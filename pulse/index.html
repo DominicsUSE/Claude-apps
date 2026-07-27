@@ -517,6 +517,7 @@ var ICONS = {
   sun:'<circle cx="12" cy="12" r="4.5"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
   moon:'<path d="M21 12.8A9 9 0 1 1 11.2 3 7.2 7.2 0 0 0 21 12.8z"/>',
   download:'<path d="M12 3v13"/><polyline points="6 11 12 17 18 11"/><path d="M4 20h16"/>',
+  filedown:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="11" x2="12" y2="17"/><polyline points="9.5 14.5 12 17 14.5 14.5"/>',
   userplus:'<circle cx="9" cy="8" r="4"/><path d="M2 20c.6-4 3.7-7 7-7s6.4 3 7 7"/><line x1="18" y1="6" x2="18" y2="12"/><line x1="15" y1="9" x2="21" y2="9"/>',
   flame:'<path d="M12 2.5c1.2 3.6-3.4 5-3.4 9.1a3.4 3.4 0 0 0 6.8 0c0-1.6-.7-2.5-.7-2.5s1.7.9 1.7 3.5a5.4 5.4 0 0 1-10.8 0c0-5.3 4.4-6 4.4-10.1.7 0 1.4 0 2 0z"/>',
   lock:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
@@ -1433,6 +1434,7 @@ function renderSettings(){
     '</div>' +
     '<div class="settings-row">' +
       '<button class="settings-item" data-action="install">'+icon('download')+'<span>Get Pulse on Your Phone</span></button>' +
+      '<button class="settings-item" data-action="download-app">'+icon('filedown')+'<span>Download App File</span></button>' +
       '<button class="settings-item" data-action="toggle-theme">'+icon(state.theme==='dark'?'sun':'moon')+'<span>'+(state.theme==='dark'?'Light Mode':'Dark Mode')+'</span></button>' +
       '<button class="settings-item danger" data-action="confirm-reset">'+icon('trash')+'<span>Reset App Data</span></button>' +
     '</div>';
@@ -1536,6 +1538,32 @@ function openInstallModal(){
   '</div>';
   openModal(html);
 }
+function triggerFileDownload(html){
+  try{
+    var blob = new Blob([html], {type:'application/octet-stream'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'Pulse.html';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+    showToast('Pulse.html saved — open it anytime, even offline 📲');
+  }catch(e){
+    showToast('Could not download on this device');
+  }
+}
+function downloadAppFile(){
+  fetch(location.href).then(function(r){
+    if(!r.ok) throw new Error('fetch failed');
+    return r.text();
+  }).then(function(html){
+    triggerFileDownload(html);
+  }).catch(function(){
+    triggerFileDownload('<!doctype html>\n' + document.documentElement.outerHTML);
+  });
+}
 
 /* ===== nav / topbar ===== */
 function renderTopbar(){
@@ -1556,10 +1584,13 @@ function renderActive(){
   else if(state.view==='calls') renderCalls();
   else if(state.view==='settings') renderSettings();
 }
+function syncViewVisibility(v){
+  document.querySelectorAll('.view').forEach(function(s){ s.classList.toggle('hidden', s.id!=='view-'+v); });
+}
 function setView(v){
   state.view = v;
   save();
-  document.querySelectorAll('.view').forEach(function(s){ s.classList.toggle('hidden', s.id!=='view-'+v); });
+  syncViewVisibility(v);
   renderActive();
   renderBottomNav();
   var target = document.getElementById('view-'+v);
@@ -1595,7 +1626,7 @@ function finishOnboarding(){
   document.getElementById('onboarding').classList.add('hidden');
   document.getElementById('appRoot').classList.remove('hidden');
   var streakNow = updateStreak();
-  renderTopbar(); renderBottomNav(); renderActive();
+  renderTopbar(); syncViewVisibility(state.view); renderBottomNav(); renderActive();
   var uname = state.user.name;
   setTimeout(function(){ showToast('Welcome, ' + uname + '! 🎉'); }, 300);
 }
@@ -1642,6 +1673,7 @@ document.addEventListener('click', function(e){
     case 'toggle-theme': toggleTheme(); break;
     case 'confirm-reset': confirmReset(); break;
     case 'install': openInstallModal(); break;
+    case 'download-app': downloadAppFile(); break;
     case 'ob-next': if(!t.disabled) goToStep(Number(t.dataset.goto)); break;
     case 'ob-finish': if(!t.disabled) finishOnboarding(); break;
   }
@@ -1667,6 +1699,7 @@ async function boot(){
     document.getElementById('appRoot').classList.remove('hidden');
     var streakNow = updateStreak();
     renderTopbar();
+    syncViewVisibility(state.view);
     renderBottomNav();
     renderActive();
     if(streakNow && streakNow>1){
@@ -1675,6 +1708,7 @@ async function boot(){
   } else {
     document.getElementById('appRoot').classList.add('hidden');
     document.getElementById('onboarding').classList.remove('hidden');
+    goToStep(1);
     setupOnboardingGrids();
   }
   setTimeout(function(){ document.getElementById('splash').classList.add('hide'); }, 650);
