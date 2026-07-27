@@ -164,7 +164,7 @@ h2{font-size:20px;margin:22px 0 12px;}
 .chip-row.scrollx{scroll-snap-type:x proximity;}
 
 /* ===== app shell ===== */
-#appRoot{height:100%;}
+#appRoot{display:contents;}
 .phone{background:var(--bg);}
 .topbar{
   display:flex;align-items:center;justify-content:space-between;
@@ -220,7 +220,7 @@ h2{font-size:20px;margin:22px 0 12px;}
 .segctrl.floating{position:absolute;top:calc(var(--safe-t) + 10px);left:50%;transform:translateX(-50%);z-index:5;margin:0;background:rgba(20,20,26,.55);backdrop-filter:blur(10px);}
 .fullscreen-btn{position:absolute;top:calc(var(--safe-t) + 10px);right:14px;z-index:5;width:36px;height:36px;border-radius:50%;background:rgba(20,20,26,.55);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;color:#fff;}
 .fullscreen-btn .icon{width:17px;height:17px;}
-:fullscreen .frame,.is-fullscreen .frame{border-radius:0;box-shadow:none;border:none;max-width:100%;}
+:fullscreen .frame,.is-fullscreen .frame{border-radius:0;box-shadow:none;border:none;max-width:100%;width:100vw;height:100vh;height:100dvh;}
 .seg{padding:8px 16px;border-radius:999px;font-size:13px;font-weight:700;color:var(--text-faint);transition:.15s ease;}
 .seg.active{background:var(--grad-brand);color:#fff;}
 .refresh-btn{margin-left:auto;margin-right:16px;color:var(--text-faint);display:flex;align-items:center;padding:8px;}
@@ -527,7 +527,8 @@ h2{font-size:20px;margin:22px 0 12px;}
 .end-call-btn .icon{width:24px;height:24px;color:#fff;transform:rotate(135deg);}
 
 @media (prefers-reduced-motion:reduce){
-  *{animation-duration:.001ms !important;transition-duration:.001ms !important;}
+  *{transition-duration:.001ms !important;}
+  .splash-logo,.burst-heart.play{animation-duration:.001ms !important;}
 }
 </style>
 </head>
@@ -1980,25 +1981,28 @@ document.addEventListener('keydown', function(e){
 
 /* ===== fullscreen ===== */
 function toggleFullscreen(){
-  var isActive = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  var goingFullscreen = !document.body.classList.contains('is-fullscreen');
+  document.body.classList.toggle('is-fullscreen', goingFullscreen);
+  var btn = document.getElementById('fullscreenBtn');
+  if(btn) btn.innerHTML = icon(goingFullscreen?'collapse':'expand');
   try{
-    if(!isActive){
+    if(goingFullscreen){
       var el = document.documentElement;
       var req = el.requestFullscreen || el.webkitRequestFullscreen;
-      if(!req){ showToast('Fullscreen not supported on this device'); return; }
-      var p = req.call(el);
-      if(p && p.catch) p.catch(function(){ showToast('Fullscreen was blocked here — try opening Pulse in its own tab'); });
-    } else {
+      if(req){ var p = req.call(el); if(p && p.catch) p.catch(function(){}); }
+    } else if(document.fullscreenElement || document.webkitFullscreenElement){
       var exit = document.exitFullscreen || document.webkitExitFullscreen;
       if(exit) exit.call(document);
     }
-  }catch(e){ showToast('Fullscreen not available here'); }
+  }catch(e){}
 }
 function onFullscreenChange(){
-  var active = !!(document.fullscreenElement || document.webkitFullscreenElement);
-  document.body.classList.toggle('is-fullscreen', active);
+  var realActive = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  if(realActive) return;
+  if(!document.body.classList.contains('is-fullscreen')) return;
+  document.body.classList.remove('is-fullscreen');
   var btn = document.getElementById('fullscreenBtn');
-  if(btn) btn.innerHTML = icon(active?'collapse':'expand');
+  if(btn) btn.innerHTML = icon('expand');
 }
 document.addEventListener('fullscreenchange', onFullscreenChange);
 document.addEventListener('webkitfullscreenchange', onFullscreenChange);
