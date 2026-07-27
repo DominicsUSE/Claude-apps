@@ -512,7 +512,7 @@ h2{font-size:20px;margin:22px 0 12px;}
 'use strict';
 
 var STORAGE_KEY = 'pulse.v1';
-var CATEGORIES = ['UFC','Wrestling','Gaming','Music','Comedy','Movies','Sports','Tech'];
+var CATEGORIES = ['UFC','Wrestling','Gaming','Music','Comedy','Movies','Sports','Tech','Brainrot'];
 var AVATARS = ['🔥','🐺','🥊','🎮','🐉','🦅','🦁','🎧','🏀','⚡','🍕','🤙','🎬','🐢','🦈','👾','🌙','🍩'];
 var GRADIENTS = [
   'linear-gradient(135deg,#ff2d78,#8b3bf7)',
@@ -528,7 +528,7 @@ var COMMENTERS = [
   {name:'zoe_vibes',avatar:'🍩'},{name:'lucas.tv',avatar:'🎬'},{name:'ari_ok',avatar:'🐢'},
   {name:'kai.fresh',avatar:'🦁'},{name:'ruby_lol',avatar:'🍕'},{name:'sam.exe',avatar:'🐉'},{name:'ivy_23',avatar:'🦈'}
 ];
-var CATEGORY_EMOJI = {UFC:'🥊',Wrestling:'🤼',Gaming:'🎮',Music:'🎧',Comedy:'😂',Movies:'🎬',Sports:'🏀',Tech:'💻'};
+var CATEGORY_EMOJI = {UFC:'🥊',Wrestling:'🤼',Gaming:'🎮',Music:'🎧',Comedy:'😂',Movies:'🎬',Sports:'🏀',Tech:'💻',Brainrot:'🐊'};
 var STORY_LINES = {
   UFC:"Fight night highlights are in 🥊🔥",
   Wrestling:"The crowd did NOT see that coming 🤼",
@@ -537,7 +537,8 @@ var STORY_LINES = {
   Comedy:"Warning: do not scroll near class 😂",
   Movies:"That ending is still living in our heads 🎬",
   Sports:"Buzzer beaters hit different 🏀",
-  Tech:"The upgrade everyone is talking about 💻"
+  Tech:"The upgrade everyone is talking about 💻",
+  Brainrot:"Tonight's fight card nobody asked for, and everybody needed 🐊🥁"
 };
 
 var FRIENDS = [
@@ -546,7 +547,9 @@ var FRIENDS = [
   {id:'ringrat', name:'ringrat', avatar:'🎤', gradient:GRADIENTS[2], vibe:'Wrestling', online:false},
   {id:'memevault', name:'memevault', avatar:'🐸', gradient:GRADIENTS[3], vibe:'Comedy', online:true},
   {id:'auxcord', name:'auxcord', avatar:'🎧', gradient:GRADIENTS[4], vibe:'Music', online:false},
-  {id:'reelthoughts', name:'reelthoughts', avatar:'🍿', gradient:GRADIENTS[5], vibe:'Movies', online:true}
+  {id:'reelthoughts', name:'reelthoughts', avatar:'🍿', gradient:GRADIENTS[5], vibe:'Movies', online:true},
+  {id:'sahur_szn', name:'sahur_szn', avatar:'🪵', gradient:GRADIENTS[2], vibe:'Brainrot', online:true,
+    intro:["bro tung tung tung sahur just trended AGAIN 😭🥁","if you don't wake up for sahur he WILL find you, that's just facts"]}
 ];
 var REPLY_POOL = {
   UFC:["did you catch the fight card this week 🥊","training arms are DEAD today 💀","who you got winning this weekend"],
@@ -555,6 +558,7 @@ var REPLY_POOL = {
   Comedy:["I'm screaming 😭","sending this to everyone I know","not you being this funny"],
   Music:["on repeat since this morning 🎧","this the one for the summer","adding it to the playlist rn"],
   Movies:["no spoilers I haven't seen it yet 🍿","that scene lived in my head all day","we need to watch this together"],
+  Brainrot:["tung tung tung sahur is undefeated, no debate","bombardiro really said not today 💀","the brainrot lore keeps getting deeper and I am here for it","tralalero tralala supremacy fr fr","not me having strong opinions about a wooden guy with a drum"],
   general:["lol fr","wait really? 😳","no cap","same tbh","I'm dead 💀","let's gooo","haha true","bet","on it rn","for real for real"]
 };
 var STICKERS = ['🔥','💯','😭','💀','🫡','🥲','😩','🎉','👑','🫶','😤','🤝','✨','😳','🙏','🥶'];
@@ -582,11 +586,12 @@ function initThreads(){
   var t = {};
   FRIENDS.forEach(function(f,i){
     var lines = REPLY_POOL[f.vibe] || REPLY_POOL.general;
+    var opener = f.intro || ["yo did you see my last post 👀", lines[0]];
     t[f.id] = {
-      unread: (i===0 || i===3),
+      unread: (i===0 || i===3 || i===6),
       messages:[
-        {id:uid(), from:'them', type:'text', text:"yo did you see my last post 👀", ts:Date.now()-3600000*6},
-        {id:uid(), from:'them', type:'text', text: lines[0], ts:Date.now()-3600000*5}
+        {id:uid(), from:'them', type:'text', text:opener[0], ts:Date.now()-3600000*6},
+        {id:uid(), from:'them', type:'text', text:opener[1], ts:Date.now()-3600000*5}
       ]
     };
   });
@@ -653,7 +658,17 @@ function seedComments(i){
     {id:uid(), name:c2.name, avatar:c2.avatar, text: COMMENT_POOL[(i+6) % COMMENT_POOL.length]}
   ];
 }
+var BRAINROT_COMMENTS = ["tralalero tralala supremacy, not up for debate","bombardiro would never lose, stop it","the tung tung tung sahur agenda is undefeated","this crossover broke something in my brain","sir this is a Wendy's 💀","brainrot tier list when though","I felt this lore in my soul","not the sahur allegations again 😭"];
+function seedBrainrotComments(i){
+  var c1 = COMMENTERS[i % COMMENTERS.length];
+  var c2 = COMMENTERS[(i+3) % COMMENTERS.length];
+  return [
+    {id:uid(), name:c1.name, avatar:c1.avatar, text: BRAINROT_COMMENTS[i % BRAINROT_COMMENTS.length]},
+    {id:uid(), name:c2.name, avatar:c2.avatar, text: BRAINROT_COMMENTS[(i+4) % BRAINROT_COMMENTS.length]}
+  ];
+}
 function seedPosts(){
+  var AI_FLAGS = {18:1,19:1,20:1,21:1,22:1,23:1,25:1,28:1};
   var raw = [
     ["UFC","fightIQ","🥊","🥊","fight week nerves are UNMATCHED 😤 who's staying up for prelims tonight",2100,18],
     ["UFC","cageside","🔥","🐐","that comeback in round 3 was pure cinema 🎬 respect either way",3400,32],
@@ -676,7 +691,15 @@ function seedPosts(){
     ["Tech","pixelmind","🤖","🎨","asked an AI to design my dream setup and it kind of understood the assignment",3200,25],
     ["Comedy","dreamscroll","🤖","🌀","this AI filter aged me 40 years and I have never laughed harder 😭",4800,60],
     ["Music","synthwave_ai","🤖","🎼","made a whole beat with an AI tool in ten minutes, we are so back",1600,140],
-    ["Gaming","pixelmind","🤖","🕹️","my AI teammate carried harder than half my actual friend group 💀",2900,310]
+    ["Gaming","pixelmind","🤖","🕹️","my AI teammate carried harder than half my actual friend group 💀",2900,310],
+    ["Brainrot","sahur_szn","🪵","🪵","tung tung tung sahur just knocked bombardiro crocodilo out cold in round 1, nobody is okay 😭🥁",8900,15],
+    ["Brainrot","tralalero_stan","🦈","🦈","tralalero tralala said 'not today' and ran off in his little nike shoes 👟💀",7200,40],
+    ["Brainrot","brainrotdaily","📊","📊","made a brainrot tier list and I will not be taking questions right now 😤",3100,80],
+    ["Brainrot","crocodilogang","🐊","🐊","bombardiro crocodilo pulled up with an actual airstrike, this fight was never fair 🐊✈️",9600,100],
+    ["Brainrot","lore_explainer","🕯️","🥁","the tung tung tung sahur lore just got so much deeper and I need everyone to know immediately",5400,160],
+    ["Brainrot","italianbrainrot","🐒","🐒","day 47 of asking who actually wins: chimpanzini bananini or ballerina cappuccina",5100,200],
+    ["Brainrot","crocodilogang","☕","☕","cappuccino assassino vs tralalero tralala is the crossover event none of us asked for and all of us needed",6700,230],
+    ["Brainrot","sahur_szn","🪵","🪵","if tung tung tung sahur does not personally wake me up for school I am simply not going",4300,270]
   ];
   return raw.map(function(r,i){
     return {
@@ -691,10 +714,10 @@ function seedPosts(){
       likeCount:r[5],
       likedByMe:false,
       savedByMe:false,
-      comments:seedComments(i),
+      comments: r[0]==='Brainrot' ? seedBrainrotComments(i) : seedComments(i),
       createdAt: Date.now() - r[6]*60000,
       video: i%3!==2,
-      ai: i>=18
+      ai: !!AI_FLAGS[i]
     };
   });
 }
@@ -1098,7 +1121,7 @@ function openConfirm(title, msg, confirmLabel, onConfirm){
 
 /* ===== create post ===== */
 function openCreateModal(){
-  var emojiOptions = ['🥊','🤼','🎮','🎧','😂','🎬','🏀','💻','🔥','🎵','⚡','🍕','🐉','🎤','🏆','📸'];
+  var emojiOptions = ['🥊','🤼','🎮','🎧','😂','🎬','🏀','💻','🔥','🎵','⚡','🍕','🐉','🎤','🏆','📸','🐊','🥁'];
   var html = '<div class="sheet create-sheet">' +
     '<div class="sheet-handle"></div>' +
     '<div class="sheet-head"><h3>New Post</h3><button data-action="close-modal" aria-label="Close">'+icon('close')+'</button></div>' +
