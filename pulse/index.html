@@ -467,16 +467,6 @@ var GRADIENTS = [
   'linear-gradient(135deg,#1e3a5f,#0d0b08)',
   'linear-gradient(135deg,#a9812f,#241d12)'
 ];
-var FRIENDS = [
-  {id:'clutchking', name:'clutchking', avatar:'🎮', gradient:GRADIENTS[0], vibe:'Gaming', online:true},
-  {id:'fightIQ', name:'fightIQ', avatar:'🥊', gradient:GRADIENTS[1], vibe:'UFC', online:true},
-  {id:'ringrat', name:'ringrat', avatar:'🎤', gradient:GRADIENTS[2], vibe:'Wrestling', online:false},
-  {id:'memevault', name:'memevault', avatar:'🐸', gradient:GRADIENTS[3], vibe:'Comedy', online:true},
-  {id:'auxcord', name:'auxcord', avatar:'🎧', gradient:GRADIENTS[4], vibe:'Music', online:false},
-  {id:'reelthoughts', name:'reelthoughts', avatar:'🍿', gradient:GRADIENTS[5], vibe:'Movies', online:true},
-  {id:'sahur_szn', name:'sahur_szn', avatar:'🪵', gradient:GRADIENTS[2], vibe:'Brainrot', online:true,
-    intro:["bro tung tung tung sahur just trended AGAIN 😭🥁","if you don't wake up for sahur he WILL find you, that's just facts"]}
-];
 var REPLY_POOL = {
   UFC:["did you catch the fight card this week 🥊","training arms are DEAD today 💀","who you got winning this weekend"],
   Wrestling:["that promo went crazy 🎤","we need a rematch fr","ring psychology on another level"],
@@ -565,7 +555,7 @@ function findFriend(id){
   return null;
 }
 function getAllFriends(){
-  return FRIENDS.concat(state.customFriends || []);
+  return state.customFriends || [];
 }
 function pickReply(vibe){
   var pool = REPLY_POOL[vibe] || REPLY_POOL.general;
@@ -574,19 +564,7 @@ function pickReply(vibe){
   return p[Math.floor(Math.random()*p.length)];
 }
 function initThreads(){
-  var t = {};
-  FRIENDS.forEach(function(f,i){
-    var lines = REPLY_POOL[f.vibe] || REPLY_POOL.general;
-    var opener = f.intro || ["yo! excited to be on here 👋", lines[0]];
-    t[f.id] = {
-      unread: (i===0 || i===3 || i===6),
-      messages:[
-        {id:uid(), from:'them', type:'text', text:opener[0], ts:Date.now()-3600000*6, status:'read'},
-        {id:uid(), from:'them', type:'text', text:opener[1], ts:Date.now()-3600000*5, status:'read'}
-      ]
-    };
-  });
-  return t;
+  return {};
 }
 
 /* ===== state + encryption ===== */
@@ -761,7 +739,8 @@ function unreadThreadCount(){
 }
 function renderChats(){
   var el = document.getElementById('view-chats');
-  var rows = getAllFriends().map(function(f){
+  var friends = getAllFriends();
+  var rows = friends.map(function(f){
     var th = state.threads[f.id];
     var unread = th && th.unread;
     var last = th && th.messages.length ? th.messages[th.messages.length-1] : null;
@@ -771,11 +750,12 @@ function renderChats(){
       '<span class="thread-meta"><span class="thread-time">'+(last?timeAgo(last.ts):'')+'</span>'+(unread?'<span class="unread-dot"></span>':'')+'</span>' +
     '</button>';
   }).join('');
+  var emptyHint = friends.length ? '' : '<div class="empty-hint">No chats yet — add a friend to start texting 👋</div>';
   var addRow = '<button type="button" class="thread-row add-friend-row" data-action="add-friend">' +
       '<span class="thread-avatar-wrap"><span class="avatar add-avatar">'+icon('userplus')+'</span></span>' +
       '<span class="thread-info"><span class="thread-name">Add a Friend</span><span class="thread-preview">Bring in someone from real life</span></span>' +
     '</button>';
-  el.innerHTML = '<div class="chats-list">'+rows+addRow+'</div>';
+  el.innerHTML = '<div class="chats-list">'+emptyHint+rows+addRow+'</div>';
 }
 function openAddFriend(){
   var html = '<div class="sheet">' +
