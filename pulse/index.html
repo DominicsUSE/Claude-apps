@@ -133,8 +133,10 @@ h2{font-size:20px;margin:22px 0 12px;}
 .ob h2{font-size:19px;margin:18px 0 10px;}
 .ob-sub{color:var(--text-faint);font-size:13px;margin:0 0 14px;}
 .ob #obName{margin-top:4px;text-align:center;font-size:16px;}
+.ob #obPassword,.ob #obPasswordConfirm,.ob #lockPassword{margin-top:10px;text-align:center;font-size:16px;}
+.ob-pw-error{color:var(--like);font-size:12.5px;margin-top:10px;}
 .ob-step[data-step="1"]{width:100%;}
-.ob-step[data-step="2"]{width:100%;max-width:360px;margin-inline:auto;}
+.ob-step[data-step="2"],.ob-step[data-step="3"],.ob-step[data-step="lock"],.ob-step[data-step="lock-forgot"]{width:100%;max-width:360px;margin-inline:auto;}
 .ob .primary-btn{margin-top:26px;width:100%;max-width:320px;}
 
 /* ===== buttons / chips ===== */
@@ -435,12 +437,41 @@ h2{font-size:20px;margin:22px 0 12px;}
     <button class="primary-btn" data-action="ob-next" data-goto="2">Get Started</button>
   </div>
   <div class="ob-step hidden" data-step="2">
-    <div class="ob-progress"><span class="dot"></span><span class="dot active"></span></div>
+    <div class="ob-progress"><span class="dot"></span><span class="dot active"></span><span class="dot"></span></div>
     <h2>Pick your avatar</h2>
     <div class="emoji-grid" id="avatarGrid"></div>
     <h2>What should we call you?</h2>
     <input type="text" id="obName" maxlength="20" placeholder="yourname" autocomplete="off">
-    <button class="primary-btn" id="obFinish" disabled data-action="ob-finish">Start Chatting</button>
+    <button class="primary-btn" id="obStep2Next" disabled data-action="ob-next" data-goto="3">Next</button>
+  </div>
+  <div class="ob-step hidden" data-step="3">
+    <div class="ob-progress"><span class="dot"></span><span class="dot"></span><span class="dot active"></span></div>
+    <h2>Create a password</h2>
+    <p class="ob-sub">Locks Pulse and encrypts your chats with it, on this device only — there's no account to log into anywhere else.</p>
+    <input type="password" id="obPassword" maxlength="60" placeholder="Password" autocomplete="new-password">
+    <input type="password" id="obPasswordConfirm" maxlength="60" placeholder="Confirm password" autocomplete="new-password">
+    <div class="ob-pw-error hidden" id="obPwError"></div>
+    <button class="primary-btn" id="obFinish" data-action="ob-finish">Create Password &amp; Start</button>
+    <button class="secondary-btn" data-action="ob-skip-password" style="width:100%;max-width:320px;margin-top:10px;">Skip for Now</button>
+  </div>
+</div>
+
+<div id="lockScreen" class="ob frame hidden">
+  <div class="ob-step" data-step="lock" id="lockStepNormal">
+    <div class="ob-hero">
+      <div class="ob-logo">Pulse</div>
+      <div class="ob-tagline">Locked 🔒</div>
+    </div>
+    <input type="password" id="lockPassword" maxlength="60" placeholder="Password" autocomplete="current-password">
+    <div class="ob-pw-error hidden" id="lockPwError">Wrong password — try again</div>
+    <button class="primary-btn" id="lockUnlockBtn" data-action="unlock-app">Unlock</button>
+    <button class="secondary-btn" data-action="show-forgot-password" style="width:100%;max-width:320px;margin-top:14px;">Forgot Password?</button>
+  </div>
+  <div class="ob-step hidden" data-step="lock-forgot" id="lockStepForgot">
+    <h2>Forgot your password?</h2>
+    <p class="ob-sub">There's no way to recover your chats without it — the only option is to reset Pulse and start fresh. This deletes everything on this device.</p>
+    <button class="danger-btn" data-action="confirm-forgot-reset" style="width:100%;max-width:320px;">Reset Pulse</button>
+    <button class="secondary-btn" data-action="hide-forgot-password" style="width:100%;max-width:320px;margin-top:10px;">Go Back</button>
   </div>
 </div>
 
@@ -589,7 +620,11 @@ function defaultState(){
   };
 }
 var KEY_STORAGE_KEY = 'pulse.key';
+var PW_SALT_KEY = 'pulse.pwsalt';
+var HAS_PW_KEY = 'pulse.haspw';
+var PBKDF2_ITERATIONS = 150000;
 var cryptoKeyPromise = null;
+var passwordKey = null;
 function bufToB64(buf){
   var bytes = new Uint8Array(buf), s = '';
   for(var i=0;i<bytes.length;i++) s += String.fromCharCode(bytes[i]);
@@ -603,7 +638,58 @@ function b64ToBuf(b64){
 function cryptoAvailable(){
   return !!(window.crypto && window.crypto.subtle);
 }
+function hasPasswordSet(){
+  return localStorage.getItem(HAS_PW_KEY)==='1';
+}
+function deriveKeyFromPassword(password, saltB64){
+  var salt = b64ToBuf(saltB64);
+  return crypto.subtle.importKey('raw', new TextEncoder().encode(password), {name:'PBKDF2'}, false, ['deriveKey']).then(function(baseKey){
+    return crypto.subtle.deriveKey(
+      {name:'PBKDF2', salt:salt, iterations:PBKDF2_ITERATIONS, hash:'SHA-256'},
+      baseKey, {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']
+    );
+  });
+}
+function applyNewPassword(password){
+  var salt = bufToB64(crypto.getRandomValues(new Uint8Array(16)));
+  return deriveKeyFromPassword(password, salt).then(function(key){
+    passwordKey = key;
+    localStorage.setItem(PW_SALT_KEY, salt);
+    localStorage.setItem(HAS_PW_KEY, '1');
+    try{ localStorage.removeItem(KEY_STORAGE_KEY); }catch(e){}
+  });
+}
+function clearPassword(){
+  localStorage.removeItem(PW_SALT_KEY);
+  localStorage.removeItem(HAS_PW_KEY);
+  passwordKey = null;
+  cryptoKeyPromise = null;
+}
+async function verifyPassword(password){
+  var salt = localStorage.getItem(PW_SALT_KEY);
+  if(!salt) return false;
+  try{
+    var key = await deriveKeyFromPassword(password, salt);
+    var raw = localStorage.getItem(STORAGE_KEY);
+    if(!raw) return true;
+    var combined = b64ToBuf(raw);
+    var iv = combined.slice(0,12), data = combined.slice(12);
+    await crypto.subtle.decrypt({name:'AES-GCM', iv:iv}, key, data);
+    return true;
+  }catch(e){ return false; }
+}
+function hardResetAllData(){
+  try{
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(STORAGE_KEY+'.enc');
+    localStorage.removeItem(PW_SALT_KEY);
+    localStorage.removeItem(HAS_PW_KEY);
+    localStorage.removeItem(KEY_STORAGE_KEY);
+  }catch(e){}
+  location.reload();
+}
 function getOrCreateKey(){
+  if(hasPasswordSet()) return Promise.resolve(passwordKey);
   if(cryptoKeyPromise) return cryptoKeyPromise;
   cryptoKeyPromise = (async function(){
     if(!cryptoAvailable()) return null;
@@ -1873,6 +1959,8 @@ function renderSettings(){
       '<button class="settings-item" data-action="install">'+icon('download')+'<span>Get Pulse on Your Phone</span></button>' +
       '<button class="settings-item" data-action="download-app">'+icon('filedown')+'<span>Download App File</span></button>' +
       '<button class="settings-item" data-action="toggle-theme">'+icon(state.theme==='dark'?'sun':'moon')+'<span>'+(state.theme==='dark'?'Light Mode':'Dark Mode')+'</span></button>' +
+      '<button class="settings-item" data-action="set-password">'+icon('lock')+'<span>'+(hasPasswordSet()?'Change Password':'Set a Password')+'</span></button>' +
+      (hasPasswordSet() ? '<button class="settings-item danger" data-action="remove-password">'+icon('lock')+'<span>Remove Password</span></button>' : '') +
       '<button class="settings-item danger" data-action="confirm-reset">'+icon('trash')+'<span>Reset App Data</span></button>' +
     '</div>';
 }
@@ -1883,9 +1971,69 @@ function toggleTheme(){
   renderSettings();
 }
 function confirmReset(){
-  openConfirm('Reset Pulse?', "This clears your chats and settings on this device. This can't be undone.", 'Reset', function(){
-    try{ localStorage.removeItem(STORAGE_KEY); localStorage.removeItem(STORAGE_KEY+'.enc'); }catch(e){}
-    location.reload();
+  openConfirm('Reset Pulse?', "This clears your chats and settings on this device. This can't be undone.", 'Reset', hardResetAllData);
+}
+function openPasswordSheet(){
+  var changing = hasPasswordSet();
+  var html = '<div class="sheet">' +
+    '<div class="sheet-handle"></div>' +
+    '<div class="sheet-head"><h3>'+(changing?'Change Password':'Set a Password')+'</h3><button data-action="close-modal" aria-label="Close">'+icon('close')+'</button></div>' +
+    '<div class="sheet-body">' +
+      (changing ? '<label class="field-label" for="curPassword">Current password</label><input type="password" id="curPassword" autocomplete="current-password">' : '') +
+      '<label class="field-label" for="newPassword">New password</label>' +
+      '<input type="password" id="newPassword" maxlength="60" autocomplete="new-password">' +
+      '<label class="field-label" for="newPasswordConfirm">Confirm new password</label>' +
+      '<input type="password" id="newPasswordConfirm" maxlength="60" autocomplete="new-password">' +
+      '<div class="ob-pw-error hidden" id="pwSheetError"></div>' +
+      '<p class="ob-sub" style="margin-top:12px;">This device only — locks Pulse and encrypts your chats with this password. There\'s no account, so if you forget it, resetting is the only way back in.</p>' +
+      '<button class="primary-btn" id="savePasswordBtn">'+(changing?'Update Password':'Set Password')+'</button>' +
+    '</div>' +
+  '</div>';
+  openModal(html);
+  document.getElementById('savePasswordBtn').addEventListener('click', onSavePasswordClick);
+}
+async function onSavePasswordClick(){
+  var errEl = document.getElementById('pwSheetError');
+  errEl.classList.add('hidden');
+  var btn = document.getElementById('savePasswordBtn');
+  var changing = hasPasswordSet();
+  if(changing){
+    var cur = document.getElementById('curPassword').value;
+    var ok = await verifyPassword(cur);
+    if(!ok){ errEl.textContent = 'Current password is incorrect'; errEl.classList.remove('hidden'); return; }
+  }
+  var np = document.getElementById('newPassword').value;
+  var npc = document.getElementById('newPasswordConfirm').value;
+  if(np.length<4){ errEl.textContent = 'Use at least 4 characters'; errEl.classList.remove('hidden'); return; }
+  if(np!==npc){ errEl.textContent = 'Passwords don’t match'; errEl.classList.remove('hidden'); return; }
+  btn.disabled = true; btn.textContent = 'Saving…';
+  await applyNewPassword(np);
+  save();
+  closeModal();
+  renderSettings();
+  showToast(changing ? 'Password updated 🔒' : 'Password set 🔒');
+}
+function openRemovePasswordConfirm(){
+  var html = '<div class="sheet">' +
+    '<div class="sheet-handle"></div>' +
+    '<div class="sheet-head"><h3>Remove Password</h3><button data-action="close-modal" aria-label="Close">'+icon('close')+'</button></div>' +
+    '<div class="sheet-body">' +
+      '<p class="ob-sub">Enter your current password to remove it. Pulse will go back to unlocking automatically on this device.</p>' +
+      '<input type="password" id="removePwInput" autocomplete="current-password" placeholder="Current password">' +
+      '<div class="ob-pw-error hidden" id="removePwError">Incorrect password</div>' +
+      '<button class="danger-btn" id="confirmRemovePwBtn" style="width:100%;margin-top:16px;">Remove Password</button>' +
+    '</div>' +
+  '</div>';
+  openModal(html);
+  document.getElementById('confirmRemovePwBtn').addEventListener('click', async function(){
+    var pw = document.getElementById('removePwInput').value;
+    var ok = await verifyPassword(pw);
+    if(!ok){ document.getElementById('removePwError').classList.remove('hidden'); return; }
+    clearPassword();
+    save();
+    closeModal();
+    renderSettings();
+    showToast('Password removed');
   });
 }
 function openEditProfile(){
@@ -2069,13 +2217,18 @@ function setupOnboardingGrids(){
     obAvatar = b.dataset.emoji;
   });
   var nameInput = document.getElementById('obName');
-  var finishBtn = document.getElementById('obFinish');
+  var nextBtn = document.getElementById('obStep2Next');
   nameInput.addEventListener('input', function(){
-    finishBtn.disabled = nameInput.value.trim().length===0;
+    nextBtn.disabled = nameInput.value.trim().length===0;
+  });
+  var pwInput = document.getElementById('obPassword');
+  var pwConfirmInput = document.getElementById('obPasswordConfirm');
+  [pwInput, pwConfirmInput].forEach(function(inp){
+    inp.addEventListener('keydown', function(e){ if(e.key==='Enter') finishOnboardingWithPassword(); });
   });
 }
 function goToStep(n){
-  document.querySelectorAll('.ob-step').forEach(function(s){ s.classList.toggle('hidden', Number(s.dataset.step)!==n); });
+  document.querySelectorAll('#onboarding .ob-step').forEach(function(s){ s.classList.toggle('hidden', Number(s.dataset.step)!==n); });
 }
 function finishOnboarding(){
   var nameInput = document.getElementById('obName');
@@ -2089,6 +2242,60 @@ function finishOnboarding(){
   renderTopbar(); syncViewVisibility(state.view); renderBottomNav(); renderActive();
   var uname = state.user.name;
   setTimeout(function(){ showToast('Welcome, ' + uname + '! 🎉'); }, 300);
+}
+async function finishOnboardingWithPassword(){
+  var pw = document.getElementById('obPassword').value;
+  var pwc = document.getElementById('obPasswordConfirm').value;
+  var errEl = document.getElementById('obPwError');
+  errEl.classList.add('hidden');
+  if(pw.length<4){ errEl.textContent = 'Use at least 4 characters'; errEl.classList.remove('hidden'); return; }
+  if(pw!==pwc){ errEl.textContent = 'Passwords don’t match'; errEl.classList.remove('hidden'); return; }
+  var btn = document.getElementById('obFinish');
+  btn.disabled = true; btn.textContent = 'Setting up…';
+  await applyNewPassword(pw);
+  finishOnboarding();
+}
+
+/* ===== lock screen ===== */
+async function attemptUnlock(){
+  var pwInput = document.getElementById('lockPassword');
+  var errEl = document.getElementById('lockPwError');
+  var btn = document.getElementById('lockUnlockBtn');
+  var password = pwInput.value;
+  if(!password) return;
+  errEl.classList.add('hidden');
+  btn.disabled = true; btn.textContent = 'Unlocking…';
+  var ok = false;
+  try{
+    var salt = localStorage.getItem(PW_SALT_KEY);
+    var key = await deriveKeyFromPassword(password, salt);
+    passwordKey = key;
+    var raw = localStorage.getItem(STORAGE_KEY);
+    if(raw && localStorage.getItem(STORAGE_KEY+'.enc')==='1'){
+      var decrypted = await decryptString(raw);
+      ok = decrypted !== null;
+    } else {
+      ok = true;
+    }
+  }catch(e){ ok = false; }
+  if(!ok){
+    passwordKey = null;
+    errEl.classList.remove('hidden');
+    btn.disabled = false; btn.textContent = 'Unlock';
+    pwInput.value = '';
+    pwInput.focus();
+    return;
+  }
+  document.getElementById('lockScreen').classList.add('hidden');
+  await continueBoot();
+}
+function showForgotPasswordStep(){
+  document.getElementById('lockStepNormal').classList.add('hidden');
+  document.getElementById('lockStepForgot').classList.remove('hidden');
+}
+function hideForgotPasswordStep(){
+  document.getElementById('lockStepForgot').classList.add('hidden');
+  document.getElementById('lockStepNormal').classList.remove('hidden');
 }
 
 /* ===== global event delegation ===== */
@@ -2139,8 +2346,15 @@ document.addEventListener('click', function(e){
     case 'install': openInstallModal(); break;
     case 'download-app': downloadAppFile(); break;
     case 'share-app': shareAppFile(); break;
+    case 'set-password': openPasswordSheet(); break;
+    case 'remove-password': openRemovePasswordConfirm(); break;
+    case 'unlock-app': if(!t.disabled) attemptUnlock(); break;
+    case 'show-forgot-password': showForgotPasswordStep(); break;
+    case 'hide-forgot-password': hideForgotPasswordStep(); break;
+    case 'confirm-forgot-reset': hardResetAllData(); break;
     case 'ob-next': if(!t.disabled) goToStep(Number(t.dataset.goto)); break;
-    case 'ob-finish': if(!t.disabled) finishOnboarding(); break;
+    case 'ob-finish': if(!t.disabled) finishOnboardingWithPassword(); break;
+    case 'ob-skip-password': finishOnboarding(); break;
   }
 });
 document.addEventListener('keydown', function(e){
@@ -2154,11 +2368,22 @@ document.addEventListener('keydown', function(e){
 
 /* ===== boot ===== */
 async function boot(){
-  state = await loadState();
-  document.documentElement.dataset.theme = state.theme;
   setupManifest();
   var photoInput = document.getElementById('photoFileInput');
   if(photoInput) photoInput.addEventListener('change', handlePhotoSelected);
+  setTimeout(function(){ document.getElementById('splash').classList.add('hide'); }, 650);
+  if(hasPasswordSet()){
+    document.getElementById('lockScreen').classList.remove('hidden');
+    var lockInput = document.getElementById('lockPassword');
+    lockInput.addEventListener('keydown', function(e){ if(e.key==='Enter') attemptUnlock(); });
+    setTimeout(function(){ lockInput.focus(); }, 700);
+    return;
+  }
+  await continueBoot();
+}
+async function continueBoot(){
+  state = await loadState();
+  document.documentElement.dataset.theme = state.theme;
   if(state.onboarded){
     document.getElementById('onboarding').classList.add('hidden');
     document.getElementById('appRoot').classList.remove('hidden');
@@ -2176,7 +2401,6 @@ async function boot(){
     goToStep(1);
     setupOnboardingGrids();
   }
-  setTimeout(function(){ document.getElementById('splash').classList.add('hide'); }, 650);
 }
 boot();
 
