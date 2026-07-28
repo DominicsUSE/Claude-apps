@@ -1386,9 +1386,9 @@ function renderCallScreen(f, status){
   openModal(html);
   if(f.live){
     var remoteEl = document.getElementById('liveRemoteMedia');
-    if(remoteEl && liveRemoteStream) remoteEl.srcObject = liveRemoteStream;
+    if(remoteEl && liveRemoteStream){ remoteEl.srcObject = liveRemoteStream; ensureMediaPlays(remoteEl); }
     var localEl = document.getElementById('liveLocalVideo');
-    if(localEl && liveLocalStream) localEl.srcObject = liveLocalStream;
+    if(localEl && liveLocalStream){ localEl.srcObject = liveLocalStream; ensureMediaPlays(localEl); }
   }
 }
 function connectCall(f){
@@ -1490,6 +1490,16 @@ function extractCodeFromPastedText(raw){
   var match = trimmed.match(/[rz]:[A-Za-z0-9+/=]+/);
   return match ? match[0] : trimmed;
 }
+function buildInviteUrl(code){
+  if(!/^https?:/.test(location.href)) return null;
+  try{ return location.origin + location.pathname + '?pulse_offer=' + encodeURIComponent(code); }catch(e){ return null; }
+}
+function checkForIncomingInviteLink(){
+  try{
+    var params = new URLSearchParams(location.search);
+    return params.get('pulse_offer') || null;
+  }catch(e){ return null; }
+}
 function waitForIceGatheringComplete(pc){
   return new Promise(function(resolve){
     if(pc.iceGatheringState==='complete'){ resolve(); return; }
@@ -1532,7 +1542,7 @@ function createLivePeerConnection(){
   pc.ontrack = function(e){
     liveRemoteStream.addTrack(e.track);
     var el = document.getElementById('liveRemoteMedia');
-    if(el) el.srcObject = liveRemoteStream;
+    if(el){ el.srcObject = liveRemoteStream; ensureMediaPlays(el); }
   };
   pc.onconnectionstatechange = function(){
     if(pc.connectionState==='connected'){
@@ -1598,7 +1608,7 @@ function openLiveConnect(reconnectFriendId){
     '<div class="sheet-head"><h3>Add a Friend</h3><button data-action="close-modal" aria-label="Close">'+icon('close')+'</button></div>' +
     '<div class="sheet-body">' +
       '<div id="liveStageChoice">' +
-        '<p class="ob-sub">This links your device directly with a friend’s — browser to browser, no server involved — for real messages and calls. You both need this open at the same time. Only ONE of you taps "I’ll Go First" — the other taps "I Have a Code". Works best on the same wifi; some cellular or school networks may block it.</p>' +
+        '<p class="ob-sub">This links your device directly with a friend’s — browser to browser, no server involved — for real messages and calls. You both need this open around the same time. Only ONE of you taps "I’ll Go First" — the other taps "I Have a Code". Works best on the same wifi; some cellular or school networks may block it.</p>' +
         '<button type="button" class="primary-btn" id="liveRoleStart">I’ll Go First</button>' +
         '<button type="button" class="secondary-btn" id="liveRoleJoin" style="width:100%;margin-top:10px;">I Have a Code From Them</button>' +
       '</div>' +
@@ -1615,17 +1625,22 @@ function openLiveConnect(reconnectFriendId){
       '</div>' +
       '<div id="liveStageCode" class="hidden">' +
         '<p class="ob-sub" id="liveCodeHint"></p>' +
-        '<textarea id="liveMyCode" rows="3" readonly></textarea>' +
-        '<div style="display:flex;gap:8px;margin-top:8px;">' +
-          '<button type="button" class="primary-btn" id="liveShareBtn" style="flex:1;">Share Code</button>' +
-          '<button type="button" class="secondary-btn" id="liveCopyBtn" style="flex:1;">Copy</button>' +
+        '<button type="button" class="primary-btn" id="liveShareBtn" style="width:100%;">Send Invite</button>' +
+        '<button type="button" class="secondary-btn" id="liveShowCodeToggle" style="width:100%;margin-top:10px;font-size:12.5px;">Show the code instead</button>' +
+        '<div id="liveCodeFallback" class="hidden" style="margin-top:10px;">' +
+          '<textarea id="liveMyCode" rows="3" readonly></textarea>' +
+          '<button type="button" class="secondary-btn" id="liveCopyBtn" style="width:100%;margin-top:8px;">Copy Code</button>' +
         '</div>' +
-        '<div id="liveAnswerWrap" class="hidden">' +
-          '<label class="field-label" style="margin-top:18px;">Paste their reply code</label>' +
-          '<textarea id="liveAnswerCode" rows="3" placeholder="Paste the code they sent back"></textarea>' +
-          '<button type="button" class="primary-btn" id="liveFinishBtn">Connect</button>' +
+        '<div id="liveAnswerWrap" class="hidden" style="margin-top:22px;">' +
+          '<label class="field-label">Got their reply?</label>' +
+          '<button type="button" class="primary-btn" id="livePasteClipboardBtn" style="width:100%;">Paste Reply from Clipboard</button>' +
+          '<button type="button" class="secondary-btn" id="liveManualPasteToggle" style="width:100%;margin-top:8px;font-size:12.5px;">Paste it manually instead</button>' +
+          '<div id="liveManualPasteWrap" class="hidden" style="margin-top:10px;">' +
+            '<textarea id="liveAnswerCode" rows="3" placeholder="Paste their reply code"></textarea>' +
+            '<button type="button" class="primary-btn" id="liveFinishBtn" style="width:100%;margin-top:8px;">Connect</button>' +
+          '</div>' +
         '</div>' +
-        '<div id="liveWaitingHint" class="hidden empty-hint">Waiting to connect<div style="display:flex;gap:4px;justify-content:center;margin-top:10px;"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div></div>' +
+        '<div id="liveWaitingHint" class="hidden empty-hint" style="margin-top:18px;">Waiting<div style="display:flex;gap:4px;justify-content:center;margin-top:10px;"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div></div>' +
       '</div>' +
     '</div>' +
   '</div>';
@@ -1640,22 +1655,46 @@ function openLiveConnect(reconnectFriendId){
   document.getElementById('liveRoleStart').addEventListener('click', function(){ setLiveRole('start'); });
   document.getElementById('liveRoleJoin').addEventListener('click', function(){ setLiveRole('join'); });
   document.getElementById('liveGenerateBtn').addEventListener('click', onLiveGenerateClick);
+  document.getElementById('liveShowCodeToggle').addEventListener('click', function(){
+    document.getElementById('liveCodeFallback').classList.toggle('hidden');
+  });
   document.getElementById('liveCopyBtn').addEventListener('click', function(){
     var code = document.getElementById('liveMyCode').value;
     try{ navigator.clipboard.writeText(code).then(function(){ showToast('Code copied 📋'); }).catch(function(){ showToast('Could not copy on this device'); }); }catch(e){ showToast('Could not copy on this device'); }
   });
-  document.getElementById('liveShareBtn').addEventListener('click', function(){
-    var code = document.getElementById('liveMyCode').value;
-    var msg = liveDraft && liveDraft.needsAnswer===false
-      ? 'Here’s my reply code for Pulse — open the app and paste this in where it says "paste their reply code":\n\n'+code
-      : 'Let’s link up on Pulse! Open the app, tap Add a Friend → "I Have a Code From Them", and paste this in:\n\n'+code;
-    try{
-      if(navigator.share){ navigator.share({title:'Pulse connection code', text:msg}).catch(function(){}); return; }
-    }catch(e){}
-    try{ navigator.clipboard.writeText(msg); showToast('Copied — send it to your friend'); }
-    catch(e){ showToast('Could not share on this device'); }
+  document.getElementById('liveShareBtn').addEventListener('click', shareLiveCode);
+  document.getElementById('liveManualPasteToggle').addEventListener('click', function(){
+    document.getElementById('liveManualPasteWrap').classList.toggle('hidden');
   });
+  document.getElementById('livePasteClipboardBtn').addEventListener('click', pasteReplyFromClipboard);
   document.getElementById('liveFinishBtn').addEventListener('click', onLiveFinishClick);
+}
+function shareLiveCode(){
+  var code = document.getElementById('liveMyCode').value;
+  var isOffer = liveDraft && liveDraft.needsAnswer!==false;
+  var inviteUrl = isOffer ? buildInviteUrl(code) : null;
+  var msg = isOffer
+    ? (inviteUrl
+        ? 'Let’s link up on Pulse! Tap this to connect with me: '+inviteUrl
+        : 'Let’s link up on Pulse! Open the app, tap Add a Friend → "I Have a Code From Them", and paste this in:\n\n'+code)
+    : 'Here’s my reply for Pulse — open the app and paste this in using "Paste Reply from Clipboard" (or the manual option):\n\n'+code;
+  try{
+    if(navigator.share){ navigator.share({title:'Pulse', text:msg}).catch(function(){}); return; }
+  }catch(e){}
+  try{ navigator.clipboard.writeText(msg); showToast('Copied — send it to your friend'); }
+  catch(e){ showToast('Could not share on this device'); }
+}
+async function pasteReplyFromClipboard(){
+  try{
+    var text = await navigator.clipboard.readText();
+    var code = extractCodeFromPastedText(text);
+    if(!code){ showToast('Nothing usable on your clipboard'); return; }
+    document.getElementById('liveAnswerCode').value = code;
+    onLiveFinishClick();
+  }catch(e){
+    showToast('Could not read your clipboard — try "Paste it manually" below');
+    document.getElementById('liveManualPasteWrap').classList.remove('hidden');
+  }
 }
 function setLiveRole(role){
   liveDraft.role = role;
@@ -1700,7 +1739,7 @@ function startLiveOffer(){
   }).then(function(){
     return encodeSignal({v:1, type:'offer', sdp:pc.localDescription.sdp, name:state.user.name, avatar:state.user.avatar});
   }).then(function(code){
-    showLiveCode(code, 'Tap Share and send this to '+liveDraft.name+' — then paste the reply code they send back below.', true);
+    showLiveCode(code, 'Tap Send Invite and share it with '+liveDraft.name+' — you’ll connect the moment they accept.', true);
     startLiveConnectTimeout(180000);
   }).catch(function(){
     showToast('Could not start a live connection on this device');
@@ -1714,26 +1753,29 @@ function joinLiveWithCode(raw){
       btn.disabled=false; btn.textContent='Generate My Reply Code';
       return;
     }
-    if(offer.name) liveDraft.remoteName = offer.name;
-    if(offer.avatar) liveDraft.remoteAvatar = offer.avatar;
-    var pc = createLivePeerConnection();
-    livePc = pc;
-    pc.ondatachannel = function(e){ liveChannel = e.channel; setupLiveChannel(liveChannel); };
-    pc.setRemoteDescription({type:'offer', sdp:offer.sdp}).then(function(){
-      pc.getTransceivers().forEach(function(t){ t.direction = 'sendrecv'; });
-      return pc.createAnswer();
-    }).then(function(answer){
-      return pc.setLocalDescription(answer);
-    }).then(function(){
-      return waitForIceGatheringComplete(pc);
-    }).then(function(){
-      return encodeSignal({v:1, type:'answer', sdp:pc.localDescription.sdp, name:state.user.name, avatar:state.user.avatar});
-    }).then(function(code){
-      showLiveCode(code, 'Tap Share and send this reply back to '+liveDraft.name+' — you’ll connect the moment they paste it in.', false);
-      startLiveConnectTimeout(180000);
-    }).catch(function(){
-      showToast('Could not join that connection');
-    });
+    establishAnswerFromOffer(offer);
+  });
+}
+function establishAnswerFromOffer(offer){
+  if(offer.name) liveDraft.remoteName = offer.name;
+  if(offer.avatar) liveDraft.remoteAvatar = offer.avatar;
+  var pc = createLivePeerConnection();
+  livePc = pc;
+  pc.ondatachannel = function(e){ liveChannel = e.channel; setupLiveChannel(liveChannel); };
+  pc.setRemoteDescription({type:'offer', sdp:offer.sdp}).then(function(){
+    pc.getTransceivers().forEach(function(t){ t.direction = 'sendrecv'; });
+    return pc.createAnswer();
+  }).then(function(answer){
+    return pc.setLocalDescription(answer);
+  }).then(function(){
+    return waitForIceGatheringComplete(pc);
+  }).then(function(){
+    return encodeSignal({v:1, type:'answer', sdp:pc.localDescription.sdp, name:state.user.name, avatar:state.user.avatar});
+  }).then(function(code){
+    showLiveCode(code, 'Tap Send Reply to get this back to '+liveDraft.name+' — you’ll connect the moment it reaches them.', false);
+    startLiveConnectTimeout(180000);
+  }).catch(function(){
+    showToast('Could not join that connection');
   });
 }
 function showLiveCode(code, hint, needsAnswer){
@@ -1763,6 +1805,65 @@ function onLiveFinishClick(){
     livePc.setRemoteDescription({type:'answer', sdp:answer.sdp}).catch(function(){
       showToast('Could not finish connecting');
     });
+  });
+}
+function openIncomingInviteScreen(rawCode){
+  decodeSignal(rawCode).catch(function(){ return null; }).then(function(offer){
+    if(!offer || offer.type!=='offer' || !offer.sdp){
+      showToast('That invite link looks broken');
+      return;
+    }
+    teardownLiveConnection();
+    var senderName = offer.name || 'a friend';
+    liveDraft = {role:'join', avatar:AVATARS[0], name:'', reconnectFriendId:null};
+    var html = '<div class="sheet">' +
+      '<div class="sheet-handle"></div>' +
+      '<div class="sheet-head"><h3>Friend Invite</h3><button data-action="close-modal" aria-label="Close">'+icon('close')+'</button></div>' +
+      '<div class="sheet-body">' +
+        '<div id="liveStageForm">' +
+          '<p class="ob-sub" style="text-align:center;font-size:15px;color:var(--text);">'+escapeHtml(senderName)+' wants to connect with you on Pulse 💓</p>' +
+          '<label class="field-label">Their avatar</label>' +
+          '<div class="emoji-grid" id="liveAvatarGrid">' + AVATARS.map(function(a,i){ return '<button type="button" class="emoji-opt '+(i===0?'active':'')+'" data-emoji="'+a+'">'+a+'</button>'; }).join('') + '</div>' +
+          '<label class="field-label" for="liveFriendName">Their @username</label>' +
+          '<input type="text" id="liveFriendName" maxlength="21" placeholder="'+escapeHtml(senderName)+'" autocomplete="off">' +
+          '<button type="button" class="primary-btn" id="liveGenerateBtn">Accept &amp; Connect</button>' +
+        '</div>' +
+        '<div id="liveStageCode" class="hidden">' +
+          '<p class="ob-sub" id="liveCodeHint"></p>' +
+          '<button type="button" class="primary-btn" id="liveShareBtn" style="width:100%;">Send Reply</button>' +
+          '<button type="button" class="secondary-btn" id="liveShowCodeToggle" style="width:100%;margin-top:10px;font-size:12.5px;">Show the code instead</button>' +
+          '<div id="liveCodeFallback" class="hidden" style="margin-top:10px;">' +
+            '<textarea id="liveMyCode" rows="3" readonly></textarea>' +
+            '<button type="button" class="secondary-btn" id="liveCopyBtn" style="width:100%;margin-top:8px;">Copy Code</button>' +
+          '</div>' +
+          '<div id="liveAnswerWrap" class="hidden"></div>' +
+          '<div id="liveWaitingHint" class="hidden empty-hint" style="margin-top:18px;">Waiting<div style="display:flex;gap:4px;justify-content:center;margin-top:10px;"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div></div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+    openModal(html);
+    var avatarGrid = document.getElementById('liveAvatarGrid');
+    avatarGrid.addEventListener('click', function(e){
+      var b = e.target.closest('.emoji-opt'); if(!b) return;
+      avatarGrid.querySelectorAll('.emoji-opt').forEach(function(x){ x.classList.remove('active'); });
+      b.classList.add('active');
+      liveDraft.avatar = b.dataset.emoji;
+    });
+    document.getElementById('liveGenerateBtn').addEventListener('click', function(){
+      var name = normalizeUsername(document.getElementById('liveFriendName').value) || normalizeUsername(senderName) || '@friend';
+      liveDraft.name = name;
+      var btn = document.getElementById('liveGenerateBtn');
+      btn.disabled = true; btn.textContent = 'Connecting…';
+      establishAnswerFromOffer(offer);
+    });
+    document.getElementById('liveShowCodeToggle').addEventListener('click', function(){
+      document.getElementById('liveCodeFallback').classList.toggle('hidden');
+    });
+    document.getElementById('liveCopyBtn').addEventListener('click', function(){
+      var code = document.getElementById('liveMyCode').value;
+      try{ navigator.clipboard.writeText(code).then(function(){ showToast('Code copied 📋'); }).catch(function(){ showToast('Could not copy on this device'); }); }catch(e){ showToast('Could not copy on this device'); }
+    });
+    document.getElementById('liveShareBtn').addEventListener('click', shareLiveCode);
   });
 }
 function finalizeLiveConnection(){
@@ -1839,6 +1940,24 @@ function handleLiveChannelMessage(raw){
 }
 
 /* ---- live calling ---- */
+function micErrorMessage(err){
+  var n = err && err.name;
+  if(n==='NotAllowedError' || n==='PermissionDeniedError') return 'Microphone access was denied — allow it in your browser/site settings and try again';
+  if(n==='NotFoundError' || n==='DevicesNotFoundError') return 'No microphone found on this device';
+  if(n==='NotReadableError' || n==='TrackStartError') return 'Your microphone is being used by another app right now';
+  return 'Could not access your microphone';
+}
+function ensureMediaPlays(el){
+  if(!el) return;
+  var p = el.play();
+  if(p && p.catch){
+    p.catch(function(){
+      var retry = function(){ if(el && el.isConnected) el.play().catch(function(){}); };
+      document.addEventListener('click', retry, {once:true});
+      document.addEventListener('touchend', retry, {once:true});
+    });
+  }
+}
 function applyLocalTracksToPeer(stream){
   if(!livePc) return;
   var transceivers = livePc.getTransceivers();
@@ -1858,16 +1977,25 @@ function liveCallStart(f, type){
   if(callState){ showToast('Already on a call'); return; }
   callState = {friendId:f.id, type:type, connected:false, startedAt:0, elapsed:0, muted:false, speaker:false, timerInt:null, ringTimeout:null, live:true, direction:'outgoing'};
   navigator.mediaDevices.getUserMedia({audio:true, video:type==='video'}).then(function(stream){
-    liveLocalStream = stream;
-    applyLocalTracksToPeer(stream);
-    renderCallScreen(f, 'Calling...');
-    sendLiveRaw({type:'call-invite', callType:type});
-    callState.ringTimeout = setTimeout(function(){
-      if(callState && !callState.connected) liveCallEnd('not answered', true);
-    }, 30000);
-  }).catch(function(){
-    showToast('Camera/microphone access is needed to call');
-    callState = null;
+    if(!callState || callState.friendId!==f.id || callState.direction!=='outgoing'){
+      stream.getTracks().forEach(function(t){ t.stop(); });
+      return;
+    }
+    try{
+      liveLocalStream = stream;
+      applyLocalTracksToPeer(stream);
+      renderCallScreen(f, 'Calling...');
+      sendLiveRaw({type:'call-invite', callType:type});
+      callState.ringTimeout = setTimeout(function(){
+        if(callState && !callState.connected) liveCallEnd('not answered', true);
+      }, 45000);
+    }catch(e){
+      showToast('Something went wrong starting the call');
+      liveCallEnd(null, true);
+    }
+  }, function(err){
+    showToast(micErrorMessage(err));
+    if(callState && callState.friendId===f.id && callState.direction==='outgoing') callState = null;
   });
 }
 function handleIncomingLiveCall(callType){
@@ -1881,15 +2009,28 @@ function handleIncomingLiveCall(callType){
 function liveCallAccept(){
   if(!callState) return;
   var f = findFriend(callState.friendId);
+  var acceptingFriendId = callState.friendId;
+  var btn = document.querySelector('[data-action="call-accept-live"]');
+  if(btn) btn.disabled = true;
   stopRingTone();
   navigator.mediaDevices.getUserMedia({audio:true, video:callState.type==='video'}).then(function(stream){
-    liveLocalStream = stream;
-    applyLocalTracksToPeer(stream);
-    sendLiveRaw({type:'call-accept'});
-    beginLiveCallTimer(f);
-  }).catch(function(){
-    showToast('Camera/microphone access is needed to answer');
-    liveCallEnd(null, true);
+    if(!callState || callState.friendId!==acceptingFriendId || callState.direction!=='incoming'){
+      stream.getTracks().forEach(function(t){ t.stop(); });
+      showToast('That call already ended');
+      return;
+    }
+    try{
+      liveLocalStream = stream;
+      applyLocalTracksToPeer(stream);
+      sendLiveRaw({type:'call-accept'});
+      beginLiveCallTimer(f);
+    }catch(e){
+      showToast('Something went wrong connecting the call');
+      liveCallEnd(null, true);
+    }
+  }, function(err){
+    showToast(micErrorMessage(err));
+    if(callState && callState.friendId===acceptingFriendId && callState.direction==='incoming') liveCallEnd(null, true);
   });
 }
 function liveCallReject(){
@@ -2240,6 +2381,7 @@ function finishOnboarding(){
   renderTopbar(); syncViewVisibility(state.view); renderBottomNav(); renderActive();
   var uname = state.user.name;
   setTimeout(function(){ showToast('Welcome, ' + uname + '! 🎉'); }, 300);
+  maybeShowIncomingInvite();
 }
 async function finishOnboardingWithPassword(){
   var pw = document.getElementById('obPassword').value;
@@ -2364,7 +2506,16 @@ document.addEventListener('keydown', function(e){
 });
 
 /* ===== boot ===== */
+var pendingInviteOfferCode = null;
+function maybeShowIncomingInvite(){
+  if(!pendingInviteOfferCode) return;
+  var code = pendingInviteOfferCode;
+  pendingInviteOfferCode = null;
+  try{ window.history.replaceState({}, '', location.pathname); }catch(e){}
+  setTimeout(function(){ openIncomingInviteScreen(code); }, 400);
+}
 async function boot(){
+  pendingInviteOfferCode = checkForIncomingInviteLink();
   setupManifest();
   var photoInput = document.getElementById('photoFileInput');
   if(photoInput) photoInput.addEventListener('change', handlePhotoSelected);
@@ -2392,6 +2543,7 @@ async function continueBoot(){
     if(streakNow && streakNow>1){
       setTimeout(function(){ showToast('🔥 Day ' + streakNow + ' streak! Keep it up'); }, 500);
     }
+    maybeShowIncomingInvite();
   } else {
     document.getElementById('appRoot').classList.add('hidden');
     document.getElementById('onboarding').classList.remove('hidden');
