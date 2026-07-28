@@ -212,6 +212,8 @@ h2{font-size:20px;margin:22px 0 12px;}
 .add-friend-row{border:1px dashed var(--border);margin-top:4px;}
 .add-avatar{background:var(--surface-2);border:1px solid var(--border);color:var(--gold);}
 .empty-hint{color:var(--text-faint);font-size:13.5px;text-align:center;padding:60px 30px;}
+.live-badge{font-size:9px;font-weight:800;color:var(--emerald);border:1px solid var(--emerald);border-radius:6px;padding:1px 5px;vertical-align:middle;margin-left:5px;letter-spacing:.3px;}
+.live-dot{position:absolute;bottom:0;right:0;width:11px;height:11px;border-radius:50%;background:var(--emerald);border:2px solid var(--bg);}
 
 /* ===== calls list ===== */
 .calls-list{padding:6px 16px 24px;}
@@ -349,6 +351,11 @@ h2{font-size:20px;margin:22px 0 12px;}
 .call-toggle.active{background:#fff;color:#111;}
 .end-call-btn{position:relative;z-index:1;width:64px;height:64px;border-radius:50%;background:var(--like);display:flex;align-items:center;justify-content:center;box-shadow:0 10px 30px rgba(255,56,96,.5);}
 .end-call-btn .icon{width:24px;height:24px;color:#fff;transform:rotate(135deg);}
+.accept-btn{background:var(--emerald);box-shadow:0 10px 30px rgba(47,158,114,.5);}
+.accept-btn .icon{transform:none;}
+.incoming-controls{gap:40px;}
+.live-remote-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;}
+.live-local-video{object-fit:cover;transform:scaleX(-1);}
 
 /* ===== modal / sheets ===== */
 .modal-root{position:absolute;inset:0;z-index:600;pointer-events:none;}
@@ -512,7 +519,8 @@ var ICONS = {
   userplus:'<circle cx="9" cy="8" r="4"/><path d="M2 20c.6-4 3.7-7 7-7s6.4 3 7 7"/><line x1="18" y1="6" x2="18" y2="12"/><line x1="15" y1="9" x2="21" y2="9"/>',
   flame:'<path d="M12 2.5c1.2 3.6-3.4 5-3.4 9.1a3.4 3.4 0 0 0 6.8 0c0-1.6-.7-2.5-.7-2.5s1.7.9 1.7 3.5a5.4 5.4 0 0 1-10.8 0c0-5.3 4.4-6 4.4-10.1.7 0 1.4 0 2 0z"/>',
   lock:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
-  comment:'<path d="M21 11.5a8.4 8.4 0 0 1-8.4 8.4c-1.4 0-2.7-.3-3.9-.9L3 21l1.9-5.6a8.3 8.3 0 0 1-.9-3.9A8.4 8.4 0 1 1 21 11.5z"/>'
+  comment:'<path d="M21 11.5a8.4 8.4 0 0 1-8.4 8.4c-1.4 0-2.7-.3-3.9-.9L3 21l1.9-5.6a8.3 8.3 0 0 1-.9-3.9A8.4 8.4 0 1 1 21 11.5z"/>',
+  bolt:'<polygon points="13 2 3 14 11 14 9 22 21 10 13 10 13 2"/>'
 };
 function icon(name, cls){
   return '<svg class="icon ' + (cls||'') + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name]||'') + '</svg>';
@@ -745,18 +753,23 @@ function renderChats(){
     var th = state.threads[f.id];
     var unread = th && th.unread;
     var last = th && th.messages.length ? th.messages[th.messages.length-1] : null;
+    var liveOnline = f.live && liveFriendId===f.id && liveConnected;
     return '<button type="button" class="thread-row" data-action="open-thread" data-id="'+f.id+'">' +
-      '<span class="thread-avatar-wrap"><span class="avatar" style="background:'+f.gradient+'">'+f.avatar+'</span>'+(f.online?'<span class="online-dot"></span>':'')+'</span>' +
-      '<span class="thread-info"><span class="thread-name '+(unread?'unread':'')+'">'+escapeHtml(f.name)+'</span><span class="thread-preview '+(unread?'unread':'')+'">'+escapeHtml(threadPreview(f.id))+'</span></span>' +
+      '<span class="thread-avatar-wrap"><span class="avatar" style="background:'+f.gradient+'">'+f.avatar+'</span>'+(liveOnline?'<span class="live-dot"></span>':(!f.live && f.online?'<span class="online-dot"></span>':''))+'</span>' +
+      '<span class="thread-info"><span class="thread-name '+(unread?'unread':'')+'">'+escapeHtml(f.name)+(f.live?'<span class="live-badge">LIVE</span>':'')+'</span><span class="thread-preview '+(unread?'unread':'')+'">'+escapeHtml(threadPreview(f.id))+'</span></span>' +
       '<span class="thread-meta"><span class="thread-time">'+(last?timeAgo(last.ts):'')+'</span>'+(unread?'<span class="unread-dot"></span>':'')+'</span>' +
     '</button>';
   }).join('');
   var emptyHint = friends.length ? '' : '<div class="empty-hint">No chats yet — add a friend to start texting 👋</div>';
+  var liveRow = '<button type="button" class="thread-row add-friend-row" data-action="connect-live">' +
+      '<span class="thread-avatar-wrap"><span class="avatar add-avatar">'+icon('bolt')+'</span></span>' +
+      '<span class="thread-info"><span class="thread-name">Connect Live</span><span class="thread-preview">Real messages &amp; calls, device to device</span></span>' +
+    '</button>';
   var addRow = '<button type="button" class="thread-row add-friend-row" data-action="add-friend">' +
       '<span class="thread-avatar-wrap"><span class="avatar add-avatar">'+icon('userplus')+'</span></span>' +
       '<span class="thread-info"><span class="thread-name">Add a Friend</span><span class="thread-preview">Bring in someone from real life</span></span>' +
     '</button>';
-  el.innerHTML = '<div class="chats-list">'+emptyHint+rows+addRow+'</div>';
+  el.innerHTML = '<div class="chats-list">'+emptyHint+rows+liveRow+addRow+'</div>';
 }
 function openAddFriend(){
   var html = '<div class="sheet">' +
@@ -805,6 +818,7 @@ function removeFriend(id){
   var f = findFriend(id);
   if(!f || !f.custom) return;
   openConfirm('Remove ' + f.name + '?', 'This deletes your chat history with them. This can\'t be undone.', 'Remove', function(){
+    if(liveFriendId===id) teardownLiveConnection();
     state.customFriends = state.customFriends.filter(function(x){ return x.id!==id; });
     delete state.threads[id];
     save();
@@ -1000,11 +1014,13 @@ function msgBubbleHtml(m, f){
 }
 function renderThreadScreen(f){
   var th = state.threads[f.id];
+  var liveOnline = f.live && liveFriendId===f.id && liveConnected;
   var html = '<div class="msg-screen thread-screen">' +
     '<div class="msg-top thread-top">' +
       '<button data-action="close-modal" aria-label="Back">'+icon('back')+'</button>' +
-      '<div class="thread-top-info"><span class="avatar sm" style="background:'+f.gradient+'">'+f.avatar+'</span><div><div class="thread-top-name">'+escapeHtml(f.name)+'</div><div class="thread-top-status">'+(f.online?'Active now':'Offline')+'</div></div></div>' +
+      '<div class="thread-top-info"><span class="avatar sm" style="background:'+f.gradient+'">'+f.avatar+'</span><div><div class="thread-top-name">'+escapeHtml(f.name)+'</div><div class="thread-top-status">'+liveStatusText(f)+'</div></div></div>' +
       '<div class="thread-top-actions">' +
+        (f.live && !liveOnline ? '<button data-action="live-reconnect" data-id="'+f.id+'" aria-label="Reconnect">'+icon('bolt')+'</button>' : '') +
         '<button data-action="call-start" data-id="'+f.id+'" data-type="voice" aria-label="Voice call">'+icon('phone')+'</button>' +
         '<button data-action="call-start" data-id="'+f.id+'" data-type="video" aria-label="Video call">'+icon('video')+'</button>' +
         (f.custom ? '<button data-action="remove-friend" data-id="'+f.id+'" aria-label="Remove friend">'+icon('trash')+'</button>' : '') +
@@ -1019,9 +1035,9 @@ function renderThreadScreen(f){
     '<div class="recording-row hidden" id="recordingRow"></div>' +
     '<div class="msg-input-row" id="msgInputRow">' +
       '<button data-action="toggle-sticker-panel" aria-label="Stickers">😊</button>' +
-      '<button data-action="trigger-photo" aria-label="Send a photo">'+icon('camera')+'</button>' +
+      (f.live ? '' : '<button data-action="trigger-photo" aria-label="Send a photo">'+icon('camera')+'</button>') +
       '<input type="text" id="msgInput" maxlength="140" placeholder="Message...">' +
-      '<button id="micSendBtn" data-action="mic-or-send" data-id="'+f.id+'" aria-label="Record voice message">'+icon('mic')+'</button>' +
+      (f.live ? '<button id="micSendBtn" class="send-btn" data-action="send-msg" data-id="'+f.id+'" aria-label="Send">'+icon('send')+'</button>' : '<button id="micSendBtn" data-action="mic-or-send" data-id="'+f.id+'" aria-label="Record voice message">'+icon('mic')+'</button>') +
     '</div>' +
   '</div>';
   openModal(html);
@@ -1032,7 +1048,7 @@ function renderThreadScreen(f){
   input.addEventListener('keydown', function(e){ if(e.key==='Enter'){ sendMsg(f.id); } });
   input.addEventListener('input', function(){
     var micBtn = document.getElementById('micSendBtn');
-    if(!micBtn) return;
+    if(!micBtn || f.live) return;
     if(input.value.trim()){ micBtn.innerHTML = icon('send'); micBtn.classList.add('send-btn'); }
     else { micBtn.innerHTML = icon('mic'); micBtn.classList.remove('send-btn'); }
   });
@@ -1052,6 +1068,14 @@ function finalizeSentMessage(friendId, f, m){
   state.threads[friendId].messages.push(m);
   save();
   appendMsgToDOM(msgBubbleHtml(m,f));
+  if(f.live){
+    if(liveFriendId===f.id && liveChannel && liveChannel.readyState==='open'){
+      sendLiveMessage(m);
+    } else {
+      showToast('Not connected — this won’t reach them until you reconnect');
+    }
+    return;
+  }
   scheduleMsgTicks(friendId, m.id);
   maybeAutoReply(f);
 }
@@ -1329,28 +1353,45 @@ function fmtDuration(sec){
 }
 function openCall(friendId, type){
   var f = findFriend(friendId); if(!f) return;
+  if(f.live){ liveCallStart(f, type); return; }
   callState = {friendId:friendId, type:type, connected:false, startedAt:0, elapsed:0, muted:false, speaker:false, timerInt:null, ringTimeout:null};
   renderCallScreen(f, 'Calling...');
   startRingTone();
   callState.ringTimeout = setTimeout(function(){ connectCall(f); }, 2200);
 }
 function renderCallScreen(f, status){
-  var html = '<div class="call-screen" data-state="'+(callState.connected?'connected':'ringing')+'">' +
+  var incoming = callState.direction==='incoming' && !callState.connected;
+  var isLiveVideo = f.live && callState.type==='video';
+  var html = '<div class="call-screen" data-state="'+(callState.connected?'connected':(incoming?'incoming':'ringing'))+'">' +
     '<div class="call-bg" style="background:'+f.gradient+'"></div>' +
-    (callState.type==='video' ? '<div class="call-self-preview">'+state.user.avatar+'</div>' : '') +
+    (f.live ? '<video id="liveRemoteMedia" class="live-remote-video'+(isLiveVideo?'':' hidden')+'" autoplay playsinline></video>' : '') +
+    (isLiveVideo ? '<video id="liveLocalVideo" class="call-self-preview live-local-video" autoplay muted playsinline></video>' : (callState.type==='video' ? '<div class="call-self-preview">'+state.user.avatar+'</div>' : '')) +
     '<div class="call-info">' +
-      '<div class="call-avatar-ring"><span class="avatar xl" style="background:'+f.gradient+'">'+f.avatar+'</span></div>' +
+      (isLiveVideo ? '' : '<div class="call-avatar-ring"><span class="avatar xl" style="background:'+f.gradient+'">'+f.avatar+'</span></div>') +
       '<div class="call-name">'+escapeHtml(f.name)+'</div>' +
       '<div class="call-status" id="callStatus">'+status+'</div>' +
     '</div>' +
-    '<div class="call-controls">' +
-      '<button class="call-toggle '+(callState.muted?'active':'')+'" data-action="call-toggle-mute">🎤<span>Mute</span></button>' +
-      '<button class="call-toggle '+(callState.speaker?'active':'')+'" data-action="call-toggle-speaker">🔊<span>Speaker</span></button>' +
-      (callState.type==='video' ? '<button class="call-toggle" data-action="call-toggle-cam">🔄<span>Flip</span></button>' : '') +
-    '</div>' +
-    '<button class="end-call-btn" data-action="call-end" aria-label="End call">'+icon('phone')+'</button>' +
+    (incoming ?
+      '<div class="call-controls incoming-controls">' +
+        '<button class="end-call-btn" data-action="call-reject-live" aria-label="Decline">'+icon('phone')+'</button>' +
+        '<button class="end-call-btn accept-btn" data-action="call-accept-live" aria-label="Accept">'+icon('phone')+'</button>' +
+      '</div>'
+    :
+      '<div class="call-controls">' +
+        '<button class="call-toggle '+(callState.muted?'active':'')+'" data-action="call-toggle-mute">🎤<span>Mute</span></button>' +
+        '<button class="call-toggle '+(callState.speaker?'active':'')+'" data-action="call-toggle-speaker">🔊<span>Speaker</span></button>' +
+        (callState.type==='video' ? '<button class="call-toggle" data-action="call-toggle-cam">🔄<span>Flip</span></button>' : '') +
+      '</div>' +
+      '<button class="end-call-btn" data-action="call-end" aria-label="End call">'+icon('phone')+'</button>'
+    ) +
   '</div>';
   openModal(html);
+  if(f.live){
+    var remoteEl = document.getElementById('liveRemoteMedia');
+    if(remoteEl && liveRemoteStream) remoteEl.srcObject = liveRemoteStream;
+    var localEl = document.getElementById('liveLocalVideo');
+    if(localEl && liveLocalStream) localEl.srcObject = liveLocalStream;
+  }
 }
 function connectCall(f){
   if(!callState) return;
@@ -1367,6 +1408,7 @@ function connectCall(f){
 }
 function endCall(){
   if(!callState) return;
+  if(callState.live){ liveCallEnd(null, true); return; }
   var f = findFriend(callState.friendId);
   clearTimeout(callState.ringTimeout);
   clearInterval(callState.timerInt);
@@ -1385,6 +1427,9 @@ function endCall(){
 function toggleCallMute(){
   if(!callState) return;
   callState.muted = !callState.muted;
+  if(callState.live && liveLocalStream){
+    liveLocalStream.getAudioTracks().forEach(function(t){ t.enabled = !callState.muted; });
+  }
   var btn = document.querySelector('.call-toggle[data-action="call-toggle-mute"]');
   if(btn) btn.classList.toggle('active', callState.muted);
 }
@@ -1397,6 +1442,416 @@ function toggleCallSpeaker(){
 function toggleCallCam(){
   var btn = document.querySelector('.call-toggle[data-action="call-toggle-cam"]');
   if(btn) btn.classList.toggle('active');
+}
+
+/* ===== live connect (real device-to-device via WebRTC) =====
+   No server is involved: two browsers exchange one short connection
+   code (an SDP offer/answer bundled after ICE gathering) through
+   whatever channel the user picks — text, AirDrop, etc — then talk
+   directly to each other. Only one live link is held at a time. */
+var RTC_CONFIG = { iceServers: [{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}] };
+var livePc = null;
+var liveChannel = null;
+var liveFriendId = null;
+var liveConnected = false;
+var liveLocalStream = null;
+var liveRemoteStream = null;
+var liveDraft = null;
+
+function encodeSignal(obj){
+  return btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
+}
+function decodeSignal(str){
+  return JSON.parse(decodeURIComponent(escape(atob(str.trim()))));
+}
+function waitForIceGatheringComplete(pc){
+  return new Promise(function(resolve){
+    if(pc.iceGatheringState==='complete'){ resolve(); return; }
+    var done = false;
+    var timeout = setTimeout(function(){ if(!done){ done=true; resolve(); } }, 5000);
+    pc.addEventListener('icegatheringstatechange', function check(){
+      if(pc.iceGatheringState==='complete' && !done){
+        done = true;
+        clearTimeout(timeout);
+        pc.removeEventListener('icegatheringstatechange', check);
+        resolve();
+      }
+    });
+  });
+}
+function createLivePeerConnection(){
+  var pc = new RTCPeerConnection(RTC_CONFIG);
+  liveRemoteStream = new MediaStream();
+  pc.ontrack = function(e){
+    liveRemoteStream.addTrack(e.track);
+    var el = document.getElementById('liveRemoteMedia');
+    if(el) el.srcObject = liveRemoteStream;
+  };
+  pc.onconnectionstatechange = function(){
+    if(pc.connectionState==='connected'){
+      finalizeLiveConnection();
+    } else if(pc.connectionState==='failed' || pc.connectionState==='closed' || pc.connectionState==='disconnected'){
+      if(callState && callState.live) liveCallEnd(null, false);
+      updateLiveThreadStatus(false);
+    }
+  };
+  return pc;
+}
+function setupLiveChannel(channel){
+  channel.onopen = function(){ updateLiveThreadStatus(true); };
+  channel.onclose = function(){ updateLiveThreadStatus(false); };
+  channel.onmessage = function(e){ handleLiveChannelMessage(e.data); };
+}
+function teardownLiveConnection(){
+  if(callState && callState.live){ try{ liveCallEnd(null, true); }catch(e){} }
+  stopLocalMediaTracks();
+  if(liveChannel){ try{ liveChannel.close(); }catch(e){} liveChannel=null; }
+  if(livePc){ try{ livePc.close(); }catch(e){} livePc=null; }
+  liveRemoteStream = null;
+  liveConnected = false;
+  liveFriendId = null;
+}
+function liveStatusText(f){
+  if(!f.live) return f.online ? 'Active now' : 'Offline';
+  return (liveFriendId===f.id && liveConnected) ? 'Live now 💓' : 'Not connected';
+}
+function updateLiveThreadStatus(connected){
+  liveConnected = connected;
+  var threadOpen = activeThreadId===liveFriendId && document.querySelector('.thread-screen');
+  if(threadOpen){
+    var f = findFriend(liveFriendId);
+    if(f) renderThreadScreen(f);
+  }
+}
+
+/* ---- connect flow UI ---- */
+function openLiveConnect(reconnectFriendId){
+  teardownLiveConnection();
+  var existing = reconnectFriendId ? findFriend(reconnectFriendId) : null;
+  liveDraft = {role:null, avatar: existing?existing.avatar:AVATARS[0], name: existing?existing.name:'', reconnectFriendId: reconnectFriendId||null};
+  var html = '<div class="sheet">' +
+    '<div class="sheet-handle"></div>' +
+    '<div class="sheet-head"><h3>Connect Live</h3><button data-action="close-modal" aria-label="Close">'+icon('close')+'</button></div>' +
+    '<div class="sheet-body">' +
+      '<div id="liveStageChoice">' +
+        '<p class="ob-sub">This links your device directly with a friend’s — browser to browser, no server involved — for real messages and calls. You both need this open at the same time and will trade one short code to link up. Works best on the same wifi; some cellular or school networks may block it.</p>' +
+        '<button type="button" class="primary-btn" id="liveRoleStart">I’ll Go First</button>' +
+        '<button type="button" class="secondary-btn" id="liveRoleJoin" style="width:100%;margin-top:10px;">I Have a Code From Them</button>' +
+      '</div>' +
+      '<div id="liveStageForm" class="hidden">' +
+        '<div id="liveJoinPasteWrap" class="hidden">' +
+          '<label class="field-label">Paste the code they sent you</label>' +
+          '<textarea id="liveIncomingCode" rows="3" placeholder="Paste code here"></textarea>' +
+        '</div>' +
+        '<label class="field-label">Their avatar</label>' +
+        '<div class="emoji-grid" id="liveAvatarGrid">' + AVATARS.map(function(a,i){ return '<button type="button" class="emoji-opt '+(i===0?'active':'')+'" data-emoji="'+a+'">'+a+'</button>'; }).join('') + '</div>' +
+        '<label class="field-label" for="liveFriendName">Their name</label>' +
+        '<input type="text" id="liveFriendName" maxlength="20" placeholder="e.g. Jake" autocomplete="off">' +
+        '<button type="button" class="primary-btn" id="liveGenerateBtn">Generate My Code</button>' +
+      '</div>' +
+      '<div id="liveStageCode" class="hidden">' +
+        '<p class="ob-sub" id="liveCodeHint"></p>' +
+        '<textarea id="liveMyCode" rows="3" readonly></textarea>' +
+        '<div style="display:flex;gap:8px;margin-top:8px;">' +
+          '<button type="button" class="secondary-btn" id="liveCopyBtn" style="flex:1;">Copy Code</button>' +
+          '<button type="button" class="secondary-btn" id="liveShareBtn" style="flex:1;">Share Code</button>' +
+        '</div>' +
+        '<div id="liveAnswerWrap" class="hidden">' +
+          '<label class="field-label" style="margin-top:18px;">Paste their reply code</label>' +
+          '<textarea id="liveAnswerCode" rows="3" placeholder="Paste the code they sent back"></textarea>' +
+          '<button type="button" class="primary-btn" id="liveFinishBtn">Connect</button>' +
+        '</div>' +
+        '<div id="liveWaitingHint" class="hidden empty-hint">Waiting to connect…</div>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+  openModal(html);
+  var avatarGrid = document.getElementById('liveAvatarGrid');
+  avatarGrid.addEventListener('click', function(e){
+    var b = e.target.closest('.emoji-opt'); if(!b) return;
+    avatarGrid.querySelectorAll('.emoji-opt').forEach(function(x){ x.classList.remove('active'); });
+    b.classList.add('active');
+    liveDraft.avatar = b.dataset.emoji;
+  });
+  document.getElementById('liveRoleStart').addEventListener('click', function(){ setLiveRole('start'); });
+  document.getElementById('liveRoleJoin').addEventListener('click', function(){ setLiveRole('join'); });
+  document.getElementById('liveGenerateBtn').addEventListener('click', onLiveGenerateClick);
+  document.getElementById('liveCopyBtn').addEventListener('click', function(){
+    var code = document.getElementById('liveMyCode').value;
+    try{ navigator.clipboard.writeText(code).then(function(){ showToast('Code copied 📋'); }).catch(function(){ showToast('Could not copy on this device'); }); }catch(e){ showToast('Could not copy on this device'); }
+  });
+  document.getElementById('liveShareBtn').addEventListener('click', function(){
+    var code = document.getElementById('liveMyCode').value;
+    if(navigator.share){ navigator.share({title:'Pulse connection code', text:code}).catch(function(){}); }
+    else { try{ navigator.clipboard.writeText(code); showToast('Code copied — send it to your friend'); }catch(e){ showToast('Could not share on this device'); } }
+  });
+  document.getElementById('liveFinishBtn').addEventListener('click', onLiveFinishClick);
+}
+function setLiveRole(role){
+  liveDraft.role = role;
+  document.getElementById('liveStageChoice').classList.add('hidden');
+  document.getElementById('liveStageForm').classList.remove('hidden');
+  document.getElementById('liveJoinPasteWrap').classList.toggle('hidden', role!=='join');
+  document.getElementById('liveGenerateBtn').textContent = role==='join' ? 'Generate My Reply Code' : 'Generate My Code';
+  if(liveDraft.name){
+    document.getElementById('liveFriendName').value = liveDraft.name;
+    document.querySelectorAll('#liveAvatarGrid .emoji-opt').forEach(function(x){ x.classList.toggle('active', x.dataset.emoji===liveDraft.avatar); });
+  }
+}
+function onLiveGenerateClick(){
+  var name = document.getElementById('liveFriendName').value.trim();
+  if(!name){ showToast('Give them a name first'); return; }
+  liveDraft.name = name;
+  var btn = document.getElementById('liveGenerateBtn');
+  btn.disabled = true;
+  btn.textContent = 'Setting up…';
+  if(liveDraft.role==='start'){
+    startLiveOffer();
+  } else {
+    var raw = document.getElementById('liveIncomingCode').value.trim();
+    if(!raw){ showToast('Paste their code first'); btn.disabled=false; btn.textContent='Generate My Reply Code'; return; }
+    joinLiveWithCode(raw);
+  }
+}
+function startLiveOffer(){
+  var pc = createLivePeerConnection();
+  livePc = pc;
+  pc.addTransceiver('audio', {direction:'sendrecv'});
+  pc.addTransceiver('video', {direction:'sendrecv'});
+  liveChannel = pc.createDataChannel('pulse');
+  setupLiveChannel(liveChannel);
+  pc.createOffer().then(function(offer){
+    return pc.setLocalDescription(offer);
+  }).then(function(){
+    return waitForIceGatheringComplete(pc);
+  }).then(function(){
+    var code = encodeSignal({v:1, type:'offer', sdp:pc.localDescription.sdp, name:state.user.name, avatar:state.user.avatar});
+    showLiveCode(code, 'Send this code to '+liveDraft.name+', then paste the reply code they send back below.', true);
+  }).catch(function(){
+    showToast('Could not start a live connection on this device');
+  });
+}
+function joinLiveWithCode(raw){
+  var offer;
+  try{ offer = decodeSignal(raw); }catch(e){ offer = null; }
+  if(!offer || offer.type!=='offer' || !offer.sdp){
+    showToast('That code looks invalid');
+    var btn = document.getElementById('liveGenerateBtn');
+    btn.disabled=false; btn.textContent='Generate My Reply Code';
+    return;
+  }
+  if(offer.name) liveDraft.remoteName = offer.name;
+  if(offer.avatar) liveDraft.remoteAvatar = offer.avatar;
+  var pc = createLivePeerConnection();
+  livePc = pc;
+  pc.ondatachannel = function(e){ liveChannel = e.channel; setupLiveChannel(liveChannel); };
+  pc.setRemoteDescription({type:'offer', sdp:offer.sdp}).then(function(){
+    pc.getTransceivers().forEach(function(t){ t.direction = 'sendrecv'; });
+    return pc.createAnswer();
+  }).then(function(answer){
+    return pc.setLocalDescription(answer);
+  }).then(function(){
+    return waitForIceGatheringComplete(pc);
+  }).then(function(){
+    var code = encodeSignal({v:1, type:'answer', sdp:pc.localDescription.sdp, name:state.user.name, avatar:state.user.avatar});
+    showLiveCode(code, 'Send this reply code back to '+liveDraft.name+'. You’ll connect the moment they paste it in.', false);
+  }).catch(function(){
+    showToast('Could not join that connection');
+  });
+}
+function showLiveCode(code, hint, needsAnswer){
+  document.getElementById('liveStageForm').classList.add('hidden');
+  document.getElementById('liveStageCode').classList.remove('hidden');
+  document.getElementById('liveCodeHint').textContent = hint;
+  document.getElementById('liveMyCode').value = code;
+  document.getElementById('liveAnswerWrap').classList.toggle('hidden', !needsAnswer);
+  document.getElementById('liveWaitingHint').classList.toggle('hidden', needsAnswer);
+}
+function onLiveFinishClick(){
+  var raw = document.getElementById('liveAnswerCode').value.trim();
+  if(!raw){ showToast('Paste their reply code first'); return; }
+  var answer;
+  try{ answer = decodeSignal(raw); }catch(e){ answer = null; }
+  if(!answer || answer.type!=='answer' || !answer.sdp){ showToast('That code looks invalid'); return; }
+  if(answer.name) liveDraft.remoteName = answer.name;
+  if(answer.avatar) liveDraft.remoteAvatar = answer.avatar;
+  var btn = document.getElementById('liveFinishBtn');
+  btn.disabled = true;
+  btn.textContent = 'Connecting…';
+  livePc.setRemoteDescription({type:'answer', sdp:answer.sdp}).catch(function(){
+    showToast('Could not finish connecting');
+  });
+}
+function finalizeLiveConnection(){
+  var friend = null;
+  if(liveFriendId) friend = findFriend(liveFriendId);
+  else if(liveDraft && liveDraft.reconnectFriendId) friend = findFriend(liveDraft.reconnectFriendId);
+  if(!friend){
+    var name = (liveDraft && (liveDraft.name || liveDraft.remoteName)) || 'Live Friend';
+    var avatar = (liveDraft && (liveDraft.avatar || liveDraft.remoteAvatar)) || AVATARS[0];
+    friend = {id:uid(), name:name, avatar:avatar, gradient:GRADIENTS[Math.floor(Math.random()*GRADIENTS.length)], online:true, custom:true, live:true};
+    state.customFriends.push(friend);
+    state.threads[friend.id] = {unread:false, messages:[]};
+  }
+  friend.live = true;
+  liveFriendId = friend.id;
+  liveConnected = true;
+  save();
+  if(liveDraft){
+    closeModal();
+    renderChats();
+    showToast('Connected with '+friend.name+' 💓');
+    liveDraft = null;
+    setTimeout(function(){ openThread(friend.id); }, 250);
+  } else {
+    renderChats();
+    if(activeThreadId===friend.id && document.querySelector('.thread-screen')) renderThreadScreen(friend);
+  }
+}
+
+/* ---- live messaging ---- */
+function sendLiveRaw(obj){
+  if(liveChannel && liveChannel.readyState==='open'){
+    try{ liveChannel.send(JSON.stringify(obj)); }catch(e){}
+  }
+}
+function sendLiveMessage(m){
+  sendLiveRaw({type:'msg', id:m.id, msgType:m.type, text:m.text, content:m.content, animClass:m.animClass, replyTo:m.replyTo||null});
+}
+function handleLiveChannelMessage(raw){
+  var data;
+  try{ data = JSON.parse(raw); }catch(e){ return; }
+  if(!liveFriendId) return;
+  var f = findFriend(liveFriendId);
+  var th = state.threads[liveFriendId];
+  if(!f || !th) return;
+  if(data.type==='msg'){
+    var m = {id:data.id||uid(), from:'them', type:data.msgType||'text', text:data.text, content:data.content, animClass:data.animClass, ts:Date.now(), status:'sent'};
+    if(data.replyTo) m.replyTo = data.replyTo;
+    th.messages.push(m);
+    var isOpen = activeThreadId===liveFriendId && document.querySelector('.thread-screen');
+    if(isOpen){
+      appendMsgToDOM(msgBubbleHtml(m,f));
+      sendLiveRaw({type:'ack', id:m.id, status:'read'});
+    } else {
+      th.unread = true;
+      renderBottomNav();
+      if(state.view==='chats') renderChats();
+      sendLiveRaw({type:'ack', id:m.id, status:'delivered'});
+    }
+    save();
+  } else if(data.type==='ack'){
+    patchMsgTicks(liveFriendId, data.id, data.status);
+  } else if(data.type==='call-invite'){
+    handleIncomingLiveCall(data.callType);
+  } else if(data.type==='call-accept'){
+    onRemoteAcceptedCall();
+  } else if(data.type==='call-reject'){
+    showToast(f.name + ' declined');
+    liveCallEnd('declined', false);
+  } else if(data.type==='call-end'){
+    liveCallEnd(null, false);
+  }
+}
+
+/* ---- live calling ---- */
+function applyLocalTracksToPeer(stream){
+  if(!livePc) return;
+  var transceivers = livePc.getTransceivers();
+  stream.getTracks().forEach(function(track){
+    var t = transceivers.find(function(tr){ return tr.receiver && tr.receiver.track && tr.receiver.track.kind===track.kind; });
+    if(t && t.sender) t.sender.replaceTrack(track).catch(function(){});
+  });
+}
+function stopLocalMediaTracks(){
+  if(liveLocalStream){ liveLocalStream.getTracks().forEach(function(t){ t.stop(); }); liveLocalStream=null; }
+  if(livePc){
+    livePc.getSenders().forEach(function(s){ if(s.track){ try{ s.replaceTrack(null); }catch(e){} } });
+  }
+}
+function liveCallStart(f, type){
+  if(!(liveFriendId===f.id && liveConnected)){ showToast('Reconnect with '+f.name+' first'); return; }
+  if(callState){ showToast('Already on a call'); return; }
+  callState = {friendId:f.id, type:type, connected:false, startedAt:0, elapsed:0, muted:false, speaker:false, timerInt:null, ringTimeout:null, live:true, direction:'outgoing'};
+  navigator.mediaDevices.getUserMedia({audio:true, video:type==='video'}).then(function(stream){
+    liveLocalStream = stream;
+    applyLocalTracksToPeer(stream);
+    renderCallScreen(f, 'Calling...');
+    sendLiveRaw({type:'call-invite', callType:type});
+    callState.ringTimeout = setTimeout(function(){
+      if(callState && !callState.connected) liveCallEnd('not answered', true);
+    }, 30000);
+  }).catch(function(){
+    showToast('Camera/microphone access is needed to call');
+    callState = null;
+  });
+}
+function handleIncomingLiveCall(callType){
+  if(callState){ sendLiveRaw({type:'call-reject'}); return; }
+  var f = findFriend(liveFriendId);
+  if(!f) return;
+  callState = {friendId:f.id, type:callType, connected:false, elapsed:0, muted:false, speaker:false, timerInt:null, ringTimeout:null, live:true, direction:'incoming'};
+  renderCallScreen(f, callType==='video' ? 'Incoming video call' : 'Incoming call');
+  startRingTone();
+}
+function liveCallAccept(){
+  if(!callState) return;
+  var f = findFriend(callState.friendId);
+  stopRingTone();
+  navigator.mediaDevices.getUserMedia({audio:true, video:callState.type==='video'}).then(function(stream){
+    liveLocalStream = stream;
+    applyLocalTracksToPeer(stream);
+    sendLiveRaw({type:'call-accept'});
+    beginLiveCallTimer(f);
+  }).catch(function(){
+    showToast('Camera/microphone access is needed to answer');
+    liveCallEnd(null, true);
+  });
+}
+function liveCallReject(){
+  sendLiveRaw({type:'call-reject'});
+  stopRingTone();
+  callState = null;
+  closeModal();
+}
+function onRemoteAcceptedCall(){
+  if(!callState) return;
+  beginLiveCallTimer(findFriend(callState.friendId));
+}
+function beginLiveCallTimer(f){
+  if(!callState || !f) return;
+  callState.connected = true;
+  callState.startedAt = Date.now();
+  stopRingTone();
+  clearTimeout(callState.ringTimeout);
+  renderCallScreen(f, '00:00');
+  callState.timerInt = setInterval(function(){
+    if(!callState) return;
+    callState.elapsed = Math.floor((Date.now()-callState.startedAt)/1000);
+    var elm = document.getElementById('callStatus');
+    if(elm) elm.textContent = fmtDuration(callState.elapsed);
+  }, 1000);
+}
+function liveCallEnd(reasonLabel, shouldSignal){
+  if(!callState) return;
+  var f = findFriend(callState.friendId);
+  clearTimeout(callState.ringTimeout);
+  clearInterval(callState.timerInt);
+  stopRingTone();
+  if(shouldSignal) sendLiveRaw({type:'call-end'});
+  stopLocalMediaTracks();
+  var elapsed = callState.elapsed||0;
+  var label = (callState.type==='video'?'🎥 Video call':'📞 Voice call') + (callState.connected ? ' · '+fmtDuration(elapsed) : ' · '+(reasonLabel||'not answered'));
+  if(f){
+    var th = state.threads[f.id];
+    if(th){
+      var m = {id:uid(), from:'me', type:'call', text:label, ts:Date.now()};
+      th.messages.push(m);
+      save();
+    }
+  }
+  callState = null;
+  if(f) renderThreadScreen(f); else closeModal();
 }
 
 /* ===== settings ===== */
@@ -1652,8 +2107,12 @@ document.addEventListener('click', function(e){
     case 'open-thread': openThread(id); break;
     case 'add-friend': openAddFriend(); break;
     case 'remove-friend': removeFriend(id); break;
+    case 'connect-live': openLiveConnect(); break;
+    case 'live-reconnect': openLiveConnect(id); break;
     case 'call-start': openCall(id, t.dataset.type); break;
     case 'call-end': endCall(); break;
+    case 'call-accept-live': liveCallAccept(); break;
+    case 'call-reject-live': liveCallReject(); break;
     case 'call-toggle-mute': toggleCallMute(); break;
     case 'call-toggle-speaker': toggleCallSpeaker(); break;
     case 'call-toggle-cam': toggleCallCam(); break;
