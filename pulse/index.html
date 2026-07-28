@@ -1455,6 +1455,10 @@ var liveConnected = false;
 var liveLocalStream = null;
 var liveRemoteStream = null;
 var liveDraft = null;
+var liveDisconnectGraceTimer = null;
+function clearLiveDisconnectGrace(){
+  if(liveDisconnectGraceTimer){ clearTimeout(liveDisconnectGraceTimer); liveDisconnectGraceTimer=null; }
+}
 
 function encodeSignal(obj){
   var json = JSON.stringify(obj);
@@ -1532,10 +1536,25 @@ function createLivePeerConnection(){
   };
   pc.onconnectionstatechange = function(){
     if(pc.connectionState==='connected'){
+      clearLiveDisconnectGrace();
       finalizeLiveConnection();
-    } else if(pc.connectionState==='failed' || pc.connectionState==='closed' || pc.connectionState==='disconnected'){
+    } else if(pc.connectionState==='failed' || pc.connectionState==='closed'){
+      // terminal - no point waiting, this connection is not coming back
+      clearLiveDisconnectGrace();
       if(callState && callState.live) liveCallEnd(null, false);
       updateLiveThreadStatus(false);
+    } else if(pc.connectionState==='disconnected'){
+      // often transient (a brief wifi hiccup, screen lock, moving between networks) and
+      // recovers on its own within a few seconds - don't drop a call or mark the friend
+      // unreachable until it's been down long enough to be a real problem
+      clearLiveDisconnectGrace();
+      liveDisconnectGraceTimer = setTimeout(function(){
+        liveDisconnectGraceTimer = null;
+        if(pc===livePc && pc.connectionState!=='connected'){
+          if(callState && callState.live) liveCallEnd(null, false);
+          updateLiveThreadStatus(false);
+        }
+      }, 7000);
     }
   };
   return pc;
@@ -1547,6 +1566,7 @@ function setupLiveChannel(channel){
 }
 function teardownLiveConnection(){
   clearLiveConnectTimeout();
+  clearLiveDisconnectGrace();
   if(callState && callState.live){ try{ liveCallEnd(null, true); }catch(e){} }
   stopLocalMediaTracks();
   if(liveChannel){ try{ liveChannel.close(); }catch(e){} liveChannel=null; }
@@ -1589,8 +1609,8 @@ function openLiveConnect(reconnectFriendId){
         '</div>' +
         '<label class="field-label">Their avatar</label>' +
         '<div class="emoji-grid" id="liveAvatarGrid">' + AVATARS.map(function(a,i){ return '<button type="button" class="emoji-opt '+(i===0?'active':'')+'" data-emoji="'+a+'">'+a+'</button>'; }).join('') + '</div>' +
-        '<label class="field-label" for="liveFriendName">Their name</label>' +
-        '<input type="text" id="liveFriendName" maxlength="20" placeholder="e.g. Jake" autocomplete="off">' +
+        '<label class="field-label" for="liveFriendName">Their @username</label>' +
+        '<input type="text" id="liveFriendName" maxlength="21" placeholder="@jake" autocomplete="off">' +
         '<button type="button" class="primary-btn" id="liveGenerateBtn">Generate My Code</button>' +
       '</div>' +
       '<div id="liveStageCode" class="hidden">' +
@@ -1648,9 +1668,13 @@ function setLiveRole(role){
     document.querySelectorAll('#liveAvatarGrid .emoji-opt').forEach(function(x){ x.classList.toggle('active', x.dataset.emoji===liveDraft.avatar); });
   }
 }
+function normalizeUsername(raw){
+  var v = (raw||'').trim().replace(/^@+/, '');
+  return v ? '@'+v : '';
+}
 function onLiveGenerateClick(){
-  var name = document.getElementById('liveFriendName').value.trim();
-  if(!name){ showToast('Give them a name first'); return; }
+  var name = normalizeUsername(document.getElementById('liveFriendName').value);
+  if(!name){ showToast('Give them a username first'); return; }
   liveDraft.name = name;
   var btn = document.getElementById('liveGenerateBtn');
   btn.disabled = true;
