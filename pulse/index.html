@@ -1546,23 +1546,7 @@ var liveDraft = null;
 
 function encodeSignal(obj){
   var json = JSON.stringify(obj);
-  if(typeof CompressionStream==='undefined'){
-    return Promise.resolve('r:'+btoa(unescape(encodeURIComponent(json))));
-  }
-  try{
-    var bytes = new TextEncoder().encode(json);
-    var cs = new CompressionStream('gzip');
-    var writer = cs.writable.getWriter();
-    writer.write(bytes);
-    writer.close();
-    return new Response(cs.readable).arrayBuffer().then(function(buf){
-      return 'z:'+bufToB64(buf);
-    }).catch(function(){
-      return 'r:'+btoa(unescape(encodeURIComponent(json)));
-    });
-  }catch(e){
-    return Promise.resolve('r:'+btoa(unescape(encodeURIComponent(json))));
-  }
+  return Promise.resolve('r:'+btoa(unescape(encodeURIComponent(json))));
 }
 function decodeSignal(str){
   str = str.trim();
@@ -1584,6 +1568,11 @@ function decodeSignal(str){
   }
   // no recognized tag - try legacy untagged format from older versions of this app
   return Promise.resolve(JSON.parse(decodeURIComponent(escape(atob(str)))));
+}
+function extractCodeFromPastedText(raw){
+  var trimmed = (raw||'').trim();
+  var match = trimmed.match(/[rz]:[A-Za-z0-9+/=]+/);
+  return match ? match[0] : trimmed;
 }
 function waitForIceGatheringComplete(pc){
   return new Promise(function(resolve){
@@ -1677,7 +1666,7 @@ function openLiveConnect(reconnectFriendId){
     '<div class="sheet-head"><h3>Connect Live</h3><button data-action="close-modal" aria-label="Close">'+icon('close')+'</button></div>' +
     '<div class="sheet-body">' +
       '<div id="liveStageChoice">' +
-        '<p class="ob-sub">This links your device directly with a friend’s — browser to browser, no server involved — for real messages and calls. You both need this open at the same time and will trade one short code to link up. Works best on the same wifi; some cellular or school networks may block it.</p>' +
+        '<p class="ob-sub">This links your device directly with a friend’s — browser to browser, no server involved — for real messages and calls. You both need this open at the same time. Only ONE of you taps "I’ll Go First" — the other taps "I Have a Code". Works best on the same wifi; some cellular or school networks may block it.</p>' +
         '<button type="button" class="primary-btn" id="liveRoleStart">I’ll Go First</button>' +
         '<button type="button" class="secondary-btn" id="liveRoleJoin" style="width:100%;margin-top:10px;">I Have a Code From Them</button>' +
       '</div>' +
@@ -1704,7 +1693,7 @@ function openLiveConnect(reconnectFriendId){
           '<textarea id="liveAnswerCode" rows="3" placeholder="Paste the code they sent back"></textarea>' +
           '<button type="button" class="primary-btn" id="liveFinishBtn">Connect</button>' +
         '</div>' +
-        '<div id="liveWaitingHint" class="hidden empty-hint">Waiting to connect…</div>' +
+        '<div id="liveWaitingHint" class="hidden empty-hint">Waiting to connect<div style="display:flex;gap:4px;justify-content:center;margin-top:10px;"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div></div>' +
       '</div>' +
     '</div>' +
   '</div>';
@@ -1725,8 +1714,14 @@ function openLiveConnect(reconnectFriendId){
   });
   document.getElementById('liveShareBtn').addEventListener('click', function(){
     var code = document.getElementById('liveMyCode').value;
-    if(navigator.share){ navigator.share({title:'Pulse connection code', text:code}).catch(function(){}); }
-    else { try{ navigator.clipboard.writeText(code); showToast('Code copied — send it to your friend'); }catch(e){ showToast('Could not share on this device'); } }
+    var msg = liveDraft && liveDraft.needsAnswer===false
+      ? 'Here’s my reply code for Pulse — open the app and paste this in where it says "paste their reply code":\n\n'+code
+      : 'Let’s link up on Pulse! Open the app, tap Connect Live → "I Have a Code From Them", and paste this in:\n\n'+code;
+    try{
+      if(navigator.share){ navigator.share({title:'Pulse connection code', text:msg}).catch(function(){}); return; }
+    }catch(e){}
+    try{ navigator.clipboard.writeText(msg); showToast('Copied — send it to your friend'); }
+    catch(e){ showToast('Could not share on this device'); }
   });
   document.getElementById('liveFinishBtn').addEventListener('click', onLiveFinishClick);
 }
@@ -1751,7 +1746,7 @@ function onLiveGenerateClick(){
   if(liveDraft.role==='start'){
     startLiveOffer();
   } else {
-    var raw = document.getElementById('liveIncomingCode').value.trim();
+    var raw = extractCodeFromPastedText(document.getElementById('liveIncomingCode').value);
     if(!raw){ showToast('Paste their code first'); btn.disabled=false; btn.textContent='Generate My Reply Code'; return; }
     joinLiveWithCode(raw);
   }
@@ -1812,9 +1807,10 @@ function showLiveCode(code, hint, needsAnswer){
   document.getElementById('liveMyCode').value = code;
   document.getElementById('liveAnswerWrap').classList.toggle('hidden', !needsAnswer);
   document.getElementById('liveWaitingHint').classList.toggle('hidden', needsAnswer);
+  if(liveDraft) liveDraft.needsAnswer = needsAnswer;
 }
 function onLiveFinishClick(){
-  var raw = document.getElementById('liveAnswerCode').value.trim();
+  var raw = extractCodeFromPastedText(document.getElementById('liveAnswerCode').value);
   if(!raw){ showToast('Paste their reply code first'); return; }
   var btn = document.getElementById('liveFinishBtn');
   btn.disabled = true;
