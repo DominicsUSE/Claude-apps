@@ -264,7 +264,6 @@ h2{font-size:20px;margin:22px 0 12px;}
 .msg-system{align-self:center;background:var(--surface-2);color:var(--text-faint);font-size:12px;padding:6px 14px;border-radius:999px;margin:6px 0;}
 .encrypted-banner{display:flex;align-items:center;gap:6px;text-align:center;max-width:80%;background:none;font-size:11.5px;padding:10px 14px 16px;line-height:1.4;}
 .encrypted-banner .icon{width:13px;height:13px;color:var(--gold);flex:0 0 auto;}
-.typing-row .bubble{display:flex;gap:4px;padding:14px 16px;align-items:center;cursor:default;}
 .typing-dot{width:6px;height:6px;border-radius:50%;background:var(--text-faint);animation:typingBounce 1.2s ease infinite;}
 .typing-dot:nth-child(2){animation-delay:.15s;}
 .typing-dot:nth-child(3){animation-delay:.3s;}
@@ -505,16 +504,6 @@ var GRADIENTS = [
   'linear-gradient(135deg,#1e3a5f,#0d0b08)',
   'linear-gradient(135deg,#a9812f,#241d12)'
 ];
-var REPLY_POOL = {
-  UFC:["did you catch the fight card this week 🥊","training arms are DEAD today 💀","who you got winning this weekend"],
-  Wrestling:["that promo went crazy 🎤","we need a rematch fr","ring psychology on another level"],
-  Gaming:["one more game and I'm done (lied)","new patch is actually insane","clutch or kick, no in between"],
-  Comedy:["I'm screaming 😭","sending this to everyone I know","not you being this funny"],
-  Music:["on repeat since this morning 🎧","this the one for the summer","adding it to the playlist rn"],
-  Movies:["no spoilers I haven't seen it yet 🍿","that scene lived in my head all day","we need to watch this together"],
-  Brainrot:["tung tung tung sahur is undefeated, no debate","bombardiro really said not today 💀","the brainrot lore keeps getting deeper and I am here for it","tralalero tralala supremacy fr fr","not me having strong opinions about a wooden guy with a drum"],
-  general:["lol fr","wait really? 😳","no cap","same tbh","I'm dead 💀","let's gooo","haha true","bet","on it rn","for real for real"]
-};
 var STICKERS = ['🔥','💯','😭','💀','🫡','🥲','😩','🎉','👑','🫶','😤','🤝','✨','😳','🙏','🥶'];
 var GIF_STICKERS = [
   {emoji:'🔥', cls:'gif-flicker'},
@@ -596,12 +585,6 @@ function findFriend(id){
 }
 function getAllFriends(){
   return state.customFriends || [];
-}
-function pickReply(vibe){
-  var pool = REPLY_POOL[vibe] || REPLY_POOL.general;
-  var useGeneral = Math.random()<0.35;
-  var p = useGeneral ? REPLY_POOL.general : pool;
-  return p[Math.floor(Math.random()*p.length)];
 }
 function initThreads(){
   return {};
@@ -743,6 +726,15 @@ async function loadState(){
       for(var k in parsed){ merged[k] = parsed[k]; }
       if(!merged.threads) merged.threads = initThreads();
       if(!merged.customFriends) merged.customFriends = [];
+      // drop any simulated (non-live) friends saved by older versions of this app
+      var realFriendIds = {};
+      merged.customFriends = merged.customFriends.filter(function(f){
+        if(f.live){ realFriendIds[f.id] = true; return true; }
+        return false;
+      });
+      Object.keys(merged.threads).forEach(function(id){
+        if(!realFriendIds[id]) delete merged.threads[id];
+      });
       return merged;
     }
   }catch(e){}
@@ -839,66 +831,19 @@ function renderChats(){
     var th = state.threads[f.id];
     var unread = th && th.unread;
     var last = th && th.messages.length ? th.messages[th.messages.length-1] : null;
-    var liveOnline = f.live && liveFriendId===f.id && liveConnected;
+    var liveOnline = liveFriendId===f.id && liveConnected;
     return '<button type="button" class="thread-row" data-action="open-thread" data-id="'+f.id+'">' +
-      '<span class="thread-avatar-wrap"><span class="avatar" style="background:'+f.gradient+'">'+f.avatar+'</span>'+(liveOnline?'<span class="live-dot"></span>':(!f.live && f.online?'<span class="online-dot"></span>':''))+'</span>' +
-      '<span class="thread-info"><span class="thread-name '+(unread?'unread':'')+'">'+escapeHtml(f.name)+(f.live?'<span class="live-badge">LIVE</span>':'')+'</span><span class="thread-preview '+(unread?'unread':'')+'">'+escapeHtml(threadPreview(f.id))+'</span></span>' +
+      '<span class="thread-avatar-wrap"><span class="avatar" style="background:'+f.gradient+'">'+f.avatar+'</span>'+(liveOnline?'<span class="live-dot"></span>':'')+'</span>' +
+      '<span class="thread-info"><span class="thread-name '+(unread?'unread':'')+'">'+escapeHtml(f.name)+'</span><span class="thread-preview '+(unread?'unread':'')+'">'+escapeHtml(threadPreview(f.id))+'</span></span>' +
       '<span class="thread-meta"><span class="thread-time">'+(last?timeAgo(last.ts):'')+'</span>'+(unread?'<span class="unread-dot"></span>':'')+'</span>' +
     '</button>';
   }).join('');
   var emptyHint = friends.length ? '' : '<div class="empty-hint">No chats yet — add a friend to start texting 👋</div>';
-  var liveRow = '<button type="button" class="thread-row add-friend-row" data-action="connect-live">' +
-      '<span class="thread-avatar-wrap"><span class="avatar add-avatar">'+icon('bolt')+'</span></span>' +
-      '<span class="thread-info"><span class="thread-name">Connect Live</span><span class="thread-preview">Real messages &amp; calls, device to device</span></span>' +
-    '</button>';
-  var addRow = '<button type="button" class="thread-row add-friend-row" data-action="add-friend">' +
+  var addRow = '<button type="button" class="thread-row add-friend-row" data-action="connect-live">' +
       '<span class="thread-avatar-wrap"><span class="avatar add-avatar">'+icon('userplus')+'</span></span>' +
-      '<span class="thread-info"><span class="thread-name">Add a Friend</span><span class="thread-preview">Bring in someone from real life</span></span>' +
+      '<span class="thread-info"><span class="thread-name">Add a Friend</span><span class="thread-preview">Link up with someone real, device to device</span></span>' +
     '</button>';
-  el.innerHTML = '<div class="chats-list">'+emptyHint+rows+liveRow+addRow+'</div>';
-}
-function openAddFriend(){
-  var html = '<div class="sheet">' +
-    '<div class="sheet-handle"></div>' +
-    '<div class="sheet-head"><h3>Add a Friend</h3><button data-action="close-modal" aria-label="Close">'+icon('close')+'</button></div>' +
-    '<div class="sheet-body">' +
-      '<label class="field-label">Their avatar</label>' +
-      '<div class="emoji-grid" id="friendAvatarGrid">' + AVATARS.map(function(a,i){ return '<button type="button" class="emoji-opt '+(i===0?'active':'')+'" data-emoji="'+a+'">'+a+'</button>'; }).join('') + '</div>' +
-      '<label class="field-label" for="friendName">Their name</label>' +
-      '<input type="text" id="friendName" maxlength="20" placeholder="e.g. Jake" autocomplete="off">' +
-      '<label class="field-label">Their vibe</label>' +
-      '<div class="chip-grid" id="friendVibeGrid">' + Object.keys(REPLY_POOL).filter(function(v){return v!=='general';}).map(function(v,i){ return '<button type="button" class="chip lg '+(i===0?'active':'')+'" data-vibe="'+v+'">'+v+'</button>'; }).join('') + '</div>' +
-      '<p class="ob-sub">This app can\'t reach their real phone, but you can text and call them here just like the rest of your chats.</p>' +
-      '<button class="primary-btn" id="saveFriendBtn">Add Friend</button>' +
-    '</div>' +
-  '</div>';
-  openModal(html);
-  var draft = {avatar:AVATARS[0], vibe:Object.keys(REPLY_POOL)[0]};
-  var avatarGrid = document.getElementById('friendAvatarGrid');
-  avatarGrid.addEventListener('click', function(e){
-    var b = e.target.closest('.emoji-opt'); if(!b) return;
-    avatarGrid.querySelectorAll('.emoji-opt').forEach(function(x){ x.classList.remove('active'); });
-    b.classList.add('active');
-    draft.avatar = b.dataset.emoji;
-  });
-  var vibeGrid = document.getElementById('friendVibeGrid');
-  vibeGrid.addEventListener('click', function(e){
-    var b = e.target.closest('.chip'); if(!b) return;
-    vibeGrid.querySelectorAll('.chip').forEach(function(x){ x.classList.remove('active'); });
-    b.classList.add('active');
-    draft.vibe = b.dataset.vibe;
-  });
-  document.getElementById('saveFriendBtn').addEventListener('click', function(){
-    var name = document.getElementById('friendName').value.trim();
-    if(!name){ showToast('Give them a name first'); return; }
-    var friend = {id:uid(), name:name, avatar:draft.avatar, gradient:GRADIENTS[Math.floor(Math.random()*GRADIENTS.length)], vibe:draft.vibe, online:true, custom:true};
-    state.customFriends.push(friend);
-    state.threads[friend.id] = {unread:false, messages:[]};
-    save();
-    closeModal();
-    renderChats();
-    showToast(name + ' added ✨');
-  });
+  el.innerHTML = '<div class="chats-list">'+emptyHint+rows+addRow+'</div>';
 }
 function removeFriend(id){
   var f = findFriend(id);
@@ -1154,20 +1099,11 @@ function finalizeSentMessage(friendId, f, m){
   state.threads[friendId].messages.push(m);
   save();
   appendMsgToDOM(msgBubbleHtml(m,f));
-  if(f.live){
-    if(liveFriendId===f.id && liveChannel && liveChannel.readyState==='open'){
-      sendLiveMessage(m);
-    } else {
-      showToast('Not connected — this won’t reach them until you reconnect');
-    }
-    return;
+  if(liveFriendId===f.id && liveChannel && liveChannel.readyState==='open'){
+    sendLiveMessage(m);
+  } else {
+    showToast('Not connected — this won’t reach them until you reconnect');
   }
-  scheduleMsgTicks(friendId, m.id);
-  maybeAutoReply(f);
-}
-function scheduleMsgTicks(friendId, msgId){
-  setTimeout(function(){ patchMsgTicks(friendId, msgId, 'delivered'); }, 650);
-  setTimeout(function(){ patchMsgTicks(friendId, msgId, 'read'); }, 2400 + Math.random()*800);
 }
 function patchMsgTicks(friendId, msgId, status){
   var th = state.threads[friendId];
@@ -1360,30 +1296,6 @@ function hideRecordingUI(){
 function updateRecordingTimer(sec){
   var t = document.getElementById('recTimer');
   if(t) t.textContent = formatAudioDuration(sec);
-}
-function maybeAutoReply(f){
-  if(Math.random()>0.75) return;
-  showTyping();
-  setTimeout(function(){
-    hideTyping();
-    var th = state.threads[f.id];
-    if(!th) return;
-    var text = pickReply(f.vibe);
-    var m = {id:uid(), from:'them', type:'text', text:text, ts:Date.now()};
-    th.messages.push(m);
-    save();
-    appendMsgToDOM(msgBubbleHtml(m,f));
-  }, 1100 + Math.random()*700);
-}
-function showTyping(){
-  var body = document.getElementById('msgBody');
-  if(!body) return;
-  body.insertAdjacentHTML('beforeend', '<div class="msg-row them typing-row" id="typingRow"><div class="bubble"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div></div>');
-  body.scrollTop = body.scrollHeight;
-}
-function hideTyping(){
-  var t = document.getElementById('typingRow');
-  if(t) t.remove();
 }
 function toggleStickerPanel(){
   var panel = document.getElementById('stickerPanel');
@@ -1663,7 +1575,7 @@ function openLiveConnect(reconnectFriendId){
   liveDraft = {role:null, avatar: existing?existing.avatar:AVATARS[0], name: existing?existing.name:'', reconnectFriendId: reconnectFriendId||null};
   var html = '<div class="sheet">' +
     '<div class="sheet-handle"></div>' +
-    '<div class="sheet-head"><h3>Connect Live</h3><button data-action="close-modal" aria-label="Close">'+icon('close')+'</button></div>' +
+    '<div class="sheet-head"><h3>Add a Friend</h3><button data-action="close-modal" aria-label="Close">'+icon('close')+'</button></div>' +
     '<div class="sheet-body">' +
       '<div id="liveStageChoice">' +
         '<p class="ob-sub">This links your device directly with a friend’s — browser to browser, no server involved — for real messages and calls. You both need this open at the same time. Only ONE of you taps "I’ll Go First" — the other taps "I Have a Code". Works best on the same wifi; some cellular or school networks may block it.</p>' +
@@ -1716,7 +1628,7 @@ function openLiveConnect(reconnectFriendId){
     var code = document.getElementById('liveMyCode').value;
     var msg = liveDraft && liveDraft.needsAnswer===false
       ? 'Here’s my reply code for Pulse — open the app and paste this in where it says "paste their reply code":\n\n'+code
-      : 'Let’s link up on Pulse! Open the app, tap Connect Live → "I Have a Code From Them", and paste this in:\n\n'+code;
+      : 'Let’s link up on Pulse! Open the app, tap Add a Friend → "I Have a Code From Them", and paste this in:\n\n'+code;
     try{
       if(navigator.share){ navigator.share({title:'Pulse connection code', text:msg}).catch(function(){}); return; }
     }catch(e){}
@@ -2374,7 +2286,6 @@ document.addEventListener('click', function(e){
     case 'send-msg': sendMsg(id); break;
     case 'send-sticker': sendSticker(id, t.dataset.emoji, t.dataset.anim); break;
     case 'open-thread': openThread(id); break;
-    case 'add-friend': openAddFriend(); break;
     case 'remove-friend': removeFriend(id); break;
     case 'connect-live': openLiveConnect(); break;
     case 'live-reconnect': openLiveConnect(id); break;
