@@ -1108,7 +1108,7 @@ function renderThreadScreen(f){
       '<div class="thread-top-actions">' +
         (f.live && !liveOnline ? '<button data-action="live-reconnect" data-id="'+f.id+'" aria-label="Reconnect">'+icon('bolt')+'</button>' : '') +
         '<button data-action="call-start" data-id="'+f.id+'" data-type="voice" aria-label="Voice call">'+icon('phone')+'</button>' +
-        '<button data-action="call-start" data-id="'+f.id+'" data-type="video" aria-label="Video call">'+icon('video')+'</button>' +
+        (f.live ? '' : '<button data-action="call-start" data-id="'+f.id+'" data-type="video" aria-label="Video call">'+icon('video')+'</button>') +
         (f.custom ? '<button data-action="remove-friend" data-id="'+f.id+'" aria-label="Remove friend">'+icon('trash')+'</button>' : '') +
       '</div>' +
     '</div>' +
@@ -1545,16 +1545,51 @@ var liveRemoteStream = null;
 var liveDraft = null;
 
 function encodeSignal(obj){
-  return btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
+  var json = JSON.stringify(obj);
+  if(typeof CompressionStream==='undefined'){
+    return Promise.resolve('r:'+btoa(unescape(encodeURIComponent(json))));
+  }
+  try{
+    var bytes = new TextEncoder().encode(json);
+    var cs = new CompressionStream('gzip');
+    var writer = cs.writable.getWriter();
+    writer.write(bytes);
+    writer.close();
+    return new Response(cs.readable).arrayBuffer().then(function(buf){
+      return 'z:'+bufToB64(buf);
+    }).catch(function(){
+      return 'r:'+btoa(unescape(encodeURIComponent(json)));
+    });
+  }catch(e){
+    return Promise.resolve('r:'+btoa(unescape(encodeURIComponent(json))));
+  }
 }
 function decodeSignal(str){
-  return JSON.parse(decodeURIComponent(escape(atob(str.trim()))));
+  str = str.trim();
+  var tag = str.slice(0,2);
+  var body = str.slice(2);
+  if(tag==='r:'){
+    return Promise.resolve(JSON.parse(decodeURIComponent(escape(atob(body)))));
+  }
+  if(tag==='z:'){
+    if(typeof DecompressionStream==='undefined') return Promise.reject(new Error('compression unsupported'));
+    var bytes = b64ToBuf(body);
+    var ds = new DecompressionStream('gzip');
+    var writer = ds.writable.getWriter();
+    writer.write(bytes);
+    writer.close();
+    return new Response(ds.readable).arrayBuffer().then(function(buf){
+      return JSON.parse(new TextDecoder().decode(buf));
+    });
+  }
+  // no recognized tag - try legacy untagged format from older versions of this app
+  return Promise.resolve(JSON.parse(decodeURIComponent(escape(atob(str)))));
 }
 function waitForIceGatheringComplete(pc){
   return new Promise(function(resolve){
     if(pc.iceGatheringState==='complete'){ resolve(); return; }
     var done = false;
-    var timeout = setTimeout(function(){ if(!done){ done=true; resolve(); } }, 5000);
+    var timeout = setTimeout(function(){ if(!done){ done=true; resolve(); } }, 6000);
     pc.addEventListener('icegatheringstatechange', function check(){
       if(pc.iceGatheringState==='complete' && !done){
         done = true;
@@ -1563,6 +1598,27 @@ function waitForIceGatheringComplete(pc){
         resolve();
       }
     });
+  });
+}
+var liveConnectTimeoutId = null;
+function startLiveConnectTimeout(){
+  clearLiveConnectTimeout();
+  liveConnectTimeoutId = setTimeout(function(){
+    if(livePc && livePc.connectionState!=='connected') showLiveConnectError();
+  }, 20000);
+}
+function clearLiveConnectTimeout(){
+  if(liveConnectTimeoutId){ clearTimeout(liveConnectTimeoutId); liveConnectTimeoutId=null; }
+}
+function showLiveConnectError(){
+  var stageCode = document.getElementById('liveStageCode');
+  if(!stageCode) return;
+  stageCode.innerHTML =
+    '<h2>Couldn’t connect</h2>' +
+    '<p class="ob-sub">This usually means you weren’t both online at the same time, or your networks won’t allow a direct connection — try again on the same wifi if you can.</p>' +
+    '<button type="button" class="primary-btn" id="liveRetryBtn" style="width:100%;">Try Again</button>';
+  document.getElementById('liveRetryBtn').addEventListener('click', function(){
+    openLiveConnect(liveDraft && liveDraft.reconnectFriendId);
   });
 }
 function createLivePeerConnection(){
@@ -1589,6 +1645,7 @@ function setupLiveChannel(channel){
   channel.onmessage = function(e){ handleLiveChannelMessage(e.data); };
 }
 function teardownLiveConnection(){
+  clearLiveConnectTimeout();
   if(callState && callState.live){ try{ liveCallEnd(null, true); }catch(e){} }
   stopLocalMediaTracks();
   if(liveChannel){ try{ liveChannel.close(); }catch(e){} liveChannel=null; }
@@ -1639,8 +1696,8 @@ function openLiveConnect(reconnectFriendId){
         '<p class="ob-sub" id="liveCodeHint"></p>' +
         '<textarea id="liveMyCode" rows="3" readonly></textarea>' +
         '<div style="display:flex;gap:8px;margin-top:8px;">' +
-          '<button type="button" class="secondary-btn" id="liveCopyBtn" style="flex:1;">Copy Code</button>' +
-          '<button type="button" class="secondary-btn" id="liveShareBtn" style="flex:1;">Share Code</button>' +
+          '<button type="button" class="primary-btn" id="liveShareBtn" style="flex:1;">Share Code</button>' +
+          '<button type="button" class="secondary-btn" id="liveCopyBtn" style="flex:1;">Copy</button>' +
         '</div>' +
         '<div id="liveAnswerWrap" class="hidden">' +
           '<label class="field-label" style="margin-top:18px;">Paste their reply code</label>' +
@@ -1703,7 +1760,6 @@ function startLiveOffer(){
   var pc = createLivePeerConnection();
   livePc = pc;
   pc.addTransceiver('audio', {direction:'sendrecv'});
-  pc.addTransceiver('video', {direction:'sendrecv'});
   liveChannel = pc.createDataChannel('pulse');
   setupLiveChannel(liveChannel);
   pc.createOffer().then(function(offer){
@@ -1711,38 +1767,42 @@ function startLiveOffer(){
   }).then(function(){
     return waitForIceGatheringComplete(pc);
   }).then(function(){
-    var code = encodeSignal({v:1, type:'offer', sdp:pc.localDescription.sdp, name:state.user.name, avatar:state.user.avatar});
-    showLiveCode(code, 'Send this code to '+liveDraft.name+', then paste the reply code they send back below.', true);
+    return encodeSignal({v:1, type:'offer', sdp:pc.localDescription.sdp, name:state.user.name, avatar:state.user.avatar});
+  }).then(function(code){
+    showLiveCode(code, 'Tap Share and send this to '+liveDraft.name+' — then paste the reply code they send back below.', true);
+    startLiveConnectTimeout();
   }).catch(function(){
     showToast('Could not start a live connection on this device');
   });
 }
 function joinLiveWithCode(raw){
-  var offer;
-  try{ offer = decodeSignal(raw); }catch(e){ offer = null; }
-  if(!offer || offer.type!=='offer' || !offer.sdp){
-    showToast('That code looks invalid');
-    var btn = document.getElementById('liveGenerateBtn');
-    btn.disabled=false; btn.textContent='Generate My Reply Code';
-    return;
-  }
-  if(offer.name) liveDraft.remoteName = offer.name;
-  if(offer.avatar) liveDraft.remoteAvatar = offer.avatar;
-  var pc = createLivePeerConnection();
-  livePc = pc;
-  pc.ondatachannel = function(e){ liveChannel = e.channel; setupLiveChannel(liveChannel); };
-  pc.setRemoteDescription({type:'offer', sdp:offer.sdp}).then(function(){
-    pc.getTransceivers().forEach(function(t){ t.direction = 'sendrecv'; });
-    return pc.createAnswer();
-  }).then(function(answer){
-    return pc.setLocalDescription(answer);
-  }).then(function(){
-    return waitForIceGatheringComplete(pc);
-  }).then(function(){
-    var code = encodeSignal({v:1, type:'answer', sdp:pc.localDescription.sdp, name:state.user.name, avatar:state.user.avatar});
-    showLiveCode(code, 'Send this reply code back to '+liveDraft.name+'. You’ll connect the moment they paste it in.', false);
-  }).catch(function(){
-    showToast('Could not join that connection');
+  decodeSignal(raw).catch(function(){ return null; }).then(function(offer){
+    if(!offer || offer.type!=='offer' || !offer.sdp){
+      showToast('That code looks invalid');
+      var btn = document.getElementById('liveGenerateBtn');
+      btn.disabled=false; btn.textContent='Generate My Reply Code';
+      return;
+    }
+    if(offer.name) liveDraft.remoteName = offer.name;
+    if(offer.avatar) liveDraft.remoteAvatar = offer.avatar;
+    var pc = createLivePeerConnection();
+    livePc = pc;
+    pc.ondatachannel = function(e){ liveChannel = e.channel; setupLiveChannel(liveChannel); };
+    pc.setRemoteDescription({type:'offer', sdp:offer.sdp}).then(function(){
+      pc.getTransceivers().forEach(function(t){ t.direction = 'sendrecv'; });
+      return pc.createAnswer();
+    }).then(function(answer){
+      return pc.setLocalDescription(answer);
+    }).then(function(){
+      return waitForIceGatheringComplete(pc);
+    }).then(function(){
+      return encodeSignal({v:1, type:'answer', sdp:pc.localDescription.sdp, name:state.user.name, avatar:state.user.avatar});
+    }).then(function(code){
+      showLiveCode(code, 'Tap Share and send this reply back to '+liveDraft.name+' — you’ll connect the moment they paste it in.', false);
+      startLiveConnectTimeout();
+    }).catch(function(){
+      showToast('Could not join that connection');
+    });
   });
 }
 function showLiveCode(code, hint, needsAnswer){
@@ -1756,19 +1816,25 @@ function showLiveCode(code, hint, needsAnswer){
 function onLiveFinishClick(){
   var raw = document.getElementById('liveAnswerCode').value.trim();
   if(!raw){ showToast('Paste their reply code first'); return; }
-  var answer;
-  try{ answer = decodeSignal(raw); }catch(e){ answer = null; }
-  if(!answer || answer.type!=='answer' || !answer.sdp){ showToast('That code looks invalid'); return; }
-  if(answer.name) liveDraft.remoteName = answer.name;
-  if(answer.avatar) liveDraft.remoteAvatar = answer.avatar;
   var btn = document.getElementById('liveFinishBtn');
   btn.disabled = true;
   btn.textContent = 'Connecting…';
-  livePc.setRemoteDescription({type:'answer', sdp:answer.sdp}).catch(function(){
-    showToast('Could not finish connecting');
+  decodeSignal(raw).catch(function(){ return null; }).then(function(answer){
+    if(!answer || answer.type!=='answer' || !answer.sdp){
+      showToast('That code looks invalid');
+      btn.disabled = false; btn.textContent = 'Connect';
+      return;
+    }
+    if(answer.name) liveDraft.remoteName = answer.name;
+    if(answer.avatar) liveDraft.remoteAvatar = answer.avatar;
+    startLiveConnectTimeout();
+    livePc.setRemoteDescription({type:'answer', sdp:answer.sdp}).catch(function(){
+      showToast('Could not finish connecting');
+    });
   });
 }
 function finalizeLiveConnection(){
+  clearLiveConnectTimeout();
   var friend = null;
   if(liveFriendId) friend = findFriend(liveFriendId);
   else if(liveDraft && liveDraft.reconnectFriendId) friend = findFriend(liveDraft.reconnectFriendId);
