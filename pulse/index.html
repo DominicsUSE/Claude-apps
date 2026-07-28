@@ -1502,11 +1502,11 @@ function waitForIceGatheringComplete(pc){
   });
 }
 var liveConnectTimeoutId = null;
-function startLiveConnectTimeout(){
+function startLiveConnectTimeout(ms){
   clearLiveConnectTimeout();
   liveConnectTimeoutId = setTimeout(function(){
     if(livePc && livePc.connectionState!=='connected') showLiveConnectError();
-  }, 20000);
+  }, ms);
 }
 function clearLiveConnectTimeout(){
   if(liveConnectTimeoutId){ clearTimeout(liveConnectTimeoutId); liveConnectTimeoutId=null; }
@@ -1677,7 +1677,7 @@ function startLiveOffer(){
     return encodeSignal({v:1, type:'offer', sdp:pc.localDescription.sdp, name:state.user.name, avatar:state.user.avatar});
   }).then(function(code){
     showLiveCode(code, 'Tap Share and send this to '+liveDraft.name+' — then paste the reply code they send back below.', true);
-    startLiveConnectTimeout();
+    startLiveConnectTimeout(180000);
   }).catch(function(){
     showToast('Could not start a live connection on this device');
   });
@@ -1706,7 +1706,7 @@ function joinLiveWithCode(raw){
       return encodeSignal({v:1, type:'answer', sdp:pc.localDescription.sdp, name:state.user.name, avatar:state.user.avatar});
     }).then(function(code){
       showLiveCode(code, 'Tap Share and send this reply back to '+liveDraft.name+' — you’ll connect the moment they paste it in.', false);
-      startLiveConnectTimeout();
+      startLiveConnectTimeout(180000);
     }).catch(function(){
       showToast('Could not join that connection');
     });
@@ -1735,7 +1735,7 @@ function onLiveFinishClick(){
     }
     if(answer.name) liveDraft.remoteName = answer.name;
     if(answer.avatar) liveDraft.remoteAvatar = answer.avatar;
-    startLiveConnectTimeout();
+    startLiveConnectTimeout(25000);
     livePc.setRemoteDescription({type:'answer', sdp:answer.sdp}).catch(function(){
       showToast('Could not finish connecting');
     });
