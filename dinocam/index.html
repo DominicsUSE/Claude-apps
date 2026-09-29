@@ -344,7 +344,7 @@ function aiModeLabel(){
   $('#aiModeText').textContent=
     mode==='local'?'Local only: plate images never leave this device. Used by "Scan an image file" only — the live camera and "Re-scan unread plates" stay local-only regardless of this setting.':
     mode==='ask'?'Ask before sending: "Scan an image file" will ask permission each time before sending that one image to your online backend.':
-    'Online AI: "Scan an image file" sends the scanned image to your own backend (below), which forwards it to Plate Recognizer. Still local-only for the live camera and "Re-scan unread plates".';
+    'Online AI: "Scan an image file" sends the scanned image to your own backend (below) for a second read — see dinocam/server/ (Claude vision or Plate Recognizer), or dinocam/plate-svm-server/ (local, Chinese plates). Still local-only for the live camera and "Re-scan unread plates".';
 }
 function faceIdLabel(){
   let on=$('#faceId').checked;

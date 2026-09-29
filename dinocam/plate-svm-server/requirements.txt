@@ -1,0 +1,10 @@
+# DinoCamSecurity vision backend — optional classic-CV Chinese plate reader.
+# Tested with Python 3.11. Install: pip install -r requirements.txt
+#
+# opencv-python's ml module (cv2.ml, used for the SVM classifier) was missing from the
+# newest opencv-python wheels tested here (5.0.0) - pinned to 4.10.0.84, which has it.
+opencv-python-headless==4.10.0.84
+numpy==2.4.6
+fastapi==0.142.0
+uvicorn==0.54.0
+python-multipart==0.0.32
