@@ -1,0 +1,8 @@
+# DinoCamSecurity vision backend — face detection + named recognition (uniface).
+# Tested with Python 3.11. Install: pip install -r requirements.txt
+uniface[cpu]==4.0.0
+fastapi==0.142.0
+uvicorn==0.54.0
+python-multipart==0.0.32
+opencv-python-headless==5.0.0.93
+numpy==2.4.6

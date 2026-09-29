@@ -1051,22 +1051,29 @@ async function scanImageFile(file){
     canvas.getContext('2d').drawImage(bitmap,0,0);
     scanStatus('Loading OCR engine…');
     if(!A.ocr)await loadOCR();
-    if(!A.ocr){scanStatus('Plate OCR unavailable — check internet access and try again.');return}
-    let vehicleBoxes=[];
-    if(!A.model){scanStatus('Loading vehicle detector…');try{await models()}catch(e){/* fall back to whole-image scan below */}}
-    if(A.model){
-      try{
-        scanStatus('Looking for vehicles in the image…');
-        let found=await A.model.detect(canvas,10,Number($('#sensitivity').value)||.55);
-        vehicleBoxes=found.filter(o=>vehicle(o.class)).map(o=>clampBox(o.bbox[0],o.bbox[1],o.bbox[2],o.bbox[3],canvas.width,canvas.height));
-      }catch(e){console.warn('Vehicle detector failed on uploaded image',e)}
-    }
-    scanStatus('Reading plate text ('+(vehicleBoxes.length?vehicleBoxes.length+' vehicle region(s) + ':'')+'whole image)…');
-    let attempts=[];
-    for(let b of vehicleBoxes.slice(0,3))attempts.push(await scanPlateImage(canvas,b));
-    attempts.push(await scanPlateImage(canvas)); // whole-image fallback — handles photos already cropped to just the plate
     let rank={confirmed:2,candidate:1,unreadable:0};
-    let best=attempts.sort((a,b)=>(rank[b.status]-rank[a.status])||((b.confidence||0)-(a.confidence||0)))[0];
+    let best={status:'unreadable',value:null,confidence:0};
+    let vehicleBoxes=[];
+    if(!A.ocr){
+      // Local OCR failing to load must NOT block the online-AI path below — that path is
+      // exactly what a person configures for when local recognition isn't working, so this
+      // used to return here and make "Scan an image file" completely unusable for them.
+      scanStatus('Local plate OCR unavailable — will try online AI if configured.');
+    }else{
+      if(!A.model){scanStatus('Loading vehicle detector…');try{await models()}catch(e){/* fall back to whole-image scan below */}}
+      if(A.model){
+        try{
+          scanStatus('Looking for vehicles in the image…');
+          let found=await A.model.detect(canvas,10,Number($('#sensitivity').value)||.55);
+          vehicleBoxes=found.filter(o=>vehicle(o.class)).map(o=>clampBox(o.bbox[0],o.bbox[1],o.bbox[2],o.bbox[3],canvas.width,canvas.height));
+        }catch(e){console.warn('Vehicle detector failed on uploaded image',e)}
+      }
+      scanStatus('Reading plate text ('+(vehicleBoxes.length?vehicleBoxes.length+' vehicle region(s) + ':'')+'whole image)…');
+      let attempts=[];
+      for(let b of vehicleBoxes.slice(0,3))attempts.push(await scanPlateImage(canvas,b));
+      attempts.push(await scanPlateImage(canvas)); // whole-image fallback — handles photos already cropped to just the plate
+      best=attempts.sort((a,b)=>(rank[b.status]-rank[a.status])||((b.confidence||0)-(a.confidence||0)))[0];
+    }
 
     let aiMode=$('#aiMode').value,backendUrl=$('#backendUrl').value.trim();
     if(aiMode!=='local'&&backendUrl){
