@@ -597,7 +597,7 @@ function isPlausibleKey(key,minLen){return !!key&&key.length>=(minLen||3)&&key.l
 // be recovered and combined later.
 function plateCandidates(data){
   let out=[],full=fullCropReading(data);
-  if(isPlausibleKey(plateKey(full.text)))out.push({value:full.text,key:plateKey(full.text),conf:full.conf,kind:'full',x:0,y:0,parts:(full.text.match(/ /g)||[]).length+1});
+  if(isPlausibleKey(plateKey(full.text),2))out.push({value:full.text,key:plateKey(full.text),conf:full.conf,kind:'full',x:0,y:0,parts:(full.text.match(/ /g)||[]).length+1});
   for(let line of data?.lines||[]){
     let r=lineReading(line.words||[]),key=plateKey(r.text);
     if(r.text&&r.text!==full.text&&isPlausibleKey(key,2))
