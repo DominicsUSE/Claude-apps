@@ -1,0 +1,14 @@
+{
+  "name": "dinocam-accuracy-benchmark",
+  "private": true,
+  "scripts": {
+    "generate": "node gen-plates.js",
+    "test": "node run-test.js"
+  },
+  "devDependencies": {
+    "sharp": "0.35.5",
+    "playwright": "1.63.0",
+    "tesseract.js": "5.1.1",
+    "@tesseract.js-data/eng": "1.0.0"
+  }
+}

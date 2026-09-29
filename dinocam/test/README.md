@@ -24,3 +24,7 @@ error paths (unreadable/corrupt file), settings/zone persistence, online-AI wiri
 stubbed backend, multi-camera add/capture/remove, cross-camera track-ID collision, and
 lock-region scoping (a primary-camera-only setting must never leak into an extra camera's
 scan, a rescanned extra-camera capture, or an uploaded test image).
+
+`accuracy-benchmark/` is a real (not mocked) plate-reading accuracy test against synthetic
+European plates at three distances, using a genuine local Tesseract engine fetched via npm
+instead of the blocked CDN. See `accuracy-benchmark/README.md` for setup and results.
