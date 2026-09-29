@@ -48,6 +48,8 @@ body{margin:0;background:var(--bg-0) radial-gradient(circle at 0 0,var(--bg-1),v
 main{max-width:1380px;margin:auto;padding:calc(18px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right)) calc(18px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left))}
 header,.row,.actions{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .actions{justify-content:flex-start;margin:10px 0}
+.quickadd{margin:0 0 14px}
+.quickadd button{font-size:15px;padding:12px 18px}
 .brand{display:flex;gap:12px;align-items:center}
 .icon{width:47px;height:47px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(135deg,#62e4b4,#85b9ff);color:#05271f;font-size:27px;flex:none}
 h1{margin:0;font-size:26px}
@@ -176,6 +178,11 @@ button:disabled{opacity:.5;cursor:not-allowed}
     <button id="theme" class="themebtn ghost" title="Toggle light/dark theme" aria-label="Toggle theme">◐</button>
   </div>
 </header>
+
+<div class="actions quickadd">
+  <button id="quickAddVehicle" class="primary">🚗 Add known vehicle</button>
+  <button id="quickAddPerson" class="primary">🧑 Add known person</button>
+</div>
 
 <nav class="tabs">
   <button id="localTab" aria-selected="true">My camera</button>
@@ -707,7 +714,10 @@ async function showFaceManager(){
     '<small id="enrollStatus"></small>'
   );
   $('#faceMgrClose').onclick=closeModal;
-  $('#enrollBtn').onclick=()=>enrollFace(backendUrl);
+  $('#enrollBtn').onclick=async()=>{
+    let ok=await enrollFace(backendUrl,$('#enrollName').value.trim(),$('#enrollFile').files[0],$('#enrollStatus'));
+    if(ok){$('#enrollName').value='';$('#enrollFile').value='';refreshFaceList(backendUrl)}
+  };
   refreshFaceList(backendUrl);
 }
 async function refreshFaceList(backendUrl){
@@ -731,20 +741,78 @@ async function refreshFaceList(backendUrl){
     }
   }catch(e){root.innerHTML='<p class="error">Could not reach the face backend at '+backendUrl.replace(/</g,'&lt;')+' — is dinocam/vision-server/ running?</p>'}
 }
-async function enrollFace(backendUrl){
-  let name=$('#enrollName').value.trim(),file=$('#enrollFile').files[0],status=$('#enrollStatus');
-  if(!name){status.textContent='Enter a name first.';return}
-  if(!file){status.textContent='Choose a photo first.';return}
+// Shared by the full "Manage known faces" modal and the one-click "Add known person"
+// quick-add button below - takes its inputs as arguments (rather than fixed element ids)
+// so both callers can use it without id collisions. Returns true on success.
+async function enrollFace(backendUrl,name,file,status){
+  if(!name){status.textContent='Enter a name first.';return false}
+  if(!file){status.textContent='Choose a photo first.';return false}
   status.textContent='Enrolling…';
   try{
-    let form=new FormData();form.append('image',file);form.append('name',name);
+    let form=new FormData();form.append('image',file,file.name||'face.jpg');form.append('name',name);
     let res=await fetch(backendUrl.replace(/\/$/,'')+'/api/faces/enroll',{method:'POST',body:form});
     let data=await res.json().catch(()=>null);
     if(!res.ok)throw Error((data&&data.detail)||('HTTP '+res.status));
     status.textContent='Enrolled '+name+'.';
-    $('#enrollName').value='';$('#enrollFile').value='';
-    refreshFaceList(backendUrl);
-  }catch(e){status.textContent='Could not enroll: '+e.message}
+    return true;
+  }catch(e){status.textContent='Could not enroll: '+e.message;return false}
+}
+
+/* ---------- quick-add: one button, minimal fields, reuses the existing watchlist /
+   face-enrollment logic above - for when someone just wants to add a known vehicle or
+   person without digging through Settings first. ---------- */
+function showQuickAddVehicle(){
+  modal(
+    '<h1>🚗 Add known vehicle</h1>'+
+    '<p>Adds this plate to your watchlist — stored only in this browser, never shared. A confirmed match triggers an alert.</p>'+
+    '<div class="actions">'+
+      '<input id="qvColor" type="text" placeholder="Color (optional)" style="flex:1;min-width:100px">'+
+      '<input id="qvPlate" type="text" placeholder="Plate (e.g. ABC 123)" style="text-transform:uppercase;flex:1;min-width:120px">'+
+    '</div>'+
+    '<div class="actions"><button id="qvSave" class="primary">Save</button><button id="qvClose">Cancel</button></div>'+
+    '<small id="qvStatus"></small>'
+  );
+  $('#qvClose').onclick=closeModal;
+  $('#qvPlate').addEventListener('keydown',e=>{if(e.key==='Enter')$('#qvSave').click()});
+  $('#qvSave').onclick=()=>{
+    let key=plateKey($('#qvPlate').value);
+    if(key.length<2){$('#qvStatus').textContent='Enter at least 2 letters/numbers for the plate.';return}
+    if(A.watchlist.some(w=>w.key===key)){$('#qvStatus').textContent='Already on the watchlist.';return}
+    A.watchlist.push({key,label:$('#qvColor').value.trim()});
+    saveSettings();renderWatchlist();
+    toast('Added '+key+' to watchlist.');
+    closeModal();
+  };
+}
+function showQuickAddPerson(){
+  let backendUrl=$('#faceBackendUrl').value.trim();
+  modal(
+    '<h1>🧑 Add known person</h1>'+
+    (backendUrl
+      ?'<p>Enrolled with your local face-recognition server. Use one clear, front-facing photo of just this person, or a live camera frame.</p>'
+      :'<p class="error">Set the face backend URL first (Recognition controls → Named face recognition → run dinocam/vision-server/ or dinocam/all-in-one-server/), then try again.</p>')+
+    '<div class="actions">'+
+      '<input id="qpName" type="text" placeholder="Name" style="flex:1;min-width:120px"'+(backendUrl?'':' disabled')+'>'+
+      '<input id="qpFile" type="file" accept="image/jpeg,image/png,image/webp"'+(backendUrl?'':' disabled')+'>'+
+    '</div>'+
+    (backendUrl&&A.on?'<div class="actions"><button id="qpUseCamera">Use current camera frame instead</button></div>':'')+
+    '<div class="actions"><button id="qpSave" class="primary"'+(backendUrl?'':' disabled')+'>Save</button><button id="qpClose">Cancel</button></div>'+
+    '<small id="qpStatus"></small>'
+  );
+  $('#qpClose').onclick=closeModal;
+  if(!backendUrl)return;
+  let cameraBlob=null;
+  if($('#qpUseCamera'))$('#qpUseCamera').onclick=async()=>{
+    let c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;
+    c.getContext('2d').drawImage(v,0,0);
+    cameraBlob=await jpeg(c,.9);
+    $('#qpStatus').textContent=cameraBlob?'Using current camera frame — click Save.':'Could not capture the camera frame.';
+  };
+  $('#qpSave').onclick=async()=>{
+    let name=$('#qpName').value.trim(),file=$('#qpFile').files[0]||cameraBlob;
+    let ok=await enrollFace(backendUrl,name,file,$('#qpStatus'));
+    if(ok){toast('Enrolled '+name+'.');closeModal()}
+  };
 }
 
 /* ---------- main detection loop ---------- */
@@ -1631,6 +1699,8 @@ $('#faces').onchange=()=>{if(!$('#faces').checked)update('face',[]);else if(A.on
 $('#faceId').onchange=()=>{faceIdLabel();saveSettings()};
 $('#faceBackendUrl').onchange=saveSettings;
 $('#manageFaces').onclick=showFaceManager;
+$('#quickAddVehicle').onclick=showQuickAddVehicle;
+$('#quickAddPerson').onclick=showQuickAddPerson;
 $('#yoloOn').onchange=()=>{yoloLabel();saveSettings()};
 $('#yoloBackendUrl').onchange=saveSettings;
 $('#plates').onchange=()=>{if($('#plates').checked&&A.on)loadOCR();saveSettings()};
