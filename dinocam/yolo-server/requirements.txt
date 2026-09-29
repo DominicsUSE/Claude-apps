@@ -1,0 +1,16 @@
+# DinoCamSecurity vision backend — optional enhanced object detection (YOLO).
+# Tested with Python 3.11. Install: pip install -r requirements.txt
+#
+# torch/torchvision are large (CPU inference works fine, no GPU required). If you have an
+# NVIDIA GPU and want CUDA acceleration, install torch yourself first following
+# https://pytorch.org/get-started/locally/ for your CUDA version, then run this file with
+# torch/torchvision commented out below so pip doesn't overwrite your GPU build.
+torch==2.14.0
+torchvision==0.29.0
+ultralytics==8.4.165
+fastapi==0.142.0
+uvicorn==0.54.0
+python-multipart==0.0.32
+opencv-python-headless==5.0.0.93
+pillow==12.3.0
+numpy==2.4.6

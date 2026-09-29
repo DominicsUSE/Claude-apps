@@ -215,6 +215,9 @@ button:disabled{opacity:.5;cursor:not-allowed}
     <h2>Recognition controls</h2>
     <label>Automatic screenshots <input id="auto" type="checkbox" checked></label>
     <label>Vehicles and objects <input id="objects" type="checkbox" checked></label>
+    <label>Enhanced object detection <input id="yoloOn" type="checkbox"></label>
+    <label id="yoloBackendUrlRow" hidden>YOLO backend URL <input id="yoloBackendUrl" type="url" placeholder="http://localhost:8789"></label>
+    <small id="yoloText">Off: vehicle detection for "Scan an image file" uses only the built-in local detector.</small>
     <label>Faces as Unknown person <input id="faces" type="checkbox" checked></label>
     <label>Named face recognition <input id="faceId" type="checkbox"></label>
     <label id="faceBackendUrlRow" hidden>Face backend URL <input id="faceBackendUrl" type="url" placeholder="http://localhost:8788"></label>
@@ -312,7 +315,7 @@ const A={
 
 /* ---------- settings persistence ---------- */
 const SETTINGS_KEY='dinocam.settings.v1';
-const settingIds=['auto','objects','faces','plates','zoomOn','location','zoom','sensitivity','ocrQuality','quality','retention','sound','notify','aiMode','backendUrl','faceId','faceBackendUrl'];
+const settingIds=['auto','objects','faces','plates','zoomOn','location','zoom','sensitivity','ocrQuality','quality','retention','sound','notify','aiMode','backendUrl','faceId','faceBackendUrl','yoloOn','yoloBackendUrl'];
 function loadSettings(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY))||{}}catch(e){return{}}}
 function saveSettings(){
   let s={theme:document.documentElement.dataset.theme==='light'?'light':'dark',zones:A.zones,lockRegion:A.lockRegion,cameraLabels:A.cameraLabels,watchlist:A.watchlist};
@@ -332,6 +335,7 @@ function applySettings(s){
   $('#locationText').textContent=($('#location').checked?'On':'Off')+'; this is the camera device\'s location, stored only in this browser.';
   aiModeLabel();
   faceIdLabel();
+  yoloLabel();
 }
 function sensitivityLabel(){let n=Number($('#sensitivity').value),t=n<=.4?'Loose (more, noisier)':n>=.7?'Strict (fewer, cleaner)':'Balanced';$('#sensitivityText').textContent=t}
 function aiModeLabel(){
@@ -348,6 +352,13 @@ function faceIdLabel(){
   $('#faceIdText').textContent=on
     ?'On: each detected face is checked against people you\'ve enrolled with your own local face-recognition server (below). Nothing goes further than that server — see dinocam/vision-server/.'
     :'Off: faces stay labeled "Unknown person" — no identity matching at all.';
+}
+function yoloLabel(){
+  let on=$('#yoloOn').checked;
+  $('#yoloBackendUrlRow').hidden=!on;
+  $('#yoloText').textContent=on
+    ?'On: "Scan an image file" also checks vehicle boxes against your local YOLO server (below) and adds any it finds that the built-in detector missed. Nothing leaves your network beyond that server — see dinocam/yolo-server/.'
+    :'Off: vehicle detection for "Scan an image file" uses only the built-in local detector.';
 }
 
 /* ---------- small helpers ---------- */
@@ -1148,6 +1159,24 @@ async function onlineRecognizePlate(blob,backendUrl){
   }finally{clearTimeout(timeout)}
 }
 
+/* ---------- optional enhanced object detection (off by default; see dinocam/yolo-server/)
+   Only ever called from "Scan an image file" below, the same one-shot deliberate-action
+   pattern as onlineRecognizePlate — never the continuous live-camera loop, so this never
+   adds a per-frame network dependency to live monitoring. Entirely local (the backend runs
+   on the user's own machine/network), unlike the plate OCR "Online AI" path. ---------- */
+async function yoloDetect(blob,backendUrl,minConfidence){
+  let ctrl=new AbortController(),timeout=setTimeout(()=>ctrl.abort(),20000);
+  try{
+    let form=new FormData();form.append('image',blob,'frame.jpg');
+    if(minConfidence!=null)form.append('min_confidence',String(minConfidence));
+    let res=await fetch(backendUrl.replace(/\/$/,'')+'/api/detect',{method:'POST',body:form,signal:ctrl.signal});
+    let data=await res.json().catch(()=>null);
+    if(!res.ok)return{error:(data&&data.detail)||('HTTP '+res.status)};
+    return data;
+  }catch(e){return{error:e.name==='AbortError'?'timed out':e.message}}
+  finally{clearTimeout(timeout)}
+}
+
 /* ---------- scan an image file (testing / hard cases: screenshots displayed on a monitor,
    photos taken separately, etc.) — analyzes the ORIGINAL file at full resolution, never a
    thumbnail or a screenshot of the app itself. ---------- */
@@ -1178,6 +1207,21 @@ async function scanImageFile(file){
           let found=await A.model.detect(canvas,10,Number($('#sensitivity').value)||.55);
           vehicleBoxes=found.filter(o=>vehicle(o.class)).map(o=>clampBox(o.bbox[0],o.bbox[1],o.bbox[2],o.bbox[3],canvas.width,canvas.height));
         }catch(e){console.warn('Vehicle detector failed on uploaded image',e)}
+      }
+      if($('#yoloOn').checked){
+        let yoloUrl=$('#yoloBackendUrl').value.trim();
+        if(yoloUrl){
+          scanStatus('Checking with enhanced object detector…');
+          let frame=await jpeg(canvas,.9);
+          let yolo=await yoloDetect(frame,yoloUrl,.35);
+          if(yolo.error)toast('Enhanced detector unavailable: '+yolo.error+' — using local detection only.');
+          else if(Array.isArray(yolo.detections)){
+            // Add boxes the local detector missed rather than replacing its results outright —
+            // IoU-dedup against what coco-ssd already found so the same vehicle isn't OCR'd twice.
+            let added=yolo.detections.filter(d=>vehicle(d.class_name)).map(d=>clampBox(d.bbox[0],d.bbox[1],d.bbox[2]-d.bbox[0],d.bbox[3]-d.bbox[1],canvas.width,canvas.height));
+            for(let yb of added)if(!vehicleBoxes.some(vb=>iou(vb,yb)>.4))vehicleBoxes.push(yb);
+          }
+        }
       }
       scanStatus('Reading plate text ('+(vehicleBoxes.length?vehicleBoxes.length+' vehicle region(s) + ':'')+'whole image)…');
       let attempts=[];
@@ -1586,6 +1630,8 @@ $('#faces').onchange=()=>{if(!$('#faces').checked)update('face',[]);else if(A.on
 $('#faceId').onchange=()=>{faceIdLabel();saveSettings()};
 $('#faceBackendUrl').onchange=saveSettings;
 $('#manageFaces').onclick=showFaceManager;
+$('#yoloOn').onchange=()=>{yoloLabel();saveSettings()};
+$('#yoloBackendUrl').onchange=saveSettings;
 $('#plates').onchange=()=>{if($('#plates').checked&&A.on)loadOCR();saveSettings()};
 $('#location').onchange=toggleLocation;
 $('#zoom').oninput=e=>{$('#zoomText').textContent=Number(e.target.value).toFixed(1)+'×';saveSettings()};
