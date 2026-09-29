@@ -1,0 +1,23 @@
+# DinoCamSecurity vision backend — all-in-one (plates + faces + objects).
+# Tested with Python 3.11. Install: pip install -r requirements.txt
+#
+# opencv-python and opencv-python-headless are BOTH installed here, pinned to the exact
+# same version. This is deliberate, not an oversight: the plate SVM engine needs cv2.ml
+# (present in 4.10.0.84, missing from newer opencv-python-headless releases tested), while
+# uniface pulls in plain opencv-python unpinned. Installing both at a mismatched version is
+# a known-bad combination (both packages ship a native cv2 extension) - pinning both to the
+# identical version avoids that, verified by importing cv2.ml after a clean install of
+# everything in this file together.
+opencv-python==4.10.0.84
+opencv-python-headless==4.10.0.84
+numpy==2.4.6
+torch==2.14.0
+torchvision==0.29.0
+ultralytics==8.4.165
+uniface[cpu]==4.0.0
+pillow==12.3.0
+anthropic==1.9.0
+requests==2.34.2
+fastapi==0.142.0
+uvicorn==0.54.0
+python-multipart==0.0.32

@@ -234,6 +234,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
     <label>Retention <select id="retention"><option value="7">7 days</option><option value="1">1 day</option><option value="30">30 days</option><option value="0">Manual</option></select></label>
     <label>AI recognition <select id="aiMode"><option value="local" selected>Local only</option><option value="ask">Ask before sending</option><option value="online">Online AI</option></select></label>
     <label id="backendUrlRow" hidden>Online backend URL <input id="backendUrl" type="url" placeholder="https://your-app.onrender.com"></label>
+    <button id="applyBackendAll" type="button" hidden style="margin:-4px 0 6px;font-size:12px">Use this URL for Face + YOLO backends too</button>
     <small id="aiModeText">Local only: plate images never leave this device. Used by "Scan an image file" only — the live camera and "Re-scan unread plates" stay local-only regardless of this setting.</small>
     <label>Alert sound on new capture <input id="sound" type="checkbox"></label>
     <label>Desktop notifications <input id="notify" type="checkbox"></label>
@@ -340,7 +341,7 @@ function applySettings(s){
 function sensitivityLabel(){let n=Number($('#sensitivity').value),t=n<=.4?'Loose (more, noisier)':n>=.7?'Strict (fewer, cleaner)':'Balanced';$('#sensitivityText').textContent=t}
 function aiModeLabel(){
   let mode=$('#aiMode').value;
-  $('#backendUrlRow').hidden=(mode==='local');
+  $('#backendUrlRow').hidden=$('#applyBackendAll').hidden=(mode==='local');
   $('#aiModeText').textContent=
     mode==='local'?'Local only: plate images never leave this device. Used by "Scan an image file" only — the live camera and "Re-scan unread plates" stay local-only regardless of this setting.':
     mode==='ask'?'Ask before sending: "Scan an image file" will ask permission each time before sending that one image to your online backend.':
@@ -1639,6 +1640,13 @@ $('#sensitivity').oninput=()=>{sensitivityLabel();saveSettings()};
 $('#ocrQuality').onchange=saveSettings;
 $('#aiMode').onchange=()=>{aiModeLabel();saveSettings()};
 $('#backendUrl').onchange=saveSettings;
+$('#applyBackendAll').onclick=()=>{
+  let url=$('#backendUrl').value.trim();
+  if(!url){toast('Enter a backend URL first.');return}
+  $('#faceBackendUrl').value=url;$('#yoloBackendUrl').value=url;
+  saveSettings();
+  toast('Applied to Face + YOLO backend URL fields (e.g. dinocam/all-in-one-server/ running one server for all three).');
+};
 $('#quality').onchange=saveSettings;
 $('#retention').onchange=async()=>{await cleanup();render();saveSettings()};
 $('#sound').onchange=saveSettings;
