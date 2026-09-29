@@ -1,0 +1,43 @@
+{
+  "name": "dinocam-security",
+  "version": "2.0.0",
+  "description": "DinoCamSecurity v2.0 - private local camera monitoring with automatic plate recognition, packaged as a native Windows desktop app",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "prebuild": "node copy-assets.js",
+    "start": "npm run prebuild && electron .",
+    "dist:win": "npm run prebuild && electron-builder --win --x64"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.dinocamsecurity.app",
+    "productName": "DinoCamSecurity",
+    "asar": true,
+    "publish": null,
+    "files": [
+      "main.js",
+      "app/**/*"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        { "target": "portable", "arch": ["x64"] },
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "DinoCamSecurity"
+    }
+  }
+}
