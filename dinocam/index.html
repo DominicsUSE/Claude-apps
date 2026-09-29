@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="DinoCam">
-<title>DinoCamSecurity — Private Camera Monitoring</title>
+<title>DinoCamSecurity v2.0 — Local ANPR Engine</title>
 <style>
 :root{
   color-scheme:dark;
@@ -98,6 +98,12 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .event button{padding:5px 8px;font-size:12px}
 .plate{display:block;color:var(--plate-ink);background:var(--plate-bg);border:1px solid var(--plate-border);border-radius:7px;padding:5px 8px;margin:7px 0;font:700 15px Consolas,monospace}
 .plate.pending{background:var(--plate-pend-bg);border-color:var(--plate-pend-border);color:var(--plate-pend-ink)}
+.plate.unreadable{background:var(--chip);border-color:var(--chip-border);color:var(--muted);font-weight:700}
+.statusrow{display:flex;gap:8px;align-items:center;margin:2px 0 7px;flex-wrap:wrap}
+.statuschip{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;border-radius:99px;padding:3px 9px}
+.statuschip.confirmed{background:var(--plate-bg);color:var(--plate-ink);border:1px solid var(--plate-border)}
+.statuschip.candidate{background:var(--plate-pend-bg);color:var(--plate-pend-ink);border:1px solid var(--plate-pend-border)}
+.statuschip.unreadable{background:var(--chip);color:var(--muted);border:1px solid var(--chip-border)}
 .badge{display:inline-block;font-size:10px;background:var(--chip);border:1px solid var(--chip-border);border-radius:99px;padding:2px 7px;margin-left:6px;color:var(--muted)}
 .notice{background:var(--notice-bg);border:1px solid var(--notice-border);border-radius:10px;padding:12px}
 .notice p{margin:0;color:var(--notice-ink)}
@@ -156,6 +162,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
     <div><small>PRIVATE LOCAL MONITORING</small><h1>DinoCamSecurity</h1></div>
   </div>
   <div class="row">
+    <span class="pill" id="version" title="Recognition engine">v2.0 · Local ANPR</span>
     <span class="pill" id="state">Camera off</span>
     <span class="pill" id="fps">— FPS</span>
     <button id="about" class="ghost" title="About &amp; privacy">About</button>
@@ -211,6 +218,9 @@ button:disabled{opacity:.5;cursor:not-allowed}
     <label>Plate OCR effort <select id="ocrQuality"><option value="fast">Fast</option><option value="balanced" selected>Balanced</option><option value="thorough">Thorough (slower)</option></select></label>
     <label>Photo quality <select id="quality"><option value=".95">High (larger files)</option><option value=".85" selected>Balanced</option><option value=".65">Storage saver</option></select></label>
     <label>Retention <select id="retention"><option value="7">7 days</option><option value="1">1 day</option><option value="30">30 days</option><option value="0">Manual</option></select></label>
+    <label>AI recognition <select id="aiMode"><option value="local" selected>Local only</option><option value="ask">Ask before sending</option><option value="online">Online AI</option></select></label>
+    <label id="backendUrlRow" hidden>Online backend URL <input id="backendUrl" type="url" placeholder="https://your-app.onrender.com"></label>
+    <small id="aiModeText">Local only: plate images never leave this device. Used by "Scan an image file" only — the live camera and "Re-scan unread plates" stay local-only regardless of this setting.</small>
     <label>Alert sound on new capture <input id="sound" type="checkbox"></label>
     <label>Desktop notifications <input id="notify" type="checkbox"></label>
     <button id="testAlert">Test alert</button>
@@ -222,6 +232,8 @@ button:disabled{opacity:.5;cursor:not-allowed}
       <div><h2>Capture history · MULTI-PASS OCR</h2><p>Search photos and plate candidates from this camera.</p></div>
       <div class="actions">
         <button id="rescan">Re-scan unread plates</button>
+        <button id="scanFileBtn">Scan an image file…</button>
+        <input id="scanFile" type="file" accept="image/jpeg,image/png,image/webp" class="sr">
         <span id="scanState" role="status" aria-live="polite" style="color:var(--live-ink);font-weight:700;max-width:520px">Scan idle</span>
         <button id="export" disabled>Export ZIP + CSV</button>
         <button id="clear" class="danger" disabled>Delete all</button>
@@ -269,7 +281,7 @@ const A={
 
 /* ---------- settings persistence ---------- */
 const SETTINGS_KEY='dinocam.settings.v1';
-const settingIds=['auto','objects','faces','plates','zoomOn','location','zoom','sensitivity','ocrQuality','quality','retention','sound','notify'];
+const settingIds=['auto','objects','faces','plates','zoomOn','location','zoom','sensitivity','ocrQuality','quality','retention','sound','notify','aiMode','backendUrl'];
 function loadSettings(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY))||{}}catch(e){return{}}}
 function saveSettings(){
   let s={theme:document.documentElement.dataset.theme==='light'?'light':'dark',zones:A.zones,lockRegion:A.lockRegion,cameraLabels:A.cameraLabels};
@@ -285,8 +297,17 @@ function applySettings(s){
   sensitivityLabel();
   renderZoneList();
   $('#locationText').textContent=($('#location').checked?'On':'Off')+'; this is the camera device\'s location, stored only in this browser.';
+  aiModeLabel();
 }
 function sensitivityLabel(){let n=Number($('#sensitivity').value),t=n<=.4?'Loose (more, noisier)':n>=.7?'Strict (fewer, cleaner)':'Balanced';$('#sensitivityText').textContent=t}
+function aiModeLabel(){
+  let mode=$('#aiMode').value;
+  $('#backendUrlRow').hidden=(mode==='local');
+  $('#aiModeText').textContent=
+    mode==='local'?'Local only: plate images never leave this device. Used by "Scan an image file" only — the live camera and "Re-scan unread plates" stay local-only regardless of this setting.':
+    mode==='ask'?'Ask before sending: "Scan an image file" will ask permission each time before sending that one image to your online backend.':
+    'Online AI: "Scan an image file" sends the scanned image to your own backend (below), which forwards it to Plate Recognizer. Still local-only for the live camera and "Re-scan unread plates".';
+}
 
 /* ---------- small helpers ---------- */
 const libs=new Map();
@@ -294,7 +315,8 @@ function load(src){if(libs.has(src))return libs.get(src);let p=new Promise((ok,n
 function say(t){$('#status').textContent=$('#announce').textContent=t}
 function stage(n,t){for(let i=1;i<=4;i++)$('#s'+i).className='step '+(i<n?'done':i===n?'active':'');$('#progress').style.width=n*25+'%';$('#startup').textContent=t}
 const clamp=(n,l,h)=>Math.max(l,Math.min(n,h));
-function box(x,y,w,h){let W=v.videoWidth,H=v.videoHeight;x=clamp(x,0,W);y=clamp(y,0,H);return{x,y,w:clamp(w,0,W-x),h:clamp(h,0,H-y)}}
+function clampBox(x,y,w,h,W,H){x=clamp(x,0,W);y=clamp(y,0,H);return{x,y,w:clamp(w,0,W-x),h:clamp(h,0,H-y)}}
+function box(x,y,w,h){return clampBox(x,y,w,h,v.videoWidth,v.videoHeight)}
 const jpeg=(c,q)=>new Promise(ok=>c.toBlob(ok,'image/jpeg',q||Number($('#quality').value)||.85));
 function dbCall(mode,fn){return new Promise((ok,no)=>{let q=fn(A.db.transaction('captures',mode).objectStore('captures'));q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)})}
 function toast(msg){let el=document.createElement('div');el.className='toast';el.textContent=msg;$('#toastwrap').append(el);setTimeout(()=>el.remove(),6000)}
@@ -523,27 +545,121 @@ function loop(){
   setTimeout(loop,160);
 }
 
-/* ---------- plate text helpers ---------- */
+/* ---------- plate text helpers (pure, DOM-free — see /test/plate-pipeline.test.js) ----------
+   Design note: earlier versions required every OCR fragment to contain BOTH a letter and a
+   digit before it could become a candidate. That silently deleted letter-only segments (e.g.
+   "NTC" on a plate reading "A022 NTC") before they ever reached the voting stage, and there
+   was no step anywhere that reassembled separately-read segments into one plate. Both are
+   fixed here: tidyToken/lineReading never drop a segment for its character mix, and
+   aggregateVotes has an explicit fragment-combination stage for when no single OCR pass
+   captured the whole plate together. */
 function plateKey(v){return String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'')}
-function tidyPlateText(v){let s=String(v||'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();return s.replace(/\s+/g,' ')}
+function tidyToken(v){return String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'')}
+// Joins one OCR line's words into a single string, inserting a space only where the visual
+// gap between adjacent words is wide enough to be a real plate-group boundary (not just
+// normal kerning within one group). Nothing is dropped for lacking a digit or a letter.
+function lineReading(words){
+  let text='',confs=[],prevX1=null,prevH=0,x0=null;
+  for(let w of (words||[])){
+    let t=tidyToken(w.text);
+    if(!t)continue;
+    let bx0=w.bbox?.x0??w.b?.x0,bx1=w.bbox?.x1??w.b?.x1,by0=w.bbox?.y0??w.b?.y0,by1=w.bbox?.y1??w.b?.y1;
+    if(x0==null)x0=bx0??0;
+    if(prevX1!=null&&bx0!=null&&(bx0-prevX1)>Math.max(6,prevH*.35))text+=' ';
+    text+=t;
+    confs.push(Number(w.confidence??w.c)||0);
+    if(bx1!=null)prevX1=bx1;
+    if(by0!=null&&by1!=null)prevH=by1-by0;
+  }
+  return{text,conf:confs.length?confs.reduce((a,b)=>a+b,0)/confs.length:0,x:x0||0};
+}
+function fullCropReading(data){
+  let lines=(data?.lines||[]).map(l=>{
+    let r=lineReading(l.words||[]);
+    let y0=l.bbox?.y0,y1=l.bbox?.y1;
+    return{...r,y:(y0!=null&&y1!=null)?(y0+y1)/2:0};
+  }).filter(l=>l.text);
+  lines.sort((a,b)=>a.y-b.y||a.x-b.x);
+  return{text:lines.map(l=>l.text).join(' ').replace(/\s+/g,' ').trim(),conf:lines.length?lines.reduce((s,l)=>s+l.conf,0)/lines.length:0};
+}
+function isPlausibleKey(key,minLen){return !!key&&key.length>=(minLen||3)&&key.length<=12&&/[A-Z0-9]/.test(key)}
+// One OCR pass (one crop x filter x PSM combination) -> candidate readings at two granularities:
+// the whole crop merged top-to-bottom/left-to-right (kind:'full'), and each individual OCR line
+// on its own (kind:'line') so a segment that never appeared in a clean full-crop read can still
+// be recovered and combined later.
 function plateCandidates(data){
-  let out=[];
+  let out=[],full=fullCropReading(data);
+  if(isPlausibleKey(plateKey(full.text)))out.push({value:full.text,key:plateKey(full.text),conf:full.conf,kind:'full',x:0,y:0,parts:(full.text.match(/ /g)||[]).length+1});
   for(let line of data?.lines||[]){
-    let words=(line.words||[]).map(w=>({t:tidyPlateText(w.text).replace(/ /g,''),raw:tidyPlateText(w.text),b:w.bbox,c:Number(w.confidence)||0})).filter(w=>w.t.length>=1&&w.t.length<=10);
-    for(let i=0;i<words.length;i++){
-      for(let count=1;count<=4&&i+count<=words.length;count++){
-        let group=words.slice(i,i+count),text=group.map(w=>w.t).join(''),display=group.map(w=>w.raw).filter(Boolean).join(' ');
-        if(text.length<4||text.length>12||!/[A-Z]/.test(text)||!/[0-9]/.test(text))continue;
-        let gapOK=group.every((w,j)=>!j||!w.b||!group[j-1].b||(w.b.x0-group[j-1].b.x1)<=Math.max(35,(group[j-1].b.y1-group[j-1].b.y0)*2.5));
-        if(!gapOK)continue;
-        let confidence=Math.min(...group.map(w=>w.c));
-        out.push({value:display||text,key:plateKey(text),score:confidence+(count>1?10:0),complete:count>1||text.length>=6,parts:count});
-      }
-    }
-    let raw=tidyPlateText(line.text||''),key=plateKey(raw);
-    if(key.length>=4&&key.length<=12&&/[A-Z]/.test(key)&&/[0-9]/.test(key))out.push({value:raw,key,score:Number(line.confidence)||0,complete:true,parts:(raw.match(/ /g)||[]).length+1});
+    let r=lineReading(line.words||[]),key=plateKey(r.text);
+    if(r.text&&r.text!==full.text&&isPlausibleKey(key,2))
+      out.push({value:r.text,key,conf:r.conf,kind:'line',x:r.x,y:(line.bbox?.y0!=null&&line.bbox?.y1!=null)?(line.bbox.y0+line.bbox.y1)/2:0,parts:(r.text.match(/ /g)||[]).length+1});
   }
   return out;
+}
+// Aggregates candidates from many OCR passes into one final reading with a Confirmed /
+// Candidate / Unreadable status. Never invents characters: a combined result only ever
+// concatenates text that was actually read. Two disjoint, repeatedly-seen readings (e.g.
+// "A022" and "NTC") are combined into one plate whenever that combination is longer and
+// at least as well supported as the best single reading — but it's only trusted as
+// CONFIRMED when at least one OCR pass actually saw both fragments together in the same
+// crop (so their left-to-right order is real, not guessed). If they were only ever read
+// in separate passes, the content is very likely right but the order is a best-effort
+// guess, so it comes back as a CANDIDATE for the user to verify — never a false "Confirmed".
+function aggregateVotes(passCandidateLists,cfg){
+  cfg=cfg||{};
+  let confirmN=cfg.confirmN||3,confirmScore=cfg.confirmScore||55;
+  let votes=new Map(),cooccur=new Map();
+  for(let cands of passCandidateLists){
+    for(let c of cands){
+      let e=votes.get(c.key)||{n:0,score:0,values:new Map(),parts:c.parts,xSum:0,ySum:0,full:false};
+      e.n++;e.score+=c.conf;e.parts=Math.max(e.parts,c.parts);e.xSum+=c.x||0;e.ySum+=c.y||0;e.full=e.full||c.kind==='full';
+      e.values.set(c.value,(e.values.get(c.value)||0)+1);
+      votes.set(c.key,e);
+    }
+    for(let i=0;i<cands.length;i++)for(let j=i+1;j<cands.length;j++){
+      let a=cands[i],b=cands[j];
+      if(a.key===b.key)continue;
+      let pairKey=a.key<b.key?a.key+'|'+b.key:b.key+'|'+a.key;
+      let firstIsA=a.y<b.y-5||(Math.abs(a.y-b.y)<=5&&a.x<=b.x);
+      let o=cooccur.get(pairKey)||new Map();
+      let orderStr=firstIsA?a.key+'>'+b.key:b.key+'>'+a.key;
+      o.set(orderStr,(o.get(orderStr)||0)+1);
+      cooccur.set(pairKey,o);
+    }
+  }
+  function pick(key){let e=votes.get(key);return{key,value:[...e.values].sort((a,b)=>b[1]-a[1])[0][0],n:e.n,avg:e.score/e.n,x:e.xSum/e.n,y:e.ySum/e.n}}
+  let ranked=[...votes.keys()].sort((a,b)=>{let ea=votes.get(a),eb=votes.get(b);return(eb.n*42+eb.score+eb.parts*7)-(ea.n*42+ea.score+ea.parts*7)});
+  let bestFullKey=ranked.find(k=>votes.get(k).full);
+  let bestFull=bestFullKey?pick(bestFullKey):null;
+  let bestFullOK=bestFull&&bestFull.n>=confirmN&&bestFull.avg>=confirmScore;
+  // Look for a combination that reads MORE of the plate than the best single reading.
+  let combineCandidates=ranked.filter(k=>votes.get(k).n>=2).slice(0,8);
+  let bestCombo=null;
+  for(let i=0;i<combineCandidates.length;i++)for(let j=i+1;j<combineCandidates.length;j++){
+    let ka=combineCandidates[i],kb=combineCandidates[j];
+    if(ka.includes(kb)||kb.includes(ka))continue;
+    let combinedKey=ka+kb;
+    if(!isPlausibleKey(combinedKey,4)||combinedKey.length>12)continue;
+    if(!(/[A-Z]/.test(combinedKey)&&/[0-9]/.test(combinedKey)))continue; // extra guard: inferred-combo path only
+    let a=pick(ka),b=pick(kb),n=Math.min(a.n,b.n),avg=(a.avg+b.avg)/2;
+    if(n<Math.max(2,confirmN-1)||avg<confirmScore)continue;
+    let pairKey=ka<kb?ka+'|'+kb:kb+'|'+ka,co=cooccur.get(pairKey);
+    let seenTogether=!!co,order;
+    if(seenTogether){let top=[...co].sort((x,y)=>y[1]-x[1])[0][0];order=top.startsWith(ka+'>')?[a,b]:[b,a]}
+    else order=(a.n+a.avg)>=(b.n+b.avg)?[a,b]:[b,a];
+    let strength=n*42+a.n+b.n;
+    if(!bestCombo||strength>bestCombo.strength)bestCombo={key:combinedKey,value:order[0].value+' '+order[1].value,n,avg,seenTogether,strength};
+  }
+  if(bestCombo&&(!bestFullOK||bestCombo.key.length>bestFull.key.length)){
+    if(bestCombo.seenTogether)
+      return{status:'confirmed',value:bestCombo.value,key:bestCombo.key,confidence:Math.round(bestCombo.avg*.95),votes:bestCombo.n,source:'fragment-combo'};
+    return{status:'candidate',value:bestCombo.value,key:bestCombo.key,confidence:Math.round(bestCombo.avg*.8),votes:bestCombo.n,source:'fragment-combo-unordered'};
+  }
+  if(bestFullOK)
+    return{status:'confirmed',value:bestFull.value,key:bestFull.key,confidence:Math.round(bestFull.avg),votes:bestFull.n,source:'full-merge'};
+  if(ranked[0]){let any=pick(ranked[0]);return{status:'candidate',value:any.value,key:any.key,confidence:Math.round(any.avg),votes:any.n,source:ranked[0]===bestFullKey?'full-merge':'single-fragment'}}
+  return{status:'unreadable',value:null,key:null,confidence:0,votes:0,source:null};
 }
 
 /* ---------- OCR effort profiles ---------- */
@@ -574,47 +690,46 @@ function plateRegions(b,W,H){
   return r;
 }
 async function ocrVariant(canvas,psm){try{return await A.ocr.recognize(canvas,{tessedit_pageseg_mode:String(psm),preserve_interword_spaces:'1'})}catch(e){return await A.ocr.recognize(canvas)}}
+// Runs the full multi-region, multi-variant OCR pass over one image and returns a tri-state
+// result: {status:'confirmed'|'candidate'|'unreadable', value, key, confidence, votes, source}.
 async function scanPlateImage(source,region,exact){
-  if(!A.ocr)return null;
+  if(!A.ocr)return{status:'unreadable',value:null,key:null,confidence:0,votes:0,source:null};
   let W=source.videoWidth||source.naturalWidth||source.width,H=source.videoHeight||source.naturalHeight||source.height;
-  if(!W||!H)return null;
+  if(!W||!H)return{status:'unreadable',value:null,key:null,confidence:0,votes:0,source:null};
   let profile=ocrProfile(),b=region||{x:0,y:0,w:W,h:H};
-  let regions=exact?[b]:(region?plateRegions(b,W,H):[{x:0,y:0,w:W,h:H}]).slice(0,profile.maxRegions),votes=new Map();
+  let regions=exact?[b]:(region?plateRegions(b,W,H):[{x:0,y:0,w:W,h:H}]).slice(0,profile.maxRegions);
+  let passCandidateLists=[];
   regionLoop: for(let rr of regions){
     for(let canvas of preprocessVariants(source,rr.x,rr.y,rr.w,rr.h,profile)){
       for(let psm of profile.psm){
         let result=await ocrVariant(canvas,psm);
-        for(let c of plateCandidates(result.data)){
-          if(c.score<18)continue;
-          let e=votes.get(c.key)||{n:0,score:0,complete:false,values:new Map(),parts:0};
-          e.n++;e.score+=c.score;e.complete||=c.complete;e.parts=Math.max(e.parts,c.parts);
-          e.values.set(c.value,(e.values.get(c.value)||0)+1);votes.set(c.key,e);
-        }
-        let leader=[...votes.values()].sort((a,b)=>b.n*42+b.score-(a.n*42+a.score)).pop();
+        let cands=plateCandidates(result.data);
+        if(cands.length)passCandidateLists.push(cands);
         // early exit once a confident consensus is reached, to keep the live loop fast
-        for(let[,o]of votes)if(o.n>=profile.earlyN&&o.complete&&(o.score/o.n)>=profile.earlyScore)break regionLoop;
+        if(aggregateVotes(passCandidateLists,{confirmN:profile.earlyN,confirmScore:profile.earlyScore}).status==='confirmed')break regionLoop;
       }
     }
   }
-  if(!votes.size)return null;
-  let ranked=[...votes].filter(([k,o])=>o.complete&&k.length>=4&&k.length<=12).sort((a,b)=>(b[1].n*42+b[1].score+b[1].parts*7)-(a[1].n*42+a[1].score+a[1].parts*7));
-  let winner=(ranked.length?ranked:[...votes]).sort((a,b)=>(b[1].n*42+b[1].score)-(a[1].n*42+a[1].score))[0];
-  let display=[...winner[1].values].sort((a,b)=>b[1]-a[1])[0]?.[0]||winner[0];
-  let avg=winner[1].score/winner[1].n;
-  return{value:display,key:winner[0],confirmed:winner[1].n>=3&&avg>=55&&winner[1].complete,votes:winner[1].n,confidence:Math.round(avg),quality:'multi-pass plate-focused'};
+  if(!passCandidateLists.length)return{status:'unreadable',value:null,key:null,confidence:0,votes:0,source:null};
+  return aggregateVotes(passCandidateLists,{confirmN:profile.earlyN,confirmScore:profile.earlyScore});
 }
+// Temporal layer: scanPlateImage's tri-state result covers ONE scan; scanPlates additionally
+// votes across repeated scans of the same tracked vehicle over several seconds, since a plate
+// that a single scan only reads as "candidate" often becomes confirmable once seen a few more
+// times as the vehicle moves through frame.
 async function scanPlates(){
   if(A.ocrBusy||!A.ocr)return;A.ocrBusy=true;
   try{
     for(let d of A.boxes.filter(x=>x.type==='vehicle').slice(0,2)){
-      let result=await scanPlateImage(v,d.b);if(!result)continue;
+      let result=await scanPlateImage(v,d.b);
+      if(result.status==='unreadable')continue;
       let tr=d.track,k=result.key,pv=tr.plateVotes.get(k)||{n:0,last:'',score:0};
-      pv.n++;pv.last=result.value;pv.score+=result.confidence||0;tr.plateVotes.set(k,pv);
+      pv.n++;pv.last=result.value;pv.score+=(result.confidence||0)+(result.status==='confirmed'?15:0);tr.plateVotes.set(k,pv);
       let best=[...tr.plateVotes].sort((a,b)=>(b[1].n*70+b[1].score)-(a[1].n*70+a[1].score))[0];
       let wasUnread=!tr.plate;
       if(best){tr.candidate=best[1].last;if(best[1].n>=3&&best[1].score/best[1].n>=55)tr.plate=best[1].last}
       for(let e of A.events.filter(e=>e.track===tr.id&&!e.manual)){
-        e.candidate=tr.candidate;if(tr.plate)e.plate=tr.plate;
+        e.candidate=tr.candidate;e.status=tr.plate?'confirmed':'candidate';if(tr.plate)e.plate=tr.plate;
         e.confidence=best?Math.round(best[1].score/best[1].n):result.confidence;
         e.label='Possible car · plate: '+(e.plate||'candidate '+e.candidate);
         if(A.db)await dbCall('readwrite',store=>store.put(e));
@@ -630,13 +745,13 @@ async function scanLockedRegion(){
   try{
     let W=v.videoWidth,H=v.videoHeight,b={x:A.lockRegion.x*W,y:A.lockRegion.y*H,w:A.lockRegion.w*W,h:A.lockRegion.h*H};
     let result=await scanPlateImage(v,b,true);
-    if(!result||!result.confirmed)return;
+    if(result.status!=='confirmed')return;
     if(result.value===A.lastLockPlate&&Date.now()-A.lastLockAt<60000)return;
     A.lastLockPlate=result.value;A.lastLockAt=Date.now();
     let c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;
     let g=c.getContext('2d');g.drawImage(v,0,0);g.strokeStyle='#ffd76b';g.lineWidth=Math.max(3,c.width/600);g.strokeRect(b.x,b.y,b.w,b.h);
     let image=await jpeg(c);if(!image)return;
-    let item={id:Date.now()+Math.random(),confidence:result.confidence,type:'vehicle',track:0,bounds:b,plate:result.value,candidate:result.value,source:'locked-region',
+    let item={id:Date.now()+Math.random(),confidence:result.confidence,status:'confirmed',type:'vehicle',track:0,bounds:b,plate:result.value,candidate:result.value,source:'locked-region',
       loc:$('#location').checked&&A.loc?{...A.loc}:null,label:'Possible car · plate: '+result.value+' (locked region)',image};
     A.events.unshift(item);if(A.db)try{await dbCall('readwrite',s=>s.put(item))}catch(e){}
     beep();notify('Plate read (locked region)',result.value);toast('Locked-region plate: '+result.value);
@@ -650,8 +765,8 @@ async function scanSaved(){
   try{
     scanStatus('Loading OCR engine…');if(!A.ocr)await loadOCR();
     if(!A.ocr)throw Error('OCR engine could not load. Check internet access and reload the app.');
-    let pending=A.events.filter(e=>e.type==='vehicle'&&!e.plate&&!e.manual);
-    if(!pending.length){scanStatus('No unread vehicle captures found.');return}
+    let pending=A.events.filter(e=>e.type==='vehicle'&&e.status!=='confirmed'&&!e.manual);
+    if(!pending.length){scanStatus('No unread or unconfirmed vehicle captures found.');return}
     let confirmed=0,candidates=0,unread=0,errors=0;
     for(let i=0;i<pending.length;i++){
       let e=pending[i];scanStatus('Scanning '+(i+1)+' of '+pending.length+' saved captures…');
@@ -659,19 +774,109 @@ async function scanSaved(){
         let img=await createImageBitmap(e.image);
         try{
           let result=await scanPlateImage(img,e.bounds);
-          if(result){
-            e.candidate=result.value;if(result.confirmed)e.plate=result.value;
+          e.status=result.status;
+          if(result.status==='unreadable'){unread++}
+          else{
+            e.candidate=result.value;e.confidence=result.confidence;
+            if(result.status==='confirmed'){e.plate=result.value;confirmed++}else candidates++;
             e.label='Possible car · plate: '+(e.plate||'candidate '+e.candidate);
-            if(e.plate)confirmed++;else candidates++;
-            if(A.db)await dbCall('readwrite',store=>store.put(e));render();
-          }else unread++;
-        }finally{img.close()}
-      }catch(err){errors++;console.error('Capture OCR error',err)}
+          }
+          if(A.db)await dbCall('readwrite',store=>store.put(e));render();
+        }catch(imgErr){errors++;e.status='unreadable';console.error('Plate detector failed on this capture',imgErr)}
+        finally{img.close()}
+      }catch(err){errors++;console.error('Image could not be loaded',err)}
     }
-    scanStatus('Scan finished: '+confirmed+' plates, '+candidates+' candidates, '+unread+' unread, '+errors+' errors.');
+    scanStatus('Completed: '+confirmed+' recognized, '+candidates+' candidates, '+unread+' unreadable'+(errors?', '+errors+' errors':'')+'.');
     if(confirmed)toast(confirmed+' saved capture(s) got a confirmed plate.');
-  }catch(err){console.error('Rescan error',err);scanStatus('Scan failed: '+err.message)}
+  }catch(err){console.error('Rescan error',err);scanStatus('Rescan failed: '+err.message)}
   finally{btn.disabled=false}
+}
+
+/* ---------- optional online AI recognition (off by default; see dinocam/server/) ----------
+   Only ever called from the deliberate, one-shot "Scan an image file" action below — never
+   from the continuous live-camera loop or the batch rescanner — so a person always knows
+   exactly which single image is being sent, and only when they explicitly opted in. */
+async function onlineRecognizePlate(blob,backendUrl){
+  let ctrl=new AbortController(),timeout=setTimeout(()=>ctrl.abort(),20000);
+  try{
+    let form=new FormData();form.append('image',blob,'plate.jpg');
+    let res=await fetch(backendUrl.replace(/\/$/,'')+'/api/recognize-plate',{method:'POST',body:form,signal:ctrl.signal});
+    let data=await res.json().catch(()=>null);
+    if(!res.ok)return{status:'unreadable',value:null,confidence:0,error:(data&&data.message)||('Online AI service error (HTTP '+res.status+')')};
+    return{status:data.status||'unreadable',value:data.value||null,confidence:data.confidence||0,source:'online:'+(data.source||'plate-recognizer')};
+  }catch(e){
+    return{status:'unreadable',value:null,confidence:0,error:e.name==='AbortError'?'Online AI service timed out.':'Online AI service unreachable: '+e.message};
+  }finally{clearTimeout(timeout)}
+}
+
+/* ---------- scan an image file (testing / hard cases: screenshots displayed on a monitor,
+   photos taken separately, etc.) — analyzes the ORIGINAL file at full resolution, never a
+   thumbnail or a screenshot of the app itself. ---------- */
+async function scanImageFile(file){
+  let btn=$('#scanFileBtn');btn.disabled=true;
+  try{
+    scanStatus('Loading image "'+file.name+'"…');
+    let bitmap;
+    try{bitmap=await createImageBitmap(file)}
+    catch(e){scanStatus('Image could not be loaded: '+e.message);return}
+    let canvas=document.createElement('canvas');canvas.width=bitmap.width;canvas.height=bitmap.height;
+    canvas.getContext('2d').drawImage(bitmap,0,0);
+    scanStatus('Loading OCR engine…');
+    if(!A.ocr)await loadOCR();
+    if(!A.ocr){scanStatus('Plate OCR unavailable — check internet access and try again.');return}
+    let vehicleBoxes=[];
+    if(!A.model){scanStatus('Loading vehicle detector…');try{await models()}catch(e){/* fall back to whole-image scan below */}}
+    if(A.model){
+      try{
+        scanStatus('Looking for vehicles in the image…');
+        let found=await A.model.detect(canvas,10,Number($('#sensitivity').value)||.55);
+        vehicleBoxes=found.filter(o=>vehicle(o.class)).map(o=>clampBox(o.bbox[0],o.bbox[1],o.bbox[2],o.bbox[3],canvas.width,canvas.height));
+      }catch(e){console.warn('Vehicle detector failed on uploaded image',e)}
+    }
+    scanStatus('Reading plate text ('+(vehicleBoxes.length?vehicleBoxes.length+' vehicle region(s) + ':'')+'whole image)…');
+    let attempts=[];
+    for(let b of vehicleBoxes.slice(0,3))attempts.push(await scanPlateImage(canvas,b));
+    attempts.push(await scanPlateImage(canvas)); // whole-image fallback — handles photos already cropped to just the plate
+    let rank={confirmed:2,candidate:1,unreadable:0};
+    let best=attempts.sort((a,b)=>(rank[b.status]-rank[a.status])||((b.confidence||0)-(a.confidence||0)))[0];
+
+    let aiMode=$('#aiMode').value,backendUrl=$('#backendUrl').value.trim();
+    if(aiMode!=='local'&&backendUrl){
+      let proceed=aiMode==='online';
+      if(aiMode==='ask')proceed=confirm('Send this image to your configured online AI backend ('+backendUrl+') for plate recognition?\n\nThis leaves your device. Choose Cancel to use local recognition only.');
+      if(proceed){
+        scanStatus('Sending image to online AI service…');
+        let full=await jpeg(canvas,.92);
+        let online=await onlineRecognizePlate(full,backendUrl);
+        if(online.error)toast('Online AI unavailable: '+online.error+' — showing local result.');
+        else if(rank[online.status]>=rank[best.status]&&online.value)best={...online,localFallback:best};
+      }
+    }
+
+    scanStatus(best.status==='unreadable'?'No plate could be read in this image.':'Scan complete: '+best.status+' — '+best.value);
+    showFileScanResult(file,best,vehicleBoxes.length);
+  }catch(err){console.error('Scan-image-file error',err);scanStatus('Plate detector failed: '+err.message)}
+  finally{btn.disabled=false}
+}
+function showFileScanResult(file,result,vehicleCount){
+  let url=URL.createObjectURL(file);
+  let statusLabel=result.status==='confirmed'?'Confirmed':result.status==='candidate'?'Needs verification':'Unreadable';
+  modal(
+    '<img src="'+url+'" alt="Scanned image" style="width:100%;border-radius:12px;max-height:50vh;object-fit:contain;background:#02070c">'+
+    '<h2 style="margin-top:12px">'+file.name.replace(/</g,'&lt;')+'</h2>'+
+    '<div class="statusrow"><span class="statuschip '+result.status+'">'+statusLabel+'</span>'+(result.confidence?'<small>'+result.confidence+'% confidence</small>':'')+'</div>'+
+    '<p style="font:700 20px Consolas,monospace;color:var(--text)">'+(result.value?result.value.replace(/</g,'&lt;'):'No plate text recognized')+'</p>'+
+    '<small>'+(vehicleCount?vehicleCount+' vehicle region(s) detected. ':'No vehicle detected — scanned the whole image directly. ')+'Source: '+(result.source||'none')+'.</small>'+
+    '<div class="actions"><button id="fsSave" class="primary"'+(result.status==='unreadable'?' disabled':'')+'>Save to Capture History</button><button id="fsClose">Close</button></div>'
+  );
+  $('#fsClose').onclick=()=>{URL.revokeObjectURL(url);closeModal()};
+  $('#fsSave').onclick=async()=>{
+    let item={id:Date.now()+Math.random(),confidence:result.confidence,status:result.status,type:'vehicle',track:0,bounds:null,
+      plate:result.status==='confirmed'?result.value:null,candidate:result.value,source:'file-scan',
+      loc:null,label:'Possible car · plate: '+(result.status==='confirmed'?result.value:'candidate '+result.value)+' (from file)',image:file};
+    A.events.unshift(item);if(A.db)try{await dbCall('readwrite',s=>s.put(item))}catch(e){}
+    toast('Saved to Capture History.');render();URL.revokeObjectURL(url);closeModal();
+  };
 }
 
 /* ---------- capture + gallery ---------- */
@@ -681,7 +886,8 @@ async function capture(d){
   if(d){g.strokeStyle='#69e5b9';g.lineWidth=Math.max(3,c.width/600);g.strokeRect(d.b.x,d.b.y,d.b.w,d.b.h)}
   let image=await jpeg(c);if(!image)return;
   let plate=d?.track?.plate||null,isNewType=d?.type&&!A.events.some(e=>e.type===d.type&&Date.now()-e.id<15000);
-  let item={id:Date.now()+Math.random(),confidence:d?.track?.plate?75:null,type:d?.type||'manual',track:d?.track?.id||0,
+  let status=d?.type==='vehicle'?(plate?'confirmed':d?.track?.candidate?'candidate':'unreadable'):null;
+  let item={id:Date.now()+Math.random(),confidence:d?.track?.plate?75:null,status,type:d?.type||'manual',track:d?.track?.id||0,
     bounds:d?.b?{...d.b}:null,plate,candidate:d?.track?.candidate||null,
     loc:$('#location').checked&&A.loc?{...A.loc}:null,
     label:d?.type==='vehicle'?'Possible car · plate: '+(plate||d?.track?.candidate||'not read'):d?.label||'Manual screenshot',image};
@@ -730,14 +936,23 @@ function render(){
     let date=document.createElement('small');date.textContent=new Date(e.id).toLocaleString()+(e.loc?' · '+e.loc.lat+', '+e.loc.lon:'');
     body.append(title,date);
     if(e.type==='vehicle'){
-      let plate=document.createElement('span');plate.className='plate'+(!e.plate?' pending':'');
-      plate.textContent=e.plate?'PLATE: '+e.plate:e.candidate?'POSSIBLE: '+e.candidate:'PLATE NOT READ';
+      // Fall back to inferring status for events saved before this field existed.
+      let status=e.status||(e.plate?'confirmed':e.candidate?'candidate':'unreadable');
+      let statusRow=document.createElement('div');statusRow.className='statusrow';
+      let chip=document.createElement('span');chip.className='statuschip '+status;
+      chip.textContent=status==='confirmed'?'Confirmed':status==='candidate'?'Needs verification':'Unreadable';
+      statusRow.append(chip);
+      if(e.confidence!=null){let c=document.createElement('small');c.textContent=e.confidence+'% confidence';statusRow.append(c)}
+      body.append(statusRow);
+      let plate=document.createElement('span');plate.className='plate'+(status==='candidate'?' pending':status==='unreadable'?' unreadable':'');
+      plate.textContent=e.plate?e.plate:e.candidate?e.candidate+' (unverified)':'Plate not read';
       body.append(plate);
       let correct=document.createElement('button');correct.textContent='Correct plate';
       correct.onclick=async()=>{
-        let input=prompt('Enter the letters and numbers visible in the saved photo:',e.plate||e.candidate||'');if(input===null)return;
-        let value=String(input).toUpperCase().replace(/[^A-Z0-9]/g,'');if(value.length<4||value.length>12){alert('Enter 4–12 letters/numbers.');return}
-        e.plate=value;e.candidate=value;e.manual=true;e.label='Possible car · plate: '+value+' (verified by user)';
+        let input=prompt('Enter the complete plate visible in the saved photo (letters and numbers, spaces allowed):',e.plate||e.candidate||'');if(input===null)return;
+        let value=String(input).toUpperCase().replace(/[^A-Z0-9 ]/g,'').replace(/\s+/g,' ').trim();
+        if(plateKey(value).length<2||plateKey(value).length>12){alert('Enter 2–12 letters/numbers.');return}
+        e.plate=value;e.candidate=value;e.status='confirmed';e.manual=true;e.label='Possible car · plate: '+value+' (verified by user)';
         if(A.db)await dbCall('readwrite',s=>s.put(e));render();
       };
       body.append(correct);
@@ -889,6 +1104,8 @@ $('#location').onchange=toggleLocation;
 $('#zoom').oninput=e=>{$('#zoomText').textContent=Number(e.target.value).toFixed(1)+'×';saveSettings()};
 $('#sensitivity').oninput=()=>{sensitivityLabel();saveSettings()};
 $('#ocrQuality').onchange=saveSettings;
+$('#aiMode').onchange=()=>{aiModeLabel();saveSettings()};
+$('#backendUrl').onchange=saveSettings;
 $('#quality').onchange=saveSettings;
 $('#retention').onchange=async()=>{await cleanup();render();saveSettings()};
 $('#sound').onchange=saveSettings;
@@ -898,6 +1115,8 @@ $('#search').oninput=render;$('#filter').onchange=render;
 $('#fromDate').onchange=render;$('#toDate').onchange=render;
 $('#clearDates').onclick=()=>{$('#fromDate').value='';$('#toDate').value='';render()};
 $('#rescan').onclick=scanSaved;
+$('#scanFileBtn').onclick=()=>$('#scanFile').click();
+$('#scanFile').onchange=e=>{let f=e.target.files[0];e.target.value='';if(f)scanImageFile(f)};
 $('#clear').onclick=async()=>{if(confirm('Delete all captures?')){A.events=[];if(A.db)await dbCall('readwrite',s=>s.clear());render()}};
 $('#export').onclick=async()=>{
   say('Preparing export…');
