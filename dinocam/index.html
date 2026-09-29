@@ -105,6 +105,13 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .statuschip.candidate{background:var(--plate-pend-bg);color:var(--plate-pend-ink);border:1px solid var(--plate-pend-border)}
 .statuschip.unreadable{background:var(--chip);color:var(--muted);border:1px solid var(--chip-border)}
 .badge{display:inline-block;font-size:10px;background:var(--chip);border:1px solid var(--chip-border);border-radius:99px;padding:2px 7px;margin-left:6px;color:var(--muted)}
+.badge.watchlist{background:#5a1620;border-color:#c23a4c;color:#ffc0c8;font-weight:700}
+:root[data-theme="light"] .badge.watchlist{background:#ffe1e5;border-color:#c23a4c;color:#8a0f24}
+.camgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+.camtile{position:relative;background:#030911;border-radius:12px;overflow:hidden;aspect-ratio:16/9}
+.camtile canvas{width:100%;height:100%;object-fit:contain;display:block}
+.camtile-label{position:absolute;top:8px;left:8px;background:#061521df;color:#fff;border-radius:99px;padding:4px 10px;font-size:12px}
+.camtile-stop{position:absolute;top:8px;right:8px;padding:4px 9px;font-size:12px}
 .notice{background:var(--notice-bg);border:1px solid var(--notice-border);border-radius:10px;padding:12px}
 .notice p{margin:0;color:var(--notice-ink)}
 .splash{position:fixed;inset:0;background:#040c15ee;z-index:5;display:grid;place-items:center;padding:16px}
@@ -225,7 +232,26 @@ button:disabled{opacity:.5;cursor:not-allowed}
     <label>Desktop notifications <input id="notify" type="checkbox"></label>
     <button id="testAlert">Test alert</button>
     <small>Plate text becomes a candidate after one read and is confirmed after several agreeing reads. Verify every result before acting on it.</small>
+    <h2 style="margin-top:16px">Watchlist</h2>
+    <p>Plates you maintain yourself — a confirmed match triggers an immediate alert. Stored only in this browser; not shared anywhere.</p>
+    <div class="actions">
+      <input id="watchlistInput" type="text" placeholder="Plate (e.g. ABC 123)" style="text-transform:uppercase;flex:1;min-width:120px">
+      <input id="watchlistLabel" type="text" placeholder="Label (optional)" style="flex:1;min-width:100px">
+      <button id="watchlistAdd">Add</button>
+    </div>
+    <div class="zonelist" id="watchlistList" hidden></div>
   </aside>
+
+  <section class="panel full">
+    <div class="row">
+      <div><h2>Additional cameras</h2><p>Run more cameras attached to this device at the same time. Captures from all of them land in the same Capture History below.</p></div>
+      <div class="actions">
+        <select id="extraCamDevice"></select>
+        <button id="addCamBtn">Add camera</button>
+      </div>
+    </div>
+    <div class="camgrid" id="extraCamGrid"></div>
+  </section>
 
   <section class="panel full">
     <div class="row">
@@ -276,7 +302,7 @@ const A={
   boxes:[],tracks:[],next:1,focus:null,pan:null,events:[],db:null,urls:[],
   objectBusy:false,faceBusy:false,lastObj:0,lastFace:0,lastOCR:0,lastLockOCR:0,
   frames:0,fpsAt:0,lastFrame:0,loc:null,lockRegion:null,zones:[],drawMode:null,dragStart:null,dragCur:null,
-  cameraLabels:{},lastLockPlate:'',lastLockAt:0
+  cameraLabels:{},lastLockPlate:'',lastLockAt:0,watchlist:[],extraCams:[],nextCam:1
 };
 
 /* ---------- settings persistence ---------- */
@@ -284,7 +310,7 @@ const SETTINGS_KEY='dinocam.settings.v1';
 const settingIds=['auto','objects','faces','plates','zoomOn','location','zoom','sensitivity','ocrQuality','quality','retention','sound','notify','aiMode','backendUrl'];
 function loadSettings(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY))||{}}catch(e){return{}}}
 function saveSettings(){
-  let s={theme:document.documentElement.dataset.theme==='light'?'light':'dark',zones:A.zones,lockRegion:A.lockRegion,cameraLabels:A.cameraLabels};
+  let s={theme:document.documentElement.dataset.theme==='light'?'light':'dark',zones:A.zones,lockRegion:A.lockRegion,cameraLabels:A.cameraLabels,watchlist:A.watchlist};
   for(let id of settingIds){let el=$('#'+id);if(!el)continue;s[id]=el.type==='checkbox'?el.checked:el.value}
   try{localStorage.setItem(SETTINGS_KEY,JSON.stringify(s))}catch(e){}
 }
@@ -293,9 +319,11 @@ function applySettings(s){
   A.zones=Array.isArray(s.zones)?s.zones:[];
   A.lockRegion=s.lockRegion||null;
   A.cameraLabels=s.cameraLabels||{};
+  A.watchlist=Array.isArray(s.watchlist)?s.watchlist:[];
   $('#zoomText').textContent=Number($('#zoom').value).toFixed(1)+'×';
   sensitivityLabel();
   renderZoneList();
+  renderWatchlist();
   $('#locationText').textContent=($('#location').checked?'On':'Off')+'; this is the camera device\'s location, stored only in this browser.';
   aiModeLabel();
 }
@@ -419,6 +447,7 @@ async function devices(){
     }
     $('#device').value=old;
   }catch(e){console.warn(e)}
+  renderCamDevices();
 }
 function renameDevice(){
   let id=$('#device').value;
@@ -506,6 +535,86 @@ function faceQuality(b){
   let p=g.getImageData(0,0,48,48).data,sum=0;
   for(let i=0;i<p.length;i+=4)sum+=p[i]*.3+p[i+1]*.59+p[i+2]*.11;
   return Math.round(100*Math.min(1,Math.min(b.w/v.videoWidth,b.h/v.videoHeight)*5)*(.5+.5*(1-Math.abs(sum/2304-125)/125)));
+}
+
+/* ---------- vehicle attributes: type (from coco-ssd's class) + color ----------
+   classifyColor is pure/DOM-free (see dinocam/test/vehicle-attributes.test.js). It buckets
+   by HSV rather than averaging raw RGB, so a red car with dark window/tire pixels mixed in
+   still classifies as "red" instead of muddying toward brown/gray. */
+function classifyColor(r,g,b){
+  let max=Math.max(r,g,b),min=Math.min(r,g,b),d=max-min,v=max/255,s=max===0?0:d/max,h=0;
+  if(d!==0){
+    if(max===r)h=60*(((g-b)/d)%6);
+    else if(max===g)h=60*((b-r)/d+2);
+    else h=60*((r-g)/d+4);
+  }
+  if(h<0)h+=360;
+  if(v<.18)return'black';
+  if(s<.14)return v>.85?'white':v>.55?'silver':'gray';
+  if(h<15||h>=345)return v<.5?'maroon':'red';
+  if(h<45)return v<.55?'brown':'orange';
+  if(h<70)return'yellow';
+  if(h<170)return'green';
+  if(h<255)return'blue';
+  if(h<290)return'purple';
+  return'red';
+}
+// Samples the middle-vertical band of a vehicle box (avoids sky/background above the
+// roofline and tires/road-shadow below) and takes the MODE of per-pixel classifications,
+// which is robust to windows/chrome/reflections skewing a plain average toward gray.
+function sampleVehicleColor(source,b){
+  try{
+    let w=24,h=Math.max(6,Math.round(w*b.h/Math.max(1,b.w)));
+    let c=document.createElement('canvas');c.width=w;c.height=h;
+    let g=c.getContext('2d',{willReadFrequently:true});
+    g.drawImage(source,b.x,b.y+b.h*.25,b.w,b.h*.45,0,0,w,h);
+    let data=g.getImageData(0,0,w,h).data,buckets=new Map();
+    for(let i=0;i<data.length;i+=4){
+      let name=classifyColor(data[i],data[i+1],data[i+2]);
+      buckets.set(name,(buckets.get(name)||0)+1);
+    }
+    return[...buckets].sort((a,b)=>b[1]-a[1])[0]?.[0]||null;
+  }catch(e){return null}
+}
+
+/* ---------- watchlist: plates the user maintains themselves, alerted on a confirmed match.
+   Not a law-enforcement hotlist and not shared with or fetched from anywhere - purely a
+   local list this browser stores, same as every other setting. ---------- */
+function watchlistMatch(value){
+  let key=plateKey(value);
+  return key?A.watchlist.find(w=>w.key===key)||null:null;
+}
+function checkWatchlist(value){
+  let hit=watchlistMatch(value);
+  if(hit){
+    beep();notify('Watchlist match',(hit.label?hit.label+' — ':'')+value);
+    toast('⚠ Watchlist match: '+value+(hit.label?' ('+hit.label+')':''));
+  }
+  return hit;
+}
+function renderWatchlist(){
+  let root=$('#watchlistList');if(!root)return;
+  root.replaceChildren();
+  if(!A.watchlist.length){root.hidden=true;return}
+  root.hidden=false;
+  for(let w of A.watchlist){
+    let row=document.createElement('div');row.className='zonerow';
+    row.innerHTML='<span>🚩 '+w.key+(w.label?' — '+w.label.replace(/</g,'&lt;'):'')+'</span>';
+    let btn=document.createElement('button');btn.textContent='Remove';
+    btn.onclick=()=>{A.watchlist=A.watchlist.filter(x=>x!==w);saveSettings();renderWatchlist()};
+    row.append(btn);root.append(row);
+  }
+}
+function addToWatchlist(){
+  let input=$('#watchlistInput'),value=input.value;
+  let key=plateKey(value);
+  if(key.length<2){alert('Enter at least 2 letters/numbers.');return}
+  if(A.watchlist.some(w=>w.key===key)){toast('Already on the watchlist.');input.value='';return}
+  let label=$('#watchlistLabel').value.trim();
+  A.watchlist.push({key,label});
+  input.value='';$('#watchlistLabel').value='';
+  saveSettings();renderWatchlist();
+  toast('Added '+key+' to watchlist.');
 }
 
 /* ---------- main detection loop ---------- */
@@ -828,7 +937,11 @@ async function scanPlates(){
         e.label='Possible car · plate: '+(e.plate||'candidate '+e.candidate);
         if(A.db)await dbCall('readwrite',store=>store.put(e));
       }
-      if(wasUnread&&tr.plate){beep();notify('Plate read',tr.plate);toast('Plate confirmed: '+tr.plate)}
+      if(wasUnread&&tr.plate){
+        let hit=checkWatchlist(tr.plate);
+        if(hit)for(let e of A.events.filter(e=>e.track===tr.id))e.watchlist=hit.label||hit.key;
+        else{beep();notify('Plate read',tr.plate);toast('Plate confirmed: '+tr.plate)}
+      }
       render();
     }
   }catch(e){say('Plate AI skipped a difficult frame: '+e.message)}
@@ -845,10 +958,12 @@ async function scanLockedRegion(){
     let c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;
     let g=c.getContext('2d');g.drawImage(v,0,0);g.strokeStyle='#ffd76b';g.lineWidth=Math.max(3,c.width/600);g.strokeRect(b.x,b.y,b.w,b.h);
     let image=await jpeg(c);if(!image)return;
+    let watchHit=checkWatchlist(result.value);
     let item={id:Date.now()+Math.random(),confidence:result.confidence,status:'confirmed',type:'vehicle',track:0,bounds:b,plate:result.value,candidate:result.value,source:'locked-region',
+      watchlist:watchHit?(watchHit.label||watchHit.key):null,
       loc:$('#location').checked&&A.loc?{...A.loc}:null,label:'Possible car · plate: '+result.value+' (locked region)',image};
     A.events.unshift(item);if(A.db)try{await dbCall('readwrite',s=>s.put(item))}catch(e){}
-    beep();notify('Plate read (locked region)',result.value);toast('Locked-region plate: '+result.value);
+    if(!watchHit){beep();notify('Plate read (locked region)',result.value);toast('Locked-region plate: '+result.value)}
     render();
   }catch(e){}
   finally{A.ocrBusy=false}
@@ -872,7 +987,7 @@ async function scanSaved(){
           if(result.status==='unreadable'){unread++}
           else{
             e.candidate=result.value;e.confidence=result.confidence;
-            if(result.status==='confirmed'){e.plate=result.value;confirmed++}else candidates++;
+            if(result.status==='confirmed'){e.plate=result.value;confirmed++;let hit=checkWatchlist(result.value);if(hit)e.watchlist=hit.label||hit.key}else candidates++;
             e.label='Possible car · plate: '+(e.plate||'candidate '+e.candidate);
           }
           if(A.db)await dbCall('readwrite',store=>store.put(e));render();
@@ -965,8 +1080,9 @@ function showFileScanResult(file,result,vehicleCount){
   );
   $('#fsClose').onclick=()=>{URL.revokeObjectURL(url);closeModal()};
   $('#fsSave').onclick=async()=>{
+    let watchHit=result.status==='confirmed'?checkWatchlist(result.value):null;
     let item={id:Date.now()+Math.random(),confidence:result.confidence,status:result.status,type:'vehicle',track:0,bounds:null,
-      plate:result.status==='confirmed'?result.value:null,candidate:result.value,source:'file-scan',
+      plate:result.status==='confirmed'?result.value:null,candidate:result.value,source:'file-scan',watchlist:watchHit?(watchHit.label||watchHit.key):null,
       loc:null,label:'Possible car · plate: '+(result.status==='confirmed'?result.value:'candidate '+result.value)+' (from file)',image:file};
     A.events.unshift(item);if(A.db)try{await dbCall('readwrite',s=>s.put(item))}catch(e){}
     toast('Saved to Capture History.');render();URL.revokeObjectURL(url);closeModal();
@@ -981,8 +1097,10 @@ async function capture(d){
   let image=await jpeg(c);if(!image)return;
   let plate=d?.track?.plate||null,isNewType=d?.type&&!A.events.some(e=>e.type===d.type&&Date.now()-e.id<15000);
   let status=d?.type==='vehicle'?(plate?'confirmed':d?.track?.candidate?'candidate':'unreadable'):null;
+  let vehicleType=d?.type==='vehicle'?d.kind:null,color=d?.type==='vehicle'?sampleVehicleColor(v,d.b):null;
+  let watchHit=plate?checkWatchlist(plate):null;
   let item={id:Date.now()+Math.random(),confidence:d?.track?.plate?75:null,status,type:d?.type||'manual',track:d?.track?.id||0,
-    bounds:d?.b?{...d.b}:null,plate,candidate:d?.track?.candidate||null,
+    bounds:d?.b?{...d.b}:null,plate,candidate:d?.track?.candidate||null,vehicleType,color,watchlist:watchHit?(watchHit.label||watchHit.key):null,
     loc:$('#location').checked&&A.loc?{...A.loc}:null,
     label:d?.type==='vehicle'?'Possible car · plate: '+(plate||d?.track?.candidate||'not read'):d?.label||'Manual screenshot',image};
   A.events.unshift(item);
@@ -1027,7 +1145,8 @@ function render(){
     let body=document.createElement('div');body.className='body';
     let title=document.createElement('strong');title.textContent=e.label;
     if(e.source==='locked-region'){let b=document.createElement('span');b.className='badge';b.textContent='locked region';title.append(b)}
-    let date=document.createElement('small');date.textContent=new Date(e.id).toLocaleString()+(e.loc?' · '+e.loc.lat+', '+e.loc.lon:'');
+    if(e.watchlist){let b=document.createElement('span');b.className='badge watchlist';b.textContent='⚠ WATCHLIST: '+e.watchlist;title.append(b)}
+    let date=document.createElement('small');date.textContent=new Date(e.id).toLocaleString()+(e.camera?' · '+e.camera:'')+(e.loc?' · '+e.loc.lat+', '+e.loc.lon:'');
     body.append(title,date);
     if(e.type==='vehicle'){
       // Fall back to inferring status for events saved before this field existed.
@@ -1038,6 +1157,7 @@ function render(){
       statusRow.append(chip);
       if(e.confidence!=null){let c=document.createElement('small');c.textContent=e.confidence+'% confidence';statusRow.append(c)}
       body.append(statusRow);
+      if(e.vehicleType||e.color){let attr=document.createElement('small');attr.textContent=[e.color,e.vehicleType].filter(Boolean).join(' ');attr.style.display='block';body.append(attr)}
       let plate=document.createElement('span');plate.className='plate'+(status==='candidate'?' pending':status==='unreadable'?' unreadable':'');
       plate.textContent=e.plate?e.plate:e.candidate?e.candidate+' (unverified)':'Plate not read';
       body.append(plate);
@@ -1047,6 +1167,7 @@ function render(){
         let value=String(input).toUpperCase().replace(/[^A-Z0-9 ]/g,'').replace(/\s+/g,' ').trim();
         if(plateKey(value).length<2||plateKey(value).length>12){alert('Enter 2–12 letters/numbers.');return}
         e.plate=value;e.candidate=value;e.status='confirmed';e.manual=true;e.label='Possible car · plate: '+value+' (verified by user)';
+        let hit=checkWatchlist(value);e.watchlist=hit?(hit.label||hit.key):null;
         if(A.db)await dbCall('readwrite',s=>s.put(e));render();
       };
       body.append(correct);
@@ -1180,6 +1301,118 @@ function toggleTheme(){
   saveSettings();
 }
 
+/* ---------- additional cameras: extra devices attached to this same machine, running
+   independently of the primary camera panel above. No zoom/privacy-zone/plate-lock UI here
+   (scope kept simple) - detection and capture reuse the same model/OCR/watchlist/color
+   pipeline as the primary camera, writing into the same shared Capture History. ---------- */
+function createCamTracker(){
+  let tracks=[],next=1;
+  return function(items,W,H){
+    let now=Date.now(),used=new Set();
+    tracks=tracks.filter(t=>now-t.seen<6000);
+    for(let d of items){
+      let dc={x:d.b.x+d.b.w/2,y:d.b.y+d.b.h/2};
+      let matches=tracks.filter(t=>t.kind===d.kind&&!used.has(t.id)).map(t=>({t,score:iou(t.b,d.b)-Math.hypot((dc.x-(t.b.x+t.b.w/2))/W,(dc.y-(t.b.y+t.b.h/2))/H)*.5})).sort((a,b)=>b.score-a.score);
+      let t=matches[0]?.score>.08?matches[0].t:null;
+      if(!t){t={id:next++,kind:d.kind,b:d.b,seen:now,saved:0,hits:1,plateVotes:new Map(),plate:null,candidate:null};tracks.push(t)}
+      else{t.b={x:t.b.x*.25+d.b.x*.75,y:t.b.y*.25+d.b.y*.75,w:t.b.w*.25+d.b.w*.75,h:t.b.h*.25+d.b.h*.75};t.seen=now;t.hits++}
+      used.add(t.id);d.track=t;d.b=t.b;
+    }
+    return items;
+  };
+}
+async function renderCamDevices(){
+  try{
+    let ds=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');
+    let used=new Set(A.extraCams.map(c=>c.deviceId));
+    $('#extraCamDevice').replaceChildren(...ds.filter(d=>!used.has(d.deviceId)).map(d=>new Option(A.cameraLabels[d.deviceId]||d.label||'Camera',d.deviceId)));
+  }catch(e){}
+}
+async function addExtraCamera(){
+  let deviceId=$('#extraCamDevice').value;
+  if(!deviceId){toast('No other camera available to add.');return}
+  let stream;
+  try{stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{deviceId:{exact:deviceId}}})}
+  catch(e){toast('Could not start that camera: '+e.message);return}
+  if(!A.model){try{await models()}catch(e){}}
+  let id=A.nextCam++,name=A.cameraLabels[deviceId]||'Camera '+id;
+  let video=document.createElement('video');video.autoplay=true;video.muted=true;video.playsInline=true;video.srcObject=stream;video.className='sr';
+  document.body.append(video);
+  try{await video.play()}catch(e){}
+  let tile=document.createElement('div');tile.className='camtile';
+  let canvas=document.createElement('canvas');
+  let label=document.createElement('div');label.className='camtile-label';label.textContent=name;
+  let stopBtn=document.createElement('button');stopBtn.className='camtile-stop';stopBtn.textContent='Remove';
+  tile.append(canvas,label,stopBtn);
+  $('#extraCamGrid').append(tile);
+  let cam={id,name,deviceId,stream,video,canvas,tile,tracker:createCamTracker(),boxes:[],lastObj:0,lastOCR:0,busy:false,ocrBusy:false,on:true};
+  stopBtn.onclick=()=>removeExtraCamera(cam);
+  A.extraCams.push(cam);
+  runCamLoop(cam);
+  renderCamDevices();
+}
+function removeExtraCamera(cam){
+  cam.on=false;
+  cam.stream?.getTracks().forEach(t=>t.stop());
+  cam.video.remove();cam.tile.remove();
+  A.extraCams=A.extraCams.filter(c=>c!==cam);
+  renderCamDevices();
+}
+function runCamLoop(cam){
+  if(!cam.on)return;
+  let W=cam.video.videoWidth,H=cam.video.videoHeight;
+  if(W&&H){
+    if(cam.canvas.width!==Math.min(480,W)){cam.canvas.width=Math.min(480,W);cam.canvas.height=Math.round(cam.canvas.width*H/W)}
+    let cx=cam.canvas.getContext('2d');
+    cx.drawImage(cam.video,0,0,cam.canvas.width,cam.canvas.height);
+    for(let d of cam.boxes){
+      let sx=d.b.x*cam.canvas.width/W,sy=d.b.y*cam.canvas.height/H,sw=d.b.w*cam.canvas.width/W,sh=d.b.h*cam.canvas.height/H;
+      cx.strokeStyle=d.kind==='face'?'#69e5b9':'#8dbdff';cx.lineWidth=2;cx.strokeRect(sx,sy,sw,sh);
+    }
+    let now=performance.now();
+    if($('#objects').checked&&A.model&&!cam.busy&&now-cam.lastObj>900){
+      cam.lastObj=now;cam.busy=true;
+      A.model.detect(cam.video,10,Number($('#sensitivity').value)||.55).then(found=>{
+        cam.boxes=cam.tracker(found.filter(o=>o.class!=='person').map(o=>({kind:o.class,b:clampBox(o.bbox[0],o.bbox[1],o.bbox[2],o.bbox[3],W,H)})),W,H);
+        if($('#auto').checked)for(let d of cam.boxes)if(vehicle(d.kind)&&d.track.hits>=2&&Date.now()-d.track.saved>18000){
+          d.track.saved=Date.now();
+          let tid=d.track.id;
+          setTimeout(()=>{let x=cam.boxes.find(z=>z.track?.id===tid);if(cam.on&&x)captureFromCam(cam,x,W,H)},A.ocr?1400:2800);
+        }
+      }).catch(console.warn).finally(()=>cam.busy=false);
+    }
+    if($('#plates').checked&&A.ocr&&!cam.ocrBusy&&now-cam.lastOCR>3500){
+      let vb=cam.boxes.find(d=>vehicle(d.kind));
+      if(vb){
+        cam.ocrBusy=true;
+        scanPlateImage(cam.video,vb.b).then(result=>{
+          if(result.status==='unreadable')return;
+          let tr=vb.track,k=result.key,pv=tr.plateVotes.get(k)||{n:0,last:'',score:0};
+          pv.n++;pv.last=result.value;pv.score+=(result.confidence||0)+(result.status==='confirmed'?15:0);tr.plateVotes.set(k,pv);
+          let best=[...tr.plateVotes].sort((a,b)=>(b[1].n*70+b[1].score)-(a[1].n*70+a[1].score))[0];
+          if(best){tr.candidate=best[1].last;if(best[1].n>=3&&best[1].score/best[1].n>=55)tr.plate=best[1].last}
+        }).catch(console.warn).finally(()=>{cam.ocrBusy=false;cam.lastOCR=performance.now()});
+      }
+    }
+  }
+  setTimeout(()=>runCamLoop(cam),180);
+}
+async function captureFromCam(cam,d,W,H){
+  let c=document.createElement('canvas');c.width=W;c.height=H;let g=c.getContext('2d');g.drawImage(cam.video,0,0);
+  g.strokeStyle='#69e5b9';g.lineWidth=Math.max(3,W/600);g.strokeRect(d.b.x,d.b.y,d.b.w,d.b.h);
+  let image=await jpeg(c);if(!image)return;
+  let plate=d.track.plate||null,status=plate?'confirmed':d.track.candidate?'candidate':'unreadable';
+  let isVehicle=vehicle(d.kind),color=isVehicle?sampleVehicleColor(cam.video,d.b):null;
+  let watchHit=plate?checkWatchlist(plate):null;
+  let item={id:Date.now()+Math.random(),confidence:plate?75:null,status:isVehicle?status:null,type:isVehicle?'vehicle':'object',track:d.track.id,
+    bounds:{...d.b},plate,candidate:d.track.candidate||null,vehicleType:isVehicle?d.kind:null,color,watchlist:watchHit?(watchHit.label||watchHit.key):null,
+    camera:cam.name,loc:null,label:(isVehicle?'Possible car · plate: '+(plate||d.track.candidate||'not read'):d.kind)+' ('+cam.name+')',image};
+  A.events.unshift(item);
+  if(A.db)try{await dbCall('readwrite',s=>s.put(item))}catch(e){}
+  if(!watchHit)beep();
+  render();
+}
+
 /* ---------- wiring ---------- */
 function tabs(publicMode){$('#localView').hidden=publicMode;$('#publicView').hidden=!publicMode;$('#localTab').setAttribute('aria-selected',String(!publicMode));$('#publicTab').setAttribute('aria-selected',String(publicMode))}
 $('#begin').onclick=()=>{stage(2,'Connecting to camera…');start()};
@@ -1209,6 +1442,9 @@ $('#search').oninput=render;$('#filter').onchange=render;
 $('#fromDate').onchange=render;$('#toDate').onchange=render;
 $('#clearDates').onclick=()=>{$('#fromDate').value='';$('#toDate').value='';render()};
 $('#rescan').onclick=scanSaved;
+$('#addCamBtn').onclick=addExtraCamera;
+$('#watchlistAdd').onclick=addToWatchlist;
+$('#watchlistInput').addEventListener('keydown',e=>{if(e.key==='Enter')addToWatchlist()});
 $('#scanFileBtn').onclick=()=>$('#scanFile').click();
 $('#scanFile').onchange=e=>{let f=e.target.files[0];e.target.value='';if(f)scanImageFile(f)};
 $('#clear').onclick=async()=>{if(confirm('Delete all captures?')){A.events=[];if(A.db)await dbCall('readwrite',s=>s.clear());render()}};
@@ -1232,7 +1468,7 @@ window.addEventListener('keydown',e=>{
   if(e.code==='Space'){e.preventDefault();if(!$('#manual').disabled)capture(null)}
   else if(e.key==='s'||e.key==='S'){if(A.on)stop();else start()}
 });
-window.addEventListener('pagehide',stop);
+window.addEventListener('pagehide',()=>{stop();for(let cam of [...A.extraCams])removeExtraCamera(cam)});
 init();
 </script>
 </body>
