@@ -216,6 +216,10 @@ button:disabled{opacity:.5;cursor:not-allowed}
     <label>Automatic screenshots <input id="auto" type="checkbox" checked></label>
     <label>Vehicles and objects <input id="objects" type="checkbox" checked></label>
     <label>Faces as Unknown person <input id="faces" type="checkbox" checked></label>
+    <label>Named face recognition <input id="faceId" type="checkbox"></label>
+    <label id="faceBackendUrlRow" hidden>Face backend URL <input id="faceBackendUrl" type="url" placeholder="http://localhost:8788"></label>
+    <small id="faceIdText">Off: faces stay labeled "Unknown person" — no identity matching at all.</small>
+    <button id="manageFaces" type="button" style="margin-top:6px">Manage known faces…</button>
     <label>Plate OCR <input id="plates" type="checkbox" checked></label>
     <label>Automatic subject zoom <input id="zoomOn" type="checkbox" checked></label>
     <label>Device location on captures <input id="location" type="checkbox"></label>
@@ -302,12 +306,13 @@ const A={
   boxes:[],tracks:[],next:1,focus:null,pan:null,events:[],db:null,urls:[],
   objectBusy:false,faceBusy:false,lastObj:0,lastFace:0,lastOCR:0,lastLockOCR:0,
   frames:0,fpsAt:0,lastFrame:0,loc:null,lockRegion:null,zones:[],drawMode:null,dragStart:null,dragCur:null,
-  cameraLabels:{},lastLockPlate:'',lastLockAt:0,watchlist:[],extraCams:[],nextCam:1
+  cameraLabels:{},lastLockPlate:'',lastLockAt:0,watchlist:[],extraCams:[],nextCam:1,
+  faceIdBusy:false,lastFaceId:0
 };
 
 /* ---------- settings persistence ---------- */
 const SETTINGS_KEY='dinocam.settings.v1';
-const settingIds=['auto','objects','faces','plates','zoomOn','location','zoom','sensitivity','ocrQuality','quality','retention','sound','notify','aiMode','backendUrl'];
+const settingIds=['auto','objects','faces','plates','zoomOn','location','zoom','sensitivity','ocrQuality','quality','retention','sound','notify','aiMode','backendUrl','faceId','faceBackendUrl'];
 function loadSettings(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY))||{}}catch(e){return{}}}
 function saveSettings(){
   let s={theme:document.documentElement.dataset.theme==='light'?'light':'dark',zones:A.zones,lockRegion:A.lockRegion,cameraLabels:A.cameraLabels,watchlist:A.watchlist};
@@ -326,6 +331,7 @@ function applySettings(s){
   renderWatchlist();
   $('#locationText').textContent=($('#location').checked?'On':'Off')+'; this is the camera device\'s location, stored only in this browser.';
   aiModeLabel();
+  faceIdLabel();
 }
 function sensitivityLabel(){let n=Number($('#sensitivity').value),t=n<=.4?'Loose (more, noisier)':n>=.7?'Strict (fewer, cleaner)':'Balanced';$('#sensitivityText').textContent=t}
 function aiModeLabel(){
@@ -335,6 +341,13 @@ function aiModeLabel(){
     mode==='local'?'Local only: plate images never leave this device. Used by "Scan an image file" only — the live camera and "Re-scan unread plates" stay local-only regardless of this setting.':
     mode==='ask'?'Ask before sending: "Scan an image file" will ask permission each time before sending that one image to your online backend.':
     'Online AI: "Scan an image file" sends the scanned image to your own backend (below), which forwards it to Plate Recognizer. Still local-only for the live camera and "Re-scan unread plates".';
+}
+function faceIdLabel(){
+  let on=$('#faceId').checked;
+  $('#faceBackendUrlRow').hidden=!on;
+  $('#faceIdText').textContent=on
+    ?'On: each detected face is checked against people you\'ve enrolled with your own local face-recognition server (below). Nothing goes further than that server — see dinocam/vision-server/.'
+    :'Off: faces stay labeled "Unknown person" — no identity matching at all.';
 }
 
 /* ---------- small helpers ---------- */
@@ -626,6 +639,102 @@ function addToWatchlist(){
   toast('Added '+key+' to watchlist.');
 }
 
+/* ---------- named face recognition: entirely optional, entirely local - talks only to a
+   backend the user runs themselves (dinocam/vision-server/), never a cloud service. Off by
+   default; faces stay "Unknown person" unless this is explicitly turned on and enrolled. ---------- */
+async function identifyFaceRequest(blob,backendUrl){
+  let ctrl=new AbortController(),timeout=setTimeout(()=>ctrl.abort(),15000);
+  try{
+    let form=new FormData();form.append('image',blob,'face.jpg');
+    let res=await fetch(backendUrl.replace(/\/$/,'')+'/api/faces/identify',{method:'POST',body:form,signal:ctrl.signal});
+    if(!res.ok)return{error:'HTTP '+res.status};
+    return await res.json();
+  }catch(e){return{error:e.name==='AbortError'?'timed out':e.message}}
+  finally{clearTimeout(timeout)}
+}
+async function identifyFaces(){
+  let backendUrl=$('#faceBackendUrl').value.trim();
+  if(!backendUrl||A.faceIdBusy)return;
+  let faces=A.boxes.filter(x=>x.type==='face').slice(0,2);
+  if(!faces.length)return;
+  A.faceIdBusy=true;
+  try{
+    for(let d of faces){
+      let tr=d.track;if(!tr)continue;
+      // Pad the crop beyond the tracker's tight box - the backend's own detector needs some
+      // margin around the face to get a clean embedding, same as it would from a normal photo.
+      let pad=.3,x=Math.max(0,d.b.x-d.b.w*pad),y=Math.max(0,d.b.y-d.b.h*pad);
+      let w=Math.min(v.videoWidth-x,d.b.w*(1+2*pad)),h=Math.min(v.videoHeight-y,d.b.h*(1+2*pad));
+      if(w<20||h<20)continue;
+      let c=document.createElement('canvas');c.width=Math.round(w);c.height=Math.round(h);
+      c.getContext('2d').drawImage(v,x,y,w,h,0,0,c.width,c.height);
+      let blob=await jpeg(c,.85);if(!blob)continue;
+      let result=await identifyFaceRequest(blob,backendUrl);
+      if(result.error)continue;
+      let match=result.faces&&result.faces[0];
+      tr.faceName=match&&match.name?match.name:null;
+      tr.faceStatus=match?match.status:'unknown';
+    }
+  }catch(e){}
+  finally{A.faceIdBusy=false}
+}
+async function showFaceManager(){
+  let backendUrl=$('#faceBackendUrl').value.trim();
+  if(!backendUrl){alert('Set the face backend URL first (Recognition controls → Named face recognition). Run dinocam/vision-server/ and point this at it, e.g. http://localhost:8788.');return}
+  modal(
+    '<h1>Known faces</h1>'+
+    '<p>People enrolled with your local face-recognition server at <b>'+backendUrl.replace(/</g,'&lt;')+'</b>. Names and face data stay on that device only.</p>'+
+    '<div id="faceList"><p>Loading…</p></div>'+
+    '<h2 style="margin-top:16px">Enroll a new face</h2>'+
+    '<p>Use one clear, front-facing photo of just this person (not a group photo).</p>'+
+    '<div class="actions">'+
+      '<input id="enrollName" type="text" placeholder="Name" style="flex:1;min-width:120px">'+
+      '<input id="enrollFile" type="file" accept="image/jpeg,image/png,image/webp">'+
+    '</div>'+
+    '<div class="actions"><button id="enrollBtn" class="primary">Enroll</button><button id="faceMgrClose">Close</button></div>'+
+    '<small id="enrollStatus"></small>'
+  );
+  $('#faceMgrClose').onclick=closeModal;
+  $('#enrollBtn').onclick=()=>enrollFace(backendUrl);
+  refreshFaceList(backendUrl);
+}
+async function refreshFaceList(backendUrl){
+  let root=$('#faceList');if(!root)return;
+  try{
+    let res=await fetch(backendUrl.replace(/\/$/,'')+'/api/faces/list');
+    if(!res.ok)throw Error('HTTP '+res.status);
+    let data=await res.json();
+    if(!data.people||!data.people.length){root.innerHTML='<p>No one enrolled yet.</p>';return}
+    root.replaceChildren();
+    for(let p of data.people){
+      let row=document.createElement('div');row.className='zonerow';
+      let span=document.createElement('span');span.textContent=p.name+' — '+p.photos+' photo(s)';
+      let btn=document.createElement('button');btn.textContent='Remove';
+      btn.onclick=async()=>{
+        if(!confirm('Remove "'+p.name+'" from known faces?'))return;
+        try{await fetch(backendUrl.replace(/\/$/,'')+'/api/faces/'+encodeURIComponent(p.name),{method:'DELETE'});refreshFaceList(backendUrl)}
+        catch(e){alert('Could not remove: '+e.message)}
+      };
+      row.append(span,btn);root.append(row);
+    }
+  }catch(e){root.innerHTML='<p class="error">Could not reach the face backend at '+backendUrl.replace(/</g,'&lt;')+' — is dinocam/vision-server/ running?</p>'}
+}
+async function enrollFace(backendUrl){
+  let name=$('#enrollName').value.trim(),file=$('#enrollFile').files[0],status=$('#enrollStatus');
+  if(!name){status.textContent='Enter a name first.';return}
+  if(!file){status.textContent='Choose a photo first.';return}
+  status.textContent='Enrolling…';
+  try{
+    let form=new FormData();form.append('image',file);form.append('name',name);
+    let res=await fetch(backendUrl.replace(/\/$/,'')+'/api/faces/enroll',{method:'POST',body:form});
+    let data=await res.json().catch(()=>null);
+    if(!res.ok)throw Error((data&&data.detail)||('HTTP '+res.status));
+    status.textContent='Enrolled '+name+'.';
+    $('#enrollName').value='';$('#enrollFile').value='';
+    refreshFaceList(backendUrl);
+  }catch(e){status.textContent='Could not enroll: '+e.message}
+}
+
 /* ---------- main detection loop ---------- */
 function loop(){
   if(!A.on)return;
@@ -662,12 +771,14 @@ function loop(){
     Promise.resolve(native?A.face.detect(mini):faceapi.detectAllFaces(mini,A.face)).then(found=>{
       if(!A.on)return;
       let items=track(found.map(f=>{let b=native?f.boundingBox:f.box,r=box(b.x*fx,b.y*fy,b.width*fx,b.height*fy);return{type:'face',kind:'face',label:'Unknown person · clarity '+faceQuality(r)+'/100',b:r}}));
+      for(let d of items)if(d.track.faceName)d.label=d.track.faceName+(d.track.faceStatus==='candidate'?' (unverified match)':'')+' · clarity '+faceQuality(d.b)+'/100';
       update('face',items);
       if($('#auto').checked)for(let d of items)if(Date.now()-d.track.saved>18000){d.track.saved=Date.now();capture(d)}
     }).catch(console.warn).finally(()=>A.faceBusy=false);
   }
   if($('#plates').checked&&A.ocr&&!A.ocrBusy&&t-A.lastOCR>3000){A.lastOCR=t;scanPlates()}
   if($('#plates').checked&&A.ocr&&A.lockRegion&&!A.ocrBusy&&t-A.lastLockOCR>4000){A.lastLockOCR=t;scanLockedRegion()}
+  if($('#faceId').checked&&$('#faces').checked&&!A.faceIdBusy&&t-A.lastFaceId>2500){A.lastFaceId=t;identifyFaces()}
   setTimeout(loop,160);
 }
 
@@ -1124,9 +1235,10 @@ async function capture(d){
   let plate=d?.track?.plate||null,isNewType=d?.type&&!A.events.some(e=>e.type===d.type&&Date.now()-e.id<15000);
   let status=d?.type==='vehicle'?(plate?'confirmed':d?.track?.candidate?'candidate':'unreadable'):null;
   let vehicleType=d?.type==='vehicle'?d.kind:null,color=d?.type==='vehicle'?sampleVehicleColor(v,d.b):null;
+  let faceName=d?.type==='face'?(d.track?.faceName||null):null;
   let watchHit=plate?checkWatchlist(plate):null;
   let item={id:Date.now()+Math.random(),confidence:d?.track?.plate?75:null,status,type:d?.type||'manual',track:d?.track?.id||0,
-    bounds:d?.b?{...d.b}:null,plate,candidate:d?.track?.candidate||null,vehicleType,color,watchlist:watchHit?(watchHit.label||watchHit.key):null,
+    bounds:d?.b?{...d.b}:null,plate,candidate:d?.track?.candidate||null,vehicleType,color,faceName,watchlist:watchHit?(watchHit.label||watchHit.key):null,
     loc:$('#location').checked&&A.loc?{...A.loc}:null,
     label:d?.type==='vehicle'?'Possible car · plate: '+(plate||d?.track?.candidate||'not read'):d?.label||'Manual screenshot',image};
   A.events.unshift(item);
@@ -1174,6 +1286,7 @@ function render(){
     if(e.watchlist){let b=document.createElement('span');b.className='badge watchlist';b.textContent='⚠ WATCHLIST: '+e.watchlist;title.append(b)}
     let date=document.createElement('small');date.textContent=new Date(e.id).toLocaleString()+(e.camera?' · '+e.camera:'')+(e.loc?' · '+e.loc.lat+', '+e.loc.lon:'');
     body.append(title,date);
+    if(e.type==='face'&&e.faceName){let attr=document.createElement('small');attr.textContent='Identified: '+e.faceName;attr.style.display='block';body.append(attr)}
     if(e.type==='vehicle'){
       // Fall back to inferring status for events saved before this field existed.
       let status=e.status||(e.plate?'confirmed':e.candidate?'candidate':'unreadable');
@@ -1299,7 +1412,7 @@ function showAbout(){
     '<div class="icon">◉</div><h1>About DinoCamSecurity</h1>'+
     '<p>Everything runs in this browser tab: the camera feed, object/vehicle/face detection, and plate OCR all happen on this device. Nothing is uploaded anywhere.</p>'+
     '<p>Captures are stored locally in this browser\'s IndexedDB and never leave the device unless you export or download them yourself.</p>'+
-    '<p>Face detection labels every face "Unknown person" — this app never attempts to identify who someone is, and it does not analyze footage from public cameras.</p>'+
+    '<p>Face detection labels every face "Unknown person" by default — no identity matching. If you turn on Named face recognition and run your own local face-recognition server (dinocam/vision-server/), faces can be matched against people you enroll yourself; that stays entirely on your own network, never a cloud service. This app never analyzes footage from public cameras.</p>'+
     '<p>Use privacy zones to mask out areas you don\'t want monitored (a sidewalk, a neighbor\'s window), and the plate-region lock to focus OCR on a fixed spot like a driveway gate.</p>'+
     '<p><b>On iPhone/iPad:</b> Safari blocks camera access on a page opened as a local file — this is a security rule, not a permission you can grant. Host this file somewhere with https:// (GitHub Pages is free and works well) and open that URL in Safari instead. Once it works, tap Share → Add to Home Screen for an app-style icon. Running two cameras at once may not work on iOS — most iPhones only allow one active camera stream at a time.</p>'+
     '<div class="actions"><button id="dlApp" class="primary">Download App File</button><button id="aboutClose">Close</button></div>'+
@@ -1470,6 +1583,9 @@ $('#device').onchange=async()=>{if(A.on){stop();await start()}};
 $('#localTab').onclick=()=>tabs(false);$('#publicTab').onclick=()=>tabs(true);
 $('#objects').onchange=()=>{if(!$('#objects').checked){update('vehicle',[]);update('object',[])}saveSettings()};
 $('#faces').onchange=()=>{if(!$('#faces').checked)update('face',[]);else if(A.on&&!A.face)models();saveSettings()};
+$('#faceId').onchange=()=>{faceIdLabel();saveSettings()};
+$('#faceBackendUrl').onchange=saveSettings;
+$('#manageFaces').onclick=showFaceManager;
 $('#plates').onchange=()=>{if($('#plates').checked&&A.on)loadOCR();saveSettings()};
 $('#location').onchange=toggleLocation;
 $('#zoom').oninput=e=>{$('#zoomText').textContent=Number(e.target.value).toFixed(1)+'×';saveSettings()};
