@@ -227,7 +227,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
     <small id="yoloText">Off: vehicle detection for "Scan an image file" uses only the built-in local detector.</small>
     <label>Faces as Unknown person <input id="faces" type="checkbox" checked></label>
     <label>Named face recognition <input id="faceId" type="checkbox"></label>
-    <label id="faceBackendUrlRow" hidden>Face backend URL <input id="faceBackendUrl" type="url" placeholder="http://localhost:8788"></label>
+    <label id="faceBackendUrlRow" hidden>Face backend URL (optional, advanced) <input id="faceBackendUrl" type="url" placeholder="Leave blank to use in-browser recognition"></label>
     <small id="faceIdText">Off: faces stay labeled "Unknown person" — no identity matching at all.</small>
     <button id="manageFaces" type="button" style="margin-top:6px">Manage known faces…</button>
     <label>Plate OCR <input id="plates" type="checkbox" checked></label>
@@ -318,7 +318,7 @@ const A={
   objectBusy:false,faceBusy:false,lastObj:0,lastFace:0,lastOCR:0,lastLockOCR:0,
   frames:0,fpsAt:0,lastFrame:0,loc:null,lockRegion:null,zones:[],drawMode:null,dragStart:null,dragCur:null,
   cameraLabels:{},lastLockPlate:'',lastLockAt:0,watchlist:[],extraCams:[],nextCam:1,
-  faceIdBusy:false,lastFaceId:0
+  faceIdBusy:false,lastFaceId:0,knownFaces:[],faceRecReady:false
 };
 
 /* ---------- settings persistence ---------- */
@@ -326,7 +326,7 @@ const SETTINGS_KEY='dinocam.settings.v1';
 const settingIds=['auto','objects','faces','plates','zoomOn','location','zoom','sensitivity','ocrQuality','quality','retention','sound','notify','aiMode','backendUrl','faceId','faceBackendUrl','yoloOn','yoloBackendUrl'];
 function loadSettings(){try{return JSON.parse(localStorage.getItem(SETTINGS_KEY))||{}}catch(e){return{}}}
 function saveSettings(){
-  let s={theme:document.documentElement.dataset.theme==='light'?'light':'dark',zones:A.zones,lockRegion:A.lockRegion,cameraLabels:A.cameraLabels,watchlist:A.watchlist};
+  let s={theme:document.documentElement.dataset.theme==='light'?'light':'dark',zones:A.zones,lockRegion:A.lockRegion,cameraLabels:A.cameraLabels,watchlist:A.watchlist,knownFaces:A.knownFaces};
   for(let id of settingIds){let el=$('#'+id);if(!el)continue;s[id]=el.type==='checkbox'?el.checked:el.value}
   try{localStorage.setItem(SETTINGS_KEY,JSON.stringify(s))}catch(e){}
 }
@@ -336,6 +336,7 @@ function applySettings(s){
   A.lockRegion=s.lockRegion||null;
   A.cameraLabels=s.cameraLabels||{};
   A.watchlist=Array.isArray(s.watchlist)?s.watchlist:[];
+  A.knownFaces=Array.isArray(s.knownFaces)?s.knownFaces:[];
   $('#zoomText').textContent=Number($('#zoom').value).toFixed(1)+'×';
   sensitivityLabel();
   renderZoneList();
@@ -358,7 +359,7 @@ function faceIdLabel(){
   let on=$('#faceId').checked;
   $('#faceBackendUrlRow').hidden=!on;
   $('#faceIdText').textContent=on
-    ?'On: each detected face is checked against people you\'ve enrolled with your own local face-recognition server (below). Nothing goes further than that server — see dinocam/vision-server/.'
+    ?'On: each detected face is checked against people you\'ve added with "Add known person" — recognized entirely in this browser, no setup needed. Setting a backend URL below is optional, only for the more accurate server-based engine (dinocam/vision-server/).'
     :'Off: faces stay labeled "Unknown person" — no identity matching at all.';
 }
 function yoloLabel(){
@@ -658,9 +659,66 @@ function addToWatchlist(){
   toast('Added '+key+' to watchlist.');
 }
 
-/* ---------- named face recognition: entirely optional, entirely local - talks only to a
-   backend the user runs themselves (dinocam/vision-server/), never a cloud service. Off by
-   default; faces stay "Unknown person" unless this is explicitly turned on and enrolled. ---------- */
+/* ---------- named face recognition: entirely optional. Two engines:
+   1) In-browser (default, zero setup): face-api.js computes a 128-value descriptor for a
+      face directly in this tab; matching is a nearest-descriptor lookup against
+      A.knownFaces, stored only in this browser's localStorage. Nothing is ever sent
+      anywhere - no server, no network call, once the (one-time, cached) model files load.
+   2) Optional server (dinocam/vision-server/ or dinocam/all-in-one-server/): more accurate,
+      but requires running a separate local process and pasting its URL below. Only used
+      when a face backend URL is actually set; the in-browser engine is the default and
+      needs nothing typed at all beyond a name and a photo.
+   Off by default; faces stay "Unknown person" until this is turned on and someone is added
+   via the "Add known person" button. ---------- */
+let faceRecLoadPromise=null;
+function loadFaceRecognition(){
+  if(A.faceRecReady)return Promise.resolve();
+  if(faceRecLoadPromise)return faceRecLoadPromise;
+  faceRecLoadPromise=(async()=>{
+    await load('https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/dist/face-api.js');
+    let base='https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.15/model';
+    await faceapi.nets.tinyFaceDetector.loadFromUri(base);
+    await faceapi.nets.faceLandmark68Net.loadFromUri(base);
+    await faceapi.nets.faceRecognitionNet.loadFromUri(base);
+    A.faceRecReady=true;
+  })();
+  return faceRecLoadPromise;
+}
+// Computes a face descriptor from an image/canvas/video source, or null if no face was
+// found. This is the only place the in-browser recognition model actually runs.
+async function computeFaceDescriptor(source){
+  try{
+    await loadFaceRecognition();
+    let result=await faceapi.detectSingleFace(source,new faceapi.TinyFaceDetectorOptions({inputSize:320,scoreThreshold:.5})).withFaceLandmarks().withFaceDescriptor();
+    return result?Array.from(result.descriptor):null;
+  }catch(e){console.warn('Face descriptor failed',e);return null}
+}
+// Pure/DOM-free matching math - see dinocam/test/face-match.test.js.
+function faceDistance(a,b){
+  let sum=0;for(let i=0;i<a.length;i++){let d=a[i]-b[i];sum+=d*d}
+  return Math.sqrt(sum);
+}
+function matchKnownFace(descriptor,knownFaces,threshold){
+  threshold=threshold==null?.6:threshold;
+  let best=null,bestDist=Infinity;
+  for(let kf of knownFaces){
+    let d=faceDistance(descriptor,kf.descriptor);
+    if(d<bestDist){bestDist=d;best=kf}
+  }
+  if(best&&bestDist<threshold)return{name:best.name,distance:bestDist,status:bestDist<threshold*.7?'confirmed':'candidate'};
+  return null;
+}
+// Enrolls a face against the in-browser engine - no server, no URL. Returns true on success.
+async function enrollFaceLocal(name,source,status){
+  if(!name){status.textContent='Enter a name first.';return false}
+  status.textContent='Looking at the photo…';
+  let descriptor=await computeFaceDescriptor(source);
+  if(!descriptor){status.textContent='No clear face found in that photo — try a closer, front-facing one.';return false}
+  A.knownFaces.push({name,descriptor});
+  saveSettings();
+  status.textContent='Enrolled '+name+'.';
+  return true;
+}
 async function identifyFaceRequest(blob,backendUrl){
   let ctrl=new AbortController(),timeout=setTimeout(()=>ctrl.abort(),15000);
   try{
@@ -673,36 +731,46 @@ async function identifyFaceRequest(blob,backendUrl){
 }
 async function identifyFaces(){
   let backendUrl=$('#faceBackendUrl').value.trim();
-  if(!backendUrl||A.faceIdBusy)return;
+  if(!backendUrl&&!A.knownFaces.length)return; // nothing to match against either way
+  if(A.faceIdBusy)return;
   let faces=A.boxes.filter(x=>x.type==='face').slice(0,2);
   if(!faces.length)return;
   A.faceIdBusy=true;
   try{
     for(let d of faces){
       let tr=d.track;if(!tr)continue;
-      // Pad the crop beyond the tracker's tight box - the backend's own detector needs some
+      // Pad the crop beyond the tracker's tight box - the recognition engine needs some
       // margin around the face to get a clean embedding, same as it would from a normal photo.
       let pad=.3,x=Math.max(0,d.b.x-d.b.w*pad),y=Math.max(0,d.b.y-d.b.h*pad);
       let w=Math.min(v.videoWidth-x,d.b.w*(1+2*pad)),h=Math.min(v.videoHeight-y,d.b.h*(1+2*pad));
       if(w<20||h<20)continue;
       let c=document.createElement('canvas');c.width=Math.round(w);c.height=Math.round(h);
       c.getContext('2d').drawImage(v,x,y,w,h,0,0,c.width,c.height);
-      let blob=await jpeg(c,.85);if(!blob)continue;
-      let result=await identifyFaceRequest(blob,backendUrl);
-      if(result.error)continue;
-      let match=result.faces&&result.faces[0];
-      tr.faceName=match&&match.name?match.name:null;
-      tr.faceStatus=match?match.status:'unknown';
+      if(backendUrl){
+        let blob=await jpeg(c,.85);if(!blob)continue;
+        let result=await identifyFaceRequest(blob,backendUrl);
+        if(result.error)continue;
+        let match=result.faces&&result.faces[0];
+        tr.faceName=match&&match.name?match.name:null;
+        tr.faceStatus=match?match.status:'unknown';
+      }else{
+        let descriptor=await computeFaceDescriptor(c);
+        if(!descriptor)continue;
+        let match=matchKnownFace(descriptor,A.knownFaces);
+        tr.faceName=match?match.name:null;
+        tr.faceStatus=match?match.status:'unknown';
+      }
     }
   }catch(e){}
   finally{A.faceIdBusy=false}
 }
 async function showFaceManager(){
   let backendUrl=$('#faceBackendUrl').value.trim();
-  if(!backendUrl){alert('Set the face backend URL first (Recognition controls → Named face recognition). Run dinocam/vision-server/ and point this at it, e.g. http://localhost:8788.');return}
   modal(
     '<h1>Known faces</h1>'+
-    '<p>People enrolled with your local face-recognition server at <b>'+backendUrl.replace(/</g,'&lt;')+'</b>. Names and face data stay on that device only.</p>'+
+    (backendUrl
+      ?'<p>People enrolled with your local face-recognition server at <b>'+backendUrl.replace(/</g,'&lt;')+'</b>. Names and face data stay on that device only.</p>'
+      :'<p>Recognized entirely in this browser — nothing is sent anywhere.</p>')+
     '<div id="faceList"><p>Loading…</p></div>'+
     '<h2 style="margin-top:16px">Enroll a new face</h2>'+
     '<p>Use one clear, front-facing photo of just this person (not a group photo).</p>'+
@@ -715,13 +783,33 @@ async function showFaceManager(){
   );
   $('#faceMgrClose').onclick=closeModal;
   $('#enrollBtn').onclick=async()=>{
-    let ok=await enrollFace(backendUrl,$('#enrollName').value.trim(),$('#enrollFile').files[0],$('#enrollStatus'));
+    let name=$('#enrollName').value.trim(),file=$('#enrollFile').files[0],status=$('#enrollStatus');
+    let ok;
+    if(backendUrl)ok=await enrollFace(backendUrl,name,file,status);
+    else if(!file){status.textContent='Choose a photo first.';ok=false}
+    else{
+      let canvas=await canvasFromFile(file);
+      if(!canvas){status.textContent='Could not read that image file.';ok=false}
+      else ok=await enrollFaceLocal(name,canvas,status);
+    }
     if(ok){$('#enrollName').value='';$('#enrollFile').value='';refreshFaceList(backendUrl)}
   };
   refreshFaceList(backendUrl);
 }
 async function refreshFaceList(backendUrl){
   let root=$('#faceList');if(!root)return;
+  if(!backendUrl){
+    root.replaceChildren();
+    if(!A.knownFaces.length){root.innerHTML='<p>No one enrolled yet.</p>';return}
+    for(let kf of A.knownFaces){
+      let row=document.createElement('div');row.className='zonerow';
+      let span=document.createElement('span');span.textContent=kf.name;
+      let btn=document.createElement('button');btn.textContent='Remove';
+      btn.onclick=()=>{A.knownFaces=A.knownFaces.filter(x=>x!==kf);saveSettings();refreshFaceList(backendUrl)};
+      row.append(span,btn);root.append(row);
+    }
+    return;
+  }
   try{
     let res=await fetch(backendUrl.replace(/\/$/,'')+'/api/faces/list');
     if(!res.ok)throw Error('HTTP '+res.status);
@@ -739,7 +827,16 @@ async function refreshFaceList(backendUrl){
       };
       row.append(span,btn);root.append(row);
     }
-  }catch(e){root.innerHTML='<p class="error">Could not reach the face backend at '+backendUrl.replace(/</g,'&lt;')+' — is dinocam/vision-server/ running?</p>'}
+  }catch(e){root.innerHTML='<p class="error">Could not reach the face backend at '+backendUrl.replace(/</g,'&lt;')+' — is it running?</p>'}
+}
+// Loads a File into a canvas - shared by the local enrollment path and quick-add-person.
+async function canvasFromFile(file){
+  try{
+    let bitmap=await createImageBitmap(file);
+    let c=document.createElement('canvas');c.width=bitmap.width;c.height=bitmap.height;
+    c.getContext('2d').drawImage(bitmap,0,0);
+    return c;
+  }catch(e){return null}
 }
 // Shared by the full "Manage known faces" modal and the one-click "Add known person"
 // quick-add button below - takes its inputs as arguments (rather than fixed element ids)
@@ -766,7 +863,9 @@ function showQuickAddVehicle(){
     '<h1>🚗 Add known vehicle</h1>'+
     '<p>Adds this plate to your watchlist — stored only in this browser, never shared. A confirmed match triggers an alert.</p>'+
     '<div class="actions">'+
-      '<input id="qvColor" type="text" placeholder="Color (optional)" style="flex:1;min-width:100px">'+
+      '<select id="qvColor" style="flex:1;min-width:100px"><option value="">Color (optional)</option>'+
+        ['Black','White','Silver','Gray','Red','Maroon','Brown','Orange','Yellow','Green','Blue','Purple'].map(c=>'<option>'+c+'</option>').join('')+
+      '</select>'+
       '<input id="qvPlate" type="text" placeholder="Plate (e.g. ABC 123)" style="text-transform:uppercase;flex:1;min-width:120px">'+
     '</div>'+
     '<div class="actions"><button id="qvSave" class="primary">Save</button><button id="qvClose">Cancel</button></div>'+
@@ -785,32 +884,35 @@ function showQuickAddVehicle(){
   };
 }
 function showQuickAddPerson(){
+  // No backend URL needed at all: recognized entirely in this browser by default (see
+  // enrollFaceLocal/computeFaceDescriptor above). A backend URL is only ever used here if
+  // someone deliberately configured the more accurate optional server in Settings.
   let backendUrl=$('#faceBackendUrl').value.trim();
   modal(
     '<h1>🧑 Add known person</h1>'+
-    (backendUrl
-      ?'<p>Enrolled with your local face-recognition server. Use one clear, front-facing photo of just this person, or a live camera frame.</p>'
-      :'<p class="error">Set the face backend URL first (Recognition controls → Named face recognition → run dinocam/vision-server/ or dinocam/all-in-one-server/), then try again.</p>')+
+    '<p>'+(backendUrl?'Enrolled with your local face-recognition server.':'Recognized entirely in this browser — no setup needed.')+' Use one clear, front-facing photo, or a live camera frame.</p>'+
     '<div class="actions">'+
-      '<input id="qpName" type="text" placeholder="Name" style="flex:1;min-width:120px"'+(backendUrl?'':' disabled')+'>'+
-      '<input id="qpFile" type="file" accept="image/jpeg,image/png,image/webp"'+(backendUrl?'':' disabled')+'>'+
+      '<input id="qpName" type="text" placeholder="Name" style="flex:1;min-width:120px">'+
+      '<input id="qpFile" type="file" accept="image/jpeg,image/png,image/webp">'+
     '</div>'+
-    (backendUrl&&A.on?'<div class="actions"><button id="qpUseCamera">Use current camera frame instead</button></div>':'')+
-    '<div class="actions"><button id="qpSave" class="primary"'+(backendUrl?'':' disabled')+'>Save</button><button id="qpClose">Cancel</button></div>'+
+    (A.on?'<div class="actions"><button id="qpUseCamera">Use current camera frame instead</button></div>':'')+
+    '<div class="actions"><button id="qpSave" class="primary">Save</button><button id="qpClose">Cancel</button></div>'+
     '<small id="qpStatus"></small>'
   );
   $('#qpClose').onclick=closeModal;
-  if(!backendUrl)return;
-  let cameraBlob=null;
-  if($('#qpUseCamera'))$('#qpUseCamera').onclick=async()=>{
+  let cameraCanvas=null;
+  if($('#qpUseCamera'))$('#qpUseCamera').onclick=()=>{
     let c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;
     c.getContext('2d').drawImage(v,0,0);
-    cameraBlob=await jpeg(c,.9);
-    $('#qpStatus').textContent=cameraBlob?'Using current camera frame — click Save.':'Could not capture the camera frame.';
+    cameraCanvas=c;
+    $('#qpStatus').textContent='Using current camera frame — click Save.';
   };
   $('#qpSave').onclick=async()=>{
-    let name=$('#qpName').value.trim(),file=$('#qpFile').files[0]||cameraBlob;
-    let ok=await enrollFace(backendUrl,name,file,$('#qpStatus'));
+    let name=$('#qpName').value.trim(),file=$('#qpFile').files[0],status=$('#qpStatus');
+    if(!name){status.textContent='Enter a name first.';return}
+    let canvas=cameraCanvas||(file?await canvasFromFile(file):null);
+    if(!canvas){status.textContent='Choose a photo or use the camera frame first.';return}
+    let ok=backendUrl?await enrollFace(backendUrl,name,await jpeg(canvas,.9),status):await enrollFaceLocal(name,canvas,status);
     if(ok){toast('Enrolled '+name+'.');closeModal()}
   };
 }
@@ -1525,7 +1627,7 @@ function showAbout(){
     '<div class="icon">◉</div><h1>About DinoCamSecurity</h1>'+
     '<p>Everything runs in this browser tab: the camera feed, object/vehicle/face detection, and plate OCR all happen on this device. Nothing is uploaded anywhere.</p>'+
     '<p>Captures are stored locally in this browser\'s IndexedDB and never leave the device unless you export or download them yourself.</p>'+
-    '<p>Face detection labels every face "Unknown person" by default — no identity matching. If you turn on Named face recognition and run your own local face-recognition server (dinocam/vision-server/), faces can be matched against people you enroll yourself; that stays entirely on your own network, never a cloud service. This app never analyzes footage from public cameras.</p>'+
+    '<p>Face detection labels every face "Unknown person" by default — no identity matching. Use "Add known person" to name someone; faces are then matched against people you\'ve added, computed entirely in this browser tab (no server, no setup). An optional local server (dinocam/vision-server/) can be used instead for higher accuracy, but nothing requires it. This app never analyzes footage from public cameras.</p>'+
     '<p>Use privacy zones to mask out areas you don\'t want monitored (a sidewalk, a neighbor\'s window), and the plate-region lock to focus OCR on a fixed spot like a driveway gate.</p>'+
     '<p><b>On iPhone/iPad:</b> Safari blocks camera access on a page opened as a local file — this is a security rule, not a permission you can grant. Host this file somewhere with https:// (GitHub Pages is free and works well) and open that URL in Safari instead. Once it works, tap Share → Add to Home Screen for an app-style icon. Running two cameras at once may not work on iOS — most iPhones only allow one active camera stream at a time.</p>'+
     '<div class="actions"><button id="dlApp" class="primary">Download App File</button><button id="aboutClose">Close</button></div>'+

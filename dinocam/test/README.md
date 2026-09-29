@@ -8,7 +8,12 @@ node plate-pipeline.test.js      # core OCR merge/aggregation logic (15 cases)
 node plate-locator.test.js       # plate-region edge-density locator (7 cases)
 node plate-formats.test.js       # international plate format matrix (32 cases)
 node vehicle-attributes.test.js  # color classifier (12 cases)
+node face-match.test.js          # in-browser face-matching math (10 cases)
 ```
+
+`face-match.test.js` covers the matching logic (faceDistance/matchKnownFace) with synthetic
+descriptor vectors, not the face-api.js model itself — that needs a browser and a CDN this
+sandbox's network policy blocks, so it's exercised by hand in a real browser instead.
 
 Browser end-to-end tests (Playwright, mocked Tesseract/backend since this environment's
 network policy blocks the real OCR CDN) live in the session's scratchpad rather than here,
