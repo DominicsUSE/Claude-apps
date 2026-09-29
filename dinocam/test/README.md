@@ -9,6 +9,7 @@ node plate-locator.test.js       # plate-region edge-density locator (7 cases)
 node plate-formats.test.js       # international plate format matrix (32 cases)
 node vehicle-attributes.test.js  # color classifier (12 cases)
 node face-match.test.js          # in-browser face-matching math (10 cases)
+node watchlist-match.test.js     # fuzzy watchlist matching math (14 cases)
 ```
 
 `face-match.test.js` covers the matching logic (faceDistance/matchKnownFace) with synthetic
