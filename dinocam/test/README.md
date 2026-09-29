@@ -1,0 +1,20 @@
+# Tests
+
+Node unit tests (no browser needed) — each extracts and runs the real code straight out
+of `../index.html`, so they always test the shipped app, not a copy:
+
+```
+node plate-pipeline.test.js      # core OCR merge/aggregation logic (15 cases)
+node plate-locator.test.js       # plate-region edge-density locator (7 cases)
+node plate-formats.test.js       # international plate format matrix (32 cases)
+node vehicle-attributes.test.js  # color classifier (12 cases)
+```
+
+Browser end-to-end tests (Playwright, mocked Tesseract/backend since this environment's
+network policy blocks the real OCR CDN) live in the session's scratchpad rather than here,
+since they need a Chromium binary path specific to the sandbox they were written in —
+ask for them to be re-created if you need to re-run: A022/NTC merge through the real UI,
+error paths (unreadable/corrupt file), settings/zone persistence, online-AI wiring with a
+stubbed backend, multi-camera add/capture/remove, cross-camera track-ID collision, and
+lock-region scoping (a primary-camera-only setting must never leak into an extra camera's
+scan, a rescanned extra-camera capture, or an uploaded test image).

@@ -811,14 +811,18 @@ function preprocessVariants(source,x,y,w,h,profile){
   }
   return out;
 }
-function plateRegions(b,W,H){
+function plateRegions(b,W,H,useLock){
   let r=[];
   const add=(x,y,w,h)=>{x=Math.max(0,x);y=Math.max(0,y);w=Math.min(W-x,w);h=Math.min(H-y,h);if(w>45&&h>12)r.push({x,y,w,h})};
   // Lower vehicle bands where plates normally appear, plus wider fallback bands. These are
   // blind guesses tried only after locatePlateRect() (below) has had a chance to actually
   // find the plate — fixed percentages miss badly on shots taken at an angle or distance
   // that don't match the assumption.
-  if(A.lockRegion)add(A.lockRegion.x*W,A.lockRegion.y*H,A.lockRegion.w*W,A.lockRegion.h*H);
+  // A.lockRegion is a fraction (0-1) of the PRIMARY camera's own frame, drawn by the user
+  // for that specific camera - it must never be applied to an extra camera's frame, a
+  // rescanned image that came from an extra camera, or an unrelated uploaded test image,
+  // since a fraction of a completely different image has no relation to where its plate is.
+  if(useLock&&A.lockRegion)add(A.lockRegion.x*W,A.lockRegion.y*H,A.lockRegion.w*W,A.lockRegion.h*H);
   add(b.x+b.w*.08,b.y+b.h*.48,b.w*.84,b.h*.34);
   add(b.x+b.w*.03,b.y+b.h*.58,b.w*.94,b.h*.30);
   add(b.x,b.y+b.h*.35,b.w,b.h*.48);
@@ -898,7 +902,7 @@ function locatePlateRect(source,b){
 async function ocrVariant(canvas,psm){try{return await A.ocr.recognize(canvas,{tessedit_pageseg_mode:String(psm),preserve_interword_spaces:'1'})}catch(e){return await A.ocr.recognize(canvas)}}
 // Runs the full multi-region, multi-variant OCR pass over one image and returns a tri-state
 // result: {status:'confirmed'|'candidate'|'unreadable', value, key, confidence, votes, source}.
-async function scanPlateImage(source,region,exact){
+async function scanPlateImage(source,region,exact,useLock){
   if(!A.ocr)return{status:'unreadable',value:null,key:null,confidence:0,votes:0,source:null};
   let W=source.videoWidth||source.naturalWidth||source.width,H=source.videoHeight||source.naturalHeight||source.height;
   if(!W||!H)return{status:'unreadable',value:null,key:null,confidence:0,votes:0,source:null};
@@ -907,7 +911,7 @@ async function scanPlateImage(source,region,exact){
   if(exact)regions=[b];
   else if(region){
     let located=locatePlateRect(source,b); // try to actually find the plate before falling back to blind bands
-    regions=[...(located?[located]:[]),...plateRegions(b,W,H)];
+    regions=[...(located?[located]:[]),...plateRegions(b,W,H,useLock)];
   }else regions=[{x:0,y:0,w:W,h:H}];
   regions=regions.slice(0,profile.maxRegions);
   let passCandidateLists=[];
@@ -933,7 +937,7 @@ async function scanPlates(){
   if(A.ocrBusy||!A.ocr)return;A.ocrBusy=true;
   try{
     for(let d of A.boxes.filter(x=>x.type==='vehicle').slice(0,2)){
-      let result=await scanPlateImage(v,d.b);
+      let result=await scanPlateImage(v,d.b,false,true);
       if(result.status==='unreadable')continue;
       let tr=d.track,k=result.key,pv=tr.plateVotes.get(k)||{n:0,last:'',score:0};
       pv.n++;pv.last=result.value;pv.score+=(result.confidence||0)+(result.status==='confirmed'?15:0);tr.plateVotes.set(k,pv);
@@ -997,7 +1001,7 @@ async function scanSaved(){
       try{
         let img=await createImageBitmap(e.image);
         try{
-          let result=await scanPlateImage(img,e.bounds);
+          let result=await scanPlateImage(img,e.bounds,false,!e.camera&&e.source!=='file-scan');
           e.status=result.status;
           if(result.status==='unreadable'){unread++}
           else{
