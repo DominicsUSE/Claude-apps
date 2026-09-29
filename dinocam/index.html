@@ -938,18 +938,24 @@ async function scanPlates(){
       let tr=d.track,k=result.key,pv=tr.plateVotes.get(k)||{n:0,last:'',score:0};
       pv.n++;pv.last=result.value;pv.score+=(result.confidence||0)+(result.status==='confirmed'?15:0);tr.plateVotes.set(k,pv);
       let best=[...tr.plateVotes].sort((a,b)=>(b[1].n*70+b[1].score)-(a[1].n*70+a[1].score))[0];
-      let wasUnread=!tr.plate;
+      let prevPlate=tr.plate;
       if(best){tr.candidate=best[1].last;if(best[1].n>=3&&best[1].score/best[1].n>=55)tr.plate=best[1].last}
-      for(let e of A.events.filter(e=>e.track===tr.id&&!e.manual)){
+      // !e.camera scopes this to the primary camera's own events: each extra camera runs
+      // its own independent track-id counter starting at 1, so a bare track-id match alone
+      // could collide with an unrelated capture from a different camera.
+      for(let e of A.events.filter(e=>e.track===tr.id&&!e.camera&&!e.manual)){
         e.candidate=tr.candidate;e.status=tr.plate?'confirmed':'candidate';if(tr.plate)e.plate=tr.plate;
         e.confidence=best?Math.round(best[1].score/best[1].n):result.confidence;
         e.label='Possible car · plate: '+(e.plate||'candidate '+e.candidate);
         if(A.db)await dbCall('readwrite',store=>store.put(e));
       }
-      if(wasUnread&&tr.plate){
+      // Re-check the watchlist any time the confirmed value actually changes, not just on
+      // the first confirmation - a later read can correct an earlier misread to a value
+      // that IS on the watchlist, and that must not be missed.
+      if(tr.plate&&tr.plate!==prevPlate){
         let hit=checkWatchlist(tr.plate);
-        if(hit)for(let e of A.events.filter(e=>e.track===tr.id))e.watchlist=hit.label||hit.key;
-        else{beep();notify('Plate read',tr.plate);toast('Plate confirmed: '+tr.plate)}
+        if(hit)for(let e of A.events.filter(e=>e.track===tr.id&&!e.camera))e.watchlist=hit.label||hit.key;
+        else if(!prevPlate){beep();notify('Plate read',tr.plate);toast('Plate confirmed: '+tr.plate)}
       }
       render();
     }
@@ -1395,12 +1401,29 @@ function runCamLoop(cam){
       let vb=cam.boxes.find(d=>vehicle(d.kind));
       if(vb){
         cam.ocrBusy=true;
-        scanPlateImage(cam.video,vb.b).then(result=>{
+        scanPlateImage(cam.video,vb.b).then(async result=>{
           if(result.status==='unreadable')return;
           let tr=vb.track,k=result.key,pv=tr.plateVotes.get(k)||{n:0,last:'',score:0};
           pv.n++;pv.last=result.value;pv.score+=(result.confidence||0)+(result.status==='confirmed'?15:0);tr.plateVotes.set(k,pv);
           let best=[...tr.plateVotes].sort((a,b)=>(b[1].n*70+b[1].score)-(a[1].n*70+a[1].score))[0];
+          let prevPlate=tr.plate;
           if(best){tr.candidate=best[1].last;if(best[1].n>=3&&best[1].score/best[1].n>=55)tr.plate=best[1].last}
+          // Propagate to any already-saved capture for this track, the same way the primary
+          // camera's scanPlates() does - otherwise a plate that only confirms after the
+          // initial capture (the normal case) would stay stuck at "candidate" forever.
+          let matching=A.events.filter(e=>e.track===tr.id&&e.camera===cam.name&&!e.manual);
+          for(let e of matching){
+            e.candidate=tr.candidate;e.status=tr.plate?'confirmed':'candidate';if(tr.plate)e.plate=tr.plate;
+            e.confidence=Math.round(best[1].score/best[1].n);
+            e.label='Possible car · plate: '+(e.plate||'candidate '+e.candidate)+' ('+cam.name+')';
+            if(A.db)try{await dbCall('readwrite',store=>store.put(e))}catch(er){}
+          }
+          if(tr.plate&&tr.plate!==prevPlate){
+            let hit=checkWatchlist(tr.plate);
+            if(hit)for(let e of matching)e.watchlist=hit.label||hit.key;
+            else if(!prevPlate)toast('Plate confirmed ('+cam.name+'): '+tr.plate);
+          }
+          if(matching.length)render();
         }).catch(console.warn).finally(()=>{cam.ocrBusy=false;cam.lastOCR=performance.now()});
       }
     }
