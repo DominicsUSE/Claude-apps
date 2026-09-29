@@ -45,7 +45,7 @@
 @media(prefers-color-scheme:light){:root:not([data-theme="dark"]){color-scheme:light}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg-0) radial-gradient(circle at 0 0,var(--bg-1),var(--bg-0) 44%);color:var(--text);font:14px/1.5 system-ui,Segoe UI,sans-serif}
-main{max-width:1380px;margin:auto;padding:18px}
+main{max-width:1380px;margin:auto;padding:calc(18px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right)) calc(18px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left))}
 header,.row,.actions{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .actions{justify-content:flex-start;margin:10px 0}
 .brand{display:flex;gap:12px;align-items:center}
@@ -461,7 +461,16 @@ function renameDevice(){
 }
 async function start(){
   if(A.on)return;
-  if(!navigator.mediaDevices?.getUserMedia){say('Camera access is blocked. Try Edge or Chrome and allow permission.');return}
+  if(!navigator.mediaDevices?.getUserMedia){
+    // navigator.mediaDevices is entirely undefined (not just denied) when the page is not
+    // a "secure context" - almost always because it was opened as a local file:// page
+    // rather than served over https. Switching browsers does not fix this on iOS, since
+    // every iOS browser uses the same engine and the same secure-context rule - the app
+    // has to be hosted over https (or opened via localhost) instead.
+    if(location.protocol==='file:')say('Camera needs this page served over https:// to work (not opened as a local file) - this is an iPhone/Safari security rule, not a permission you can grant. See About for how to host it.');
+    else say('This browser does not support camera access on this page.');
+    return;
+  }
   $('#start').disabled=true;
   try{
     stage(2,'Requesting camera permission…');
@@ -1275,6 +1284,7 @@ function showAbout(){
     '<p>Captures are stored locally in this browser\'s IndexedDB and never leave the device unless you export or download them yourself.</p>'+
     '<p>Face detection labels every face "Unknown person" — this app never attempts to identify who someone is, and it does not analyze footage from public cameras.</p>'+
     '<p>Use privacy zones to mask out areas you don\'t want monitored (a sidewalk, a neighbor\'s window), and the plate-region lock to focus OCR on a fixed spot like a driveway gate.</p>'+
+    '<p><b>On iPhone/iPad:</b> Safari blocks camera access on a page opened as a local file — this is a security rule, not a permission you can grant. Host this file somewhere with https:// (GitHub Pages is free and works well) and open that URL in Safari instead. Once it works, tap Share → Add to Home Screen for an app-style icon. Running two cameras at once may not work on iOS — most iPhones only allow one active camera stream at a time.</p>'+
     '<div class="actions"><button id="dlApp" class="primary">Download App File</button><button id="aboutClose">Close</button></div>'+
     '<small>Downloading saves this whole app as one HTML file you can open offline, on any device, without a network connection.</small>'
   );
