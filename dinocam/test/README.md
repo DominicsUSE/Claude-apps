@@ -90,3 +90,38 @@ minute and a half, and is checked into this suite so `node --test` runs it every
 because ~15-20k well-distributed samples already covers a space this small thoroughly.
 Result: zero failures, reproduced on an independent re-run. That's the honest outcome of
 this round, not a shortfall — the codebase held up identically at 100x scale.
+
+## Real-photo end-to-end test (not checked in — see below)
+
+All the rounds above test the app's own logic with synthetic or randomized inputs. A
+separate, one-off test ran the real, unmodified "Scan an image file" feature — real
+Tesseract.js OCR, real coco-ssd object detection with its actual pretrained weights, driven
+through the real UI (file input → change event → result modal), no mocked detection behavior
+at all — against five real photographs of real vehicles and license plates from
+`openalpr/benchmarks` (an AGPLv3 dataset published specifically for testing ANPR software;
+images were used transiently for this test and are not bundled with the app).
+
+It found one real, significant bug: `preprocessVariants()` scaled a region up by the OCR
+profile's fixed multiplier (2-4x) with no upper bound. That's fine for the small plate crops
+this was designed around, but a real photo's vehicle bounding box — or the whole-image
+fallback scan "Scan an image file" always runs as its last attempt — can already be
+thousands of pixels wide, and multiplying that further produced multi-megapixel canvases
+that turned a single file scan into a multi-minute (95+ seconds, still not finished when
+cut off) Tesseract run instead of the roughly-instant experience the UI implies. Fixed by
+capping the scaled canvas to a maximum dimension (1400px) regardless of the multiplier —
+verified this brought the worst case (a 2048x1536 photo, 3 detected vehicles) down to ~25
+seconds, and confirmed zero regressions across the full existing suite afterward.
+
+Separately, and left as an honest finding rather than "fixed": plate-text accuracy on these
+real, unconstrained photos was 0/5 exact matches. A couple were close (`NWA 56660` vs.
+expected `WA56660` — the real plate text is right there as an exact substring), but this is
+a genuine limitation of generic Tesseract OCR run without plate-specific training on photos
+with real-world angle, lighting, and background clutter — not a bug with a small fix, and
+not what "training" means for this app (see the `fuzz-1000.test.js` note above). The
+synthetic `accuracy-benchmark/` suite, which controls for exactly those variables, still
+reads plates correctly — that gap between clean and real-world accuracy is the honest
+takeaway of this round, not a contradiction.
+
+This test isn't checked into the suite (it downloads ~65MB of real model weights and clones
+an external image dataset, neither of which belongs in this repo) — ask for it to be
+re-created if you need to re-run it.

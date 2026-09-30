@@ -1319,8 +1319,16 @@ function ocrProfile(){
 }
 function preprocessVariants(source,x,y,w,h,profile){
   let out=[];
+  // Cap the scaled-up canvas size regardless of the profile's multiplier. The scale factors
+  // exist to help OCR on small plate crops (a few hundred px wide) - but a real photo's vehicle
+  // box, or the whole-image fallback scan below, can already be thousands of px wide, and
+  // blindly multiplying that by 2-4x produces a multi-megapixel canvas that turns one file scan
+  // into a multi-minute Tesseract run. Found by testing against real (not synthetic) photos.
+  const MAX_OCR_DIM=1400;
   for(let scale of profile.scales)for(let filter of profile.filters){
-    let c=document.createElement('canvas');c.width=Math.round(w*scale);c.height=Math.round(h*scale);
+    let cw=Math.round(w*scale),ch=Math.round(h*scale);
+    if(Math.max(cw,ch)>MAX_OCR_DIM){let f=MAX_OCR_DIM/Math.max(cw,ch);cw=Math.round(cw*f);ch=Math.round(ch*f)}
+    let c=document.createElement('canvas');c.width=cw;c.height=ch;
     let g=c.getContext('2d');g.filter=filter;g.imageSmoothingEnabled=true;g.imageSmoothingQuality='high';
     g.drawImage(source,x,y,w,h,0,0,c.width,c.height);out.push(c);
   }
