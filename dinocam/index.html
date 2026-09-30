@@ -1194,7 +1194,7 @@ function loop(){
         // brand-new, instantly-eligible-to-save object every ~700ms.
         if($('#auto').checked&&d.track.hits>=2&&Date.now()-d.track.saved>18000){
           d.track.saved=Date.now();
-          if(vehicle(d.kind)){let id=d.track.id;setTimeout(()=>{let x=A.boxes.find(z=>z.type==='vehicle'&&z.track?.id===id);if(A.on&&x)capture(x)},(A.ocr||A.plateModel)?700:2800)}
+          if(vehicle(d.kind)){let id=d.track.id;setTimeout(()=>{let x=A.boxes.find(z=>z.type==='vehicle'&&z.track?.id===id);if(A.on&&x)capture(x)},(A.ocr||A.plateModel)?400:2800)}
           else capture(d);
         }
       }
@@ -1238,11 +1238,12 @@ function loop(){
       }
     }).catch(console.warn).finally(()=>A.postureBusy=false);
   }
-  // 500ms (was 3000ms, then 1200ms): safe now that a plate-model read is ~30-90ms, vs.
-  // Tesseract's much slower multi-variant scan the old interval was sized around. This is a
-  // floor, not a guarantee - A.ocrBusy already blocks overlapping scans, so a slower fallback
-  // read (Tesseract, no model loaded) still naturally paces itself at its own real cost.
-  if($('#plates').checked&&(A.ocr||A.plateModel)&&!A.ocrBusy&&t-A.lastOCR>500){A.lastOCR=t;scanPlates()}
+  // 200ms (was 3000ms, then 1200ms, then 500ms): A.ocrBusy already blocks overlapping scans,
+  // so this interval was never the real pacing mechanism once it dropped below actual scan
+  // cost - a plate-model read is ~30-90ms, so 500ms was still mostly idle wait between scans,
+  // not computation. This is a floor, not a guarantee: a slower fallback read (Tesseract, no
+  // model loaded) still naturally paces itself at its own real cost regardless of this number.
+  if($('#plates').checked&&(A.ocr||A.plateModel)&&!A.ocrBusy&&t-A.lastOCR>200){A.lastOCR=t;scanPlates()}
   if($('#plates').checked&&(A.ocr||A.plateModel)&&A.lockRegion&&!A.ocrBusy&&t-A.lastLockOCR>4000){A.lastLockOCR=t;scanLockedRegion()}
   if($('#faceId').checked&&$('#faces').checked&&!A.faceIdBusy&&t-A.lastFaceId>2500){A.lastFaceId=t;identifyFaces()}
   setTimeout(loop,160);
@@ -2133,7 +2134,7 @@ function runCamLoop(cam){
         if($('#auto').checked)for(let d of items)if(vehicle(d.kind)&&d.track.hits>=2&&Date.now()-d.track.saved>18000){
           d.track.saved=Date.now();
           let tid=d.track.id;
-          setTimeout(()=>{let x=cam.objBoxes.find(z=>z.track?.id===tid);if(cam.on&&x)captureFromCam(cam,x,W,H)},(A.ocr||A.plateModel)?700:2800);
+          setTimeout(()=>{let x=cam.objBoxes.find(z=>z.track?.id===tid);if(cam.on&&x)captureFromCam(cam,x,W,H)},(A.ocr||A.plateModel)?400:2800);
         }
       }).catch(console.warn).finally(()=>cam.busy=false);
     }
@@ -2179,7 +2180,7 @@ function runCamLoop(cam){
         }
       }).catch(console.warn).finally(()=>cam.postureBusy=false);
     }
-    if($('#plates').checked&&(A.ocr||A.plateModel)&&!cam.ocrBusy&&now-cam.lastOCR>500){
+    if($('#plates').checked&&(A.ocr||A.plateModel)&&!cam.ocrBusy&&now-cam.lastOCR>200){
       let vb=cam.boxes.find(d=>vehicle(d.kind));
       if(vb){
         cam.ocrBusy=true;

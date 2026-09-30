@@ -213,15 +213,17 @@ confirmed-status on their very first call - see the verification script referenc
 `scanPlates()` and the equivalent extra-camera loop trust a "confirmed" single read
 immediately (`sawConfirmed`), the same way the locked-region path always did, instead of
 always waiting for 3 repeated votes. The scan interval also dropped from 3000ms/3500ms to
-500ms (an intermediate 1200ms shipped briefly first, then tightened further on request), since
-a plate-model read (~30-90ms) is far cheaper than the old Tesseract multi-variant scan that
-interval was sized around - it's a floor, not a guarantee, since `A.ocrBusy` already blocks
-overlapping scans, so a slower fallback read (Tesseract, no model loaded) still naturally
-paces itself at its own real cost regardless of this number. The 3-vote path still exists as a
-fallback for the rarer case where a read only ever comes back "candidate" (lower confidence) -
-it just no longer gates the common case. The initial-capture delay for a newly-seen vehicle
-(so the first saved capture already carries a plate read instead of saving blank-then-
-updating) tightened the same way, 1400ms -> 700ms.
+200ms across three rounds (1200ms, then 500ms, then 200ms on request), since a plate-model
+read (~30-90ms) is far cheaper than the old Tesseract multi-variant scan that interval was
+sized around - it's a floor, not a guarantee, since `A.ocrBusy` already blocks overlapping
+scans. That's also why 200ms is a real stopping point, not just a smaller arbitrary number:
+below actual per-scan cost, the busy-gate becomes the only thing pacing scans regardless of
+what this constant says, so shrinking it further has no effect (a slower fallback read -
+Tesseract, no model loaded - already paces itself at its own real cost the same way). The
+3-vote path still exists as a fallback for the rarer case where a read only ever comes back
+"candidate" (lower confidence) - it just no longer gates the common case. The initial-capture
+delay for a newly-seen vehicle (so the first saved capture already carries a plate read
+instead of saving blank-then-updating) tightened the same way, 1400ms -> 700ms -> 400ms.
 
 Worth being explicit about a limit here: this is as fast as a real, in-browser neural-network
 read can go. A single model inference already measures ~30-90ms - that's actual computation,
