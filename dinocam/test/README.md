@@ -15,6 +15,7 @@ node fuzz-1000.test.js           # randomized property-based fuzzing, ~19,000 ch
 node fuzz-560-plate-pipeline.test.js  # 560 randomized OCR-pipeline runs, 3275 checks
 node fuzz-10000.test.js          # 10,000 randomized cases across 6 functions, 15,021 checks
 node fuzz-1000000.test.js        # 1,000,000 randomized cases across the same 6 functions, ~1.7M checks (~100s)
+node plate-model-decode.test.js  # plate-specific ONNX model's output decoder (9 cases)
 ```
 
 `face-match.test.js` covers the matching logic (faceDistance/matchKnownFace) with synthetic
@@ -125,3 +126,55 @@ takeaway of this round, not a contradiction.
 This test isn't checked into the suite (it downloads ~65MB of real model weights and clones
 an external image dataset, neither of which belongs in this repo) — ask for it to be
 re-created if you need to re-run it.
+
+## Plate-specific OCR model (real, purpose-trained, not generic OCR)
+
+The 0/5 real-world accuracy result above was a genuine ceiling for generic Tesseract, not a
+tuning problem — so instead of tuning it further, the app now also carries a real,
+purpose-trained license-plate model: `models/plate-ocr/cct_xs_v2_global.onnx`, from
+[ankandrew/fast-plate-ocr](https://github.com/ankandrew/fast-plate-ocr) (MIT licensed code
+*and* MIT licensed weights, no non-commercial restriction), a Compact Convolutional
+Transformer trained on 220k+ real plates across 65+ countries. It runs fully client-side via
+ONNX Runtime Web — no image leaves the device to use it, same as everything else in this
+app. See `models/plate-ocr/README.md` for exactly what it is and how it's invoked.
+
+Two other candidates were evaluated and rejected first, both measured rather than assumed:
+
+- **OpenALPR's own Tesseract-compatible `.traineddata` files** (`leu.traineddata` etc.) looked
+  like a zero-architecture-change win — the app already runs Tesseract, so this would've just
+  been swapping the language model. Measured against the same 10 real photos (in the correct
+  legacy engine mode, once that was worked out): **0/10 exact**, actually *worse* than the
+  app's existing generic engine's 1/10, because it's a circa-2013 segmentation-based
+  classifier that picks up spurious characters from plate borders and frames without the
+  contextual awareness a modern LSTM model has. It's also AGPLv3-licensed, which would have
+  obligated releasing this app's own source under AGPL-compatible terms to distribute it —
+  a real cost for a model that, measured, didn't even help.
+- **OpenIPC's `lpr-wasm`** (also a real in-browser ONNX plate reader) has MIT-licensed code
+  but **CC BY-NC 4.0 (non-commercial-only) weights** — ruled out on licensing alone, without
+  needing to measure its accuracy.
+
+Measured on the same 10 real, unconstrained photos as above (ground-truth plate rectangle,
+isolating OCR accuracy from region detection — same methodology as `accuracy-benchmark/`):
+
+| | exact matches |
+|---|---|
+| Generic Tesseract `eng` (previous behavior) | 1/10 |
+| OpenALPR `leu.traineddata` (rejected — see above) | 0/10 |
+| **`cct_xs_v2_global.onnx` (shipped)** | **8/10** |
+
+The two misses (`OY09FEU` vs `OYO9FEU`, `W0BVWMK4` vs `WOBVWMK4`) are both single-character
+O/0 confusions — a genuinely ambiguous glyph in most fonts, reported at high confidence
+(95-100%) rather than hedged, which is honest: the model isn't uncertain, the character
+genuinely looks like a zero. Inference is fast (26-93ms per region after the model loads) —
+comparable to or faster than the Tesseract path it's preferred over.
+
+Integration is additive, not a replacement: `scanPlateImage()` tries the ONNX model first
+(when loaded) and falls through to the existing, unmodified Tesseract pipeline if it isn't
+available (older environment, asset failed to load) or finds nothing plausible — so every
+existing test and code path above still exercises the Tesseract fallback exactly as before.
+`plate-model-decode.test.js` covers the new pure decode step (argmax + trailing-pad-strip
+over the model's already-softmaxed output — an early version of this code mistakenly
+re-applied softmax to already-softmaxed values, which silently flattened every confidence
+down to near-uniform noise; caught by comparing the standalone research harness's raw output
+values against what the shipped code reported, not by the unit tests alone, since the tests'
+synthetic inputs were written to match the same wrong assumption until that was found too).

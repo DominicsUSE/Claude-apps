@@ -12,4 +12,11 @@ fs.copyFileSync(path.join(root, 'index.html'), path.join(__dirname, 'app', 'inde
 fs.copyFileSync(path.join(root, 'windows', 'dinosaur.ico'), path.join(__dirname, 'app', 'dinosaur.ico'));
 fs.copyFileSync(path.join(root, 'windows', 'dinosaur.ico'), path.join(__dirname, 'build', 'icon.ico'));
 
-console.log('Copied ../index.html and ../windows/dinosaur.ico into electron/app and electron/build.');
+// The plate-specific OCR model index.html loads via a relative <script src> (models/plate-ocr/...)
+fs.mkdirSync(path.join(__dirname, 'app', 'models', 'plate-ocr'), { recursive: true });
+fs.copyFileSync(
+  path.join(root, 'models', 'plate-ocr', 'model-data.js'),
+  path.join(__dirname, 'app', 'models', 'plate-ocr', 'model-data.js')
+);
+
+console.log('Copied ../index.html, ../windows/dinosaur.ico, and ../models/plate-ocr into electron/app and electron/build.');

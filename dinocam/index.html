@@ -562,6 +562,61 @@ async function loadOCR(){
     say('Plate OCR ready');
   }catch(e){say('Plate OCR unavailable; other detection continues')}
   finally{A.loadingOCR=false}
+  loadPlateModel(); // a real plate-trained model, not a required dependency - Tesseract above already works without it
+}
+// A purpose-trained license-plate reader (ankandrew/fast-plate-ocr's cct_xs_v2_global, MIT
+// licensed, trained on 220k+ real plates across 65+ countries), run fully client-side via ONNX
+// Runtime Web. Measured against real photos this reads plates far more reliably than the
+// generic document-OCR engine above (Tesseract) - see test/README.md for the comparison. It's
+// optional and additive: scanPlateImage() below prefers it when loaded, and falls back to the
+// existing Tesseract pipeline untouched if it isn't (older browser, asset failed to load, etc).
+const PLATE_MODEL_ALPHABET='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_',PLATE_MODEL_SLOTS=10,PLATE_MODEL_W=128,PLATE_MODEL_H=64,PLATE_MODEL_PAD='_';
+async function loadPlateModel(){
+  if(A.plateModel||A.loadingPlateModel)return;A.loadingPlateModel=true;
+  try{
+    await load('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort.min.js');
+    ort.env.wasm.wasmPaths='https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/'; // pin explicitly, same as every other CDN dependency in this file
+    // Loaded as a <script> (defines window.PLATE_MODEL_B64) rather than fetched: a file://-loaded
+    // app (Electron's default) can't fetch() its own sibling files, but <script src> works there.
+    await load('models/plate-ocr/model-data.js');
+    let bin=Uint8Array.from(atob(window.PLATE_MODEL_B64),c=>c.charCodeAt(0));
+    A.plateModel=await ort.InferenceSession.create(bin.buffer,{executionProviders:['wasm']});
+  }catch(e){console.warn('Plate-specific OCR model unavailable; falling back to generic OCR only',e)}
+  finally{A.loadingPlateModel=false}
+}
+// Decodes the model's (maxSlots*alphabet.length) flat logit array into a plate string + 0-100
+// confidence. Pure and testable - see test/plate-model-decode.test.js.
+function decodePlateOutput(logits,alphabet,maxSlots,padChar){
+  let vocab=alphabet.length;
+  if(!logits||typeof logits.length!=='number'||logits.length<maxSlots*vocab)return{value:'',confidence:0};
+  let chars='',probs=[];
+  for(let slot=0;slot<maxSlots;slot++){
+    // The model's own output is already softmaxed per slot (each slot's `vocab` values sum to
+    // ~1) - it's not raw logits, so the argmax value itself IS the class probability. Applying
+    // softmax again here would flatten an already-confident distribution toward uniform.
+    let best=-Infinity,bestIdx=0;
+    for(let v=0;v<vocab;v++){let val=logits[slot*vocab+v];if(val>best){best=val;bestIdx=v}}
+    chars+=alphabet[bestIdx];probs.push(best);
+  }
+  let end=chars.length;while(end>0&&chars[end-1]===padChar)end--;
+  let value=chars.slice(0,end),used=probs.slice(0,end);
+  let confidence=used.length?Math.round(100*used.reduce((a,b)=>a+b,0)/used.length):0;
+  return{value,confidence};
+}
+// Crops/resizes exactly like the upstream Python pipeline (stretch to 128x64 RGB, no aspect-
+// ratio padding), runs the model, and returns a scanPlateImage-shaped tri-state result.
+async function runPlateModel(source,x,y,w,h){
+  if(!A.plateModel)return null;
+  let c=document.createElement('canvas');c.width=PLATE_MODEL_W;c.height=PLATE_MODEL_H;
+  let g=c.getContext('2d');g.drawImage(source,x,y,w,h,0,0,PLATE_MODEL_W,PLATE_MODEL_H);
+  let{data}=g.getImageData(0,0,PLATE_MODEL_W,PLATE_MODEL_H);
+  let rgb=new Uint8Array(PLATE_MODEL_W*PLATE_MODEL_H*3);
+  for(let i=0,j=0;i<data.length;i+=4,j+=3){rgb[j]=data[i];rgb[j+1]=data[i+1];rgb[j+2]=data[i+2]}
+  let tensor=new ort.Tensor('uint8',rgb,[1,PLATE_MODEL_H,PLATE_MODEL_W,3]);
+  let outputs=await A.plateModel.run({input:tensor});
+  let{value,confidence}=decodePlateOutput(outputs.plate.data,PLATE_MODEL_ALPHABET,PLATE_MODEL_SLOTS,PLATE_MODEL_PAD);
+  if(!value||!isPlausibleKey(plateKey(value)))return{status:'unreadable',value:null,key:null,confidence:0,votes:0,source:null};
+  return{status:confidence>=70?'confirmed':'candidate',value,key:plateKey(value),confidence,votes:1,source:'plate-model'};
 }
 
 /* ---------- camera devices ---------- */
@@ -1426,7 +1481,7 @@ async function ocrVariant(canvas,psm){try{return await A.ocr.recognize(canvas,{t
 // Runs the full multi-region, multi-variant OCR pass over one image and returns a tri-state
 // result: {status:'confirmed'|'candidate'|'unreadable', value, key, confidence, votes, source}.
 async function scanPlateImage(source,region,exact,useLock){
-  if(!A.ocr)return{status:'unreadable',value:null,key:null,confidence:0,votes:0,source:null};
+  if(!A.ocr&&!A.plateModel)return{status:'unreadable',value:null,key:null,confidence:0,votes:0,source:null};
   let W=source.videoWidth||source.naturalWidth||source.width,H=source.videoHeight||source.naturalHeight||source.height;
   if(!W||!H)return{status:'unreadable',value:null,key:null,confidence:0,votes:0,source:null};
   let profile=ocrProfile(),b=region||{x:0,y:0,w:W,h:H};
@@ -1437,6 +1492,19 @@ async function scanPlateImage(source,region,exact,useLock){
     regions=[...(located?[located]:[]),...plateRegions(b,W,H,useLock)];
   }else regions=[{x:0,y:0,w:W,h:H}];
   regions=regions.slice(0,profile.maxRegions);
+  // Prefer the plate-trained model when it's loaded - one pass per region, no preprocessing
+  // variants needed (unlike Tesseract below, it wasn't designed for). Falls through to Tesseract
+  // untouched if the model isn't available or none of its reads look like a plausible plate.
+  if(A.plateModel){
+    let best=null;
+    for(let rr of regions){
+      let r=await runPlateModel(source,rr.x,rr.y,rr.w,rr.h);
+      if(r&&r.status!=='unreadable'&&(!best||r.confidence>best.confidence))best=r;
+      if(best&&best.status==='confirmed')break;
+    }
+    if(best)return best;
+  }
+  if(!A.ocr)return{status:'unreadable',value:null,key:null,confidence:0,votes:0,source:null};
   let passCandidateLists=[];
   regionLoop: for(let rr of regions){
     for(let canvas of preprocessVariants(source,rr.x,rr.y,rr.w,rr.h,profile)){
