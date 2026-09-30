@@ -859,7 +859,9 @@ function matchKnownFace(descriptor,knownFaces,threshold){
 function classifyPosture(keypoints,minScore){
   minScore=minScore==null?.3:minScore;
   let byName={};
-  for(let k of keypoints||[])if((k.score||0)>=minScore&&k.name)byName[k.name]=k;
+  // Array.isArray, not just `||[]` - a truthy non-array (unexpected pose-detection output,
+  // or any future caller passing something malformed) must degrade to 'unknown', not throw.
+  for(let k of Array.isArray(keypoints)?keypoints:[])if(k&&(k.score||0)>=minScore&&k.name)byName[k.name]=k;
   let pts=Object.values(byName);
   if(pts.length<4)return{status:'unknown',confidence:0};
   let xs=pts.map(p=>p.x),ys=pts.map(p=>p.y);
