@@ -17,6 +17,7 @@ node fuzz-10000.test.js          # 10,000 randomized cases across 6 functions, 1
 node fuzz-1000000.test.js        # 1,000,000 randomized cases across the same 6 functions, ~1.7M checks (~100s)
 node plate-model-decode.test.js  # plate-specific ONNX model's output decoder (9 cases)
 node fuzz-plate-model-decode.test.js  # 1,000,000 randomized cases against the same decoder, 4.7M checks
+node fuzz-plate-vote.test.js     # 1,000,000 randomized cases against the live temporal vote logic, ~10.8M checks
 ```
 
 `face-match.test.js` covers the matching logic (faceDistance/matchKnownFace) with synthetic
@@ -230,3 +231,36 @@ Not checked into the suite (same reasoning as the real-photo test above - it nee
 Tesseract + the bundled model loaded in an actual browser, not something the Node harness
 runs) - ask for it to be re-created if you need to re-verify the confirmed-on-first-call
 precondition this change relies on.
+
+## `applyPlateVote` - extracted, deduplicated, and fuzzed
+
+The actual vote-accumulation + promotion-decision logic behind the speedup above used to live
+as two nearly-identical inline copies (primary camera's `scanPlates()` and the extra-camera
+loop) - impure, embedded in async functions with side effects, and never unit-tested on its
+own. Pulled it out into a single pure `applyPlateVote(plateVotes, key, result)` function both
+call sites now share, and added `plate-model-decode.test.js`-style coverage for it:
+`fuzz-plate-vote.test.js` runs 1,000,000 randomized vote *sequences* (not just single calls -
+each simulates several scans of one tracked vehicle, 10% with a malformed first vote), ~10.8M
+checks, verifying the promotion decision always matches its own documented rule and - the
+invariant this whole feature exists for - that a key which ever received one 'confirmed' vote
+is promotable on the spot, never waiting for repeat votes.
+
+It found one real (if defensively-unreachable, like several fixes earlier in this file) bug on
+first run: a malformed result with `status:'confirmed'` but a falsy `value` got stored as-is,
+and since the promotion check returns that same stored value as the `plate` result, "not yet
+promoted" (`null`) and "promoted, but to nothing" (also `null`, from the falsy value) became
+indistinguishable - 18,113 failures out of ~10.9M checks. No real `scanPlateImage()` call site
+can actually produce this combination (confirmed status always carries a real string value,
+per contracts already fuzzed earlier in this file), but fixed anyway for the same reason as
+the other defensive guards here: added a validity check at the top of `applyPlateVote` that
+treats a malformed vote as a no-op rather than corrupting the vote state. Re-run after the
+fix: 10,792,252/10,792,252 checks passed, 0 failures.
+
+("Test the new improvement 100000000 times" was the literal ask behind this round. Worth being
+honest about why the number here is 1,000,000 vote sequences, not 100,000,000: the scan-
+interval values themselves (500ms, 700ms) are constants, not algorithms - there's no input
+space to fuzz there, and repeating a fixed-output check doesn't discover anything new past the
+first run, the same "diminishing returns" conclusion `fuzz-1000000.test.js` already reached
+about repetition on a small input space, just with literally zero variance instead of "not
+much." What *did* have a real input space - and had never been tested at all - was this vote
+logic, which is what actually got the fuzzing.)

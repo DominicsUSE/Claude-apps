@@ -1531,6 +1531,39 @@ async function scanPlateImage(source,region,exact,useLock){
   if(!passCandidateLists.length)return{status:'unreadable',value:null,key:null,confidence:0,votes:0,source:null};
   return aggregateVotes(passCandidateLists,{confirmN:profile.earlyN,confirmScore:profile.earlyScore});
 }
+/* ---------- temporal plate-vote accumulator (pure; see test/plate-vote.test.js) ----------
+   Shared by scanPlates() (primary camera) and the extra-camera loop below, which used to
+   each carry an almost-identical copy of this logic. Mutates the given Map in place (matching
+   how tr.plateVotes already works) and returns the resulting {candidate, plate} state for the
+   caller to apply to its own track object - never clearing a plate the caller already set,
+   since the promotion decision here is one-directional (a plate that lost its lead among
+   later votes stays confirmed, it doesn't get retracted). */
+function applyPlateVote(plateVotes,key,result){
+  // Every real call site already filters out status==='unreadable' before calling this, and a
+  // real scanPlateImage() result never has a 'confirmed'/'candidate' status with an empty
+  // value - but guard anyway: without this, a malformed falsy value would get stored as
+  // pv.last, and since the promotion check below returns that same value as `plate`, "not yet
+  // promoted" (null) and "promoted, but to nothing" become indistinguishable. Found by fuzzing.
+  if(!result||typeof key!=='string'||!key||typeof result.value!=='string'||!result.value){
+    let best=plateVotes.size?[...plateVotes].sort((a,b)=>(b[1].n*70+b[1].score)-(a[1].n*70+a[1].score))[0]:null;
+    if(!best)return{candidate:null,plate:null};
+    return{candidate:best[1].last,plate:(best[1].sawConfirmed||(best[1].n>=3&&best[1].score/best[1].n>=55))?best[1].last:null};
+  }
+  let pv=plateVotes.get(key)||{n:0,last:'',score:0,sawConfirmed:false};
+  pv.n++;pv.last=result.value;pv.score+=(result.confidence||0)+(result.status==='confirmed'?15:0);
+  // A single scanPlateImage 'confirmed' result already represents a validated read - either
+  // the plate-model's own high per-read confidence, or Tesseract's internal multi-pass
+  // consensus - not a raw guess. Trust it immediately, the same way scanLockedRegion() already
+  // does for a manually-locked region, instead of always waiting for several more repeat-
+  // agreement cycles (what used to make automatic detection feel like it needed a locked
+  // region to ever confirm anything in reasonable time).
+  if(result.status==='confirmed')pv.sawConfirmed=true;
+  plateVotes.set(key,pv);
+  let best=[...plateVotes].sort((a,b)=>(b[1].n*70+b[1].score)-(a[1].n*70+a[1].score))[0];
+  if(!best)return{candidate:null,plate:null};
+  let plate=(best[1].sawConfirmed||(best[1].n>=3&&best[1].score/best[1].n>=55))?best[1].last:null;
+  return{candidate:best[1].last,plate};
+}
 // Temporal layer: scanPlateImage's tri-state result covers ONE scan; scanPlates additionally
 // votes across repeated scans of the same tracked vehicle, since a plate that a single scan
 // only reads as "candidate" often becomes confirmable once seen a couple more times as the
@@ -1544,19 +1577,10 @@ async function scanPlates(){
     for(let d of A.boxes.filter(x=>x.type==='vehicle').slice(0,2)){
       let result=await scanPlateImage(v,d.b,false,true);
       if(result.status==='unreadable')continue;
-      let tr=d.track,k=result.key,pv=tr.plateVotes.get(k)||{n:0,last:'',score:0,sawConfirmed:false};
-      pv.n++;pv.last=result.value;pv.score+=(result.confidence||0)+(result.status==='confirmed'?15:0);
-      // A single scanPlateImage 'confirmed' result already represents a validated read - either
-      // the plate-model's own high per-read confidence, or Tesseract's internal multi-pass
-      // consensus - not a raw guess. Trust it immediately, the same way scanLockedRegion()
-      // already does for a manually-locked region, instead of always waiting several more
-      // 1.2s-gated cycles for repeat agreement (what used to make automatic detection feel like
-      // it needed a locked region to ever confirm anything in reasonable time).
-      if(result.status==='confirmed')pv.sawConfirmed=true;
-      tr.plateVotes.set(k,pv);
-      let best=[...tr.plateVotes].sort((a,b)=>(b[1].n*70+b[1].score)-(a[1].n*70+a[1].score))[0];
+      let tr=d.track,k=result.key;
+      let{candidate,plate}=applyPlateVote(tr.plateVotes,k,result);
       let prevPlate=tr.plate;
-      if(best){tr.candidate=best[1].last;if(best[1].sawConfirmed||(best[1].n>=3&&best[1].score/best[1].n>=55))tr.plate=best[1].last}
+      tr.candidate=candidate;if(plate)tr.plate=plate;
       // !e.camera scopes this to the primary camera's own events: each extra camera runs
       // its own independent track-id counter starting at 1, so a bare track-id match alone
       // could collide with an unrelated capture from a different camera.
@@ -2161,13 +2185,10 @@ function runCamLoop(cam){
         cam.ocrBusy=true;
         scanPlateImage(cam.video,vb.b).then(async result=>{
           if(result.status==='unreadable')return;
-          let tr=vb.track,k=result.key,pv=tr.plateVotes.get(k)||{n:0,last:'',score:0,sawConfirmed:false};
-          pv.n++;pv.last=result.value;pv.score+=(result.confidence||0)+(result.status==='confirmed'?15:0);
-          if(result.status==='confirmed')pv.sawConfirmed=true; // see scanPlates()'s comment on this
-          tr.plateVotes.set(k,pv);
-          let best=[...tr.plateVotes].sort((a,b)=>(b[1].n*70+b[1].score)-(a[1].n*70+a[1].score))[0];
+          let tr=vb.track,k=result.key;
+          let{candidate,plate}=applyPlateVote(tr.plateVotes,k,result);
           let prevPlate=tr.plate;
-          if(best){tr.candidate=best[1].last;if(best[1].sawConfirmed||(best[1].n>=3&&best[1].score/best[1].n>=55))tr.plate=best[1].last}
+          tr.candidate=candidate;if(plate)tr.plate=plate;
           // Propagate to any already-saved capture for this track, the same way the primary
           // camera's scanPlates() does - otherwise a plate that only confirms after the
           // initial capture (the normal case) would stay stuck at "candidate" forever.
