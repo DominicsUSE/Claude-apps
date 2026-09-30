@@ -1464,7 +1464,11 @@ async function scanPlates(){
       // could collide with an unrelated capture from a different camera.
       for(let e of A.events.filter(e=>e.track===tr.id&&!e.camera&&!e.manual)){
         e.candidate=tr.candidate;e.status=tr.plate?'confirmed':'candidate';if(tr.plate)e.plate=tr.plate;
-        e.confidence=best?Math.round(best[1].score/best[1].n):result.confidence;
+        // best[1].score includes a +15-per-vote "confirmed" bonus (line above) that's a
+        // deliberate ranking weight, not a real confidence value - averaging it can push
+        // past 100, which would show a nonsensical "109% confidence" in the UI. Clamp the
+        // displayed number; the unclamped score keeps doing its ranking job untouched.
+        e.confidence=best?Math.min(100,Math.round(best[1].score/best[1].n)):result.confidence;
         e.label='Possible car · plate: '+(e.plate||'candidate '+e.candidate);
         if(A.db)await dbCall('readwrite',store=>store.put(e));
       }
@@ -2070,7 +2074,9 @@ function runCamLoop(cam){
           let matching=A.events.filter(e=>e.track===tr.id&&e.camera===cam.name&&!e.manual);
           for(let e of matching){
             e.candidate=tr.candidate;e.status=tr.plate?'confirmed':'candidate';if(tr.plate)e.plate=tr.plate;
-            e.confidence=Math.round(best[1].score/best[1].n);
+            // Same clamp as the primary camera's scanPlates() - best[1].score includes a
+            // +15-per-vote "confirmed" ranking bonus that can push the average past 100.
+            e.confidence=Math.min(100,Math.round(best[1].score/best[1].n));
             e.label='Possible car · plate: '+(e.plate||'candidate '+e.candidate)+' ('+cam.name+')';
             if(A.db)try{await dbCall('readwrite',store=>store.put(e))}catch(er){}
           }
