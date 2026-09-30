@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "generate": "node gen-plates.js",
-    "test": "node run-test.js"
+    "test": "node benchmark.js"
   },
   "devDependencies": {
     "sharp": "0.35.5",

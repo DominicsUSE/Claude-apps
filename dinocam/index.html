@@ -571,12 +571,13 @@ function track(items){
 function update(type,list){A.boxes=[...A.boxes.filter(x=>x.type!==type),...list];$('#features').textContent=A.boxes.length}
 
 /* ---------- face quality ---------- */
-function faceQuality(b){
+function faceQuality(b,source){
+  source=source||v;
   let c=document.createElement('canvas');c.width=c.height=48;let g=c.getContext('2d');
-  g.drawImage(v,b.x,b.y,b.w,b.h,0,0,48,48);
+  g.drawImage(source,b.x,b.y,b.w,b.h,0,0,48,48);
   let p=g.getImageData(0,0,48,48).data,sum=0;
   for(let i=0;i<p.length;i+=4)sum+=p[i]*.3+p[i+1]*.59+p[i+2]*.11;
-  return Math.round(100*Math.min(1,Math.min(b.w/v.videoWidth,b.h/v.videoHeight)*5)*(.5+.5*(1-Math.abs(sum/2304-125)/125)));
+  return Math.round(100*Math.min(1,Math.min(b.w/source.videoWidth,b.h/source.videoHeight)*5)*(.5+.5*(1-Math.abs(sum/2304-125)/125)));
 }
 
 /* ---------- vehicle attributes: type (from coco-ssd's class) + color ----------
@@ -760,6 +761,47 @@ async function identifyFaceRequest(blob,backendUrl){
   }catch(e){return{error:e.name==='AbortError'?'timed out':e.message}}
   finally{clearTimeout(timeout)}
 }
+// Identifies one already-detected face track against enrolled people (local descriptor
+// match by default, or the optional server if a backend URL is configured) and updates
+// tr.faceName/tr.faceStatus. Shared by the primary camera's identifyFaces() below and each
+// extra camera's runCamLoop(), so named recognition behaves identically on every camera.
+async function identifyFaceTrack(tr,source,b,maxW,maxH,cameraName){
+  let backendUrl=$('#faceBackendUrl').value.trim();
+  // Pad the crop beyond the tracker's tight box - the recognition engine needs some
+  // margin around the face to get a clean embedding, same as it would from a normal photo.
+  let pad=.3,x=Math.max(0,b.x-b.w*pad),y=Math.max(0,b.y-b.h*pad);
+  let w=Math.min(maxW-x,b.w*(1+2*pad)),h=Math.min(maxH-y,b.h*(1+2*pad));
+  if(w<20||h<20)return;
+  let c=document.createElement('canvas');c.width=Math.round(w);c.height=Math.round(h);
+  c.getContext('2d').drawImage(source,x,y,w,h,0,0,c.width,c.height);
+  if(backendUrl){
+    let blob=await jpeg(c,.85);if(!blob)return;
+    let result=await identifyFaceRequest(blob,backendUrl);
+    if(result.error)return;
+    let match=result.faces&&result.faces[0];
+    tr.faceName=match&&match.name?match.name:null;
+    tr.faceStatus=match?match.status:'unknown';
+  }else{
+    let descriptor=await computeFaceDescriptor(c);
+    if(!descriptor)return;
+    let match=matchKnownFace(descriptor,A.knownFaces);
+    tr.faceName=match?match.name:null;
+    tr.faceStatus=match?match.status:'unknown';
+  }
+  // Propagate to any already-saved capture for this track, the same way plate reads
+  // already do (scanPlates()/runCamLoop()'s plate block) - a face is usually auto-captured
+  // on first sighting, often before identification has had a chance to run, so without this
+  // the correct name would only ever reach a future capture, never the one already saved.
+  let matching=A.events.filter(e=>e.type==='face'&&e.track===tr.id&&(cameraName?e.camera===cameraName:!e.camera)&&!e.manual);
+  if(matching.length){
+    for(let e of matching){
+      e.faceName=tr.faceName;
+      e.label=(tr.faceName||'Unknown person')+(cameraName?' ('+cameraName+')':'');
+      if(A.db)try{await dbCall('readwrite',store=>store.put(e))}catch(er){}
+    }
+    render();
+  }
+}
 async function identifyFaces(){
   let backendUrl=$('#faceBackendUrl').value.trim();
   if(!backendUrl&&!A.knownFaces.length)return; // nothing to match against either way
@@ -770,27 +812,7 @@ async function identifyFaces(){
   try{
     for(let d of faces){
       let tr=d.track;if(!tr)continue;
-      // Pad the crop beyond the tracker's tight box - the recognition engine needs some
-      // margin around the face to get a clean embedding, same as it would from a normal photo.
-      let pad=.3,x=Math.max(0,d.b.x-d.b.w*pad),y=Math.max(0,d.b.y-d.b.h*pad);
-      let w=Math.min(v.videoWidth-x,d.b.w*(1+2*pad)),h=Math.min(v.videoHeight-y,d.b.h*(1+2*pad));
-      if(w<20||h<20)continue;
-      let c=document.createElement('canvas');c.width=Math.round(w);c.height=Math.round(h);
-      c.getContext('2d').drawImage(v,x,y,w,h,0,0,c.width,c.height);
-      if(backendUrl){
-        let blob=await jpeg(c,.85);if(!blob)continue;
-        let result=await identifyFaceRequest(blob,backendUrl);
-        if(result.error)continue;
-        let match=result.faces&&result.faces[0];
-        tr.faceName=match&&match.name?match.name:null;
-        tr.faceStatus=match?match.status:'unknown';
-      }else{
-        let descriptor=await computeFaceDescriptor(c);
-        if(!descriptor)continue;
-        let match=matchKnownFace(descriptor,A.knownFaces);
-        tr.faceName=match?match.name:null;
-        tr.faceStatus=match?match.status:'unknown';
-      }
+      await identifyFaceTrack(tr,v,d.b,v.videoWidth,v.videoHeight);
     }
   }catch(e){}
   finally{A.faceIdBusy=false}
@@ -1744,7 +1766,10 @@ async function renderCamDevices(){
   try{
     let ds=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');
     let used=new Set(A.extraCams.map(c=>c.deviceId));
-    $('#extraCamDevice').replaceChildren(...ds.filter(d=>!used.has(d.deviceId)).map(d=>new Option(A.cameraLabels[d.deviceId]||d.label||'Camera',d.deviceId)));
+    // Number unlabeled devices (common until camera permission has been granted at least
+    // once) so two indistinguishable "Camera"/"Camera" entries aren't both shown verbatim -
+    // matches how the primary camera's own device list already numbers these.
+    $('#extraCamDevice').replaceChildren(...ds.filter(d=>!used.has(d.deviceId)).map((d,i)=>new Option(A.cameraLabels[d.deviceId]||d.label||'Camera '+(i+1),d.deviceId)));
   }catch(e){}
 }
 async function addExtraCamera(){
@@ -1753,8 +1778,12 @@ async function addExtraCamera(){
   let stream;
   try{stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{deviceId:{exact:deviceId}}})}
   catch(e){toast('Could not start that camera: '+e.message);return}
-  if(!A.model){try{await models()}catch(e){}}
-  let id=A.nextCam++,name=A.cameraLabels[deviceId]||'Camera '+id;
+  if(!A.model||($('#faces').checked&&!A.face)){try{await models()}catch(e){}}
+  // Match renderCamDevices()'s own fallback chain (custom label, then the device's real
+  // label as shown in the picker, then a generic name) - this previously skipped straight
+  // to "Camera N" even when a real device label was available and had just been shown to
+  // the user in the dropdown they picked it from.
+  let id=A.nextCam++,name=A.cameraLabels[deviceId]||$('#extraCamDevice').selectedOptions[0]?.textContent||'Camera '+id;
   let video=document.createElement('video');video.autoplay=true;video.muted=true;video.playsInline=true;video.srcObject=stream;video.className='sr';
   document.body.append(video);
   try{await video.play()}catch(e){}
@@ -1764,7 +1793,8 @@ async function addExtraCamera(){
   let stopBtn=document.createElement('button');stopBtn.className='camtile-stop';stopBtn.textContent='Remove';
   tile.append(canvas,label,stopBtn);
   $('#extraCamGrid').append(tile);
-  let cam={id,name,deviceId,stream,video,canvas,tile,tracker:createCamTracker(),boxes:[],lastObj:0,lastOCR:0,busy:false,ocrBusy:false,on:true};
+  let cam={id,name,deviceId,stream,video,canvas,tile,tracker:createCamTracker(),boxes:[],objBoxes:[],faceBoxes:[],
+    lastObj:0,lastOCR:0,lastFace:0,lastFaceId:0,busy:false,ocrBusy:false,faceBusy:false,faceIdBusy:false,on:true};
   stopBtn.onclick=()=>removeExtraCamera(cam);
   A.extraCams.push(cam);
   runCamLoop(cam);
@@ -1787,18 +1817,47 @@ function runCamLoop(cam){
     for(let d of cam.boxes){
       let sx=d.b.x*cam.canvas.width/W,sy=d.b.y*cam.canvas.height/H,sw=d.b.w*cam.canvas.width/W,sh=d.b.h*cam.canvas.height/H;
       cx.strokeStyle=d.kind==='face'?'#69e5b9':'#8dbdff';cx.lineWidth=2;cx.strokeRect(sx,sy,sw,sh);
+      if(d.label){
+        cx.font='11px system-ui';let tw=cx.measureText(d.label).width+6;
+        cx.fillStyle='#061521df';cx.fillRect(sx,Math.max(0,sy-16),tw,16);
+        cx.fillStyle='white';cx.fillText(d.label,sx+3,Math.max(12,sy-4));
+      }
     }
     let now=performance.now();
     if($('#objects').checked&&A.model&&!cam.busy&&now-cam.lastObj>900){
       cam.lastObj=now;cam.busy=true;
       A.model.detect(cam.video,10,Number($('#sensitivity').value)||.55).then(found=>{
-        cam.boxes=cam.tracker(found.filter(o=>o.class!=='person').map(o=>({kind:o.class,b:clampBox(o.bbox[0],o.bbox[1],o.bbox[2],o.bbox[3],W,H)})),W,H);
-        if($('#auto').checked)for(let d of cam.boxes)if(vehicle(d.kind)&&d.track.hits>=2&&Date.now()-d.track.saved>18000){
+        let items=cam.tracker(found.filter(o=>o.class!=='person').map(o=>({kind:o.class,b:clampBox(o.bbox[0],o.bbox[1],o.bbox[2],o.bbox[3],W,H)})),W,H);
+        for(let d of items)d.label=vehicle(d.kind)?d.kind+' · plate: '+(d.track.plate||'unread'):d.kind;
+        cam.objBoxes=items;cam.boxes=[...cam.objBoxes,...cam.faceBoxes];
+        if($('#auto').checked)for(let d of items)if(vehicle(d.kind)&&d.track.hits>=2&&Date.now()-d.track.saved>18000){
           d.track.saved=Date.now();
           let tid=d.track.id;
-          setTimeout(()=>{let x=cam.boxes.find(z=>z.track?.id===tid);if(cam.on&&x)captureFromCam(cam,x,W,H)},A.ocr?1400:2800);
+          setTimeout(()=>{let x=cam.objBoxes.find(z=>z.track?.id===tid);if(cam.on&&x)captureFromCam(cam,x,W,H)},A.ocr?1400:2800);
         }
       }).catch(console.warn).finally(()=>cam.busy=false);
+    }
+    // Named face recognition is entirely absent from extra cameras unless this block also
+    // runs it - a face-detection/-recognition gap that silently made "Faces as Unknown
+    // person" and "Named face recognition" do nothing at all on any camera but the primary
+    // one, despite this section's own doc comment promising the same pipeline everywhere.
+    if($('#faces').checked&&A.face&&!cam.faceBusy&&now-cam.lastFace>1100){
+      cam.lastFace=now;cam.faceBusy=true;
+      let native=!!window.FaceDetector&&A.face instanceof window.FaceDetector;
+      Promise.resolve(native?A.face.detect(cam.video):faceapi.detectAllFaces(cam.video,A.face)).then(found=>{
+        let items=cam.tracker(found.map(f=>{let b=native?f.boundingBox:f.box;return{kind:'face',b:clampBox(b.x,b.y,b.width,b.height,W,H)}}),W,H);
+        for(let d of items)d.label=(d.track.faceName?d.track.faceName+(d.track.faceStatus==='candidate'?' (unverified match)':''):'Unknown person')+' · clarity '+faceQuality(d.b,cam.video)+'/100';
+        cam.faceBoxes=items;cam.boxes=[...cam.objBoxes,...cam.faceBoxes];
+        if($('#auto').checked)for(let d of items)if(Date.now()-d.track.saved>18000){d.track.saved=Date.now();captureFromCam(cam,d,W,H)}
+      }).catch(console.warn).finally(()=>cam.faceBusy=false);
+    }
+    if($('#faceId').checked&&$('#faces').checked&&!cam.faceIdBusy&&now-cam.lastFaceId>2500){
+      let backendUrl=$('#faceBackendUrl').value.trim();
+      if(backendUrl||A.knownFaces.length){
+        cam.lastFaceId=now;cam.faceIdBusy=true;
+        (async()=>{for(let d of cam.faceBoxes.slice(0,2))if(d.track)await identifyFaceTrack(d.track,cam.video,d.b,W,H,cam.name)})()
+          .catch(console.warn).finally(()=>cam.faceIdBusy=false);
+      }
     }
     if($('#plates').checked&&A.ocr&&!cam.ocrBusy&&now-cam.lastOCR>3500){
       let vb=cam.boxes.find(d=>vehicle(d.kind));
@@ -1837,12 +1896,18 @@ async function captureFromCam(cam,d,W,H){
   let c=document.createElement('canvas');c.width=W;c.height=H;let g=c.getContext('2d');g.drawImage(cam.video,0,0);
   g.strokeStyle='#69e5b9';g.lineWidth=Math.max(3,W/600);g.strokeRect(d.b.x,d.b.y,d.b.w,d.b.h);
   let image=await jpeg(c);if(!image)return;
-  let plate=d.track.plate||null,status=plate?'confirmed':d.track.candidate?'candidate':'unreadable';
-  let isVehicle=vehicle(d.kind),color=isVehicle?sampleVehicleColor(cam.video,d.b):null;
+  let isVehicle=vehicle(d.kind),isFace=d.kind==='face';
+  let plate=isVehicle?(d.track.plate||null):null,status=isVehicle?(plate?'confirmed':d.track.candidate?'candidate':'unreadable'):null;
+  let color=isVehicle?sampleVehicleColor(cam.video,d.b):null;
+  let faceName=isFace?(d.track.faceName||null):null;
   let watchHit=plate?checkWatchlist(plate):null;
-  let item={id:Date.now()+Math.random(),confidence:plate?75:null,status:isVehicle?status:null,type:isVehicle?'vehicle':'object',track:d.track.id,
-    bounds:{...d.b},plate,candidate:d.track.candidate||null,vehicleType:isVehicle?d.kind:null,color,watchlist:watchHit?watchlistBadge(watchHit):null,
-    camera:cam.name,loc:null,label:(isVehicle?'Possible car · plate: '+(plate||d.track.candidate||'not read'):d.kind)+' ('+cam.name+')',image};
+  let type=isVehicle?'vehicle':isFace?'face':'object';
+  let label=isVehicle?'Possible car · plate: '+(plate||d.track.candidate||'not read')+' ('+cam.name+')'
+    :isFace?(faceName||'Unknown person')+' ('+cam.name+')'
+    :d.kind+' ('+cam.name+')';
+  let item={id:Date.now()+Math.random(),confidence:plate?75:null,status,type,track:d.track.id,
+    bounds:{...d.b},plate,candidate:d.track.candidate||null,vehicleType:isVehicle?d.kind:null,color,faceName,watchlist:watchHit?watchlistBadge(watchHit):null,
+    camera:cam.name,loc:null,label,image};
   A.events.unshift(item);
   if(A.db)try{await dbCall('readwrite',s=>s.put(item))}catch(e){}
   if(!watchHit)beep();
