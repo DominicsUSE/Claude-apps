@@ -1247,7 +1247,11 @@ function aggregateVotes(passCandidateLists,cfg){
   cfg=cfg||{};
   let confirmN=cfg.confirmN||3,confirmScore=cfg.confirmScore||55;
   let votes=new Map(),cooccur=new Map();
-  for(let cands of passCandidateLists){
+  // Both real call sites always pass a locally-built array, never null/undefined - this
+  // guard is purely defensive (same reasoning as classifyPosture's Array.isArray guard),
+  // so any future/other caller degrades to 'unreadable' instead of throwing.
+  for(let candsRaw of Array.isArray(passCandidateLists)?passCandidateLists:[]){
+    let cands=Array.isArray(candsRaw)?candsRaw:[];
     for(let c of cands){
       let e=votes.get(c.key)||{n:0,score:0,values:new Map(),parts:c.parts,xSum:0,ySum:0,full:false};
       e.n++;e.score+=c.conf;e.parts=Math.max(e.parts,c.parts);e.xSum+=c.x||0;e.ySum+=c.y||0;e.full=e.full||c.kind==='full';

@@ -12,6 +12,7 @@ node face-match.test.js          # in-browser face-matching math (10 cases)
 node watchlist-match.test.js     # fuzzy watchlist matching math (14 cases)
 node posture-classify.test.js    # fall/posture geometry heuristic (9 cases)
 node fuzz-1000.test.js           # randomized property-based fuzzing, ~19,000 checks across 4000+ generated cases
+node fuzz-560-plate-pipeline.test.js  # 560 randomized OCR-pipeline runs, 3275 checks
 ```
 
 `face-match.test.js` covers the matching logic (faceDistance/matchKnownFace) with synthetic
@@ -50,3 +51,16 @@ correctly with zero collisions — but it does not retrain or fuzz the underlyin
 models (face-api.js/coco-ssd/Tesseract/pose-detection) themselves, which this app never
 trains and which are unrelated to what "training" means for DinoCam (enrolling known
 people/vehicles, not model weights).
+
+`fuzz-560-plate-pipeline.test.js` runs 560 randomized OCR passes (25% deliberately with
+missing/garbage word entries) through the real `plateCandidates`/`aggregateVotes` pipeline
+and checks, among other things, the one invariant this pipeline exists to uphold: a combined
+reading must never contain a character that wasn't actually present in some OCR pass's word
+text — the exact class of bug the earlier A022/NTC merge fix addressed, now checked against
+560 generated cases instead of a handful of hand-picked ones. It held perfectly across all
+3273 combined-reading checks. It also found two real (if currently unreachable through the
+app's own call sites, which always pass a real array) crashes: `aggregateVotes(null)` and
+`aggregateVotes(undefined)` both threw "is not iterable" instead of degrading to
+'unreadable'. Fixed with the same `Array.isArray(...)?...:[]` guard pattern already used for
+`classifyPosture`, applied consistently to both the outer pass-list loop and each individual
+pass's candidate list.
