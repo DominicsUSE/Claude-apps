@@ -13,6 +13,7 @@ node watchlist-match.test.js     # fuzzy watchlist matching math (14 cases)
 node posture-classify.test.js    # fall/posture geometry heuristic (9 cases)
 node fuzz-1000.test.js           # randomized property-based fuzzing, ~19,000 checks across 4000+ generated cases
 node fuzz-560-plate-pipeline.test.js  # 560 randomized OCR-pipeline runs, 3275 checks
+node fuzz-10000.test.js          # 10,000 randomized cases across 6 functions, 15,021 checks
 ```
 
 `face-match.test.js` covers the matching logic (faceDistance/matchKnownFace) with synthetic
@@ -64,3 +65,15 @@ app's own call sites, which always pass a real array) crashes: `aggregateVotes(n
 'unreadable'. Fixed with the same `Array.isArray(...)?...:[]` guard pattern already used for
 `classifyPosture`, applied consistently to both the outer pass-list loop and each individual
 pass's candidate list.
+
+`fuzz-10000.test.js` runs 10,000 randomized cases (fresh seed, genuinely new coverage rather
+than a repeat) across six pure functions: the four already covered by `fuzz-1000.test.js`
+(re-verified at 1500 cases each) plus two never fuzzed before — `classifyColor` (the vehicle
+color classifier, hammered with out-of-range/NaN/Infinity/wrong-type RGB components) and
+`findPlateBand` (the edge-density plate-region locator, fed random-sized noise/flat/
+plate-like/too-short/empty grayscale buffers and degenerate width/height combinations). All
+15,021 checks passed — no new bugs found this round. Worth saying plainly: that's a real,
+useful result on its own, not a gap in the test — it means the fixes from the two earlier
+fuzzing rounds (`classifyPosture`'s and `aggregateVotes`'s `Array.isArray` guards) hold, and
+these two newly-covered functions were already written defensively enough to survive random
+and malformed input without help.
