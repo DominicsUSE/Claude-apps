@@ -13,6 +13,9 @@
 <title>DinoCamSecurity v2.0 — Local ANPR Engine</title>
 <style>
 :root{
+  --ease-out:cubic-bezier(.23,1,.32,1);
+}
+:root{
   color-scheme:dark;
   --bg-0:#000000;
   --panel:#1c1c1eee; --panel-2:#18181a; --panel-3:#161618;
@@ -144,9 +147,19 @@ button:not(:disabled):active{filter:brightness(.92);transform:translateY(1px)}
 .progress span{display:block;height:100%;width:0;background:var(--accent);transition:width .35s}
 .error{color:var(--danger)}
 .sr{position:absolute;width:1px;height:1px;clip:rect(0,0,0,0);overflow:hidden}
-.modal{position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(6px);z-index:9;display:grid;place-items:center;padding:16px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.75);backdrop-filter:blur(6px);z-index:9;display:grid;place-items:center;padding:16px;
+  opacity:1;transition:opacity 220ms var(--ease-out)}
 :root[data-theme="light"] .modal{background:rgba(29,29,31,.5)}
-.modal .dialog{width:min(640px,100%)}
+.modal.closing{opacity:0}
+@starting-style{.modal{opacity:0}}
+.modal .dialog{width:min(640px,100%);opacity:1;transform:scale(1);transition:opacity 220ms var(--ease-out),transform 220ms var(--ease-out)}
+.modal.closing .dialog{opacity:0;transform:scale(.96)}
+@starting-style{.modal .dialog{opacity:0;transform:scale(.96)}}
+@media(prefers-reduced-motion:reduce){
+  .modal .dialog{transition:opacity 220ms var(--ease-out)}
+  .modal.closing .dialog{transform:none}
+  @starting-style{.modal .dialog{transform:none}}
+}
 .lightbox img{width:100%;border-radius:14px;background:#000;max-height:60vh;object-fit:contain}
 .toastwrap{position:fixed;right:16px;bottom:16px;z-index:8;display:flex;flex-direction:column;gap:8px;max-width:320px}
 .toast{background:rgba(28,28,30,.9);backdrop-filter:saturate(180%) blur(20px);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:10px 12px;font-size:13px;box-shadow:0 10px 30px #0006;animation:tin .25s ease}
@@ -401,7 +414,21 @@ const jpeg=(c,q)=>new Promise(ok=>c.toBlob(ok,'image/jpeg',q||Number($('#quality
 function dbCall(mode,fn){return new Promise((ok,no)=>{let q=fn(A.db.transaction('captures',mode).objectStore('captures'));q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)})}
 function toast(msg){let el=document.createElement('div');el.className='toast';el.textContent=msg;$('#toastwrap').append(el);setTimeout(()=>el.remove(),6000)}
 function modal(html){let root=$('#modalRoot');root.innerHTML='<div class="modal" id="modalBack"><div class="dialog">'+html+'</div></div>';let back=$('#modalBack');back.onclick=e=>{if(e.target===back)closeModal()};return back}
-function closeModal(){$('#modalRoot').innerHTML=''}
+// Plays the exit transition (the reverse of modal()'s @starting-style entrance) before actually
+// removing the DOM - a CSS transition can't bridge an innerHTML='' removal by itself. `after`
+// runs right when the modal is actually gone, for cleanup (like revoking a blob URL) that would
+// otherwise break the dialog's content mid-fade if it ran immediately on click.
+function closeModal(after){
+  // Several call sites use closeModal directly as an onclick handler (`onclick=closeModal`),
+  // so `after` can be a PointerEvent, not a callback - only ever call it if it's actually one.
+  if(typeof after!=='function')after=null;
+  let root=$('#modalRoot'),back=$('#modalBack');
+  if(!back){if(after)after();return}
+  let done=false,finish=()=>{if(done)return;done=true;root.innerHTML='';if(after)after()};
+  back.addEventListener('transitionend',finish,{once:true});
+  setTimeout(finish,260);
+  back.classList.add('closing');
+}
 
 /* ---------- audio + notification alerts ---------- */
 let actx=null;
@@ -1610,14 +1637,14 @@ function showFileScanResult(file,result,vehicleCount){
     '<small>'+(vehicleCount?vehicleCount+' vehicle region(s) detected. ':'No vehicle detected — scanned the whole image directly. ')+'Source: '+(result.source||'none')+'.</small>'+
     '<div class="actions"><button id="fsSave" class="primary"'+(result.status==='unreadable'?' disabled':'')+'>Save to Capture History</button><button id="fsClose">Close</button></div>'
   );
-  $('#fsClose').onclick=()=>{URL.revokeObjectURL(url);closeModal()};
+  $('#fsClose').onclick=()=>closeModal(()=>URL.revokeObjectURL(url));
   $('#fsSave').onclick=async()=>{
     let watchHit=result.status==='confirmed'?checkWatchlist(result.value):null;
     let item={id:Date.now()+Math.random(),confidence:result.confidence,status:result.status,type:'vehicle',track:0,bounds:null,
       plate:result.status==='confirmed'?result.value:null,candidate:result.value,source:'file-scan',watchlist:watchHit?watchlistBadge(watchHit):null,
       loc:null,label:'Possible car · plate: '+(result.status==='confirmed'?result.value:'candidate '+result.value)+' (from file)',image:file};
     A.events.unshift(item);if(A.db)try{await dbCall('readwrite',s=>s.put(item))}catch(e){}
-    toast('Saved to Capture History.');render();URL.revokeObjectURL(url);closeModal();
+    toast('Saved to Capture History.');render();closeModal(()=>URL.revokeObjectURL(url));
   };
 }
 
