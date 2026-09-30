@@ -600,7 +600,11 @@ function decodePlateOutput(logits,alphabet,maxSlots,padChar){
   }
   let end=chars.length;while(end>0&&chars[end-1]===padChar)end--;
   let value=chars.slice(0,end),used=probs.slice(0,end);
-  let confidence=used.length?Math.round(100*used.reduce((a,b)=>a+b,0)/used.length):0;
+  // The real model always emits a valid [0,1] softmax, so this only guards against malformed/
+  // corrupted input (NaN, Infinity, negative values) that would otherwise round to a
+  // nonsensical confidence (found by fuzzing - never reachable through the app's real call site).
+  let avg=used.length?used.reduce((a,b)=>a+b,0)/used.length:0;
+  let confidence=Number.isFinite(avg)?Math.max(0,Math.min(100,Math.round(100*avg))):0;
   return{value,confidence};
 }
 // Crops/resizes exactly like the upstream Python pipeline (stretch to 128x64 RGB, no aspect-

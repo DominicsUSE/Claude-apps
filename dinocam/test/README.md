@@ -16,6 +16,7 @@ node fuzz-560-plate-pipeline.test.js  # 560 randomized OCR-pipeline runs, 3275 c
 node fuzz-10000.test.js          # 10,000 randomized cases across 6 functions, 15,021 checks
 node fuzz-1000000.test.js        # 1,000,000 randomized cases across the same 6 functions, ~1.7M checks (~100s)
 node plate-model-decode.test.js  # plate-specific ONNX model's output decoder (9 cases)
+node fuzz-plate-model-decode.test.js  # 1,000,000 randomized cases against the same decoder, 4.7M checks
 ```
 
 `face-match.test.js` covers the matching logic (faceDistance/matchKnownFace) with synthetic
@@ -178,3 +179,19 @@ re-applied softmax to already-softmaxed values, which silently flattened every c
 down to near-uniform noise; caught by comparing the standalone research harness's raw output
 values against what the shipped code reported, not by the unit tests alone, since the tests'
 synthetic inputs were written to match the same wrong assumption until that was found too).
+
+`fuzz-plate-model-decode.test.js` then ran 1,000,000 randomized cases (4.7M checks) against
+`decodePlateOutput` specifically, since — unlike the six functions in `fuzz-1000000.test.js`
+— it's brand new and had never been fuzzed. 10% of cases are deliberately malformed (`null`,
+wrong length, all-`NaN`, all-`Infinity`, all-negative, all-zero). It found one real bug on
+first run: a malformed/corrupted-input confidence value (never reachable through the app's
+real call site, which always gets a valid softmax array from the model) could come out
+negative (e.g. -100) or `NaN`, instead of degrading to a value within [0,100] — the same
+defensive-robustness class of bug as the `Array.isArray` fixes earlier in this file, not a
+reachable production issue. Fixed by clamping and adding a finite-value guard. Re-run after
+the fix: 4,718,159/4,718,159 checks passed, 0 failures. (The first run also logged 8 failures
+that turned out to be the *test's own* synthetic-data generator occasionally producing a
+tied, ambiguous "correct answer" via floating-point coincidence — not a decodePlateOutput
+defect, verified by reasoning through the tie condition and confirmed by hardening the
+generator to make its target character an unambiguous, non-tied argmax, after which those 8
+disappeared on top of the real fix above.)
