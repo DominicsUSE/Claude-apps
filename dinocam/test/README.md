@@ -195,3 +195,29 @@ tied, ambiguous "correct answer" via floating-point coincidence — not a decode
 defect, verified by reasoning through the tie condition and confirmed by hardening the
 generator to make its target character an unambiguous, non-tied argmax, after which those 8
 disappeared on top of the real fix above.)
+
+## Live-camera detection speed (removed the "need to lock a region" feel)
+
+Before the plate-specific model landed, automatic (non-locked) plate detection needed a plate
+read as the *top-ranked* candidate across **three separate scans**, each gated to at most once
+every 3 seconds - roughly 9+ seconds of a vehicle sitting in frame before anything showed as
+"confirmed," even when the very first read was already correct. The "Lock plate region"
+feature never had this problem: it already trusted a single `scanPlateImage()` "confirmed"
+result outright. That mismatch is almost certainly why locking a region felt necessary for
+normal use.
+
+Now that a single `scanPlateImage()` call reliably comes back "confirmed" with the plate
+model (verified directly: 9/9 cases across `accuracy-benchmark/`'s synthetic set came back
+confirmed-status on their very first call - see the verification script referenced below),
+`scanPlates()` and the equivalent extra-camera loop trust a "confirmed" single read
+immediately (`sawConfirmed`), the same way the locked-region path always did, instead of
+always waiting for 3 repeated votes. The scan interval also dropped from 3000ms/3500ms to
+1200ms, since a plate-model read (~30-90ms) is far cheaper than the old Tesseract multi-variant
+scan that interval was sized around. The 3-vote path still exists as a fallback for the rarer
+case where a read only ever comes back "candidate" (lower confidence) - it just no longer
+gates the common case.
+
+Not checked into the suite (same reasoning as the real-photo test above - it needs real local
+Tesseract + the bundled model loaded in an actual browser, not something the Node harness
+runs) - ask for it to be re-created if you need to re-verify the confirmed-on-first-call
+precondition this change relies on.

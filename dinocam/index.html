@@ -1238,8 +1238,10 @@ function loop(){
       }
     }).catch(console.warn).finally(()=>A.postureBusy=false);
   }
-  if($('#plates').checked&&A.ocr&&!A.ocrBusy&&t-A.lastOCR>3000){A.lastOCR=t;scanPlates()}
-  if($('#plates').checked&&A.ocr&&A.lockRegion&&!A.ocrBusy&&t-A.lastLockOCR>4000){A.lastLockOCR=t;scanLockedRegion()}
+  // 1200ms (was 3000ms): safe now that a plate-model read is ~30-90ms, vs. Tesseract's much
+  // slower multi-variant scan the old interval was sized around.
+  if($('#plates').checked&&(A.ocr||A.plateModel)&&!A.ocrBusy&&t-A.lastOCR>1200){A.lastOCR=t;scanPlates()}
+  if($('#plates').checked&&(A.ocr||A.plateModel)&&A.lockRegion&&!A.ocrBusy&&t-A.lastLockOCR>4000){A.lastLockOCR=t;scanLockedRegion()}
   if($('#faceId').checked&&$('#faces').checked&&!A.faceIdBusy&&t-A.lastFaceId>2500){A.lastFaceId=t;identifyFaces()}
   setTimeout(loop,160);
 }
@@ -1528,20 +1530,31 @@ async function scanPlateImage(source,region,exact,useLock){
   return aggregateVotes(passCandidateLists,{confirmN:profile.earlyN,confirmScore:profile.earlyScore});
 }
 // Temporal layer: scanPlateImage's tri-state result covers ONE scan; scanPlates additionally
-// votes across repeated scans of the same tracked vehicle over several seconds, since a plate
-// that a single scan only reads as "candidate" often becomes confirmable once seen a few more
-// times as the vehicle moves through frame.
+// votes across repeated scans of the same tracked vehicle, since a plate that a single scan
+// only reads as "candidate" often becomes confirmable once seen a couple more times as the
+// vehicle moves through frame. A scan that already came back "confirmed" skips the vote-count
+// wait entirely (see sawConfirmed below) - waiting several more cycles to re-confirm a result
+// scanPlateImage already validated internally was exactly what made automatic detection feel
+// like it needed a manually locked region to ever resolve in reasonable time.
 async function scanPlates(){
-  if(A.ocrBusy||!A.ocr)return;A.ocrBusy=true;
+  if(A.ocrBusy||(!A.ocr&&!A.plateModel))return;A.ocrBusy=true;
   try{
     for(let d of A.boxes.filter(x=>x.type==='vehicle').slice(0,2)){
       let result=await scanPlateImage(v,d.b,false,true);
       if(result.status==='unreadable')continue;
-      let tr=d.track,k=result.key,pv=tr.plateVotes.get(k)||{n:0,last:'',score:0};
-      pv.n++;pv.last=result.value;pv.score+=(result.confidence||0)+(result.status==='confirmed'?15:0);tr.plateVotes.set(k,pv);
+      let tr=d.track,k=result.key,pv=tr.plateVotes.get(k)||{n:0,last:'',score:0,sawConfirmed:false};
+      pv.n++;pv.last=result.value;pv.score+=(result.confidence||0)+(result.status==='confirmed'?15:0);
+      // A single scanPlateImage 'confirmed' result already represents a validated read - either
+      // the plate-model's own high per-read confidence, or Tesseract's internal multi-pass
+      // consensus - not a raw guess. Trust it immediately, the same way scanLockedRegion()
+      // already does for a manually-locked region, instead of always waiting several more
+      // 1.2s-gated cycles for repeat agreement (what used to make automatic detection feel like
+      // it needed a locked region to ever confirm anything in reasonable time).
+      if(result.status==='confirmed')pv.sawConfirmed=true;
+      tr.plateVotes.set(k,pv);
       let best=[...tr.plateVotes].sort((a,b)=>(b[1].n*70+b[1].score)-(a[1].n*70+a[1].score))[0];
       let prevPlate=tr.plate;
-      if(best){tr.candidate=best[1].last;if(best[1].n>=3&&best[1].score/best[1].n>=55)tr.plate=best[1].last}
+      if(best){tr.candidate=best[1].last;if(best[1].sawConfirmed||(best[1].n>=3&&best[1].score/best[1].n>=55))tr.plate=best[1].last}
       // !e.camera scopes this to the primary camera's own events: each extra camera runs
       // its own independent track-id counter starting at 1, so a bare track-id match alone
       // could collide with an unrelated capture from a different camera.
@@ -1569,7 +1582,7 @@ async function scanPlates(){
   finally{A.ocrBusy=false}
 }
 async function scanLockedRegion(){
-  if(A.ocrBusy||!A.ocr||!A.lockRegion)return;A.ocrBusy=true;
+  if(A.ocrBusy||(!A.ocr&&!A.plateModel)||!A.lockRegion)return;A.ocrBusy=true;
   try{
     let W=v.videoWidth,H=v.videoHeight,b={x:A.lockRegion.x*W,y:A.lockRegion.y*H,w:A.lockRegion.w*W,h:A.lockRegion.h*H};
     let result=await scanPlateImage(v,b,true);
@@ -2140,17 +2153,19 @@ function runCamLoop(cam){
         }
       }).catch(console.warn).finally(()=>cam.postureBusy=false);
     }
-    if($('#plates').checked&&A.ocr&&!cam.ocrBusy&&now-cam.lastOCR>3500){
+    if($('#plates').checked&&(A.ocr||A.plateModel)&&!cam.ocrBusy&&now-cam.lastOCR>1200){
       let vb=cam.boxes.find(d=>vehicle(d.kind));
       if(vb){
         cam.ocrBusy=true;
         scanPlateImage(cam.video,vb.b).then(async result=>{
           if(result.status==='unreadable')return;
-          let tr=vb.track,k=result.key,pv=tr.plateVotes.get(k)||{n:0,last:'',score:0};
-          pv.n++;pv.last=result.value;pv.score+=(result.confidence||0)+(result.status==='confirmed'?15:0);tr.plateVotes.set(k,pv);
+          let tr=vb.track,k=result.key,pv=tr.plateVotes.get(k)||{n:0,last:'',score:0,sawConfirmed:false};
+          pv.n++;pv.last=result.value;pv.score+=(result.confidence||0)+(result.status==='confirmed'?15:0);
+          if(result.status==='confirmed')pv.sawConfirmed=true; // see scanPlates()'s comment on this
+          tr.plateVotes.set(k,pv);
           let best=[...tr.plateVotes].sort((a,b)=>(b[1].n*70+b[1].score)-(a[1].n*70+a[1].score))[0];
           let prevPlate=tr.plate;
-          if(best){tr.candidate=best[1].last;if(best[1].n>=3&&best[1].score/best[1].n>=55)tr.plate=best[1].last}
+          if(best){tr.candidate=best[1].last;if(best[1].sawConfirmed||(best[1].n>=3&&best[1].score/best[1].n>=55))tr.plate=best[1].last}
           // Propagate to any already-saved capture for this track, the same way the primary
           // camera's scanPlates() does - otherwise a plate that only confirms after the
           // initial capture (the normal case) would stay stuck at "candidate" forever.
