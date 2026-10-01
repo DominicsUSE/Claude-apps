@@ -19,4 +19,11 @@ fs.copyFileSync(
   path.join(__dirname, 'app', 'models', 'plate-ocr', 'model-data.js')
 );
 
-console.log('Copied ../index.html, ../windows/dinosaur.ico, and ../models/plate-ocr into electron/app and electron/build.');
+// Same pattern for the EdgeFace recognition embedding model (models/face-edge/...)
+fs.mkdirSync(path.join(__dirname, 'app', 'models', 'face-edge'), { recursive: true });
+fs.copyFileSync(
+  path.join(root, 'models', 'face-edge', 'model-data.js'),
+  path.join(__dirname, 'app', 'models', 'face-edge', 'model-data.js')
+);
+
+console.log('Copied ../index.html, ../windows/dinosaur.ico, ../models/plate-ocr, and ../models/face-edge into electron/app and electron/build.');

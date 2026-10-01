@@ -18,6 +18,7 @@ node fuzz-1000000.test.js        # 1,000,000 randomized cases across the same 6 
 node plate-model-decode.test.js  # plate-specific ONNX model's output decoder (9 cases)
 node fuzz-plate-model-decode.test.js  # 1,000,000 randomized cases against the same decoder, 4.7M checks
 node fuzz-plate-vote.test.js     # 1,000,000 randomized cases against the live temporal vote logic, ~10.8M checks
+node fuzz-face-align.test.js     # 1,000,000 randomized cases against the EdgeFace alignment/matching math, ~1.69M checks
 ```
 
 `face-match.test.js` covers the matching logic (faceDistance/matchKnownFace) with synthetic
@@ -266,3 +267,81 @@ first run, the same "diminishing returns" conclusion `fuzz-1000000.test.js` alre
 about repetition on a small input space, just with literally zero variance instead of "not
 much." What *did* have a real input space - and had never been tested at all - was this vote
 logic, which is what actually got the fuzzing.)
+
+## EdgeFace: a second, stronger face-recognition embedding
+
+The app's face recognition previously had exactly one engine: face-api.js's own 128-d
+descriptor (Euclidean match, `matchKnownFace`). Added a second, optional one on top of it -
+[EdgeFace](https://github.com/otroshi/edgeface) (Idiap Research Institute, BSD-3-Clause,
+run via the ONNX re-export at `yakhyo/edgeface-onnx`), a purpose-built, efficient
+face-recognition model (112x112 aligned input, 512-d output, XXS variant: 1.24M params,
+~5MB) - see `models/face-edge/README.md` for the full provenance/license note, including why
+several other candidate models from the same family (SCRFD, ArcFace/`w600k_*`, AgeGender,
+106-point landmarks - all InsightFace-derived and non-commercial-research-only) were
+deliberately **not** used.
+
+This was explicitly scoped down from "port the whole uniface face pipeline" to "keep what
+already works, replace only the weak link": face-api.js still does 100% of detection,
+68-point landmarks, and expression - all untouched, zero risk to something that was never
+reported broken. Only the recognition *embedding* changes, via:
+- `deriveFaceLandmarks5` - reduces face-api.js's 68 points to the standard 5-point layout
+  (left eye/right eye/nose/left mouth/right mouth) EdgeFace expects, using the same fixed
+  index ranges face-api.js's own `FaceLandmarks68.getLeftEye()`/`getRightEye()` use internally
+  (verified by reading that library's source directly, not assumed) - `[36,37,38,39,40,41]`
+  for the left eye, `[42,43,44,45,46,47]` for the right, `30` for the nose tip, `48`/`54` for
+  the mouth corners.
+- `estimateSimilarityTransform` - a closed-form least-squares fit (scale+rotation+translate,
+  4 degrees of freedom, no reflection possible by construction) equivalent to the Umeyama
+  algorithm the reference Python implementation (`uniface`'s `face_utils.py`) uses via
+  scikit-image, derived directly from the normal equations rather than ported line-by-line.
+- `alignFaceCrop` - warps the detected face onto EdgeFace's expected 112x112 layout via
+  Canvas2D's `setTransform`+`drawImage`, the browser-native equivalent of `cv2.warpAffine`.
+- `matchKnownFaceBest` - prefers a cosine-similarity match on the new 512-d embedding when
+  both the live capture and an enrolled person have one, and falls back to the original
+  Euclidean `matchKnownFace` otherwise - the path anyone enrolled *before* this change always
+  takes, since their stored entry has no `.edge` field. No migration step, no breakage, no
+  re-enrollment required for existing users; they just don't get the accuracy improvement
+  until they re-enroll (or re-identify, which doesn't update the stored embedding - only
+  enrollment does).
+
+**Math-level testing** (`face-match.test.js` + `fuzz-face-align.test.js`, extracted straight
+out of `index.html`): 43 fixed-case checks plus 1,000,000 randomized cases (~1.69M individual
+checks) covering `estimateSimilarityTransform` (identity/translation/scale/rotation sanity
+checks, then 300,000 cases generating a *known* random transform and verifying it's recovered
+to within 1e-6 and correctly reprojects the source points, plus 200,000 malformed-input cases
+- NaN/Infinity/wrong-type/mismatched-length - that must all return `null`, never throw),
+`deriveFaceLandmarks5` (150,000 cases including deliberately-holed 68-point arrays), and
+`matchKnownFaceBest`'s dual-descriptor fallback (350,000 cases with randomly mixed
+old/new-style enrolled entries, checking it always prefers a genuine edge match when one
+exists and correctly falls back to the legacy descriptor otherwise). All passed, zero
+failures.
+
+**Real end-to-end browser test** (Playwright + real Chromium + the real bundled ONNX model,
+not mocked - same methodology as the plate-OCR model's testing): confirmed the model loads
+in ~4.4s via a real ONNX Runtime Web session, and that `alignFaceCrop`+`runFaceEmbedModel`
+together produce a 512-d, all-finite, correctly L2-normalized embedding from a real
+in-browser canvas - deterministic on repeat (same image twice -> cosine similarity
+1.0000) and responsive to actual pixel content (two different synthetic images -> cosine
+similarity 0.748, clearly below the same-image baseline, meaning the model is actually
+looking at the pixels, not emitting a constant vector regardless of input).
+
+**What this testing deliberately does NOT cover, and why**: real-photo recognition accuracy
+with actual human faces - "does it correctly match two photos of the same real person and
+reject a different one." The plate-OCR model's accuracy claims (8/10 on real photos) could
+honestly be benchmarked against real street photos because the *vehicle/plate*, not a
+person's identity, is the subject of those public test images. Face recognition is
+different: it processes biometric identity specifically, and this session has consistently
+avoided using unconsenting strangers' photos for anything (the same reasoning that kept
+`accuracy-benchmark/` using synthetic plates, and kept earlier real-camera testing to the
+tester's own judgment calls about what's reasonable to process). No photo of a real,
+identifiable person with consent for facial-recognition testing was available in this
+sandbox - no camera, nothing supplied by the user for this specific purpose - so the smoke
+test above uses synthetic procedurally-generated test patterns with hand-placed landmark
+coordinates instead of a real detected face, which proves the *plumbing* works (model loads,
+alignment math feeds real ONNX inference correctly, output is well-formed) without touching
+anyone's actual likeness. The cosine-similarity threshold in `matchKnownFaceEdge`
+(`0.42`, "confirmed" at the halfway point to a perfect match) is therefore a
+literature-informed default, not empirically tuned against real enrolled/test photos in this
+sandbox - worth real-world verification (enroll a person, check a same-person and a
+different-person photo both read as expected, adjust the threshold if needed) once this runs
+somewhere with an actual camera or user-supplied, consented photos.

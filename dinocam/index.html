@@ -859,6 +859,146 @@ function addToWatchlist(){
       needs nothing typed at all beyond a name and a photo.
    Off by default; faces stay "Unknown person" until this is turned on and someone is added
    via the "Add known person" button. ---------- */
+// An optional second, stronger recognition engine layered on top of the face-api.js engine
+// above: EdgeFace (Idiap Research Institute, BSD-3-Clause, via yakhyo/edgeface-onnx - see
+// models/face-edge/README.md for the full license/provenance note and why several other
+// candidate models from the same family were deliberately NOT used). face-api.js still does
+// all detection/landmarks/expression work untouched; this only replaces the recognition
+// *embedding* with a sharper one, run fully client-side via the same ONNX Runtime Web engine
+// already used for the plate-OCR model. Optional and additive, same pattern as that model:
+// every call site below degrades cleanly to the original face-api.js descriptor/matching
+// whenever this model hasn't loaded (older browser, asset failed, or simply not loaded yet) -
+// including for anyone already enrolled before this was added, whose stored entry has no
+// edge embedding to compare against until they're re-enrolled.
+let faceEmbedLoadPromise=null;
+function loadFaceEmbedModel(){
+  if(A.faceEmbedModel||faceEmbedLoadPromise)return faceEmbedLoadPromise||Promise.resolve();
+  faceEmbedLoadPromise=(async()=>{
+    try{
+      await load('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort.min.js');
+      ort.env.wasm.wasmPaths='https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/'; // pin explicitly, same as every other CDN dependency in this file
+      await load('models/face-edge/model-data.js');
+      let bin=Uint8Array.from(atob(window.EDGEFACE_MODEL_B64),c=>c.charCodeAt(0));
+      A.faceEmbedModel=await ort.InferenceSession.create(bin.buffer,{executionProviders:['wasm']});
+    }catch(e){console.warn('EdgeFace embedding model unavailable; falling back to face-api.js matching only',e)}
+  })();
+  return faceEmbedLoadPromise;
+}
+// Standard 5-point ArcFace/InsightFace-style reference template for a 112x112 aligned face
+// crop - the layout EdgeFace (like most modern face-recognition models) was trained against.
+// From uniface's face_utils.py (BSD-3-Clause, same project EdgeFace's weights come from).
+// Order: left eye, right eye, nose tip, left mouth corner, right mouth corner, where
+// "left"/"right" means the side of the aligned IMAGE, not the subject's own anatomical
+// left/right - the usual convention for landmark datasets built from frontal photos.
+const FACE_ALIGN_TEMPLATE=[
+  {x:38.2946,y:51.6963},{x:73.5318,y:51.5014},{x:56.0252,y:71.7366},
+  {x:41.5493,y:92.3655},{x:70.7299,y:92.2041}
+];
+// Reduces face-api.js's 68-point landmark output to the 5 points above, using the fixed
+// index mapping standard for that landmark layout (dlib/ibug 300-W numbering, which
+// face-api.js follows exactly - points numbered left-to-right across the image as drawn,
+// matching the template's own left-to-right ordering). Eye centers are the mean of their 6
+// contour points. Pure/DOM-free - see dinocam/test/face-match.test.js.
+function deriveFaceLandmarks5(positions68){
+  if(!Array.isArray(positions68)||positions68.length<68)return null;
+  let mean=idxs=>{
+    let sx=0,sy=0;
+    for(let i of idxs){
+      let p=positions68[i];
+      if(!p||typeof p.x!=='number'||typeof p.y!=='number')return null;
+      sx+=p.x;sy+=p.y;
+    }
+    return{x:sx/idxs.length,y:sy/idxs.length};
+  };
+  let leftEye=mean([36,37,38,39,40,41]),rightEye=mean([42,43,44,45,46,47]);
+  let nose=positions68[30],leftMouth=positions68[48],rightMouth=positions68[54];
+  if(!leftEye||!rightEye||!nose||!leftMouth||!rightMouth)return null;
+  if(typeof nose.x!=='number'||typeof nose.y!=='number'||typeof leftMouth.x!=='number'||typeof leftMouth.y!=='number'||typeof rightMouth.x!=='number'||typeof rightMouth.y!=='number')return null;
+  return[leftEye,rightEye,{x:nose.x,y:nose.y},{x:leftMouth.x,y:leftMouth.y},{x:rightMouth.x,y:rightMouth.y}];
+}
+// Least-squares similarity transform (uniform scale + rotation + translation, no reflection)
+// mapping `src` points onto `dst` points - the closed-form 2D equivalent of the Umeyama
+// algorithm uniface's face_utils.py applies via scikit-image's SimilarityTransform. A pure
+// rotation+scale+translate has only 4 degrees of freedom, so minimizing total squared point
+// distance reduces to a small linear system solvable directly (no SVD needed, and no
+// reflection is representable by this parameterization in the first place). See
+// dinocam/test/face-match.test.js for known-transform checks. Returns {a,b,tx,ty} where
+// X = a*x - b*y + tx, Y = b*x + a*y + ty.
+function estimateSimilarityTransform(src,dst){
+  if(!Array.isArray(src)||!Array.isArray(dst)||src.length!==dst.length||src.length<2)return null;
+  let n=src.length,mx=0,my=0,mX=0,mY=0;
+  for(let i=0;i<n;i++){
+    let s=src[i],d=dst[i];
+    if(!s||!d||!Number.isFinite(s.x)||!Number.isFinite(s.y)||!Number.isFinite(d.x)||!Number.isFinite(d.y))return null;
+    mx+=s.x;my+=s.y;mX+=d.x;mY+=d.y;
+  }
+  mx/=n;my/=n;mX/=n;mY/=n;
+  let num1=0,num2=0,denom=0;
+  for(let i=0;i<n;i++){
+    let xp=src[i].x-mx,yp=src[i].y-my,Xp=dst[i].x-mX,Yp=dst[i].y-mY;
+    num1+=Xp*xp+Yp*yp;
+    num2+=Yp*xp-Xp*yp;
+    denom+=xp*xp+yp*yp;
+  }
+  if(!(denom>1e-9))return null;
+  let a=num1/denom,b=num2/denom;
+  return{a,b,tx:mX-a*mx+b*my,ty:mY-b*mx-a*my};
+}
+// Warps `source` so the face at `points5` lands on the standard template, returning a new
+// outSize x outSize canvas ready for EdgeFace - the role cv2.warpAffine plays in uniface's
+// face_alignment(). Canvas's setTransform+drawImage applies the forward src->dst affine
+// directly with native bilinear resampling, equivalent to what warpAffine does.
+function alignFaceCrop(source,points5,outSize){
+  outSize=outSize||112;
+  let scale=outSize/112;
+  let dst=FACE_ALIGN_TEMPLATE.map(p=>({x:p.x*scale,y:p.y*scale}));
+  let t=estimateSimilarityTransform(points5,dst);
+  if(!t)return null;
+  let c=document.createElement('canvas');c.width=outSize;c.height=outSize;
+  let g=c.getContext('2d');
+  g.setTransform(t.a,t.b,-t.b,t.a,t.tx,t.ty);
+  g.drawImage(source,0,0);
+  g.setTransform(1,0,0,1,0,0);
+  return c;
+}
+// Pure - L2-normalizes a vector so cosine similarity reduces to a plain dot product at
+// match time. See dinocam/test/face-match.test.js.
+function l2Normalize(v){
+  let norm=0;for(let i=0;i<v.length;i++)norm+=v[i]*v[i];
+  norm=Math.sqrt(norm);
+  if(!(norm>1e-9))return v.slice();
+  return v.map(x=>x/norm);
+}
+// Runs the EdgeFace model on an already-aligned 112x112 canvas and returns its L2-normalized
+// 512-d embedding. Input: NCHW float32, (pixel-127.5)/127.5 per channel, RGB order - see
+// models/face-edge/README.md.
+async function runFaceEmbedModel(canvas){
+  if(!A.faceEmbedModel)return null;
+  let g=canvas.getContext('2d');
+  let{data}=g.getImageData(0,0,canvas.width,canvas.height);
+  let n=canvas.width*canvas.height,chw=new Float32Array(3*n);
+  for(let i=0,p=0;i<data.length;i+=4,p++){
+    chw[p]=(data[i]-127.5)/127.5;
+    chw[n+p]=(data[i+1]-127.5)/127.5;
+    chw[2*n+p]=(data[i+2]-127.5)/127.5;
+  }
+  let tensor=new ort.Tensor('float32',chw,[1,3,canvas.height,canvas.width]);
+  let outputs=await A.faceEmbedModel.run({input:tensor});
+  return l2Normalize(Array.from(outputs.embedding.data));
+}
+// Ties the pieces above together: aligns `source` against `positions68` and runs EdgeFace,
+// returning null (never throwing) whenever the model isn't loaded yet or alignment fails -
+// callers always have the face-api.js descriptor to fall back to either way.
+async function computeEdgeEmbedding(source,positions68){
+  if(!A.faceEmbedModel)return null;
+  try{
+    let pts5=deriveFaceLandmarks5(positions68);
+    if(!pts5)return null;
+    let aligned=alignFaceCrop(source,pts5,112);
+    if(!aligned)return null;
+    return await runFaceEmbedModel(aligned);
+  }catch(e){console.warn('EdgeFace embedding failed',e);return null}
+}
 let faceRecLoadPromise=null;
 function loadFaceRecognition(){
   if(A.faceRecReady)return Promise.resolve();
@@ -872,6 +1012,7 @@ function loadFaceRecognition(){
     await faceapi.nets.faceExpressionNet.loadFromUri(base);
     A.faceRecReady=true;
   })();
+  loadFaceEmbedModel(); // a stronger optional embedding model, not a required dependency - face-api.js above already works without it
   return faceRecLoadPromise;
 }
 // Runs face-api's detector/landmark/descriptor/expression chain once and returns everything
@@ -885,17 +1026,13 @@ async function detectFaceDetails(source){
     let top=result.expressions?Object.entries(result.expressions).sort((a,b)=>b[1]-a[1])[0]:null;
     // Only report an expression when the model is reasonably confident - otherwise a near-flat
     // probability distribution (e.g. "neutral" at 0.3) is more noise than signal.
-    return{descriptor:Array.from(result.descriptor),expression:top&&top[1]>=.5?top[0]:null};
+    let edge=await computeEdgeEmbedding(source,result.landmarks.positions);
+    return{descriptor:Array.from(result.descriptor),expression:top&&top[1]>=.5?top[0]:null,edge};
   }catch(e){console.warn('Face detail detection failed',e);return null}
 }
-// Computes a face descriptor from an image/canvas/video source, or null if no face was
-// found. Kept as a thin wrapper around detectFaceDetails for callers that only need the
-// descriptor (enrollment).
-async function computeFaceDescriptor(source){
-  let d=await detectFaceDetails(source);
-  return d?d.descriptor:null;
-}
-// Pure/DOM-free matching math - see dinocam/test/face-match.test.js.
+// Pure/DOM-free matching math - see dinocam/test/face-match.test.js. This is the original
+// face-api.js engine's matcher (128-d descriptor, Euclidean distance) - unchanged, since
+// every person enrolled before the EdgeFace embedding existed only has this to match against.
 function faceDistance(a,b){
   let sum=0;for(let i=0;i<a.length;i++){let d=a[i]-b[i];sum+=d*d}
   return Math.sqrt(sum);
@@ -909,6 +1046,46 @@ function matchKnownFace(descriptor,knownFaces,threshold){
   }
   if(best&&bestDist<threshold)return{name:best.name,distance:bestDist,status:bestDist<threshold*.7?'confirmed':'candidate'};
   return null;
+}
+// Cosine similarity between two equal-length vectors (both expected already L2-normalized,
+// so this is just a dot product) - see dinocam/test/face-match.test.js.
+function cosineSimilarity(a,b){
+  if(!Array.isArray(a)||!Array.isArray(b)||a.length!==b.length||!a.length)return -1;
+  let dot=0;for(let i=0;i<a.length;i++)dot+=a[i]*b[i];
+  return dot;
+}
+// The EdgeFace-based matcher: higher cosine similarity is a better match (opposite sense
+// from faceDistance above). Only ever compares against knownFaces entries that themselves
+// have an .edge embedding, so it naturally no-ops (returns null) against an all-legacy
+// enrollment list rather than crashing or false-matching on missing data. Threshold/confirmed
+// split mirrors matchKnownFace's proportional style (confirmed = closed half the remaining
+// gap to a perfect 1.0 match) - see test/README.md for the real-photo tuning this was set
+// against.
+function matchKnownFaceEdge(embedding,knownFaces,threshold){
+  threshold=threshold==null?.42:threshold;
+  if(!Array.isArray(embedding))return null;
+  let best=null,bestSim=-Infinity;
+  for(let kf of knownFaces){
+    if(!Array.isArray(kf.edge)||kf.edge.length!==embedding.length)continue;
+    let sim=cosineSimilarity(embedding,kf.edge);
+    if(sim>bestSim){bestSim=sim;best=kf}
+  }
+  if(!best||bestSim<threshold)return null;
+  let confirmedAt=threshold+(1-threshold)*.5;
+  return{name:best.name,distance:1-bestSim,status:bestSim>=confirmedAt?'confirmed':'candidate'};
+}
+// Picks the strongest available match for one freshly-detected face (`captured`, as returned
+// by detectFaceDetails: {descriptor, edge}) against enrolled people, preferring the EdgeFace
+// embedding when both sides have one, and falling back to the original face-api.js descriptor
+// otherwise - the path anyone enrolled before EdgeFace was added always takes, since their
+// stored entry has no .edge field. See dinocam/test/face-match.test.js.
+function matchKnownFaceBest(captured,knownFaces){
+  if(!captured)return null;
+  if(Array.isArray(captured.edge)){
+    let m=matchKnownFaceEdge(captured.edge,knownFaces);
+    if(m)return m;
+  }
+  return Array.isArray(captured.descriptor)?matchKnownFace(captured.descriptor,knownFaces):null;
 }
 // Pure/DOM-free posture heuristic from body keypoints (TensorFlow.js pose-detection's
 // MoveNet output: [{x,y,score,name}, ...] in the source image's pixel coordinates) - see
@@ -944,9 +1121,11 @@ function classifyPosture(keypoints,minScore){
 async function enrollFaceLocal(name,source,status){
   if(!name){status.textContent='Enter a name first.';return false}
   status.textContent='Looking at the photo…';
-  let descriptor=await computeFaceDescriptor(source);
-  if(!descriptor){status.textContent='No clear face found in that photo — try a closer, front-facing one.';return false}
-  A.knownFaces.push({name,descriptor});
+  let details=await detectFaceDetails(source);
+  if(!details){status.textContent='No clear face found in that photo — try a closer, front-facing one.';return false}
+  let kf={name,descriptor:details.descriptor};
+  if(Array.isArray(details.edge))kf.edge=details.edge;
+  A.knownFaces.push(kf);
   saveSettings();
   status.textContent='Enrolled '+name+'.';
   return true;
@@ -984,7 +1163,7 @@ async function identifyFaceTrack(tr,source,b,maxW,maxH,cameraName){
   }else{
     let details=await detectFaceDetails(c);
     if(!details)return;
-    let match=matchKnownFace(details.descriptor,A.knownFaces);
+    let match=matchKnownFaceBest(details,A.knownFaces);
     tr.faceName=match?match.name:null;
     tr.faceStatus=match?match.status:'unknown';
     tr.expression=details.expression;
