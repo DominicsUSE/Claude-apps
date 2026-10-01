@@ -474,12 +474,31 @@ undertaking (closer to the scale of integrating an actual learned plate/text det
 tunable heuristic) and is out of scope for this round - flagging it clearly rather than
 claiming a fix that isn't complete.
 
-One real mitigating factor this single-static-photo test can't capture: the live camera path
-(`scanPlates()`) doesn't rely on any one frame succeeding - `applyPlateVote()` (fuzzed at 1M
-sequences/~10.8M checks earlier this session) accumulates votes as a tracked vehicle moves
-through several frames, and promotes on the first `'confirmed'` read, not a majority. A plate
-that reads correctly on even one frame out of several as a real car passes by will still get
-confirmed, even if most individual frames in this test's single-static-photo methodology
-don't. This round measured single-shot accuracy specifically because that's what's
-directly testable and comparable to the OCR-only baseline; it understates, by an unmeasured
-amount, the live multi-frame app's real effective accuracy on a moving vehicle.
+**Follow-up: tested the "multi-frame voting mitigates this" hypothesis directly - it mostly
+doesn't.** The paragraph originally here speculated that the live camera path's multi-frame
+voting (`scanPlates()`+`applyPlateVote()`, promoting on the first `'confirmed'` read as a
+tracked vehicle moves through several frames) would recover plates that any single static
+frame misses, since this round's methodology only tested one still photo per vehicle. Measured
+it instead of leaving it as a hopeful caveat: simulated 6 "frames" per vehicle by jittering
+each real photo's actual coco-ssd vehicle box by a few percent (position and size) per frame -
+standing in for a tracker's real box wobbling slightly frame to frame - and ran the real
+`scanPlateImage`+`applyPlateVote` pipeline across all 6 jittered scans per vehicle, exactly as
+`scanPlates()` does on a live feed (`multiframe.js`, not checked in).
+
+Result: **1/15 recovered** (only `eu4.jpg`, the one case that was already passing single-shot)
+- voting did *not* meaningfully rescue the other 14. Looking at the actual per-frame readings
+explains why: for a failing vehicle, the 6 jittered frames mostly produce 6 *different* wrong
+readings (e.g. `eu1.jpg`: "EB", "A YR", "AN VA", "N J", "EE", "GH" - no two alike), not the
+same wrong reading repeated or the occasional correct one buried among consistent near-misses.
+`applyPlateVote` only promotes a value once it either sees one `'confirmed'` read or the same
+value repeated 3+ times with decent average confidence - neither condition is met when every
+frame's localizer lands on a *different* (often different, often wrong) edge-dense feature on
+the vehicle, which is exactly the instability this round's root-cause diagnosis already
+identified (the localizer sometimes locks onto grille/trim/badges, not the plate). The one
+success, `eu4.jpg`, reads correctly in all 6 jittered frames regardless of jitter - evidently a
+vehicle/plate where either the localizer or the blind fallback bands reliably land close
+enough every time. The honest conclusion: multi-frame voting helps when per-frame accuracy is
+*inconsistent-but-occasionally-right*; it doesn't help when per-frame results are
+*consistently pointed at different wrong places*, which is this round's actual failure mode.
+Closing this gap for real needs the localizer itself to be more reliable (or a materially
+different approach - e.g. a learned plate detector), not more frames of an unreliable one.
