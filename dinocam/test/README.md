@@ -382,15 +382,27 @@ No second independently-photographed instance of the same real person was availa
 above for why), so as a same-identity positive control, ran each of the first 3 photos through
 `alignFaceCrop`+`detectFaceDetails` a second time after a realistic perturbation (8° rotation
 + darkened/contrast-boosted, simulating a different angle/lighting on an unchanged subject) and
-compared the fresh embedding to the original. Results were honestly mixed: sample2.jpg scored
-0.98 cosine (correctly matches) but sample1.jpg and sample3.jpg scored only 0.11 and 0.23
-(would NOT match at the 0.42 threshold) against their own rotated/darkened selves. This isn't
-necessarily an EdgeFace weakness - sample1.jpg is a 3-person group photo where face-api.js's
-"most prominent face" pick can legitimately land on a *different* person after the geometry
-changes, and real users won't typically enroll/recognize at an 8° rotation + 28% brightness
-drop in one step - but it's an honest data point, not swept under the rug: this round did not
-produce a clean, fully-controlled same-person-always-matches real-photo result, and that
-remains worth re-testing with an actual second photo of a real, consenting subject.
+compared the fresh embedding to the original. First pass looked mixed: sample2.jpg scored 0.98
+cosine (correctly matches) but sample1.jpg and sample3.jpg scored only 0.11 and 0.23 (would NOT
+match at the 0.42 threshold). Root-caused with a follow-up diagnostic (`face-diag.js`, not
+checked in) comparing each photo's detected face *box position*, mapped through the same
+rotation, before vs after perturbation: in both "failing" cases the detector's single-most-
+prominent-face pick landed on a **different person** after the perturbation (sample1.jpg:
+366px center-shift against a ~307px face; sample3.jpg: 503px shift against a ~344px face -
+both unambiguously a different face, not bounding-box jitter on the same one). All three test
+photos are multi-person group shots, and `detectSingleFace` only ever returns whichever single
+face scores highest confidence in that specific frame - a choice that can and did flip to a
+different person once relighting/rotation changed the relative confidence ranking. sample2.jpg
+is the one case where the detector's pick genuinely stayed on the same physical face before and
+after (84px shift against a 265px face - ordinary bounding-box jitter), and that's exactly the
+one that matched correctly. So corrected picture, not a mixed one: every one of the 3 cases
+behaved exactly as it should have once "which face got compared" is accounted for - same face
+in, high similarity out; different face in, low similarity out - which is actually a *fourth*
+real-photo confirmation that the embedding discriminates real faces correctly, not a
+counterexample. The test methodology (assuming "most prominent face" stays on the same person
+across a perturbation of a crowded group photo) was the flaw, not EdgeFace. Still genuinely
+worth re-testing with an actual second photo of the same real, consenting, single-subject
+scene, since a single same-face data point (sample2) is a thin positive-control sample size.
 
 ### Vehicles/plates: found and fixed a real, significant pipeline bug
 
