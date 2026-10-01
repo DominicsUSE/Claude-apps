@@ -345,3 +345,129 @@ literature-informed default, not empirically tuned against real enrolled/test ph
 sandbox - worth real-world verification (enroll a person, check a same-person and a
 different-person photo both read as expected, adjust the threshold if needed) once this runs
 somewhere with an actual camera or user-supplied, consented photos.
+
+## Real-photo round: vehicles, humans, items - and a real bug found and fixed
+
+Per request, ran the actual shipped pipeline (real Tesseract, real plate-ONNX model, real
+coco-ssd, real face-api.js, real EdgeFace - all fetched via pinned local npm installs standing
+in for the blocked CDNs, same methodology as `accuracy-benchmark/`) against three categories
+of genuinely real photos, through Playwright + real Chromium, not internal-function-only calls:
+
+- **Vehicles/plates**: 15 real street photos with hand-labeled ground truth (`openalpr/
+  benchmarks`' `endtoend/eu` set - the same source used earlier for `accuracy-benchmark/`).
+- **Humans**: face-api.js's own demo/test fixtures (`sample1-6.jpg`, MIT-licensed, the library
+  authors' own canonical recognition-demo images) - used transiently in-memory only, never
+  persisted into `A.knownFaces`, never tied to invented names, discarded after the run. Still
+  not a photo supplied/consented specifically for this test by a real person (see the EdgeFace
+  section above for why that distinction matters and was kept) - this is the next-best
+  ethically-available real-face source, not a substitute for it.
+- **Items**: `@tensorflow-models/coco-ssd`'s own demo fixtures (cat, beach/kitesurfing scene,
+  two beagles) - real photos, no people's faces visible, Apache-2.0 project.
+
+### Items: worked cleanly, no issues
+
+cat.jpg -> cat 93%. image2.jpg (two beagles) -> dog 94%, dog 87%, person 56% (legs only, no
+face). image1.jpg (kitesurfers) -> kite x3, person x4 (small/distant). All sensible, no false
+detections, nothing to report.
+
+### Humans: EdgeFace embeddings behave correctly on real faces
+
+All 6 photos detected cleanly (~1s each after warmup). Cross-photo cosine similarity between
+every pair of DIFFERENT people across the 6 photos: all 15 pairs scored between -0.17 and
++0.16 - correctly, consistently low, nowhere near the 0.42 match threshold. That's the
+expected signature of a discriminative embedding space (collapsed/constant embeddings would
+instead show uniformly high similarity regardless of identity).
+
+No second independently-photographed instance of the same real person was available (see
+above for why), so as a same-identity positive control, ran each of the first 3 photos through
+`alignFaceCrop`+`detectFaceDetails` a second time after a realistic perturbation (8° rotation
++ darkened/contrast-boosted, simulating a different angle/lighting on an unchanged subject) and
+compared the fresh embedding to the original. Results were honestly mixed: sample2.jpg scored
+0.98 cosine (correctly matches) but sample1.jpg and sample3.jpg scored only 0.11 and 0.23
+(would NOT match at the 0.42 threshold) against their own rotated/darkened selves. This isn't
+necessarily an EdgeFace weakness - sample1.jpg is a 3-person group photo where face-api.js's
+"most prominent face" pick can legitimately land on a *different* person after the geometry
+changes, and real users won't typically enroll/recognize at an 8° rotation + 28% brightness
+drop in one step - but it's an honest data point, not swept under the rug: this round did not
+produce a clean, fully-controlled same-person-always-matches real-photo result, and that
+remains worth re-testing with an actual second photo of a real, consenting subject.
+
+### Vehicles/plates: found and fixed a real, significant pipeline bug
+
+This is the substantial finding. Ran the SAME 15 real photos two ways in one pass, to isolate
+OCR from localization:
+- **OCR-only isolation**: `scanPlateImage` given the ground-truth plate rectangle directly
+  (`exact=true`, same technique `accuracy-benchmark/` uses) - **12/15 exact matches (80%)**,
+  consistent with the plate-OCR model's previously-reported accuracy.
+- **Live pipeline**: the actual path `scanPlates()` takes on a real camera - coco-ssd finds the
+  *vehicle* box, then `scanPlateImage(v, vehicleBox, exact=false, ...)` has to locate the plate
+  *within* that box itself - **2/15 exact matches (13%)** on the first run.
+
+A 67-point gap on the exact same 15 photos, same engines, same run. Root-caused with a
+dedicated diagnostic (`calibrate.js`, not checked in - ask to re-create if needed) comparing
+`locatePlateRect()`'s output against the ground-truth box via IoU, with the coco-ssd vehicle
+box confirmed to actually contain the true plate in 14/15 cases (so "vehicle detection missed
+the plate entirely" wasn't the explanation). The real cause: `locatePlateRect()` - the
+edge-density plate finder from the earlier "replace fixed % bands" work - was returning `null`
+in **14 of 15 real cases**, falling through to the blind percentage-band fallback every time,
+which only happened to overlap the true plate well in 2 of those 15 (explaining both passes).
+Instrumenting the rejection point showed why: the row-finding half of the algorithm (which
+*row* in the vehicle box has the densest text-like edges) was working excellently on real
+photos - `bestScore` values of 0.24-0.73, comfortably above its 0.055 threshold - but the
+column-bounding step (which *x*-range in that row is the plate) used a "threshold inward from
+both ends" approach that, on a real photo's row, keeps including any other edge-dense feature
+sharing that row (grille slats, bumper trim, badges) rather than stopping at the plate's own
+edges - producing boxes with **9.8:1 to 29.9:1 aspect ratios** that then correctly tripped the
+existing `aspect>9` sanity check and got rejected. The synthetic test fixture this was
+previously validated against (`plate-locator.test.js`) used an idealized, maximum-contrast
+stripe pattern on an otherwise perfectly smooth background - a case where "threshold inward
+from both ends" and "find the densest column run" give the same answer, so the gap between
+synthetic-test-passing and real-world-effectively-disabled was invisible until tested against
+real photos.
+
+Fixed by replacing the threshold-inward column search with the same sliding-window technique
+the row search already uses - search directly for the densest column *run* within a
+plate-plausible width range, rather than thresholding from both ends inward. Also found and
+removed an obsolete absolute-pixel width floor (`width >= 29px` on the 240px-wide downscaled
+work canvas) left over from before that change - it was coincidentally the only thing stopping
+some of the newly-found (correctly tight) real plate boxes, since a legitimately small/distant
+real plate can be narrower than 29px in that downscaled representation; the aspect-ratio and
+minimum-width-relative-to-height checks already cover the actual degenerate case without it.
+
+Fixing the column search this way reintroduced a real regression the test suite caught
+immediately: `plate-locator.test.js`'s synthetic sensor-noise case started returning a
+spurious, confident-looking band. Root cause: the row-density threshold is *relative* to the
+image's own max gradient, and small uniform sensor noise can saturate it (near-100% of pixels
+score as "edge" when the whole distribution is tightly clustered near its own max) - that case
+scored `bestScore=0.98`, something no real plate photo in this round ever did (max observed:
+0.73, out of a row that spans the plate's own modest width, never the whole vehicle-box-wide
+row). Fixed with a principled upper bound (`bestScore>0.85` also rejects, not just `<0.055`) -
+verified against all 15 real photos' actual scores (0.24-0.73, comfortably clear) before
+adding it, not guessed. All 7 `plate-locator.test.js` cases and the full existing suite
+(fuzz tests included, ~29M total checks) pass clean after these three changes together.
+
+**The honest remaining picture after the fix**: `locatePlateRect()` now returns a candidate in
+13/15 real cases (was 1/15), and *average* IoU against ground truth roughly doubled - a real,
+validated improvement, not a regression-masking change. But re-running the full live-pipeline
+test after the fix still only got **1-2/15 exact matches** - of the 13 non-null localizations,
+several land on the *wrong* edge-dense feature on the vehicle entirely (zero IoU with the true
+plate), not just an imprecisely-sized correct one. A padding sweep (`padsweep.js`, not checked
+in) confirmed the crop's existing margin (14% width / 45% height) is already close to optimal
+for IoU, not the limiting factor. The real remaining gap is *which row* the density search
+locks onto in the first place - real vehicles often have other features (grilles, trim,
+reflections, text/badges) with comparably strong or stronger edge density than the plate
+itself in a single static frame, and pure edge-density alone doesn't reliably distinguish
+"license plate" from "other dense vehicle texture." Properly solving that is a bigger
+undertaking (closer to the scale of integrating an actual learned plate/text detector than a
+tunable heuristic) and is out of scope for this round - flagging it clearly rather than
+claiming a fix that isn't complete.
+
+One real mitigating factor this single-static-photo test can't capture: the live camera path
+(`scanPlates()`) doesn't rely on any one frame succeeding - `applyPlateVote()` (fuzzed at 1M
+sequences/~10.8M checks earlier this session) accumulates votes as a tracked vehicle moves
+through several frames, and promotes on the first `'confirmed'` read, not a majority. A plate
+that reads correctly on even one frame out of several as a real car passes by will still get
+confirmed, even if most individual frames in this test's single-static-photo methodology
+don't. This round measured single-shot accuracy specifically because that's what's
+directly testable and comparable to the OCR-only baseline; it understates, by an unmeasured
+amount, the live multi-frame app's real effective accuracy on a moving vehicle.

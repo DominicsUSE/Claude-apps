@@ -1638,16 +1638,53 @@ function findPlateBand(gray,W,H){
       if(y0+bandH<H)s+=sm[y0+bandH]-sm[y0];
     }
   }
-  if(bestScore<.055)return null;
+  // bestScore is edge-pixel density across the FULL row width (W), not just the eventual plate
+  // width - a real plate only ever occupies a modest fraction of a vehicle-box-wide row, so a
+  // genuine plate's bestScore stays well under 1 (real photos in this app's own test set score
+  // 0.24-0.73). Density this close to saturated (>.85) instead means something is lighting up
+  // as "edge" almost everywhere in the row - uniform sensor noise does exactly that, because
+  // the threshold below is relative to the image's own max gradient, which a near-uniform noise
+  // floor clears almost everywhere at once. A real character-stroke row never looks like that.
+  if(bestScore<.055||bestScore>.85)return null;
+  let bandH=bestY1-bestY0;
   let colDensity=new Float32Array(W);
-  for(let x=0;x<W;x++){let s=0;for(let y=bestY0;y<bestY1;y++)s+=dil[y*W+x];colDensity[x]=s/(bestY1-bestY0)}
+  for(let x=0;x<W;x++){let s=0;for(let y=bestY0;y<bestY1;y++)s+=dil[y*W+x];colDensity[x]=s/bandH}
   let colMax=0;for(let x=0;x<W;x++)if(colDensity[x]>colMax)colMax=colDensity[x];
   if(colMax<=0)return null;
-  let colThr=colMax*.3,x0=0,x1=W-1;
-  while(x0<W&&colDensity[x0]<colThr)x0++;
-  while(x1>0&&colDensity[x1]<colThr)x1--;
-  if(x1<=x0||(x1-x0)<W*.12)return null;
-  let rectW=x1-x0,rectH=bestY1-bestY0,aspect=rectW/Math.max(1,rectH);
+  // Slide a plate-plausible-width window across columns and keep the one with the highest
+  // average density - the same sliding-window technique the Y-band search above already uses,
+  // applied to X. The previous approach (threshold inward from both ends) over-includes any
+  // other edge-dense feature sharing the row (grille slats, bumper trim, badges), which on
+  // real photos routinely stretched the box across most of the vehicle's width - a ~20-30:1
+  // aspect ratio that then correctly tripped the sanity check below and returned null, which
+  // is why this almost never fired on real photos despite bestScore itself being well above
+  // threshold (found by testing against real vehicle photos, not synthetic ones - see
+  // test/README.md). Searching directly for the densest column RUN instead stays tight to the
+  // plate's own characters even when the row contains other texture nearby.
+  let minBandW=Math.max(8,Math.round(bandH*1.3)),maxBandW=Math.min(W,Math.round(bandH*9));
+  if(minBandW>maxBandW)return null;
+  // Widest-first: on a real plate's actual character region, a narrower sub-window scoring
+  // the same average as a wider one is rare (density genuinely tapers at the real edges), so
+  // this only matters for exact ties - and prefers the window that captures the full dense
+  // region instead of an arbitrary dense-enough sliver of it (found via the synthetic test's
+  // perfectly uniform stripe pattern, where every sub-window scores identically).
+  let bestXScore=-1,bestX0=0,bestXW=minBandW;
+  for(let bandW=maxBandW;bandW>=minBandW;bandW--){
+    let s=0;for(let x=0;x<bandW;x++)s+=colDensity[x];
+    for(let xx=0;xx+bandW<=W;xx++){
+      let score=s/bandW;
+      if(score>bestXScore){bestXScore=score;bestX0=xx;bestXW=bandW}
+      if(xx+bandW<W)s+=colDensity[xx+bandW]-colDensity[xx];
+    }
+  }
+  if(bestXScore<=0)return null;
+  let x0=bestX0,x1=bestX0+bestXW;
+  // No separate absolute-pixel width floor here (there used to be one, W*.12) - minBandW above
+  // already enforces width>=~1.3x the band height (same ratio the aspect check below re-checks),
+  // which is the real sanity bound; a fixed ~29px-on-a-240px-canvas floor on top of that was
+  // bigger than many real plates' actual width once legitimately small/distant in the downscaled
+  // work canvas, rejecting them outright regardless of how clean their edge signal was.
+  let rectW=x1-x0,rectH=bandH,aspect=rectW/Math.max(1,rectH);
   if(aspect<1.3||aspect>9)return null;
   let padX=rectW*.14,padY=rectH*.45;
   let rx=Math.max(0,x0-padX),ry=Math.max(0,bestY0-padY);
