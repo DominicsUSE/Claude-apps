@@ -1627,17 +1627,25 @@ function findPlateBand(gray,W,H){
   for(let y=0;y<H;y++){let s=0;for(let x=0;x<W;x++)s+=dil[y*W+x];rowDensity[y]=s/W}
   let sm=new Float32Array(H);
   for(let y=0;y<H;y++){let s=0,n=0;for(let k=-1;k<=1;k++){let yy=y+k;if(yy>=0&&yy<H){s+=rowDensity[yy];n++}}sm[y]=s/n}
-  // slide a plate-height-sized window down the rows, keep the band with the highest average edge density
+  // Slide a plate-height-sized window down the rows and score every position - then, instead
+  // of keeping only the single best-scoring row, keep the top few non-overlapping ones. On a
+  // real vehicle the single highest-edge-density row isn't always the plate (a grille, bumper
+  // trim, or badge can legitimately score higher) - trying the next-best rows too meaningfully
+  // raises the odds the actual plate is among what gets tried, instead of being silently
+  // discarded because something else on the car scored marginally higher (see test/README.md
+  // for the real-photo testing that found this - the single-best approach located nothing
+  // useful far more often than not). Each candidate still goes through the same column search
+  // and sanity checks below as before; this only widens how many row candidates get that chance.
+  let rowCandidates=[];
   let minBandH=Math.max(3,Math.round(H*.10)),maxBandH=Math.max(minBandH+1,Math.round(H*.42));
-  let bestScore=-1,bestY0=0,bestY1=0;
   for(let bandH=minBandH;bandH<=maxBandH;bandH++){
     let s=0;for(let y=0;y<bandH;y++)s+=sm[y];
     for(let y0=0;y0+bandH<=H;y0++){
-      let score=s/bandH;
-      if(score>bestScore){bestScore=score;bestY0=y0;bestY1=y0+bandH}
+      rowCandidates.push({score:s/bandH,y0,y1:y0+bandH});
       if(y0+bandH<H)s+=sm[y0+bandH]-sm[y0];
     }
   }
+  rowCandidates.sort((a,b)=>b.score-a.score);
   // bestScore is edge-pixel density across the FULL row width (W), not just the eventual plate
   // width - a real plate only ever occupies a modest fraction of a vehicle-box-wide row, so a
   // genuine plate's bestScore stays well under 1 (real photos in this app's own test set score
@@ -1645,50 +1653,66 @@ function findPlateBand(gray,W,H){
   // as "edge" almost everywhere in the row - uniform sensor noise does exactly that, because
   // the threshold below is relative to the image's own max gradient, which a near-uniform noise
   // floor clears almost everywhere at once. A real character-stroke row never looks like that.
-  if(bestScore<.055||bestScore>.85)return null;
-  let bandH=bestY1-bestY0;
-  let colDensity=new Float32Array(W);
-  for(let x=0;x<W;x++){let s=0;for(let y=bestY0;y<bestY1;y++)s+=dil[y*W+x];colDensity[x]=s/bandH}
-  let colMax=0;for(let x=0;x<W;x++)if(colDensity[x]>colMax)colMax=colDensity[x];
-  if(colMax<=0)return null;
-  // Slide a plate-plausible-width window across columns and keep the one with the highest
-  // average density - the same sliding-window technique the Y-band search above already uses,
-  // applied to X. The previous approach (threshold inward from both ends) over-includes any
-  // other edge-dense feature sharing the row (grille slats, bumper trim, badges), which on
-  // real photos routinely stretched the box across most of the vehicle's width - a ~20-30:1
-  // aspect ratio that then correctly tripped the sanity check below and returned null, which
-  // is why this almost never fired on real photos despite bestScore itself being well above
-  // threshold (found by testing against real vehicle photos, not synthetic ones - see
-  // test/README.md). Searching directly for the densest column RUN instead stays tight to the
-  // plate's own characters even when the row contains other texture nearby.
-  let minBandW=Math.max(8,Math.round(bandH*1.3)),maxBandW=Math.min(W,Math.round(bandH*9));
-  if(minBandW>maxBandW)return null;
-  // Widest-first: on a real plate's actual character region, a narrower sub-window scoring
-  // the same average as a wider one is rare (density genuinely tapers at the real edges), so
-  // this only matters for exact ties - and prefers the window that captures the full dense
-  // region instead of an arbitrary dense-enough sliver of it (found via the synthetic test's
-  // perfectly uniform stripe pattern, where every sub-window scores identically).
-  let bestXScore=-1,bestX0=0,bestXW=minBandW;
-  for(let bandW=maxBandW;bandW>=minBandW;bandW--){
-    let s=0;for(let x=0;x<bandW;x++)s+=colDensity[x];
-    for(let xx=0;xx+bandW<=W;xx++){
-      let score=s/bandW;
-      if(score>bestXScore){bestXScore=score;bestX0=xx;bestXW=bandW}
-      if(xx+bandW<W)s+=colDensity[xx+bandW]-colDensity[xx];
-    }
+  let topRows=[];
+  for(let c of rowCandidates){
+    if(c.score<.055||c.score>.85)continue;
+    let cy=(c.y0+c.y1)/2;
+    // Skip near-duplicates of an already-picked row (the same real feature found at a
+    // slightly different bandH) rather than genuinely distinct candidates - simple
+    // non-max-suppression by center distance.
+    if(topRows.some(t=>Math.abs((t.y0+t.y1)/2-cy)<(t.y1-t.y0)*.5))continue;
+    topRows.push(c);
+    if(topRows.length>=3)break;
   }
-  if(bestXScore<=0)return null;
-  let x0=bestX0,x1=bestX0+bestXW;
-  // No separate absolute-pixel width floor here (there used to be one, W*.12) - minBandW above
-  // already enforces width>=~1.3x the band height (same ratio the aspect check below re-checks),
-  // which is the real sanity bound; a fixed ~29px-on-a-240px-canvas floor on top of that was
-  // bigger than many real plates' actual width once legitimately small/distant in the downscaled
-  // work canvas, rejecting them outright regardless of how clean their edge signal was.
-  let rectW=x1-x0,rectH=bandH,aspect=rectW/Math.max(1,rectH);
-  if(aspect<1.3||aspect>9)return null;
-  let padX=rectW*.14,padY=rectH*.45;
-  let rx=Math.max(0,x0-padX),ry=Math.max(0,bestY0-padY);
-  return{x:rx,y:ry,w:Math.min(W-rx,rectW+2*padX),h:Math.min(H-ry,rectH+2*padY),score:bestScore};
+  if(!topRows.length)return null;
+  let out=[];
+  for(let row of topRows){
+    let bandH=row.y1-row.y0;
+    let colDensity=new Float32Array(W);
+    for(let x=0;x<W;x++){let s=0;for(let y=row.y0;y<row.y1;y++)s+=dil[y*W+x];colDensity[x]=s/bandH}
+    let colMax=0;for(let x=0;x<W;x++)if(colDensity[x]>colMax)colMax=colDensity[x];
+    if(colMax<=0)continue;
+    // Slide a plate-plausible-width window across columns and keep the one with the highest
+    // average density - the same sliding-window technique used for the row search above,
+    // applied to X. Thresholding inward from both ends (the previous approach) over-includes
+    // any other edge-dense feature sharing the row (grille slats, bumper trim, badges), which
+    // on real photos routinely stretched the box across most of the vehicle's width - a
+    // ~20-30:1 aspect ratio that then correctly tripped the sanity check below and got
+    // rejected, which is why this almost never fired on real photos despite the row score
+    // itself being well above threshold (found by testing against real vehicle photos, not
+    // synthetic ones - see test/README.md). Searching directly for the densest column RUN
+    // instead stays tight to the plate's own characters even when the row has other texture.
+    let minBandW=Math.max(8,Math.round(bandH*1.3)),maxBandW=Math.min(W,Math.round(bandH*9));
+    if(minBandW>maxBandW)continue;
+    // Widest-first: on a real plate's actual character region, a narrower sub-window scoring
+    // the same average as a wider one is rare (density genuinely tapers at the real edges), so
+    // this only matters for exact ties - and prefers the window that captures the full dense
+    // region instead of an arbitrary dense-enough sliver of it (found via the synthetic test's
+    // perfectly uniform stripe pattern, where every sub-window scores identically).
+    let bestXScore=-1,bestX0=0,bestXW=minBandW;
+    for(let bandW=maxBandW;bandW>=minBandW;bandW--){
+      let s=0;for(let x=0;x<bandW;x++)s+=colDensity[x];
+      for(let xx=0;xx+bandW<=W;xx++){
+        let score=s/bandW;
+        if(score>bestXScore){bestXScore=score;bestX0=xx;bestXW=bandW}
+        if(xx+bandW<W)s+=colDensity[xx+bandW]-colDensity[xx];
+      }
+    }
+    if(bestXScore<=0)continue;
+    let x0=bestX0,x1=bestX0+bestXW;
+    // No separate absolute-pixel width floor here (there used to be one, W*.12) - minBandW
+    // above already enforces width>=~1.3x the band height (same ratio the aspect check below
+    // re-checks), which is the real sanity bound; a fixed ~29px-on-a-240px-canvas floor on top
+    // of that was bigger than many real plates' actual width once legitimately small/distant
+    // in the downscaled work canvas, rejecting them outright regardless of how clean their
+    // edge signal was.
+    let rectW=x1-x0,rectH=bandH,aspect=rectW/Math.max(1,rectH);
+    if(aspect<1.3||aspect>9)continue;
+    let padX=rectW*.14,padY=rectH*.45;
+    let rx=Math.max(0,x0-padX),ry=Math.max(0,row.y0-padY);
+    out.push({x:rx,y:ry,w:Math.min(W-rx,rectW+2*padX),h:Math.min(H-ry,rectH+2*padY),score:row.score});
+  }
+  return out.length?out:null;
 }
 function locatePlateRect(source,b){
   let scanBox={x:b.x,y:b.y+b.h*.35,w:b.w,h:b.h*.65};
@@ -1701,9 +1725,9 @@ function locatePlateRect(source,b){
   try{img=g.getImageData(0,0,workW,workH).data}catch(e){return null}
   let gray=new Float32Array(workW*workH);
   for(let i=0;i<workW*workH;i++){let o=i*4;gray[i]=.299*img[o]+.587*img[o+1]+.114*img[o+2]}
-  let band=findPlateBand(gray,workW,workH);
-  if(!band)return null;
-  return{x:scanBox.x+band.x/workW*scanBox.w,y:scanBox.y+band.y/workH*scanBox.h,w:band.w/workW*scanBox.w,h:band.h/workH*scanBox.h};
+  let bands=findPlateBand(gray,workW,workH);
+  if(!bands)return null;
+  return bands.map(band=>({x:scanBox.x+band.x/workW*scanBox.w,y:scanBox.y+band.y/workH*scanBox.h,w:band.w/workW*scanBox.w,h:band.h/workH*scanBox.h}));
 }
 async function ocrVariant(canvas,psm){try{return await A.ocr.recognize(canvas,{tessedit_pageseg_mode:String(psm),preserve_interword_spaces:'1'})}catch(e){return await A.ocr.recognize(canvas)}}
 // Runs the full multi-region, multi-variant OCR pass over one image and returns a tri-state
@@ -1716,8 +1740,8 @@ async function scanPlateImage(source,region,exact,useLock){
   let regions;
   if(exact)regions=[b];
   else if(region){
-    let located=locatePlateRect(source,b); // try to actually find the plate before falling back to blind bands
-    regions=[...(located?[located]:[]),...plateRegions(b,W,H,useLock)];
+    let located=locatePlateRect(source,b); // try to actually find the plate (now up to 3 real candidates) before falling back to blind bands
+    regions=[...(located||[]),...plateRegions(b,W,H,useLock)];
   }else regions=[{x:0,y:0,w:W,h:H}];
   regions=regions.slice(0,profile.maxRegions);
   // Prefer the plate-trained model when it's loaded - one pass per region, no preprocessing

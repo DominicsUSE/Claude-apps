@@ -185,9 +185,11 @@ for (let i = 0; i < 2000; i++) {
   let result;
   try { result = findPlateBand(gray, W, H); } catch (e) { check('findPlateBand#' + i + ' does not throw', false, { W, H, kind, error: e.message }); continue; }
   if (result === null) { check('findPlateBand#' + i + ' null is a valid "nothing found" result', true); continue; }
-  check('findPlateBand#' + i + ' returns finite, sane box fields', [result.x, result.y, result.w, result.h, result.score].every(v => typeof v === 'number' && isFinite(v)), { W, H, kind, result });
-  check('findPlateBand#' + i + ' box has positive width and height', result.w > 0 && result.h > 0, { W, H, kind, result });
-  check('findPlateBand#' + i + ' box origin is non-negative', result.x >= 0 && result.y >= 0, { W, H, kind, result });
+  // findPlateBand now returns an array of up to 3 candidate bands (or null), not a single one.
+  check('findPlateBand#' + i + ' returns a non-empty array of at most 3 candidates', Array.isArray(result) && result.length > 0 && result.length <= 3, { W, H, kind, result });
+  check('findPlateBand#' + i + ' every candidate has finite, sane box fields', result.every(b => [b.x, b.y, b.w, b.h, b.score].every(v => typeof v === 'number' && isFinite(v))), { W, H, kind, result });
+  check('findPlateBand#' + i + ' every candidate has positive width and height', result.every(b => b.w > 0 && b.h > 0), { W, H, kind, result });
+  check('findPlateBand#' + i + ' every candidate has non-negative origin', result.every(b => b.x >= 0 && b.y >= 0), { W, H, kind, result });
 }
 // Degenerate dimensions must never throw.
 for (const [W, H] of [[0, 0], [-5, 10], [10, -5], [1, 1], [NaN, 50], [50, NaN]]) {

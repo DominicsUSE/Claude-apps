@@ -33,9 +33,11 @@ function overlap(a0, a1, b0, b1) { return Math.max(0, Math.min(a1, b1) - Math.ma
       gray[y * W + x] = (Math.floor(x / 4) % 2 === 0) ? 30 : 220; // alternating dark/light strokes
     }
   }
-  const band = findPlateBand(gray, W, H);
-  check('clean plate band: found something', !!band, JSON.stringify(band));
-  if (band) {
+  const bands = findPlateBand(gray, W, H);
+  check('clean plate band: found something', !!bands, JSON.stringify(bands));
+  if (bands) {
+    check('clean plate band: returns an array of at most 3 candidates', Array.isArray(bands) && bands.length > 0 && bands.length <= 3, JSON.stringify(bands));
+    const band = bands[0]; // best-scoring candidate
     const yOverlap = overlap(band.y, band.y + band.h, bandY0, bandY1) / (bandY1 - bandY0);
     const xOverlap = overlap(band.x, band.x + band.w, stripeX0, stripeX1) / (stripeX1 - stripeX0);
     check('clean plate band: y-range substantially overlaps the real band', yOverlap > 0.6, 'yOverlap=' + yOverlap.toFixed(2) + ' band=' + JSON.stringify(band));
@@ -69,13 +71,12 @@ function overlap(a0, a1, b0, b1) { return Math.max(0, Math.min(a1, b1) - Math.ma
   const W = 240, H = 150;
   const gray = new Float32Array(W * H).fill(120);
   for (let y = 60; y < 110; y++) for (let x = 100; x < 150; x++) gray[y * W + x] = (Math.floor(x / 3) % 2 === 0) ? 30 : 220;
-  const band = findPlateBand(gray, W, H);
+  const bands = findPlateBand(gray, W, H);
   // A ~50x50 square blob is aspect ~1:1, outside the accepted 1.3-9 plate range, OR if the
-  // band-search crops it into a plate-like slice that's fine too — either way it must not
+  // band-search crops it into a plate-like slice that's fine too — either way no candidate may
   // report the whole square as-is with aspect < 1.3.
-  if (band) {
-    const aspect = band.w / band.h;
-    check('square grille blob: not reported as a ~1:1 block', aspect >= 1.3, 'aspect=' + aspect.toFixed(2));
+  if (bands) {
+    check('square grille blob: not reported as a ~1:1 block', bands.every(band => band.w / band.h >= 1.3), JSON.stringify(bands));
   } else {
     check('square grille blob: rejecting entirely is also acceptable', true);
   }

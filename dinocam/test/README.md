@@ -502,3 +502,52 @@ enough every time. The honest conclusion: multi-frame voting helps when per-fram
 *consistently pointed at different wrong places*, which is this round's actual failure mode.
 Closing this gap for real needs the localizer itself to be more reliable (or a materially
 different approach - e.g. a learned plate detector), not more frames of an unreliable one.
+
+## Follow-up: top-K plate-region candidates, not just the single best
+
+Direct follow-up on the finding above - "the localizer itself needs to be more reliable." The
+multi-frame diagnosis showed the real failure mode isn't usually "found nothing," it's "found
+the wrong thing with confidence" - `findPlateBand`'s row search picked the single
+highest-edge-density row in the vehicle box, but on a real vehicle that's not always the plate
+(a grille, bumper trim, or badge can legitimately score higher in one frame). Since
+`scanPlateImage` already has the machinery to try multiple candidate regions and keep whichever
+one actually OCRs well (that's what `plateRegions()`'s blind percentage bands were always for),
+the natural fix is to feed it more *real* candidates instead of relying on one best guess:
+`findPlateBand` now returns the top 3 non-overlapping row candidates (by edge density, with
+simple non-max suppression so they're not 3 near-identical variants of the same row), each run
+through the same column search and sanity checks as before, instead of only the single best.
+`locatePlateRect` and `scanPlateImage`'s region-building updated to match (an array of
+candidates instead of one object-or-null).
+
+**Measured effect on the same 15 real photos**: `locatePlateRect` now returns at least one
+candidate in **15/15** cases (was 13/15), and the *best* IoU-against-ground-truth among a
+vehicle's candidates roughly doubled on average (several cases that were a flat 0.00 single-
+shot - `eu3.jpg`, `eu6.jpg` - now have a best candidate at 0.45-0.46 IoU; `eu8.jpg` reached
+0.83). Re-running the full live pipeline (`run.js`) with real OCR: exact-match count stayed
+flat at **1/15** (the strict whole-plate metric is harsh), but several near-misses visibly
+tightened - `eu6.jpg` went from reading nothing useful to `confirmed "VWMK4"` (exactly
+"WOBVWMK4" missing its 3-character prefix), `eu4.jpg` to `"IMM1"` (missing a leading B and
+trailing AN from "BIMMIAN"), `eu8.jpg` to a full exact match. The pattern across several
+near-misses - correct trailing characters, missing leading ones - suggests the found box's
+*left* edge is sometimes still slightly too tight (plausibly where a plate's border/mounting
+margin has lower edge density than its characters, pulling the column sliding-window's "densest
+average" inward from the plate's true left edge). That's a specific, actionable lead for
+further work on this, not something chased further this round - two full rounds of real-photo-
+driven tuning on this one 15-photo sample is enough for now without a larger validation set to
+avoid overfitting to these specific vehicles. All existing tests (synthetic + ~29M fuzz checks,
+`findPlateBand`'s fuzz coverage and `plate-locator.test.js` updated for the new
+array-of-candidates return shape) still pass.
+
+### On "lock the plate region" and speed
+
+Worth saying plainly, since the ask behind this round was "faster, without needing to lock the
+region": the live scan interval is already a 200ms floor (real per-call compute time, not the
+interval, is what actually paces scans - see the interval-tightening work earlier this
+session), so raw speed was never the bottleneck here. Locking the region works well because
+`scanLockedRegion()` passes `exact=true` - the user-drawn box *is* used directly as the plate
+rectangle, with no localization step at all. Automatic (unlocked) detection has always had to
+additionally solve "where in the vehicle is the plate," and that - not scan speed - is the real
+gap this round (and the two before it) worked on narrowing. It's measurably better than it was
+(13/15 -> 15/15 candidates found, IoU roughly doubled) but not yet at parity with a manually
+locked region, which still reads more reliably because it skips localization's uncertainty
+entirely.

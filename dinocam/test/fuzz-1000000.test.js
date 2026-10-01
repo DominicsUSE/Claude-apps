@@ -196,7 +196,10 @@ for (let i = 0; i < 50000; i++) {
   let result;
   try { result = findPlateBand(gray, W, H); } catch (e) { check('findPlateBand', '#' + i, false, { W, H, kind, error: e.message }); continue; }
   if (result === null) { pass++; continue; }
-  check('findPlateBand', '#' + i, [result.x, result.y, result.w, result.h, result.score].every(v => typeof v === 'number' && isFinite(v)) && result.w > 0 && result.h > 0 && result.x >= 0 && result.y >= 0, { W, H, kind, result });
+  // findPlateBand now returns an array of up to 3 candidate bands (or null), not a single one.
+  check('findPlateBand', '#' + i, Array.isArray(result) && result.length > 0 && result.length <= 3 &&
+    result.every(b => [b.x, b.y, b.w, b.h, b.score].every(v => typeof v === 'number' && isFinite(v)) && b.w > 0 && b.h > 0 && b.x >= 0 && b.y >= 0),
+    { W, H, kind, result });
 }
 console.log('  findPlateBand (50,000) done at ' + (Date.now() - t0) + 'ms, running total: ' + pass + ' pass / ' + fail + ' fail');
 
