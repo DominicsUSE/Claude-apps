@@ -1,0 +1,673 @@
+<title>Build Atlas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: full-bleed night globe; floating search top-left, legend bottom-left,
+   detail panel docked right (bottom sheet on phones). One deliberate dark look. */
+:root{
+  --space:#060a12;
+  --ocean:#0c1828;
+  --land:#1a2633;
+  --panel:rgba(10,17,28,.9);
+  --line:rgba(150,180,210,.16);
+  --ink:#e6edf5;
+  --muted:#8798ad;
+  --accent:#8fc8ff;
+  --good:#3cc47f;
+  --mid:#f1c232;
+  --bad:#ee5a52;
+  --f-display:"Bricolage Grotesque","Avenir Next","Segoe UI",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans","Segoe UI",system-ui,-apple-system,sans-serif;
+  --f-data:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --r:12px;
+  color-scheme:dark;
+}
+html,body{height:100%}
+[hidden]{display:none!important}
+body{margin:0;background:var(--space);color:var(--ink);font:14px/1.45 var(--f-body);overflow:hidden}
+#app{position:relative;height:100%;width:100%}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+canvas.dragging{cursor:grabbing}
+canvas.pointing{cursor:pointer}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.top{position:absolute;top:16px;left:16px;display:flex;flex-direction:column;gap:10px;width:min(340px,calc(100% - 32px));z-index:3}
+.brand{display:flex;align-items:baseline;gap:10px}
+.brand h1{margin:0;font:700 22px/1 var(--f-display);letter-spacing:-.01em}
+.brand span{color:var(--muted);font-size:12px;letter-spacing:.04em;text-transform:uppercase}
+.search{position:relative}
+.search input{width:100%;box-sizing:border-box;padding:11px 14px 11px 38px;border-radius:var(--r);border:1px solid var(--line);background:var(--panel);color:var(--ink);font:15px var(--f-body);backdrop-filter:blur(10px)}
+.search input::placeholder{color:var(--muted)}
+.search svg{position:absolute;z-index:1;pointer-events:none;left:12px;top:50%;transform:translateY(-50%);width:16px;height:16px;stroke:var(--muted);fill:none;stroke-width:2}
+.results{list-style:none;margin:6px 0 0;padding:4px;border-radius:var(--r);border:1px solid var(--line);background:var(--panel);backdrop-filter:blur(10px);max-height:320px;overflow:auto}
+.results li{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer}
+.results li[aria-selected="true"],.results li:hover{background:rgba(143,200,255,.1)}
+.results .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.results .sub{color:var(--muted);font-size:12px}
+
+.pct{font:500 12px/1 var(--f-data);padding:4px 7px;border-radius:999px;color:#08111c;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pct.g{background:var(--good)}.pct.y{background:var(--mid)}.pct.r{background:var(--bad)}
+
+.legend{position:absolute;left:16px;bottom:16px;z-index:3;display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:var(--r);background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(10px);max-width:calc(100% - 32px);box-sizing:border-box}
+.legend .lbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:flex;align-items:center;gap:7px;padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:transparent;cursor:pointer;font-size:13px}
+.chip i{width:10px;height:10px;border-radius:50%;display:block}
+.chip[aria-pressed="false"]{opacity:.4}
+.chip b{font:500 11px var(--f-data);color:var(--muted);font-weight:500}
+.note{font-size:11px;color:var(--muted);max-width:320px}
+.zoomhint{font:500 11px var(--f-data);color:var(--accent)}
+
+.ctrls{position:absolute;right:16px;bottom:16px;z-index:3;display:flex;flex-direction:column;gap:6px}
+.ctrls button{width:40px;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--panel);cursor:pointer;font-size:18px;display:grid;place-items:center;backdrop-filter:blur(10px)}
+.ctrls button:hover{border-color:var(--accent)}
+.ctrls svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2}
+
+.panel{position:absolute;top:16px;right:16px;bottom:16px;width:340px;z-index:2;display:flex;flex-direction:column;border-radius:16px;background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(14px);overflow:hidden}
+body.has-panel .ctrls{right:372px}
+.panel-scroll{overflow:auto;padding:18px;display:flex;flex-direction:column;gap:16px;min-height:0}
+.panel h2{margin:0;font:700 24px/1.1 var(--f-display);text-wrap:balance}
+.panel h3{margin:0;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.eyebrow{color:var(--muted);font-size:13px}
+.back{align-self:flex-start;background:none;border:0;color:var(--accent);cursor:pointer;padding:0;font-size:13px}
+.hero{display:flex;align-items:center;gap:14px}
+.big{font:700 52px/1 var(--f-display);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.big small{font-size:24px;color:var(--muted);font-weight:500}
+.verdict{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;font-weight:600;font-size:13px}
+.verdict.g{background:rgba(60,196,127,.15);color:var(--good)}
+.verdict.y{background:rgba(241,194,50,.15);color:var(--mid)}
+.verdict.r{background:rgba(238,90,82,.15);color:var(--bad)}
+.verdict i{width:8px;height:8px;border-radius:50%;background:currentColor}
+.meta{color:var(--muted);font-size:13px}
+.bars{display:flex;flex-direction:column;gap:10px}
+.bar{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center}
+.bar .t{font-size:13px}
+.bar .v{font:500 12px var(--f-data);color:var(--muted);font-variant-numeric:tabular-nums}
+.bar .track{grid-column:1/-1;height:6px;border-radius:3px;background:rgba(150,180,210,.12);overflow:hidden}
+.bar .fill{height:100%;border-radius:3px}
+.adj{display:grid;grid-template-columns:1fr auto;gap:6px 12px;font-size:13px;margin:0}
+.adj dt{color:var(--muted)}
+.adj dd{margin:0;font:500 13px var(--f-data);text-align:right;font-variant-numeric:tabular-nums}
+.adj .tot{color:var(--ink);font-weight:600;border-top:1px solid var(--line);padding-top:6px}
+.list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.list li{display:flex;align-items:center;gap:10px;padding:8px 6px;border-radius:8px;cursor:pointer;border-bottom:1px solid var(--line)}
+.list li:last-child{border-bottom:0}
+.list li:hover{background:rgba(143,200,255,.08)}
+.list .rk{font:500 11px var(--f-data);color:var(--muted);width:20px;font-variant-numeric:tabular-nums}
+.list .nm{flex:1;min-width:0}
+.list .nm div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list .nm small{color:var(--muted);font-size:12px}
+.tabs{display:flex;gap:4px;padding:3px;border-radius:10px;background:rgba(150,180,210,.08)}
+.tabs button{flex:1;padding:7px;border:0;border-radius:8px;background:transparent;cursor:pointer;font-size:13px;color:var(--muted)}
+.tabs button[aria-selected="true"]{background:rgba(143,200,255,.14);color:var(--ink)}
+.p{margin:0;color:var(--muted);font-size:13px}
+
+.tip{position:absolute;z-index:4;pointer-events:none;padding:8px 10px;border-radius:10px;background:var(--panel);border:1px solid var(--line);font-size:13px;display:flex;gap:10px;align-items:center;white-space:nowrap;transform:translate(14px,-50%)}
+.tip small{display:block;color:var(--muted);font-size:11px}
+
+.loading{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font:500 13px var(--f-data);z-index:1}
+
+@media (max-width:760px){
+  .panel{top:auto;left:0;right:0;bottom:0;width:auto;max-height:46%;border-radius:16px 16px 0 0;padding-bottom:env(safe-area-inset-bottom,0px)}
+  .panel.collapsed{max-height:56px}
+  body.has-panel .ctrls{right:16px}
+  .ctrls{bottom:auto;top:16px}
+  .top{width:calc(100% - 92px)}
+  .brand span{display:none}
+  .legend{bottom:calc(46% + 10px);padding:8px 10px}
+  body.sheet-collapsed .legend{bottom:66px}
+  .legend .note,.legend .lbl,.chip b{display:none}
+  .grab{display:block!important}
+}
+.grab{display:none;width:100%;border:0;background:none;padding:8px 0 0;cursor:pointer}
+.grab::before{content:"";display:block;margin:0 auto;width:38px;height:4px;border-radius:2px;background:var(--muted);opacity:.6}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div id="app">
+  <canvas id="globe" aria-label="Interactive globe of real-estate opportunity scores"></canvas>
+  <div class="loading" id="loading">Loading map…</div>
+
+  <div class="top">
+    <div class="brand"><h1>Build Atlas</h1><span>Where to start a real-estate company</span></div>
+    <div class="search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="Search a city, town or country" autocomplete="off" aria-label="Search places" aria-controls="results">
+      <ul class="results" id="results" role="listbox" hidden></ul>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="lbl">Opportunity score</div>
+    <div class="chips" id="chips">
+      <button class="chip" id="chip-g" data-r="g" aria-pressed="true"><i style="background:var(--good)"></i>65–100% <b id="cnt-g"></b></button>
+      <button class="chip" id="chip-y" data-r="y" aria-pressed="true"><i style="background:var(--mid)"></i>50–64% <b id="cnt-y"></b></button>
+      <button class="chip" id="chip-r" data-r="r" aria-pressed="true"><i style="background:var(--bad)"></i>0–49% <b id="cnt-r"></b></button>
+    </div>
+    <div class="zoomhint" id="zoomhint"></div>
+    <div class="note">Indicative model scores from demand, economy, affordability, stability and ease of doing business. Not financial advice.</div>
+  </div>
+
+  <div class="ctrls">
+    <button id="zin" aria-label="Zoom in"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button id="zout" aria-label="Zoom out"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+    <button id="home" aria-label="Show whole globe"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/></svg></button>
+  </div>
+
+  <aside class="panel" id="panel" aria-live="polite">
+    <button class="grab" id="grab" aria-label="Expand or collapse panel"></button>
+    <div class="panel-scroll" id="panelBody"></div>
+  </aside>
+
+  <div class="tip" id="tip" hidden></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script>
+/*__DATA__*/
+</script>
+<script>
+(function(){
+"use strict";
+const $ = id => document.getElementById(id);
+const DEG = 180/Math.PI;
+
+/* ---------- scoring ---------- */
+const FACTORS = [
+  ["D","Demand growth","Population growth, urbanisation, new households"],
+  ["E","Economy","GDP growth outlook, incomes, inflation"],
+  ["A","Affordability & yield","Price-to-income, rental yields, land and build cost"],
+  ["S","Stability","Rule of law, property rights, political and currency risk"],
+  ["F","Business & finance","Permits, foreign ownership, mortgage market depth"]
+];
+for (const k in COUNTRIES){
+  const c = COUNTRIES[k];
+  c.score = FACTORS.reduce((s,[f],i)=>s + c.f[i]*WEIGHTS[f], 0);
+}
+function sizeMod(pop){
+  if (pop>=1e7) return 5; if (pop>=5e6) return 4; if (pop>=1e6) return 3;
+  if (pop>=3e5) return 1; if (pop>=1e5) return 0; if (pop>=3e4) return -2; return -4;
+}
+const P = PLACES.map((r,i)=>{
+  const [name,lon,lat,pop,mz,ck,adm1,cap,hot] = r;
+  const c = COUNTRIES[ck];
+  const sm = sizeMod(pop), cm = cap?2:0;
+  const raw = c.score + sm + cm + hot;
+  const score = Math.max(3, Math.min(97, Math.round(raw)));
+  return {i,name,lon,lat,pop,mz,ck,adm1,cap,hot,sm,cm,score,rating:rate(score),lname:name.toLowerCase()};
+});
+function rate(s){ return s>=65?"g":s>=50?"y":"r"; }
+const RCOL = {g:"#3cc47f", y:"#f1c232", r:"#ee5a52"};
+const RLABEL = {g:"Strong opportunity", y:"Moderate opportunity", r:"High risk"};
+const byCountry = {};
+P.forEach(p=>{ (byCountry[p.ck] ||= []).push(p); });
+for (const k in byCountry) byCountry[k].sort((a,b)=>b.score-a.score || b.pop-a.pop);
+
+/* ---------- topojson decode (Polygon / MultiPolygon only) ---------- */
+function decode(topo){
+  const [sx,sy] = topo.transform.scale, [tx,ty] = topo.transform.translate;
+  const arcs = topo.arcs.map(a=>{ let x=0,y=0; return a.map(([dx,dy])=>{ x+=dx; y+=dy; return [x*sx+tx, y*sy+ty]; }); });
+  const ring = idx => { const pts=[]; idx.forEach(i=>{ const a = i<0 ? arcs[~i].slice().reverse() : arcs[i]; if (pts.length) pts.pop(); for (const p of a) pts.push(p); }); return pts; };
+  return topo.objects.countries.geometries.filter(g=>g.type).map(g=>({
+    type:"Feature", k:g.k,
+    geometry: g.type==="Polygon" ? {type:"Polygon",coordinates:g.arcs.map(ring)}
+                                 : {type:"MultiPolygon",coordinates:g.arcs.map(p=>p.map(ring))}
+  }));
+}
+const F50 = decode(TOPO50), F110 = decode(TOPO110);
+// culling info + label anchor for each feature
+for (const f of F50.concat(F110)){
+  const c = COUNTRIES[f.k];
+  f.rating = rate(Math.round(c.score));
+  let polys = f.geometry.type==="Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates;
+  let best=null, ba=-1;
+  for (const pc of polys){ const g={type:"Polygon",coordinates:pc}; const a=d3.geoArea(g); if (a>ba && a<6){ba=a;best=g;} }
+  f.anchor = best ? d3.geoCentroid(best) : d3.geoCentroid(f);
+  f.area = d3.geoArea(f) > 6 ? 0 : d3.geoArea(f);
+  f.bigArea = ba;
+  const b = d3.geoBounds(f);
+  f.center = d3.geoCentroid(f);
+  f.rad = Math.max(d3.geoDistance(f.center,b[0]), d3.geoDistance(f.center,b[1]), d3.geoDistance(f.center,[b[0][0],b[1][1]]), d3.geoDistance(f.center,[b[1][0],b[0][1]]));
+  if (f.area===0) f.rad = Math.PI;
+}
+const featByKey = {};
+F50.forEach(f=>{ featByKey[f.k]=f; });
+
+/* ---------- canvas + projection ---------- */
+const canvas = $("globe"), ctx = canvas.getContext("2d");
+let W=0, H=0, DPR=1, R0=300;
+const proj = d3.geoOrthographic().clipAngle(90).precision(0.3);
+const path = d3.geoPath(proj, ctx);
+const grat = d3.geoGraticule10();
+const state = { rot:[20,-22,0], k:1 };
+let sel = null;       // {type:'place', p} | {type:'country', k}
+const show = {g:true,y:true,r:true};
+let hits = [];
+let dirty = true;
+
+function resize(){
+  DPR = Math.min(window.devicePixelRatio||1, 2);
+  W = canvas.clientWidth; H = canvas.clientHeight;
+  canvas.width = Math.round(W*DPR); canvas.height = Math.round(H*DPR);
+  R0 = Math.min(W, H) * (W<760 ? 0.42 : 0.4);
+  MAXK = kForZoom(9.5);
+  zoom.scaleExtent([MINK, MAXK]);
+  dirty = true;
+}
+function cx(){ return W<760 ? W/2 : (document.body.classList.contains("has-panel") ? (W-372)/2 : W/2); }
+function cy(){ return W<760 ? H*0.36 : H/2; }
+function R(){ return R0*state.k; }
+function webZoom(){ return Math.log2(2*Math.PI*R()/256); }
+function apply(){
+  proj.scale(R()).translate([cx(),cy()]).rotate(state.rot).clipExtent([[-20,-20],[W+20,H+20]]);
+}
+function viewCenter(){ return [-state.rot[0], -state.rot[1]]; }
+function visibleAngle(){
+  const d = Math.hypot(W,H)/2 + 40;
+  return Math.min(Math.PI/2, d/R()) + 0.02;
+}
+
+function draw(){
+  apply();
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.clearRect(0,0,W,H);
+  const r = R(), x0=cx(), y0=cy();
+  // atmosphere
+  if (r < 4*Math.max(W,H)){
+    const g = ctx.createRadialGradient(x0,y0,r*0.9,x0,y0,r*1.18);
+    g.addColorStop(0,"rgba(110,170,255,.22)"); g.addColorStop(1,"rgba(110,170,255,0)");
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x0,y0,r*1.18,0,2*Math.PI); ctx.fill();
+  }
+  // ocean
+  ctx.beginPath(); path({type:"Sphere"});
+  const og = ctx.createRadialGradient(x0-r*.35,y0-r*.4,r*.1,x0,y0,r);
+  og.addColorStop(0,"#13263c"); og.addColorStop(1,"#0a1524");
+  ctx.fillStyle = r < 4*Math.max(W,H) ? og : "#0c1828"; ctx.fill();
+  // graticule
+  ctx.beginPath(); path(grat); ctx.strokeStyle="rgba(150,180,210,.07)"; ctx.lineWidth=1; ctx.stroke();
+
+  // countries
+  const z = webZoom();
+  const feats = z < 4.2 ? F110 : F50;
+  const vc = viewCenter(), va = visibleAngle();
+  const vis = feats.filter(f => d3.geoDistance(vc, f.center) - f.rad < va);
+  const fillA = z < 6 ? 0.34 : 0.22;
+  for (const rt of ["r","y","g"]){
+    ctx.beginPath();
+    for (const f of vis) if (f.rating===rt) path(f);
+    ctx.fillStyle = "#1a2633"; ctx.fill();
+    ctx.globalAlpha = show[rt] ? fillA : 0.06;
+    ctx.fillStyle = RCOL[rt]; ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  ctx.beginPath(); for (const f of vis) path(f);
+  ctx.strokeStyle = "rgba(220,235,250,.28)"; ctx.lineWidth = z<5 ? .6 : 1; ctx.stroke();
+  if (sel && sel.type==="country" && featByKey[sel.k]){
+    ctx.beginPath(); path(featByKey[sel.k]); ctx.strokeStyle="#8fc8ff"; ctx.lineWidth=2; ctx.stroke();
+  }
+
+  // country labels when zoomed out
+  const boxes = [];
+  if (z < 6.2){
+    ctx.textAlign="center"; ctx.textBaseline="middle";
+    const list = F50.filter(f=>f.bigArea*r*r > (z<3.6?2600:1400) && d3.geoDistance(vc,f.anchor) < Math.PI/2 - 0.12).sort((a,b)=>b.bigArea-a.bigArea);
+    for (const f of list){
+      const p = proj(f.anchor); if (!p) continue;
+      const c = COUNTRIES[f.k];
+      const label = c.n.toUpperCase();
+      ctx.font = `600 ${z<4?10:11}px "IBM Plex Sans", system-ui, sans-serif`;
+      const w = ctx.measureText(label).width;
+      const b = [p[0]-w/2-4, p[1]-14, w+8, 30];
+      if (overlaps(boxes,b)) continue; boxes.push(b);
+      ctx.fillStyle = "rgba(230,237,245,.55)";
+      ctx.fillText(label, p[0], p[1]-4);
+      ctx.font = `500 11px "IBM Plex Mono", ui-monospace, monospace`;
+      ctx.fillStyle = RCOL[f.rating];
+      ctx.globalAlpha = show[f.rating] ? .95 : .3;
+      ctx.fillText(Math.round(c.score)+"%", p[0], p[1]+9);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // places
+  hits = [];
+  const dotZ = z + 1.3, labZ = z + 0.2;
+  const cos = Math.cos(Math.PI/2 - 0.02);
+  const [l0,p0] = vc.map(v=>v/DEG);
+  const sinP0=Math.sin(p0), cosP0=Math.cos(p0);
+  const visible = [];
+  for (const p of P){
+    if (p.mz > dotZ && !(sel && sel.p===p)) continue;
+    if (!show[p.rating]) continue;
+    const lam=p.lon/DEG, phi=p.lat/DEG;
+    const c = sinP0*Math.sin(phi) + cosP0*Math.cos(phi)*Math.cos(lam-l0);
+    if (c < 0.02) continue;
+    const xy = proj([p.lon,p.lat]); if (!xy) continue;
+    if (xy[0]<-10||xy[1]<-10||xy[0]>W+10||xy[1]>H+10) continue;
+    visible.push([p,xy]);
+  }
+  // dots
+  for (const [p,xy] of visible){
+    const rr = dotR(p, z);
+    ctx.beginPath(); ctx.arc(xy[0],xy[1],rr,0,2*Math.PI);
+    ctx.fillStyle = RCOL[p.rating]; ctx.fill();
+    ctx.lineWidth = 1; ctx.strokeStyle = "rgba(6,10,18,.85)"; ctx.stroke();
+    hits.push({x:xy[0],y:xy[1],r:Math.max(rr,6),p});
+  }
+  // labels (priority order already: min zoom, then population)
+  ctx.textBaseline="middle"; ctx.textAlign="left";
+  let labelled = 0;
+  const pin = sel && sel.type==="place" ? visible.find(v=>v[0]===sel.p) : null;
+  const order = pin ? [pin].concat(visible.filter(v=>v!==pin)) : visible;
+  for (const [p,xy] of order){
+    if (p.mz > labZ && p!==(pin&&pin[0])) continue;
+    if (labelled > 260) break;
+    const big = p.mz <= 3 || p.pop >= 5e6;
+    const fs = big ? 13 : p.mz<=5 ? 12 : 11;
+    ctx.font = `${big?600:500} ${fs}px "IBM Plex Sans", system-ui, sans-serif`;
+    const tw = ctx.measureText(p.name).width;
+    ctx.font = `500 10px "IBM Plex Mono", ui-monospace, monospace`;
+    const pct = p.score+"%", pw = ctx.measureText(pct).width + 8;
+    const rr = dotR(p,z);
+    const lx = xy[0]+rr+4, ly = xy[1];
+    const b = [lx-2, ly-fs/2-3, tw+pw+10, fs+6];
+    if (overlaps(boxes,b) && p!==(pin&&pin[0])) continue;
+    boxes.push(b); labelled++;
+    ctx.font = `${big?600:500} ${fs}px "IBM Plex Sans", system-ui, sans-serif`;
+    ctx.lineJoin="round"; ctx.lineWidth=3.5; ctx.strokeStyle="rgba(6,10,18,.9)";
+    ctx.strokeText(p.name, lx, ly);
+    ctx.fillStyle = "#e6edf5"; ctx.fillText(p.name, lx, ly);
+    // score pill
+    const px = lx+tw+5;
+    roundRect(px, ly-7, pw, 14, 7); ctx.fillStyle = RCOL[p.rating]; ctx.fill();
+    ctx.font = `500 10px "IBM Plex Mono", ui-monospace, monospace`;
+    ctx.fillStyle = "#08111c"; ctx.fillText(pct, px+4, ly+0.5);
+  }
+  // selected ring
+  if (pin){
+    const [,xy] = pin;
+    ctx.beginPath(); ctx.arc(xy[0],xy[1],dotR(pin[0],z)+5,0,2*Math.PI);
+    ctx.strokeStyle="#8fc8ff"; ctx.lineWidth=2; ctx.stroke();
+  }
+  $("zoomhint").textContent = z < 5 ? "Zoom in to see more cities and towns" : z < 7.5 ? "Zoom further for small towns" : "Showing towns";
+}
+function dotR(p,z){
+  const base = p.pop>=5e6?5:p.pop>=1e6?4:p.pop>=2e5?3.2:2.6;
+  return base + Math.max(0,Math.min(2,(z-5)*0.4));
+}
+function overlaps(boxes,b){
+  for (const o of boxes) if (b[0]<o[0]+o[2] && b[0]+b[2]>o[0] && b[1]<o[1]+o[3] && b[1]+b[3]>o[1]) return true;
+  return false;
+}
+function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+
+function loop(){ if (dirty){ dirty=false; draw(); } requestAnimationFrame(loop); }
+
+/* ---------- interaction ---------- */
+const MINK = 0.7;
+let MAXK = 400;
+const zoom = d3.zoom().scaleExtent([MINK,MAXK]).clickDistance(4)
+  .filter(ev => (!ev.ctrlKey || ev.type==="wheel") && !ev.button && ev.type!=="dblclick");
+let last = {x:0,y:0};
+const csel = d3.select(canvas);
+zoom.on("start", ev=>{ last={x:ev.transform.x,y:ev.transform.y}; if (ev.sourceEvent && ev.sourceEvent.type!=="wheel") canvas.classList.add("dragging"); hideTip(); })
+    .on("zoom", ev=>{
+      const t = ev.transform, se = ev.sourceEvent;
+      if (se && se.type==="wheel"){
+        zoomAbout(t.k, d3.pointer(se, canvas));
+      } else if (se){
+        const dx=t.x-last.x, dy=t.y-last.y;
+        const dpp = DEG / R();
+        state.k = t.k;
+        state.rot[0] += dx*dpp;
+        state.rot[1] = Math.max(-89, Math.min(89, state.rot[1] - dy*dpp));
+      } else {
+        state.k = t.k;
+      }
+      last={x:t.x,y:t.y}; dirty=true;
+    })
+    .on("end", ()=>canvas.classList.remove("dragging"));
+csel.call(zoom).on("dblclick.zoom", null);
+
+function zoomAbout(k, pt){
+  apply();
+  const geo = proj.invert(pt);
+  state.k = k; apply();
+  if (!geo || d3.geoDistance(geo, viewCenter()) > Math.PI/2) return;
+  // nudge rotation so the point under the cursor stays put
+  for (let i=0;i<2;i++){
+    const np = proj(geo); if (!np) break;
+    const dpp = DEG / R();
+    state.rot[0] -= (np[0]-pt[0])*dpp;
+    state.rot[1] = Math.max(-89, Math.min(89, state.rot[1] + (np[1]-pt[1])*dpp));
+    apply();
+  }
+}
+function setK(k){ zoom.transform(csel, d3.zoomIdentity.translate(last.x,last.y).scale(k)); }
+
+let anim = null;
+function flyTo(lon, lat, k){
+  if (anim) anim.stop();
+  const r0 = state.rot.slice(), k0 = state.k;
+  const r1 = [-lon, -lat, 0];
+  // shortest way round
+  while (r1[0]-r0[0] > 180) r1[0]-=360;
+  while (r1[0]-r0[0] < -180) r1[0]+=360;
+  const ir = d3.interpolate(r0, r1);
+  const lk0 = Math.log(k0), lk1 = Math.log(k);
+  const dist = d3.geoDistance(viewCenter(), [lon,lat]);
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const dur = reduce ? 0 : 900 + 500*dist;
+  anim = d3.timer(el=>{
+    const t = dur ? Math.min(1, el/dur) : 1, e = d3.easeCubicInOut(t);
+    state.rot = ir(e);
+    // zoom out a little mid-flight when travelling far
+    const base = lk0 + (lk1-lk0)*e;
+    const dip = dist>0.3 ? Math.sin(Math.PI*e) * Math.max(0, Math.min(base, dist*1.5)) : 0;
+    setK(Math.exp(base - dip));
+    dirty = true;
+    if (t>=1){ anim.stop(); anim=null; }
+  });
+}
+
+function nearest(pt){
+  let best=null, bd=Infinity;
+  for (let i=hits.length-1;i>=0;i--){
+    const h=hits[i], d=Math.hypot(h.x-pt[0],h.y-pt[1]);
+    if (d<=h.r+3 && d<bd){ bd=d; best=h; }
+  }
+  return best;
+}
+const tip = $("tip");
+function hideTip(){ tip.hidden = true; canvas.classList.remove("pointing"); }
+canvas.addEventListener("mousemove", ev=>{
+  if (canvas.classList.contains("dragging")) return;
+  const pt = d3.pointer(ev, canvas), h = nearest(pt);
+  if (!h){ hideTip(); return; }
+  canvas.classList.add("pointing");
+  const p = h.p, c = COUNTRIES[p.ck];
+  tip.innerHTML = `<div><b>${esc(p.name)}</b><small>${esc(p.adm1 ? p.adm1+", " : "")}${esc(c.n)}</small></div><span class="pct ${p.rating}">${p.score}%</span>`;
+  tip.style.left = h.x+"px"; tip.style.top = h.y+"px"; tip.hidden = false;
+});
+canvas.addEventListener("mouseleave", hideTip);
+canvas.addEventListener("click", ev=>{
+  const pt = d3.pointer(ev, canvas), h = nearest(pt);
+  if (h){ selectPlace(h.p, false); return; }
+  apply();
+  const geo = proj.invert(pt);
+  if (!geo || d3.geoDistance(geo, viewCenter()) > Math.PI/2){ return; }
+  const feats = webZoom() < 4.2 ? F110 : F50;
+  const f = feats.find(f=>d3.geoDistance(geo,f.center) <= f.rad+0.01 && d3.geoContains(f, geo));
+  if (f) selectCountry(f.k, false);
+});
+canvas.addEventListener("dblclick", ev=>{
+  apply();
+  const geo = proj.invert(d3.pointer(ev, canvas));
+  if (geo) flyTo(geo[0], geo[1], Math.min(MAXK, state.k*3));
+});
+$("zin").onclick = ()=>flyTo(...viewCenter(), Math.min(MAXK, state.k*2.2));
+$("zout").onclick = ()=>flyTo(...viewCenter(), Math.max(MINK, state.k/2.2));
+$("home").onclick = ()=>{ flyTo(...viewCenter(), 1); };
+window.addEventListener("resize", ()=>{ resize(); });
+
+/* ---------- filters ---------- */
+const counts = {g:0,y:0,r:0}; P.forEach(p=>counts[p.rating]++);
+for (const r of ["g","y","r"]){
+  $("cnt-"+r).textContent = counts[r].toLocaleString();
+  $("chip-"+r).onclick = e=>{ show[r] = !show[r]; e.currentTarget.setAttribute("aria-pressed", show[r]); dirty=true; };
+}
+
+/* ---------- panel ---------- */
+const panel = $("panel"), body = $("panelBody");
+let tab = "cities";
+function esc(s){ return String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function fmtPop(n){ return n>=1e6 ? (n/1e6).toFixed(n>=1e7?0:1)+"M" : n>=1e3 ? Math.round(n/1e3)+"k" : String(n||"—"); }
+function bars(c){
+  return `<div class="bars">${FACTORS.map(([f,t,d],i)=>{
+    const v=c.f[i], col = RCOL[rate(v)];
+    return `<div class="bar" title="${esc(d)}"><span class="t">${t}</span><span class="v">${v}</span><div class="track"><div class="fill" style="width:${v}%;background:${col}"></div></div></div>`;
+  }).join("")}</div>`;
+}
+function sign(n){ return (n>0?"+":n<0?"−":"±")+Math.abs(n); }
+function rowItem(p, rank, sub){
+  return `<li data-i="${p.i}"><span class="rk">${rank}</span><div class="nm"><div>${esc(p.name)}</div><small>${esc(sub)}</small></div><span class="pct ${p.rating}">${p.score}%</span></li>`;
+}
+function bindList(){
+  body.querySelectorAll("li[data-i]").forEach(li=>li.onclick=()=>selectPlace(P[+li.dataset.i], true));
+  body.querySelectorAll("li[data-k]").forEach(li=>li.onclick=()=>selectCountry(li.dataset.k, true));
+  const b = body.querySelector(".back"); if (b) b.onclick = ()=>{ sel=null; dirty=true; renderPanel(); };
+  body.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{ tab=b.dataset.t; renderPanel(); });
+}
+const topCities = P.filter(p=>p.pop>=3e5).sort((a,b)=>b.score-a.score||b.pop-a.pop).slice(0,25);
+const topCountries = Object.entries(COUNTRIES).filter(([k])=>featByKey[k] && byCountry[k]).sort((a,b)=>b[1].score-a[1].score).slice(0,25);
+const riskCities = P.filter(p=>p.pop>=1e6).sort((a,b)=>a.score-b.score).slice(0,15);
+
+function renderPanel(){
+  if (!sel){
+    let list;
+    if (tab==="cities") list = topCities.map((p,i)=>rowItem(p,i+1,`${COUNTRIES[p.ck].n} · ${fmtPop(p.pop)} people`)).join("");
+    else if (tab==="countries") list = topCountries.map(([k,c],i)=>`<li data-k="${k}"><span class="rk">${i+1}</span><div class="nm"><div>${esc(c.n)}</div><small>${byCountry[k].length} places scored</small></div><span class="pct ${rate(Math.round(c.score))}">${Math.round(c.score)}%</span></li>`).join("");
+    else list = riskCities.map((p,i)=>rowItem(p,i+1,`${COUNTRIES[p.ck].n} · ${fmtPop(p.pop)} people`)).join("");
+    body.innerHTML = `
+      <div><h2>Best places to build</h2></div>
+      <p class="p">Every dot is a city or town, scored for starting a real-estate development company. Drag to spin, scroll or pinch to zoom, and tap any place or country for the breakdown.</p>
+      <div class="tabs" role="tablist">
+        <button role="tab" data-t="cities" aria-selected="${tab==="cities"}">Top cities</button>
+        <button role="tab" data-t="countries" aria-selected="${tab==="countries"}">Top countries</button>
+        <button role="tab" data-t="risk" aria-selected="${tab==="risk"}">Riskiest</button>
+      </div>
+      <ul class="list">${list}</ul>`;
+  } else if (sel.type==="place"){
+    const p = sel.p, c = COUNTRIES[p.ck], list = byCountry[p.ck];
+    const rank = list.indexOf(p)+1;
+    const raw = c.score + p.sm + p.cm + p.hot;
+    body.innerHTML = `
+      <button class="back">← All rankings</button>
+      <div><div class="eyebrow">${esc(p.adm1 ? p.adm1+" · " : "")}${esc(c.n)}</div><h2>${esc(p.name)}</h2></div>
+      <div class="hero"><div class="big">${p.score}<small>%</small></div>
+        <div><span class="verdict ${p.rating}"><i></i>${RLABEL[p.rating]}</span>
+        <div class="meta" style="margin-top:6px">#${rank} of ${list.length} in ${esc(c.n)} · ${fmtPop(p.pop)} people</div></div></div>
+      <div><h3>How the score is built</h3></div>
+      <dl class="adj">
+        <dt>${esc(c.n)} baseline</dt><dd>${c.score.toFixed(1)}</dd>
+        <dt>Market size (${fmtPop(p.pop)})</dt><dd>${sign(p.sm)}</dd>
+        ${p.cm ? `<dt>National capital</dt><dd>${sign(p.cm)}</dd>` : ""}
+        ${p.hot ? `<dt>Local momentum</dt><dd>${sign(p.hot)}</dd>` : ""}
+        <dt class="tot">Opportunity score</dt><dd class="tot">${p.score}%${Math.round(raw)!==p.score?" (capped)":""}</dd>
+      </dl>
+      <div><h3>National fundamentals</h3></div>
+      ${bars(c)}
+      <div><h3>Also in ${esc(c.n)}</h3></div>
+      <ul class="list">${list.filter(q=>q!==p).slice(0,6).map((q,i)=>rowItem(q,list.indexOf(q)+1,`${q.adm1||c.n} · ${fmtPop(q.pop)}`)).join("")}</ul>`;
+  } else {
+    const k = sel.k, c = COUNTRIES[k], list = byCountry[k] || [], s = Math.round(c.score), rt = rate(s);
+    const allRank = Object.values(COUNTRIES).filter(x=>x.score>c.score).length+1;
+    body.innerHTML = `
+      <button class="back">← All rankings</button>
+      <div><div class="eyebrow">Country</div><h2>${esc(c.n)}</h2></div>
+      <div class="hero"><div class="big">${s}<small>%</small></div>
+        <div><span class="verdict ${rt}"><i></i>${RLABEL[rt]}</span>
+        <div class="meta" style="margin-top:6px">#${allRank} of ${Object.keys(COUNTRIES).length} countries and territories</div></div></div>
+      ${bars(c)}
+      <div><h3>Best places here</h3></div>
+      ${list.length ? `<ul class="list">${list.slice(0,10).map((q,i)=>rowItem(q,i+1,`${q.adm1||c.n} · ${fmtPop(q.pop)}`)).join("")}</ul>` : `<p class="p">No cities in the dataset for this territory.</p>`}`;
+  }
+  bindList();
+  body.scrollTop = 0;
+}
+function selectPlace(p, fly){
+  sel = {type:"place", p};
+  renderPanel(); expandSheet(); dirty = true;
+  if (fly) flyTo(p.lon, p.lat, Math.max(state.k, kForZoom(Math.max(p.mz+0.5, 6.2))));
+}
+function selectCountry(k, fly){
+  sel = {type:"country", k};
+  renderPanel(); expandSheet(); dirty = true;
+  const f = featByKey[k];
+  if (fly && f){
+    const rad = Math.max(0.03, Math.min(1.2, f.rad));
+    const kk = Math.max(1, Math.min(60, (Math.min(W,H)*0.42) / (R0*Math.sin(Math.min(rad*0.85, Math.PI/2)))));
+    flyTo(f.anchor[0], f.anchor[1], kk);
+  }
+}
+function kForZoom(z){ return (256*Math.pow(2,z))/(2*Math.PI*R0); }
+
+// phone bottom sheet
+$("grab").onclick = ()=>{ const c = panel.classList.toggle("collapsed"); document.body.classList.toggle("sheet-collapsed", c); };
+function expandSheet(){ panel.classList.remove("collapsed"); document.body.classList.remove("sheet-collapsed"); }
+
+/* ---------- search ---------- */
+const q = $("q"), res = $("results");
+let matches = [], cursor = 0;
+const countryList = Object.entries(COUNTRIES).filter(([k])=>byCountry[k]||featByKey[k]).map(([k,c])=>({k,c,l:c.n.toLowerCase()}));
+function search(){
+  const s = q.value.trim().toLowerCase();
+  if (!s){ res.hidden = true; matches=[]; return; }
+  const cs = countryList.filter(x=>x.l.startsWith(s)).slice(0,3).map(x=>({type:"country",k:x.k}));
+  const pre = [], inn = [];
+  for (const p of P){
+    if (p.lname.startsWith(s)) pre.push(p); else if (s.length>2 && p.lname.includes(s)) inn.push(p);
+  }
+  pre.sort((a,b)=>b.pop-a.pop); inn.sort((a,b)=>b.pop-a.pop);
+  matches = cs.concat(pre.concat(inn).slice(0, 10-cs.length).map(p=>({type:"place",p})));
+  cursor = 0;
+  res.innerHTML = matches.length ? matches.map((m,i)=>{
+    if (m.type==="country"){ const c=COUNTRIES[m.k], s2=Math.round(c.score); return `<li role="option" data-n="${i}" aria-selected="${i===cursor}"><div class="nm">${esc(c.n)} <span class="sub">· country</span></div><span class="pct ${rate(s2)}">${s2}%</span></li>`; }
+    const p=m.p; return `<li role="option" data-n="${i}" aria-selected="${i===cursor}"><div class="nm">${esc(p.name)} <span class="sub">· ${esc(p.adm1?p.adm1+", ":"")}${esc(COUNTRIES[p.ck].n)}</span></div><span class="pct ${p.rating}">${p.score}%</span></li>`;
+  }).join("") : `<li><div class="nm sub">No place called “${esc(q.value)}” in the dataset</div></li>`;
+  res.hidden = false;
+  res.querySelectorAll("li[data-n]").forEach(li=>li.onmousedown=e=>{ e.preventDefault(); pick(+li.dataset.n); });
+}
+function pick(n){
+  const m = matches[n]; if (!m) return;
+  res.hidden = true; q.blur();
+  if (m.type==="country"){ q.value = COUNTRIES[m.k].n; selectCountry(m.k, true); }
+  else { q.value = m.p.name; selectPlace(m.p, true); }
+}
+q.addEventListener("input", search);
+q.addEventListener("focus", ()=>{ if (q.value) search(); });
+q.addEventListener("blur", ()=>{ res.hidden = true; });
+q.addEventListener("keydown", e=>{
+  if (e.key==="ArrowDown"||e.key==="ArrowUp"){
+    e.preventDefault(); if (!matches.length) return;
+    cursor = (cursor + (e.key==="ArrowDown"?1:-1) + matches.length) % matches.length;
+    res.querySelectorAll("li[data-n]").forEach((li,i)=>li.setAttribute("aria-selected", i===cursor));
+  } else if (e.key==="Enter"){ e.preventDefault(); pick(cursor); }
+  else if (e.key==="Escape"){ res.hidden = true; q.blur(); }
+});
+
+/* ---------- boot ---------- */
+document.body.classList.add("has-panel");
+resize(); renderPanel();
+$("loading").remove();
+requestAnimationFrame(loop);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(()=>{ dirty = true; });
+// gentle spin until the first interaction
+let spin = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const stopSpin = ()=>{ spin = false; };
+["pointerdown","wheel","keydown","touchstart"].forEach(t=>window.addEventListener(t, stopSpin, {once:true, passive:true}));
+d3.timer(()=>{ if (spin && !anim){ state.rot[0] += 0.06; dirty = true; } });
+})();
+</script>
