@@ -6,7 +6,7 @@ of `../index.html`, so they always test the shipped app, not a copy:
 ```
 node plate-pipeline.test.js      # core OCR merge/aggregation logic (15 cases)
 node plate-locator.test.js       # plate-region edge-density locator (7 cases)
-node plate-formats.test.js       # international plate format matrix (32 cases)
+node plate-formats.test.js       # international plate format matrix + EU shape-correction (50,100 checks)
 node vehicle-attributes.test.js  # color classifier (12 cases)
 node face-match.test.js          # in-browser face-matching math (10 cases)
 node watchlist-match.test.js     # fuzzy watchlist matching math (14 cases)
@@ -659,3 +659,58 @@ else the app already does (vehicle detection, the plate-ONNX model, Tesseract, m
 voting, multi-region candidates) - this round's addition is specifically the position-aware
 character-type correction layer, now covering nine countries with real confidence instead of
 two, not a claim of covering all 27.
+
+### Continuing EU coverage: the remaining members researched and resolved
+
+Per "continue teaching," researched every EU member this round's section above left unresolved
+(Estonia, Latvia, Cyprus, Malta, Greece, Slovenia, Slovakia, Croatia, Bulgaria, Romania,
+Portugal, Poland, Czechia), each verified against a real source before writing anything -
+same discipline as the round above, for the same reason (a wrong format guess corrupts a
+correct read, not just fails to help one).
+
+**Six more fall inside the existing shape logic with zero code changes** - `fixPlateChars`
+already covers them because their real format is exactly the same letters-then-digits or
+digits-then-letters shape, within the same 2-5/3-5 length bounds, the function already checks:
+Estonia (3 digits + 3 letters, digits-then-letters, same family as Spain), Latvia (2 letters +
+4 digits), Cyprus (3 letters + 3 digits, essentially the Lithuanian/German shape), Malta (3
+letters + 3 digits), Greece (3 letters + 4 digits), and Slovenia (a 2-letter region code + a
+merged letter/digit serial that reduces to the same letters-then-digits shape once the
+district-code separator is stripped, same as the other merged-format countries already
+covered). Added confirmatory test cases for all six, plus two new confusion-correction
+full-pipeline tests (Estonian O/0, Greek B/8) exercising the complete OCR-vote path, not just
+the unit-level function.
+
+**Five more confirmed to be the letter-digit-letter family already safely left alone**:
+Slovakia, Croatia, Bulgaria, Romania, and Portugal all use variants of that third shape (like
+the UK, France, and Italy above) - verified each one explicitly rather than assuming the
+family membership from the country name alone, since getting this wrong in either direction
+(treating a letter-digit-letter plate as correctable, or failing to recognize a real
+letters/digits split) is exactly the risk this whole feature is designed around. Added
+explicit "no valid split - unchanged" test cases for each, confirming `fixPlateChars` correctly
+leaves them untouched (it already did, by construction - these are confirmatory, not code
+changes).
+
+**Still deliberately not covered**: Poland and the Czech Republic, verified and confirmed
+irregular enough that hardcoding a shape risks corrupting a correct read rather than helping -
+Poland's format varies by voivodeship/county (1-3 letters, inconsistent digit-run length, no
+single reliable split point across the whole country), and the Czech Republic's format mixes
+a 3-letter region code with a serial that itself contains both letters and digits in no fixed
+position. The Netherlands, Belgium, and Ireland remain unresolved from the prior round's list
+for the same reasons stated there (multiple concurrent historical formats, variable-length
+segments).
+
+**Net result after both rounds**: of the EU's 27 members, `fixPlateChars` now actively
+corrects 15 (Germany, Lithuania, Sweden, Finland, Hungary, Luxembourg, Austria, Denmark, Spain,
+Estonia, Latvia, Cyprus, Malta, Greece, Slovenia), 8 are confirmed to be a different shape
+that's already handled correctly elsewhere in the pipeline and deliberately left alone (UK\*,
+France, Italy, Slovakia, Croatia, Bulgaria, Romania, Portugal - \*UK is EU-format-adjacent but
+no longer an EU member), and 4 (Poland, Czechia, Netherlands, Belgium) plus Ireland remain
+genuinely too irregular to safely hardcode. Every one of the 23 resolved countries was checked
+against a real source, not assumed.
+
+Validated via the same `plate-formats.test.js` suite, now at 50,100 checks (0 failed) -
+11 new example cases, 2 new full-pipeline confusion tests, and 10+ new direct `fixPlateChars`
+unit cases - plus a full re-run of the entire existing test suite (`fuzz-1000.test.js` through
+`watchlist-match.test.js`, ~29M total checks) confirming zero regressions, since this round
+changed no code in `index.html` - only added tests against logic already shipped and committed
+in the prior round.

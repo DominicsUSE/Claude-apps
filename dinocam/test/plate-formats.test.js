@@ -44,6 +44,17 @@ const cases = [
   ['Luxembourg 2+4 "XY 3456"', [['XY', 45], ['3456', 0]], 'XY 3456'],
   ['Danish 2+5 "AB 12345"', [['AB', 45], ['12345', 0]], 'AB 12345'],
   ['Spanish 4+3 (digits-then-letters) "1234 BCF"', [['1234', 45], ['BCF', 0]], '1234 BCF'],
+  ['Estonian 3+3 (digits-then-letters) "123 ABC"', [['123', 45], ['ABC', 0]], '123 ABC'],
+  ['Latvian 2+4 "AB-1234"', [['AB-1234', 0]], 'AB1234'],
+  ['Cypriot 3+3 "ABC 123"', [['ABC', 45], ['123', 0]], 'ABC 123'],
+  ['Maltese 3+3 "ZZZ 999"', [['ZZZ', 45], ['999', 0]], 'ZZZ 999'],
+  ['Greek 3+4 "AAA 1000"', [['AAA', 45], ['1000', 0]], 'AAA 1000'],
+  ['Slovenian region+serial 2+2+3 "KR AB-123"', [['KR', 45], ['AB-123', 0]], 'KR AB123'],
+  ['Slovak letter-digit-letter "AB123CD" (own family, not corrected)', [['AB123CD', 0]], 'AB123CD'],
+  ['Croatian letter-digit-letter "AB 123-CD"', [['AB', 45], ['123-CD', 0]], 'AB 123CD'],
+  ['Bulgarian letter-digit-letter "A1234BC"', [['A1234BC', 0]], 'A1234BC'],
+  ['Romanian letter-digit-letter "AB123CDE"', [['AB123CDE', 0]], 'AB123CDE'],
+  ['Portuguese letter-digit-letter "AA-00-AA"', [['AA-00-AA', 0]], 'AA00AA'],
   ['French 3-segment "AB-123-CD"', [['AB-123-CD', 0]], 'AB123CD'],
   ['Dutch "12-ABC-3"', [['12-ABC-3', 0]], '12ABC3'],
   ['Australian "ABC123"', [['ABC123', 0]], 'ABC123'],
@@ -140,6 +151,20 @@ for (const [name, words, expected] of cases) {
   const result = confirm({ lines: [line(built, 0, 30)] });
   check('Spanish S/5 confusion corrects to "1254 BCF"', result.status === 'confirmed' && result.value === '1254 BCF', JSON.stringify(result));
 }
+{
+  // Estonian "105 ABC" (digits-then-letters) with the digit '0' consistently OCR'd as letter 'O'.
+  const built = [word('1O5', 0)];
+  built.push(word('ABC', built[0].bbox.x1 + 45));
+  const result = confirm({ lines: [line(built, 0, 30)] });
+  check('Estonian O/0 confusion corrects to "105 ABC"', result.status === 'confirmed' && result.value === '105 ABC', JSON.stringify(result));
+}
+{
+  // Greek "AAA 1008" (letters-then-digits) with the trailing digit '8' consistently OCR'd as letter 'B'.
+  const built = [word('AAA', 0)];
+  built.push(word('100B', built[0].bbox.x1 + 45));
+  const result = confirm({ lines: [line(built, 0, 30)] });
+  check('Greek B/8 confusion corrects to "AAA 1008"', result.status === 'confirmed' && result.value === 'AAA 1008', JSON.stringify(result));
+}
 
 // ---- fixPlateChars unit cases (direct, not through a full OCR-pass simulation) ----
 const fixCases = [
@@ -151,8 +176,18 @@ const fixCases = [
   ['Danish O corrected to 0 in a digit position', 'AB 1O345', 'AB 10345'],
   ['already-valid Spanish shape (digits-then-letters) is unchanged', '1234 BCF', '1234 BCF'],
   ['Spanish S corrected to 5 in a digit position (mirror-image orientation)', '12S4 BCF', '1254 BCF'],
+  ['already-valid Estonian shape (digits-then-letters, 3+3) is unchanged', '123 ABC', '123 ABC'],
+  ['Estonian O corrected to 0 in a digit position', '1O5 ABC', '105 ABC'],
+  ['already-valid Latvian shape (2+4) is unchanged', 'AB1234', 'AB1234'],
+  ['already-valid Cypriot/Lithuanian-shape (3+3) is unchanged', 'ABC123', 'ABC123'],
+  ['already-valid Greek shape (3+4) is unchanged', 'AAA 1000', 'AAA 1000'],
+  ['Greek B corrected to 8 in a digit position', 'AAA 100B', 'AAA 1008'],
+  ['already-valid Slovenian merged shape (4+3) is unchanged', 'KR AB123', 'KR AB123'],
   ['UK letters-digits-letters shape has no valid split - unchanged', 'AB12CDE', 'AB12CDE'],
   ['French letters-digits-letters shape has no valid split - unchanged', 'AB126FD', 'AB126FD'],
+  ['Slovak/Croatian letter-digit-letter shape has no valid split - unchanged', 'AB123CD', 'AB123CD'],
+  ['Romanian letter-digit-letter shape has no valid split - unchanged', 'AB123CDE', 'AB123CDE'],
+  ['Portuguese letter-digit-letter shape has no valid split - unchanged', 'AA00AA', 'AA00AA'],
   ['too short for any shape - unchanged', 'A1', 'A1'],
   ['too long for any shape - unchanged', 'ABCDEFGHIJ', 'ABCDEFGHIJ'],
   ['empty string - unchanged', '', ''],
