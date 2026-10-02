@@ -775,3 +775,112 @@ unit cases - plus a full re-run of the entire existing test suite (`fuzz-1000.te
 `watchlist-match.test.js`, ~29M total checks) confirming zero regressions, since this round
 changed no code in `index.html` - only added tests against logic already shipped and committed
 in the prior round.
+
+## Large-scale real-photo round: 322 real plates, facial expressions, and a real attempt at posture
+
+Per request, a much bigger real-photo validation than any single round so far - real Tesseract,
+real plate-ONNX model, real coco-ssd, real face-api.js + EdgeFace, all via pinned local npm
+installs standing in for blocked CDNs (same methodology as every other real-photo round), driven
+through Playwright + real Chromium, against the real unmodified app.
+
+### Plates: 322 real photos across three continents, not 15
+
+Earlier rounds validated the EU shape-correction work against 15 hand-picked EU photos. This
+round used the **entire** `openalpr/benchmarks` EU set (108 photos) and Brazil set (114 photos -
+the exact Mercosul family a false-positive fix this session was built around), plus a 100-photo
+US subsample as an unrelated baseline, for a combined 322 real vehicles - a far larger, more
+statistically meaningful sample than anything tested against this logic before.
+
+| set | vehicle detected | OCR-isolated exact (ground-truth box) | live-pipeline exact |
+|---|---|---|---|
+| EU (108, full set) | 107/108 (99%) | **99/108 (91.7%)** | 2/108 |
+| Brazil (114, full set) | 106/114 (93%) | **107/114 (93.9%)** | 1/114 |
+| US (100, subsample) | 97/100 (97%) | 83/100 (83%) | 5/100 |
+
+Two things worth drawing out:
+
+- **OCR-isolation accuracy at scale (91.7% EU, 93.9% Brazil) is as strong or stronger than the
+  small-sample estimates** from earlier rounds (the original 15-photo EU test measured 80%,
+  `accuracy-benchmark/`'s synthetic set measured higher still) - this is real confirmation the
+  plate-ONNX model's accuracy holds up at 7x the sample size, not an artifact of a lucky small
+  sample.
+- **Live-pipeline accuracy remains low across all three sets** (2/108, 1/114, 5/100) - this is
+  the *same, already-documented* plate-localization gap from earlier rounds ("found the wrong
+  thing with confidence" - a grille, bumper trim, or badge outscoring the real plate in a single
+  static frame), now confirmed at 322-photo scale rather than 15. Nothing new here, but worth
+  being explicit: the large sample didn't surface a different bottleneck - it's still
+  localization, not OCR, and not anything from this session's EU-format work.
+
+**Specifically checking whether the EU shape-correction / false-positive-fix work caused any
+real regression at this scale**: it did not, but the test surfaced two genuine real-world
+instances of the *already-documented* irreducible collision from the previous section. Checking
+every missed ground-truth plate's **expected (correct) text** directly against `fixPlateChars`
+(not just eyeballing the OCR output) found two real plates whose correct text the function would
+alter if the OCR had read them perfectly:
+
+- A US plate, `0SG719`, collides with the Lithuania/Sweden/Hungary/Cyprus/Malta `lettersLen:3,
+  digitsLen:3` shape (`fixPlateChars('0SG719')` → `'OSG719'`).
+- A Brazilian plate, `R820503`, collides with Denmark's `lettersLen:2, digitsLen:5` shape
+  (`fixPlateChars('R820503')` → `'RB20503'`).
+
+In **both actual photos**, this never mattered in practice: the real OCR engine had already
+misread an unrelated character before `fixPlateChars` ever ran (`D` instead of `0`, `Z` instead
+of `2` - neither in the confusion map, so `fixPlateChars` left the already-wrong reading
+untouched, verified directly: `fixPlateChars('DSG719')` and `fixPlateChars('RBZ0503')` are both
+no-ops). So out of 322 real photos, the predicted collision risk from the previous section's
+honest write-up is real (2/322, 0.6%, confirmed against genuine plate text) but caused **zero**
+actual exact-match regressions in this round - a reassuring, now-quantified data point for a
+tradeoff that was previously only reasoned about, not measured against real photos.
+
+### Facial expressions: a real, reproducible alignment-sensitivity finding
+
+Re-examined `detectFaceDetails()`'s facial expression output (the closest real "body language"
+signal with a genuinely working model in this sandbox - see below for why pose/posture itself
+couldn't be tested this round) across all 6 real demo photos, plus a focused diagnostic
+(`diag-expr.js`, not checked in) comparing three ways of invoking face-api.js's expression net on
+the *identical* canvas:
+
+1. The real shipped path - `detectSingleFace().withFaceLandmarks().withFaceDescriptor().withFaceExpressions()` (one chained call), thresholded to `null` below 0.5 confidence.
+2. The same chain's raw `.expressions` distribution before thresholding.
+3. A bare `.detectSingleFace().withFaceExpressions()` call with nothing else chained.
+
+| photo | shipped result | chained top (1&2) | bare top (3) | same label? |
+|---|---|---|---|---|
+| sample1.jpg | sad | sad (0.734) | sad (0.779) | yes |
+| sample2.jpg | sad | sad (0.988) | sad (0.813) | yes |
+| sample3.jpg | neutral | neutral (0.893) | **happy (0.877)** | **no** |
+| sample4.jpg | *(null - below threshold)* | sad (0.353) | neutral (0.789) | no |
+| sample5.jpg | happy | happy (0.999) | happy (0.919) | yes |
+| sample6.jpg | neutral | neutral (1.0) | neutral (0.965) | yes |
+
+Both modes are individually deterministic (re-running either one 3x on the same canvas gives
+identical output), but they genuinely **disagree on which emotion is dominant** for 2 of 6 real
+photos - not just a confidence difference. Root cause: face-api.js's expression net gets a
+better-aligned face crop when real facial landmarks are already available earlier in the same
+call chain (which the shipped code does) versus a crop based only on the raw detection box (the
+bare call) - this is face-api.js's own intended behavior, landmarks improve alignment quality,
+not a bug in this app's code. Two things this confirms, both good news: the shipped code already
+uses the better-aligned (chained) path, and the existing `>=0.5` confidence threshold is doing
+real, useful work on real photos - `sample4.jpg`'s chained read was a near 3-way tie (0.353/
+0.329/0.318) and correctly came back as "don't know" rather than confidently reporting "sad" on
+what the uncertainty actually shows is an ambiguous expression.
+
+### Posture / body-language (MoveNet): confirmed still blocked, not silently skipped
+
+An earlier round found `tfhub.dev` (MoveNet's weight-hosting domain) unreachable via `curl` and
+abandoned that sub-test. This round tried again, two ways, specifically to give this an honest
+answer rather than assume the earlier finding still holds: (1) `curl` against `tfhub.dev` and
+several plausible `storage.googleapis.com` mirror paths - all blocked or 403/404; (2) letting the
+real, unmocked app attempt its own real `loadPoseModel` path (`$('#posture').checked=true` then
+calling the real `models()` function) inside an actual Chromium page, not a Node-side guess at a
+URL. The real browser fetch failed with `net::ERR_TUNNEL_CONNECTION_FAILED` against
+`tfhub.dev` - the same network-policy block, now confirmed from inside the real app's own loader,
+not just from `curl`. Posture/body-language (fall detection, sustained-lying-down alerts) remains
+covered by `posture-classify.test.js` and `fuzz-face-align.test.js`-style synthetic/fuzz testing
+only - genuinely untestable against real human photos in this sandbox until it runs somewhere
+with a less restrictive network policy. Stated plainly rather than silently dropped from this
+round's scope.
+
+No code changes this round - the shape-correction/false-positive work from the previous two
+rounds held up clean at 322-photo scale, and the expression/posture findings are both either
+already-correct-behavior confirmations or an environment limitation, not app bugs.
