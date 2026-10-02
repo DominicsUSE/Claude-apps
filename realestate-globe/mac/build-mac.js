@@ -23,6 +23,20 @@ function offlinePage() {
   fs.writeFileSync(path.join(ROOT, "app", "index.html"), html);
 }
 
+// The app's own text is English; drop Chromium's ~50 other UI translations to keep the download small.
+function trimLocales(appPath) {
+  const keep = new Set(["en.lproj", "en_GB.lproj", "Base.lproj"]);
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isSymbolicLink()) continue;
+      if (e.isDirectory() && e.name.endsWith(".lproj") && !keep.has(e.name)) fs.rmSync(p, { recursive: true });
+      else if (e.isDirectory()) walk(p);
+    }
+  };
+  walk(appPath);
+}
+
 function sign(appPath) {
   if (process.platform === "darwin") {
     execFileSync("codesign", ["--force", "--deep", "--sign", "-", appPath], { stdio: "inherit" });
@@ -38,7 +52,7 @@ function zip(appPath, out) {
     execFileSync("ditto", ["-c", "-k", "--keepParent", appPath, out], { stdio: "inherit" });
   } else {
     // -y keeps the symlinks inside Electron's frameworks intact
-    execFileSync("zip", ["-qry", out, path.basename(appPath)], { cwd: path.dirname(appPath), stdio: "inherit" });
+    execFileSync("zip", ["-qry9", out, path.basename(appPath)], { cwd: path.dirname(appPath), stdio: "inherit" });
   }
 }
 
@@ -68,6 +82,7 @@ function zip(appPath, out) {
       ignore: [/^\/dist($|\/)/, /^\/node_modules\/(?!$)/, /^\/build-mac\.js$/, /^\/make_icon\.py$/, /^\/icon\.png$/, /^\/README\.md$/],
     });
     const appPath = path.join(dir, "Build Atlas.app");
+    trimLocales(appPath);
     sign(appPath);
     const label = arch === "arm64" ? "Apple-Silicon" : "Intel";
     const out = path.join(DIST, `Build-Atlas-${version}-mac-${label}.zip`);
