@@ -26,8 +26,8 @@
   --mid:#f4c430;
   --bad:#f25f57;
   --f-display:"Bricolage Grotesque","Avenir Next","Segoe UI",system-ui,sans-serif;
-  --f-body:"IBM Plex Sans","Segoe UI",system-ui,-apple-system,sans-serif;
-  --f-data:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --f-body:-apple-system,BlinkMacSystemFont,"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --f-data:ui-monospace,"SF Mono","IBM Plex Mono",Menlo,Consolas,monospace;
   --r:14px;
   --shadow:0 18px 50px rgba(0,0,0,.45),0 2px 6px rgba(0,0,0,.3);
   color-scheme:dark;
@@ -44,6 +44,21 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 #globe.pointing{cursor:pointer}
 button{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.search input::-webkit-search-decoration,.search input::-webkit-search-cancel-button,.search input::-webkit-search-results-button{-webkit-appearance:none;appearance:none;display:none}
+.search input:focus{outline:none;border-color:rgba(142,197,255,.6);box-shadow:0 0 0 3px rgba(142,197,255,.18),var(--shadow)}
+.composer textarea:focus{outline:none;border-color:rgba(142,197,255,.6);box-shadow:0 0 0 3px rgba(142,197,255,.15)}
+.kbd{position:absolute;right:10px;top:23px;transform:translateY(-50%);display:flex;gap:2px;pointer-events:none}
+.kbd kbd{font:500 11px/1 var(--f-body);color:var(--muted);padding:4px 6px;border-radius:6px;border:1px solid var(--line-2);background:rgba(255,255,255,.04)}
+.search input:focus ~ .kbd{opacity:0}
+::selection{background:rgba(142,197,255,.35)}
+input,textarea{caret-color:var(--accent)}
+*{scrollbar-width:thin;scrollbar-color:rgba(160,190,225,.25) transparent}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(160,190,225,.22);border-radius:10px;border:3px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background-color:rgba(160,190,225,.38)}
+.suggest::-webkit-scrollbar{display:none}
+@media (prefers-reduced-transparency:reduce){.glass{background:var(--panel-solid);backdrop-filter:none;-webkit-backdrop-filter:none}}
 .glass{background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(16px) saturate(140%);-webkit-backdrop-filter:blur(16px) saturate(140%);box-shadow:var(--shadow)}
 
 .top{position:absolute;top:16px;left:16px;display:flex;flex-direction:column;gap:10px;width:min(360px,calc(100% - 32px));z-index:3}
@@ -52,7 +67,7 @@ button{font:inherit;color:inherit}
 .brand h1{margin:0;font:800 23px/1 var(--f-display);letter-spacing:-.02em}
 .brand p{margin:2px 0 0;color:var(--muted);font-size:12px}
 .search{position:relative}
-.search input{width:100%;box-sizing:border-box;padding:12px 14px 12px 40px;border-radius:var(--r);color:var(--ink);font:15px var(--f-body)}
+.search input{-webkit-appearance:none;appearance:none;width:100%;box-sizing:border-box;padding-right:64px!important;padding:12px 14px 12px 40px;border-radius:var(--r);color:var(--ink);font:15px var(--f-body)}
 .search input::placeholder{color:var(--muted)}
 .search svg{position:absolute;left:13px;top:23px;transform:translateY(-50%);width:16px;height:16px;stroke:var(--muted);fill:none;stroke-width:2;z-index:1;pointer-events:none}
 .results{list-style:none;margin:6px 0 0;padding:4px;border-radius:var(--r);max-height:320px;overflow:auto;background:var(--panel-solid)}
@@ -231,7 +246,7 @@ body.has-panel .ctrls{right:388px}
 .suggest button{flex:none;padding:7px 11px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.03);cursor:pointer;font-size:12.5px;color:var(--ink);white-space:nowrap}
 .suggest button:hover{border-color:rgba(142,197,255,.5)}
 .composer{display:flex;gap:8px;align-items:flex-end;padding:10px 16px 16px;border-top:1px solid var(--line);flex:none}
-.composer textarea{flex:1;min-width:0;resize:none;max-height:120px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:rgba(4,8,16,.5);color:var(--ink);font:14px/1.4 var(--f-body)}
+.composer textarea{-webkit-appearance:none;appearance:none;box-shadow:none;flex:1;min-width:0;resize:none;max-height:120px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:rgba(4,8,16,.5);color:var(--ink);font:14px/1.4 var(--f-body)}
 .composer textarea::placeholder{color:var(--muted)}
 .composer button{width:42px;height:42px;flex:none;border-radius:12px;border:0;background:var(--accent);color:#06101b;cursor:pointer;display:grid;place-items:center}
 .composer button svg{width:18px;height:18px;fill:currentColor}
@@ -262,7 +277,8 @@ body.has-panel .ctrls{right:388px}
     </div>
     <div class="search">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input id="q" class="glass" type="search" placeholder="Search a city, town or country" autocomplete="off" aria-label="Search places" aria-controls="results">
+      <input id="q" class="glass" type="search" placeholder="Search a city, town or country" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Search places" aria-controls="results">
+      <span class="kbd" id="kbd" aria-hidden="true" hidden><kbd id="kbd-mod">⌘</kbd><kbd>K</kbd></span>
       <ul class="results glass" id="results" role="listbox" hidden></ul>
     </div>
     <div class="modes glass" role="group" aria-label="Rate places by">
@@ -487,6 +503,9 @@ function drawStars(){
 
 function resize(){
   DPR = Math.min(window.devicePixelRatio||1, 2);
+  // a 5K Retina window would mean ~15 million pixels per frame; cap it so motion stays smooth
+  const area = canvas.clientWidth * canvas.clientHeight;
+  if (area * DPR * DPR > 9e6) DPR = Math.max(1, Math.sqrt(9e6 / area));
   TDPR = Math.min(DPR, 1.25);
   W = canvas.clientWidth; H = canvas.clientHeight;
   canvas.width = Math.round(W*DPR); canvas.height = Math.round(H*DPR);
@@ -593,7 +612,8 @@ const GL = (()=>{
 })();
 if (!GL) earthC.hidden = true;
 
-const SANS = '"IBM Plex Sans", system-ui, sans-serif', MONO = '"IBM Plex Mono", ui-monospace, monospace';
+const SANS = '-apple-system, BlinkMacSystemFont, "IBM Plex Sans", "Segoe UI", system-ui, sans-serif',
+      MONO = 'ui-monospace, "SF Mono", "IBM Plex Mono", Menlo, Consolas, monospace';
 const MW = new Map();   // measured text widths
 function mw(font, text){
   const k = font + "|" + text; let w = MW.get(k);
@@ -948,6 +968,7 @@ csel.call(zoom).on("dblclick.zoom", null).on("wheel.zoom", null);
 
 canvas.addEventListener("wheel", ev=>{
   ev.preventDefault();
+  if (typeof gestureK !== "undefined" && gestureK !== null) return;
   stopMotion(true); hideTip();
   const dy = ev.deltaY * (ev.deltaMode===1 ? 0.05 : ev.deltaMode ? 1 : 0.002) * (ev.ctrlKey ? 10 : 1);
   const base = cam.targetK ?? state.k;
@@ -1332,8 +1353,6 @@ const REGIONS = {
   "oceania": "AUS NZL PNG FJI SLB VUT NCL PYF WSM TON"
 };
 for (const k in REGIONS) REGIONS[k] = new Set(REGIONS[k].split(" "));
-const REGION_WORDS = [["europe","europe"],["european","europe"],["eu ","europe"],["asia","asia"],["asian","asia"],["middle east","middle east"],["gulf","middle east"],["africa","africa"],["african","africa"],["north america","north america"],["latin america","latin america"],["south america","latin america"],["central america","latin america"],["caribbean","latin america"],["oceania","oceania"],["pacific","oceania"]];
-const ALIASES = {usa:"USA","united states":"USA",america:"USA","the us":"USA",uk:"GBR","united kingdom":"GBR",britain:"GBR",england:"GBR",uae:"ARE",emirates:"ARE",russia:"RUS",korea:"KOR","south korea":"KOR",czechia:"CZE","czech republic":"CZE",holland:"NLD","dr congo":"COD",turkey:"TUR","türkiye":"TUR",vietnam:"VNM","ivory coast":"CIV"};
 const countryKeys = Object.keys(COUNTRIES).filter(k=>byCountry[k]);
 function findCountry(name){
   const n = String(name||"").trim().toLowerCase(); if (!n) return null;
@@ -1440,7 +1459,25 @@ How to answer:
 - Be brief and concrete: one short sentence, then up to 6 bullets like "- [[Medellin|Colombia]]: 72% value, about $1.6k/m², growth 66%. One short reason." Then one line on the main risk if there is one.
 - Use plain text with "- " bullets and **bold** only. No tables, no headings.
 - Always warn clearly when a recommended place has property safety under 45, and mention foreign-ownership limits when the data has them.
-- If asked about something outside real estate or this map, answer briefly and steer back.`;
+- People often misspell words and names ("potencial", "goverment", "countris", "Polland"). Work out what they mean; do not correct them.
+- Answer in the language the person writes in.
+- Pick the right tool: lists of places -> find_places (cheap + growth = sort "value"; cheapest = "price"; growth = "potential"); one city -> get_place; one country -> get_country; "can the government take my property" or foreign ownership -> property_risk or get_country. Compare by calling get_place for each.
+- If asked about something outside real estate or this map, answer briefly and steer back.
+
+Example
+Question: best cheep places with potencial in europe
+Answer:
+The best cheap places with strong growth in Europe:
+- [[Wroclaw|Poland]]: 64% value, about $2.9k/m², growth 69%. Fast-growing economy and a housing shortage.
+- [[Bucharest|Romania]]: 63% value, about $1.9k/m², growth 63%. Low entry cost for an EU capital.
+Main risk: prices in Polish cities have risen fast, so margins are thinner than a few years ago.
+
+Example
+Question: can the goverment take my house in thailand
+Answer:
+Thailand scores 50% for property safety (some risk or limits). Seizure is unlikely, but foreigners cannot own land, only condo units within a 49% foreign quota per building. Most foreign buyers use a condo or a long lease.
+
+(The numbers in the examples are only illustrations; always use the tools for real figures.)`;
 
 const chatEl = $("chat"), msgsEl = $("msgs"), inEl = $("chatIn"), sendBtn = $("send"), sugEl = $("suggest");
 const turns = [];
@@ -1539,53 +1576,277 @@ function highlight(list){
 }
 
 // instant, offline answers from the same data (used when Claude is not available here)
-function localAnswer(q){
-  const t = " " + q.toLowerCase() + " ";
-  let reg = null; for (const [w,r] of REGION_WORDS) if (t.includes(w)) { reg = r; break; }
-  let ck = null;
-  for (const a in ALIASES) if (t.includes(" "+a+" ") || t.includes(" "+a+"?") || t.includes(" "+a+",")) { ck = ALIASES[a]; break; }
-  if (!ck) for (const k of countryKeys){ const n = COUNTRIES[k].n.toLowerCase(); if (n.length > 3 && t.includes(n)) { ck = k; break; } }
-  // named cities
-  const named = [];
-  for (const p of P) if (p.lname.length > 3 && p.pop > 50000 && new RegExp("\\b"+p.lname.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b").test(t) && !named.some(x=>x.lname===p.lname)) named.push(p);
-  named.sort((a,b)=>b.pop-a.pop);
-  const fmt = p => `- [[${p.name}|${COUNTRIES[p.ck].n}]]: ${p.s.value}% value, about ${usd(p.ppm)}/m², growth ${p.s.potential}%, overall ${p.s.overall}%.`;
-  if (named.length && named.length <= 3 && !/cheap|growth|best|where|list|top/.test(t)){
-    const lines = named.slice(0,3).map(p=>{
-      const r = reasons(COUNTRIES[p.ck], p);
-      return `${fmt(p)}\n  ${p.s.value>=65||p.s.overall>=65 ? "Strength: "+(r.pros[0]||"steady fundamentals") : "Main problem: "+(r.cons[0]||"no single big problem")}.`;
-    });
-    return {text:(named.length>1?"Here is how they compare:\n":"")+lines.join("\n"), picks:named.slice(0,3)};
-  }
-  if (/seiz|confiscat|expropriat|nationali|take (my|your|the|our)? ?(property|propert|home|house|land)|property rights|can.t own|cannot own|foreigners? (own|buy)|own property/.test(t)){
-    if (ck){
-      const c = COUNTRIES[ck], v = c.f[5];
-      return {text:`**${c.n}: property safety ${v}%** (${PROP_LABEL[propRate(v)].toLowerCase()}).\n${c.pn ? "- "+c.pn+"\n" : ""}- ${v >= 70 ? "Courts and the land registry protect owners well." : v >= 45 ? "You can usually own property, but check the limits for foreigners and the title history." : "The state has seized or blocked property here, or foreigners cannot really own it. Treat it as high risk."}`, picks:[]};
+// ---- understanding questions (typo tolerant) ----
+const REGION_WORDS = [["eastern europe","europe"],["western europe","europe"],["europe","europe"],["european","europe"],["eu","europe"],
+  ["southeast asia","asia"],["south east asia","asia"],["east asia","asia"],["asia","asia"],["asian","asia"],
+  ["middle east","middle east"],["mena","middle east"],["gulf","middle east"],["arab","middle east"],
+  ["africa","africa"],["african","africa"],["north america","north america"],["latin america","latin america"],["latam","latin america"],
+  ["south america","latin america"],["central america","latin america"],["caribbean","latin america"],["oceania","oceania"],["pacific","oceania"],["australasia","oceania"]];
+const ALIASES = {usa:"USA","united states":"USA",america:"USA","the us":"USA",american:"USA",uk:"GBR","united kingdom":"GBR",britain:"GBR","great britain":"GBR",england:"GBR",british:"GBR",
+  uae:"ARE",emirates:"ARE",russia:"RUS",russian:"RUS",korea:"KOR","south korea":"KOR",czechia:"CZE","czech republic":"CZE",czech:"CZE",holland:"NLD",dutch:"NLD","dr congo":"COD",
+  turkey:"TUR","türkiye":"TUR",turkiye:"TUR",vietnam:"VNM","ivory coast":"CIV",german:"DEU",polish:"POL",spanish:"ESP",french:"FRA",italian:"ITA",portuguese:"PRT",greek:"GRC",
+  chinese:"CHN",japanese:"JPN",indian:"IND",mexican:"MEX",brazilian:"BRA",canadian:"CAN",australian:"AUS",thai:"THA",filipino:"PHL",philippine:"PHL",indonesian:"IDN",
+  nigerian:"NGA",kenyan:"KEN",egyptian:"EGY",saudi:"SAU",swiss:"CHE",swedish:"SWE",norwegian:"NOR",danish:"DNK",irish:"IRL",hungarian:"HUN",romanian:"ROU",bulgarian:"BGR",
+  croatian:"HRV",serbian:"SRB",ukrainian:"UKR",slovak:"SVK",slovakian:"SVK",lithuanian:"LTU",latvian:"LVA",estonian:"EST",georgian:"GEO",colombian:"COL",argentinian:"ARG",
+  chilean:"CHL",peruvian:"PER",venezuelan:"VEN",cuban:"CUB",moroccan:"MAR",rwandan:"RWA",tanzanian:"TZA",ghanaian:"GHA",vietnamese:"VNM",malaysian:"MYS"};
+// concept -> words (each also matches with small typos)
+const VOCAB = {
+  cheap:["cheap","cheapest","cheaper","cheep","affordable","afford","inexpensive","budget","lowcost"],
+  growth:["growth","grow","growing","potential","boom","booming","future","rising","rise","rises","upside","appreciation","emerging","fastest","upcoming","develop","developing"],
+  value:["value","bargain","bargains","deal","deals","invest","investment","investing","worth","roi","opportunity","opportunities"],
+  best:["best","top","good","great","ideal","recommend","recommended","suggest"],
+  worst:["worst","avoid","riskiest","dangerous","bad","risky","terrible","stay"],
+  safe:["safe","safest","secure","stable","safety"],
+  seize:["seize","seizure","seized","confiscate","confiscation","expropriate","expropriation","nationalise","nationalize","nationalisation","nationalization","steal","grab","taken","takes"],
+  own:["own","ownership","owner","owners","foreigner","foreigners","foreign","freehold","title","titles","rights"],
+  property:["property","properties","home","homes","house","houses","land","apartment","apartments","realestate","estate","flat","flats","building","buildings"],
+  government:["government","goverment","state","regime","authorities"],
+  compare:["compare","comparison","versus","vs","between","difference","better"],
+  why:["why","reason","reasons","explain","because","risk","risks","problem","problems","downside","downsides","issues","dangers","pros","cons"],
+  big:["big","large","major","biggest","largest","capital","capitals","metropolis"],
+  small:["towns","small","village","villages","smaller"],
+  overall:["overall","allround","general"],
+  meaning:["mean","means","meaning","calculated","calculate","calculation","methodology","formula"],
+  where:["where","which","places","cities","spots","locations","areas","list","options"],
+  hello:["hi","hello","hey","hola","ahoj","yo"],
+  thanks:["thanks","thank","thx","ty","cheers"]
+};
+const COMMON = new Set(("a an the and or of in on at to for from by with is are was be it its this that these those i me my we our you your he she they them what which who where when why how "+
+  "can could should would will do does did not no yes any some all most more less than then much many very also just there here about into over under below above near between best top good "+
+  "place places city cities country countries town towns build building buy sell rent start company business real estate property land home house money want need like "+
+  "nice mobile reading split bath orange split mission hope union independence liberty paradise florida victoria").split(" "));
+function lev(a, b, max){   // edit distance with swaps, stops early above max
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let pp = null, p = Array.from({length:b.length+1}, (_,j)=>j);
+  for (let i=1; i<=a.length; i++){
+    const c = [i]; let rowMin = i;
+    for (let j=1; j<=b.length; j++){
+      let v = Math.min(p[j]+1, c[j-1]+1, p[j-1] + (a[i-1]===b[j-1] ? 0 : 1));
+      if (i>1 && j>1 && a[i-1]===b[j-2] && a[i-2]===b[j-1]) v = Math.min(v, pp[j-2]+1);
+      c[j] = v; if (v < rowMin) rowMin = v;
     }
-    const worst = propertyRanking({region:reg, limit:8});
-    const safe = queryPlaces({sort:"value", region:reg, min_property_safety:80, min_population:300000, limit:5});
-    return {text:`**Where the government may take your property${reg?" in "+reg.replace(/\b\w/g,m=>m.toUpperCase()):""}** (lowest property safety):\n${worst.map(([k,c])=>`- ${c.n} (${c.f[5]}%): ${c.pn || "weak courts and property rights"}`).join("\n")}\n\n**Cheap with growth where property is safe (80%+):**\n${safe.map(fmt).join("\n")}`, picks:safe};
+    if (rowMin > max) return max + 1;
+    pp = p; p = c;
   }
-  if (ck && /why|bad|good|risk|problem|about/.test(t)){
-    const c = COUNTRIES[ck], r = reasons(c, null);
-    const top = (byCountry[ck]||[]).slice().sort((a,b)=>b.s.value-a.s.value).slice(0,3);
-    return {text:`**${c.n}** scores ${Math.round(c.overall)}% overall, ${c.value}% value and ${Math.round(c.potential)}% growth.\n${r.cons.slice(0,3).map(x=>"- "+x).join("\n")}${r.pros.length?"\nIn its favour: "+r.pros[0].toLowerCase()+".":""}\nBest value there: ${top.map(p=>`[[${p.name}|${c.n}]]`).join(", ")}.`, picks:top};
-  }
-  let sort = "value", lowest = false;
-  const cheap = /cheap|afford|low cost|budget|price|inexpensive/.test(t), grow = /growth|grow|potential|boom|future|rising/.test(t);
-  if (/avoid|worst|riskiest|bad places/.test(t)) { sort = "overall"; lowest = true; }
-  else if (cheap && !grow && !/value|best/.test(t)) sort = "price";
-  else if (grow && !cheap && !/value/.test(t)) sort = "potential";
-  const priceCap = (t.match(/\$\s?([\d,.]+)\s?(k)?/)||[]);
-  let max = priceCap[1] ? parseFloat(priceCap[1].replace(/,/g,"")) * (priceCap[2] ? 1000 : 1) : undefined;
-  const big = /big|large|major/.test(t), small = /town|small/.test(t);
-  const list = queryPlaces({sort, region:reg, countries:ck?[COUNTRIES[ck].n]:undefined, max_price_usd_per_m2:max, lowest_first:lowest,
-    min_population: big ? 1e6 : small ? 20000 : 100000, limit:6});
-  const where = ck ? " in "+COUNTRIES[ck].n : reg ? " in "+reg.replace(/\b\w/g,m=>m.toUpperCase()) : "";
-  const head = {value:`Cheap places with the most growth${where}`, price:`Cheapest stable places${where}`, potential:`Most growth potential${where}`, overall:`Riskiest places${where}`}[lowest?"overall":sort];
-  if (!list.length) return {text:`I found no places matching that${where}. Try a higher price limit or a bigger area.`, picks:[]};
-  return {text:`**${head}** (by ${lowest?"lowest overall score":sort==="value"?"value: cheap + growth":sort==="price"?"lowest price per m²":"growth potential"}):\n${list.map(fmt).join("\n")}${sort!=="overall"&&!lowest?"\nWar zones and countries where the government may take your property are left out.":""}`, picks:list};
+  return p[b.length];
 }
+const tol = w => w.length >= 8 ? 2 : w.length >= 5 ? 1 : 0;
+// closest candidate within its tolerance; ties go to the same first letter, then list order
+function closest(w, list, tolOf){
+  let best = null, bs = 99;
+  for (const item of list){
+    const n = item[0], t = tolOf(n); if (t <= 0) continue;
+    const d = lev(w, n, t); if (d > t) continue;
+    const score = d * 2 + (n[0] === w[0] ? 0 : 1);
+    if (score < bs){ bs = score; best = item; }
+  }
+  return best;
+}
+const CONCEPT_ORDER = ["seize","own","government","property","cheap","growth","value","worst","why","compare","meaning","where","best","safe","big","small","overall","hello","thanks"];
+const VOCAB_WORDS = [];
+for (const c in VOCAB) for (const w of VOCAB[c]) VOCAB_WORDS.push([w, c]);
+let VOCAB_WORDS_ORDERED = null;   // filled once CONCEPT_ORDER exists
+const norm = s => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+// names to look up: countries (name, aliases), cities (big enough to be worth matching)
+const COUNTRY_NAMES = [];
+for (const k of countryKeys) COUNTRY_NAMES.push([norm(COUNTRIES[k].n).replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim(), k]);
+for (const a in ALIASES) COUNTRY_NAMES.push([a, ALIASES[a]]);
+COUNTRY_NAMES.sort((a,b)=>b[0].length - a[0].length);
+const CITY_INDEX = new Map();   // normalised name -> most populous place
+for (const p of P){
+  if (p.pop < 20000) continue;
+  const n = norm(p.name).replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim();
+  if (n.length < 3 || COMMON.has(n)) continue;
+  const cur = CITY_INDEX.get(n);
+  if (!cur || cur.pop < p.pop) CITY_INDEX.set(n, p);
+}
+VOCAB_WORDS_ORDERED = VOCAB_WORDS.slice().sort((a,b)=>CONCEPT_ORDER.indexOf(a[1]) - CONCEPT_ORDER.indexOf(b[1]));
+const SINGLE_COUNTRIES = COUNTRY_NAMES.filter(([n])=>!n.includes(" "));
+const COUNTRY_SET = new Set(COUNTRY_NAMES.map(x=>x[0]));
+const COMMON_LONG = [...COMMON].filter(w=>w.length >= 5);
+const FUZZY_CITIES = [...CITY_INDEX].filter(([n,p])=>p.pop >= 400000 && n.length >= 6 && !n.includes(" "));
+
+function understand(q){
+  const raw = norm(String(q||""));
+  const out = {concepts:new Set(), countries:[], places:[], region:null, maxPrice:null, limit:null};
+  // prices: "$1500", "1.5k", "under 2000 per m2", "1500 dollars"
+  let text = raw.replace(/(\d),(\d{3})/g, "$1$2");
+  const pm = text.match(/(?:under|below|less than|max(?:imum)?|cheaper than|up to|<)\s*\$?\s*(\d+(?:\.\d+)?)\s*(k|thousand)?/) ||
+             text.match(/\$\s*(\d+(?:\.\d+)?)\s*(k|thousand)?/) || text.match(/(\d+(?:\.\d+)?)\s*(k|thousand)?\s*(?:\$|usd|dollars?|per m|\/m|a m)/);
+  if (pm){ let v = parseFloat(pm[1]) * (pm[2] ? 1000 : 1); if (v >= 100 && v <= 100000){ out.maxPrice = v; text = text.replace(pm[0], " "); } }
+  const lm = text.match(/\b(?:top|best|first)\s+(\d{1,2})\b/) || text.match(/\b(\d{1,2})\s+(?:best|top|cheapest|places|cities|towns|countries|options|picks)\b/);
+  if (lm){ out.limit = Math.max(1, Math.min(15, +lm[1])); text = text.replace(lm[0], " " + lm[0].replace(/\d+/, "") + " "); }
+  const clean = " " + text.replace(/[^a-z0-9$ ]+/g, " ").replace(/\s+/g, " ").trim() + " ";
+  // regions (longest phrases first)
+  let rest = clean;
+  // multi-word country names first, so "south africa" is a country and not the region "africa"
+  for (const [n, k] of COUNTRY_NAMES){
+    if (n.includes(" ") && rest.includes(" "+n+" ") && !out.countries.includes(k)){ out.countries.push(k); rest = rest.replace(" "+n+" ", "  "); }
+  }
+  for (const [w, r] of REGION_WORDS) if (rest.includes(" "+w+" ")) { out.region = r; rest = rest.replace(" "+w+" ", "  "); break; }
+  {   // misspelt country names ("south afirca", "australai"), checked before regions
+    const ws = rest.trim().split(" ");
+    const keep = [];
+    for (let i=0; i<ws.length; i++){
+      const w = ws[i], two = i+1 < ws.length ? w + " " + ws[i+1] : null;
+      let k = null, took = 1;
+      if (two && two.length >= 8){
+        // closest two-word name wins: a region ("south america") or a country ("south africa")
+        let best = null, bd = 9;
+        for (const [r] of REGION_WORDS) if (r.includes(" ")){ const d = lev(two, r, tol(r)); if (d <= tol(r) && d < bd){ bd = d; best = null; } }
+        for (const [n, kk] of COUNTRY_NAMES) if (n.includes(" ")){ const d = lev(two, n, tol(n)); if (d <= tol(n) && d < bd){ bd = d; best = kk; } }
+        if (bd < 9 && !best){ keep.push(w, ws[i+1]); i++; continue; }
+        if (best){ k = best; took = 2; }
+      }
+      if (!k && w.length >= 4 && !COMMON.has(w) && !VOCAB_WORDS.some(([v])=>v===w) && !REGION_WORDS.some(([r])=>r===w))
+        { const m = closest(w, SINGLE_COUNTRIES, n => n.length >= 5 ? Math.max(1, tol(n)) : 0); if (m) k = m[1]; }
+      if (k){ if (!out.countries.includes(k)) out.countries.push(k); i += took - 1; }
+      else keep.push(w);
+    }
+    rest = " " + keep.join(" ") + " ";
+  }
+  if (!out.region){   // misspelt region ("euorpe", "latin amerca")
+    const ws = rest.trim().split(" ");
+    outer: for (let n=2; n>=1; n--) for (let i=0; i+n<=ws.length; i++){
+      const ph = ws.slice(i, i+n).join(" ");
+      if (ph.length < 5 || COUNTRY_SET.has(ph)) continue;
+      for (const [w, r] of REGION_WORDS) if (w.length >= 5 && w.split(" ").length === n && lev(ph, w, tol(w)) <= tol(w)){
+        out.region = r; rest = (" " + ws.slice(0,i).concat(ws.slice(i+n)).join(" ") + " "); break outer;
+      }
+    }
+  }
+  // countries: exact phrases, then typo-tolerant single words
+  for (const [n, k] of COUNTRY_NAMES){
+    if (n.length < 2) continue;
+    if (rest.includes(" "+n+" ") && !out.countries.includes(k)){ out.countries.push(k); rest = rest.replace(" "+n+" ", "  "); }
+  }
+  // cities: exact names up to three words long
+  const words = rest.trim().split(" ").filter(Boolean);
+  const used = new Set();
+  for (let len=3; len>=1; len--){
+    for (let i=0; i+len<=words.length; i++){
+      if ([...Array(len).keys()].some(j=>used.has(i+j))) continue;
+      const phrase = words.slice(i, i+len).join(" ");
+      const p = CITY_INDEX.get(phrase);
+      if (p && !(len===1 && COMMON.has(phrase)) && !out.places.includes(p)){
+        out.places.push(p); for (let j=0;j<len;j++) used.add(i+j);
+      }
+    }
+  }
+  // concepts and typo-tolerant matching for the remaining words
+  words.forEach((w, i)=>{
+    if (used.has(i)) return;
+    let hit = null;
+    for (const [v, c] of VOCAB_WORDS){ if (w === v){ hit = c; break; } }
+    if (!hit && COMMON.has(w)) return;   // an everyday word, never a typo of a keyword
+    if (!hit && w.length >= 4){
+      const m = closest(w, VOCAB_WORDS_ORDERED, v => v.length >= 4 ? tol(v) : 0);
+      if (m) hit = m[1];
+    }
+    if (hit){ out.concepts.add(hit); return; }
+    if (COMMON.has(w) || w.length < 4) return;
+    if (COMMON_LONG.some(c=>lev(w, c, 1) <= 1)) return;   // a misspelt everyday word, not a name
+    // misspelt country or big city
+    { const m = closest(w, SINGLE_COUNTRIES, n => n.length >= 5 ? Math.max(1, tol(n)) : 0); if (m){ if (!out.countries.includes(m[1])) out.countries.push(m[1]); return; } }
+    if (w.length >= 5) for (const [n, p] of FUZZY_CITIES) if (lev(w, n, 1) <= 1){ if (!out.places.includes(p)) out.places.push(p); return; }
+  });
+  if (/\bcost of\b|\bhow much\b|\bexpensive\b/.test(clean)) out.concepts.add("priceOf");
+  if (/\btowns?\b/.test(clean)) out.concepts.add("small");
+  if (/\blow (cost|price|prices|priced)\b/.test(clean)) out.concepts.add("cheap");
+  if (/\bwhat (is|are|does|do) (the |a )?(value|growth|potential|price|overall|property safety|score|scores|percent|percentage|percentages|procentages)\b|\bhow (do|does|are|is) (the |your )?(score|scores|rating|ratings|value|it|this|percentages?)\b.*\b(work|calculat|made|mean)/.test(clean)) out.concepts.add("meaning");
+  if (/\bnot safe\b|\bunsafe\b/.test(clean)){ out.concepts.delete("safe"); out.concepts.add("worst"); }
+  if (/\b(or|and|vs)\b/.test(clean) && out.places.length + out.countries.length >= 2) out.concepts.add("compare");
+  return out;
+}
+function decide(u){
+  const has = c => u.concepts.has(c);
+  const nNamed = u.places.length + u.countries.length;
+  const listSignal = !!(u.region || u.maxPrice || u.limit || has("where"));
+  const kw = ["cheap","growth","value","worst","safe","big","small","overall","best"].some(has);
+  if ((has("hello") || has("thanks")) && !nNamed && !kw && !has("seize") && !has("own")) return has("thanks") ? "thanks" : "hello";
+  if (has("meaning") && !nNamed && !has("seize")) return "explain";
+  if (has("seize") || (has("government") && (has("property") || has("own"))) || (has("own") && (has("property") || nNamed))) return "property";
+  if (u.places.length >= 2 && !u.region && !u.maxPrice && !u.limit) return "compare";
+  if (!listSignal && has("compare") && nNamed >= 2) return "compare";
+  if (!listSignal && u.places.length === 1) return "place";
+  if (!listSignal && u.countries.length >= 2 && (!kw || has("compare"))) return "compare";
+  if (!listSignal && u.countries.length === 1 && (!kw || has("why") || (has("best") && !has("cheap") && !has("growth") && !has("value")))) return "country";
+  if (!listSignal && !kw && !nNamed) return "unknown";
+  return "list";
+}
+function listSpec(u){
+  const has = c => u.concepts.has(c);
+  let sort = "value", lowest = false, minProp = 0;
+  if (has("worst")) { sort = "overall"; lowest = true; }
+  else if (has("cheap") && has("growth")) sort = "value";
+  else if (has("value")) sort = "value";
+  else if (has("cheap")) sort = "price";
+  else if (has("growth")) sort = "potential";
+  else if (has("overall") || (has("best") && !has("cheap"))) sort = has("best") && !has("overall") ? "value" : "overall";
+  if (has("safe") && !lowest) minProp = 80;
+  return {sort, lowest, minProp, minPop: has("big") ? 1e6 : has("small") ? 20000 : 100000, limit: u.limit || 6};
+}
+const regionName = r => r.replace(/\b\w/g, m=>m.toUpperCase());
+function fmtPlace(p){
+  const c = COUNTRIES[p.ck], warn = c.f[5] < 45 ? " ⚠ property risk" : "";
+  return `- [[${p.name}|${c.n}]]: ${p.s.value}% value, about ${usd(p.ppm)}/m², growth ${p.s.potential}%, overall ${p.s.overall}%${warn}.`;
+}
+function placeLine(p){
+  const c = COUNTRIES[p.ck], r = reasons(c, p), good = p.s.value >= 65 || p.s.overall >= 65;
+  return `${fmtPlace(p)}\n  Property safety ${c.f[5]}%. ${good ? "Strength: "+(r.pros[0]||"steady fundamentals") : "Main problem: "+(r.cons[0]||"no single big problem")}.`;
+}
+function countryText(k){
+  const c = COUNTRIES[k], r = reasons(c, null);
+  const top = (byCountry[k]||[]).slice().sort((a,b)=>b.s.value-a.s.value).slice(0,3);
+  return `**${c.n}**: ${Math.round(c.overall)}% overall, ${c.value}% value, ${Math.round(c.potential)}% growth, property safety ${c.f[5]}%, typical ${usd(c.p)}/m².\n`
+    + r.cons.slice(0,3).map(x=>"- "+x).join("\n") + (r.pros.length ? "\nIn its favour: " + r.pros[0].charAt(0).toLowerCase() + r.pros[0].slice(1) + "." : "")
+    + (top.length ? "\nBest value there: " + top.map(p=>`[[${p.name}|${c.n}]]`).join(", ") + "." : "");
+}
+function localAnswer(q){
+  const u = understand(q), intent = decide(u);
+  if (intent === "hello") return {text:"Hi! Ask me where to build: cheap places with growth, a country's risks, or whether the government can take your property.", picks:[], intent};
+  if (intent === "thanks") return {text:"You're welcome. Ask me anything else about places, prices or growth.", picks:[], intent};
+  if (intent === "explain") return {intent, picks:[], text:"**How the scores work** (0-100%, green 65+, yellow 50-64, red under 50):\n- **Overall**: demand, economy, affordability, stability, business climate and property safety together.\n- **Price**: higher means cheaper, from estimated apartment prices per m².\n- **Growth**: population growth, economy and local momentum.\n- **Value**: cheap AND high growth, marked down where it is unsafe.\n- **Property safety**: how likely the government is to take your property, and limits on foreign owners.\nThey are indicative estimates, not financial advice."};
+  if (intent === "property"){
+    const ks = u.countries.length ? u.countries : u.places.map(p=>p.ck);
+    if (ks.length){
+      const lines = [...new Set(ks)].slice(0,4).map(k=>{
+        const c = COUNTRIES[k], v = c.f[5];
+        return `**${c.n}: property safety ${v}%** (${PROP_LABEL[propRate(v)].toLowerCase()}).\n${c.pn ? "- "+c.pn+"\n" : ""}- ${v >= 70 ? "Courts and the land registry protect owners well." : v >= 45 ? "You can usually own property, but check the limits for foreigners and the title history." : "The state has seized or blocked property here, or foreigners cannot really own it. Treat it as high risk."}`;
+      });
+      return {text:lines.join("\n"), picks:u.places.slice(0,3), intent};
+    }
+    const asksSafe = u.concepts.has("safe") || u.concepts.has("best");
+    const worst = propertyRanking({region:u.region, limit:8, safest_first:asksSafe});
+    const safe = queryPlaces({sort:"value", region:u.region, min_property_safety:80, min_population:300000, limit:5});
+    return {intent, picks:safe, text:`**${asksSafe ? "Where your property is safest" : "Where the government may take your property"}${u.region?" in "+regionName(u.region):""}**:\n${worst.map(([k,c])=>`- ${c.n} (${c.f[5]}%): ${c.pn || (c.f[5] >= 85 ? "strong property rights" : "weak courts and property rights")}`).join("\n")}\n\n**Cheap with growth where property is safe (80%+):**\n${safe.map(fmtPlace).join("\n")}`};
+  }
+  if (intent === "compare"){
+    const items = u.places.slice(0,4);
+    const lines = items.map(placeLine).concat(u.countries.filter(k=>!items.some(p=>p.ck===k)).slice(0,3).map(countryText));
+    const all = items.slice();
+    let verdict = "";
+    if (items.length >= 2){ const b = items.slice().sort((a,b)=>b.s.value-a.s.value)[0]; verdict = `\n**Better value: [[${b.name}|${COUNTRIES[b.ck].n}]]** (${b.s.value}%).`; }
+    return {text:"Here is how they compare:\n" + lines.join("\n") + verdict, picks:all, intent};
+  }
+  if (intent === "place"){
+    const ps = u.places.slice(0,3);
+    return {text:(ps.length > 1 ? "Here is how they compare:\n" : "") + ps.map(placeLine).join("\n"), picks:ps, intent};
+  }
+  if (intent === "country") return {text:countryText(u.countries[0]), picks:(byCountry[u.countries[0]]||[]).slice().sort((a,b)=>b.s.value-a.s.value).slice(0,3), intent};
+  const s = listSpec(u);
+  if (!u.countries.length && u.places.length) u.countries = [...new Set(u.places.map(p=>p.ck))];
+  const where = u.countries.length ? " in " + u.countries.map(k=>COUNTRIES[k].n).join(", ") : u.region ? " in " + regionName(u.region) : "";
+  const list = queryPlaces({sort:s.sort, region:u.region, countries:u.countries.map(k=>COUNTRIES[k].n), max_price_usd_per_m2:u.maxPrice || undefined,
+    lowest_first:s.lowest, min_property_safety:s.minProp, min_population:s.minPop, limit:s.limit});
+  const intro = intent === "unknown" ? "I'm not sure what you mean, so here are the best cheap places with growth. Try \"cheapest big cities in Asia\" or \"why is Russia rated badly?\"\n" : "";
+  const head = s.lowest ? `Riskiest places${where}` : ({value:`Cheap places with the most growth${where}`, price:`Cheapest places${where}`, potential:`Most growth potential${where}`, overall:`Best all-round places${where}`})[s.sort];
+  const extra = [u.maxPrice ? `under ${usd(u.maxPrice)}/m²` : "", s.minProp ? "property safety 80%+" : "", s.minPop >= 1e6 ? "cities over 1M people" : s.minPop < 100000 ? "including small towns" : ""].filter(Boolean).join(", ");
+  if (!list.length) return {text:`I found no places matching that${where}${extra ? " ("+extra+")" : ""}. Try a higher price limit or a bigger area.`, picks:[], intent};
+  return {intent, picks:list, text:`${intro}**${head}**${extra ? " ("+extra+")" : ""}:\n${list.map(fmtPlace).join("\n")}${!s.lowest ? "\nWar zones and countries where the government may take your property are left out." : ""}`};
+}
+
+window.__atlasBrain = {understand, decide, localAnswer};   // used by the test suite
 
 function setBusy(b){
   busy = b;
@@ -1689,6 +1950,41 @@ function showTab(t){
 }
 $("tab-chat").onclick = ()=>showTab("chat");
 $("tab-explore").onclick = ()=>showTab("explore");
+
+/* ---------- Mac and keyboard polish ---------- */
+const IS_MAC = navigator.userAgentData?.platform === "macOS" || /Mac|iPhone|iPad/.test(navigator.platform || "") || /Macintosh|Mac OS X/.test(navigator.userAgent);
+document.documentElement.classList.toggle("mac", IS_MAC);
+if (window.matchMedia("(hover: hover) and (pointer: fine)").matches){
+  $("kbd").hidden = false;
+  if (!IS_MAC) $("kbd-mod").textContent = "Ctrl";
+}
+window.addEventListener("keydown", ev=>{
+  const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName);
+  if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k"){ ev.preventDefault(); showTab("explore"); q.focus(); q.select(); return; }
+  if (typing || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  const step = 12 / Math.sqrt(state.k);
+  if (ev.key === "/"){ ev.preventDefault(); showTab("explore"); q.focus(); }
+  else if (ev.key === "+" || ev.key === "="){ zoomBy(1.6); }
+  else if (ev.key === "-" || ev.key === "_"){ zoomBy(1/1.6); }
+  else if (ev.key === "0"){ flyTo(...viewCenter(), 1); }
+  else if (ev.key === "ArrowLeft"){ ev.preventDefault(); flyTo(viewCenter()[0] - step, viewCenter()[1], state.k); }
+  else if (ev.key === "ArrowRight"){ ev.preventDefault(); flyTo(viewCenter()[0] + step, viewCenter()[1], state.k); }
+  else if (ev.key === "ArrowUp"){ ev.preventDefault(); flyTo(viewCenter()[0], Math.min(85, viewCenter()[1] + step), state.k); }
+  else if (ev.key === "ArrowDown"){ ev.preventDefault(); flyTo(viewCenter()[0], Math.max(-85, viewCenter()[1] - step), state.k); }
+  else if (ev.key === "Escape"){ hideTip(); }
+});
+// Safari on a Mac reports trackpad pinches as gesture events rather than ctrl+wheel
+let gestureK = null;
+canvas.addEventListener("gesturestart", ev=>{ ev.preventDefault(); stopMotion(true); gestureK = cam.targetK ?? state.k; });
+canvas.addEventListener("gesturechange", ev=>{
+  ev.preventDefault(); if (gestureK === null) return;
+  const pt = d3.pointer(ev, canvas); apply();
+  const g = proj.invert(pt);
+  cam.targetK = Math.max(MINK, Math.min(MAXK, gestureK * ev.scale));
+  cam.anchor = pt; cam.anchorGeo = g && d3.geoDistance(g, viewCenter()) < Math.PI/2 - 0.01 ? g : null;
+});
+canvas.addEventListener("gestureend", ev=>{ ev.preventDefault(); gestureK = null; });
+document.addEventListener("gesturestart", ev=>ev.preventDefault());   // no page zoom in Safari
 
 /* ---------- boot ---------- */
 document.body.classList.add("has-panel");

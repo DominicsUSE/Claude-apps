@@ -81,3 +81,20 @@ python3 ~/.nanobot/workspace/skills/build-atlas/scripts/atlas.py place Lisbon
 
 `build/build.py` regenerates `assets/atlas-data.json` together with `index.html`
 (the scoring is mirrored in `build/export_skill.py`).
+
+## Chat understanding tests
+
+The offline chat parses each question into an intent (list, place, country, compare,
+property, explain ...) plus filters (region, country, price cap, size, how many). It
+tolerates typos ("potencial", "goverment", "Polland") and synonyms. A generated test
+suite checks it on about 2,000 questions per seed:
+
+```bash
+npm i playwright d3@7.9.0
+node realestate-globe/tests/chat-understanding.test.js 1   # try other seeds: 2, 3, ...
+```
+
+## On a Mac
+
+San Francisco is used for text, ⌘K (or /) jumps to search, + − 0 and the arrow
+keys move the globe, and trackpad pinch works in Safari and Chrome.
