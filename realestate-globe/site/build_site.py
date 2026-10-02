@@ -24,7 +24,7 @@ DESCRIPTION = ("Interactive globe of the best places to start a real-estate comp
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--domain", default="buildingatlas.com")
+    ap.add_argument("--domain", default="buildingatlas.eu.org")
     ap.add_argument("--out", default="_site")
     ap.add_argument("--no-news", action="store_true")
     a = ap.parse_args()
