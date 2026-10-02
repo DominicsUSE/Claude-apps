@@ -132,19 +132,26 @@ Every place and country has a **Why X%?** section: what the percentage means
 (very poor, poor, mixed, strong, excellent), and each factor with how many points
 it adds or removes from the 50% midpoint and a plain-language reason.
 
-## Website (buildingatlas.com)
+## Website (buildingatlas.eu.org)
 
 `.github/workflows/website.yml` publishes the map on GitHub Pages and rebuilds it every
 10 minutes with fresh headlines (`site/build_site.py` adds search/social metadata,
-icons, `CNAME`, `robots.txt`, `sitemap.xml` and `news.json`). One-time setup:
+icons, `CNAME`, `robots.txt`, `sitemap.xml` and `news.json`).
 
-1. Repo **Settings > Pages > Build and deployment > Source: GitHub Actions**.
-2. Merge this work into the default branch (Pages and scheduled runs only use it).
-3. Buy `buildingatlas.com` at any registrar and add DNS records:
-   `A @ 185.199.108.153`, `185.199.109.153`, `185.199.110.153`, `185.199.111.153`,
-   `AAAA @ 2606:50c0:8000::153`, `2606:50c0:8001::153`, `2606:50c0:8002::153`,
-   `2606:50c0:8003::153`, and `CNAME www dominicsuse.github.io`.
-4. **Settings > Pages > Custom domain:** `buildingatlas.com`, then tick **Enforce HTTPS**.
+The address is a free domain from the EU.org registry. One-time setup:
+
+1. Repo **Settings > Pages > Build and deployment > Source: GitHub Actions**. The site
+   then runs at https://dominicsuse.github.io/Claude-apps/ until the domain is ready.
+2. Free DNS: create a Cloudflare account, **Add a domain** `buildingatlas.eu.org`
+   (Free plan) and note its two nameservers. In its DNS settings add, with the cloud
+   set to **DNS only** (grey) so GitHub can issue the HTTPS certificate:
+   `A @ 185.199.108.153`, `A @ 185.199.109.153`, `A @ 185.199.110.153`,
+   `A @ 185.199.111.153`, `CNAME www dominicsuse.github.io`.
+3. Request the domain: create a contact at https://nic.eu.org/arf/en/contact/create/,
+   confirm the email, log in, choose **New domain**, enter `buildingatlas.eu.org`
+   and the two Cloudflare nameservers. EU.org reviews requests by hand (days to weeks).
+4. When EU.org approves it: **Settings > Pages > Custom domain**: `buildingatlas.eu.org`,
+   **Save**, then tick **Enforce HTTPS**.
 
 On the website the Ask AI tab answers from the map data (Claude and nanobot are only
 available in claude.ai and the Mac app / serve.py).
