@@ -7,7 +7,9 @@ Switch between three ratings:
 - **Price**: cheapest land and homes (estimated USD per m²; green is cheaper).
 - **Potential**: where demand and prices should grow most.
 Drag to spin, scroll or pinch to zoom; city and town names appear as you zoom in.
-Click a place or country for its score breakdown.
+Click a place or country for its score breakdown, its growth potential and
+plain-language reasons why it scores well or badly. Map labels carry a
+small arrow for growth potential (up = high, sideways = some, down = low).
 
 Open `index.html` in a browser (it loads d3 from cdnjs; everything else is inline).
 
@@ -22,4 +24,5 @@ Scores are indicative estimates, not financial advice:
   1.3× local momentum and price headroom.
 
 To change scores, edit `build/scores.py`, then run `python3 build/build.py`
-to regenerate `index.html`. Map data: Natural Earth via world-atlas.
+to regenerate `index.html`. Country-specific reasons live in `COUNTRY_NOTES`.
+Map data: Natural Earth via world-atlas. Satellite imagery: NASA Blue Marble.

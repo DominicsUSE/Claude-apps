@@ -130,6 +130,27 @@ body.has-panel .ctrls{right:388px}
 .tabs button{flex:1;padding:7px 4px;border:0;border-radius:8px;background:transparent;cursor:pointer;font-size:13px;color:var(--muted)}
 .tabs button[aria-selected="true"]{background:rgba(142,197,255,.15);color:var(--ink)}
 .p{margin:0;color:var(--muted);font-size:13px}
+.why{display:flex;flex-direction:column;gap:12px}
+.reasons{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.reasons li{display:grid;grid-template-columns:20px 1fr;gap:8px;align-items:start;font-size:13px;line-height:1.4}
+.reasons li i{width:20px;height:20px;border-radius:6px;display:grid;place-items:center;font:700 12px/1 var(--f-data);font-style:normal}
+.reasons li.con i{background:rgba(242,95,87,.16);color:var(--bad)}
+.reasons li.pro i{background:rgba(56,208,138,.16);color:var(--good)}
+.reasons li.none{color:var(--muted);grid-template-columns:1fr}
+.pot{display:flex;flex-direction:column;gap:8px;padding:14px;border-radius:12px;border:1px solid var(--line);background:linear-gradient(135deg,rgba(142,197,255,.08),rgba(142,197,255,.02))}
+.pot .phead{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:10px}
+.pot .phead span{font-size:13px;color:var(--muted)}
+.pot .phead b{font:800 22px/1 var(--f-display);font-variant-numeric:tabular-nums}
+.pot .phead b.g{color:var(--good)}.pot .phead b.y{color:var(--mid)}.pot .phead b.r{color:var(--bad)}
+.pot p{margin:0;font-size:13px}
+.pot .track{height:6px;border-radius:3px;background:rgba(160,190,225,.1);overflow:hidden}
+.pot .track div{height:100%;border-radius:3px}
+.arrows{display:flex;gap:12px;font-size:12px;color:var(--muted);align-items:center}
+.arrows span{display:flex;align-items:center;gap:5px}
+.tri{width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent}
+.tri.up{border-bottom:8px solid var(--good)}
+.tri.dn{border-top:8px solid var(--bad)}
+.tri.fl{border-left:8px solid var(--mid);border-top:5px solid transparent;border-bottom:5px solid transparent;border-right:0}
 
 .tip{position:absolute;z-index:4;pointer-events:none;padding:10px 12px;border-radius:12px;font-size:13px;display:flex;flex-direction:column;gap:6px;white-space:nowrap;transform:translate(16px,-50%);background:var(--panel-solid)}
 .tip .h{display:flex;gap:10px;align-items:center;justify-content:space-between}
@@ -137,6 +158,9 @@ body.has-panel .ctrls{right:388px}
 .tip .row{display:flex;gap:10px;font:500 11px var(--f-data);color:var(--muted)}
 .tip .row b{font-weight:600}
 .tip .row b.g{color:var(--good)}.tip .row b.y{color:var(--mid)}.tip .row b.r{color:var(--bad)}
+.tip .why1{white-space:normal;max-width:300px;font-size:12px;display:grid;grid-template-columns:auto 1fr;gap:6px;align-items:start}
+.tip .why1 i{font:700 11px/1.4 var(--f-data);font-style:normal}
+.tip .why1.con i{color:var(--bad)}.tip .why1.pro i{color:var(--good)}
 
 .loading{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font:500 13px var(--f-data);z-index:1}
 
@@ -151,7 +175,7 @@ body.has-panel .ctrls{right:388px}
   .modes button{align-items:center;padding:8px 4px}
   .legend{bottom:calc(44% + 10px);padding:8px 10px}
   body.sheet-collapsed .legend{bottom:66px}
-  .legend .note,.legend .lbl,.legend .ramp,.legend .zoomhint,.chip b{display:none}
+  .legend .note,.legend .lbl,.legend .ramp,.legend .zoomhint,.legend .arrows,.chip b{display:none}
   .chips{flex-wrap:nowrap;gap:4px}
   .chip{padding:5px 8px;font-size:11px;gap:5px;white-space:nowrap}
   .grab{display:block!important}
@@ -191,6 +215,7 @@ body.has-panel .ctrls{right:388px}
       <button class="chip" id="chip-y" aria-pressed="true"><i style="background:var(--mid);color:var(--mid)"></i><span id="lab-y"></span> <b id="cnt-y"></b></button>
       <button class="chip" id="chip-r" aria-pressed="true"><i style="background:var(--bad);color:var(--bad)"></i><span id="lab-r"></span> <b id="cnt-r"></b></button>
     </div>
+    <div class="arrows" id="arrows"><span><i class="tri up"></i>High growth potential</span><span><i class="tri fl"></i>Some</span><span><i class="tri dn"></i>Low</span></div>
     <div class="zoomhint" id="zoomhint"></div>
     <div class="note" id="legendNote"></div>
   </div>
@@ -370,6 +395,79 @@ function apply(){ proj.scale(R()).translate([cx(),cy()]).rotate(state.rot).clipE
 function viewCenter(){ return [-state.rot[0], -state.rot[1]]; }
 function visibleAngle(){ return Math.min(Math.PI/2, (Math.hypot(W,H)/2 + 40)/R()) + 0.02; }
 
+/* ---------- satellite texture (NASA Blue Marble), reprojected per frame ---------- */
+let TEX = null, TW = 0, TH = 0;
+const earthImg = new Image();
+earthImg.onload = ()=>{
+  const c = document.createElement("canvas"); c.width = TW = earthImg.width; c.height = TH = earthImg.height;
+  const x = c.getContext("2d"); x.drawImage(earthImg,0,0); TEX = x.getImageData(0,0,TW,TH).data; dirty = true;
+};
+earthImg.src = EARTH;
+const buf = document.createElement("canvas"), bctx = buf.getContext("2d");
+let bufImg = null, lastMove = 0, hiTimer = 0;
+let geo = {key:"", lam:null, v:null};
+function markMove(){ lastMove = performance.now(); clearTimeout(hiTimer); hiTimer = setTimeout(()=>{ dirty = true; }, 200); }
+function drawTexture(alpha){
+  const r = R(), x0 = cx(), y0 = cy();
+  const bx0 = Math.max(0, Math.floor(x0-r)), by0 = Math.max(0, Math.floor(y0-r));
+  const bx1 = Math.min(W, Math.ceil(x0+r)), by1 = Math.min(H, Math.ceil(y0+r));
+  const bw = bx1-bx0, bh = by1-by0; if (bw<=0 || bh<=0) return;
+  const moving = performance.now() - lastMove < 180;
+  const s = Math.min(DPR, (moving ? 520 : 1100) / Math.max(bw,bh));
+  const w = Math.max(1, Math.round(bw*s)), h = Math.max(1, Math.round(bh*s));
+  if (buf.width!==w || buf.height!==h || !bufImg){ buf.width = w; buf.height = h; bufImg = bctx.createImageData(w,h); }
+  const out = bufImg.data, T = TEX;
+  const dl = state.rot[0];
+  // Per-pixel longitude/latitude only depend on tilt and zoom, so a plain spin reuses them.
+  const key = [w,h,bx0,by0,x0,y0,r,s,state.rot[1]].join();
+  if (geo.key !== key){
+    const dp = state.rot[1]/DEG, cosP = Math.cos(dp), sinP = Math.sin(dp);
+    const lamA = new Float32Array(w*h), vA = new Float32Array(w*h);
+    for (let j=0, n=0; j<h; j++){
+      const yu = -((by0 + (j+.5)/s) - y0)/r, yy = yu*yu;
+      for (let i=0; i<w; i++, n++){
+        const xu = ((bx0 + (i+.5)/s) - x0)/r, d = xu*xu + yy;
+        if (d >= 1){ vA[n] = -1; continue; }
+        const zc = Math.sqrt(1-d);
+        lamA[n] = Math.atan2(xu, zc*cosP + yu*sinP)*DEG + 180;
+        let sp = yu*cosP - zc*sinP; sp = sp>1?1:sp<-1?-1:sp;
+        vA[n] = (90 - Math.asin(sp)*DEG)/180;
+      }
+    }
+    geo = {key, lam:lamA, v:vA};
+  }
+  const LA = geo.lam, VA = geo.v;
+  const smooth = 2*Math.PI*r/TW > 1.3;   // magnifying the texture: filter it
+  for (let j=0, n=0; j<h; j++){
+    let o = j*w*4;
+    for (let i=0; i<w; i++, o+=4, n++){
+      const v = VA[n];
+      if (v < 0){ out[o+3] = 0; continue; }
+      let u = (LA[n] - dl)/360; u -= Math.floor(u);
+      if (smooth){
+        const tx = u*TW - .5, ty = Math.min(TH-1.001, Math.max(0, v*TH - .5));
+        let ix = Math.floor(tx); const fx = tx-ix, iy = ty|0, fy = ty-iy;
+        ix = (ix+TW)%TW; const ix1 = (ix+1)%TW, iy1 = iy+1;
+        const a = (iy*TW+ix)*4, b = (iy*TW+ix1)*4, c2 = (iy1*TW+ix)*4, e = (iy1*TW+ix1)*4;
+        const w00=(1-fx)*(1-fy), w10=fx*(1-fy), w01=(1-fx)*fy, w11=fx*fy;
+        out[o]   = T[a]*w00 + T[b]*w10 + T[c2]*w01 + T[e]*w11;
+        out[o+1] = T[a+1]*w00 + T[b+1]*w10 + T[c2+1]*w01 + T[e+1]*w11;
+        out[o+2] = T[a+2]*w00 + T[b+2]*w10 + T[c2+2]*w01 + T[e+2]*w11;
+      } else {
+        const t = (Math.min(TH-1, (v*TH)|0)*TW + ((u*TW)|0))*4;
+        out[o] = T[t]; out[o+1] = T[t+1]; out[o+2] = T[t+2];
+      }
+      out[o+3] = 255;
+    }
+  }
+  bctx.putImageData(bufImg, 0, 0);
+  ctx.save();
+  ctx.beginPath(); path({type:"Sphere"}); ctx.clip();
+  ctx.globalAlpha = alpha; ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(buf, bx0, by0, bw, bh);
+  ctx.restore();
+}
+
 const SANS = '"IBM Plex Sans", system-ui, sans-serif', MONO = '"IBM Plex Mono", ui-monospace, monospace';
 
 function draw(){
@@ -392,20 +490,38 @@ function draw(){
     ctx.fillStyle = og;
   } else ctx.fillStyle = "#0f2238";
   ctx.fill();
-  ctx.beginPath(); path(grat); ctx.strokeStyle="rgba(170,200,235,.07)"; ctx.lineWidth=.8; ctx.stroke();
+  // satellite imagery, fading out where it would get blurry
+  const texA = TEX ? (z < 5.6 ? 1 : z > 7.4 ? 0 : 1 - (z-5.6)/1.8) : 0;
+  if (texA > 0) drawTexture(texA);
+  ctx.beginPath(); path(grat); ctx.strokeStyle="rgba(170,200,235,.06)"; ctx.lineWidth=.8; ctx.stroke();
 
-  // countries: dark land base, then score colour
+  // countries: tint the terrain with the score colour (flat land once imagery fades)
   const feats = z < 4.2 ? F110 : F50;
   const vc = viewCenter(), va = visibleAngle();
   const vis = feats.filter(f => d3.geoDistance(vc, f.center) - f.rad < va);
-  ctx.beginPath(); for (const f of vis) path(f);
-  ctx.fillStyle = "#16212e"; ctx.fill();
-  const fa = z < 6 ? .62 : .4;
+  if (texA < 1){
+    ctx.beginPath(); for (const f of vis) path(f);
+    ctx.globalAlpha = 1 - texA; ctx.fillStyle = "#1a2531"; ctx.fill(); ctx.globalAlpha = 1;
+  }
+  const groups = new Map();   // one path per colour step keeps fills cheap
   for (const f of vis){
-    const sc = CS(COUNTRIES[f.k]);
-    ctx.beginPath(); path(f);
-    ctx.globalAlpha = show[rate(sc)] ? fa : .08;
-    ctx.fillStyle = fillScale(sc); ctx.fill();
+    const sc = CS(COUNTRIES[f.k]), key = show[rate(sc)] ? Math.round(sc/2)*2 : -1;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(f);
+  }
+  const colorA = texA * (z < 4.6 ? .85 : .55);
+  const flatA = texA > 0 ? (z < 4.6 ? .26 : .16) + (1-texA)*.3 : (z < 6 ? .55 : .4);
+  for (const [key, fs] of groups){
+    ctx.beginPath(); for (const f of fs) path(f);
+    if (key < 0){ ctx.globalAlpha = .45; ctx.fillStyle = "#05080f"; ctx.fill(); continue; }
+    const col = fillScale(key);
+    if (texA > 0){
+      // hue from the score, light and shade from the terrain
+      ctx.globalCompositeOperation = "color"; ctx.globalAlpha = colorA;
+      ctx.fillStyle = col; ctx.fill();
+      ctx.globalCompositeOperation = "source-over";
+    }
+    ctx.globalAlpha = flatA; ctx.fillStyle = col; ctx.fill();
   }
   ctx.globalAlpha = 1;
   ctx.beginPath(); for (const f of vis) path(f);
@@ -452,9 +568,7 @@ function draw(){
       if (S(p) < 70 || p.pop < 4e5) continue;
       if (++n > 90) break;
       const gr = (z<4?14:20) * (p.pop>=5e6?1.5:1);
-      const g = ctx.createRadialGradient(xy[0],xy[1],0,xy[0],xy[1],gr);
-      g.addColorStop(0,"rgba(80,240,160,.45)"); g.addColorStop(1,"rgba(80,240,160,0)");
-      ctx.fillStyle = g; ctx.fillRect(xy[0]-gr,xy[1]-gr,2*gr,2*gr);
+      ctx.drawImage(GLOW, xy[0]-gr, xy[1]-gr, 2*gr, 2*gr);
     }
     ctx.globalCompositeOperation = "source-over";
   }
@@ -516,9 +630,10 @@ function draw(){
     const pill = mode==="price" ? usd(p.ppm) : S(p)+"%";
     ctx.font = `600 10px ${MONO}`;
     const pw = ctx.measureText(pill).width + 9;
+    const arrow = mode!=="potential", aw = arrow ? 12 : 0;
     const rr = dotR(p,z);
     const lx = xy[0]+rr+5, ly = xy[1];
-    const b = [lx-2, ly-fs/2-3, tw+pw+10, fs+6];
+    const b = [lx-2, ly-fs/2-3, tw+pw+aw+10, fs+6];
     if (overlaps(boxes,b) && !isPin) continue;
     boxes.push(b); labelled++;
     ctx.font = nameFont;
@@ -529,6 +644,7 @@ function draw(){
     roundRect(px, ly-7, pw, 14, 7); ctx.fillStyle = RCOL[rate(S(p))]; ctx.fill();
     ctx.font = `600 10px ${MONO}`;
     ctx.fillStyle = "#06101b"; ctx.fillText(pill, px+4.5, ly+0.5);
+    if (arrow) drawTrend(px+pw+7, ly, rate(p.s.potential));
   }
   if (pin){
     const [,xy] = pin;
@@ -536,6 +652,17 @@ function draw(){
     ctx.shadowColor="#8ec5ff"; ctx.shadowBlur=10; ctx.strokeStyle="#bfe0ff"; ctx.lineWidth=2; ctx.stroke(); ctx.shadowBlur=0;
   }
   $("zoomhint").textContent = z < 5 ? "Zoom in to see more cities and towns" : z < 7.5 ? "Zoom further for small towns" : "Showing towns";
+}
+const GLOW = (()=>{ const c = document.createElement("canvas"); c.width = c.height = 64; const g = c.getContext("2d");
+  const gr = g.createRadialGradient(32,32,0,32,32,32); gr.addColorStop(0,"rgba(80,240,160,.5)"); gr.addColorStop(1,"rgba(80,240,160,0)");
+  g.fillStyle = gr; g.fillRect(0,0,64,64); return c; })();
+function drawTrend(x, y, rt){
+  ctx.beginPath();
+  if (rt==="g"){ ctx.moveTo(x-4.5,y+3.5); ctx.lineTo(x+4.5,y+3.5); ctx.lineTo(x,y-4.5); }
+  else if (rt==="r"){ ctx.moveTo(x-4.5,y-3.5); ctx.lineTo(x+4.5,y-3.5); ctx.lineTo(x,y+4.5); }
+  else { ctx.moveTo(x-3.5,y-4.5); ctx.lineTo(x-3.5,y+4.5); ctx.lineTo(x+4.5,y); }
+  ctx.closePath(); ctx.fillStyle = RCOL[rt]; ctx.fill();
+  ctx.lineWidth = 1; ctx.strokeStyle = "rgba(4,8,16,.8)"; ctx.stroke();
 }
 function dotR(p,z){
   const base = p.pop>=5e6?5:p.pop>=1e6?4:p.pop>=2e5?3.2:2.6;
@@ -564,7 +691,7 @@ zoom.on("start", ev=>{ last={x:ev.transform.x,y:ev.transform.y}; if (ev.sourceEv
       } else {
         state.k = t.k;
       }
-      last={x:t.x,y:t.y}; dirty=true;
+      last={x:t.x,y:t.y}; dirty=true; markMove();
     })
     .on("end", ()=>canvas.classList.remove("dragging"));
 csel.call(zoom).on("dblclick.zoom", null);
@@ -616,6 +743,11 @@ function nearest(pt){
   return best;
 }
 const tip = $("tip");
+function tipReason(p, c){
+  const {pros, cons} = reasons(c, p), good = rate(S(p))==="g";
+  const t = good ? (pros[0] ? ["pro","✓",pros[0]] : null) : (cons[0] ? ["con","✕",cons[0]] : null);
+  return t ? `<div class="why1 ${t[0]}"><i>${t[1]}</i><span>${esc(t[2])}</span></div>` : "";
+}
 function hideTip(){ tip.hidden = true; canvas.classList.remove("pointing"); }
 canvas.addEventListener("mousemove", ev=>{
   if (canvas.classList.contains("dragging")) return;
@@ -624,7 +756,8 @@ canvas.addEventListener("mousemove", ev=>{
   canvas.classList.add("pointing");
   const p = h.p, c = COUNTRIES[p.ck];
   tip.innerHTML = `<div class="h"><div><b>${esc(p.name)}</b><small>${esc(p.adm1 ? p.adm1+", " : "")}${esc(c.n)}</small></div><span class="pct ${rate(S(p))}">${S(p)}%</span></div>
-    <div class="row"><span>Overall <b class="${rate(p.s.overall)}">${p.s.overall}%</b></span><span>Price <b class="${rate(p.s.price)}">${usd(p.ppm)}/m²</b></span><span>Potential <b class="${rate(p.s.potential)}">${p.s.potential}%</b></span></div>`;
+    <div class="row"><span>Overall <b class="${rate(p.s.overall)}">${p.s.overall}%</b></span><span>Price <b class="${rate(p.s.price)}">${usd(p.ppm)}/m²</b></span><span>Potential <b class="${rate(p.s.potential)}">${p.s.potential}%</b></span></div>
+    ${tipReason(p, c)}`;
   tip.style.left = h.x+"px"; tip.style.top = h.y+"px"; tip.hidden = false;
 });
 canvas.addEventListener("mouseleave", hideTip);
@@ -656,6 +789,7 @@ function setMode(m){
   const M = MODES[m], counts = {g:0,y:0,r:0};
   P.forEach(p=>counts[rate(S(p))]++);
   $("legendTitle").textContent = M.title;
+  $("arrows").hidden = m==="potential";
   $("legendNote").textContent = M.note + " Indicative estimates, not financial advice.";
   for (const r of ["g","y","r"]){ $("lab-"+r).textContent = M.chips[r]; $("cnt-"+r).textContent = counts[r].toLocaleString(); }
   sortCountryLists(); buildRankings();
@@ -696,7 +830,7 @@ function tiles(sc){
     `<button class="tile" data-mode="${m}" aria-pressed="${m===mode}"><span>${l}</span><b class="${rate(sc[m])}">${sc[m]}%</b></button>`).join("")}</div>`;
 }
 function rowItem(p, rank, sub){
-  const extra = mode==="price" ? `<em>${usd(p.ppm)}/m²</em>` : "";
+  const extra = mode==="price" ? `<em>${usd(p.ppm)}/m² · growth ${p.s.potential}%</em>` : mode==="overall" ? `<em>growth ${p.s.potential}%</em>` : "";
   return `<li data-i="${p.i}"><span class="rk">${rank}</span><div class="nm"><div>${esc(p.name)}</div><small>${esc(sub)}</small></div><div class="side"><span class="pct ${rate(S(p))}">${S(p)}%</span>${extra}</div></li>`;
 }
 function bindList(){
@@ -705,6 +839,70 @@ function bindList(){
   const b = body.querySelector(".back"); if (b) b.onclick = ()=>{ sel=null; dirty=true; renderPanel(); };
   body.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{ tab=b.dataset.t; renderPanel(); });
   body.querySelectorAll(".tile").forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
+}
+function reasons(c, p){
+  const pros = [], cons = [];
+  const [D,E,A,St,F] = c.f;
+  for (const [k,t] of (c.notes||[])) (k==="+" ? pros : cons).push(t);
+  // skip a generic line when a country note already says it
+  const said = re => (c.notes||[]).some(([k,t])=>k==="-" && re.test(t));
+  const noted = said(/war|conflict|military|sanction|gang|coup|collapse|repression|taliban|insurgen|instab|split/i);
+  if (St < 30){ if (!noted) cons.push("Conflict or an unstable government makes contracts and property rights hard to enforce"); }
+  else if (St < 50) cons.push("Political or currency risk is higher than average");
+  else if (St >= 80) pros.push("Stable, with strong property rights");
+  if (said(/population|birth/i)) {}
+  else if (D < 35) cons.push("Population is flat or shrinking, so there are few new buyers and renters");
+  else if (D < 45) cons.push("Slow population growth limits new housing demand");
+  else if (D >= 68) pros.push("Fast-growing population creates steady housing demand");
+  if (said(/inflation|economy|devaluation|debt/i)) {}
+  else if (E < 35) cons.push("Weak economic growth or high inflation");
+  else if (E < 45) cons.push("Slow economic growth");
+  else if (E >= 65) pros.push("Strong economic growth");
+  if (said(/expensive|afford/i)) {}
+  else if (A < 35) cons.push("Homes are very expensive compared with local incomes, so rents and margins are thin");
+  else if (A < 45) cons.push("Homes are getting hard for locals to afford");
+  else if (A >= 58) pros.push("Affordable compared with incomes, with decent rental yields");
+  if (F < 35) cons.push("Hard to get building permits, mortgages or foreign ownership");
+  else if (F < 50) cons.push("Building permits and mortgage finance are limited");
+  else if (F >= 75) pros.push("Easy to get permits, finance and foreign investment");
+  const ppm = p ? p.ppm : c.p;
+  if (ppm >= 6000) cons.push(`Very expensive to get started: about ${usd(ppm)} per m²`);
+  else if (ppm >= 3200) cons.push(`High cost to get started: about ${usd(ppm)} per m²`);
+  else if (ppm <= 1700) pros.push(`Cheap to get started: about ${usd(ppm)} per m²`);
+  if (p){
+    if (p.hot < 0) cons.push("This city's market is overheated or losing residents to cheaper places");
+    if (p.hot > 0) pros.push("Local hotspot: people and jobs are moving in");
+    if (p.pop < 30000) cons.push("Small town: few buyers, so homes can be slow to sell or rent");
+    else if (p.pop >= 1e6) pros.push(`Big market with ${fmtPop(p.pop)} people`);
+    if (p.cap) pros.push("National capital, with government and business jobs");
+  }
+  return {pros, cons};
+}
+function potentialLine(c, p){
+  const [D,E] = c.f, hot = p ? p.hot : 0, bits = [];
+  if (D >= 65) bits.push("fast population growth"); else if (D < 40) bits.push("a shrinking population");
+  if (E >= 65) bits.push("a strong economy"); else if (E < 40) bits.push("a weak economy");
+  if (hot > 0) bits.push("people moving into this city"); else if (hot < 0) bits.push("an overheated local market");
+  if (!bits.length) return "Average growth in population and the economy.";
+  const good = bits.filter(b=>!/shrinking|weak|overheated/.test(b)), bad = bits.filter(b=>/shrinking|weak|overheated/.test(b));
+  const join = a => a.length > 1 ? a.slice(0,-1).join(", ")+" and "+a[a.length-1] : a[0];
+  return [good.length ? "Driven by "+join(good)+"." : "", bad.length ? "Held back by "+join(bad)+"." : ""].join(" ").trim();
+}
+function whyBlock(c, p, score){
+  const {pros, cons} = reasons(c, p), rt = rate(score);
+  const li = (cls, t) => `<li class="${cls}"><i>${cls==="con"?"✕":"✓"}</i><span>${esc(t)}</span></li>`;
+  const conList = cons.length ? cons.slice(0,6).map(t=>li("con",t)).join("") : `<li class="none">No major problems in this model.</li>`;
+  const proList = pros.length ? pros.slice(0,6).map(t=>li("pro",t)).join("") : `<li class="none">No standout strengths in this model.</li>`;
+  const bad = `<div><h3>${rt==="g" ? "Watch out for" : "Why it scores lower"}</h3></div><ul class="reasons">${conList}</ul>`;
+  const good = `<div><h3>${rt==="g" ? "Why it scores well" : "What works in its favour"}</h3></div><ul class="reasons">${proList}</ul>`;
+  return `<div class="why">${rt==="g" ? good + bad : bad + good}</div>`;
+}
+function potBlock(c, p, pot){
+  if (mode==="potential") return "";
+  const rt = rate(pot);
+  return `<div class="pot"><div class="phead"><span>Growth potential</span><b class="${rt}">${pot}%</b></div>
+    <div class="track"><div style="width:${pot}%;background:${RCOL[rt]}"></div></div>
+    <p><strong>${MODES.potential.labels[rt]}.</strong> ${esc(potentialLine(c, p))}</p></div>`;
 }
 function breakdown(p, c){
   if (mode==="overall") return `
@@ -751,6 +949,8 @@ function renderPanel(){
         <div><span class="verdict ${rt}"><i></i>${M.labels[rt]}</span>
         <div class="meta">${M.noun} · #${rank} of ${list.length} in ${esc(c.n)} · ${fmtPop(p.pop)} people</div></div></div>
       ${tiles(p.s)}
+      ${potBlock(c, p, p.s.potential)}
+      ${whyBlock(c, p, sc)}
       <div class="price"><span>Est. property price</span><b>${usd(p.ppm)}/m²</b></div>
       <div><h3>How the ${M.noun.toLowerCase()} is built</h3></div>
       <dl class="adj">${breakdown(p,c)}
@@ -770,7 +970,10 @@ function renderPanel(){
         <div><span class="verdict ${rt}"><i></i>${M.labels[rt]}</span>
         <div class="meta">${M.noun} · #${allRank} of ${Object.keys(COUNTRIES).length} countries and territories</div></div></div>
       ${tiles(sc)}
+      ${potBlock(c, null, sc.potential)}
+      ${whyBlock(c, null, s)}
       <div class="price"><span>Typical price per m²</span><b>${usd(c.p)}</b></div>
+      <div><h3>National fundamentals</h3></div>
       ${bars(c)}
       <div><h3>Best places here</h3></div>
       ${list.length ? `<ul class="list">${list.slice(0,10).map((q,i)=>rowItem(q,i+1,`${q.adm1||c.n} · ${fmtPop(q.pop)}`)).join("")}</ul>` : `<p class="p">No cities in the dataset for this territory.</p>`}`;
@@ -842,6 +1045,6 @@ if (document.fonts && document.fonts.ready) document.fonts.ready.then(()=>{ dirt
 let spin = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const stopSpin = ()=>{ spin = false; };
 ["pointerdown","wheel","keydown","touchstart"].forEach(t=>window.addEventListener(t, stopSpin, {once:true, passive:true}));
-d3.timer(()=>{ if (spin && !anim){ state.rot[0] += 0.06; dirty = true; } });
+d3.timer(()=>{ if (spin && !anim){ state.rot[0] += 0.06; dirty = true; markMove(); } });
 })();
 </script>

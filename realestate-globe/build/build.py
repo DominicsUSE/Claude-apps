@@ -3,18 +3,20 @@
 Inputs (in this folder):
   countries-50m.json / countries-110m.json  - world-atlas 2.0.2 TopoJSON (Natural Earth)
   places.geojson                            - Natural Earth 10m populated places (simple)
+  earth.jpg                                 - NASA Blue Marble texture, 2048x1024
   app.html                                  - page template with a /*__DATA__*/ marker
 
 Outputs:
   ../index.html  - standalone page (open directly in a browser)
   argv[1]        - optional: body-only copy for publishing as a claude.ai Artifact
 """
+import base64
 import json
 import os
 import sys
 
 from scores import (DEFAULT, PRICE_DEFAULT, WEIGHTS, parse_city_prices, parse_countries,
-                    parse_hotspots, parse_prices)
+                    parse_hotspots, parse_notes, parse_prices)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKIP_CLASSES = {"Scientific station", "Meteorological Station", "Historic place"}
@@ -30,6 +32,7 @@ def main():
     hotspots = parse_hotspots()
     prices = parse_prices()
     city_prices = parse_city_prices()
+    notes = parse_notes()
     num_to_iso = {v["num"]: k for k, v in table.items() if v["num"] != "000"}
 
     topo50 = load("countries-50m.json")
@@ -41,6 +44,8 @@ def main():
         if key not in countries:
             f = table[key]["f"] if key in table else DEFAULT
             countries[key] = {"n": name, "f": list(f), "p": prices.get(key, PRICE_DEFAULT)}
+            if key in notes:
+                countries[key]["notes"] = notes[key]
         return key
 
     # Tag every map feature with our country key.
@@ -91,11 +96,14 @@ def main():
         print("hotspots without a matching place:", missing, file=sys.stderr)
 
     places.sort(key=lambda r: (r[4], -r[3]))
+    with open(os.path.join(HERE, "earth.jpg"), "rb") as fh:  # NASA Blue Marble
+        earth = base64.b64encode(fh.read()).decode("ascii")
     data = (
         "const WEIGHTS=" + json.dumps(WEIGHTS, separators=(",", ":")) + ";\n"
         "const COUNTRIES=" + json.dumps(countries, separators=(",", ":"), ensure_ascii=False) + ";\n"
         "const PLACES=" + json.dumps(places, separators=(",", ":"), ensure_ascii=False) + ";\n"
         "const TOPO50=" + json.dumps(topo50, separators=(",", ":"), ensure_ascii=False) + ";\n"
+        "const EARTH='data:image/jpeg;base64," + earth + "';\n"
         "const TOPO110=" + json.dumps(topo110, separators=(",", ":"), ensure_ascii=False) + ";\n"
     )
 

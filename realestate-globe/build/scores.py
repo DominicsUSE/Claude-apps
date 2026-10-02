@@ -384,3 +384,85 @@ def parse_city_prices():
             name, price = item.strip().rsplit(" ", 1)
             out[(iso, name.lower())] = int(price)
     return out
+
+
+# Country-specific reasons shown in the "Why" section. "-" = problem, "+" = strength.
+COUNTRY_NOTES = """
+RUS - War in Ukraine and sanctions block foreign capital, banking and payments
+UKR - Active war makes building and insuring property very risky today
+UKR + Post-war reconstruction could become one of Europe's biggest building markets
+BLR - Sanctions and political repression scare off foreign money
+CHN - Developer debt crisis: falling prices, unfinished projects and oversupply in many cities
+CHN + Top-tier cities still draw people and jobs
+HKG - Among the world's most expensive homes, and prices have been falling since 2021
+MAC - Tiny, very expensive market tied to the casino economy
+TWN - Homes are very expensive compared with incomes; geopolitical risk with China
+KOR - World's lowest birth rate means future buyers are shrinking
+JPN - Population is shrinking and aging, and many towns have empty homes
+JPN + Very stable, cheap borrowing and big cities like Tokyo still grow
+ITA - Shrinking population and decades of slow growth
+DEU - Slow economy, high build costs and strict rent rules squeeze margins
+FRA - Heavy regulation and rent controls in big cities
+GBR - Expensive land and slow planning approvals
+CAN - Some of the least affordable homes in the world compared with incomes
+AUS - Very expensive homes compared with incomes; tight lending
+NZL - Very expensive homes compared with incomes; foreign buyers largely banned
+CHE - Extremely high prices and strict limits on foreign buyers
+ISR - Security risk and very high prices
+LBN - Banking collapse and currency crisis wiped out savings
+SYR - Long civil war; property rights are hard to enforce
+YEM - Ongoing war and humanitarian crisis
+SDN - Civil war since 2023
+SSD - Conflict and very weak institutions
+AFG - Taliban rule and sanctions; almost no foreign investment
+LBY - Split government and armed conflict
+SOM - Armed conflict and weak property records
+MMR - Civil war since the 2021 coup
+HTI - Gang violence and political collapse
+CAF - Armed conflict across much of the country
+MLI - Military rule and insurgency
+BFA - Military rule and insurgency
+NER - Military rule and insurgency
+VEN - Hyperinflation history, currency controls and risk of expropriation
+CUB - Private property and foreign ownership are heavily restricted
+PRK - Private property and foreign investment are effectively banned
+IRN - Sanctions, high inflation and limits on foreign owners
+IRQ - Political instability and unclear land titles
+ARG - High inflation and currency controls, though reforms since 2024 are helping
+ARG + Property is cheap in dollar terms after years of crisis
+TUR - Very high inflation and a volatile lira
+TUR + Big, young population and steady demand in Istanbul
+EGY - Repeated currency devaluations and high inflation
+EGY + Huge, young population needs millions of new homes
+PAK - Debt crisis, inflation and political instability
+NGA - Currency devaluation, inflation and insecurity in parts of the country
+NGA + Africa's largest population with a huge housing shortage
+ZAF - Power cuts, crime and slow growth
+ZWE - Currency instability and weak property rights
+GRL - Tiny market with an extreme climate
+ARE + No income tax, open to foreign buyers, and people are moving in fast
+SAU + Vision 2030 mega-projects and fast-growing cities
+IND + Fastest-growing large economy and rapid move to cities
+VNM + Manufacturing boom and young, urbanising population
+IDN + Large, young population and steady growth
+PHL + Young population and strong remittance-driven demand
+KEN + East Africa's business hub with fast-growing cities
+RWA + Clean, safe and easy to do business
+POL + One of Europe's fastest-growing economies with a housing shortage
+PRT + Strong demand from foreign buyers and tourism
+ESP + Strong tourism and growing coastal and big-city demand
+GEO + Very easy to register property and open to foreign owners
+USA + Deep mortgage market and strong demand in the South and Sun Belt
+MEX + Nearshoring is bringing factories and jobs to northern and central cities
+GUY + Oil boom is driving one of the world's fastest economic growth rates
+IRL + Severe housing shortage keeps demand high
+SGP + Very stable and well run, but extremely expensive to enter
+"""
+
+
+def parse_notes():
+    out = {}
+    for line in COUNTRY_NOTES.strip().splitlines():
+        iso, kind, text = line.split(" ", 2)
+        out.setdefault(iso, []).append([kind, text])
+    return out
