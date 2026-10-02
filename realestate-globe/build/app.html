@@ -30,6 +30,8 @@ html,body{height:100%}
 body{margin:0;background:var(--space);color:var(--ink);font:14px/1.45 var(--f-body);overflow:hidden;-webkit-font-smoothing:antialiased}
 #app{position:relative;height:100%;width:100%}
 canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#stars,#earth,#tint{pointer-events:none}
+#tint{mix-blend-mode:color;opacity:0}
 #globe{touch-action:none;cursor:grab}
 #globe.dragging{cursor:grabbing}
 #globe.pointing{cursor:pointer}
@@ -152,7 +154,7 @@ body.has-panel .ctrls{right:388px}
 .tri.dn{border-top:8px solid var(--bad)}
 .tri.fl{border-left:8px solid var(--mid);border-top:5px solid transparent;border-bottom:5px solid transparent;border-right:0}
 
-.tip{position:absolute;z-index:4;pointer-events:none;padding:10px 12px;border-radius:12px;font-size:13px;display:flex;flex-direction:column;gap:6px;white-space:nowrap;transform:translate(16px,-50%);background:var(--panel-solid)}
+.tip{position:absolute;z-index:4;pointer-events:none;padding:10px 12px;border-radius:12px;font-size:13px;display:flex;flex-direction:column;gap:6px;white-space:nowrap;left:0;top:0;will-change:transform;background:var(--panel-solid)}
 .tip .h{display:flex;gap:10px;align-items:center;justify-content:space-between}
 .tip small{display:block;color:var(--muted);font-size:11px}
 .tip .row{display:flex;gap:10px;font:500 11px var(--f-data);color:var(--muted)}
@@ -182,11 +184,21 @@ body.has-panel .ctrls{right:388px}
 }
 .grab{display:none;width:100%;border:0;background:none;padding:8px 0 0;cursor:pointer}
 .grab::before{content:"";display:block;margin:0 auto;width:38px;height:4px;border-radius:2px;background:var(--muted);opacity:.6}
-@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.panel-scroll.in>*{animation:rise .32s cubic-bezier(.2,.7,.2,1) both}
+.panel-scroll.in>*:nth-child(2){animation-delay:.03s}
+.panel-scroll.in>*:nth-child(3){animation-delay:.06s}
+.panel-scroll.in>*:nth-child(4){animation-delay:.09s}
+.panel-scroll.in>*:nth-child(n+5){animation-delay:.12s}
+.chip{transition:opacity .25s,border-color .2s}
+.list li,.results li,.tile,.ctrls button{transition:background .18s,border-color .18s}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 
 <div id="app">
   <canvas id="stars" aria-hidden="true"></canvas>
+  <canvas id="earth" aria-hidden="true"></canvas>
+  <canvas id="tint" aria-hidden="true"></canvas>
   <canvas id="globe" aria-label="Interactive globe of real-estate opportunity scores"></canvas>
   <div class="loading" id="loading">Loading map…</div>
 
@@ -343,12 +355,16 @@ F50.forEach(f=>{ featByKey[f.k]=f; });
 // continuous fill colour for countries, discrete buckets for dots and pills
 const fillScale = d3.scaleLinear().domain([25,50,57,65,85]).range(["#c2413a","#e0703c","#e7b62f","#3fbf7f","#2fd89a"]).clamp(true);
 
-/* ---------- canvas + projection ---------- */
+/* ---------- canvases + projection ---------- */
+// Layers, bottom to top: stars, satellite globe (WebGL), score tint (CSS colour blend), overlay.
 const canvas = $("globe"), ctx = canvas.getContext("2d");
 const starsC = $("stars"), sctx = starsC.getContext("2d");
-let W=0, H=0, DPR=1, R0=300;
+const tintC = $("tint"), tctx = tintC.getContext("2d");
+const earthC = $("earth");
+let W=0, H=0, DPR=1, TDPR=1, R0=300;
 const proj = d3.geoOrthographic().clipAngle(90).precision(0.3);
 const path = d3.geoPath(proj, ctx);
+const ppath = d3.geoPath(proj);          // writes into Path2D objects
 const grat = d3.geoGraticule10();
 const state = { rot:[20,-22,0], k:1 };
 let sel = null;
@@ -357,8 +373,11 @@ let hits = [];
 let dirty = true;
 const MINK = 0.7;
 let MAXK = 400;
+const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 const zoom = d3.zoom().scaleExtent([MINK,MAXK]).clickDistance(4)
-  .filter(ev => (!ev.ctrlKey || ev.type==="wheel") && !ev.button && ev.type!=="dblclick");
+  .filter(ev => ev.type!=="wheel" && !ev.ctrlKey && !ev.button && ev.type!=="dblclick");
+const clampLat = v => Math.max(-89, Math.min(89, v));
+const clamp01 = v => Math.max(0, Math.min(1, v));
 
 // fixed pseudo-random starfield
 const STARS = (()=>{ let s=7; const rnd=()=>((s=(s*16807)%2147483647)/2147483647); return Array.from({length:420},()=>[rnd(),rnd(),rnd()]); })();
@@ -378,11 +397,15 @@ function drawStars(){
 
 function resize(){
   DPR = Math.min(window.devicePixelRatio||1, 2);
+  TDPR = Math.min(DPR, 1.25);
   W = canvas.clientWidth; H = canvas.clientHeight;
   canvas.width = Math.round(W*DPR); canvas.height = Math.round(H*DPR);
+  earthC.width = Math.round(W*DPR); earthC.height = Math.round(H*DPR);
+  tintC.width = Math.round(W*TDPR); tintC.height = Math.round(H*TDPR);
   R0 = Math.min(W, H) * (W<760 ? 0.42 : 0.4);
   MAXK = kForZoom(9.5);
   zoom.scaleExtent([MINK, MAXK]);
+  MW.clear();
   drawStars();
   dirty = true;
 }
@@ -395,138 +418,179 @@ function apply(){ proj.scale(R()).translate([cx(),cy()]).rotate(state.rot).clipE
 function viewCenter(){ return [-state.rot[0], -state.rot[1]]; }
 function visibleAngle(){ return Math.min(Math.PI/2, (Math.hypot(W,H)/2 + 40)/R()) + 0.02; }
 
-/* ---------- satellite texture (NASA Blue Marble), reprojected per frame ---------- */
-let TEX = null, TW = 0, TH = 0;
-const earthImg = new Image();
-earthImg.onload = ()=>{
-  const c = document.createElement("canvas"); c.width = TW = earthImg.width; c.height = TH = earthImg.height;
-  const x = c.getContext("2d"); x.drawImage(earthImg,0,0); TEX = x.getImageData(0,0,TW,TH).data; dirty = true;
-};
-earthImg.src = EARTH;
-const buf = document.createElement("canvas"), bctx = buf.getContext("2d");
-let bufImg = null, lastMove = 0, hiTimer = 0;
-let geo = {key:"", lam:null, v:null};
-function markMove(){ lastMove = performance.now(); clearTimeout(hiTimer); hiTimer = setTimeout(()=>{ dirty = true; }, 200); }
-function drawTexture(alpha){
-  const r = R(), x0 = cx(), y0 = cy();
-  const bx0 = Math.max(0, Math.floor(x0-r)), by0 = Math.max(0, Math.floor(y0-r));
-  const bx1 = Math.min(W, Math.ceil(x0+r)), by1 = Math.min(H, Math.ceil(y0+r));
-  const bw = bx1-bx0, bh = by1-by0; if (bw<=0 || bh<=0) return;
-  const moving = performance.now() - lastMove < 180;
-  const s = Math.min(DPR, (moving ? 520 : 1100) / Math.max(bw,bh));
-  const w = Math.max(1, Math.round(bw*s)), h = Math.max(1, Math.round(bh*s));
-  if (buf.width!==w || buf.height!==h || !bufImg){ buf.width = w; buf.height = h; bufImg = bctx.createImageData(w,h); }
-  const out = bufImg.data, T = TEX;
-  const dl = state.rot[0];
-  // Per-pixel longitude/latitude only depend on tilt and zoom, so a plain spin reuses them.
-  const key = [w,h,bx0,by0,x0,y0,r,s,state.rot[1]].join();
-  if (geo.key !== key){
-    const dp = state.rot[1]/DEG, cosP = Math.cos(dp), sinP = Math.sin(dp);
-    const lamA = new Float32Array(w*h), vA = new Float32Array(w*h);
-    for (let j=0, n=0; j<h; j++){
-      const yu = -((by0 + (j+.5)/s) - y0)/r, yy = yu*yu;
-      for (let i=0; i<w; i++, n++){
-        const xu = ((bx0 + (i+.5)/s) - x0)/r, d = xu*xu + yy;
-        if (d >= 1){ vA[n] = -1; continue; }
-        const zc = Math.sqrt(1-d);
-        lamA[n] = Math.atan2(xu, zc*cosP + yu*sinP)*DEG + 180;
-        let sp = yu*cosP - zc*sinP; sp = sp>1?1:sp<-1?-1:sp;
-        vA[n] = (90 - Math.asin(sp)*DEG)/180;
-      }
+/* ---------- satellite globe on the GPU (NASA Blue Marble) ---------- */
+const GL = (()=>{
+  let gl = null;
+  try { gl = earthC.getContext("webgl2", {alpha:true, premultipliedAlpha:true, antialias:false}); } catch(e){}
+  if (!gl) return null;
+  const sh = (type, src)=>{ const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  const prog = gl.createProgram();
+  try {
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, `#version 300 es
+      in vec2 p; void main(){ gl_Position = vec4(p, 0., 1.); }`));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, `#version 300 es
+      precision highp float;
+      uniform sampler2D tex;
+      uniform vec2 center;      // globe centre, device px, origin bottom-left
+      uniform float radius;     // device px
+      uniform vec3 rot;         // longitude shift (rad), cos(tilt), sin(tilt)
+      uniform float texA;       // 0 = flat ocean colour, 1 = full imagery
+      uniform vec3 ocean;
+      out vec4 o;
+      const float PI = 3.14159265359;
+      void main(){
+        vec2 q = (gl_FragCoord.xy - center) / radius;
+        float d = dot(q, q);
+        if (d >= 1.0) { o = vec4(0.0); return; }
+        float edge = clamp((1.0 - sqrt(d)) * radius, 0.0, 1.0);
+        float zc = sqrt(1.0 - d);
+        float lam = atan(q.x, zc*rot.y + q.y*rot.z);
+        float phi = asin(clamp(q.y*rot.y - zc*rot.z, -1.0, 1.0));
+        float x = (lam - rot.x) / (2.0*PI) + 0.5;
+        // pick the longitude wrap with the smaller derivative so mipmaps have no seam
+        float u1 = fract(x), u2 = fract(x + 0.5) - 0.5;
+        float u = fwidth(u1) <= fwidth(u2) ? u1 : u2;
+        vec3 c = texture(tex, vec2(u, 0.5 - phi/PI)).rgb;
+        c = mix(ocean, c, texA);
+        o = vec4(c * edge, edge);
+      }`));
+    gl.bindAttribLocation(prog, 0, "p");
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  } catch(e){ console.warn("Satellite globe unavailable:", e.message); return null; }
+  gl.useProgram(prog);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  const U = n => gl.getUniformLocation(prog, n);
+  const uC = U("center"), uR = U("radius"), uRot = U("rot"), uA = U("texA"), uO = U("ocean");
+  gl.uniform3f(uO, 15/255, 34/255, 56/255);
+  const tex = gl.createTexture();
+  const api = { ready:false };
+  const img = new Image();
+  img.onload = ()=>{
+    let src = img;
+    const max = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    if (img.width > max){
+      const c = document.createElement("canvas"); c.width = max; c.height = max/2;
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); src = c;
     }
-    geo = {key, lam:lamA, v:vA};
-  }
-  const LA = geo.lam, VA = geo.v;
-  const smooth = 2*Math.PI*r/TW > 1.3;   // magnifying the texture: filter it
-  for (let j=0, n=0; j<h; j++){
-    let o = j*w*4;
-    for (let i=0; i<w; i++, o+=4, n++){
-      const v = VA[n];
-      if (v < 0){ out[o+3] = 0; continue; }
-      let u = (LA[n] - dl)/360; u -= Math.floor(u);
-      if (smooth){
-        const tx = u*TW - .5, ty = Math.min(TH-1.001, Math.max(0, v*TH - .5));
-        let ix = Math.floor(tx); const fx = tx-ix, iy = ty|0, fy = ty-iy;
-        ix = (ix+TW)%TW; const ix1 = (ix+1)%TW, iy1 = iy+1;
-        const a = (iy*TW+ix)*4, b = (iy*TW+ix1)*4, c2 = (iy1*TW+ix)*4, e = (iy1*TW+ix1)*4;
-        const w00=(1-fx)*(1-fy), w10=fx*(1-fy), w01=(1-fx)*fy, w11=fx*fy;
-        out[o]   = T[a]*w00 + T[b]*w10 + T[c2]*w01 + T[e]*w11;
-        out[o+1] = T[a+1]*w00 + T[b+1]*w10 + T[c2+1]*w01 + T[e+1]*w11;
-        out[o+2] = T[a+2]*w00 + T[b+2]*w10 + T[c2+2]*w01 + T[e+2]*w11;
-      } else {
-        const t = (Math.min(TH-1, (v*TH)|0)*TW + ((u*TW)|0))*4;
-        out[o] = T[t]; out[o+1] = T[t+1]; out[o+2] = T[t+2];
-      }
-      out[o+3] = 255;
-    }
-  }
-  bctx.putImageData(bufImg, 0, 0);
-  ctx.save();
-  ctx.beginPath(); path({type:"Sphere"}); ctx.clip();
-  ctx.globalAlpha = alpha; ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(buf, bx0, by0, bw, bh);
-  ctx.restore();
-}
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const an = gl.getExtension("EXT_texture_filter_anisotropic");
+    if (an) gl.texParameterf(gl.TEXTURE_2D, an.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(an.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
+    api.ready = true; dirty = true;
+  };
+  img.src = EARTH;
+  api.draw = (texA)=>{
+    gl.viewport(0, 0, earthC.width, earthC.height);
+    gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform2f(uC, cx()*DPR, (H - cy())*DPR);
+    gl.uniform1f(uR, R()*DPR);
+    const t = state.rot[1]/DEG;
+    gl.uniform3f(uRot, state.rot[0]/DEG, Math.cos(t), Math.sin(t));
+    gl.uniform1f(uA, api.ready ? texA : 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  };
+  return api;
+})();
+if (!GL) earthC.hidden = true;
 
 const SANS = '"IBM Plex Sans", system-ui, sans-serif', MONO = '"IBM Plex Mono", ui-monospace, monospace';
+const MW = new Map();   // measured text widths
+function mw(font, text){
+  const k = font + "|" + text; let w = MW.get(k);
+  if (w === undefined){ ctx.font = font; w = ctx.measureText(text).width; MW.set(k, w); }
+  return w;
+}
+const RGB = {g:[56,208,138], y:[244,196,48], r:[242,95,87]};
+function mixRating(a, b, t){
+  if (a===b || t>=1) return RCOL[b];
+  const A = RGB[a], B = RGB[b];
+  return `rgb(${A[0]+(B[0]-A[0])*t|0},${A[1]+(B[1]-A[1])*t|0},${A[2]+(B[2]-A[2])*t|0})`;
+}
+// mode cross-fade
+let prevMode = mode, fade = 1, fadeStart = 0;
+let tintOpacity = "";
+// time-based fade-in for labels and dots as they appear
+const seen = new Map();
+let frameNow = 0, fading = false;
+function appear(key){
+  let t = seen.get(key);
+  if (t === undefined || t.f !== frameNo - 1 && t.f !== frameNo){ t = {t0: frameNow, f: frameNo}; seen.set(key, t); }
+  t.f = frameNo;
+  const a = REDUCE ? 1 : clamp01((frameNow - t.t0)/260);
+  if (a < 1) fading = true;
+  return a;
+}
+let frameNo = 0;
+let hintText = "";
 
 function draw(){
+  frameNow = performance.now(); frameNo++; fading = false;
+  if (seen.size > 6000) seen.clear();
   apply();
   ctx.setTransform(DPR,0,0,DPR,0,0);
   ctx.clearRect(0,0,W,H);
   const r = R(), x0=cx(), y0=cy(), whole = r < 3*Math.max(W,H);
   const z = webZoom();
+  const fe = fade < 1 ? d3.easeCubicInOut(fade) : 1;
+  const texA = GL && GL.ready ? clamp01(1 - (z-5.8)/1.8) : 0;
+  if (GL) GL.draw(texA);
+
   // outer atmosphere
   if (whole){
     const g = ctx.createRadialGradient(x0,y0,r*.96,x0,y0,r*1.22);
     g.addColorStop(0,"rgba(120,180,255,.38)"); g.addColorStop(.25,"rgba(90,150,255,.14)"); g.addColorStop(1,"rgba(80,140,255,0)");
     ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x0,y0,r*1.22,0,2*Math.PI); ctx.fill();
   }
-  // ocean
-  ctx.beginPath(); path({type:"Sphere"});
-  if (whole){
-    const og = ctx.createRadialGradient(x0-r*.38,y0-r*.42,r*.05,x0,y0,r*1.02);
-    og.addColorStop(0,"#1b3a5c"); og.addColorStop(.55,"#0f243d"); og.addColorStop(1,"#081526");
-    ctx.fillStyle = og;
-  } else ctx.fillStyle = "#0f2238";
-  ctx.fill();
-  // satellite imagery, fading out where it would get blurry
-  const texA = TEX ? (z < 5.6 ? 1 : z > 7.4 ? 0 : 1 - (z-5.6)/1.8) : 0;
-  if (texA > 0) drawTexture(texA);
+  if (!GL){
+    ctx.beginPath(); path({type:"Sphere"});
+    if (whole){
+      const og = ctx.createRadialGradient(x0-r*.38,y0-r*.42,r*.05,x0,y0,r*1.02);
+      og.addColorStop(0,"#1b3a5c"); og.addColorStop(.55,"#0f243d"); og.addColorStop(1,"#081526");
+      ctx.fillStyle = og;
+    } else ctx.fillStyle = "#0f2238";
+    ctx.fill();
+  }
   ctx.beginPath(); path(grat); ctx.strokeStyle="rgba(170,200,235,.06)"; ctx.lineWidth=.8; ctx.stroke();
 
-  // countries: tint the terrain with the score colour (flat land once imagery fades)
+  // countries: project every shape once into Path2D groups of the same colour
   const feats = z < 4.2 ? F110 : F50;
   const vc = viewCenter(), va = visibleAngle();
-  const vis = feats.filter(f => d3.geoDistance(vc, f.center) - f.rad < va);
-  if (texA < 1){
-    ctx.beginPath(); for (const f of vis) path(f);
-    ctx.globalAlpha = 1 - texA; ctx.fillStyle = "#1a2531"; ctx.fill(); ctx.globalAlpha = 1;
+  const groups = new Map();
+  for (const f of feats){
+    if (d3.geoDistance(vc, f.center) - f.rad >= va) continue;
+    const c = COUNTRIES[f.k], sc = c[mode];
+    let col;
+    if (!show[rate(Math.round(sc))]) col = "#4a5260";
+    else if (fe < 1) col = d3.interpolateRgb(fillScale(c[prevMode]), fillScale(sc))(fe);
+    else col = fillScale(Math.round(sc/2)*2);
+    let p2 = groups.get(col);
+    if (!p2){ p2 = new Path2D(); groups.set(col, p2); }
+    ppath.context(p2); ppath(f);
   }
-  const groups = new Map();   // one path per colour step keeps fills cheap
-  for (const f of vis){
-    const sc = CS(COUNTRIES[f.k]), key = show[rate(sc)] ? Math.round(sc/2)*2 : -1;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(f);
-  }
-  const colorA = texA * (z < 4.6 ? .85 : .55);
-  const flatA = texA > 0 ? (z < 4.6 ? .26 : .16) + (1-texA)*.3 : (z < 6 ? .55 : .4);
-  for (const [key, fs] of groups){
-    ctx.beginPath(); for (const f of fs) path(f);
-    if (key < 0){ ctx.globalAlpha = .45; ctx.fillStyle = "#05080f"; ctx.fill(); continue; }
-    const col = fillScale(key);
-    if (texA > 0){
-      // hue from the score, light and shade from the terrain
-      ctx.globalCompositeOperation = "color"; ctx.globalAlpha = colorA;
-      ctx.fillStyle = col; ctx.fill();
-      ctx.globalCompositeOperation = "source-over";
-    }
-    ctx.globalAlpha = flatA; ctx.fillStyle = col; ctx.fill();
-  }
+  const all = new Path2D();
+  tctx.setTransform(TDPR,0,0,TDPR,0,0);
+  tctx.clearRect(0,0,W,H);
+  for (const [col, p2] of groups){ tctx.fillStyle = col; tctx.fill(p2); all.addPath(p2); }
+  // hue from the score, light and shade from the terrain (CSS colour blend on the tint layer)
+  const colorA = texA * (.85 - .3*clamp01((z-4)/1.5));
+  const op = colorA.toFixed(2);
+  if (op !== tintOpacity){ tintC.style.opacity = op; tintOpacity = op; }
+  if (texA < 1){ ctx.globalAlpha = 1 - texA; ctx.fillStyle = "#1a2531"; ctx.fill(all); }
+  const flatA = texA*(.26 - .1*clamp01((z-4)/1.5)) + (1-texA)*(.55 - .15*clamp01((z-6)/1.5));
+  ctx.globalAlpha = flatA; ctx.drawImage(tintC, 0, 0, W, H);
   ctx.globalAlpha = 1;
-  ctx.beginPath(); for (const f of vis) path(f);
-  ctx.strokeStyle = "rgba(6,12,22,.75)"; ctx.lineWidth = z<5 ? 1.1 : 1.6; ctx.stroke();
-  ctx.strokeStyle = "rgba(235,245,255,.32)"; ctx.lineWidth = z<5 ? .5 : .8; ctx.stroke();
+  ctx.strokeStyle = "rgba(6,12,22,.75)"; ctx.lineWidth = z<5 ? 1.1 : 1.6; ctx.stroke(all);
+  ctx.strokeStyle = "rgba(235,245,255,.32)"; ctx.lineWidth = z<5 ? .5 : .8; ctx.stroke(all);
   if (sel && sel.type==="country" && featByKey[sel.k]){
     ctx.beginPath(); path(featByKey[sel.k]);
     ctx.shadowColor="#8ec5ff"; ctx.shadowBlur=12; ctx.strokeStyle="#bfe0ff"; ctx.lineWidth=2; ctx.stroke(); ctx.shadowBlur=0;
@@ -561,8 +625,9 @@ function draw(){
   }
 
   // glowing hot spots for the strongest big markets
-  if (z < 6.5 && mode!=="price"){
-    ctx.globalCompositeOperation = "lighter";
+  const glowA = (mode==="price" ? 0 : 1) * clamp01((6.6 - z)/0.6) * (prevMode==="price" ? fe : 1);
+  if (glowA > 0){
+    ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = glowA;
     let n = 0;
     for (const [p,xy] of visible){
       if (S(p) < 70 || p.pop < 4e5) continue;
@@ -570,54 +635,65 @@ function draw(){
       const gr = (z<4?14:20) * (p.pop>=5e6?1.5:1);
       ctx.drawImage(GLOW, xy[0]-gr, xy[1]-gr, 2*gr, 2*gr);
     }
-    ctx.globalCompositeOperation = "source-over";
+    ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
   }
 
-  // country labels when zoomed out
+  // country labels when zoomed out, fading in with size and out with zoom
   const boxes = [];
-  if (z < 6.2){
+  const cOut = clamp01((6.2 - z)/0.6);
+  if (cOut > 0){
     ctx.textAlign="center"; ctx.textBaseline="middle";
-    const list = F50.filter(f=>f.bigArea*r*r > (z<3.6?2600:1400) && d3.geoDistance(vc,f.anchor) < Math.PI/2 - 0.12).sort((a,b)=>b.bigArea-a.bigArea);
+    const thr = z<3.6 ? 2600 : 1400;
+    const list = F50.filter(f=>f.bigArea*r*r > thr && d3.geoDistance(vc,f.anchor) < Math.PI/2 - 0.12).sort((a,b)=>b.bigArea-a.bigArea);
     for (const f of list){
       const pt = proj(f.anchor); if (!pt) continue;
       const c = COUNTRIES[f.k], sc = CS(c), rt = rate(sc);
       const label = c.n.toUpperCase();
-      ctx.font = `600 ${z<4?10:11}px ${SANS}`;
-      const w = ctx.measureText(label).width;
+      const lf = `600 ${z<4?10:11}px ${SANS}`;
+      const w = mw(lf, label);
       const b = [pt[0]-w/2-4, pt[1]-14, w+8, 32];
       if (overlaps(boxes,b)) continue; boxes.push(b);
+      const a = cOut * appear("c"+f.k);
+      ctx.globalAlpha = a;
+      ctx.font = lf;
       ctx.lineJoin="round"; ctx.lineWidth=3; ctx.strokeStyle="rgba(4,8,16,.55)";
       ctx.strokeText(label, pt[0], pt[1]-5);
       ctx.fillStyle = "rgba(240,246,252,.82)"; ctx.fillText(label, pt[0], pt[1]-5);
       const txt = mode==="price" ? usd(c.p) : sc+"%";
-      ctx.font = `600 10px ${MONO}`;
-      const tw = ctx.measureText(txt).width + 10;
-      ctx.globalAlpha = show[rt] ? 1 : .3;
-      roundRect(pt[0]-tw/2, pt[1]+3, tw, 14, 7); ctx.fillStyle = RCOL[rt]; ctx.fill();
-      ctx.fillStyle = "#06101b"; ctx.fillText(txt, pt[0], pt[1]+10.5);
-      ctx.globalAlpha = 1;
+      const pf = `600 10px ${MONO}`;
+      const tw = mw(pf, txt) + 10;
+      ctx.globalAlpha = a * (show[rt] ? 1 : .3);
+      roundRect(pt[0]-tw/2, pt[1]+3, tw, 14, 7);
+      ctx.fillStyle = mixRating(rate(Math.round(c[prevMode])), rt, fe); ctx.fill();
+      ctx.font = pf; ctx.fillStyle = "#06101b"; ctx.fillText(txt, pt[0], pt[1]+10.5);
     }
+    ctx.globalAlpha = 1;
   }
 
-  // dots
+  // dots, fading in as they come into range
   hits = [];
   for (const [p,xy] of visible){
-    const rr = dotR(p, z), col = RCOL[rate(S(p))];
+    const isSel = sel && sel.p===p;
+    const a = isSel ? 1 : appear("d"+p.i);
+    const rr = dotR(p, z), col = mixRating(rate(p.s[prevMode]), rate(S(p)), fe);
+    ctx.globalAlpha = a;
     if (p.pop >= 1e6 || p.cap){
       ctx.beginPath(); ctx.arc(xy[0],xy[1],rr+2.5,0,2*Math.PI);
-      ctx.strokeStyle = col; ctx.globalAlpha=.45; ctx.lineWidth=1; ctx.stroke(); ctx.globalAlpha=1;
+      ctx.strokeStyle = col; ctx.globalAlpha = a*.45; ctx.lineWidth=1; ctx.stroke(); ctx.globalAlpha = a;
     }
     ctx.beginPath(); ctx.arc(xy[0],xy[1],rr,0,2*Math.PI);
     ctx.fillStyle = col; ctx.fill();
     ctx.lineWidth = 1.2; ctx.strokeStyle = "rgba(4,8,16,.9)"; ctx.stroke();
     hits.push({x:xy[0],y:xy[1],r:Math.max(rr,6),p});
   }
+  ctx.globalAlpha = 1;
 
   // place labels (priority order already: min zoom, then population)
   ctx.textBaseline="middle"; ctx.textAlign="left";
   let labelled = 0;
   const pin = sel && sel.type==="place" ? visible.find(v=>v[0]===sel.p) : null;
   const order = pin ? [pin].concat(visible.filter(v=>v!==pin)) : visible;
+  const pf = `600 10px ${MONO}`;
   for (const [p,xy] of order){
     const isPin = pin && p===pin[0];
     if (p.mz > labZ && !isPin) continue;
@@ -625,33 +701,35 @@ function draw(){
     const big = p.mz <= 3 || p.pop >= 5e6;
     const fs = big ? 13 : p.mz<=5 ? 12 : 11;
     const nameFont = `${big?600:500} ${fs}px ${SANS}`;
-    ctx.font = nameFont;
-    const tw = ctx.measureText(p.name).width;
+    const tw = mw(nameFont, p.name);
     const pill = mode==="price" ? usd(p.ppm) : S(p)+"%";
-    ctx.font = `600 10px ${MONO}`;
-    const pw = ctx.measureText(pill).width + 9;
+    const pw = mw(pf, pill) + 9;
     const arrow = mode!=="potential", aw = arrow ? 12 : 0;
     const rr = dotR(p,z);
     const lx = xy[0]+rr+5, ly = xy[1];
     const b = [lx-2, ly-fs/2-3, tw+pw+aw+10, fs+6];
     if (overlaps(boxes,b) && !isPin) continue;
     boxes.push(b); labelled++;
+    ctx.globalAlpha = isPin ? 1 : appear("l"+p.i);
     ctx.font = nameFont;
     ctx.lineJoin="round"; ctx.lineWidth=3.5; ctx.strokeStyle="rgba(4,8,16,.88)";
     ctx.strokeText(p.name, lx, ly);
     ctx.fillStyle = "#f2f6fb"; ctx.fillText(p.name, lx, ly);
     const px = lx+tw+5;
-    roundRect(px, ly-7, pw, 14, 7); ctx.fillStyle = RCOL[rate(S(p))]; ctx.fill();
-    ctx.font = `600 10px ${MONO}`;
+    roundRect(px, ly-7, pw, 14, 7); ctx.fillStyle = mixRating(rate(p.s[prevMode]), rate(S(p)), fe); ctx.fill();
+    ctx.font = pf;
     ctx.fillStyle = "#06101b"; ctx.fillText(pill, px+4.5, ly+0.5);
     if (arrow) drawTrend(px+pw+7, ly, rate(p.s.potential));
   }
+  ctx.globalAlpha = 1;
   if (pin){
     const [,xy] = pin;
     ctx.beginPath(); ctx.arc(xy[0],xy[1],dotR(pin[0],z)+6,0,2*Math.PI);
     ctx.shadowColor="#8ec5ff"; ctx.shadowBlur=10; ctx.strokeStyle="#bfe0ff"; ctx.lineWidth=2; ctx.stroke(); ctx.shadowBlur=0;
   }
-  $("zoomhint").textContent = z < 5 ? "Zoom in to see more cities and towns" : z < 7.5 ? "Zoom further for small towns" : "Showing towns";
+  const hint = z < 5 ? "Zoom in to see more cities and towns" : z < 7.5 ? "Zoom further for small towns" : "Showing towns";
+  if (hint !== hintText){ $("zoomhint").textContent = hint; hintText = hint; }
+  if (fading) dirty = true;
 }
 const GLOW = (()=>{ const c = document.createElement("canvas"); c.width = c.height = 64; const g = c.getContext("2d");
   const gr = g.createRadialGradient(32,32,0,32,32,32); gr.addColorStop(0,"rgba(80,240,160,.5)"); gr.addColorStop(1,"rgba(80,240,160,0)");
@@ -673,47 +751,104 @@ function overlaps(boxes,b){
   return false;
 }
 function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
-function loop(){ if (dirty){ dirty=false; draw(); } requestAnimationFrame(loop); }
+
+/* ---------- motion: eased zoom, drag momentum, idle spin ---------- */
+const cam = { targetK:null, anchor:null, anchorGeo:null, vel:[0,0], coasting:false };
+let spin = !REDUCE, anim = null, lastNow = performance.now();
+function syncZoom(){ canvas.__zoom = d3.zoomIdentity.translate(last.x, last.y).scale(state.k); }
+function stopMotion(keepZoom){
+  if (anim){ anim.stop(); anim = null; }
+  cam.coasting = false; spin = false;
+  if (!keepZoom) cam.targetK = null;
+}
+function setKAround(k, pt, geo){
+  state.k = k; apply();
+  if (geo && pt){
+    // keep the point under the cursor in place while the scale changes
+    for (let i=0;i<2;i++){
+      const np = proj(geo); if (!np) break;
+      const dpp = DEG / R();
+      state.rot[0] -= (np[0]-pt[0])*dpp;
+      state.rot[1] = clampLat(state.rot[1] + (np[1]-pt[1])*dpp);
+      apply();
+    }
+  }
+  syncZoom();
+}
+function loop(now){
+  const dt = Math.min(48, now - lastNow); lastNow = now;
+  if (cam.targetK !== null){
+    const lk = Math.log(state.k), lt = Math.log(cam.targetK);
+    let nk = REDUCE ? cam.targetK : Math.exp(lk + (lt-lk)*(1 - Math.exp(-dt/80)));
+    if (Math.abs(lt - Math.log(nk)) < 0.0015){ nk = cam.targetK; cam.targetK = null; }
+    setKAround(nk, cam.anchor, cam.anchorGeo);
+    dirty = true;
+  }
+  if (cam.coasting){
+    const dpp = DEG / R();
+    state.rot[0] += cam.vel[0]*dt*dpp;
+    state.rot[1] = clampLat(state.rot[1] - cam.vel[1]*dt*dpp);
+    const decay = Math.exp(-dt/350);
+    cam.vel[0] *= decay; cam.vel[1] *= decay;
+    if (Math.hypot(cam.vel[0], cam.vel[1]) < 0.015) cam.coasting = false;
+    dirty = true;
+  }
+  if (spin && !anim){ state.rot[0] += 0.0045*dt; dirty = true; }
+  if (fade < 1){ fade = REDUCE ? 1 : Math.min(1, (now - fadeStart)/420); if (fade >= 1) prevMode = mode; dirty = true; }
+  if (dirty){ dirty = false; draw(); }
+  requestAnimationFrame(loop);
+}
 
 /* ---------- interaction ---------- */
-let last = {x:0,y:0};
+let last = {x:0,y:0}, velo = [0,0], lastMoveT = 0;
 const csel = d3.select(canvas);
-zoom.on("start", ev=>{ last={x:ev.transform.x,y:ev.transform.y}; if (ev.sourceEvent && ev.sourceEvent.type!=="wheel") canvas.classList.add("dragging"); hideTip(); })
+zoom.on("start", ev=>{
+      last = {x:ev.transform.x, y:ev.transform.y}; velo = [0,0]; lastMoveT = performance.now();
+      if (ev.sourceEvent){ stopMotion(); canvas.classList.add("dragging"); }
+      hideTip();
+    })
     .on("zoom", ev=>{
       const t = ev.transform, se = ev.sourceEvent;
-      if (se && se.type==="wheel"){
-        zoomAbout(t.k, d3.pointer(se, canvas));
-      } else if (se){
-        const dpp = DEG / R();
+      if (se){
+        const dx = t.x-last.x, dy = t.y-last.y, dpp = DEG / R();
         state.k = t.k;
-        state.rot[0] += (t.x-last.x)*dpp;
-        state.rot[1] = Math.max(-89, Math.min(89, state.rot[1] - (t.y-last.y)*dpp));
-      } else {
-        state.k = t.k;
+        state.rot[0] += dx*dpp;
+        state.rot[1] = clampLat(state.rot[1] - dy*dpp);
+        // smoothed pointer velocity (px/ms) for the coast after release
+        const now = performance.now(), dtm = Math.max(4, now - lastMoveT);
+        velo = [velo[0]*.3 + dx/dtm*.7, velo[1]*.3 + dy/dtm*.7];
+        lastMoveT = now;
+        dirty = true;
       }
-      last={x:t.x,y:t.y}; dirty=true; markMove();
+      last = {x:t.x, y:t.y};
     })
-    .on("end", ()=>canvas.classList.remove("dragging"));
-csel.call(zoom).on("dblclick.zoom", null);
+    .on("end", ev=>{
+      canvas.classList.remove("dragging");
+      if (!ev.sourceEvent || REDUCE) return;
+      // let the globe coast after a flick
+      const sp = Math.hypot(velo[0], velo[1]);
+      if (performance.now() - lastMoveT < 90 && sp > 0.12){
+        const k = Math.min(1, 5/sp);   // cap very fast flicks
+        cam.vel = [velo[0]*k, velo[1]*k]; cam.coasting = true;
+      }
+    });
+csel.call(zoom).on("dblclick.zoom", null).on("wheel.zoom", null);
 
-function zoomAbout(k, pt){
+canvas.addEventListener("wheel", ev=>{
+  ev.preventDefault();
+  stopMotion(true); hideTip();
+  const dy = ev.deltaY * (ev.deltaMode===1 ? 0.05 : ev.deltaMode ? 1 : 0.002) * (ev.ctrlKey ? 10 : 1);
+  const base = cam.targetK ?? state.k;
+  cam.targetK = Math.max(MINK, Math.min(MAXK, base * Math.pow(2, -dy)));
+  const pt = d3.pointer(ev, canvas);
   apply();
-  const geo = proj.invert(pt);
-  state.k = k; apply();
-  if (!geo || d3.geoDistance(geo, viewCenter()) > Math.PI/2) return;
-  for (let i=0;i<2;i++){
-    const np = proj(geo); if (!np) break;
-    const dpp = DEG / R();
-    state.rot[0] -= (np[0]-pt[0])*dpp;
-    state.rot[1] = Math.max(-89, Math.min(89, state.rot[1] + (np[1]-pt[1])*dpp));
-    apply();
-  }
-}
-function setK(k){ zoom.transform(csel, d3.zoomIdentity.translate(last.x,last.y).scale(k)); }
+  const g = proj.invert(pt);
+  cam.anchor = pt;
+  cam.anchorGeo = g && d3.geoDistance(g, viewCenter()) < Math.PI/2 - 0.01 ? g : null;
+}, {passive:false});
 
-let anim = null;
 function flyTo(lon, lat, k){
-  if (anim) anim.stop();
+  stopMotion();
   const r0 = state.rot.slice(), k0 = state.k;
   const r1 = [-lon, -lat, 0];
   while (r1[0]-r0[0] > 180) r1[0]-=360;
@@ -721,17 +856,21 @@ function flyTo(lon, lat, k){
   const ir = d3.interpolate(r0, r1);
   const lk0 = Math.log(k0), lk1 = Math.log(k);
   const dist = d3.geoDistance(viewCenter(), [lon,lat]);
-  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const dur = reduce ? 0 : 900 + 500*dist;
+  const dur = REDUCE ? 0 : 900 + 500*dist;
   anim = d3.timer(el=>{
     const t = dur ? Math.min(1, el/dur) : 1, e = d3.easeCubicInOut(t);
     state.rot = ir(e);
     const base = lk0 + (lk1-lk0)*e;
     const dip = dist>0.3 ? Math.sin(Math.PI*e) * Math.max(0, Math.min(base, dist*1.5)) : 0;
-    setK(Math.exp(base - dip));
+    state.k = Math.exp(base - dip); syncZoom();
     dirty = true;
     if (t>=1){ anim.stop(); anim=null; }
   });
+}
+function zoomBy(f){
+  stopMotion(true);
+  cam.targetK = Math.max(MINK, Math.min(MAXK, (cam.targetK ?? state.k) * f));
+  cam.anchor = null; cam.anchorGeo = null;
 }
 
 function nearest(pt){
@@ -749,18 +888,22 @@ function tipReason(p, c){
   return t ? `<div class="why1 ${t[0]}"><i>${t[1]}</i><span>${esc(t[2])}</span></div>` : "";
 }
 function hideTip(){ tip.hidden = true; canvas.classList.remove("pointing"); }
+let tipFor = null;
 canvas.addEventListener("mousemove", ev=>{
   if (canvas.classList.contains("dragging")) return;
   const pt = d3.pointer(ev, canvas), h = nearest(pt);
-  if (!h){ hideTip(); return; }
+  if (!h){ hideTip(); tipFor = null; return; }
   canvas.classList.add("pointing");
   const p = h.p, c = COUNTRIES[p.ck];
-  tip.innerHTML = `<div class="h"><div><b>${esc(p.name)}</b><small>${esc(p.adm1 ? p.adm1+", " : "")}${esc(c.n)}</small></div><span class="pct ${rate(S(p))}">${S(p)}%</span></div>
-    <div class="row"><span>Overall <b class="${rate(p.s.overall)}">${p.s.overall}%</b></span><span>Price <b class="${rate(p.s.price)}">${usd(p.ppm)}/m²</b></span><span>Potential <b class="${rate(p.s.potential)}">${p.s.potential}%</b></span></div>
-    ${tipReason(p, c)}`;
-  tip.style.left = h.x+"px"; tip.style.top = h.y+"px"; tip.hidden = false;
+  if (tipFor !== p.i + mode){
+    tipFor = p.i + mode;
+    tip.innerHTML = `<div class="h"><div><b>${esc(p.name)}</b><small>${esc(p.adm1 ? p.adm1+", " : "")}${esc(c.n)}</small></div><span class="pct ${rate(S(p))}">${S(p)}%</span></div>
+      <div class="row"><span>Overall <b class="${rate(p.s.overall)}">${p.s.overall}%</b></span><span>Price <b class="${rate(p.s.price)}">${usd(p.ppm)}/m²</b></span><span>Potential <b class="${rate(p.s.potential)}">${p.s.potential}%</b></span></div>
+      ${tipReason(p, c)}`;
+  }
+  tip.style.transform = `translate(${h.x+16}px, ${h.y}px) translateY(-50%)`; tip.hidden = false;
 });
-canvas.addEventListener("mouseleave", hideTip);
+canvas.addEventListener("mouseleave", ()=>{ hideTip(); tipFor = null; });
 canvas.addEventListener("click", ev=>{
   const pt = d3.pointer(ev, canvas), h = nearest(pt);
   if (h){ selectPlace(h.p, false); return; }
@@ -776,13 +919,14 @@ canvas.addEventListener("dblclick", ev=>{
   const geo = proj.invert(d3.pointer(ev, canvas));
   if (geo) flyTo(geo[0], geo[1], Math.min(MAXK, state.k*3));
 });
-$("zin").onclick = ()=>flyTo(...viewCenter(), Math.min(MAXK, state.k*2.2));
-$("zout").onclick = ()=>flyTo(...viewCenter(), Math.max(MINK, state.k/2.2));
+$("zin").onclick = ()=>zoomBy(2.2);
+$("zout").onclick = ()=>zoomBy(1/2.2);
 $("home").onclick = ()=>flyTo(...viewCenter(), 1);
 window.addEventListener("resize", resize);
 
 /* ---------- modes + filters ---------- */
 function setMode(m){
+  if (m !== mode){ prevMode = mode; fade = 0; fadeStart = performance.now(); }
   mode = m;
   try { localStorage.setItem("buildatlas.mode", m); } catch(e){}
   document.querySelectorAll(".modes button").forEach(b=>b.setAttribute("aria-pressed", b.dataset.m===m));
@@ -979,6 +1123,7 @@ function renderPanel(){
       ${list.length ? `<ul class="list">${list.slice(0,10).map((q,i)=>rowItem(q,i+1,`${q.adm1||c.n} · ${fmtPop(q.pop)}`)).join("")}</ul>` : `<p class="p">No cities in the dataset for this territory.</p>`}`;
   }
   bindList();
+  body.classList.remove("in"); void body.offsetWidth; body.classList.add("in");
 }
 function selectPlace(p, fly){
   sel = {type:"place", p};
@@ -1041,10 +1186,8 @@ document.body.classList.add("has-panel");
 resize(); setMode(mode);
 $("loading").remove();
 requestAnimationFrame(loop);
-if (document.fonts && document.fonts.ready) document.fonts.ready.then(()=>{ dirty = true; });
-let spin = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(()=>{ MW.clear(); dirty = true; });
 const stopSpin = ()=>{ spin = false; };
-["pointerdown","wheel","keydown","touchstart"].forEach(t=>window.addEventListener(t, stopSpin, {once:true, passive:true}));
-d3.timer(()=>{ if (spin && !anim){ state.rot[0] += 0.06; dirty = true; markMove(); } });
+["pointerdown","keydown","touchstart"].forEach(t=>window.addEventListener(t, stopSpin, {once:true, passive:true}));
 })();
 </script>

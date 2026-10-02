@@ -3,7 +3,7 @@
 Inputs (in this folder):
   countries-50m.json / countries-110m.json  - world-atlas 2.0.2 TopoJSON (Natural Earth)
   places.geojson                            - Natural Earth 10m populated places (simple)
-  earth.jpg                                 - NASA Blue Marble texture, 2048x1024
+  earth.jpg                                 - NASA Blue Marble texture, 4096x2048
   app.html                                  - page template with a /*__DATA__*/ marker
 
 Outputs:
