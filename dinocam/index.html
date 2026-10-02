@@ -378,7 +378,8 @@ const A={
   frames:0,fpsAt:0,lastFrame:0,loc:null,lockRegion:null,zones:[],drawMode:null,dragStart:null,dragCur:null,
   cameraLabels:{},lastLockPlate:'',lastLockAt:0,watchlist:[],extraCams:[],nextCam:1,
   faceIdBusy:false,lastFaceId:0,knownFaces:[],faceRecReady:false,
-  poseDetector:null,postureBusy:false,lastPosture:0,fallState:{status:null,since:0,alerted:false}
+  poseDetector:null,postureBusy:false,lastPosture:0,fallState:{status:null,since:0,alerted:false},
+  rescanBusy:false,lastAutoRescan:0,autoRescannedIds:new Set()
 };
 
 /* ---------- settings persistence ---------- */
@@ -1425,6 +1426,10 @@ function loop(){
   if($('#plates').checked&&(A.ocr||A.plateModel)&&!A.ocrBusy&&t-A.lastOCR>200){A.lastOCR=t;scanPlates()}
   if($('#plates').checked&&(A.ocr||A.plateModel)&&A.lockRegion&&!A.ocrBusy&&t-A.lastLockOCR>4000){A.lastLockOCR=t;scanLockedRegion()}
   if($('#faceId').checked&&$('#faces').checked&&!A.faceIdBusy&&t-A.lastFaceId>2500){A.lastFaceId=t;identifyFaces()}
+  // 20s: generous on purpose - this only ever needs to notice a NEW unread capture once, not
+  // repeatedly poll one that hasn't changed (autoRescanPending skips anything already in
+  // A.autoRescannedIds), so there's no benefit to checking more often, only wasted work.
+  if($('#plates').checked&&!A.rescanBusy&&t-A.lastAutoRescan>20000){A.lastAutoRescan=t;autoRescanPending()}
   setTimeout(loop,160);
 }
 
@@ -1466,17 +1471,104 @@ function fullCropReading(data){
   return{text:lines.map(l=>l.text).join(' ').replace(/\s+/g,' ').trim(),conf:lines.length?lines.reduce((s,l)=>s+l.conf,0)/lines.length:0};
 }
 function isPlausibleKey(key,minLen){return !!key&&key.length>=(minLen||3)&&key.length<=12&&/[A-Z0-9]/.test(key)}
+// Given a plate reading, tries every split point consistent with a letters-run/digits-run
+// shape (one run 2-5 letters, the other 3-5 digits, never interleaved) and keeps whichever
+// needs correcting the fewest classic OCR confusions (O/0, I/1, S/5, B/8) to make every
+// position match its side of the split - the standard "once a shape is implied, type-correct
+// against it" technique real ANPR systems use. Tries both a letters-run-then-
+// digits-run split (Germany, Lithuania, Sweden, Finland, Hungary, Luxembourg, Austria, Denmark
+// - all some variant of "letters, then digits", verified against each country's current format
+// rather than assumed) and the mirror image, digits-run-then-letters (Spain's "1234 ABC",
+// likewise verified) - two shapes covering the majority of EU plates that aren't already
+// well-served by the segment-combination logic below (France/Italy/UK's letter-digit-letter
+// mixing is a third, structurally different family deliberately NOT given this treatment: it's
+// already read correctly via that segment logic, and - checked directly, see
+// dinocam/test/plate-formats.test.js - a plate in that family can never actually match either
+// split here, since it starts with a letter that these confusion maps don't produce from a
+// digit). A reading that's already a clean match for some split costs nothing and comes back
+// unchanged; one with no plausible low-cost split at all also comes back unchanged. Operates on
+// the display string (spaces/dashes preserved untouched), not the stripped key, so the
+// corrected value is still presentable.
+// Only the four strongest, near-universal OCR confusion pairs - not every digit/letter that
+// could conceivably be confused. A looser map (also mapping e.g. 2<->Z, 6<->G) was found by
+// fuzzing/testing to occasionally let an unrelated short alnum string (not a plate in either
+// shape at all) "succeed" a split by coincidence, producing a bogus corrected reading for
+// something that was never this shape in the first place - keeping only the strongest pairs,
+// plus the cost cap and minimum length below, keeps this correction precise rather than
+// speculative.
+const PLATE_DIGIT_TO_LETTER={'0':'O','1':'I','5':'S','8':'B'};
+const PLATE_LETTER_TO_DIGIT={'O':'0','I':'1','S':'5','B':'8'};
+function fixPlateChars(value){
+  let key=plateKey(value);
+  // Lithuania is always exactly 6 characters; the rest of the letters-then-digits family and
+  // Spain's digits-then-letters realistically run 5-8. A lower floor of 5 (not 3) was found by
+  // testing to matter: a short string like "A123" can "fit" a split via just one confusable
+  // swap even though 4-character strings are too short to meaningfully distinguish "this is a
+  // plate missing a split" from "this is some unrelated short OCR fragment" - none of the real
+  // target formats are ever this short anyway.
+  if(!key||key.length<5||key.length>9)return value;
+  let bestPlan=null,bestCost=Infinity;
+  // Digit-run length tried longest-first: every target format has at least as many digits as
+  // letters in the common case (Lithuania exactly 3+3, Germany/Austria usually 2-3 letters +
+  // 3-4 digits, Denmark 2 letters + 5 digits, Spain's mirror image is 4 digits + 3 letters), so
+  // on a tie this prefers the more realistic split instead of an arbitrary one (found by
+  // testing - an ascending search could tie-break toward an unrealistic 5-letter/1-digit
+  // reading over the correct 3-letter/3-digit one for the same input). Only tries 3-5 digits,
+  // not 1-2: a shorter digit run was found by testing to occasionally let a genuinely
+  // different, already-correct format (Brazilian Mercosul's letters-digit-letter-digits mix,
+  // e.g. "ABC1D23") accidentally "fit" a split via one confusable swap and get wrongly
+  // rewritten, even though that plate was never misread at all - plates with a 1-2 digit serial
+  // (less common across this family) go uncorrected rather than risk that regression on a
+  // format this app already reads correctly.
+  for(let digitsLen=5;digitsLen>=3;digitsLen--){
+    let lettersLen=key.length-digitsLen;
+    if(lettersLen<2||lettersLen>5)continue;
+    for(let lettersFirst of [true,false]){
+      let plan=[],cost=0,ok=true;
+      for(let i=0;i<key.length;i++){
+        let c=key[i],wantLetter=lettersFirst?(i<lettersLen):(i>=digitsLen);
+        if(wantLetter&&/[0-9]/.test(c)){let m=PLATE_DIGIT_TO_LETTER[c];if(!m){ok=false;break}plan.push(m);cost++}
+        else if(!wantLetter&&/[A-Z]/.test(c)){let m=PLATE_LETTER_TO_DIGIT[c];if(!m){ok=false;break}plan.push(m);cost++}
+        else plan.push(c);
+      }
+      if(ok&&cost<bestCost){bestCost=cost;bestPlan=plan}
+    }
+  }
+  // A single confused character on an otherwise-consistent plate is the real-world case this
+  // targets; needing 2+ simultaneous corrections to force-fit a shape is much more often a
+  // sign the input simply isn't this format at all (found the same way as the length floor
+  // above - a 2-correction "fix" was turning unrelated short strings into bogus readings).
+  if(bestCost>1)return value;
+  if(!bestPlan)return value;
+  let out='',ki=0;
+  for(let ch of value){
+    if(/[A-Za-z0-9]/.test(ch)){out+=bestPlan[ki];ki++}
+    else out+=ch;
+  }
+  return out;
+}
 // One OCR pass (one crop x filter x PSM combination) -> candidate readings at two granularities:
 // the whole crop merged top-to-bottom/left-to-right (kind:'full'), and each individual OCR line
 // on its own (kind:'line') so a segment that never appeared in a clean full-crop read can still
-// be recovered and combined later.
+// be recovered and combined later. Each reading is run through fixPlateChars() first (a no-op
+// unless the shape correction actually applies) and only the corrected value is kept - not
+// added alongside the original - so repeated passes reading the same real plate as "ABC1O3",
+// "ABC103", etc. all land on one shared key and their votes accumulate together, instead of
+// competing as two different candidates that aggregateVotes' own segment-combination logic
+// would otherwise try to concatenate into a nonsense "ABC1O3 ABC103" (it has no way to know
+// two keys are alternate readings of the same characters rather than genuinely separate parts
+// of the plate - correcting before the key is ever recorded sidesteps that ambiguity entirely).
+function addPlateCandidate(out,value,conf,kind,x,y,parts){
+  let fixedValue=fixPlateChars(value),key=plateKey(fixedValue);
+  if(isPlausibleKey(key,2))out.push({value:fixedValue,key,conf,kind,x,y,parts});
+}
 function plateCandidates(data){
   let out=[],full=fullCropReading(data);
-  if(isPlausibleKey(plateKey(full.text),2))out.push({value:full.text,key:plateKey(full.text),conf:full.conf,kind:'full',x:0,y:0,parts:(full.text.match(/ /g)||[]).length+1});
+  if(isPlausibleKey(plateKey(full.text),2))addPlateCandidate(out,full.text,full.conf,'full',0,0,(full.text.match(/ /g)||[]).length+1);
   for(let line of data?.lines||[]){
     let r=lineReading(line.words||[]),key=plateKey(r.text);
     if(r.text&&r.text!==full.text&&isPlausibleKey(key,2))
-      out.push({value:r.text,key,conf:r.conf,kind:'line',x:r.x,y:(line.bbox?.y0!=null&&line.bbox?.y1!=null)?(line.bbox.y0+line.bbox.y1)/2:0,parts:(r.text.match(/ /g)||[]).length+1});
+      addPlateCandidate(out,r.text,r.conf,'line',r.x,(line.bbox?.y0!=null&&line.bbox?.y1!=null)?(line.bbox.y0+line.bbox.y1)/2:0,(r.text.match(/ /g)||[]).length+1);
   }
   return out;
 }
@@ -1870,69 +1962,103 @@ async function scanLockedRegion(){
   finally{A.ocrBusy=false}
 }
 function scanStatus(text){$('#scanState').textContent=text;say(text)}
+// Shared core for re-scanning a list of saved vehicle captures in place, used by both the
+// manual "Re-scan unread plates" button and the automatic background sweep below - same
+// scanning/keep-the-better-result logic either way, just a different event list and a
+// different (or absent) place to report progress. `setStatus`, if given, is called with
+// progress/completion text; pass null for a silent pass (the automatic sweep only surfaces a
+// toast on an actual confirmation, not a running commentary in the main status line).
+async function rescanEvents(pending,setStatus){
+  let rank={confirmed:2,candidate:1,unreadable:0};
+  let confirmed=0,candidates=0,unread=0,errors=0,kept=0;
+  for(let i=0;i<pending.length;i++){
+    let e=pending[i];if(setStatus)setStatus('Scanning '+(i+1)+' of '+pending.length+' saved captures…');
+    try{
+      let img=await createImageBitmap(e.image);
+      try{
+        let prevStatus=e.status||'unreadable';
+        let result;
+        if(e.bounds){
+          result=await scanPlateImage(img,e.bounds,false,!e.camera&&e.source!=='file-scan');
+        }else{
+          // No stored bounding box - this is a saved event with no known vehicle region
+          // (e.g. a "Scan an image file" save). Falling straight to a blind whole-image
+          // OCR pass here almost never finds a small plate reliably in a full street/
+          // parking-lot photo - re-detect vehicles in the saved image first, exactly like
+          // scanImageFile() already does for the same kind of photo, instead of throwing
+          // that detection work away on every re-scan.
+          if(!A.model){try{await models()}catch(modelErr){/* fall back to whole-image below */}}
+          let vehicleBoxes=[];
+          if(A.model){
+            try{
+              let found=await A.model.detect(img,10,Number($('#sensitivity').value)||.55);
+              vehicleBoxes=found.filter(o=>vehicle(o.class)).map(o=>clampBox(o.bbox[0],o.bbox[1],o.bbox[2],o.bbox[3],img.width,img.height));
+            }catch(detErr){console.warn('Vehicle detector failed on saved capture',detErr)}
+          }
+          let attempts=[];
+          for(let b of vehicleBoxes.slice(0,3))attempts.push(await scanPlateImage(img,b));
+          attempts.push(await scanPlateImage(img)); // whole-image fallback
+          result=attempts.sort((a,b)=>(rank[b.status]-rank[a.status])||((b.confidence||0)-(a.confidence||0)))[0];
+        }
+        if(rank[result.status]<rank[prevStatus]){
+          // Never let a re-scan make a saved capture worse than it already was. This
+          // particular pass not reproducing an earlier, better read (a missed detection,
+          // an unlucky OCR attempt) isn't evidence the earlier read was wrong - it's just
+          // this pass doing worse. Leave the existing status/plate/candidate untouched.
+          kept++;
+        }else{
+          e.status=result.status;
+          if(result.status==='unreadable'){unread++}
+          else{
+            e.candidate=result.value;e.confidence=result.confidence;
+            if(result.status==='confirmed'){e.plate=result.value;confirmed++;let hit=checkWatchlist(result.value);if(hit)e.watchlist=watchlistBadge(hit)}else candidates++;
+            e.label='Possible car · plate: '+(e.plate||'candidate '+e.candidate);
+          }
+          if(A.db)await dbCall('readwrite',store=>store.put(e));
+        }
+        render();
+      }catch(imgErr){errors++;e.status='unreadable';console.error('Plate detector failed on this capture',imgErr)}
+      finally{img.close()}
+    }catch(err){errors++;console.error('Image could not be loaded',err)}
+    // scanPlateImage is deterministic for the same saved image/bounds/engine state, so once an
+    // event has been through a pass this session (whichever triggered it), retrying it again
+    // before anything could have changed would just burn CPU for a guaranteed-identical result.
+    A.autoRescannedIds.add(e.id);
+  }
+  if(setStatus)setStatus('Completed: '+confirmed+' recognized, '+candidates+' candidates, '+unread+' unreadable'+(kept?', '+kept+' kept as-is (this pass did worse)':'')+(errors?', '+errors+' errors':'')+'.');
+  if(confirmed)toast(confirmed+' saved capture(s) got a confirmed plate.');
+}
 async function scanSaved(){
-  let btn=$('#rescan');if(btn.disabled)return;btn.disabled=true;
+  if(A.rescanBusy){scanStatus('A rescan is already running in the background — try again in a moment.');return}
+  A.rescanBusy=true;
+  let btn=$('#rescan');btn.disabled=true;
   try{
     scanStatus('Loading OCR engine…');if(!A.ocr)await loadOCR();
     if(!A.ocr)throw Error('OCR engine could not load. Check internet access and reload the app.');
     let pending=A.events.filter(e=>e.type==='vehicle'&&e.status!=='confirmed'&&!e.manual);
     if(!pending.length){scanStatus('No unread or unconfirmed vehicle captures found.');return}
-    let rank={confirmed:2,candidate:1,unreadable:0};
-    let confirmed=0,candidates=0,unread=0,errors=0,kept=0;
-    for(let i=0;i<pending.length;i++){
-      let e=pending[i];scanStatus('Scanning '+(i+1)+' of '+pending.length+' saved captures…');
-      try{
-        let img=await createImageBitmap(e.image);
-        try{
-          let prevStatus=e.status||'unreadable';
-          let result;
-          if(e.bounds){
-            result=await scanPlateImage(img,e.bounds,false,!e.camera&&e.source!=='file-scan');
-          }else{
-            // No stored bounding box - this is a saved event with no known vehicle region
-            // (e.g. a "Scan an image file" save). Falling straight to a blind whole-image
-            // OCR pass here almost never finds a small plate reliably in a full street/
-            // parking-lot photo - re-detect vehicles in the saved image first, exactly like
-            // scanImageFile() already does for the same kind of photo, instead of throwing
-            // that detection work away on every re-scan.
-            if(!A.model){try{await models()}catch(modelErr){/* fall back to whole-image below */}}
-            let vehicleBoxes=[];
-            if(A.model){
-              try{
-                let found=await A.model.detect(img,10,Number($('#sensitivity').value)||.55);
-                vehicleBoxes=found.filter(o=>vehicle(o.class)).map(o=>clampBox(o.bbox[0],o.bbox[1],o.bbox[2],o.bbox[3],img.width,img.height));
-              }catch(detErr){console.warn('Vehicle detector failed on saved capture',detErr)}
-            }
-            let attempts=[];
-            for(let b of vehicleBoxes.slice(0,3))attempts.push(await scanPlateImage(img,b));
-            attempts.push(await scanPlateImage(img)); // whole-image fallback
-            result=attempts.sort((a,b)=>(rank[b.status]-rank[a.status])||((b.confidence||0)-(a.confidence||0)))[0];
-          }
-          if(rank[result.status]<rank[prevStatus]){
-            // Never let a re-scan make a saved capture worse than it already was. This
-            // particular pass not reproducing an earlier, better read (a missed detection,
-            // an unlucky OCR attempt) isn't evidence the earlier read was wrong - it's just
-            // this pass doing worse. Leave the existing status/plate/candidate untouched.
-            kept++;
-          }else{
-            e.status=result.status;
-            if(result.status==='unreadable'){unread++}
-            else{
-              e.candidate=result.value;e.confidence=result.confidence;
-              if(result.status==='confirmed'){e.plate=result.value;confirmed++;let hit=checkWatchlist(result.value);if(hit)e.watchlist=watchlistBadge(hit)}else candidates++;
-              e.label='Possible car · plate: '+(e.plate||'candidate '+e.candidate);
-            }
-            if(A.db)await dbCall('readwrite',store=>store.put(e));
-          }
-          render();
-        }catch(imgErr){errors++;e.status='unreadable';console.error('Plate detector failed on this capture',imgErr)}
-        finally{img.close()}
-      }catch(err){errors++;console.error('Image could not be loaded',err)}
-    }
-    scanStatus('Completed: '+confirmed+' recognized, '+candidates+' candidates, '+unread+' unreadable'+(kept?', '+kept+' kept as-is (this pass did worse)':'')+(errors?', '+errors+' errors':'')+'.');
-    if(confirmed)toast(confirmed+' saved capture(s) got a confirmed plate.');
+    await rescanEvents(pending,scanStatus);
   }catch(err){console.error('Rescan error',err);scanStatus('Rescan failed: '+err.message)}
-  finally{btn.disabled=false}
+  finally{btn.disabled=false;A.rescanBusy=false}
+}
+// Background counterpart to the manual button above, polled from loop(): sweeps any vehicle
+// captures that finished without a confirmed plate and haven't been retried yet this session,
+// so a plate that was never read while its vehicle was briefly in frame still gets a real
+// second attempt without anyone remembering to click "Re-scan unread plates". Scoped to events
+// not already in A.autoRescannedIds (see rescanEvents' note on why retrying a settled one would
+// be pure waste) - a fresh app load starts that set empty again, so every still-unread capture
+// gets one real new attempt under whatever the current code is (e.g. this session's plate-
+// locator improvements), not zero. Reports only a toast on an actual confirmation, not a
+// running commentary in the main status line - unlike the manual button, nobody asked for this
+// particular pass to run right now.
+async function autoRescanPending(){
+  if(A.rescanBusy||(!A.ocr&&!A.plateModel))return;
+  let pending=A.events.filter(e=>e.type==='vehicle'&&e.status!=='confirmed'&&!e.manual&&!A.autoRescannedIds.has(e.id));
+  if(!pending.length)return;
+  A.rescanBusy=true;
+  try{await rescanEvents(pending,text=>{let el=$('#scanState');if(el)el.textContent=text})}
+  catch(err){console.error('Automatic rescan error',err)}
+  finally{A.rescanBusy=false}
 }
 
 /* ---------- optional online AI recognition (off by default; see dinocam/server/) ----------

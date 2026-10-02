@@ -551,3 +551,111 @@ gap this round (and the two before it) worked on narrowing. It's measurably bett
 (13/15 -> 15/15 candidates found, IoU roughly doubled) but not yet at parity with a manually
 locked region, which still reads more reliably because it skips localization's uncertainty
 entirely.
+
+## Automatic rescan of unread plates
+
+The app already had a manual "Re-scan unread plates" button (`scanSaved()`): it re-runs the
+real plate pipeline against every saved vehicle capture that never got a confirmed plate (a
+vehicle that left frame before `scanPlates()`'s vote accumulation ever converged). Per request,
+this now also runs automatically in the background, not just on a click.
+
+The one thing worth being precise about: `scanPlateImage` is **deterministic** for a given
+saved image, stored bounding box, and engine state - re-scanning the exact same already-tried
+capture again produces the exact same result, every time, for free CPU cost and zero benefit.
+A naive "just run the rescan on a timer" would burn battery/CPU re-doing identical work forever
+on captures that are genuinely unreadable. So the real design question wasn't "how to rescan,"
+it was "how to rescan only what's actually new": `A.autoRescannedIds` (an in-memory `Set`, not
+persisted) tracks which events have already been through a pass this session; the background
+sweep (`autoRescanPending()`, polled every 20s from the existing `loop()` - no new timer
+mechanism) only ever considers events NOT in that set. A fresh page load starts the set empty
+again, so every still-unread capture gets one real new attempt under whatever the current code
+is (e.g. this session's plate-localizer and EU-format improvements), not zero - the dedup is
+about not repeating pointless work within one session, not about permanently giving up on a
+capture.
+
+The manual button and the automatic sweep now share one core (`rescanEvents()`, extracted from
+the original `scanSaved()` body) and a single `A.rescanBusy` guard so they can never run
+concurrently against the same `A.events` array. The automatic sweep reports only a toast on an
+actual confirmation (consistent with how the app already surfaces other background events,
+like a live plate confirming) - it deliberately does NOT hijack the main status line with
+progress text the way a user-requested manual rescan does, since nobody asked for this
+particular pass to run right now.
+
+Validated end-to-end in a real browser (Playwright, real engines, not mocked): seeded a saved
+"unreadable" capture using eu4.jpg (a real photo from this session's earlier testing, known to
+read correctly given its own real coco-ssd vehicle box), called `autoRescanPending()` directly,
+and confirmed it picks up the new capture, improves its status, marks it processed in
+`A.autoRescannedIds`, and - critically - that a second immediate call does NOT re-invoke
+`scanPlateImage` on the same event (proving the no-wasted-repeat-work guarantee actually holds,
+not just that the feature "works"). 5/5 checks passed.
+
+## Lithuania, Germany, and the rest of the EU: shape-aware OCR correction
+
+Per request: "make it really really good at reading Lithuanian and German plates," then
+widened to "all EU plates." Rather than guess at ~27 countries' exact formats from memory (a
+wrong guess would actively corrupt an otherwise-correct read - exactly the failure mode this
+work ended up finding and fixing twice over), verified each country's current format against
+real sources before writing anything - see the chat for the two web searches this round ran
+(Wikipedia's per-country vehicle-registration-plate pages, confirmed current as of this
+session).
+
+**The real structural insight**: most EU plates fall into one of two shapes - a run of letters
+then a run of digits (Germany, Lithuania, Sweden, Finland, Hungary, Luxembourg, Austria,
+Denmark), or the mirror image, digits then letters (Spain). A third shape - letters, digits,
+letters (France, Italy, UK) - is already read correctly by the existing segment-combination
+logic in `aggregateVotes` and deliberately was NOT given this treatment (checked directly: a
+plate in that family can never match either new split, since it always starts with a letter
+these confusion maps don't produce from a digit - see the `fixPlateChars` test cases for UK and
+French plates explicitly verifying they're untouched).
+
+New function `fixPlateChars(value)`: given a plate reading, tries every split point consistent
+with either shape (a 2-5 letter run, a 3-5 digit run, in either order) and keeps whichever
+needs correcting the fewest classic OCR confusions (O/0, I/1, S/5, B/8 - only the four
+strongest, near-universal pairs) to make every position match its side of the split. This is
+the standard "once a shape is implied, type-correct against it" technique real ANPR systems
+use. Wired into `plateCandidates()` so every OCR reading is corrected *before* it's recorded as
+a vote - not added as a competing second candidate (an earlier version of this that added both
+got wrongly concatenated by `aggregateVotes`' own segment-combination logic into nonsense like
+"ABC1O3 ABC103", since that logic has no way to know two keys are alternate readings of the
+same characters rather than genuinely separate parts of the plate - correcting before the key
+is ever recorded sidesteps that ambiguity entirely). The practical effect: repeated OCR passes
+that read the same real plate as "ABC1O3", "ABC103", etc. now all converge onto one shared key
+instead of splitting the vote across near-duplicates.
+
+**Two real false positives found and fixed by testing, not by inspection** - both worth
+recording since they're the actual reason the design ended up as narrow as it is:
+- A looser confusion map (also mapping 2<->Z, 6<->G) let an unrelated short string like "A123"
+  or Dutch "12-ABC-3" accidentally "fit" a split via one coincidental confusable swap, producing
+  a bogus corrected reading for something that was never this shape. Fixed by keeping only the
+  four strongest pairs, requiring minimum plate length 5 (not 3), and capping the correction to
+  at most 1 character fixed (needing 2+ simultaneous corrections to force-fit a shape is much
+  more often a sign the input simply isn't this format, not that OCR made several mistakes).
+- Even after that, Brazilian Mercosul's genuinely different letters-digit-letter-digits mix
+  ("ABC1D23") could still "fit" a 1-cost digits-then-letters-adjacent split via the 2-digit-run
+  case specifically. Fixed by restricting the digit-run length to 3-5 (not 1-2): every target
+  format realistically has 3+ digits anyway, and this one restriction closed the gap without
+  giving up real coverage.
+
+Validated three ways: 50,066 checks in `plate-formats.test.js` (example cases for every newly-
+covered country plus the ones deliberately left alone, direct `fixPlateChars` unit cases for
+each, and a 50,000-case fuzz run checking it never throws, always preserves string
+length/separators exactly, and is a stable fixed point under re-application), the existing
+`fuzz-560-plate-pipeline.test.js` (whose "never invents a character not seen in any OCR pass"
+invariant needed a deliberate, narrow update - expanding the allowed character set by exactly
+the same confusion map `fixPlateChars` itself uses, not weakening the check - since inventing a
+corrected character is now a real, intended exception to that rule, not a bug), and the full
+existing suite (~29M checks) confirming no regressions elsewhere.
+
+**What this round did NOT do**, stated plainly: implement country-specific logic for the ~20
+remaining EU/EEA members (Poland, Netherlands, Belgium, Czechia, Ireland, Portugal, Greece,
+Croatia, Romania, Bulgaria, Slovakia, Slovenia, Estonia, Latvia, Cyprus, Malta, and others).
+Several of these have formats too variable or irregular to safely hardcode from memory without
+real risk of silently corrupting a correct read (Poland's format varies significantly by
+province; the Netherlands has multiple historical formats still in active concurrent use;
+Ireland's year-county-serial format has a variable-length final segment) - getting country
+format details wrong would actively make readings worse, the same failure class this round
+found and fixed twice already. Every plate from every country still benefits from everything
+else the app already does (vehicle detection, the plate-ONNX model, Tesseract, multi-pass
+voting, multi-region candidates) - this round's addition is specifically the position-aware
+character-type correction layer, now covering nine countries with real confidence instead of
+two, not a claim of covering all 27.

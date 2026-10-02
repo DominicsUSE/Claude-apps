@@ -7,11 +7,11 @@ const vm = require('vm');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf-8');
 const start = html.indexOf('/* ---------- plate text helpers');
 const end = html.indexOf('/* ---------- OCR effort profiles ---------- */');
-const src = html.slice(start, end) + '\nmodule.exports = { plateKey, plateCandidates, aggregateVotes };';
+const src = html.slice(start, end) + '\nmodule.exports = { plateKey, plateCandidates, aggregateVotes, fixPlateChars };';
 const sandbox = { module: { exports: {} } };
 vm.createContext(sandbox);
 vm.runInContext(src, sandbox, { filename: 'index.html(extracted)' });
-const { plateCandidates, aggregateVotes } = sandbox.module.exports;
+const { plateCandidates, aggregateVotes, fixPlateChars } = sandbox.module.exports;
 
 let pass = 0, fail = 0;
 function check(name, cond, detail) {
@@ -36,6 +36,14 @@ const cases = [
   ['US single-word "7ABC123"', [['7ABC123', 0]], '7ABC123'],
   ['US hyphenated "ABC-1234" (OCR as one token)', [['ABC-1234', 0]], 'ABC1234'],
   ['German 3-segment "B MV 1234"', [['B', 45], ['MV', 45], ['1234', 0]], 'B MV 1234'],
+  ['German 2-letter district "HH XY 99"', [['HH', 45], ['XY', 45], ['99', 0]], 'HH XY 99'],
+  ['Lithuanian 3+3 "ABC 123"', [['ABC', 45], ['123', 0]], 'ABC 123'],
+  ['Lithuanian glued "ABC123"', [['ABC123', 0]], 'ABC123'],
+  ['Swedish 3+3 "ABC 123"', [['ABC', 45], ['123', 0]], 'ABC 123'],
+  ['Hungarian 3+3 "ABC-123"', [['ABC-123', 0]], 'ABC123'],
+  ['Luxembourg 2+4 "XY 3456"', [['XY', 45], ['3456', 0]], 'XY 3456'],
+  ['Danish 2+5 "AB 12345"', [['AB', 45], ['12345', 0]], 'AB 12345'],
+  ['Spanish 4+3 (digits-then-letters) "1234 BCF"', [['1234', 45], ['BCF', 0]], '1234 BCF'],
   ['French 3-segment "AB-123-CD"', [['AB-123-CD', 0]], 'AB123CD'],
   ['Dutch "12-ABC-3"', [['12-ABC-3', 0]], '12ABC3'],
   ['Australian "ABC123"', [['ABC123', 0]], 'ABC123'],
@@ -100,6 +108,89 @@ for (const [name, words, expected] of cases) {
   ];
   const result = aggregateVotes(passes, { confirmN: 3, confirmScore: 55 });
   check('motion-blur variance does not falsely confirm', result.status !== 'confirmed', JSON.stringify(result));
+}
+
+// ---- Lithuania/Germany shape-aware OCR correction (fixPlateChars) end-to-end through a full
+// OCR-pass simulation: a plate consistently misread with a classic O/0-family confusion in a
+// position its letters-then-digits shape rules out must still confirm as the corrected reading. ----
+{
+  // Lithuanian "ABC123" with the trailing digit consistently OCR'd as letter 'O' instead of '0'.
+  const result = confirm({ lines: [line([word('ABC1O3', 0)], 0, 30)] });
+  check('Lithuanian O/0 confusion corrects to "ABC103"', result.status === 'confirmed' && result.value === 'ABC103', JSON.stringify(result));
+}
+{
+  // German "M AB 1023" with the digit '0' consistently OCR'd as letter 'O'.
+  const built = [word('M', 0)];
+  built.push(word('AB', built[0].bbox.x1 + 45));
+  built.push(word('1O23', built[1].bbox.x1 + 45));
+  const result = confirm({ lines: [line(built, 0, 30)] });
+  check('German O/0 confusion corrects to "M AB 1023"', result.status === 'confirmed' && result.value === 'M AB 1023', JSON.stringify(result));
+}
+{
+  // Danish "AB 10345" with the digit '0' consistently OCR'd as letter 'O'.
+  const built = [word('AB', 0)];
+  built.push(word('1O345', built[0].bbox.x1 + 45));
+  const result = confirm({ lines: [line(built, 0, 30)] });
+  check('Danish O/0 confusion corrects to "AB 10345"', result.status === 'confirmed' && result.value === 'AB 10345', JSON.stringify(result));
+}
+{
+  // Spanish "1254 BCF" (digits-then-letters) with the digit '5' consistently OCR'd as letter 'S'.
+  const built = [word('12S4', 0)];
+  built.push(word('BCF', built[0].bbox.x1 + 45));
+  const result = confirm({ lines: [line(built, 0, 30)] });
+  check('Spanish S/5 confusion corrects to "1254 BCF"', result.status === 'confirmed' && result.value === '1254 BCF', JSON.stringify(result));
+}
+
+// ---- fixPlateChars unit cases (direct, not through a full OCR-pass simulation) ----
+const fixCases = [
+  ['already-valid Lithuanian shape is unchanged', 'ABC123', 'ABC123'],
+  ['already-valid German shape (with spaces) is unchanged', 'B MV 1234', 'B MV 1234'],
+  ['trailing O corrected to 0 in a digit position', 'ABC1O3', 'ABC103'],
+  ['S corrected to 5 in a digit position, spaces preserved', 'B MV 12S4', 'B MV 1254'],
+  ['already-valid Danish shape (2 letters + 5 digits) is unchanged', 'AB 12345', 'AB 12345'],
+  ['Danish O corrected to 0 in a digit position', 'AB 1O345', 'AB 10345'],
+  ['already-valid Spanish shape (digits-then-letters) is unchanged', '1234 BCF', '1234 BCF'],
+  ['Spanish S corrected to 5 in a digit position (mirror-image orientation)', '12S4 BCF', '1254 BCF'],
+  ['UK letters-digits-letters shape has no valid split - unchanged', 'AB12CDE', 'AB12CDE'],
+  ['French letters-digits-letters shape has no valid split - unchanged', 'AB126FD', 'AB126FD'],
+  ['too short for any shape - unchanged', 'A1', 'A1'],
+  ['too long for any shape - unchanged', 'ABCDEFGHIJ', 'ABCDEFGHIJ'],
+  ['empty string - unchanged', '', ''],
+];
+for (const [name, input, expected] of fixCases) {
+  const got = fixPlateChars(input);
+  check('fixPlateChars: ' + name, got === expected, 'input=' + JSON.stringify(input) + ' got=' + JSON.stringify(got) + ' expected=' + JSON.stringify(expected));
+}
+check('fixPlateChars is idempotent on its own output', fixPlateChars(fixPlateChars('ABC1O3')) === fixPlateChars('ABC1O3'));
+
+// ---- fixPlateChars fuzz: 50,000 randomized strings, must never throw, must preserve length
+// and non-alphanumeric characters exactly, and must be a stable fixed point (re-applying its
+// own output never changes it further) ----
+{
+  const SEED = 20261002;
+  function mulberry32(a) { return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  const rand = mulberry32(SEED);
+  function randInt(min, max) { return Math.floor(rand() * (max - min + 1)) + min; }
+  const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -';
+  let fuzzPass = 0, fuzzFail = 0;
+  const N = 50000;
+  for (let i = 0; i < N; i++) {
+    const len = randInt(0, 11);
+    let input = '';
+    for (let j = 0; j < len; j++) input += CHARS[randInt(0, CHARS.length - 1)];
+    let out;
+    try { out = fixPlateChars(input); }
+    catch (e) { fuzzFail++; console.log('FAIL  fixPlateChars fuzz#' + i + ' threw -> ' + JSON.stringify({ input, error: e.message })); continue; }
+    let ok = typeof out === 'string' && out.length === input.length;
+    if (ok) for (let k = 0; k < input.length; k++) if (!/[A-Za-z0-9]/.test(input[k]) && out[k] !== input[k]) ok = false;
+    if (!ok) { fuzzFail++; console.log('FAIL  fixPlateChars fuzz#' + i + ' length/non-alnum preserved -> ' + JSON.stringify({ input, out })); continue; }
+    let out2;
+    try { out2 = fixPlateChars(out); } catch (e) { fuzzFail++; console.log('FAIL  fixPlateChars fuzz#' + i + ' re-apply threw -> ' + JSON.stringify({ input, out, error: e.message })); continue; }
+    if (out2 !== out) { fuzzFail++; console.log('FAIL  fixPlateChars fuzz#' + i + ' not a stable fixed point -> ' + JSON.stringify({ input, out, out2 })); continue; }
+    fuzzPass++;
+  }
+  pass += fuzzPass; fail += fuzzFail;
+  console.log((fuzzFail ? 'FAIL  ' : 'PASS  ') + 'fixPlateChars fuzz: ' + fuzzPass + '/' + N + ' passed (never throws, preserves length/separators, stable fixed point)');
 }
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

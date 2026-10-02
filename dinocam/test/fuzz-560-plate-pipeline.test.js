@@ -11,12 +11,12 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf-8');
 const start = html.indexOf('/* ---------- plate text helpers');
 const end = html.indexOf('/* ---------- OCR effort profiles ---------- */');
 if (start < 0 || end < 0) throw new Error('Could not find plate-helper markers in index.html');
-const src = html.slice(start, end) + '\nmodule.exports = { plateKey, tidyToken, lineReading, fullCropReading, isPlausibleKey, plateCandidates, aggregateVotes };';
+const src = html.slice(start, end) + '\nmodule.exports = { plateKey, tidyToken, lineReading, fullCropReading, isPlausibleKey, plateCandidates, aggregateVotes, fixPlateChars, PLATE_DIGIT_TO_LETTER, PLATE_LETTER_TO_DIGIT };';
 const sandbox = { module: { exports: {} } };
 vm.createContext(sandbox);
 vm.runInContext(src, sandbox, { filename: 'index.html(extracted)' });
-const { plateKey, tidyToken, lineReading, fullCropReading, isPlausibleKey, plateCandidates, aggregateVotes } = sandbox.module.exports;
-for (const [name, fn] of Object.entries({ plateKey, tidyToken, lineReading, fullCropReading, isPlausibleKey, plateCandidates, aggregateVotes }))
+const { plateKey, tidyToken, lineReading, fullCropReading, isPlausibleKey, plateCandidates, aggregateVotes, fixPlateChars, PLATE_DIGIT_TO_LETTER, PLATE_LETTER_TO_DIGIT } = sandbox.module.exports;
+for (const [name, fn] of Object.entries({ plateKey, tidyToken, lineReading, fullCropReading, isPlausibleKey, plateCandidates, aggregateVotes, fixPlateChars }))
   if (typeof fn !== 'function') throw new Error(name + ' did not extract as a function');
 
 let pass = 0, fail = 0;
@@ -91,7 +91,17 @@ for (let i = 0; i < N; i++) {
     for (const line of data.lines || []) {
       for (const w of line.words || []) {
         const t = tidyToken(w && w.text);
-        for (const ch of t) allSourceChars.add(ch);
+        for (const ch of t) {
+          allSourceChars.add(ch);
+          // fixPlateChars() deliberately substitutes a narrow, fixed set of classic OCR
+          // confusion pairs (0<->O, 1<->I, 5<->S, 8<->B) when a plate's shape implies one -
+          // a real, intended exception to "only ever concatenate real reads", not a bypass of
+          // it. Expand the ground truth with exactly those substitutions (via the app's own
+          // confusion maps, not a hand-copied duplicate that could drift from the real ones)
+          // so this still catches any OTHER, unintended character invention.
+          if (PLATE_DIGIT_TO_LETTER[ch]) allSourceChars.add(PLATE_DIGIT_TO_LETTER[ch]);
+          if (PLATE_LETTER_TO_DIGIT[ch]) allSourceChars.add(PLATE_LETTER_TO_DIGIT[ch]);
+        }
       }
     }
     let cands;
