@@ -131,3 +131,20 @@ safety by up to 15. The headlines are listed under **In the news** for each plac
 Every place and country has a **Why X%?** section: what the percentage means
 (very poor, poor, mixed, strong, excellent), and each factor with how many points
 it adds or removes from the 50% midpoint and a plain-language reason.
+
+## Website (buildingatlas.com)
+
+`.github/workflows/website.yml` publishes the map on GitHub Pages and rebuilds it every
+10 minutes with fresh headlines (`site/build_site.py` adds search/social metadata,
+icons, `CNAME`, `robots.txt`, `sitemap.xml` and `news.json`). One-time setup:
+
+1. Repo **Settings > Pages > Build and deployment > Source: GitHub Actions**.
+2. Merge this work into the default branch (Pages and scheduled runs only use it).
+3. Buy `buildingatlas.com` at any registrar and add DNS records:
+   `A @ 185.199.108.153`, `185.199.109.153`, `185.199.110.153`, `185.199.111.153`,
+   `AAAA @ 2606:50c0:8000::153`, `2606:50c0:8001::153`, `2606:50c0:8002::153`,
+   `2606:50c0:8003::153`, and `CNAME www dominicsuse.github.io`.
+4. **Settings > Pages > Custom domain:** `buildingatlas.com`, then tick **Enforce HTTPS**.
+
+On the website the Ask AI tab answers from the map data (Claude and nanobot are only
+available in claude.ai and the Mac app / serve.py).

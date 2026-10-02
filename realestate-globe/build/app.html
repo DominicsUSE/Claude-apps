@@ -1996,7 +1996,9 @@ async function ask(q){
   if (aiState !== "ready"){
     const a = localAnswer(q);
     turns.push({role:"assistant", content:a.text});
-    finishBot(el, a.text, aiState==="off" ? (location.protocol === "atlas:" ? "Quick answer from the map data. For AI answers, start nanobot (nanobot serve) and reopen the chat." : "Quick answer from the map data. For AI answers, open this page in Claude or run it with serve.py and nanobot.") : "Quick answer from the map data.");
+    finishBot(el, a.text, aiState==="off" ? (location.protocol === "atlas:" ? "Quick answer from the map data. For AI answers, start nanobot (nanobot serve) and reopen the chat."
+      : /^https?:$/.test(location.protocol) && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "Answered from the map data."
+      : "Quick answer from the map data. For AI answers, open this page in Claude or run it with serve.py and nanobot.") : "Quick answer from the map data.");
     return;
   }
   setBusy(true);
