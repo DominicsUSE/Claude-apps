@@ -1,0 +1,2178 @@
+<title>Build Atlas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: full-bleed globe over a starfield; floating search + mode switch top-left,
+   legend bottom-left, detail panel docked right (bottom sheet on phones).
+   One deliberate night look: deep navy space, glass panels, semantic green/amber/red. */
+:root{
+  --space:#04070e;
+  --panel:rgba(9,15,26,.78);
+  --panel-solid:#0b1322;
+  --line:rgba(160,190,225,.14);
+  --line-2:rgba(160,190,225,.26);
+  --ink:#eaf0f7;
+  --muted:#8b9bb1;
+  --accent:#8ec5ff;
+  --good:#38d08a;
+  --mid:#f4c430;
+  --bad:#f25f57;
+  --f-display:"Bricolage Grotesque","Avenir Next","Segoe UI",system-ui,sans-serif;
+  --f-body:-apple-system,BlinkMacSystemFont,"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --f-data:ui-monospace,"SF Mono","IBM Plex Mono",Menlo,Consolas,monospace;
+  --r:14px;
+  --shadow:0 18px 50px rgba(0,0,0,.45),0 2px 6px rgba(0,0,0,.3);
+  color-scheme:dark;
+}
+html,body{height:100%}
+[hidden]{display:none!important}
+body{margin:0;background:var(--space);color:var(--ink);font:14px/1.45 var(--f-body);overflow:hidden;-webkit-font-smoothing:antialiased}
+#app{position:relative;height:100%;width:100%}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#stars,#earth,#tint{pointer-events:none}
+.dragbar{display:none}
+html.desktop-mac .dragbar{display:block;position:absolute;top:0;left:0;right:0;height:38px;z-index:5;-webkit-app-region:drag}
+html.desktop-mac .top{top:46px}
+html.desktop-mac .panel{top:46px}
+#tint{mix-blend-mode:color;opacity:0}
+#globe{touch-action:none;cursor:grab}
+#globe.dragging{cursor:grabbing}
+#globe.pointing{cursor:pointer}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.search input::-webkit-search-decoration,.search input::-webkit-search-cancel-button,.search input::-webkit-search-results-button{-webkit-appearance:none;appearance:none;display:none}
+.search input:focus{outline:none;border-color:rgba(142,197,255,.6);box-shadow:0 0 0 3px rgba(142,197,255,.18),var(--shadow)}
+.composer textarea:focus{outline:none;border-color:rgba(142,197,255,.6);box-shadow:0 0 0 3px rgba(142,197,255,.15)}
+.kbd{position:absolute;right:10px;top:23px;transform:translateY(-50%);display:flex;gap:2px;pointer-events:none}
+.kbd kbd{font:500 11px/1 var(--f-body);color:var(--muted);padding:4px 6px;border-radius:6px;border:1px solid var(--line-2);background:rgba(255,255,255,.04)}
+.search input:focus ~ .kbd{opacity:0}
+::selection{background:rgba(142,197,255,.35)}
+input,textarea{caret-color:var(--accent)}
+*{scrollbar-width:thin;scrollbar-color:rgba(160,190,225,.25) transparent}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(160,190,225,.22);border-radius:10px;border:3px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background-color:rgba(160,190,225,.38)}
+.suggest::-webkit-scrollbar{display:none}
+@media (prefers-reduced-transparency:reduce){.glass{background:var(--panel-solid);backdrop-filter:none;-webkit-backdrop-filter:none}}
+.glass{background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(16px) saturate(140%);-webkit-backdrop-filter:blur(16px) saturate(140%);box-shadow:var(--shadow)}
+
+.top{position:absolute;top:16px;left:16px;display:flex;flex-direction:column;gap:10px;width:min(360px,calc(100% - 32px));z-index:3}
+.brand{display:flex;align-items:center;gap:10px}
+.mark{width:30px;height:30px;flex:none}
+.brand h1{margin:0;font:800 23px/1 var(--f-display);letter-spacing:-.02em}
+.brand p{margin:2px 0 0;color:var(--muted);font-size:12px}
+.search{position:relative}
+.search input{-webkit-appearance:none;appearance:none;width:100%;box-sizing:border-box;padding-right:64px!important;padding:12px 14px 12px 40px;border-radius:var(--r);color:var(--ink);font:15px var(--f-body)}
+.search input::placeholder{color:var(--muted)}
+.search svg{position:absolute;left:13px;top:23px;transform:translateY(-50%);width:16px;height:16px;stroke:var(--muted);fill:none;stroke-width:2;z-index:1;pointer-events:none}
+.results{list-style:none;margin:6px 0 0;padding:4px;border-radius:var(--r);max-height:320px;overflow:auto;background:var(--panel-solid)}
+.results li{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;cursor:pointer}
+.results li[aria-selected="true"],.results li:hover{background:rgba(142,197,255,.1)}
+.results .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.results .sub{color:var(--muted);font-size:12px}
+
+.modes{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:4px;border-radius:var(--r)}
+.modes button{display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:8px 8px;min-width:0;border:0;border-radius:10px;background:transparent;cursor:pointer;text-align:left;color:var(--muted);transition:background .2s,color .2s}
+.modes button b{font:600 12.5px var(--f-body);color:inherit;display:flex;align-items:center;gap:6px}
+.modes button small{font-size:11px;line-height:1.25}
+.modes button svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2}
+.modes button:hover{color:var(--ink)}
+.modes button[aria-pressed="true"]{background:linear-gradient(180deg,rgba(142,197,255,.2),rgba(142,197,255,.08));color:var(--ink);box-shadow:inset 0 0 0 1px rgba(142,197,255,.35)}
+
+.pct{font:600 12px/1 var(--f-data);padding:4px 7px;border-radius:999px;color:#06101b;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pct.g{background:var(--good)}.pct.y{background:var(--mid)}.pct.r{background:var(--bad)}
+
+.legend{position:absolute;left:16px;bottom:16px;z-index:3;display:flex;flex-direction:column;gap:9px;padding:12px 14px;border-radius:var(--r);max-width:min(400px,calc(100% - 32px));box-sizing:border-box}
+.legend .lbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.ramp{height:6px;border-radius:3px;background:linear-gradient(90deg,var(--bad),var(--mid) 55%,var(--good))}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:flex;align-items:center;gap:7px;padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.02);cursor:pointer;font-size:12.5px}
+.chip i{width:9px;height:9px;border-radius:50%;display:block;box-shadow:0 0 8px currentColor}
+.chip[aria-pressed="false"]{opacity:.38}
+.chip b{font:500 11px var(--f-data);color:var(--muted)}
+.chip.risk{align-self:flex-start}
+.chip i.hatch{width:12px;height:12px;border-radius:3px;box-shadow:none;background:repeating-linear-gradient(135deg,var(--bad) 0 2px,transparent 2px 5px);border:1px solid var(--bad)}
+.note{font-size:11px;color:var(--muted);max-width:340px}
+.zoomhint{font:500 11px var(--f-data);color:var(--accent)}
+
+.ctrls{position:absolute;right:16px;bottom:16px;z-index:3;display:flex;flex-direction:column;gap:6px}
+.ctrls button{width:42px;height:42px;border-radius:12px;cursor:pointer;display:grid;place-items:center}
+.ctrls button:hover{border-color:var(--accent)}
+.ctrls svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2}
+
+.panel{position:absolute;top:16px;right:16px;bottom:16px;width:356px;z-index:2;display:flex;flex-direction:column;border-radius:18px;overflow:hidden}
+body.has-panel .ctrls{right:388px}
+.panel-scroll{overflow:auto;padding:20px;display:flex;flex-direction:column;gap:16px;min-height:0}
+.panel h2{margin:0;font:800 26px/1.08 var(--f-display);letter-spacing:-.015em;text-wrap:balance}
+.panel h3{margin:0;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.eyebrow{color:var(--muted);font-size:13px;margin-bottom:3px}
+.back{align-self:flex-start;background:none;border:0;color:var(--accent);cursor:pointer;padding:0;font-size:13px}
+.hero{display:flex;align-items:center;gap:16px}
+.ringwrap{position:relative;width:96px;height:96px;flex:none}
+.ringwrap svg{width:100%;height:100%;transform:rotate(-90deg)}
+.ringwrap .num{position:absolute;inset:0;display:grid;place-items:center;font:800 30px/1 var(--f-display);font-variant-numeric:tabular-nums}
+.ringwrap .num small{font-size:14px;color:var(--muted);font-weight:500}
+.verdict{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;font-weight:600;font-size:13px}
+.verdict.g{background:rgba(56,208,138,.14);color:var(--good)}
+.verdict.y{background:rgba(244,196,48,.14);color:var(--mid)}
+.verdict.r{background:rgba(242,95,87,.14);color:var(--bad)}
+.verdict i{width:8px;height:8px;border-radius:50%;background:currentColor}
+.meta{color:var(--muted);font-size:13px;margin-top:6px}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.tile{padding:9px 8px;min-width:0;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.02);display:flex;flex-direction:column;gap:4px;cursor:pointer;text-align:left}
+.tile[aria-pressed="true"]{border-color:rgba(142,197,255,.5);background:rgba(142,197,255,.08)}
+.tile span{font-size:11px;color:var(--muted)}
+.tile b{font:700 20px/1 var(--f-display);font-variant-numeric:tabular-nums}
+.tile b.g{color:var(--good)}.tile b.y{color:var(--mid)}.tile b.r{color:var(--bad)}
+.price{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:12px 14px;border-radius:12px;background:rgba(255,255,255,.03);border:1px solid var(--line)}
+.price span{color:var(--muted);font-size:13px}
+.price b{font:600 18px var(--f-data);font-variant-numeric:tabular-nums}
+.bars{display:flex;flex-direction:column;gap:10px}
+.bar{display:grid;grid-template-columns:1fr auto;gap:5px 10px;align-items:center}
+.bar .t{font-size:13px}
+.bar .v{font:500 12px var(--f-data);color:var(--muted);font-variant-numeric:tabular-nums}
+.bar .track{grid-column:1/-1;height:6px;border-radius:3px;background:rgba(160,190,225,.1);overflow:hidden}
+.bar .fill{height:100%;border-radius:3px}
+.adj{display:grid;grid-template-columns:1fr auto;gap:6px 12px;font-size:13px;margin:0}
+.adj dt{color:var(--muted)}
+.adj dd{margin:0;font:500 13px var(--f-data);text-align:right;font-variant-numeric:tabular-nums}
+.adj .tot{color:var(--ink);font-weight:600;border-top:1px solid var(--line);padding-top:7px}
+.list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.list li{display:flex;align-items:center;gap:10px;padding:9px 6px;border-radius:9px;cursor:pointer;border-bottom:1px solid var(--line)}
+.list li:last-child{border-bottom:0}
+.list li:hover{background:rgba(142,197,255,.07)}
+.list .rk{font:500 11px var(--f-data);color:var(--muted);width:20px;font-variant-numeric:tabular-nums}
+.list .nm{flex:1;min-width:0}
+.list .nm div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list .nm small{color:var(--muted);font-size:12px}
+.list .side{display:flex;flex-direction:column;align-items:flex-end;gap:3px}
+.list .side em{font:500 11px var(--f-data);color:var(--muted);font-style:normal}
+.tabs{display:flex;gap:4px;padding:3px;border-radius:11px;background:rgba(160,190,225,.07)}
+.tabs button{flex:1;padding:7px 4px;border:0;border-radius:8px;background:transparent;cursor:pointer;font-size:13px;color:var(--muted)}
+.tabs button[aria-selected="true"]{background:rgba(142,197,255,.15);color:var(--ink)}
+.p{margin:0;color:var(--muted);font-size:13px}
+.why{display:flex;flex-direction:column;gap:12px}
+.newsline{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink)}
+.newsline i{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 0 rgba(56,208,138,.6);animation:pulse 2s infinite}
+.newsline.off i{background:var(--mid);animation:none}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(56,208,138,.55)}70%{box-shadow:0 0 0 7px rgba(56,208,138,0)}100%{box-shadow:0 0 0 0 rgba(56,208,138,0)}}
+.newsb{display:flex;flex-direction:column;gap:10px}
+.newsb b.g{color:var(--good)}.newsb b.r{color:var(--bad)}
+.news-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}
+.news-list li{display:grid;grid-template-columns:10px 1fr;gap:9px;align-items:start}
+.news-list li i{width:8px;height:8px;border-radius:50%;margin-top:6px}
+.news-list li i.g{background:var(--good)}.news-list li i.r{background:var(--bad)}.news-list li i.n{background:var(--muted)}
+.news-list a{color:var(--ink);font-size:13px;line-height:1.4;text-decoration:none}
+.news-list a:hover{color:var(--accent);text-decoration:underline}
+.news-list small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px}
+.ex{padding:14px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.02)}
+.ex-sum{margin:0;font-size:13.5px;line-height:1.5}
+.ex-sum .verdict{margin-right:4px;vertical-align:1px;padding:3px 8px;font-size:12px}
+.ex h4{margin:0 0 6px;font-size:12px;font-weight:600;color:var(--muted)}
+.ex-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.ex-list li{display:flex;flex-direction:column;gap:2px}
+.ex-h{display:flex;justify-content:space-between;gap:10px;font-size:13px;font-weight:600}
+.ex-h em{font:500 11.5px var(--f-data);color:var(--muted);font-style:normal;margin-left:4px}
+.ex-h b{font:600 12px var(--f-data);font-variant-numeric:tabular-nums}
+.ex-h b.g{color:var(--good)}.ex-h b.r{color:var(--bad)}
+.ex-list p{margin:0;font-size:12.5px;color:var(--muted);line-height:1.4}
+.ex-scale{margin:0;font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px}
+.reasons{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.reasons li{display:grid;grid-template-columns:20px 1fr;gap:8px;align-items:start;font-size:13px;line-height:1.4}
+.reasons li i{width:20px;height:20px;border-radius:6px;display:grid;place-items:center;font:700 12px/1 var(--f-data);font-style:normal}
+.reasons li.con i{background:rgba(242,95,87,.16);color:var(--bad)}
+.reasons li.pro i{background:rgba(56,208,138,.16);color:var(--good)}
+.reasons li.none{color:var(--muted);grid-template-columns:1fr}
+.pot{display:flex;flex-direction:column;gap:8px;padding:14px;border-radius:12px;border:1px solid var(--line);background:linear-gradient(135deg,rgba(142,197,255,.08),rgba(142,197,255,.02))}
+.pot .phead{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:10px}
+.pot .phead span{font-size:13px;color:var(--muted)}
+.pot .phead b{font:800 22px/1 var(--f-display);font-variant-numeric:tabular-nums}
+.pot .phead b.g{color:var(--good)}.pot .phead b.y{color:var(--mid)}.pot .phead b.r{color:var(--bad)}
+.pot p{margin:0;font-size:13px}
+.pot p.sub{color:var(--muted);font-size:12px}
+.pot.prop .phead span{color:var(--ink);font-weight:600}
+.pot .track{height:6px;border-radius:3px;background:rgba(160,190,225,.1);overflow:hidden}
+.pot .track div{height:100%;border-radius:3px}
+.arrows{display:flex;gap:12px;font-size:12px;color:var(--muted);align-items:center}
+.arrows span{display:flex;align-items:center;gap:5px}
+.tri{width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent}
+.tri.up{border-bottom:8px solid var(--good)}
+.tri.dn{border-top:8px solid var(--bad)}
+.tri.fl{border-left:8px solid var(--mid);border-top:5px solid transparent;border-bottom:5px solid transparent;border-right:0}
+
+.tip{position:absolute;z-index:4;pointer-events:none;padding:10px 12px;border-radius:12px;font-size:13px;display:flex;flex-direction:column;gap:6px;white-space:nowrap;left:0;top:0;will-change:transform;background:var(--panel-solid)}
+.tip .h{display:flex;gap:10px;align-items:center;justify-content:space-between}
+.tip small{display:block;color:var(--muted);font-size:11px}
+.tip .row{display:flex;gap:10px;font:500 11px var(--f-data);color:var(--muted)}
+.tip .row b{font-weight:600}
+.tip .row b.g{color:var(--good)}.tip .row b.y{color:var(--mid)}.tip .row b.r{color:var(--bad)}
+.tip .why1{white-space:normal;max-width:300px;font-size:12px;display:grid;grid-template-columns:auto 1fr;gap:6px;align-items:start}
+.tip .why1 i{font:700 11px/1.4 var(--f-data);font-style:normal}
+.tip .why1.con i{color:var(--bad)}.tip .why1.pro i{color:var(--good)}
+
+.loading{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font:500 13px var(--f-data);z-index:1}
+
+@media (max-width:760px){
+  .panel{top:auto;left:0;right:0;bottom:0;width:auto;max-height:44%;border-radius:18px 18px 0 0;padding-bottom:env(safe-area-inset-bottom,0px)}
+  .panel.collapsed{max-height:56px}
+  .panel.chatting{max-height:62%}
+  body.chat-open .legend{display:none}
+  .ptabs{margin:6px 12px 0}
+  body.has-panel .ctrls{right:16px}
+  .ctrls{bottom:auto;top:16px}
+  .ctrls button{width:38px;height:38px}
+  .top{width:calc(100% - 86px)}
+  .brand p,.modes small{display:none}
+  .modes button{align-items:center;padding:8px 2px}
+  .modes button svg{display:none}
+  .legend{bottom:calc(44% + 10px);padding:8px 10px}
+  body.sheet-collapsed .legend{bottom:66px}
+  .legend .note,.legend .lbl,.legend .ramp,.legend .zoomhint,.legend .arrows,.chip b{display:none}
+  .chips{flex-wrap:nowrap;gap:4px}
+  .chip{padding:5px 8px;font-size:11px;gap:5px;white-space:nowrap}
+  .grab{display:block!important}
+}
+.grab{display:none;width:100%;border:0;background:none;padding:8px 0 0;cursor:pointer}
+.grab::before{content:"";display:block;margin:0 auto;width:38px;height:4px;border-radius:2px;background:var(--muted);opacity:.6}
+.ptabs{display:flex;gap:4px;margin:14px 16px 0;padding:3px;border-radius:12px;background:rgba(160,190,225,.07);flex:none}
+.ptabs button{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px;border:0;border-radius:9px;background:transparent;cursor:pointer;font-size:13px;font-weight:600;color:var(--muted)}
+.ptabs button svg{width:15px;height:15px;fill:currentColor}
+.ptabs button[aria-selected="true"]{background:rgba(142,197,255,.16);color:var(--ink)}
+#tab-chat[aria-selected="true"] svg{color:var(--accent)}
+.chat{display:flex;flex-direction:column;min-height:0;flex:1}
+.msgs{flex:1;overflow:auto;padding:16px 16px 8px;display:flex;flex-direction:column;gap:12px;min-height:0}
+.msg{max-width:92%;font-size:13.5px;line-height:1.5;overflow-wrap:anywhere}
+.msg.user{align-self:flex-end;background:rgba(142,197,255,.16);border:1px solid rgba(142,197,255,.3);padding:8px 12px;border-radius:14px 14px 4px 14px}
+.msg.bot{align-self:flex-start;display:flex;flex-direction:column;gap:6px}
+.msg.bot .who{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:6px}
+.msg.bot .who i{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+.msg.bot p{margin:0}
+.msg.bot ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:5px}
+.msg.bot .note{font-size:11.5px;color:var(--muted)}
+.msg.bot .thinking{color:var(--muted);display:flex;gap:4px;align-items:center}
+.msg.bot .thinking span{width:6px;height:6px;border-radius:50%;background:var(--muted);animation:blink 1.2s infinite both}
+.msg.bot .thinking span:nth-child(2){animation-delay:.2s}.msg.bot .thinking span:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+.plink{display:inline;border:0;padding:0 2px;margin:0;background:none;color:var(--accent);font:inherit;font-weight:600;cursor:pointer;text-decoration:underline;text-decoration-color:rgba(142,197,255,.4);text-underline-offset:2px}
+.plink:hover{text-decoration-color:var(--accent)}
+.picks{display:flex;flex-direction:column;gap:6px;margin-top:2px}
+.pick{display:grid;grid-template-columns:22px 1fr auto;gap:8px;align-items:center;padding:8px 10px;border-radius:11px;border:1px solid var(--line);background:rgba(255,255,255,.03);cursor:pointer;text-align:left}
+.pick:hover{border-color:rgba(142,197,255,.45);background:rgba(142,197,255,.06)}
+.pick .n{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--accent);color:#06101b;font:700 11px var(--f-data)}
+.pick .t{min-width:0}
+.pick .t div{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pick .t small{color:var(--muted);font-size:11.5px}
+.suggest{display:flex;gap:6px;overflow-x:auto;padding:4px 16px 8px;flex:none;scrollbar-width:none}
+.suggest button{flex:none;padding:7px 11px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.03);cursor:pointer;font-size:12.5px;color:var(--ink);white-space:nowrap}
+.suggest button:hover{border-color:rgba(142,197,255,.5)}
+.composer{display:flex;gap:8px;align-items:flex-end;padding:10px 16px 16px;border-top:1px solid var(--line);flex:none}
+.composer textarea{-webkit-appearance:none;appearance:none;box-shadow:none;flex:1;min-width:0;resize:none;max-height:120px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:rgba(4,8,16,.5);color:var(--ink);font:14px/1.4 var(--f-body)}
+.composer textarea::placeholder{color:var(--muted)}
+.composer button{width:42px;height:42px;flex:none;border-radius:12px;border:0;background:var(--accent);color:#06101b;cursor:pointer;display:grid;place-items:center}
+.composer button svg{width:18px;height:18px;fill:currentColor}
+.composer button.stop{background:rgba(242,95,87,.9)}
+.composer button:disabled{opacity:.5;cursor:default}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.panel-scroll.in>*{animation:rise .32s cubic-bezier(.2,.7,.2,1) both}
+.panel-scroll.in>*:nth-child(2){animation-delay:.03s}
+.panel-scroll.in>*:nth-child(3){animation-delay:.06s}
+.panel-scroll.in>*:nth-child(4){animation-delay:.09s}
+.panel-scroll.in>*:nth-child(n+5){animation-delay:.12s}
+.chip{transition:opacity .25s,border-color .2s}
+.list li,.results li,.tile,.ctrls button{transition:background .18s,border-color .18s}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div id="app">
+  <div class="dragbar" aria-hidden="true"></div>
+  <canvas id="stars" aria-hidden="true"></canvas>
+  <canvas id="earth" aria-hidden="true"></canvas>
+  <canvas id="tint" aria-hidden="true"></canvas>
+  <canvas id="globe" aria-label="Interactive globe of real-estate opportunity scores"></canvas>
+  <div class="loading" id="loading">Loading map…</div>
+
+  <div class="top">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="mk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#38d08a"/><stop offset=".55" stop-color="#f4c430"/><stop offset="1" stop-color="#f25f57"/></linearGradient></defs><circle cx="16" cy="16" r="14" fill="none" stroke="url(#mk)" stroke-width="2.5"/><path d="M9 21V13l7-5 7 5v8h-4v-5h-6v5z" fill="#eaf0f7"/></svg>
+      <div><h1>Build Atlas</h1><p>Where to start a real-estate company</p></div>
+    </div>
+    <div class="search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" class="glass" type="search" placeholder="Search a city, town or country" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Search places" aria-controls="results">
+      <span class="kbd" id="kbd" aria-hidden="true" hidden><kbd id="kbd-mod">⌘</kbd><kbd>K</kbd></span>
+      <ul class="results glass" id="results" role="listbox" hidden></ul>
+    </div>
+    <div class="modes glass" role="group" aria-label="Rate places by">
+      <button id="m-overall" data-m="overall" aria-pressed="true"><b><svg viewBox="0 0 24 24"><path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"/></svg>Overall</b><small>Best all-round</small></button>
+      <button id="m-price" data-m="price" aria-pressed="false"><b><svg viewBox="0 0 24 24"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/></svg>Price</b><small>Cheapest to build</small></button>
+      <button id="m-potential" data-m="potential" aria-pressed="false"><b><svg viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>Potential</b><small>Most growth ahead</small></button>
+      <button id="m-value" data-m="value" aria-pressed="false"><b><svg viewBox="0 0 24 24"><path d="M6 3h12l3 6-9 12L3 9z"/><path d="M3 9h18M9 3l3 18 3-18"/></svg>Value</b><small>Cheap + growth</small></button>
+    </div>
+  </div>
+
+  <div class="legend glass">
+    <div class="lbl" id="legendTitle">Overall opportunity</div>
+    <div class="ramp" aria-hidden="true"></div>
+    <div class="chips">
+      <button class="chip" id="chip-g" aria-pressed="true"><i style="background:var(--good);color:var(--good)"></i><span id="lab-g"></span> <b id="cnt-g"></b></button>
+      <button class="chip" id="chip-y" aria-pressed="true"><i style="background:var(--mid);color:var(--mid)"></i><span id="lab-y"></span> <b id="cnt-y"></b></button>
+      <button class="chip" id="chip-r" aria-pressed="true"><i style="background:var(--bad);color:var(--bad)"></i><span id="lab-r"></span> <b id="cnt-r"></b></button>
+    </div>
+    <button class="chip risk" id="chip-risk" aria-pressed="true" title="Hatch countries where the government may seize property or foreigners cannot really own it"><i class="hatch"></i>Seizure risk <b id="cnt-risk"></b></button>
+    <div class="arrows" id="arrows"><span><i class="tri up"></i>High growth potential</span><span><i class="tri fl"></i>Some</span><span><i class="tri dn"></i>Low</span></div>
+    <div class="newsline" id="newsline" hidden><i></i><span></span></div>
+    <div class="zoomhint" id="zoomhint"></div>
+    <div class="note" id="legendNote"></div>
+  </div>
+
+  <div class="ctrls">
+    <button class="glass" id="zin" aria-label="Zoom in"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button class="glass" id="zout" aria-label="Zoom out"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+    <button class="glass" id="home" aria-label="Show whole globe"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/></svg></button>
+  </div>
+
+  <aside class="panel glass" id="panel">
+    <button class="grab" id="grab" aria-label="Expand or collapse panel"></button>
+    <div class="ptabs" role="tablist" aria-label="Panel">
+      <button role="tab" id="tab-explore" aria-selected="true">Explore</button>
+      <button role="tab" id="tab-chat" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>Ask AI</button>
+    </div>
+    <div class="panel-scroll" id="panelBody" aria-live="polite"></div>
+    <div class="chat" id="chat" hidden>
+      <div class="msgs" id="msgs" role="log" aria-live="polite"></div>
+      <div class="suggest" id="suggest"></div>
+      <form class="composer" id="composer">
+        <textarea id="chatIn" rows="1" placeholder="Ask where to build…" aria-label="Message the AI assistant"></textarea>
+        <button type="submit" id="send" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-2-6z"/></svg></button>
+      </form>
+    </div>
+  </aside>
+
+  <div class="tip glass" id="tip" hidden></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script>
+/*__DATA__*/
+</script>
+<script>
+(function(){
+"use strict";
+const $ = id => document.getElementById(id);
+const DEG = 180/Math.PI;
+
+/* ---------- scoring ---------- */
+const FACTORS = [
+  ["D","Demand growth","Population growth, urbanisation, new households"],
+  ["E","Economy","GDP growth outlook, incomes, inflation"],
+  ["A","Affordability & yield","Price-to-income, rental yields, land and build cost"],
+  ["S","Stability","Rule of law, property rights, political and currency risk"],
+  ["F","Business & finance","Permits, foreign ownership, mortgage market depth"],
+  ["P","Property safety","How likely the government is to seize, nationalise or block your property, and limits on foreign owners"]
+];
+const POT_W = {D:.45, E:.40, S:.15};
+const clamp = v => Math.max(3, Math.min(97, Math.round(v)));
+// Price score: cheaper per m2 = higher. $400/m2 -> 100, $25,000/m2 -> 0 (log scale).
+const LMAX = Math.log(25000), LMIN = Math.log(400);
+const priceScore = p => clamp(100*(LMAX-Math.log(p))/(LMAX-LMIN));
+const priceAt = s => Math.exp(LMAX - s/100*(LMAX-LMIN));
+
+// Best value: cheap to buy and build AND strong growth, marked down where it is unsafe
+// or where the government may take your property.
+function valueOf(price, potential, stability, property){
+  return clamp(.40*price + .40*potential + .10*stability + .10*property - (stability < 30 ? 15 : 0) - (property < 25 ? 10 : 0));
+}
+// property safety bands
+const SAFE_MIN = 35;   // below this, rankings for cheap places leave the country out
+const propRate = v => v >= 70 ? "g" : v >= 45 ? "y" : "r";
+const PROP_LABEL = {g:"Property is safe", y:"Some risk or limits", r:"High risk: seizure or no real ownership"};
+// Country scores. c.f0 keeps the base factors; c.news (from live headlines) nudges them.
+const clamp100 = v => Math.max(0, Math.min(100, Math.round(v)));
+function scoreCountry(c){
+  if (!c.f0) c.f0 = c.f.slice();
+  const n = c.news || {adj:0, propAdj:0};
+  c.f = c.f0.slice();
+  c.f[5] = clamp100(c.f0[5] + n.propAdj);
+  c.overall0 = FACTORS.reduce((s,[f],i)=>s + c.f[i]*WEIGHTS[f], 0);
+  c.overall = c.overall0 + n.adj;
+  c.potential = c.f[0]*POT_W.D + c.f[1]*POT_W.E + c.f[3]*POT_W.S + n.adj*0.8;
+  c.price = priceScore(c.p);
+  c.value = valueOf(c.price, c.potential, c.f[3], c.f[5]);
+}
+for (const k in COUNTRIES) scoreCountry(COUNTRIES[k]);
+function sizeMod(pop){
+  if (pop>=1e7) return 5; if (pop>=5e6) return 4; if (pop>=1e6) return 3;
+  if (pop>=3e5) return 1; if (pop>=1e5) return 0; if (pop>=3e4) return -2; return -4;
+}
+function sizePrice(pop){
+  if (pop>=1e7) return 1.6; if (pop>=5e6) return 1.45; if (pop>=1e6) return 1.25;
+  if (pop>=3e5) return 1.05; if (pop>=1e5) return .9; if (pop>=3e4) return .75; return .6;
+}
+const rate = s => s>=65?"g":s>=50?"y":"r";
+const P = PLACES.map((r,i)=>{
+  const [name,lon,lat,pop,mz,ck,adm1,cap,hot,cp] = r;
+  const c = COUNTRIES[ck];
+  const sm = sizeMod(pop), cm = cap?2:0;
+  const ppm = cp || Math.round(c.p * sizePrice(pop) * (cap?1.15:1) * (1+Math.abs(hot)*0.03) / 50) * 50;
+  const p = {i,name,lon,lat,pop,mz,ck,adm1,cap,hot,sm,cm,ppm,lname:name.toLowerCase(),known:!!cp};
+  scorePlace(p);
+  return p;
+});
+function scorePlace(p){
+  const c = COUNTRIES[p.ck];
+  p.s = {
+    overall: clamp(c.overall + p.sm + p.cm + p.hot),
+    price: priceScore(p.ppm),
+    potential: clamp(c.potential + p.sm*0.6 + (p.cap?1:0) + p.hot*1.3 + (c.f[2]-50)*0.1)
+  };
+  p.s.value = valueOf(p.s.price, p.s.potential, c.f[3], c.f[5]);
+}
+const RCOL = {g:"#38d08a", y:"#f4c430", r:"#f25f57"};
+const MODES = {
+  overall:{title:"Overall opportunity", noun:"Opportunity score",
+    labels:{g:"Strong opportunity", y:"Moderate opportunity", r:"High risk"},
+    chips:{g:"65–100%", y:"50–64%", r:"0–49%"},
+    note:"Mix of demand, economy, affordability, stability and ease of doing business.",
+    low:"Riskiest"},
+  price:{title:"Price to buy and build", noun:"Price score",
+    labels:{g:"Low cost", y:"Mid-priced", r:"Expensive"},
+    chips:{g:"<"+usd(priceAt(65))+"/m²", y:usd(priceAt(65))+"–"+usd(priceAt(50)), r:">"+usd(priceAt(50))},
+    note:"Green is cheaper land and homes, based on estimated typical apartment prices per m².",
+    low:"Priciest"},
+  potential:{title:"Growth potential", noun:"Potential score",
+    labels:{g:"High potential", y:"Some potential", r:"Low potential"},
+    chips:{g:"65–100%", y:"50–64%", r:"0–49%"},
+    note:"Where demand and prices should grow most: population, economy, local momentum.",
+    low:"Slowest"},
+  value:{title:"Best value", noun:"Value score",
+    labels:{g:"Great value", y:"Fair value", r:"Poor value"},
+    chips:{g:"65–100%", y:"50–64%", r:"0–49%"},
+    note:"Cheap to buy and build and strong growth ahead, marked down where it is unsafe.",
+    low:"Worst value"}
+};
+function usd(v){ return v>=1000 ? "$"+(v/1000).toFixed(v>=10000?0:1).replace(/\.0$/,"")+"k" : "$"+Math.round(v/10)*10; }
+let mode = "overall";
+try { const m = localStorage.getItem("buildatlas.mode"); if (MODES[m]) mode = m; } catch(e){}
+const S = p => p.s[mode];
+const CS = c => Math.round(c[mode]);
+
+const byCountry = {};
+P.forEach(p=>{ (byCountry[p.ck] ||= []).push(p); });
+function sortCountryLists(){ for (const k in byCountry) byCountry[k].sort((a,b)=>S(b)-S(a) || b.pop-a.pop); }
+
+/* ---------- topojson decode (Polygon / MultiPolygon only) ---------- */
+function decode(topo){
+  const [sx,sy] = topo.transform.scale, [tx,ty] = topo.transform.translate;
+  const arcs = topo.arcs.map(a=>{ let x=0,y=0; return a.map(([dx,dy])=>{ x+=dx; y+=dy; return [x*sx+tx, y*sy+ty]; }); });
+  const ring = idx => { const pts=[]; idx.forEach(i=>{ const a = i<0 ? arcs[~i].slice().reverse() : arcs[i]; if (pts.length) pts.pop(); for (const p of a) pts.push(p); }); return pts; };
+  return topo.objects.countries.geometries.filter(g=>g.type).map(g=>({
+    type:"Feature", k:g.k,
+    geometry: g.type==="Polygon" ? {type:"Polygon",coordinates:g.arcs.map(ring)}
+                                 : {type:"MultiPolygon",coordinates:g.arcs.map(p=>p.map(ring))}
+  }));
+}
+const F50 = decode(TOPO50), F110 = decode(TOPO110);
+for (const f of F50.concat(F110)){
+  const polys = f.geometry.type==="Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates;
+  let best=null, ba=-1;
+  for (const pc of polys){ const g={type:"Polygon",coordinates:pc}; const a=d3.geoArea(g); if (a>ba && a<6){ba=a;best=g;} }
+  f.anchor = best ? d3.geoCentroid(best) : d3.geoCentroid(f);
+  f.bigArea = ba;
+  const b = d3.geoBounds(f);
+  f.center = d3.geoCentroid(f);
+  f.rad = Math.max(d3.geoDistance(f.center,b[0]), d3.geoDistance(f.center,b[1]), d3.geoDistance(f.center,[b[0][0],b[1][1]]), d3.geoDistance(f.center,[b[1][0],b[0][1]]));
+  if (d3.geoArea(f) > 6) f.rad = Math.PI;
+}
+const featByKey = {};
+F50.forEach(f=>{ featByKey[f.k]=f; });
+// continuous fill colour for countries, discrete buckets for dots and pills
+const fillScale = d3.scaleLinear().domain([25,50,57,65,85]).range(["#c2413a","#e0703c","#e7b62f","#3fbf7f","#2fd89a"]).clamp(true);
+
+/* ---------- canvases + projection ---------- */
+// Layers, bottom to top: stars, satellite globe (WebGL), score tint (CSS colour blend), overlay.
+const canvas = $("globe"), ctx = canvas.getContext("2d");
+const starsC = $("stars"), sctx = starsC.getContext("2d");
+const tintC = $("tint"), tctx = tintC.getContext("2d");
+const earthC = $("earth");
+let W=0, H=0, DPR=1, TDPR=1, R0=300;
+const proj = d3.geoOrthographic().clipAngle(90).precision(0.3);
+const path = d3.geoPath(proj, ctx);
+const ppath = d3.geoPath(proj);          // writes into Path2D objects
+const grat = d3.geoGraticule10();
+const state = { rot:[20,-22,0], k:1 };
+let sel = null;
+const show = {g:true,y:true,r:true};
+let hits = [];
+let dirty = true;
+const MINK = 0.7;
+let MAXK = 400;
+const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const zoom = d3.zoom().scaleExtent([MINK,MAXK]).clickDistance(4)
+  .filter(ev => ev.type!=="wheel" && !ev.ctrlKey && !ev.button && ev.type!=="dblclick");
+const clampLat = v => Math.max(-89, Math.min(89, v));
+const clamp01 = v => Math.max(0, Math.min(1, v));
+
+// fixed pseudo-random starfield
+const STARS = (()=>{ let s=7; const rnd=()=>((s=(s*16807)%2147483647)/2147483647); return Array.from({length:420},()=>[rnd(),rnd(),rnd()]); })();
+function drawStars(){
+  starsC.width = Math.round(W*DPR); starsC.height = Math.round(H*DPR);
+  sctx.setTransform(DPR,0,0,DPR,0,0);
+  const g = sctx.createRadialGradient(W*.5,H*.45,0,W*.5,H*.45,Math.max(W,H)*.8);
+  g.addColorStop(0,"#0b1630"); g.addColorStop(.55,"#060b18"); g.addColorStop(1,"#03050b");
+  sctx.fillStyle = g; sctx.fillRect(0,0,W,H);
+  for (const [x,y,b] of STARS){
+    sctx.globalAlpha = .15 + b*.6;
+    sctx.fillStyle = b>.92 ? "#cfe4ff" : "#ffffff";
+    sctx.fillRect(x*W, y*H, b>.85?1.6:1, b>.85?1.6:1);
+  }
+  sctx.globalAlpha = 1;
+}
+
+function resize(){
+  DPR = Math.min(window.devicePixelRatio||1, 2);
+  // a 5K Retina window would mean ~15 million pixels per frame; cap it so motion stays smooth
+  const area = canvas.clientWidth * canvas.clientHeight;
+  if (area * DPR * DPR > 9e6) DPR = Math.max(1, Math.sqrt(9e6 / area));
+  TDPR = Math.min(DPR, 1.25);
+  W = canvas.clientWidth; H = canvas.clientHeight;
+  canvas.width = Math.round(W*DPR); canvas.height = Math.round(H*DPR);
+  earthC.width = Math.round(W*DPR); earthC.height = Math.round(H*DPR);
+  tintC.width = Math.round(W*TDPR); tintC.height = Math.round(H*TDPR);
+  R0 = Math.min(W, H) * (W<760 ? 0.42 : 0.4);
+  MAXK = kForZoom(9.5);
+  zoom.scaleExtent([MINK, MAXK]);
+  MW.clear();
+  drawStars();
+  dirty = true;
+}
+function cx(){ return W<760 ? W/2 : (document.body.classList.contains("has-panel") ? (W-388)/2 + 16 : W/2); }
+function cy(){ return W<760 ? H*0.37 : H/2; }
+function R(){ return R0*state.k; }
+function webZoom(){ return Math.log2(2*Math.PI*R()/256); }
+function kForZoom(z){ return (256*Math.pow(2,z))/(2*Math.PI*R0); }
+function apply(){ proj.scale(R()).translate([cx(),cy()]).rotate(state.rot).clipExtent([[-20,-20],[W+20,H+20]]); }
+function viewCenter(){ return [-state.rot[0], -state.rot[1]]; }
+function visibleAngle(){ return Math.min(Math.PI/2, (Math.hypot(W,H)/2 + 40)/R()) + 0.02; }
+
+/* ---------- satellite globe on the GPU (NASA Blue Marble) ---------- */
+const GL = (()=>{
+  let gl = null;
+  try { gl = earthC.getContext("webgl2", {alpha:true, premultipliedAlpha:true, antialias:false}); } catch(e){}
+  if (!gl) return null;
+  const sh = (type, src)=>{ const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  const prog = gl.createProgram();
+  try {
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, `#version 300 es
+      in vec2 p; void main(){ gl_Position = vec4(p, 0., 1.); }`));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, `#version 300 es
+      precision highp float;
+      uniform sampler2D tex;
+      uniform vec2 center;      // globe centre, device px, origin bottom-left
+      uniform float radius;     // device px
+      uniform vec3 rot;         // longitude shift (rad), cos(tilt), sin(tilt)
+      uniform float texA;       // 0 = flat ocean colour, 1 = full imagery
+      uniform vec3 ocean;
+      out vec4 o;
+      const float PI = 3.14159265359;
+      void main(){
+        vec2 q = (gl_FragCoord.xy - center) / radius;
+        float d = dot(q, q);
+        if (d >= 1.0) { o = vec4(0.0); return; }
+        float edge = clamp((1.0 - sqrt(d)) * radius, 0.0, 1.0);
+        float zc = sqrt(1.0 - d);
+        float lam = atan(q.x, zc*rot.y + q.y*rot.z);
+        float phi = asin(clamp(q.y*rot.y - zc*rot.z, -1.0, 1.0));
+        float x = (lam - rot.x) / (2.0*PI) + 0.5;
+        // pick the longitude wrap with the smaller derivative so mipmaps have no seam
+        float u1 = fract(x), u2 = fract(x + 0.5) - 0.5;
+        float u = fwidth(u1) <= fwidth(u2) ? u1 : u2;
+        vec3 c = texture(tex, vec2(u, 0.5 - phi/PI)).rgb;
+        c = mix(ocean, c, texA);
+        o = vec4(c * edge, edge);
+      }`));
+    gl.bindAttribLocation(prog, 0, "p");
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  } catch(e){ console.warn("Satellite globe unavailable:", e.message); return null; }
+  gl.useProgram(prog);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  const U = n => gl.getUniformLocation(prog, n);
+  const uC = U("center"), uR = U("radius"), uRot = U("rot"), uA = U("texA"), uO = U("ocean");
+  gl.uniform3f(uO, 15/255, 34/255, 56/255);
+  const tex = gl.createTexture();
+  const api = { ready:false };
+  const img = new Image();
+  img.onload = ()=>{
+    let src = img;
+    const max = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    if (img.width > max){
+      const c = document.createElement("canvas"); c.width = max; c.height = max/2;
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); src = c;
+    }
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const an = gl.getExtension("EXT_texture_filter_anisotropic");
+    if (an) gl.texParameterf(gl.TEXTURE_2D, an.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(an.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
+    api.ready = true; dirty = true;
+  };
+  img.src = EARTH;
+  api.draw = (texA)=>{
+    gl.viewport(0, 0, earthC.width, earthC.height);
+    gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform2f(uC, cx()*DPR, (H - cy())*DPR);
+    gl.uniform1f(uR, R()*DPR);
+    const t = state.rot[1]/DEG;
+    gl.uniform3f(uRot, state.rot[0]/DEG, Math.cos(t), Math.sin(t));
+    gl.uniform1f(uA, api.ready ? texA : 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  };
+  return api;
+})();
+if (!GL) earthC.hidden = true;
+
+const SANS = '-apple-system, BlinkMacSystemFont, "IBM Plex Sans", "Segoe UI", system-ui, sans-serif',
+      MONO = 'ui-monospace, "SF Mono", "IBM Plex Mono", Menlo, Consolas, monospace';
+const MW = new Map();   // measured text widths
+function mw(font, text){
+  const k = font + "|" + text; let w = MW.get(k);
+  if (w === undefined){ ctx.font = font; w = ctx.measureText(text).width; MW.set(k, w); }
+  return w;
+}
+const RGB = {g:[56,208,138], y:[244,196,48], r:[242,95,87]};
+function mixRating(a, b, t){
+  if (a===b || t>=1) return RCOL[b];
+  const A = RGB[a], B = RGB[b];
+  return `rgb(${A[0]+(B[0]-A[0])*t|0},${A[1]+(B[1]-A[1])*t|0},${A[2]+(B[2]-A[2])*t|0})`;
+}
+// mode cross-fade
+let prevMode = mode, fade = 1, fadeStart = 0;
+let tintOpacity = "";
+// time-based fade-in for labels and dots as they appear
+const seen = new Map();
+let frameNow = 0, fading = false;
+function appear(key){
+  let t = seen.get(key);
+  if (t === undefined || t.f !== frameNo - 1 && t.f !== frameNo){ t = {t0: frameNow, f: frameNo}; seen.set(key, t); }
+  t.f = frameNo;
+  const a = REDUCE ? 1 : clamp01((frameNow - t.t0)/260);
+  if (a < 1) fading = true;
+  return a;
+}
+let frameNo = 0;
+let hintText = "";
+
+function draw(){
+  frameNow = performance.now(); frameNo++; fading = false;
+  if (seen.size > 6000) seen.clear();
+  apply();
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.clearRect(0,0,W,H);
+  const r = R(), x0=cx(), y0=cy(), whole = r < 3*Math.max(W,H);
+  const z = webZoom();
+  const fe = fade < 1 ? d3.easeCubicInOut(fade) : 1;
+  const texA = GL && GL.ready ? clamp01(1 - (z-5.8)/1.8) : 0;
+  if (GL) GL.draw(texA);
+
+  // outer atmosphere
+  if (whole){
+    const g = ctx.createRadialGradient(x0,y0,r*.96,x0,y0,r*1.22);
+    g.addColorStop(0,"rgba(120,180,255,.38)"); g.addColorStop(.25,"rgba(90,150,255,.14)"); g.addColorStop(1,"rgba(80,140,255,0)");
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x0,y0,r*1.22,0,2*Math.PI); ctx.fill();
+  }
+  if (!GL){
+    ctx.beginPath(); path({type:"Sphere"});
+    if (whole){
+      const og = ctx.createRadialGradient(x0-r*.38,y0-r*.42,r*.05,x0,y0,r*1.02);
+      og.addColorStop(0,"#1b3a5c"); og.addColorStop(.55,"#0f243d"); og.addColorStop(1,"#081526");
+      ctx.fillStyle = og;
+    } else ctx.fillStyle = "#0f2238";
+    ctx.fill();
+  }
+  ctx.beginPath(); path(grat); ctx.strokeStyle="rgba(170,200,235,.06)"; ctx.lineWidth=.8; ctx.stroke();
+
+  // countries: project every shape once into Path2D groups of the same colour
+  const feats = z < 4.2 ? F110 : F50;
+  const vc = viewCenter(), va = visibleAngle();
+  const groups = new Map();
+  const risky = new Path2D(); let hasRisk = false;   // countries where the government may take property
+  for (const f of feats){
+    if (d3.geoDistance(vc, f.center) - f.rad >= va) continue;
+    const c = COUNTRIES[f.k], sc = c[mode];
+    let col;
+    if (!show[rate(Math.round(sc))]) col = "#4a5260";
+    else if (fe < 1) col = d3.interpolateRgb(fillScale(c[prevMode]), fillScale(sc))(fe);
+    else col = fillScale(Math.round(sc/2)*2);
+    let p2 = groups.get(col);
+    if (!p2){ p2 = new Path2D(); groups.set(col, p2); }
+    ppath.context(p2); ppath(f);
+    if (showRisk && c.f[5] < 45){ ppath.context(risky); ppath(f); hasRisk = true; }
+  }
+  const all = new Path2D();
+  tctx.setTransform(TDPR,0,0,TDPR,0,0);
+  tctx.clearRect(0,0,W,H);
+  for (const [col, p2] of groups){ tctx.fillStyle = col; tctx.fill(p2); all.addPath(p2); }
+  // hue from the score, light and shade from the terrain (CSS colour blend on the tint layer)
+  const colorA = texA * (.85 - .3*clamp01((z-4)/1.5));
+  const op = colorA.toFixed(2);
+  if (op !== tintOpacity){ tintC.style.opacity = op; tintOpacity = op; }
+  if (texA < 1){ ctx.globalAlpha = 1 - texA; ctx.fillStyle = "#1a2531"; ctx.fill(all); }
+  const flatA = texA*(.26 - .1*clamp01((z-4)/1.5)) + (1-texA)*(.55 - .15*clamp01((z-6)/1.5));
+  ctx.globalAlpha = flatA; ctx.drawImage(tintC, 0, 0, W, H);
+  ctx.globalAlpha = 1;
+  if (hasRisk){
+    ctx.globalAlpha = .55 * (z < 7 ? 1 : .6);
+    ctx.fillStyle = HATCH; ctx.fill(risky);
+    ctx.globalAlpha = 1;
+  }
+  ctx.strokeStyle = "rgba(6,12,22,.75)"; ctx.lineWidth = z<5 ? 1.1 : 1.6; ctx.stroke(all);
+  ctx.strokeStyle = "rgba(235,245,255,.32)"; ctx.lineWidth = z<5 ? .5 : .8; ctx.stroke(all);
+  if (sel && sel.type==="country" && featByKey[sel.k]){
+    ctx.beginPath(); path(featByKey[sel.k]);
+    ctx.shadowColor="#8ec5ff"; ctx.shadowBlur=12; ctx.strokeStyle="#bfe0ff"; ctx.lineWidth=2; ctx.stroke(); ctx.shadowBlur=0;
+  }
+
+  // sphere lighting: soft shade toward the limb plus a specular highlight
+  if (whole){
+    ctx.save(); ctx.beginPath(); path({type:"Sphere"}); ctx.clip();
+    const sh = ctx.createRadialGradient(x0-r*.35,y0-r*.4,r*.2,x0,y0,r);
+    sh.addColorStop(0,"rgba(0,0,0,0)"); sh.addColorStop(.7,"rgba(2,6,14,.12)"); sh.addColorStop(1,"rgba(2,6,14,.55)");
+    ctx.fillStyle = sh; ctx.fillRect(x0-r,y0-r,2*r,2*r);
+    const hl = ctx.createRadialGradient(x0-r*.42,y0-r*.48,0,x0-r*.42,y0-r*.48,r*.7);
+    hl.addColorStop(0,"rgba(200,225,255,.13)"); hl.addColorStop(1,"rgba(200,225,255,0)");
+    ctx.fillStyle = hl; ctx.fillRect(x0-r,y0-r,2*r,2*r);
+    ctx.restore();
+    ctx.beginPath(); path({type:"Sphere"}); ctx.strokeStyle="rgba(150,200,255,.35)"; ctx.lineWidth=1.2; ctx.stroke();
+  }
+
+  // places in view
+  const dotZ = z + 1.3, labZ = z + 0.2;
+  const [l0,p0] = vc.map(v=>v/DEG);
+  const sinP0=Math.sin(p0), cosP0=Math.cos(p0);
+  const visible = [];
+  for (const p of P){
+    if (p.mz > dotZ && !(sel && sel.p===p) && !p.hl) continue;
+    if (!show[rate(S(p))]) continue;
+    const lam=p.lon/DEG, phi=p.lat/DEG;
+    if (sinP0*Math.sin(phi) + cosP0*Math.cos(phi)*Math.cos(lam-l0) < 0.02) continue;
+    const xy = proj([p.lon,p.lat]); if (!xy) continue;
+    if (xy[0]<-10||xy[1]<-10||xy[0]>W+10||xy[1]>H+10) continue;
+    visible.push([p,xy]);
+  }
+
+  // glowing hot spots for the strongest big markets
+  const glowA = (mode==="price" ? 0 : 1) * clamp01((6.6 - z)/0.6) * (prevMode==="price" ? fe : 1);
+  if (glowA > 0){
+    ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = glowA;
+    let n = 0;
+    for (const [p,xy] of visible){
+      if (S(p) < 70 || p.pop < 4e5) continue;
+      if (++n > 90) break;
+      const gr = (z<4?14:20) * (p.pop>=5e6?1.5:1);
+      ctx.drawImage(GLOW, xy[0]-gr, xy[1]-gr, 2*gr, 2*gr);
+    }
+    ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
+  }
+
+  // country labels when zoomed out, fading in with size and out with zoom
+  const boxes = [];
+  const cOut = clamp01((6.2 - z)/0.6);
+  if (cOut > 0){
+    ctx.textAlign="center"; ctx.textBaseline="middle";
+    const thr = z<3.6 ? 2600 : 1400;
+    const list = F50.filter(f=>f.bigArea*r*r > thr && d3.geoDistance(vc,f.anchor) < Math.PI/2 - 0.12).sort((a,b)=>b.bigArea-a.bigArea);
+    for (const f of list){
+      const pt = proj(f.anchor); if (!pt) continue;
+      const c = COUNTRIES[f.k], sc = CS(c), rt = rate(sc);
+      const label = (c.f[5] < 45 ? "⚠ " : "") + c.n.toUpperCase();
+      const lf = `600 ${z<4?10:11}px ${SANS}`;
+      const w = mw(lf, label);
+      const b = [pt[0]-w/2-4, pt[1]-14, w+8, 32];
+      if (overlaps(boxes,b)) continue; boxes.push(b);
+      const a = cOut * appear("c"+f.k);
+      ctx.globalAlpha = a;
+      ctx.font = lf;
+      ctx.lineJoin="round"; ctx.lineWidth=3; ctx.strokeStyle="rgba(4,8,16,.55)";
+      ctx.strokeText(label, pt[0], pt[1]-5);
+      ctx.fillStyle = "rgba(240,246,252,.82)"; ctx.fillText(label, pt[0], pt[1]-5);
+      const txt = mode==="price" ? usd(c.p) : sc+"%";
+      const pf = `600 10px ${MONO}`;
+      const tw = mw(pf, txt) + 10;
+      ctx.globalAlpha = a * (show[rt] ? 1 : .3);
+      roundRect(pt[0]-tw/2, pt[1]+3, tw, 14, 7);
+      ctx.fillStyle = mixRating(rate(Math.round(c[prevMode])), rt, fe); ctx.fill();
+      ctx.font = pf; ctx.fillStyle = "#06101b"; ctx.fillText(txt, pt[0], pt[1]+10.5);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // dots, fading in as they come into range
+  hits = [];
+  for (const [p,xy] of visible){
+    const isSel = sel && sel.p===p;
+    const a = isSel ? 1 : appear("d"+p.i);
+    const rr = dotR(p, z), col = mixRating(rate(p.s[prevMode]), rate(S(p)), fe);
+    ctx.globalAlpha = a;
+    if (p.pop >= 1e6 || p.cap){
+      ctx.beginPath(); ctx.arc(xy[0],xy[1],rr+2.5,0,2*Math.PI);
+      ctx.strokeStyle = col; ctx.globalAlpha = a*.45; ctx.lineWidth=1; ctx.stroke(); ctx.globalAlpha = a;
+    }
+    ctx.beginPath(); ctx.arc(xy[0],xy[1],rr,0,2*Math.PI);
+    ctx.fillStyle = col; ctx.fill();
+    ctx.lineWidth = 1.2; ctx.strokeStyle = "rgba(4,8,16,.9)"; ctx.stroke();
+    hits.push({x:xy[0],y:xy[1],r:Math.max(rr,6),p});
+  }
+  ctx.globalAlpha = 1;
+
+  // place labels (priority order already: min zoom, then population)
+  ctx.textBaseline="middle"; ctx.textAlign="left";
+  let labelled = 0;
+  const pin = sel && sel.type==="place" ? visible.find(v=>v[0]===sel.p) : null;
+  const hl = visible.filter(v=>v[0].hl && v!==pin);
+  const order = (pin ? [pin] : []).concat(hl, visible.filter(v=>v!==pin && !v[0].hl));
+  const pf = `600 10px ${MONO}`;
+  for (const [p,xy] of order){
+    const isPin = pin && p===pin[0];
+    if (p.mz > labZ && !isPin && !p.hl) continue;
+    if (labelled > 260) break;
+    const big = p.mz <= 3 || p.pop >= 5e6;
+    const fs = big ? 13 : p.mz<=5 ? 12 : 11;
+    const nameFont = `${big?600:500} ${fs}px ${SANS}`;
+    const tw = mw(nameFont, p.name);
+    const pill = mode==="price" ? usd(p.ppm) : S(p)+"%";
+    const pw = mw(pf, pill) + 9;
+    const arrow = mode!=="potential", aw = arrow ? 12 : 0;
+    const rr = dotR(p,z);
+    const lx = xy[0]+rr+5, ly = xy[1];
+    const b = [lx-2, ly-fs/2-3, tw+pw+aw+10, fs+6];
+    if (overlaps(boxes,b) && !isPin && !p.hl) continue;
+    boxes.push(b); labelled++;
+    ctx.globalAlpha = isPin ? 1 : appear("l"+p.i);
+    ctx.font = nameFont;
+    ctx.lineJoin="round"; ctx.lineWidth=3.5; ctx.strokeStyle="rgba(4,8,16,.88)";
+    ctx.strokeText(p.name, lx, ly);
+    ctx.fillStyle = "#f2f6fb"; ctx.fillText(p.name, lx, ly);
+    const px = lx+tw+5;
+    roundRect(px, ly-7, pw, 14, 7); ctx.fillStyle = mixRating(rate(p.s[prevMode]), rate(S(p)), fe); ctx.fill();
+    ctx.font = pf;
+    ctx.fillStyle = "#06101b"; ctx.fillText(pill, px+4.5, ly+0.5);
+    if (arrow) drawTrend(px+pw+7, ly, rate(p.s.potential));
+  }
+  ctx.globalAlpha = 1;
+  // places the assistant recommended: numbered markers
+  for (const [p,xy] of hl.slice().reverse()){
+    const rr = dotR(p,z)+5;
+    ctx.beginPath(); ctx.arc(xy[0],xy[1],rr,0,2*Math.PI);
+    ctx.strokeStyle="#8ec5ff"; ctx.lineWidth=2; ctx.stroke();
+    const bx = xy[0]-rr-3, by = xy[1]-rr-3;
+    ctx.beginPath(); ctx.arc(bx,by,8,0,2*Math.PI); ctx.fillStyle="#8ec5ff"; ctx.fill();
+    ctx.strokeStyle="rgba(4,8,16,.9)"; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.font=`700 10px ${MONO}`; ctx.textAlign="center"; ctx.fillStyle="#06101b"; ctx.fillText(String(p.hl), bx, by+.5); ctx.textAlign="left";
+  }
+  if (pin){
+    const [,xy] = pin;
+    ctx.beginPath(); ctx.arc(xy[0],xy[1],dotR(pin[0],z)+6,0,2*Math.PI);
+    ctx.shadowColor="#8ec5ff"; ctx.shadowBlur=10; ctx.strokeStyle="#bfe0ff"; ctx.lineWidth=2; ctx.stroke(); ctx.shadowBlur=0;
+  }
+  const hint = z < 5 ? "Zoom in to see more cities and towns" : z < 7.5 ? "Zoom further for small towns" : "Showing towns";
+  if (hint !== hintText){ $("zoomhint").textContent = hint; hintText = hint; }
+  if (fading) dirty = true;
+}
+const HATCH = (()=>{ const c = document.createElement("canvas"); c.width = c.height = 10; const g = c.getContext("2d");
+  g.strokeStyle = "rgba(255,90,80,.95)"; g.lineWidth = 1.6;
+  g.beginPath(); g.moveTo(-2,12); g.lineTo(12,-2); g.moveTo(-2,2); g.lineTo(2,-2); g.moveTo(8,12); g.lineTo(12,8); g.stroke();
+  return ctx.createPattern(c, "repeat"); })();
+const GLOW = (()=>{ const c = document.createElement("canvas"); c.width = c.height = 64; const g = c.getContext("2d");
+  const gr = g.createRadialGradient(32,32,0,32,32,32); gr.addColorStop(0,"rgba(80,240,160,.5)"); gr.addColorStop(1,"rgba(80,240,160,0)");
+  g.fillStyle = gr; g.fillRect(0,0,64,64); return c; })();
+function drawTrend(x, y, rt){
+  ctx.beginPath();
+  if (rt==="g"){ ctx.moveTo(x-4.5,y+3.5); ctx.lineTo(x+4.5,y+3.5); ctx.lineTo(x,y-4.5); }
+  else if (rt==="r"){ ctx.moveTo(x-4.5,y-3.5); ctx.lineTo(x+4.5,y-3.5); ctx.lineTo(x,y+4.5); }
+  else { ctx.moveTo(x-3.5,y-4.5); ctx.lineTo(x-3.5,y+4.5); ctx.lineTo(x+4.5,y); }
+  ctx.closePath(); ctx.fillStyle = RCOL[rt]; ctx.fill();
+  ctx.lineWidth = 1; ctx.strokeStyle = "rgba(4,8,16,.8)"; ctx.stroke();
+}
+function dotR(p,z){
+  const base = p.pop>=5e6?5:p.pop>=1e6?4:p.pop>=2e5?3.2:2.6;
+  return base + Math.max(0,Math.min(2,(z-5)*0.4));
+}
+function overlaps(boxes,b){
+  for (const o of boxes) if (b[0]<o[0]+o[2] && b[0]+b[2]>o[0] && b[1]<o[1]+o[3] && b[1]+b[3]>o[1]) return true;
+  return false;
+}
+function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+
+/* ---------- motion: eased zoom, drag momentum, idle spin ---------- */
+const cam = { targetK:null, anchor:null, anchorGeo:null, vel:[0,0], coasting:false };
+let spin = !REDUCE, anim = null, lastNow = performance.now();
+function syncZoom(){ canvas.__zoom = d3.zoomIdentity.translate(last.x, last.y).scale(state.k); }
+function stopMotion(keepZoom){
+  if (anim){ anim.stop(); anim = null; }
+  cam.coasting = false; spin = false;
+  if (!keepZoom) cam.targetK = null;
+}
+function setKAround(k, pt, geo){
+  state.k = k; apply();
+  if (geo && pt){
+    // keep the point under the cursor in place while the scale changes
+    for (let i=0;i<2;i++){
+      const np = proj(geo); if (!np) break;
+      const dpp = DEG / R();
+      state.rot[0] -= (np[0]-pt[0])*dpp;
+      state.rot[1] = clampLat(state.rot[1] + (np[1]-pt[1])*dpp);
+      apply();
+    }
+  }
+  syncZoom();
+}
+function loop(now){
+  const dt = Math.min(48, now - lastNow); lastNow = now;
+  if (cam.targetK !== null){
+    const lk = Math.log(state.k), lt = Math.log(cam.targetK);
+    let nk = REDUCE ? cam.targetK : Math.exp(lk + (lt-lk)*(1 - Math.exp(-dt/80)));
+    if (Math.abs(lt - Math.log(nk)) < 0.0015){ nk = cam.targetK; cam.targetK = null; }
+    setKAround(nk, cam.anchor, cam.anchorGeo);
+    dirty = true;
+  }
+  if (cam.coasting){
+    const dpp = DEG / R();
+    state.rot[0] += cam.vel[0]*dt*dpp;
+    state.rot[1] = clampLat(state.rot[1] - cam.vel[1]*dt*dpp);
+    const decay = Math.exp(-dt/350);
+    cam.vel[0] *= decay; cam.vel[1] *= decay;
+    if (Math.hypot(cam.vel[0], cam.vel[1]) < 0.015) cam.coasting = false;
+    dirty = true;
+  }
+  if (spin && !anim){ state.rot[0] += 0.0045*dt; dirty = true; }
+  if (fade < 1){ fade = REDUCE ? 1 : Math.min(1, (now - fadeStart)/420); if (fade >= 1) prevMode = mode; dirty = true; }
+  if (dirty){ dirty = false; draw(); }
+  requestAnimationFrame(loop);
+}
+
+/* ---------- interaction ---------- */
+let last = {x:0,y:0}, velo = [0,0], lastMoveT = 0;
+const csel = d3.select(canvas);
+zoom.on("start", ev=>{
+      last = {x:ev.transform.x, y:ev.transform.y}; velo = [0,0]; lastMoveT = performance.now();
+      if (ev.sourceEvent){ stopMotion(); canvas.classList.add("dragging"); }
+      hideTip();
+    })
+    .on("zoom", ev=>{
+      const t = ev.transform, se = ev.sourceEvent;
+      if (se){
+        const dx = t.x-last.x, dy = t.y-last.y, dpp = DEG / R();
+        state.k = t.k;
+        state.rot[0] += dx*dpp;
+        state.rot[1] = clampLat(state.rot[1] - dy*dpp);
+        // smoothed pointer velocity (px/ms) for the coast after release
+        const now = performance.now(), dtm = Math.max(4, now - lastMoveT);
+        velo = [velo[0]*.3 + dx/dtm*.7, velo[1]*.3 + dy/dtm*.7];
+        lastMoveT = now;
+        dirty = true;
+      }
+      last = {x:t.x, y:t.y};
+    })
+    .on("end", ev=>{
+      canvas.classList.remove("dragging");
+      if (!ev.sourceEvent || REDUCE) return;
+      // let the globe coast after a flick
+      const sp = Math.hypot(velo[0], velo[1]);
+      if (performance.now() - lastMoveT < 90 && sp > 0.12){
+        const k = Math.min(1, 5/sp);   // cap very fast flicks
+        cam.vel = [velo[0]*k, velo[1]*k]; cam.coasting = true;
+      }
+    });
+csel.call(zoom).on("dblclick.zoom", null).on("wheel.zoom", null);
+
+canvas.addEventListener("wheel", ev=>{
+  ev.preventDefault();
+  if (typeof gestureK !== "undefined" && gestureK !== null) return;
+  stopMotion(true); hideTip();
+  const dy = ev.deltaY * (ev.deltaMode===1 ? 0.05 : ev.deltaMode ? 1 : 0.002) * (ev.ctrlKey ? 10 : 1);
+  const base = cam.targetK ?? state.k;
+  cam.targetK = Math.max(MINK, Math.min(MAXK, base * Math.pow(2, -dy)));
+  const pt = d3.pointer(ev, canvas);
+  apply();
+  const g = proj.invert(pt);
+  cam.anchor = pt;
+  cam.anchorGeo = g && d3.geoDistance(g, viewCenter()) < Math.PI/2 - 0.01 ? g : null;
+}, {passive:false});
+
+function flyTo(lon, lat, k){
+  stopMotion();
+  const r0 = state.rot.slice(), k0 = state.k;
+  const r1 = [-lon, -lat, 0];
+  while (r1[0]-r0[0] > 180) r1[0]-=360;
+  while (r1[0]-r0[0] < -180) r1[0]+=360;
+  const ir = d3.interpolate(r0, r1);
+  const lk0 = Math.log(k0), lk1 = Math.log(k);
+  const dist = d3.geoDistance(viewCenter(), [lon,lat]);
+  const dur = REDUCE ? 0 : 900 + 500*dist;
+  anim = d3.timer(el=>{
+    const t = dur ? Math.min(1, el/dur) : 1, e = d3.easeCubicInOut(t);
+    state.rot = ir(e);
+    const base = lk0 + (lk1-lk0)*e;
+    const dip = dist>0.3 ? Math.sin(Math.PI*e) * Math.max(0, Math.min(base, dist*1.5)) : 0;
+    state.k = Math.exp(base - dip); syncZoom();
+    dirty = true;
+    if (t>=1){ anim.stop(); anim=null; }
+  });
+}
+function zoomBy(f){
+  stopMotion(true);
+  cam.targetK = Math.max(MINK, Math.min(MAXK, (cam.targetK ?? state.k) * f));
+  cam.anchor = null; cam.anchorGeo = null;
+}
+
+function nearest(pt){
+  let best=null, bd=Infinity;
+  for (let i=hits.length-1;i>=0;i--){
+    const h=hits[i], d=Math.hypot(h.x-pt[0],h.y-pt[1]);
+    if (d<=h.r+3 && d<bd){ bd=d; best=h; }
+  }
+  return best;
+}
+const tip = $("tip");
+function tipReason(p, c){
+  const {pros, cons} = reasons(c, p), good = rate(S(p))==="g";
+  const t = good ? (pros[0] ? ["pro","✓",pros[0]] : null) : (cons[0] ? ["con","✕",cons[0]] : null);
+  return t ? `<div class="why1 ${t[0]}"><i>${t[1]}</i><span>${esc(t[2])}</span></div>` : "";
+}
+function hideTip(){ tip.hidden = true; canvas.classList.remove("pointing"); }
+let tipFor = null;
+canvas.addEventListener("mousemove", ev=>{
+  if (canvas.classList.contains("dragging")) return;
+  const pt = d3.pointer(ev, canvas), h = nearest(pt);
+  if (!h){ hideTip(); tipFor = null; return; }
+  canvas.classList.add("pointing");
+  const p = h.p, c = COUNTRIES[p.ck];
+  if (tipFor !== p.i + mode){
+    tipFor = p.i + mode;
+    tip.innerHTML = `<div class="h"><div><b>${esc(p.name)}</b><small>${esc(p.adm1 ? p.adm1+", " : "")}${esc(c.n)}</small></div><span class="pct ${rate(S(p))}">${S(p)}%</span></div>
+      <div class="row"><span>Overall <b class="${rate(p.s.overall)}">${p.s.overall}%</b></span><span>Price <b class="${rate(p.s.price)}">${usd(p.ppm)}/m²</b></span><span>Potential <b class="${rate(p.s.potential)}">${p.s.potential}%</b></span></div>
+      ${tipReason(p, c)}`;
+  }
+  tip.style.transform = `translate(${h.x+16}px, ${h.y}px) translateY(-50%)`; tip.hidden = false;
+});
+canvas.addEventListener("mouseleave", ()=>{ hideTip(); tipFor = null; });
+canvas.addEventListener("click", ev=>{
+  const pt = d3.pointer(ev, canvas), h = nearest(pt);
+  if (h){ selectPlace(h.p, false); return; }
+  apply();
+  const geo = proj.invert(pt);
+  if (!geo || d3.geoDistance(geo, viewCenter()) > Math.PI/2) return;
+  const feats = webZoom() < 4.2 ? F110 : F50;
+  const f = feats.find(f=>d3.geoDistance(geo,f.center) <= f.rad+0.01 && d3.geoContains(f, geo));
+  if (f) selectCountry(f.k, false);
+});
+canvas.addEventListener("dblclick", ev=>{
+  apply();
+  const geo = proj.invert(d3.pointer(ev, canvas));
+  if (geo) flyTo(geo[0], geo[1], Math.min(MAXK, state.k*3));
+});
+$("zin").onclick = ()=>zoomBy(2.2);
+$("zout").onclick = ()=>zoomBy(1/2.2);
+$("home").onclick = ()=>flyTo(...viewCenter(), 1);
+window.addEventListener("resize", resize);
+
+/* ---------- modes + filters ---------- */
+function setMode(m){
+  if (m !== mode){ prevMode = mode; fade = 0; fadeStart = performance.now(); }
+  mode = m;
+  try { localStorage.setItem("buildatlas.mode", m); } catch(e){}
+  document.querySelectorAll(".modes button").forEach(b=>b.setAttribute("aria-pressed", b.dataset.m===m));
+  const M = MODES[m], counts = {g:0,y:0,r:0};
+  P.forEach(p=>counts[rate(S(p))]++);
+  $("legendTitle").textContent = M.title;
+  $("arrows").hidden = m==="potential";
+  $("legendNote").textContent = M.note + " Indicative estimates, not financial advice.";
+  for (const r of ["g","y","r"]){ $("lab-"+r).textContent = M.chips[r]; $("cnt-"+r).textContent = counts[r].toLocaleString(); }
+  sortCountryLists(); buildRankings();
+  renderPanel(); dirty = true;
+}
+document.querySelectorAll(".modes button").forEach(b=>b.onclick=()=>setMode(b.dataset.m));
+let showRisk = true;
+$("cnt-risk").textContent = Object.keys(COUNTRIES).filter(k=>featByKey[k] && COUNTRIES[k].f[5] < 45).length + " countries";
+$("chip-risk").onclick = e=>{ showRisk = !showRisk; e.currentTarget.setAttribute("aria-pressed", showRisk); dirty = true; };
+for (const r of ["g","y","r"]){
+  $("chip-"+r).onclick = e=>{ show[r] = !show[r]; e.currentTarget.setAttribute("aria-pressed", show[r]); dirty=true; };
+}
+
+/* ---------- panel ---------- */
+const panel = $("panel"), body = $("panelBody");
+let tab = "cities";
+let topCities=[], topCountries=[], lowCities=[];
+const STABLE = 35; // stability floor for the cheapest-places lists (skips war zones)
+function buildRankings(){
+  const ok = c => (mode!=="price" && mode!=="value") || (c.f[3] >= STABLE && c.f[5] >= SAFE_MIN);
+  const tie = (a,b) => mode==="price" ? a.ppm-b.ppm : b.pop-a.pop;
+  topCities = P.filter(p=>p.pop>=3e5 && ok(COUNTRIES[p.ck])).sort((a,b)=>S(b)-S(a)||tie(a,b)).slice(0,25);
+  topCountries = Object.entries(COUNTRIES).filter(([k,c])=>featByKey[k] && byCountry[k] && ok(c)).sort((a,b)=>b[1][mode]-a[1][mode]||a[1].p-b[1].p).slice(0,25);
+  lowCities = P.filter(p=>p.pop>=1e6).sort((a,b)=>S(a)-S(b)||-tie(a,b)).slice(0,15);
+}
+function esc(s){ return String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function fmtPop(n){ return n>=1e6 ? (n/1e6).toFixed(n>=1e7?0:1)+"M" : n>=1e3 ? Math.round(n/1e3)+"k" : String(n||"—"); }
+function sign(n){ n = Math.round(n*10)/10; return (n>0?"+":n<0?"−":"±")+Math.abs(n); }
+function bars(c){
+  return `<div class="bars">${FACTORS.map(([f,t,d],i)=>{
+    const v=c.f[i];
+    return `<div class="bar" title="${esc(d)}"><span class="t">${t}</span><span class="v">${v}</span><div class="track"><div class="fill" style="width:${v}%;background:${RCOL[rate(v)]}"></div></div></div>`;
+  }).join("")}</div>`;
+}
+function ring(score){
+  const rt = rate(score), C = 2*Math.PI*42;
+  return `<div class="ringwrap"><svg viewBox="0 0 96 96"><circle cx="48" cy="48" r="42" fill="none" stroke="rgba(160,190,225,.12)" stroke-width="8"/><circle cx="48" cy="48" r="42" fill="none" stroke="${RCOL[rt]}" stroke-width="8" stroke-linecap="round" stroke-dasharray="${C*score/100} ${C}"/></svg><div class="num"><span>${score}<small>%</small></span></div></div>`;
+}
+function tiles(sc){
+  return `<div class="tiles">${[["overall","Overall"],["price","Price"],["potential","Growth"],["value","Value"]].map(([m,l])=>
+    `<button class="tile" data-mode="${m}" aria-pressed="${m===mode}"><span>${l}</span><b class="${rate(sc[m])}">${sc[m]}%</b></button>`).join("")}</div>`;
+}
+function rowItem(p, rank, sub){
+  const extra = mode==="price" || mode==="value" ? `<em>${usd(p.ppm)}/m² · growth ${p.s.potential}%</em>` : mode==="overall" ? `<em>growth ${p.s.potential}%</em>` : "";
+  return `<li data-i="${p.i}"><span class="rk">${rank}</span><div class="nm"><div>${esc(p.name)}</div><small>${esc(sub)}</small></div><div class="side"><span class="pct ${rate(S(p))}">${S(p)}%</span>${extra}</div></li>`;
+}
+function bindList(){
+  body.querySelectorAll("li[data-i]").forEach(li=>li.onclick=()=>selectPlace(P[+li.dataset.i], true));
+  body.querySelectorAll("li[data-k]").forEach(li=>li.onclick=()=>selectCountry(li.dataset.k, true));
+  const b = body.querySelector(".back"); if (b) b.onclick = ()=>{ sel=null; dirty=true; renderPanel(); };
+  body.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{ tab=b.dataset.t; renderPanel(); });
+  body.querySelectorAll(".tile").forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
+}
+function reasons(c, p){
+  const pros = [], cons = [];
+  const [D,E,A,St,F,Pr] = c.f;
+  // can the government take your property? (first, because it can wipe out everything else)
+  if (Pr < 25) cons.push(c.pn ? "Government may take your property: " + c.pn.charAt(0).toLowerCase() + c.pn.slice(1) : "High risk that the government seizes or nationalises property");
+  else if (Pr < 45) cons.push(c.pn || "Weak property rights: titles can be challenged or taken");
+  else if (c.pn) cons.push(c.pn);
+  else if (Pr >= 85) pros.push("Strong property rights: the government cannot simply take your property");
+  for (const [k,t] of (c.notes||[])) (k==="+" ? pros : cons).push(t);
+  // skip a generic line when a country note already says it
+  const said = re => (c.notes||[]).some(([k,t])=>k==="-" && re.test(t));
+  const noted = said(/war|conflict|military|sanction|gang|coup|collapse|repression|taliban|insurgen|instab|split/i);
+  if (St < 30){ if (!noted) cons.push("Conflict or an unstable government makes contracts and property rights hard to enforce"); }
+  else if (St < 50) cons.push("Political or currency risk is higher than average");
+  else if (St >= 80) pros.push("Stable politics and reliable courts");
+  if (said(/population|birth/i)) {}
+  else if (D < 35) cons.push("Population is flat or shrinking, so there are few new buyers and renters");
+  else if (D < 45) cons.push("Slow population growth limits new housing demand");
+  else if (D >= 68) pros.push("Fast-growing population creates steady housing demand");
+  if (said(/inflation|economy|devaluation|debt/i)) {}
+  else if (E < 35) cons.push("Weak economic growth or high inflation");
+  else if (E < 45) cons.push("Slow economic growth");
+  else if (E >= 65) pros.push("Strong economic growth");
+  if (said(/expensive|afford/i)) {}
+  else if (A < 35) cons.push("Homes are very expensive compared with local incomes, so rents and margins are thin");
+  else if (A < 45) cons.push("Homes are getting hard for locals to afford");
+  else if (A >= 58) pros.push("Affordable compared with incomes, with decent rental yields");
+  if (F < 35) cons.push("Hard to get building permits, mortgages or foreign ownership");
+  else if (F < 50) cons.push("Building permits and mortgage finance are limited");
+  else if (F >= 75) pros.push("Easy to get permits, finance and foreign investment");
+  const ppm = p ? p.ppm : c.p;
+  if (ppm >= 6000) cons.push(`Very expensive to get started: about ${usd(ppm)} per m²`);
+  else if (ppm >= 3200) cons.push(`High cost to get started: about ${usd(ppm)} per m²`);
+  else if (ppm <= 1700) pros.push(`Cheap to get started: about ${usd(ppm)} per m²`);
+  if (p){
+    if (p.hot < 0) cons.push("This city's market is overheated or losing residents to cheaper places");
+    if (p.hot > 0) pros.push("Local hotspot: people and jobs are moving in");
+    if (p.pop < 30000) cons.push("Small town: few buyers, so homes can be slow to sell or rent");
+    else if (p.pop >= 1e6) pros.push(`Big market with ${fmtPop(p.pop)} people`);
+    if (p.cap) pros.push("National capital, with government and business jobs");
+  }
+  return {pros, cons};
+}
+function potentialLine(c, p){
+  const [D,E] = c.f, hot = p ? p.hot : 0, bits = [];
+  if (D >= 65) bits.push("fast population growth"); else if (D < 40) bits.push("a shrinking population");
+  if (E >= 65) bits.push("a strong economy"); else if (E < 40) bits.push("a weak economy");
+  if (hot > 0) bits.push("people moving into this city"); else if (hot < 0) bits.push("an overheated local market");
+  if (!bits.length) return "Average growth in population and the economy.";
+  const good = bits.filter(b=>!/shrinking|weak|overheated/.test(b)), bad = bits.filter(b=>/shrinking|weak|overheated/.test(b));
+  const join = a => a.length > 1 ? a.slice(0,-1).join(", ")+" and "+a[a.length-1] : a[0];
+  return [good.length ? "Driven by "+join(good)+"." : "", bad.length ? "Held back by "+join(bad)+"." : ""].join(" ").trim();
+}
+function whyBlock(c, p, score){
+  const {pros, cons} = reasons(c, p), rt = rate(score);
+  const li = (cls, t) => `<li class="${cls}"><i>${cls==="con"?"✕":"✓"}</i><span>${esc(t)}</span></li>`;
+  const conList = cons.length ? cons.slice(0,6).map(t=>li("con",t)).join("") : `<li class="none">No major problems in this model.</li>`;
+  const proList = pros.length ? pros.slice(0,6).map(t=>li("pro",t)).join("") : `<li class="none">No standout strengths in this model.</li>`;
+  const bad = `<div><h3>${rt==="g" ? "Watch out for" : "Why it scores lower"}</h3></div><ul class="reasons">${conList}</ul>`;
+  const good = `<div><h3>${rt==="g" ? "Why it scores well" : "What works in its favour"}</h3></div><ul class="reasons">${proList}</ul>`;
+  return `<div class="why">${rt==="g" ? good + bad : bad + good}</div>`;
+}
+function propBlock(c){
+  const v = c.f[5], rt = propRate(v);
+  const what = {g:"Your ownership is well protected by law and courts.",
+                y:"You can usually own property, but there are limits on foreigners or weak spots in the courts.",
+                r:"The government has seized, nationalised or blocked property here, or foreigners cannot really own it."}[rt];
+  return `<div class="pot prop"><div class="phead"><span>Can the government take your property?</span><b class="${rt}">${v}%</b></div>
+    <div class="track"><div style="width:${v}%;background:${RCOL[rt]}"></div></div>
+    <p><strong>${PROP_LABEL[rt]}.</strong> ${esc(c.pn || what)}</p>${c.pn ? `<p class="sub">${esc(what)}</p>` : ""}</div>`;
+}
+function potBlock(c, p, pot){
+  if (mode==="potential") return "";
+  const rt = rate(pot);
+  return `<div class="pot"><div class="phead"><span>Growth potential</span><b class="${rt}">${pot}%</b></div>
+    <div class="track"><div style="width:${pot}%;background:${RCOL[rt]}"></div></div>
+    <p><strong>${MODES.potential.labels[rt]}.</strong> ${esc(potentialLine(c, p))}</p></div>`;
+}
+/* ---------- detailed explanations: what each percentage means and why ---------- */
+const LEVELS = {
+  D:[[35,"the population is flat or shrinking, so few new buyers and renters appear"],[50,"the population grows slowly, so new demand is modest"],[65,"the population grows steadily, which keeps demand for homes coming"],[101,"the population is growing fast, so new homes are needed every year"]],
+  E:[[35,"the economy is weak or inflation is high, so buyers struggle to pay and borrow"],[50,"the economy grows slowly"],[65,"the economy grows at a healthy pace"],[101,"the economy is growing strongly and incomes are rising"]],
+  A:[[35,"homes cost far more than local incomes allow, so margins and rents are thin"],[50,"homes are expensive for local buyers"],[65,"prices are reasonable compared with incomes"],[101,"homes are cheap compared with incomes and rents pay well"]],
+  S:[[30,"war, conflict or a very unstable government makes everything risky"],[50,"political or currency risk is high"],[75,"politics and the currency are reasonably stable"],[101,"politics and courts are very stable"]],
+  F:[[35,"permits, loans and foreign investment are very hard to get"],[50,"permits and mortgages are limited"],[75,"business rules and financing are workable"],[101,"permits are easy, mortgages are common and investors are welcome"]],
+  P:[[25,"the government has seized property here, or private ownership barely exists"],[45,"there is a high risk of seizure, or foreigners cannot really own property"],[70,"you can own property, but with limits for foreigners or weak spots in the courts"],[101,"ownership is well protected by law and courts"]]
+};
+const levelText = (f, v) => LEVELS[f].find(([max])=>v < max)[1];
+const BANDS = [[25,"Very poor","almost everything works against building here"],[50,"Poor","serious problems outweigh the positives"],[65,"Mixed","workable, but with clear weak spots"],[80,"Strong","most things favour building here"],[101,"Excellent","nearly everything favours building here"]];
+const band = v => BANDS.find(([max])=>v < max);
+const MEDIAN_PPM = (()=>{ const a = P.map(p=>p.ppm).sort((x,y)=>x-y); return a[a.length>>1]; })();
+function signPts(v){ v = Math.round(v*10)/10; return (v > 0 ? "+" : v < 0 ? "−" : "±") + Math.abs(v); }
+// rows of [label, value shown, points, sentence], strongest effects first
+function explainRows(p, c, m){
+  const rows = [];
+  const fac = (i, w, label) => { const [f] = FACTORS[i], v = c.f[i]; rows.push([label || FACTORS[i][1], v+"/100", w*(v-50), levelText(f, v)]); };
+  if (m === "overall"){
+    FACTORS.forEach(([f], i)=>fac(i, WEIGHTS[f]));
+    if (p){
+      if (p.sm) rows.push(["Market size", fmtPop(p.pop)+" people", p.sm, p.sm > 0 ? "a big market with many buyers and renters" : "a small market where homes can be slow to sell"]);
+      if (p.cm) rows.push(["National capital", "yes", p.cm, "government and business jobs keep demand steady"]);
+      if (p.hot) rows.push(["Local momentum", signPts(p.hot), p.hot, p.hot > 0 ? "people and jobs are moving into this city" : "the local market is overheated or losing residents"]);
+    }
+  } else if (m === "potential"){
+    fac(0, POT_W.D); fac(1, POT_W.E); fac(3, POT_W.S);
+    if (p){
+      if (p.sm) rows.push(["Market size", fmtPop(p.pop)+" people", p.sm*0.6, p.sm > 0 ? "big cities attract more people and money" : "small places grow more slowly"]);
+      if (p.hot) rows.push(["Local momentum", signPts(p.hot*1.3), p.hot*1.3, p.hot > 0 ? "people and jobs are moving in" : "prices already ran ahead or people are leaving"]);
+      rows.push(["Price headroom", c.f[2]+"/100", (c.f[2]-50)*0.1, c.f[2] >= 50 ? "prices still have room to rise compared with incomes" : "prices are already stretched, leaving less room to rise"]);
+    }
+  } else if (m === "value"){
+    const pr = p ? p.s.price : c.price, po = p ? p.s.potential : Math.round(c.potential);
+    rows.push(["Price score", pr+"%", .40*(pr-50), pr >= 65 ? "cheap to buy land and build" : pr >= 50 ? "mid-priced to get started" : "expensive to get started"]);
+    rows.push(["Growth potential", po+"%", .40*(po-50), po >= 65 ? "strong growth ahead" : po >= 50 ? "some growth ahead" : "little growth ahead"]);
+    fac(3, .10); fac(5, .10);
+    if (c.f[3] < 30) rows.push(["Conflict penalty", "yes", -15, "war or a collapsing state can wipe out any investment"]);
+    if (c.f[5] < 25) rows.push(["Seizure penalty", "yes", -10, "the government may take what you build"]);
+  } else if (m === "price"){
+    const ppm = p ? p.ppm : c.p, x = ppm / MEDIAN_PPM;
+    rows.push(["Price per m²", usd(ppm), 0, `about ${x >= 1 ? x.toFixed(1)+"× more than" : (1/x).toFixed(1)+"× less than"} the typical place on the map (${usd(MEDIAN_PPM)}/m²). $400/m² would score 100% and $25k/m² 0%, on a log scale`]);
+  }
+  const n = c.news;
+  if (n && n.adj && m !== "price") rows.push(["Recent news", signPts(n.adj), m === "potential" ? n.adj*0.8 : m === "value" ? .40*n.adj*0.8 : n.adj, n.adj > 0 ? "recent headlines are mostly positive" : "recent headlines are mostly negative"]);
+  return rows;
+}
+function explainBlock(p, c){
+  const m = mode, score = p ? S(p) : CS(c), [, bandName, bandText] = band(score);
+  const rows = explainRows(p, c, m);
+  const ups = rows.filter(r=>r[2] > 0.05).sort((a,b)=>b[2]-a[2]), downs = rows.filter(r=>r[2] < -0.05).sort((a,b)=>a[2]-b[2]);
+  const who = p ? p.name : c.n;
+  const line = r => `<li><div class="ex-h"><span>${esc(r[0])} <em>${esc(r[1])}</em></span>${m !== "price" ? `<b class="${r[2] >= 0 ? "g" : "r"}">${signPts(r[2])}</b>` : ""}</div><p>${esc(r[3].charAt(0).toUpperCase() + r[3].slice(1))}.</p></li>`;
+  let summary;
+  if (m === "price") summary = `${who} scores ${score}% on price: ${score >= 65 ? "it is cheap" : score >= 50 ? "it is mid-priced" : "it is expensive"} to buy land and build.`;
+  else {
+    const top = ups[0], low = downs[0];
+    summary = `${who} scores ${score}%: ${bandName.toLowerCase()}, ${bandText}.`
+      + (top ? ` The biggest boost is ${top[0].toLowerCase()} (${signPts(top[2])} points)` : "")
+      + (low ? `${top ? ", and the biggest drag is" : " The biggest drag is"} ${low[0].toLowerCase()} (${signPts(low[2])} points).` : top ? "." : "");
+  }
+  const scale = m === "price" ? "" : `<p class="ex-scale">Every score starts from 50%. Each factor above adds or removes points depending on how far it is from average. 0% would mean everything is as bad as it gets; 100% would mean everything is ideal.</p>`;
+  return `<div class="why ex"><div><h3>Why ${score}%?</h3></div>
+    <p class="ex-sum"><span class="verdict ${rate(score)}"><i></i>${bandName}</span> ${esc(summary)}</p>
+    ${ups.length || m === "price" ? `<div class="ex-g"><h4>${m === "price" ? "How the price is scored" : "Pushing the score up"}</h4><ul class="ex-list">${(m === "price" ? rows : ups).map(line).join("")}</ul></div>` : ""}
+    ${downs.length ? `<div class="ex-g"><h4>Pulling the score down</h4><ul class="ex-list">${downs.map(line).join("")}</ul></div>` : ""}
+    ${scale}</div>`;
+}
+function explainText(p, c, m){   // plain text for the AI chat tools
+  return explainRows(p, c, m).sort((a,b)=>Math.abs(b[2])-Math.abs(a[2])).map(r=>`${r[0]} ${r[1]} (${signPts(r[2])} pts): ${r[3]}`);
+}
+
+function breakdown(p, c){
+  if (mode==="value") return `
+    <dt>Price score (${usd(p.ppm)}/m²) × 0.40</dt><dd>${(p.s.price*.40).toFixed(1)}</dd>
+    <dt>Growth potential × 0.40</dt><dd>${(p.s.potential*.40).toFixed(1)}</dd>
+    <dt>${esc(c.n)} stability × 0.10</dt><dd>${(c.f[3]*.1).toFixed(1)}</dd>
+    <dt>Property safety × 0.10</dt><dd>${(c.f[5]*.1).toFixed(1)}</dd>
+    ${c.f[3] < 30 ? `<dt>Conflict or instability</dt><dd>−15</dd>` : ""}
+    ${c.f[5] < 25 ? `<dt>Government may seize property</dt><dd>−10</dd>` : ""}`;
+  if (mode==="overall") return `
+    <dt>${esc(c.n)} baseline</dt><dd>${c.overall.toFixed(1)}</dd>
+    <dt>Market size (${fmtPop(p.pop)})</dt><dd>${sign(p.sm)}</dd>
+    ${p.cm ? `<dt>National capital</dt><dd>${sign(p.cm)}</dd>` : ""}
+    ${p.hot ? `<dt>Local momentum</dt><dd>${sign(p.hot)}</dd>` : ""}`;
+  if (mode==="potential") return `
+    <dt>${esc(c.n)} growth baseline</dt><dd>${c.potential.toFixed(1)}</dd>
+    <dt>Market size (${fmtPop(p.pop)})</dt><dd>${sign(p.sm*0.6)}</dd>
+    ${p.cap ? `<dt>National capital</dt><dd>+1</dd>` : ""}
+    ${p.hot ? `<dt>Local momentum</dt><dd>${sign(p.hot*1.3)}</dd>` : ""}
+    <dt>Price headroom</dt><dd>${sign((c.f[2]-50)*0.1)}</dd>`;
+  return `
+    <dt>${esc(c.n)} typical price</dt><dd>${usd(c.p)}/m²</dd>
+    <dt>${p.known ? "Known city price" : "Size, capital and demand"}</dt><dd>${p.known ? usd(p.ppm) : "×"+(p.ppm/c.p).toFixed(2)}</dd>
+    <dt>Estimated price here</dt><dd>${usd(p.ppm)}/m²</dd>`;
+}
+function renderPanel(){
+  const M = MODES[mode];
+  if (!sel){
+    const sub = p => `${COUNTRIES[p.ck].n} · ${fmtPop(p.pop)} people`;
+    let list;
+    if (tab==="cities") list = topCities.map((p,i)=>rowItem(p,i+1,sub(p))).join("");
+    else if (tab==="countries") list = topCountries.map(([k,c],i)=>{ const s=CS(c); return `<li data-k="${k}"><span class="rk">${i+1}</span><div class="nm"><div>${esc(c.n)}</div><small>${byCountry[k].length} places scored</small></div><div class="side"><span class="pct ${rate(s)}">${s}%</span>${mode==="price"?`<em>${usd(c.p)}/m²</em>`:""}</div></li>`; }).join("");
+    else list = lowCities.map((p,i)=>rowItem(p,i+1,sub(p))).join("");
+    const heading = {overall:"Best places to build", price:"Cheapest places to build", potential:"Most growth potential", value:"Cheap with the most growth"}[mode];
+    body.innerHTML = `
+      <div><div class="eyebrow">${M.title}</div><h2>${heading}</h2></div>
+      <p class="p">${M.note}${(mode==="price"||mode==="value")&&tab!=="low"?" Lists leave out war zones and countries where the government may take your property.":""} Drag to spin, scroll or pinch to zoom, and tap any place or country for details.</p>
+      <div class="tabs" role="tablist">
+        <button role="tab" data-t="cities" aria-selected="${tab==="cities"}">Top cities</button>
+        <button role="tab" data-t="countries" aria-selected="${tab==="countries"}">Top countries</button>
+        <button role="tab" data-t="low" aria-selected="${tab==="low"}">${M.low}</button>
+      </div>
+      <ul class="list">${list}</ul>`;
+  } else if (sel.type==="place"){
+    const p = sel.p, c = COUNTRIES[p.ck], list = byCountry[p.ck], sc = S(p), rt = rate(sc);
+    const rank = list.indexOf(p)+1;
+    body.innerHTML = `
+      <button class="back">← All rankings</button>
+      <div><div class="eyebrow">${esc(p.adm1 ? p.adm1+" · " : "")}${esc(c.n)}</div><h2>${esc(p.name)}</h2></div>
+      <div class="hero">${ring(sc)}
+        <div><span class="verdict ${rt}"><i></i>${M.labels[rt]}</span>
+        <div class="meta">${M.noun} · #${rank} of ${list.length} in ${esc(c.n)} · ${fmtPop(p.pop)} people</div></div></div>
+      ${tiles(p.s)}
+      ${potBlock(c, p, p.s.potential)}
+      ${propBlock(c)}
+      ${whyBlock(c, p, sc)}
+      <div class="price"><span>Est. property price</span><b>${usd(p.ppm)}/m²</b></div>
+      ${explainBlock(p, c)}
+      ${newsBlock(c)}
+      <div><h3>The exact numbers</h3></div>
+      <dl class="adj">${breakdown(p,c)}
+        <dt class="tot">${M.noun}</dt><dd class="tot">${sc}%</dd></dl>
+      <div><h3>National fundamentals</h3></div>
+      ${bars(c)}
+      <div><h3>Also in ${esc(c.n)}</h3></div>
+      <ul class="list">${list.filter(q=>q!==p).slice(0,6).map(q=>rowItem(q,list.indexOf(q)+1,`${q.adm1||c.n} · ${fmtPop(q.pop)}`)).join("")}</ul>`;
+  } else {
+    const k = sel.k, c = COUNTRIES[k], list = byCountry[k] || [], s = CS(c), rt = rate(s);
+    const allRank = Object.values(COUNTRIES).filter(x=>x[mode]>c[mode]).length+1;
+    const sc = {overall:Math.round(c.overall), price:c.price, potential:Math.round(c.potential), value:c.value};
+    body.innerHTML = `
+      <button class="back">← All rankings</button>
+      <div><div class="eyebrow">Country</div><h2>${esc(c.n)}</h2></div>
+      <div class="hero">${ring(s)}
+        <div><span class="verdict ${rt}"><i></i>${M.labels[rt]}</span>
+        <div class="meta">${M.noun} · #${allRank} of ${Object.keys(COUNTRIES).length} countries and territories</div></div></div>
+      ${tiles(sc)}
+      ${potBlock(c, null, sc.potential)}
+      ${propBlock(c)}
+      ${explainBlock(null, c)}
+      ${newsBlock(c)}
+      ${whyBlock(c, null, s)}
+      <div class="price"><span>Typical price per m²</span><b>${usd(c.p)}</b></div>
+      <div><h3>National fundamentals</h3></div>
+      ${bars(c)}
+      <div><h3>Best places here</h3></div>
+      ${list.length ? `<ul class="list">${list.slice(0,10).map((q,i)=>rowItem(q,i+1,`${q.adm1||c.n} · ${fmtPop(q.pop)}`)).join("")}</ul>` : `<p class="p">No cities in the dataset for this territory.</p>`}`;
+  }
+  bindList();
+  body.classList.remove("in"); void body.offsetWidth; body.classList.add("in");
+}
+function selectPlace(p, fly){
+  sel = {type:"place", p};
+  if (!chatEl.hidden) showTab("explore");
+  renderPanel(); body.scrollTop = 0; expandSheet(); dirty = true;
+  if (fly) flyTo(p.lon, p.lat, Math.max(state.k, kForZoom(Math.max(p.mz+0.5, 6.2))));
+}
+function selectCountry(k, fly){
+  sel = {type:"country", k};
+  if (!chatEl.hidden) showTab("explore");
+  renderPanel(); body.scrollTop = 0; expandSheet(); dirty = true;
+  const f = featByKey[k];
+  if (fly && f){
+    const rad = Math.max(0.03, Math.min(1.2, f.rad));
+    const kk = Math.max(1, Math.min(60, (Math.min(W,H)*0.42) / (R0*Math.sin(Math.min(rad*0.85, Math.PI/2)))));
+    flyTo(f.anchor[0], f.anchor[1], kk);
+  }
+}
+$("grab").onclick = ()=>{ const c = panel.classList.toggle("collapsed"); document.body.classList.toggle("sheet-collapsed", c); };
+function expandSheet(){ panel.classList.remove("collapsed"); document.body.classList.remove("sheet-collapsed"); }
+
+/* ---------- search ---------- */
+const q = $("q"), res = $("results");
+let matches = [], cursor = 0;
+const countryList = Object.entries(COUNTRIES).filter(([k])=>byCountry[k]||featByKey[k]).map(([k,c])=>({k,c,l:c.n.toLowerCase()}));
+function search(){
+  const s = q.value.trim().toLowerCase();
+  if (!s){ res.hidden = true; matches=[]; return; }
+  const cs = countryList.filter(x=>x.l.startsWith(s)).slice(0,3).map(x=>({type:"country",k:x.k}));
+  const pre = [], inn = [];
+  for (const p of P){ if (p.lname.startsWith(s)) pre.push(p); else if (s.length>2 && p.lname.includes(s)) inn.push(p); }
+  pre.sort((a,b)=>b.pop-a.pop); inn.sort((a,b)=>b.pop-a.pop);
+  matches = cs.concat(pre.concat(inn).slice(0, 10-cs.length).map(p=>({type:"place",p})));
+  cursor = 0;
+  res.innerHTML = matches.length ? matches.map((m,i)=>{
+    if (m.type==="country"){ const c=COUNTRIES[m.k], s2=CS(c); return `<li role="option" data-n="${i}" aria-selected="${i===cursor}"><div class="nm">${esc(c.n)} <span class="sub">· country</span></div><span class="pct ${rate(s2)}">${s2}%</span></li>`; }
+    const p=m.p; return `<li role="option" data-n="${i}" aria-selected="${i===cursor}"><div class="nm">${esc(p.name)} <span class="sub">· ${esc(p.adm1?p.adm1+", ":"")}${esc(COUNTRIES[p.ck].n)}</span></div><span class="pct ${rate(S(p))}">${S(p)}%</span></li>`;
+  }).join("") : `<li><div class="nm sub">No place called “${esc(q.value)}” in the dataset</div></li>`;
+  res.hidden = false;
+  res.querySelectorAll("li[data-n]").forEach(li=>li.onmousedown=e=>{ e.preventDefault(); pick(+li.dataset.n); });
+}
+function pick(n){
+  const m = matches[n]; if (!m) return;
+  res.hidden = true; q.blur();
+  if (m.type==="country"){ q.value = COUNTRIES[m.k].n; selectCountry(m.k, true); }
+  else { q.value = m.p.name; selectPlace(m.p, true); }
+}
+q.addEventListener("input", search);
+q.addEventListener("focus", ()=>{ if (q.value) search(); });
+q.addEventListener("blur", ()=>{ res.hidden = true; });
+q.addEventListener("keydown", e=>{
+  if (e.key==="ArrowDown"||e.key==="ArrowUp"){
+    e.preventDefault(); if (!matches.length) return;
+    cursor = (cursor + (e.key==="ArrowDown"?1:-1) + matches.length) % matches.length;
+    res.querySelectorAll("li[data-n]").forEach((li,i)=>li.setAttribute("aria-selected", i===cursor));
+  } else if (e.key==="Enter"){ e.preventDefault(); pick(cursor); }
+  else if (e.key==="Escape"){ res.hidden = true; q.blur(); }
+});
+
+/* ---------- AI assistant ---------- */
+const REGIONS = {
+  "europe": "ALB AND AUT BEL BIH BGR HRV CYP CZE DNK EST FIN FRA DEU GRC HUN ISL IRL ITA KOS LVA LIE LTU LUX MLT MDA MCO MNE NLD MKD NOR POL PRT ROU SMR SRB SVK SVN ESP SWE CHE UKR GBR BLR",
+  "asia": "AFG ARM AZE BGD BTN BRN KHM CHN GEO HKG IND IDN JPN KAZ KGZ LAO MAC MYS MDV MNG MMR NPL PRK PAK PHL SGP KOR LKA TWN TJK THA TLS TKM UZB VNM",
+  "middle east": "ARE BHR EGY IRN IRQ ISR JOR KWT LBN OMN PSX QAT SAU SYR TUR YEM",
+  "africa": "DZA AGO BEN BWA BFA BDI CMR CPV CAF TCD COM COD COG CIV DJI EGY GNQ ERI SWZ ETH GAB GMB GHA GIN GNB KEN LSO LBR LBY MDG MWI MLI MRT MUS MAR MOZ NAM NER NGA RWA STP SEN SYC SLE SOM ZAF SSD SDN TZA TGO TUN UGA ZMB ZWE SOL SAH",
+  "north america": "USA CAN MEX",
+  "latin america": "MEX GTM BLZ SLV HND NIC CRI PAN CUB JAM HTI DOM PRI BHS TTO BRB COL VEN ECU PER BOL BRA PRY URY ARG CHL GUY SUR",
+  "oceania": "AUS NZL PNG FJI SLB VUT NCL PYF WSM TON"
+};
+for (const k in REGIONS) REGIONS[k] = new Set(REGIONS[k].split(" "));
+const countryKeys = Object.keys(COUNTRIES).filter(k=>byCountry[k]);
+function findCountry(name){
+  const n = String(name||"").trim().toLowerCase(); if (!n) return null;
+  if (ALIASES[n]) return ALIASES[n];
+  return countryKeys.find(k=>COUNTRIES[k].n.toLowerCase()===n) || countryKeys.find(k=>COUNTRIES[k].n.toLowerCase().startsWith(n)) || null;
+}
+function findPlace(name, country){
+  const n = String(name||"").trim().toLowerCase(), ck = country ? findCountry(country) : null;
+  let best = null;
+  for (const p of P){
+    if (p.lname !== n || (ck && p.ck !== ck)) continue;
+    if (!best || p.pop > best.pop) best = p;
+  }
+  return best;
+}
+function summary(p){
+  const c = COUNTRIES[p.ck];
+  return {name:p.name, country:c.n, region:p.adm1, population:p.pop, price_usd_per_m2:p.ppm,
+    overall:p.s.overall, price_score:p.s.price, growth_potential:p.s.potential, value:p.s.value, country_stability:c.f[3],
+    property_safety:c.f[5], property_note:c.pn || undefined};
+}
+const SORTS = {value:"value", overall:"overall", price:"price", cheap:"price", potential:"potential", growth:"potential"};
+function queryPlaces(o){
+  const sort = SORTS[o.sort] || "value";
+  const cks = (Array.isArray(o.countries) ? o.countries : o.countries ? [o.countries] : []).map(findCountry).filter(Boolean);
+  const reg = REGIONS[String(o.region||"").toLowerCase()];
+  const minPop = Number(o.min_population ?? 100000) || 0;
+  const maxPrice = Number(o.max_price_usd_per_m2) || Infinity;
+  const minPot = Number(o.min_growth_potential) || 0;
+  const unstable = !!o.include_unstable;
+  const lowest = !!o.lowest_first;
+  const limit = Math.max(1, Math.min(15, Number(o.limit) || 8));
+  const list = P.filter(p=>{
+    const c = COUNTRIES[p.ck];
+    if (cks.length && !cks.includes(p.ck)) return false;
+    if (reg && !reg.has(p.ck)) return false;
+    if (p.pop < minPop || p.ppm > maxPrice || p.s.potential < minPot) return false;
+    if (!unstable && !lowest && (c.f[3] < STABLE || c.f[5] < SAFE_MIN)) return false;
+    if (Number(o.min_property_safety) && c.f[5] < Number(o.min_property_safety)) return false;
+    return true;
+  });
+  list.sort((a,b)=> lowest ? a.s[sort]-b.s[sort] : b.s[sort]-a.s[sort] || b.pop-a.pop);
+  return list.slice(0, limit);
+}
+function placeDetail(p){
+  const c = COUNTRIES[p.ck], r = reasons(c, p);
+  return {...summary(p), rank_in_country:(byCountry[p.ck].slice().sort((a,b)=>b.s.value-a.s.value).indexOf(p)+1)+" of "+byCountry[p.ck].length+" by value",
+    strengths:r.pros.slice(0,5), problems:r.cons.slice(0,5), growth_outlook:potentialLine(c, p),
+    why_overall_score:explainText(p, c, "overall"), why_value_score:explainText(p, c, "value"),
+    recent_news:(c.news?.items||[]).slice(0,3).map(n=>n.title)};
+}
+function countryDetail(k){
+  const c = COUNTRIES[k], r = reasons(c, null);
+  const fac = {}; FACTORS.forEach(([f,t],i)=>fac[t]=c.f[i]);
+  return {country:c.n, overall:Math.round(c.overall), price_score:c.price, growth_potential:Math.round(c.potential), value:c.value,
+    property_safety:c.f[5], property_verdict:PROP_LABEL[propRate(c.f[5])], property_note:c.pn || undefined,
+    typical_price_usd_per_m2:c.p, factors_0_to_100:fac, strengths:r.pros.slice(0,5), problems:r.cons.slice(0,5),
+    best_value_places:(byCountry[k]||[]).slice().sort((a,b)=>b.s.value-a.s.value).slice(0,5).map(summary)};
+}
+function propertyRanking(o){
+  const reg = REGIONS[String(o.region||"").toLowerCase()];
+  const list = Object.entries(COUNTRIES).filter(([k])=>byCountry[k] && featByKey[k] && (!reg || reg.has(k)));
+  list.sort((a,b)=> o.safest_first ? b[1].f[5]-a[1].f[5] || b[1].value-a[1].value : a[1].f[5]-b[1].f[5]);
+  return list.slice(0, Math.max(1, Math.min(20, Number(o.limit) || 10)));
+}
+const TOOLS = [
+  {name:"find_places",
+   description:"Search the Build Atlas dataset of ~7,300 scored cities and towns. Returns a ranked list with price per m², overall, price, growth-potential and value scores (0-100). Places in war zones or very unstable countries are excluded unless include_unstable is true.",
+   inputSchema:{type:"object", properties:{
+     sort:{type:"string", enum:["value","price","potential","overall"], description:"value = cheap AND high growth (default); price = cheapest; potential = most growth; overall = best all-round"},
+     countries:{type:"array", items:{type:"string"}, description:"Country names to limit to"},
+     region:{type:"string", enum:["europe","asia","middle east","africa","north america","latin america","oceania"]},
+     min_population:{type:"number", description:"Default 100000. Use 1000000 for big cities, 20000 to include towns."},
+     max_price_usd_per_m2:{type:"number"},
+     min_growth_potential:{type:"number"},
+     min_property_safety:{type:"number", description:"0-100; 70+ means the government is unlikely to take your property"},
+     lowest_first:{type:"boolean", description:"true to list the worst places first"},
+     include_unstable:{type:"boolean"},
+     limit:{type:"number", description:"1-15, default 8"}}},
+   execute:(i)=>queryPlaces(i).map(summary)},
+  {name:"get_place",
+   description:"Full details for one city or town: all scores, estimated price per m², rank in its country, plain-language strengths and problems, and growth outlook.",
+   inputSchema:{type:"object", properties:{name:{type:"string"}, country:{type:"string"}}, required:["name"]},
+   execute:(i)=>{ const p = findPlace(i.name, i.country); if (!p) throw new Error("No place called "+i.name+" in the dataset"); return placeDetail(p); }},
+  {name:"property_risk",
+   description:"Countries ranked by property safety: how likely the government is to seize, nationalise or block property, and limits on foreign owners. Returns the riskiest (default) or safest countries with a short reason.",
+   inputSchema:{type:"object", properties:{safest_first:{type:"boolean"}, region:{type:"string", enum:["europe","asia","middle east","africa","north america","latin america","oceania"]}, limit:{type:"number"}}},
+   execute:(i)=>propertyRanking(i).map(([k,c])=>({country:c.n, property_safety:c.f[5], verdict:PROP_LABEL[propRate(c.f[5])], reason:c.pn || ""}))},
+  {name:"get_country",
+   description:"Details for one country: scores, typical price per m², the five factor ratings, strengths, problems and its five best-value places.",
+   inputSchema:{type:"object", properties:{name:{type:"string"}}, required:["name"]},
+   execute:(i)=>{ const k = findCountry(i.name); if (!k) throw new Error("No country called "+i.name); return countryDetail(k); }}
+];
+const RULES = `You are the assistant inside Build Atlas, an interactive globe that scores about 7,300 cities and towns and every country for starting a real-estate development company.
+Scores run 0-100 (green 65+, yellow 50-64, red under 50):
+- overall: best all-round place to start and build
+- price: higher means CHEAPER to buy land and build (based on estimated typical apartment price in USD per m²)
+- growth potential: how much demand and prices should grow (population, economy, local momentum)
+- value: cheap AND high growth potential together, marked down in unstable countries and where the government may take property
+- property_safety (country level): how likely the government is to seize, nationalise or block your property, and limits on foreign owners (70+ safe, 45-69 some risk or limits, under 45 high risk)
+The numbers are indicative model estimates, not live market data and not financial advice.
+
+How to answer:
+- Look the data up with the tools; never invent places or numbers. Questions about cheap places with growth, bargains or "best places" mean sort by value.
+- When asked why something scores a percentage, use the why_overall_score / why_value_score lines from get_place: name the biggest boosts and drags with their points.
+- Whenever you name a place from the data, write it exactly as [[Name|Country]] using the tool's spelling, so the page can link it and show it on the globe. Write countries as plain text.
+- Be brief and concrete: one short sentence, then up to 6 bullets like "- [[Medellin|Colombia]]: 72% value, about $1.6k/m², growth 66%. One short reason." Then one line on the main risk if there is one.
+- Use plain text with "- " bullets and **bold** only. No tables, no headings.
+- Always warn clearly when a recommended place has property safety under 45, and mention foreign-ownership limits when the data has them.
+- People often misspell words and names ("potencial", "goverment", "countris", "Polland"). Work out what they mean; do not correct them.
+- Answer in the language the person writes in.
+- Pick the right tool: lists of places -> find_places (cheap + growth = sort "value"; cheapest = "price"; growth = "potential"); one city -> get_place; one country -> get_country; "can the government take my property" or foreign ownership -> property_risk or get_country. Compare by calling get_place for each.
+- If asked about something outside real estate or this map, answer briefly and steer back.
+
+Example
+Question: best cheep places with potencial in europe
+Answer:
+The best cheap places with strong growth in Europe:
+- [[Wroclaw|Poland]]: 64% value, about $2.9k/m², growth 69%. Fast-growing economy and a housing shortage.
+- [[Bucharest|Romania]]: 63% value, about $1.9k/m², growth 63%. Low entry cost for an EU capital.
+Main risk: prices in Polish cities have risen fast, so margins are thinner than a few years ago.
+
+Example
+Question: can the goverment take my house in thailand
+Answer:
+Thailand scores 50% for property safety (some risk or limits). Seizure is unlikely, but foreigners cannot own land, only condo units within a 49% foreign quota per building. Most foreign buyers use a condo or a long lease.
+
+(The numbers in the examples are only illustrations; always use the tools for real figures.)`;
+
+const chatEl = $("chat"), msgsEl = $("msgs"), inEl = $("chatIn"), sendBtn = $("send"), sugEl = $("suggest");
+const turns = [];
+let sampleFn, aiState = "unknown", ctl = null, busy = false;
+(async ()=>{ try { sampleFn = window.claude ? await window.claude.use("sample") : null; } catch(e){ sampleFn = null; }
+  aiState = sampleFn ? "ready" : "off";
+  // Run locally with serve.py and the chat uses your own nanobot agent instead.
+  // served over http(s) by serve.py, or inside the Mac app (atlas:), nanobot sits behind /nanobot/
+  if (!sampleFn && (/^https?:$/.test(location.protocol) || location.protocol === "atlas:")){
+    try { const r = await fetch("nanobot/health", {cache:"no-store"}); if (r.ok) aiState = "nanobot"; } catch(e){}
+  }
+})();
+const NB_SESSION = "build-atlas-" + Math.random().toString(36).slice(2, 10);
+let nbPrimed = false;
+async function askNanobot(q, el){
+  // keep it compact: nanobot's own prompt and tools already fill much of the context window,
+  // and with the build-atlas skill installed it can look up anything else itself
+  const row = p => `${p.name}, ${COUNTRIES[p.ck].n}: value ${p.s.value}, ${usd(p.ppm)}/m2, growth ${p.s.potential}, overall ${p.s.overall}`;
+  const local = localAnswer(q).picks;
+  const msg = (nbPrimed ? "Same rules as before: name places as [[Name|Country]], keep it short, only use real data.\n"
+                         : RULES + "\nIf the build-atlas skill is installed, run it for anything the lines below do not cover.\n")
+    + "\nFrom the map (scores 0-100):\nMatches for this question:\n" + local.map(row).join("\n")
+    + "\nBest value overall:\n" + queryPlaces({sort:"value", limit:6}).map(row).join("\n")
+    + "\n\nQuestion: " + q;
+  ctl = new AbortController();
+  const r = await fetch("nanobot/v1/chat/completions", {method:"POST", signal:ctl.signal, headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({messages:[{role:"user", content:msg}], session_id:NB_SESSION, stream:true})});
+  if (!r.ok){ let m = ""; try { m = (await r.json()).error?.message || ""; } catch(e){} throw {code:"nanobot_http", status:r.status, message:m}; }
+  nbPrimed = true;
+  let text = "";
+  if ((r.headers.get("Content-Type")||"").includes("event-stream")){
+    const reader = r.body.getReader(), dec = new TextDecoder(); let buf = "";
+    for (;;){
+      const {value, done} = await reader.read(); if (done) break;
+      buf += dec.decode(value, {stream:true});
+      const lines = buf.split("\n"); buf = lines.pop();
+      for (const line of lines){
+        const m = line.match(/^data:\s?(.*)/); if (!m || m[1]==="[DONE]") continue;
+        try { const d = JSON.parse(m[1]).choices?.[0]?.delta?.content; if (d){ text += d; el.querySelector(".body").innerHTML = renderRich(text, true).html; msgsEl.scrollTop = msgsEl.scrollHeight; } } catch(e){}
+      }
+    }
+  } else text = (await r.json()).choices?.[0]?.message?.content || "";
+  return text;
+}
+
+const SUGGEST = ["Cheap places with the most growth","Where can the government take my property?","Best value in Europe","Cheapest safe big cities in Asia","High growth under $1,500/m²","Why is Russia rated badly?","Compare Lisbon and Warsaw"];
+sugEl.innerHTML = SUGGEST.map(t=>`<button type="button">${esc(t)}</button>`).join("");
+sugEl.querySelectorAll("button").forEach(b=>b.onclick=()=>ask(b.textContent));
+
+// render assistant text: escape, then **bold**, "- " bullets and [[Place|Country]] links
+function renderRich(text, streaming){
+  let t = text;
+  if (streaming) t = t.replace(/\[\[[^\]]*$/, "");          // hide a half-written link
+  const links = [];
+  const html = esc(t).replace(/\[\[([^\]|]+)\|?([^\]]*)\]\]/g, (m, name, country)=>{
+    const p = findPlace(name, country) || findPlace(name);
+    if (!p) return esc(name);
+    if (!links.includes(p)) links.push(p);
+    return `<button type="button" class="plink" data-i="${p.i}">${esc(p.name)}</button>`;
+  }).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  const out = []; let list = null;
+  for (const line of html.split("\n")){
+    const m = line.match(/^\s*[-•*]\s+(.*)/);
+    if (m){ if (!list){ list = []; } list.push(`<li>${m[1]}</li>`); continue; }
+    if (list){ out.push(`<ul>${list.join("")}</ul>`); list = null; }
+    if (line.trim()) out.push(`<p>${line}</p>`);
+  }
+  if (list) out.push(`<ul>${list.join("")}</ul>`);
+  return {html: out.join(""), links};
+}
+function addMsg(role, html){
+  const d = document.createElement("div");
+  d.className = "msg " + role;
+  d.innerHTML = role==="bot" ? `<div class="who"><i></i>Atlas AI</div><div class="body">${html}</div>` : html;
+  msgsEl.appendChild(d); msgsEl.scrollTop = msgsEl.scrollHeight;
+  return d;
+}
+function bindLinks(root){
+  root.querySelectorAll("[data-i]").forEach(b=>b.onclick=()=>{ showTab("explore"); selectPlace(P[+b.dataset.i], true); });
+}
+function picksHtml(list){
+  return `<div class="picks">${list.map((p,i)=>`<button type="button" class="pick" data-i="${p.i}"><span class="n">${i+1}</span><span class="t"><div>${esc(p.name)}</div><small>${esc(COUNTRIES[p.ck].n)} · ${usd(p.ppm)}/m² · growth ${p.s.potential}%</small></span><span class="pct ${rate(p.s.value)}">${p.s.value}%</span></button>`).join("")}</div>`;
+}
+let hlList = [];
+function highlight(list){
+  for (const p of hlList) p.hl = 0;
+  hlList = list.slice(0, 9);
+  hlList.forEach((p,i)=>p.hl = i+1);
+  dirty = true;
+  if (!hlList.length) return;
+  if (hlList.length === 1){ flyTo(hlList[0].lon, hlList[0].lat, Math.max(state.k, kForZoom(6))); return; }
+  const mp = {type:"MultiPoint", coordinates:hlList.map(p=>[p.lon,p.lat])};
+  const c = d3.geoCentroid(mp);
+  const spread = Math.max(...hlList.map(p=>d3.geoDistance(c,[p.lon,p.lat])));
+  const kk = Math.max(1, Math.min(40, (Math.min(W,H)*0.36) / (R0*Math.sin(Math.min(Math.max(spread,0.02)*1.15, Math.PI/2)))));
+  flyTo(c[0], c[1], kk);
+}
+
+// instant, offline answers from the same data (used when Claude is not available here)
+// ---- understanding questions (typo tolerant) ----
+const REGION_WORDS = [["eastern europe","europe"],["western europe","europe"],["europe","europe"],["european","europe"],["eu","europe"],
+  ["southeast asia","asia"],["south east asia","asia"],["east asia","asia"],["asia","asia"],["asian","asia"],
+  ["middle east","middle east"],["mena","middle east"],["gulf","middle east"],["arab","middle east"],
+  ["africa","africa"],["african","africa"],["north america","north america"],["latin america","latin america"],["latam","latin america"],
+  ["south america","latin america"],["central america","latin america"],["caribbean","latin america"],["oceania","oceania"],["pacific","oceania"],["australasia","oceania"]];
+const ALIASES = {usa:"USA","united states":"USA",america:"USA","the us":"USA",american:"USA",uk:"GBR","united kingdom":"GBR",britain:"GBR","great britain":"GBR",england:"GBR",british:"GBR",
+  uae:"ARE",emirates:"ARE",russia:"RUS",russian:"RUS",korea:"KOR","south korea":"KOR",czechia:"CZE","czech republic":"CZE",czech:"CZE",holland:"NLD",dutch:"NLD","dr congo":"COD",
+  turkey:"TUR","türkiye":"TUR",turkiye:"TUR",vietnam:"VNM","ivory coast":"CIV",german:"DEU",polish:"POL",spanish:"ESP",french:"FRA",italian:"ITA",portuguese:"PRT",greek:"GRC",
+  chinese:"CHN",japanese:"JPN",indian:"IND",mexican:"MEX",brazilian:"BRA",canadian:"CAN",australian:"AUS",thai:"THA",filipino:"PHL",philippine:"PHL",indonesian:"IDN",
+  nigerian:"NGA",kenyan:"KEN",egyptian:"EGY",saudi:"SAU",swiss:"CHE",swedish:"SWE",norwegian:"NOR",danish:"DNK",irish:"IRL",hungarian:"HUN",romanian:"ROU",bulgarian:"BGR",
+  croatian:"HRV",serbian:"SRB",ukrainian:"UKR",slovak:"SVK",slovakian:"SVK",lithuanian:"LTU",latvian:"LVA",estonian:"EST",georgian:"GEO",colombian:"COL",argentinian:"ARG",
+  chilean:"CHL",peruvian:"PER",venezuelan:"VEN",cuban:"CUB",moroccan:"MAR",rwandan:"RWA",tanzanian:"TZA",ghanaian:"GHA",vietnamese:"VNM",malaysian:"MYS"};
+// concept -> words (each also matches with small typos)
+const VOCAB = {
+  cheap:["cheap","cheapest","cheaper","cheep","affordable","afford","inexpensive","budget","lowcost"],
+  growth:["growth","grow","growing","potential","boom","booming","future","rising","rise","rises","upside","appreciation","emerging","fastest","upcoming","develop","developing"],
+  value:["value","bargain","bargains","deal","deals","invest","investment","investing","worth","roi","opportunity","opportunities"],
+  best:["best","top","good","great","ideal","recommend","recommended","suggest"],
+  worst:["worst","avoid","riskiest","dangerous","bad","risky","terrible","stay"],
+  safe:["safe","safest","secure","stable","safety"],
+  seize:["seize","seizure","seized","confiscate","confiscation","expropriate","expropriation","nationalise","nationalize","nationalisation","nationalization","steal","grab","taken","takes"],
+  own:["own","ownership","owner","owners","foreigner","foreigners","foreign","freehold","title","titles","rights"],
+  property:["property","properties","home","homes","house","houses","land","apartment","apartments","realestate","estate","flat","flats","building","buildings"],
+  government:["government","goverment","state","regime","authorities"],
+  compare:["compare","comparison","versus","vs","between","difference","better"],
+  why:["why","reason","reasons","explain","because","risk","risks","problem","problems","downside","downsides","issues","dangers","pros","cons"],
+  big:["big","large","major","biggest","largest","capital","capitals","metropolis"],
+  small:["towns","small","village","villages","smaller"],
+  overall:["overall","allround","general"],
+  meaning:["mean","means","meaning","calculated","calculate","calculation","methodology","formula"],
+  where:["where","which","places","cities","spots","locations","areas","list","options"],
+  hello:["hi","hello","hey","hola","ahoj","yo"],
+  thanks:["thanks","thank","thx","ty","cheers"]
+};
+const COMMON = new Set(("a an the and or of in on at to for from by with is are was be it its this that these those i me my we our you your he she they them what which who where when why how "+
+  "can could should would will do does did not no yes any some all most more less than then much many very also just there here about into over under below above near between best top good "+
+  "place places city cities country countries town towns build building buy sell rent start company business real estate property land home house money want need like "+
+  "nice mobile reading split bath orange split mission hope union independence liberty paradise florida victoria").split(" "));
+function lev(a, b, max){   // edit distance with swaps, stops early above max
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let pp = null, p = Array.from({length:b.length+1}, (_,j)=>j);
+  for (let i=1; i<=a.length; i++){
+    const c = [i]; let rowMin = i;
+    for (let j=1; j<=b.length; j++){
+      let v = Math.min(p[j]+1, c[j-1]+1, p[j-1] + (a[i-1]===b[j-1] ? 0 : 1));
+      if (i>1 && j>1 && a[i-1]===b[j-2] && a[i-2]===b[j-1]) v = Math.min(v, pp[j-2]+1);
+      c[j] = v; if (v < rowMin) rowMin = v;
+    }
+    if (rowMin > max) return max + 1;
+    pp = p; p = c;
+  }
+  return p[b.length];
+}
+const tol = w => w.length >= 8 ? 2 : w.length >= 5 ? 1 : 0;
+// closest candidate within its tolerance; ties go to the same first letter, then list order
+function closest(w, list, tolOf){
+  let best = null, bs = 99;
+  for (const item of list){
+    const n = item[0], t = tolOf(n); if (t <= 0) continue;
+    const d = lev(w, n, t); if (d > t) continue;
+    const score = d * 2 + (n[0] === w[0] ? 0 : 1);
+    if (score < bs){ bs = score; best = item; }
+  }
+  return best;
+}
+const CONCEPT_ORDER = ["seize","own","government","property","cheap","growth","value","worst","why","compare","meaning","where","best","safe","big","small","overall","hello","thanks"];
+const VOCAB_WORDS = [];
+for (const c in VOCAB) for (const w of VOCAB[c]) VOCAB_WORDS.push([w, c]);
+let VOCAB_WORDS_ORDERED = null;   // filled once CONCEPT_ORDER exists
+const norm = s => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+// names to look up: countries (name, aliases), cities (big enough to be worth matching)
+const COUNTRY_NAMES = [];
+for (const k of countryKeys) COUNTRY_NAMES.push([norm(COUNTRIES[k].n).replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim(), k]);
+for (const a in ALIASES) COUNTRY_NAMES.push([a, ALIASES[a]]);
+COUNTRY_NAMES.sort((a,b)=>b[0].length - a[0].length);
+const CITY_INDEX = new Map();   // normalised name -> most populous place
+for (const p of P){
+  if (p.pop < 20000) continue;
+  const n = norm(p.name).replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim();
+  if (n.length < 3 || COMMON.has(n)) continue;
+  const cur = CITY_INDEX.get(n);
+  if (!cur || cur.pop < p.pop) CITY_INDEX.set(n, p);
+}
+VOCAB_WORDS_ORDERED = VOCAB_WORDS.slice().sort((a,b)=>CONCEPT_ORDER.indexOf(a[1]) - CONCEPT_ORDER.indexOf(b[1]));
+const SINGLE_COUNTRIES = COUNTRY_NAMES.filter(([n])=>!n.includes(" "));
+const COUNTRY_SET = new Set(COUNTRY_NAMES.map(x=>x[0]));
+const COMMON_LONG = [...COMMON].filter(w=>w.length >= 5);
+const FUZZY_CITIES = [...CITY_INDEX].filter(([n,p])=>p.pop >= 400000 && n.length >= 6 && !n.includes(" "));
+
+function understand(q){
+  const raw = norm(String(q||""));
+  const out = {concepts:new Set(), countries:[], places:[], region:null, maxPrice:null, limit:null};
+  // prices: "$1500", "1.5k", "under 2000 per m2", "1500 dollars"
+  let text = raw.replace(/(\d),(\d{3})/g, "$1$2");
+  const pm = text.match(/(?:under|below|less than|max(?:imum)?|cheaper than|up to|<)\s*\$?\s*(\d+(?:\.\d+)?)\s*(k|thousand)?/) ||
+             text.match(/\$\s*(\d+(?:\.\d+)?)\s*(k|thousand)?/) || text.match(/(\d+(?:\.\d+)?)\s*(k|thousand)?\s*(?:\$|usd|dollars?|per m|\/m|a m)/);
+  if (pm){ let v = parseFloat(pm[1]) * (pm[2] ? 1000 : 1); if (v >= 100 && v <= 100000){ out.maxPrice = v; text = text.replace(pm[0], " "); } }
+  const lm = text.match(/\b(?:top|best|first)\s+(\d{1,2})\b/) || text.match(/\b(\d{1,2})\s+(?:best|top|cheapest|places|cities|towns|countries|options|picks)\b/);
+  if (lm){ out.limit = Math.max(1, Math.min(15, +lm[1])); text = text.replace(lm[0], " " + lm[0].replace(/\d+/, "") + " "); }
+  const clean = " " + text.replace(/[^a-z0-9$ ]+/g, " ").replace(/\s+/g, " ").trim() + " ";
+  // regions (longest phrases first)
+  let rest = clean;
+  // multi-word country names first, so "south africa" is a country and not the region "africa"
+  for (const [n, k] of COUNTRY_NAMES){
+    if (n.includes(" ") && rest.includes(" "+n+" ") && !out.countries.includes(k)){ out.countries.push(k); rest = rest.replace(" "+n+" ", "  "); }
+  }
+  for (const [w, r] of REGION_WORDS) if (rest.includes(" "+w+" ")) { out.region = r; rest = rest.replace(" "+w+" ", "  "); break; }
+  {   // misspelt country names ("south afirca", "australai"), checked before regions
+    const ws = rest.trim().split(" ");
+    const keep = [];
+    for (let i=0; i<ws.length; i++){
+      const w = ws[i], two = i+1 < ws.length ? w + " " + ws[i+1] : null;
+      let k = null, took = 1;
+      if (two && two.length >= 8){
+        // closest two-word name wins: a region ("south america") or a country ("south africa")
+        let best = null, bd = 9;
+        for (const [r] of REGION_WORDS) if (r.includes(" ")){ const d = lev(two, r, tol(r)); if (d <= tol(r) && d < bd){ bd = d; best = null; } }
+        for (const [n, kk] of COUNTRY_NAMES) if (n.includes(" ")){ const d = lev(two, n, tol(n)); if (d <= tol(n) && d < bd){ bd = d; best = kk; } }
+        if (bd < 9 && !best){ keep.push(w, ws[i+1]); i++; continue; }
+        if (best){ k = best; took = 2; }
+      }
+      if (!k && w.length >= 4 && !COMMON.has(w) && !VOCAB_WORDS.some(([v])=>v===w) && !REGION_WORDS.some(([r])=>r===w))
+        { const m = closest(w, SINGLE_COUNTRIES, n => n.length >= 5 ? Math.max(1, tol(n)) : 0); if (m) k = m[1]; }
+      if (k){ if (!out.countries.includes(k)) out.countries.push(k); i += took - 1; }
+      else keep.push(w);
+    }
+    rest = " " + keep.join(" ") + " ";
+  }
+  if (!out.region){   // misspelt region ("euorpe", "latin amerca")
+    const ws = rest.trim().split(" ");
+    outer: for (let n=2; n>=1; n--) for (let i=0; i+n<=ws.length; i++){
+      const ph = ws.slice(i, i+n).join(" ");
+      if (ph.length < 5 || COUNTRY_SET.has(ph)) continue;
+      for (const [w, r] of REGION_WORDS) if (w.length >= 5 && w.split(" ").length === n && lev(ph, w, tol(w)) <= tol(w)){
+        out.region = r; rest = (" " + ws.slice(0,i).concat(ws.slice(i+n)).join(" ") + " "); break outer;
+      }
+    }
+  }
+  // countries: exact phrases, then typo-tolerant single words
+  for (const [n, k] of COUNTRY_NAMES){
+    if (n.length < 2) continue;
+    if (rest.includes(" "+n+" ") && !out.countries.includes(k)){ out.countries.push(k); rest = rest.replace(" "+n+" ", "  "); }
+  }
+  // cities: exact names up to three words long
+  const words = rest.trim().split(" ").filter(Boolean);
+  const used = new Set();
+  for (let len=3; len>=1; len--){
+    for (let i=0; i+len<=words.length; i++){
+      if ([...Array(len).keys()].some(j=>used.has(i+j))) continue;
+      const phrase = words.slice(i, i+len).join(" ");
+      const p = CITY_INDEX.get(phrase);
+      if (p && !(len===1 && COMMON.has(phrase)) && !out.places.includes(p)){
+        out.places.push(p); for (let j=0;j<len;j++) used.add(i+j);
+      }
+    }
+  }
+  // concepts and typo-tolerant matching for the remaining words
+  words.forEach((w, i)=>{
+    if (used.has(i)) return;
+    let hit = null;
+    for (const [v, c] of VOCAB_WORDS){ if (w === v){ hit = c; break; } }
+    if (!hit && COMMON.has(w)) return;   // an everyday word, never a typo of a keyword
+    if (!hit && w.length >= 4){
+      const m = closest(w, VOCAB_WORDS_ORDERED, v => v.length >= 4 ? tol(v) : 0);
+      if (m) hit = m[1];
+    }
+    if (hit){ out.concepts.add(hit); return; }
+    if (COMMON.has(w) || w.length < 4) return;
+    if (COMMON_LONG.some(c=>lev(w, c, 1) <= 1)) return;   // a misspelt everyday word, not a name
+    // misspelt country or big city
+    { const m = closest(w, SINGLE_COUNTRIES, n => n.length >= 5 ? Math.max(1, tol(n)) : 0); if (m){ if (!out.countries.includes(m[1])) out.countries.push(m[1]); return; } }
+    if (w.length >= 5) for (const [n, p] of FUZZY_CITIES) if (lev(w, n, 1) <= 1){ if (!out.places.includes(p)) out.places.push(p); return; }
+  });
+  if (/\bcost of\b|\bhow much\b|\bexpensive\b/.test(clean)) out.concepts.add("priceOf");
+  if (/\btowns?\b/.test(clean)) out.concepts.add("small");
+  if (/\blow (cost|price|prices|priced)\b/.test(clean)) out.concepts.add("cheap");
+  if (/\bwhat (is|are|does|do) (the |a )?(value|growth|potential|price|overall|property safety|score|scores|percent|percentage|percentages|procentages)\b|\bhow (do|does|are|is) (the |your )?(score|scores|rating|ratings|value|it|this|percentages?)\b.*\b(work|calculat|made|mean)/.test(clean)) out.concepts.add("meaning");
+  if (/\bnot safe\b|\bunsafe\b/.test(clean)){ out.concepts.delete("safe"); out.concepts.add("worst"); }
+  if (/\b(or|and|vs)\b/.test(clean) && out.places.length + out.countries.length >= 2) out.concepts.add("compare");
+  return out;
+}
+function decide(u){
+  const has = c => u.concepts.has(c);
+  const nNamed = u.places.length + u.countries.length;
+  const listSignal = !!(u.region || u.maxPrice || u.limit || has("where"));
+  const kw = ["cheap","growth","value","worst","safe","big","small","overall","best"].some(has);
+  if ((has("hello") || has("thanks")) && !nNamed && !kw && !has("seize") && !has("own")) return has("thanks") ? "thanks" : "hello";
+  if (has("meaning") && !nNamed && !has("seize")) return "explain";
+  if (has("seize") || (has("government") && (has("property") || has("own"))) || (has("own") && (has("property") || nNamed))) return "property";
+  if (u.places.length >= 2 && !u.region && !u.maxPrice && !u.limit) return "compare";
+  if (!listSignal && has("compare") && nNamed >= 2) return "compare";
+  if (!listSignal && u.places.length === 1) return "place";
+  if (!listSignal && u.countries.length >= 2 && (!kw || has("compare"))) return "compare";
+  if (!listSignal && u.countries.length === 1 && (!kw || has("why") || (has("best") && !has("cheap") && !has("growth") && !has("value")))) return "country";
+  if (!listSignal && !kw && !nNamed) return "unknown";
+  return "list";
+}
+function listSpec(u){
+  const has = c => u.concepts.has(c);
+  let sort = "value", lowest = false, minProp = 0;
+  if (has("worst")) { sort = "overall"; lowest = true; }
+  else if (has("cheap") && has("growth")) sort = "value";
+  else if (has("value")) sort = "value";
+  else if (has("cheap")) sort = "price";
+  else if (has("growth")) sort = "potential";
+  else if (has("overall") || (has("best") && !has("cheap"))) sort = has("best") && !has("overall") ? "value" : "overall";
+  if (has("safe") && !lowest) minProp = 80;
+  return {sort, lowest, minProp, minPop: has("big") ? 1e6 : has("small") ? 20000 : 100000, limit: u.limit || 6};
+}
+const regionName = r => r.replace(/\b\w/g, m=>m.toUpperCase());
+function fmtPlace(p){
+  const c = COUNTRIES[p.ck], warn = c.f[5] < 45 ? " ⚠ property risk" : "";
+  return `- [[${p.name}|${c.n}]]: ${p.s.value}% value, about ${usd(p.ppm)}/m², growth ${p.s.potential}%, overall ${p.s.overall}%${warn}.`;
+}
+function placeLine(p){
+  const c = COUNTRIES[p.ck], r = reasons(c, p), good = p.s.value >= 65 || p.s.overall >= 65;
+  return `${fmtPlace(p)}\n  Property safety ${c.f[5]}%. ${good ? "Strength: "+(r.pros[0]||"steady fundamentals") : "Main problem: "+(r.cons[0]||"no single big problem")}.`;
+}
+function countryText(k){
+  const c = COUNTRIES[k], r = reasons(c, null);
+  const top = (byCountry[k]||[]).slice().sort((a,b)=>b.s.value-a.s.value).slice(0,3);
+  return `**${c.n}**: ${Math.round(c.overall)}% overall, ${c.value}% value, ${Math.round(c.potential)}% growth, property safety ${c.f[5]}%, typical ${usd(c.p)}/m².\n`
+    + r.cons.slice(0,3).map(x=>"- "+x).join("\n") + (r.pros.length ? "\nIn its favour: " + r.pros[0].charAt(0).toLowerCase() + r.pros[0].slice(1) + "." : "")
+    + (top.length ? "\nBest value there: " + top.map(p=>`[[${p.name}|${c.n}]]`).join(", ") + "." : "");
+}
+function localAnswer(q){
+  const u = understand(q), intent = decide(u);
+  if (intent === "hello") return {text:"Hi! Ask me where to build: cheap places with growth, a country's risks, or whether the government can take your property.", picks:[], intent};
+  if (intent === "thanks") return {text:"You're welcome. Ask me anything else about places, prices or growth.", picks:[], intent};
+  if (intent === "explain") return {intent, picks:[], text:"**How the scores work** (0-100%, green 65+, yellow 50-64, red under 50):\n- **Overall**: demand, economy, affordability, stability, business climate and property safety together.\n- **Price**: higher means cheaper, from estimated apartment prices per m².\n- **Growth**: population growth, economy and local momentum.\n- **Value**: cheap AND high growth, marked down where it is unsafe.\n- **Property safety**: how likely the government is to take your property, and limits on foreign owners.\nThey are indicative estimates, not financial advice."};
+  if (intent === "property"){
+    const ks = u.countries.length ? u.countries : u.places.map(p=>p.ck);
+    if (ks.length){
+      const lines = [...new Set(ks)].slice(0,4).map(k=>{
+        const c = COUNTRIES[k], v = c.f[5];
+        return `**${c.n}: property safety ${v}%** (${PROP_LABEL[propRate(v)].toLowerCase()}).\n${c.pn ? "- "+c.pn+"\n" : ""}- ${v >= 70 ? "Courts and the land registry protect owners well." : v >= 45 ? "You can usually own property, but check the limits for foreigners and the title history." : "The state has seized or blocked property here, or foreigners cannot really own it. Treat it as high risk."}`;
+      });
+      return {text:lines.join("\n"), picks:u.places.slice(0,3), intent};
+    }
+    const asksSafe = u.concepts.has("safe") || u.concepts.has("best");
+    const worst = propertyRanking({region:u.region, limit:8, safest_first:asksSafe});
+    const safe = queryPlaces({sort:"value", region:u.region, min_property_safety:80, min_population:300000, limit:5});
+    return {intent, picks:safe, text:`**${asksSafe ? "Where your property is safest" : "Where the government may take your property"}${u.region?" in "+regionName(u.region):""}**:\n${worst.map(([k,c])=>`- ${c.n} (${c.f[5]}%): ${c.pn || (c.f[5] >= 85 ? "strong property rights" : "weak courts and property rights")}`).join("\n")}\n\n**Cheap with growth where property is safe (80%+):**\n${safe.map(fmtPlace).join("\n")}`};
+  }
+  if (intent === "compare"){
+    const items = u.places.slice(0,4);
+    const lines = items.map(placeLine).concat(u.countries.filter(k=>!items.some(p=>p.ck===k)).slice(0,3).map(countryText));
+    const all = items.slice();
+    let verdict = "";
+    if (items.length >= 2){ const b = items.slice().sort((a,b)=>b.s.value-a.s.value)[0]; verdict = `\n**Better value: [[${b.name}|${COUNTRIES[b.ck].n}]]** (${b.s.value}%).`; }
+    return {text:"Here is how they compare:\n" + lines.join("\n") + verdict, picks:all, intent};
+  }
+  if (intent === "place"){
+    const ps = u.places.slice(0,3);
+    return {text:(ps.length > 1 ? "Here is how they compare:\n" : "") + ps.map(placeLine).join("\n"), picks:ps, intent};
+  }
+  if (intent === "country") return {text:countryText(u.countries[0]), picks:(byCountry[u.countries[0]]||[]).slice().sort((a,b)=>b.s.value-a.s.value).slice(0,3), intent};
+  const s = listSpec(u);
+  if (!u.countries.length && u.places.length) u.countries = [...new Set(u.places.map(p=>p.ck))];
+  const where = u.countries.length ? " in " + u.countries.map(k=>COUNTRIES[k].n).join(", ") : u.region ? " in " + regionName(u.region) : "";
+  const list = queryPlaces({sort:s.sort, region:u.region, countries:u.countries.map(k=>COUNTRIES[k].n), max_price_usd_per_m2:u.maxPrice || undefined,
+    lowest_first:s.lowest, min_property_safety:s.minProp, min_population:s.minPop, limit:s.limit});
+  const intro = intent === "unknown" ? "I'm not sure what you mean, so here are the best cheap places with growth. Try \"cheapest big cities in Asia\" or \"why is Russia rated badly?\"\n" : "";
+  const head = s.lowest ? `Riskiest places${where}` : ({value:`Cheap places with the most growth${where}`, price:`Cheapest places${where}`, potential:`Most growth potential${where}`, overall:`Best all-round places${where}`})[s.sort];
+  const extra = [u.maxPrice ? `under ${usd(u.maxPrice)}/m²` : "", s.minProp ? "property safety 80%+" : "", s.minPop >= 1e6 ? "cities over 1M people" : s.minPop < 100000 ? "including small towns" : ""].filter(Boolean).join(", ");
+  if (!list.length) return {text:`I found no places matching that${where}${extra ? " ("+extra+")" : ""}. Try a higher price limit or a bigger area.`, picks:[], intent};
+  return {intent, picks:list, text:`${intro}**${head}**${extra ? " ("+extra+")" : ""}:\n${list.map(fmtPlace).join("\n")}${!s.lowest ? "\nWar zones and countries where the government may take your property are left out." : ""}`};
+}
+
+window.__atlasBrain = {understand, decide, localAnswer};   // used by the test suite
+
+function setBusy(b){
+  busy = b;
+  sendBtn.classList.toggle("stop", b);
+  sendBtn.setAttribute("aria-label", b ? "Stop" : "Send");
+  sendBtn.innerHTML = b ? `<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>` : `<svg viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-2-6z"/></svg>`;
+}
+function finishBot(el, text, note){
+  const {html, links} = renderRich(text, false);
+  el.querySelector(".body").innerHTML = html + (links.length ? picksHtml(links) : "") + (note ? `<div class="note">${esc(note)}</div>` : "");
+  bindLinks(el);
+  highlight(links);
+  msgsEl.scrollTop = msgsEl.scrollHeight;
+}
+async function ask(q){
+  q = String(q||"").trim(); if (!q || busy) return;
+  inEl.value = ""; inEl.style.height = "";
+  addMsg("user", esc(q));
+  const el = addMsg("bot", `<div class="thinking" aria-label="Thinking"><span></span><span></span><span></span></div>`);
+  turns.push({role:"user", content:q});
+  if (aiState === "nanobot"){
+    setBusy(true);
+    try {
+      const text = await askNanobot(q, el);
+      turns.push({role:"assistant", content:text});
+      finishBot(el, text || "nanobot sent an empty reply.", "Answered by your nanobot.");
+    } catch(e){
+      turns.pop();
+      if (e && e.name === "AbortError") finishBot(el, "Stopped.", "");
+      else {
+        const a = localAnswer(q);
+        const why = e && e.code === "nanobot_http" ? `nanobot returned an error (${e.status}${e.message ? ": "+e.message : ""}). Check its log; a bigger model context window may help.` : "Could not reach nanobot. Is `nanobot serve` running?";
+        finishBot(el, a.text, why + " Here is a quick answer from the map data.");
+      }
+    } finally { setBusy(false); ctl = null; }
+    return;
+  }
+  if (aiState !== "ready"){
+    const a = localAnswer(q);
+    turns.push({role:"assistant", content:a.text});
+    finishBot(el, a.text, aiState==="off" ? (location.protocol === "atlas:" ? "Quick answer from the map data. For AI answers, start nanobot (nanobot serve) and reopen the chat."
+      : /^https?:$/.test(location.protocol) && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? "Answered from the map data."
+      : "Quick answer from the map data. For AI answers, open this page in Claude or run it with serve.py and nanobot.") : "Quick answer from the map data.");
+    return;
+  }
+  setBusy(true);
+  ctl = new AbortController();
+  const recent = turns.slice(-12);
+  while (recent.length && recent[0].role !== "user") recent.shift();
+  const input = [{role:"user", content:RULES}, ...recent];
+  let useTools = false;
+  try { useTools = !!(await sampleFn.limits()).tools; } catch(e){}
+  const opts = {signal:ctl.signal, cache:false, modelTier:"quick",
+    onText:({text})=>{ el.querySelector(".body").innerHTML = renderRich(text, true).html; msgsEl.scrollTop = msgsEl.scrollHeight; }};
+  if (useTools){ opts.tools = TOOLS; delete opts.cache; }
+  else {
+    // no page tools in this view: hand Claude a compact slice of the data instead
+    const snap = {best_value:queryPlaces({sort:"value", limit:15}).map(summary), cheapest_stable:queryPlaces({sort:"price", limit:10}).map(summary),
+      most_growth:queryPlaces({sort:"potential", limit:10}).map(summary), local_matches:localAnswer(q).picks.map(placeDetail)};
+    input[0] = {role:"user", content:RULES + "\n\nYou cannot call tools here. Use only this data:\n" + JSON.stringify(snap)};
+  }
+  try {
+    const {text, truncated} = await sampleFn(input, opts);
+    turns.push({role:"assistant", content:text});
+    finishBot(el, text, truncated ? "Answer cut short. Ask for less at a time." : "");
+  } catch(e){
+    const code = e && e.code;
+    if (code === "cancelled"){ finishBot(el, e.text || "Stopped.", ""); turns.pop(); }
+    else if (["not_granted","sampling_disabled","not_declared","capability_disabled","capability_removed","tools_unavailable"].includes(code)){
+      aiState = "declined"; turns.pop();
+      const a = localAnswer(q); turns.push({role:"user", content:q}, {role:"assistant", content:a.text});
+      finishBot(el, a.text, "AI chat is off for this view, so this is a quick answer from the map data.");
+    } else if (code === "rate_limited"){ finishBot(el, e.text || "", "Too many questions at once. Wait a moment and ask again."); turns.pop(); }
+    else if (code === "refused"){ finishBot(el, "I can't help with that one. Try asking about places, prices or growth.", ""); turns.pop(); }
+    else { finishBot(el, e.text || "", "The answer was interrupted. Ask again to retry."); turns.pop(); }
+  } finally { setBusy(false); ctl = null; }
+}
+$("composer").addEventListener("submit", ev=>{ ev.preventDefault(); if (busy){ ctl && ctl.abort(); return; } ask(inEl.value); });
+inEl.addEventListener("keydown", ev=>{ if (ev.key==="Enter" && !ev.shiftKey){ ev.preventDefault(); if (!busy) ask(inEl.value); } });
+inEl.addEventListener("input", ()=>{ inEl.style.height = ""; inEl.style.height = Math.min(120, inEl.scrollHeight)+"px"; });
+
+// welcome: the best cheap + high-growth picks, straight from the data
+function welcome(){
+  const top = [], used = new Set();   // one city per country so the picks span the globe
+  for (const p of queryPlaces({sort:"value", min_population:300000, limit:15})) if (!used.has(p.ck) && top.length < 5){ used.add(p.ck); top.push(p); }
+  const el = addMsg("bot", "");
+  el.querySelector(".body").innerHTML = `<p>Hi! I can find cheap places with the most growth potential, compare cities and countries, or explain why a place scores badly. These are the best value picks on the map right now (cheap + high growth):</p>${picksHtml(top)}`;
+  bindLinks(el);
+  return top;
+}
+let welcomed = false;
+function showTab(t){
+  const chat = t === "chat";
+  $("tab-chat").setAttribute("aria-selected", chat); $("tab-explore").setAttribute("aria-selected", !chat);
+  chatEl.hidden = !chat; body.hidden = chat;
+  panel.classList.toggle("chatting", chat);
+  document.body.classList.toggle("chat-open", chat);
+  if (chat){
+    expandSheet();
+    if (!welcomed){ welcomed = true; highlight(welcome()); }
+    if (window.innerWidth > 760) inEl.focus();
+  }
+}
+$("tab-chat").onclick = ()=>showTab("chat");
+$("tab-explore").onclick = ()=>showTab("explore");
+
+/* ---------- live news: the Mac app and serve.py fetch headlines every 10 minutes ---------- */
+const NEG_WORDS = /\b(war|wars|invasion|invades?|conflict|sanction\w*|seiz\w*|expropriat\w*|nationali[sz]\w*|confiscat\w*|crisis|collapse\w*|defaults?|defaulted|crash\w*|plunge\w*|slump\w*|tumbl\w*|falls?|falling|fell|drops?|dropped|declin\w*|bans?|banned|protests?|coup|unrest|riots?|inflation|recession|bankrupt\w*|devalu\w*|earthquake|floods?|flooding|hurricane|cyclone|wildfires?|downgrad\w*|shortages?|freezes?|frozen|halt\w*|evict\w*|demolish\w*|fraud|corruption|curbs?)\b/g;
+const POS_WORDS = /\b(boom\w*|surge\w*|soar\w*|records?|growth|grows?|growing|invest\w*|rises?|rising|rose|recover\w*|rally|rallies|reforms?|upgrad\w*|expan\w*|approv\w*|deals?|opens?|opening|demand|strong|jumps?|jumped|gains?|eases?|easing|incentives?|stimulus|cuts? rates?|rate cuts?)\b/g;
+const SEIZE_WORDS = /\b(seiz\w*|expropriat\w*|nationali[sz]\w*|confiscat\w*)\b/;
+const NEWS_NAMES = new Map();
+for (const [n, k] of COUNTRY_NAMES) if (n.length >= 4 || ["uk","uae","usa"].includes(n)) NEWS_NAMES.set(n, k);
+for (const [n, p] of CITY_INDEX) if (p.pop >= 1e6 && !NEWS_NAMES.has(n)) NEWS_NAMES.set(n, p.ck);
+const NEWS = {fetched:null, count:0, error:null};
+function applyNews(d){
+  const now = Date.now(), by = {};
+  for (const it of d.items || []){
+    const t = norm(it.title || "");
+    const words = t.replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(Boolean);
+    const cks = new Set();
+    for (let n=3; n>=1; n--) for (let i=0; i+n<=words.length; i++){ const k = NEWS_NAMES.get(words.slice(i, i+n).join(" ")); if (k) cks.add(k); }
+    if (!cks.size || cks.size > 3) continue;   // skip headlines about no country, or round-ups of many
+    const neg = (t.match(NEG_WORDS) || []).length, pos = (t.match(POS_WORDS) || []).length;
+    const sent = Math.max(-2, Math.min(2, pos - neg)), seize = SEIZE_WORDS.test(t);
+    const ageH = Math.max(0, (now - (Date.parse(it.published) || now)) / 36e5), w = Math.exp(-ageH / 48);   // older news counts less
+    for (const k of cks){
+      const b = by[k] || (by[k] = {sum:0, prop:0, items:[]});
+      b.sum += sent * w; if (seize) b.prop -= w;
+      b.items.push({title:it.title, link:it.link, source:it.source, published:it.published, sent, seize});
+    }
+  }
+  for (const k in COUNTRIES){
+    const c = COUNTRIES[k], b = by[k];
+    // capped so headlines nudge the model rather than rewrite it
+    c.news = b ? {adj:Math.max(-6, Math.min(6, Math.round(b.sum * 1.5))), propAdj:Math.max(-15, Math.min(0, Math.round(b.prop * 5))),
+      items:b.items.sort((x,y)=>(Date.parse(y.published)||0) - (Date.parse(x.published)||0)).slice(0, 6)} : null;
+    scoreCountry(c);
+  }
+  for (const p of P) scorePlace(p);
+  NEWS.fetched = d.fetched; NEWS.count = (d.items || []).length; NEWS.error = d.error || null;
+  const typing = document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
+  if (!typing) setMode(mode); else { sortCountryLists(); buildRankings(); }
+  updateNewsLine(); dirty = true;
+}
+function ago(ts){
+  const m = Math.round((Date.now() - (Date.parse(ts) || Date.now())) / 60000);
+  return m < 1 ? "just now" : m < 60 ? m + " min ago" : m < 1440 ? Math.round(m/60) + " h ago" : Math.round(m/1440) + " d ago";
+}
+function updateNewsLine(){
+  const el = $("newsline");
+  if (!NEWS.fetched){ el.hidden = true; return; }
+  el.hidden = false;
+  el.classList.toggle("off", !!NEWS.error);
+  el.querySelector("span").textContent = NEWS.error ? `News offline, using data from ${ago(NEWS.fetched)}` : `Live news: ${NEWS.count} headlines, updated ${ago(NEWS.fetched)}`;
+}
+function newsBlock(c){
+  const n = c.news;
+  if (!n || !n.items.length) return NEWS.fetched ? `<div class="newsb"><div><h3>In the news</h3></div><p class="p">No recent headlines about ${esc(c.n)}. Its score uses the base model only.</p></div>` : "";
+  const eff = n.adj ? `Recent headlines move ${esc(c.n)}'s scores by <b class="${n.adj > 0 ? "g" : "r"}">${signPts(n.adj)} points</b>${n.propAdj ? ` and property safety by <b class="r">${signPts(n.propAdj)}</b>` : ""}.` : `Recent headlines are mixed, so they do not change ${esc(c.n)}'s scores.`;
+  return `<div class="newsb"><div><h3>In the news</h3></div><p class="p">${eff}</p><ul class="news-list">${n.items.map(it=>
+    `<li><i class="${it.sent > 0 ? "g" : it.sent < 0 ? "r" : "n"}" title="${it.sent > 0 ? "Positive" : it.sent < 0 ? "Negative" : "Neutral"}"></i><div><a href="${esc(it.link || "#")}" target="_blank" rel="noopener">${esc(it.title)}</a><small>${esc(it.source || "")}${it.source ? " · " : ""}${ago(it.published)}${it.seize ? " · property seizure" : ""}</small></div></li>`).join("")}</ul></div>`;
+}
+async function pollNews(){
+  if (!(/^https?:$/.test(location.protocol) || location.protocol === "atlas:")) return;   // a plain file or claude.ai cannot fetch feeds
+  try {
+    const r = await fetch("news.json", {cache:"no-store"});
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.fetched && d.fetched !== NEWS.fetched) applyNews(d); else updateNewsLine();
+  } catch(e){}
+}
+setInterval(pollNews, 60000);
+setInterval(updateNewsLine, 30000);
+
+/* ---------- Mac and keyboard polish ---------- */
+const IS_MAC = navigator.userAgentData?.platform === "macOS" || /Mac|iPhone|iPad/.test(navigator.platform || "") || /Macintosh|Mac OS X/.test(navigator.userAgent);
+document.documentElement.classList.toggle("mac", IS_MAC);
+if (window.matchMedia("(hover: hover) and (pointer: fine)").matches){
+  $("kbd").hidden = false;
+  if (!IS_MAC) $("kbd-mod").textContent = "Ctrl";
+}
+window.addEventListener("keydown", ev=>{
+  const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName);
+  if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k"){ ev.preventDefault(); showTab("explore"); q.focus(); q.select(); return; }
+  if (typing || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  const step = 12 / Math.sqrt(state.k);
+  if (ev.key === "/"){ ev.preventDefault(); showTab("explore"); q.focus(); }
+  else if (ev.key === "+" || ev.key === "="){ zoomBy(1.6); }
+  else if (ev.key === "-" || ev.key === "_"){ zoomBy(1/1.6); }
+  else if (ev.key === "0"){ flyTo(...viewCenter(), 1); }
+  else if (ev.key === "ArrowLeft"){ ev.preventDefault(); flyTo(viewCenter()[0] - step, viewCenter()[1], state.k); }
+  else if (ev.key === "ArrowRight"){ ev.preventDefault(); flyTo(viewCenter()[0] + step, viewCenter()[1], state.k); }
+  else if (ev.key === "ArrowUp"){ ev.preventDefault(); flyTo(viewCenter()[0], Math.min(85, viewCenter()[1] + step), state.k); }
+  else if (ev.key === "ArrowDown"){ ev.preventDefault(); flyTo(viewCenter()[0], Math.max(-85, viewCenter()[1] - step), state.k); }
+  else if (ev.key === "Escape"){ hideTip(); }
+});
+// Safari on a Mac reports trackpad pinches as gesture events rather than ctrl+wheel
+let gestureK = null;
+canvas.addEventListener("gesturestart", ev=>{ ev.preventDefault(); stopMotion(true); gestureK = cam.targetK ?? state.k; });
+canvas.addEventListener("gesturechange", ev=>{
+  ev.preventDefault(); if (gestureK === null) return;
+  const pt = d3.pointer(ev, canvas); apply();
+  const g = proj.invert(pt);
+  cam.targetK = Math.max(MINK, Math.min(MAXK, gestureK * ev.scale));
+  cam.anchor = pt; cam.anchorGeo = g && d3.geoDistance(g, viewCenter()) < Math.PI/2 - 0.01 ? g : null;
+});
+canvas.addEventListener("gestureend", ev=>{ ev.preventDefault(); gestureK = null; });
+document.addEventListener("gesturestart", ev=>ev.preventDefault());   // no page zoom in Safari
+
+/* ---------- boot ---------- */
+document.body.classList.add("has-panel");
+resize(); setMode(mode);
+$("loading").remove();
+pollNews();
+requestAnimationFrame(loop);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(()=>{ MW.clear(); dirty = true; });
+const stopSpin = ()=>{ spin = false; };
+["pointerdown","keydown","touchstart"].forEach(t=>window.addEventListener(t, stopSpin, {once:true, passive:true}));
+})();
+</script>

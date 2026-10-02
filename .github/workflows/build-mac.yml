@@ -1,0 +1,57 @@
+# Builds the Build Atlas Mac app on a real Mac and attaches the zips to the run.
+name: Build Atlas Mac app
+
+on:
+  push:
+    paths:
+      - "realestate-globe/**"
+      - ".github/workflows/build-mac.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mac:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install icon tooling
+        run: pip install pillow
+
+      - name: Build Apple Silicon and Intel apps
+        working-directory: realestate-globe/mac
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: |
+          npm ci --no-audit --no-fund
+          node build-mac.js
+
+      - name: Check the apps are signed
+        working-directory: realestate-globe/mac/dist/build
+        run: |
+          for app in */"Build Atlas.app"; do codesign --verify --deep --strict "$app" && echo "signed: $app"; done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Build-Atlas-Mac-Apple-Silicon
+          path: realestate-globe/mac/dist/*Apple-Silicon.zip
+          compression-level: 0
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Build-Atlas-Mac-Intel
+          path: realestate-globe/mac/dist/*Intel.zip
+          compression-level: 0
+          if-no-files-found: error
