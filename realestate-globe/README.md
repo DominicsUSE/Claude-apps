@@ -6,6 +6,8 @@ Switch between three ratings:
 - **Overall**: best all-round places to start and build.
 - **Price**: cheapest land and homes (estimated USD per m²; green is cheaper).
 - **Potential**: where demand and prices should grow most.
+- **Value**: cheap AND high growth potential together (marked down in unstable
+  countries). This is the "best cheap places with the most potential" view.
 Drag to spin, scroll or pinch to zoom; city and town names appear as you zoom in.
 Click a place or country for its score breakdown, its growth potential and
 plain-language reasons why it scores well or badly. Map labels carry a
@@ -26,3 +28,49 @@ Scores are indicative estimates, not financial advice:
 To change scores, edit `build/scores.py`, then run `python3 build/build.py`
 to regenerate `index.html`. Country-specific reasons live in `COUNTRY_NOTES`.
 Map data: Natural Earth via world-atlas. Satellite imagery: NASA Blue Marble.
+
+## Ask AI chat
+
+The side panel has an **Ask AI** tab. Ask things like "cheap places with the most
+growth", "best value in Europe" or "why is Russia rated badly?". Answers link
+each place, and the globe flies to them with numbered pins. It runs in one of
+three ways:
+
+1. **Opened in Claude (claude.ai artifact):** Claude answers, looking places up in
+   the map data with page tools.
+2. **Run locally with your own nanobot:** see below.
+3. **Anywhere else:** instant answers built from the map data, no AI needed.
+
+## Using nanobot
+
+[nanobot](https://github.com/HKUDS/nanobot) is a self-hosted AI agent. Two parts
+connect it to Build Atlas:
+
+- `nanobot-skill/build-atlas/`: a nanobot skill. nanobot can then answer
+  Build Atlas questions everywhere it runs (WebUI, terminal, Telegram, Discord ...)
+  by running `scripts/atlas.py` on the scored data in `assets/atlas-data.json`.
+- `serve.py`: serves the map and forwards its Ask AI tab to nanobot's
+  OpenAI-compatible API. nanobot's API sends no CORS headers, so the browser has
+  to reach it through the same server.
+
+```bash
+# 1. install the skill into your nanobot workspace
+cp -r realestate-globe/nanobot-skill/build-atlas ~/.nanobot/workspace/skills/
+
+# 2. start nanobot's API (default http://127.0.0.1:8900)
+nanobot plugins enable api
+nanobot serve
+
+# 3. serve the map, then open http://127.0.0.1:8000 and use the Ask AI tab
+python3 realestate-globe/serve.py            # --nanobot URL --key API_KEY if needed
+```
+
+You can try the skill on its own:
+
+```bash
+python3 ~/.nanobot/workspace/skills/build-atlas/scripts/atlas.py top --sort value --region europe
+python3 ~/.nanobot/workspace/skills/build-atlas/scripts/atlas.py place Lisbon
+```
+
+`build/build.py` regenerates `assets/atlas-data.json` together with `index.html`
+(the scoring is mirrored in `build/export_skill.py`).

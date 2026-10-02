@@ -15,6 +15,7 @@ import json
 import os
 import sys
 
+from export_skill import export
 from scores import (DEFAULT, PRICE_DEFAULT, WEIGHTS, parse_city_prices, parse_countries,
                     parse_hotspots, parse_notes, parse_prices)
 
@@ -120,6 +121,7 @@ def main():
     if len(sys.argv) > 1:
         with open(sys.argv[1], "w", encoding="utf-8") as fh:
             fh.write(body)
+    export(countries, places, os.path.join(HERE, "..", "nanobot-skill", "build-atlas", "assets", "atlas-data.json"))
     print(f"{len(places)} places, {len(countries)} countries")
 
 

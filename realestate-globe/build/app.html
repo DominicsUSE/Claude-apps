@@ -54,9 +54,9 @@ button{font:inherit;color:inherit}
 .results .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .results .sub{color:var(--muted);font-size:12px}
 
-.modes{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:4px;border-radius:var(--r)}
-.modes button{display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:8px 10px;border:0;border-radius:10px;background:transparent;cursor:pointer;text-align:left;color:var(--muted);transition:background .2s,color .2s}
-.modes button b{font:600 13px var(--f-body);color:inherit;display:flex;align-items:center;gap:6px}
+.modes{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:4px;border-radius:var(--r)}
+.modes button{display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:8px 8px;min-width:0;border:0;border-radius:10px;background:transparent;cursor:pointer;text-align:left;color:var(--muted);transition:background .2s,color .2s}
+.modes button b{font:600 12.5px var(--f-body);color:inherit;display:flex;align-items:center;gap:6px}
 .modes button small{font-size:11px;line-height:1.25}
 .modes button svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2}
 .modes button:hover{color:var(--ink)}
@@ -99,8 +99,8 @@ body.has-panel .ctrls{right:388px}
 .verdict.r{background:rgba(242,95,87,.14);color:var(--bad)}
 .verdict i{width:8px;height:8px;border-radius:50%;background:currentColor}
 .meta{color:var(--muted);font-size:13px;margin-top:6px}
-.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.tile{padding:10px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.02);display:flex;flex-direction:column;gap:4px;cursor:pointer;text-align:left}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.tile{padding:9px 8px;min-width:0;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.02);display:flex;flex-direction:column;gap:4px;cursor:pointer;text-align:left}
 .tile[aria-pressed="true"]{border-color:rgba(142,197,255,.5);background:rgba(142,197,255,.08)}
 .tile span{font-size:11px;color:var(--muted)}
 .tile b{font:700 20px/1 var(--f-display);font-variant-numeric:tabular-nums}
@@ -169,12 +169,16 @@ body.has-panel .ctrls{right:388px}
 @media (max-width:760px){
   .panel{top:auto;left:0;right:0;bottom:0;width:auto;max-height:44%;border-radius:18px 18px 0 0;padding-bottom:env(safe-area-inset-bottom,0px)}
   .panel.collapsed{max-height:56px}
+  .panel.chatting{max-height:62%}
+  body.chat-open .legend{display:none}
+  .ptabs{margin:6px 12px 0}
   body.has-panel .ctrls{right:16px}
   .ctrls{bottom:auto;top:16px}
   .ctrls button{width:38px;height:38px}
   .top{width:calc(100% - 86px)}
   .brand p,.modes small{display:none}
-  .modes button{align-items:center;padding:8px 4px}
+  .modes button{align-items:center;padding:8px 2px}
+  .modes button svg{display:none}
   .legend{bottom:calc(44% + 10px);padding:8px 10px}
   body.sheet-collapsed .legend{bottom:66px}
   .legend .note,.legend .lbl,.legend .ramp,.legend .zoomhint,.legend .arrows,.chip b{display:none}
@@ -184,6 +188,44 @@ body.has-panel .ctrls{right:388px}
 }
 .grab{display:none;width:100%;border:0;background:none;padding:8px 0 0;cursor:pointer}
 .grab::before{content:"";display:block;margin:0 auto;width:38px;height:4px;border-radius:2px;background:var(--muted);opacity:.6}
+.ptabs{display:flex;gap:4px;margin:14px 16px 0;padding:3px;border-radius:12px;background:rgba(160,190,225,.07);flex:none}
+.ptabs button{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px;border:0;border-radius:9px;background:transparent;cursor:pointer;font-size:13px;font-weight:600;color:var(--muted)}
+.ptabs button svg{width:15px;height:15px;fill:currentColor}
+.ptabs button[aria-selected="true"]{background:rgba(142,197,255,.16);color:var(--ink)}
+#tab-chat[aria-selected="true"] svg{color:var(--accent)}
+.chat{display:flex;flex-direction:column;min-height:0;flex:1}
+.msgs{flex:1;overflow:auto;padding:16px 16px 8px;display:flex;flex-direction:column;gap:12px;min-height:0}
+.msg{max-width:92%;font-size:13.5px;line-height:1.5;overflow-wrap:anywhere}
+.msg.user{align-self:flex-end;background:rgba(142,197,255,.16);border:1px solid rgba(142,197,255,.3);padding:8px 12px;border-radius:14px 14px 4px 14px}
+.msg.bot{align-self:flex-start;display:flex;flex-direction:column;gap:6px}
+.msg.bot .who{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:6px}
+.msg.bot .who i{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+.msg.bot p{margin:0}
+.msg.bot ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:5px}
+.msg.bot .note{font-size:11.5px;color:var(--muted)}
+.msg.bot .thinking{color:var(--muted);display:flex;gap:4px;align-items:center}
+.msg.bot .thinking span{width:6px;height:6px;border-radius:50%;background:var(--muted);animation:blink 1.2s infinite both}
+.msg.bot .thinking span:nth-child(2){animation-delay:.2s}.msg.bot .thinking span:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+.plink{display:inline;border:0;padding:0 2px;margin:0;background:none;color:var(--accent);font:inherit;font-weight:600;cursor:pointer;text-decoration:underline;text-decoration-color:rgba(142,197,255,.4);text-underline-offset:2px}
+.plink:hover{text-decoration-color:var(--accent)}
+.picks{display:flex;flex-direction:column;gap:6px;margin-top:2px}
+.pick{display:grid;grid-template-columns:22px 1fr auto;gap:8px;align-items:center;padding:8px 10px;border-radius:11px;border:1px solid var(--line);background:rgba(255,255,255,.03);cursor:pointer;text-align:left}
+.pick:hover{border-color:rgba(142,197,255,.45);background:rgba(142,197,255,.06)}
+.pick .n{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--accent);color:#06101b;font:700 11px var(--f-data)}
+.pick .t{min-width:0}
+.pick .t div{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pick .t small{color:var(--muted);font-size:11.5px}
+.suggest{display:flex;gap:6px;overflow-x:auto;padding:4px 16px 8px;flex:none;scrollbar-width:none}
+.suggest button{flex:none;padding:7px 11px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.03);cursor:pointer;font-size:12.5px;color:var(--ink);white-space:nowrap}
+.suggest button:hover{border-color:rgba(142,197,255,.5)}
+.composer{display:flex;gap:8px;align-items:flex-end;padding:10px 16px 16px;border-top:1px solid var(--line);flex:none}
+.composer textarea{flex:1;min-width:0;resize:none;max-height:120px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:rgba(4,8,16,.5);color:var(--ink);font:14px/1.4 var(--f-body)}
+.composer textarea::placeholder{color:var(--muted)}
+.composer button{width:42px;height:42px;flex:none;border-radius:12px;border:0;background:var(--accent);color:#06101b;cursor:pointer;display:grid;place-items:center}
+.composer button svg{width:18px;height:18px;fill:currentColor}
+.composer button.stop{background:rgba(242,95,87,.9)}
+.composer button:disabled{opacity:.5;cursor:default}
 @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 .panel-scroll.in>*{animation:rise .32s cubic-bezier(.2,.7,.2,1) both}
 .panel-scroll.in>*:nth-child(2){animation-delay:.03s}
@@ -216,6 +258,7 @@ body.has-panel .ctrls{right:388px}
       <button id="m-overall" data-m="overall" aria-pressed="true"><b><svg viewBox="0 0 24 24"><path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"/></svg>Overall</b><small>Best all-round</small></button>
       <button id="m-price" data-m="price" aria-pressed="false"><b><svg viewBox="0 0 24 24"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/></svg>Price</b><small>Cheapest to build</small></button>
       <button id="m-potential" data-m="potential" aria-pressed="false"><b><svg viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>Potential</b><small>Most growth ahead</small></button>
+      <button id="m-value" data-m="value" aria-pressed="false"><b><svg viewBox="0 0 24 24"><path d="M6 3h12l3 6-9 12L3 9z"/><path d="M3 9h18M9 3l3 18 3-18"/></svg>Value</b><small>Cheap + growth</small></button>
     </div>
   </div>
 
@@ -238,9 +281,21 @@ body.has-panel .ctrls{right:388px}
     <button class="glass" id="home" aria-label="Show whole globe"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/></svg></button>
   </div>
 
-  <aside class="panel glass" id="panel" aria-live="polite">
+  <aside class="panel glass" id="panel">
     <button class="grab" id="grab" aria-label="Expand or collapse panel"></button>
-    <div class="panel-scroll" id="panelBody"></div>
+    <div class="ptabs" role="tablist" aria-label="Panel">
+      <button role="tab" id="tab-explore" aria-selected="true">Explore</button>
+      <button role="tab" id="tab-chat" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>Ask AI</button>
+    </div>
+    <div class="panel-scroll" id="panelBody" aria-live="polite"></div>
+    <div class="chat" id="chat" hidden>
+      <div class="msgs" id="msgs" role="log" aria-live="polite"></div>
+      <div class="suggest" id="suggest"></div>
+      <form class="composer" id="composer">
+        <textarea id="chatIn" rows="1" placeholder="Ask where to build…" aria-label="Message the AI assistant"></textarea>
+        <button type="submit" id="send" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-2-6z"/></svg></button>
+      </form>
+    </div>
   </aside>
 
   <div class="tip glass" id="tip" hidden></div>
@@ -271,11 +326,16 @@ const LMAX = Math.log(25000), LMIN = Math.log(400);
 const priceScore = p => clamp(100*(LMAX-Math.log(p))/(LMAX-LMIN));
 const priceAt = s => Math.exp(LMAX - s/100*(LMAX-LMIN));
 
+// Best value: cheap to buy and build AND strong growth, marked down where it is unsafe.
+function valueOf(price, potential, stability){
+  return clamp(.45*price + .45*potential + .10*stability - (stability < 30 ? 15 : 0));
+}
 for (const k in COUNTRIES){
   const c = COUNTRIES[k];
   c.overall = FACTORS.reduce((s,[f],i)=>s + c.f[i]*WEIGHTS[f], 0);
   c.potential = c.f[0]*POT_W.D + c.f[1]*POT_W.E + c.f[3]*POT_W.S;
   c.price = priceScore(c.p);
+  c.value = valueOf(c.price, c.potential, c.f[3]);
 }
 function sizeMod(pop){
   if (pop>=1e7) return 5; if (pop>=5e6) return 4; if (pop>=1e6) return 3;
@@ -297,6 +357,7 @@ const P = PLACES.map((r,i)=>{
     price: priceScore(ppm),
     potential: clamp(c.potential + sm*0.6 + (cap?1:0) + hot*1.3 + (c.f[2]-50)*0.1)
   };
+  p.s.value = valueOf(p.s.price, p.s.potential, c.f[3]);
   return p;
 });
 const RCOL = {g:"#38d08a", y:"#f4c430", r:"#f25f57"};
@@ -315,7 +376,12 @@ const MODES = {
     labels:{g:"High potential", y:"Some potential", r:"Low potential"},
     chips:{g:"65–100%", y:"50–64%", r:"0–49%"},
     note:"Where demand and prices should grow most: population, economy, local momentum.",
-    low:"Slowest"}
+    low:"Slowest"},
+  value:{title:"Best value", noun:"Value score",
+    labels:{g:"Great value", y:"Fair value", r:"Poor value"},
+    chips:{g:"65–100%", y:"50–64%", r:"0–49%"},
+    note:"Cheap to buy and build and strong growth ahead, marked down where it is unsafe.",
+    low:"Worst value"}
 };
 function usd(v){ return v>=1000 ? "$"+(v/1000).toFixed(v>=10000?0:1).replace(/\.0$/,"")+"k" : "$"+Math.round(v/10)*10; }
 let mode = "overall";
@@ -615,7 +681,7 @@ function draw(){
   const sinP0=Math.sin(p0), cosP0=Math.cos(p0);
   const visible = [];
   for (const p of P){
-    if (p.mz > dotZ && !(sel && sel.p===p)) continue;
+    if (p.mz > dotZ && !(sel && sel.p===p) && !p.hl) continue;
     if (!show[rate(S(p))]) continue;
     const lam=p.lon/DEG, phi=p.lat/DEG;
     if (sinP0*Math.sin(phi) + cosP0*Math.cos(phi)*Math.cos(lam-l0) < 0.02) continue;
@@ -692,11 +758,12 @@ function draw(){
   ctx.textBaseline="middle"; ctx.textAlign="left";
   let labelled = 0;
   const pin = sel && sel.type==="place" ? visible.find(v=>v[0]===sel.p) : null;
-  const order = pin ? [pin].concat(visible.filter(v=>v!==pin)) : visible;
+  const hl = visible.filter(v=>v[0].hl && v!==pin);
+  const order = (pin ? [pin] : []).concat(hl, visible.filter(v=>v!==pin && !v[0].hl));
   const pf = `600 10px ${MONO}`;
   for (const [p,xy] of order){
     const isPin = pin && p===pin[0];
-    if (p.mz > labZ && !isPin) continue;
+    if (p.mz > labZ && !isPin && !p.hl) continue;
     if (labelled > 260) break;
     const big = p.mz <= 3 || p.pop >= 5e6;
     const fs = big ? 13 : p.mz<=5 ? 12 : 11;
@@ -708,7 +775,7 @@ function draw(){
     const rr = dotR(p,z);
     const lx = xy[0]+rr+5, ly = xy[1];
     const b = [lx-2, ly-fs/2-3, tw+pw+aw+10, fs+6];
-    if (overlaps(boxes,b) && !isPin) continue;
+    if (overlaps(boxes,b) && !isPin && !p.hl) continue;
     boxes.push(b); labelled++;
     ctx.globalAlpha = isPin ? 1 : appear("l"+p.i);
     ctx.font = nameFont;
@@ -722,6 +789,16 @@ function draw(){
     if (arrow) drawTrend(px+pw+7, ly, rate(p.s.potential));
   }
   ctx.globalAlpha = 1;
+  // places the assistant recommended: numbered markers
+  for (const [p,xy] of hl.slice().reverse()){
+    const rr = dotR(p,z)+5;
+    ctx.beginPath(); ctx.arc(xy[0],xy[1],rr,0,2*Math.PI);
+    ctx.strokeStyle="#8ec5ff"; ctx.lineWidth=2; ctx.stroke();
+    const bx = xy[0]-rr-3, by = xy[1]-rr-3;
+    ctx.beginPath(); ctx.arc(bx,by,8,0,2*Math.PI); ctx.fillStyle="#8ec5ff"; ctx.fill();
+    ctx.strokeStyle="rgba(4,8,16,.9)"; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.font=`700 10px ${MONO}`; ctx.textAlign="center"; ctx.fillStyle="#06101b"; ctx.fillText(String(p.hl), bx, by+.5); ctx.textAlign="left";
+  }
   if (pin){
     const [,xy] = pin;
     ctx.beginPath(); ctx.arc(xy[0],xy[1],dotR(pin[0],z)+6,0,2*Math.PI);
@@ -950,7 +1027,7 @@ let tab = "cities";
 let topCities=[], topCountries=[], lowCities=[];
 const STABLE = 35; // stability floor for the cheapest-places lists (skips war zones)
 function buildRankings(){
-  const ok = c => mode!=="price" || c.f[3] >= STABLE;
+  const ok = c => (mode!=="price" && mode!=="value") || c.f[3] >= STABLE;
   const tie = (a,b) => mode==="price" ? a.ppm-b.ppm : b.pop-a.pop;
   topCities = P.filter(p=>p.pop>=3e5 && ok(COUNTRIES[p.ck])).sort((a,b)=>S(b)-S(a)||tie(a,b)).slice(0,25);
   topCountries = Object.entries(COUNTRIES).filter(([k,c])=>featByKey[k] && byCountry[k] && ok(c)).sort((a,b)=>b[1][mode]-a[1][mode]||a[1].p-b[1].p).slice(0,25);
@@ -970,11 +1047,11 @@ function ring(score){
   return `<div class="ringwrap"><svg viewBox="0 0 96 96"><circle cx="48" cy="48" r="42" fill="none" stroke="rgba(160,190,225,.12)" stroke-width="8"/><circle cx="48" cy="48" r="42" fill="none" stroke="${RCOL[rt]}" stroke-width="8" stroke-linecap="round" stroke-dasharray="${C*score/100} ${C}"/></svg><div class="num"><span>${score}<small>%</small></span></div></div>`;
 }
 function tiles(sc){
-  return `<div class="tiles">${[["overall","Overall"],["price","Price"],["potential","Potential"]].map(([m,l])=>
+  return `<div class="tiles">${[["overall","Overall"],["price","Price"],["potential","Growth"],["value","Value"]].map(([m,l])=>
     `<button class="tile" data-mode="${m}" aria-pressed="${m===mode}"><span>${l}</span><b class="${rate(sc[m])}">${sc[m]}%</b></button>`).join("")}</div>`;
 }
 function rowItem(p, rank, sub){
-  const extra = mode==="price" ? `<em>${usd(p.ppm)}/m² · growth ${p.s.potential}%</em>` : mode==="overall" ? `<em>growth ${p.s.potential}%</em>` : "";
+  const extra = mode==="price" || mode==="value" ? `<em>${usd(p.ppm)}/m² · growth ${p.s.potential}%</em>` : mode==="overall" ? `<em>growth ${p.s.potential}%</em>` : "";
   return `<li data-i="${p.i}"><span class="rk">${rank}</span><div class="nm"><div>${esc(p.name)}</div><small>${esc(sub)}</small></div><div class="side"><span class="pct ${rate(S(p))}">${S(p)}%</span>${extra}</div></li>`;
 }
 function bindList(){
@@ -1049,6 +1126,11 @@ function potBlock(c, p, pot){
     <p><strong>${MODES.potential.labels[rt]}.</strong> ${esc(potentialLine(c, p))}</p></div>`;
 }
 function breakdown(p, c){
+  if (mode==="value") return `
+    <dt>Price score (${usd(p.ppm)}/m²) × 0.45</dt><dd>${(p.s.price*.45).toFixed(1)}</dd>
+    <dt>Growth potential × 0.45</dt><dd>${(p.s.potential*.45).toFixed(1)}</dd>
+    <dt>${esc(c.n)} stability × 0.10</dt><dd>${(c.f[3]*.1).toFixed(1)}</dd>
+    ${c.f[3] < 30 ? `<dt>Conflict or instability</dt><dd>−15</dd>` : ""}`;
   if (mode==="overall") return `
     <dt>${esc(c.n)} baseline</dt><dd>${c.overall.toFixed(1)}</dd>
     <dt>Market size (${fmtPop(p.pop)})</dt><dd>${sign(p.sm)}</dd>
@@ -1073,10 +1155,10 @@ function renderPanel(){
     if (tab==="cities") list = topCities.map((p,i)=>rowItem(p,i+1,sub(p))).join("");
     else if (tab==="countries") list = topCountries.map(([k,c],i)=>{ const s=CS(c); return `<li data-k="${k}"><span class="rk">${i+1}</span><div class="nm"><div>${esc(c.n)}</div><small>${byCountry[k].length} places scored</small></div><div class="side"><span class="pct ${rate(s)}">${s}%</span>${mode==="price"?`<em>${usd(c.p)}/m²</em>`:""}</div></li>`; }).join("");
     else list = lowCities.map((p,i)=>rowItem(p,i+1,sub(p))).join("");
-    const heading = {overall:"Best places to build", price:"Cheapest places to build", potential:"Most growth potential"}[mode];
+    const heading = {overall:"Best places to build", price:"Cheapest places to build", potential:"Most growth potential", value:"Cheap with the most growth"}[mode];
     body.innerHTML = `
       <div><div class="eyebrow">${M.title}</div><h2>${heading}</h2></div>
-      <p class="p">${M.note}${mode==="price"&&tab!=="low"?" Lists leave out war zones and very unstable countries.":""} Drag to spin, scroll or pinch to zoom, and tap any place or country for details.</p>
+      <p class="p">${M.note}${(mode==="price"||mode==="value")&&tab!=="low"?" Lists leave out war zones and very unstable countries.":""} Drag to spin, scroll or pinch to zoom, and tap any place or country for details.</p>
       <div class="tabs" role="tablist">
         <button role="tab" data-t="cities" aria-selected="${tab==="cities"}">Top cities</button>
         <button role="tab" data-t="countries" aria-selected="${tab==="countries"}">Top countries</button>
@@ -1106,7 +1188,7 @@ function renderPanel(){
   } else {
     const k = sel.k, c = COUNTRIES[k], list = byCountry[k] || [], s = CS(c), rt = rate(s);
     const allRank = Object.values(COUNTRIES).filter(x=>x[mode]>c[mode]).length+1;
-    const sc = {overall:Math.round(c.overall), price:c.price, potential:Math.round(c.potential)};
+    const sc = {overall:Math.round(c.overall), price:c.price, potential:Math.round(c.potential), value:c.value};
     body.innerHTML = `
       <button class="back">← All rankings</button>
       <div><div class="eyebrow">Country</div><h2>${esc(c.n)}</h2></div>
@@ -1127,11 +1209,13 @@ function renderPanel(){
 }
 function selectPlace(p, fly){
   sel = {type:"place", p};
+  if (!chatEl.hidden) showTab("explore");
   renderPanel(); body.scrollTop = 0; expandSheet(); dirty = true;
   if (fly) flyTo(p.lon, p.lat, Math.max(state.k, kForZoom(Math.max(p.mz+0.5, 6.2))));
 }
 function selectCountry(k, fly){
   sel = {type:"country", k};
+  if (!chatEl.hidden) showTab("explore");
   renderPanel(); body.scrollTop = 0; expandSheet(); dirty = true;
   const f = featByKey[k];
   if (fly && f){
@@ -1180,6 +1264,350 @@ q.addEventListener("keydown", e=>{
   } else if (e.key==="Enter"){ e.preventDefault(); pick(cursor); }
   else if (e.key==="Escape"){ res.hidden = true; q.blur(); }
 });
+
+/* ---------- AI assistant ---------- */
+const REGIONS = {
+  "europe": "ALB AND AUT BEL BIH BGR HRV CYP CZE DNK EST FIN FRA DEU GRC HUN ISL IRL ITA KOS LVA LIE LTU LUX MLT MDA MCO MNE NLD MKD NOR POL PRT ROU SMR SRB SVK SVN ESP SWE CHE UKR GBR BLR",
+  "asia": "AFG ARM AZE BGD BTN BRN KHM CHN GEO HKG IND IDN JPN KAZ KGZ LAO MAC MYS MDV MNG MMR NPL PRK PAK PHL SGP KOR LKA TWN TJK THA TLS TKM UZB VNM",
+  "middle east": "ARE BHR EGY IRN IRQ ISR JOR KWT LBN OMN PSX QAT SAU SYR TUR YEM",
+  "africa": "DZA AGO BEN BWA BFA BDI CMR CPV CAF TCD COM COD COG CIV DJI EGY GNQ ERI SWZ ETH GAB GMB GHA GIN GNB KEN LSO LBR LBY MDG MWI MLI MRT MUS MAR MOZ NAM NER NGA RWA STP SEN SYC SLE SOM ZAF SSD SDN TZA TGO TUN UGA ZMB ZWE SOL SAH",
+  "north america": "USA CAN MEX",
+  "latin america": "MEX GTM BLZ SLV HND NIC CRI PAN CUB JAM HTI DOM PRI BHS TTO BRB COL VEN ECU PER BOL BRA PRY URY ARG CHL GUY SUR",
+  "oceania": "AUS NZL PNG FJI SLB VUT NCL PYF WSM TON"
+};
+for (const k in REGIONS) REGIONS[k] = new Set(REGIONS[k].split(" "));
+const REGION_WORDS = [["europe","europe"],["european","europe"],["eu ","europe"],["asia","asia"],["asian","asia"],["middle east","middle east"],["gulf","middle east"],["africa","africa"],["african","africa"],["north america","north america"],["latin america","latin america"],["south america","latin america"],["central america","latin america"],["caribbean","latin america"],["oceania","oceania"],["pacific","oceania"]];
+const ALIASES = {usa:"USA","united states":"USA",america:"USA","the us":"USA",uk:"GBR","united kingdom":"GBR",britain:"GBR",england:"GBR",uae:"ARE",emirates:"ARE",russia:"RUS",korea:"KOR","south korea":"KOR",czechia:"CZE","czech republic":"CZE",holland:"NLD","dr congo":"COD",turkey:"TUR","türkiye":"TUR",vietnam:"VNM","ivory coast":"CIV"};
+const countryKeys = Object.keys(COUNTRIES).filter(k=>byCountry[k]);
+function findCountry(name){
+  const n = String(name||"").trim().toLowerCase(); if (!n) return null;
+  if (ALIASES[n]) return ALIASES[n];
+  return countryKeys.find(k=>COUNTRIES[k].n.toLowerCase()===n) || countryKeys.find(k=>COUNTRIES[k].n.toLowerCase().startsWith(n)) || null;
+}
+function findPlace(name, country){
+  const n = String(name||"").trim().toLowerCase(), ck = country ? findCountry(country) : null;
+  let best = null;
+  for (const p of P){
+    if (p.lname !== n || (ck && p.ck !== ck)) continue;
+    if (!best || p.pop > best.pop) best = p;
+  }
+  return best;
+}
+function summary(p){
+  const c = COUNTRIES[p.ck];
+  return {name:p.name, country:c.n, region:p.adm1, population:p.pop, price_usd_per_m2:p.ppm,
+    overall:p.s.overall, price_score:p.s.price, growth_potential:p.s.potential, value:p.s.value, country_stability:c.f[3]};
+}
+const SORTS = {value:"value", overall:"overall", price:"price", cheap:"price", potential:"potential", growth:"potential"};
+function queryPlaces(o){
+  const sort = SORTS[o.sort] || "value";
+  const cks = (Array.isArray(o.countries) ? o.countries : o.countries ? [o.countries] : []).map(findCountry).filter(Boolean);
+  const reg = REGIONS[String(o.region||"").toLowerCase()];
+  const minPop = Number(o.min_population ?? 100000) || 0;
+  const maxPrice = Number(o.max_price_usd_per_m2) || Infinity;
+  const minPot = Number(o.min_growth_potential) || 0;
+  const unstable = !!o.include_unstable;
+  const lowest = !!o.lowest_first;
+  const limit = Math.max(1, Math.min(15, Number(o.limit) || 8));
+  const list = P.filter(p=>{
+    const c = COUNTRIES[p.ck];
+    if (cks.length && !cks.includes(p.ck)) return false;
+    if (reg && !reg.has(p.ck)) return false;
+    if (p.pop < minPop || p.ppm > maxPrice || p.s.potential < minPot) return false;
+    if (!unstable && !lowest && c.f[3] < STABLE) return false;
+    return true;
+  });
+  list.sort((a,b)=> lowest ? a.s[sort]-b.s[sort] : b.s[sort]-a.s[sort] || b.pop-a.pop);
+  return list.slice(0, limit);
+}
+function placeDetail(p){
+  const c = COUNTRIES[p.ck], r = reasons(c, p);
+  return {...summary(p), rank_in_country:(byCountry[p.ck].slice().sort((a,b)=>b.s.value-a.s.value).indexOf(p)+1)+" of "+byCountry[p.ck].length+" by value",
+    strengths:r.pros.slice(0,5), problems:r.cons.slice(0,5), growth_outlook:potentialLine(c, p)};
+}
+function countryDetail(k){
+  const c = COUNTRIES[k], r = reasons(c, null);
+  const fac = {}; FACTORS.forEach(([f,t],i)=>fac[t]=c.f[i]);
+  return {country:c.n, overall:Math.round(c.overall), price_score:c.price, growth_potential:Math.round(c.potential), value:c.value,
+    typical_price_usd_per_m2:c.p, factors_0_to_100:fac, strengths:r.pros.slice(0,5), problems:r.cons.slice(0,5),
+    best_value_places:(byCountry[k]||[]).slice().sort((a,b)=>b.s.value-a.s.value).slice(0,5).map(summary)};
+}
+const TOOLS = [
+  {name:"find_places",
+   description:"Search the Build Atlas dataset of ~7,300 scored cities and towns. Returns a ranked list with price per m², overall, price, growth-potential and value scores (0-100). Places in war zones or very unstable countries are excluded unless include_unstable is true.",
+   inputSchema:{type:"object", properties:{
+     sort:{type:"string", enum:["value","price","potential","overall"], description:"value = cheap AND high growth (default); price = cheapest; potential = most growth; overall = best all-round"},
+     countries:{type:"array", items:{type:"string"}, description:"Country names to limit to"},
+     region:{type:"string", enum:["europe","asia","middle east","africa","north america","latin america","oceania"]},
+     min_population:{type:"number", description:"Default 100000. Use 1000000 for big cities, 20000 to include towns."},
+     max_price_usd_per_m2:{type:"number"},
+     min_growth_potential:{type:"number"},
+     lowest_first:{type:"boolean", description:"true to list the worst places first"},
+     include_unstable:{type:"boolean"},
+     limit:{type:"number", description:"1-15, default 8"}}},
+   execute:(i)=>queryPlaces(i).map(summary)},
+  {name:"get_place",
+   description:"Full details for one city or town: all scores, estimated price per m², rank in its country, plain-language strengths and problems, and growth outlook.",
+   inputSchema:{type:"object", properties:{name:{type:"string"}, country:{type:"string"}}, required:["name"]},
+   execute:(i)=>{ const p = findPlace(i.name, i.country); if (!p) throw new Error("No place called "+i.name+" in the dataset"); return placeDetail(p); }},
+  {name:"get_country",
+   description:"Details for one country: scores, typical price per m², the five factor ratings, strengths, problems and its five best-value places.",
+   inputSchema:{type:"object", properties:{name:{type:"string"}}, required:["name"]},
+   execute:(i)=>{ const k = findCountry(i.name); if (!k) throw new Error("No country called "+i.name); return countryDetail(k); }}
+];
+const RULES = `You are the assistant inside Build Atlas, an interactive globe that scores about 7,300 cities and towns and every country for starting a real-estate development company.
+Scores run 0-100 (green 65+, yellow 50-64, red under 50):
+- overall: best all-round place to start and build
+- price: higher means CHEAPER to buy land and build (based on estimated typical apartment price in USD per m²)
+- growth potential: how much demand and prices should grow (population, economy, local momentum)
+- value: cheap AND high growth potential together, marked down in unstable countries
+The numbers are indicative model estimates, not live market data and not financial advice.
+
+How to answer:
+- Look the data up with the tools; never invent places or numbers. Questions about cheap places with growth, bargains or "best places" mean sort by value.
+- Whenever you name a place from the data, write it exactly as [[Name|Country]] using the tool's spelling, so the page can link it and show it on the globe. Write countries as plain text.
+- Be brief and concrete: one short sentence, then up to 6 bullets like "- [[Medellin|Colombia]]: 72% value, about $1.6k/m², growth 66%. One short reason." Then one line on the main risk if there is one.
+- Use plain text with "- " bullets and **bold** only. No tables, no headings.
+- If asked about something outside real estate or this map, answer briefly and steer back.`;
+
+const chatEl = $("chat"), msgsEl = $("msgs"), inEl = $("chatIn"), sendBtn = $("send"), sugEl = $("suggest");
+const turns = [];
+let sampleFn, aiState = "unknown", ctl = null, busy = false;
+(async ()=>{ try { sampleFn = window.claude ? await window.claude.use("sample") : null; } catch(e){ sampleFn = null; }
+  aiState = sampleFn ? "ready" : "off";
+  // Run locally with serve.py and the chat uses your own nanobot agent instead.
+  if (!sampleFn && /^https?:$/.test(location.protocol)){
+    try { const r = await fetch("nanobot/health", {cache:"no-store"}); if (r.ok) aiState = "nanobot"; } catch(e){}
+  }
+})();
+const NB_SESSION = "build-atlas-" + Math.random().toString(36).slice(2, 10);
+let nbPrimed = false;
+async function askNanobot(q, el){
+  // keep it compact: nanobot's own prompt and tools already fill much of the context window,
+  // and with the build-atlas skill installed it can look up anything else itself
+  const row = p => `${p.name}, ${COUNTRIES[p.ck].n}: value ${p.s.value}, ${usd(p.ppm)}/m2, growth ${p.s.potential}, overall ${p.s.overall}`;
+  const local = localAnswer(q).picks;
+  const msg = (nbPrimed ? "Same rules as before: name places as [[Name|Country]], keep it short, only use real data.\n"
+                         : RULES + "\nIf the build-atlas skill is installed, run it for anything the lines below do not cover.\n")
+    + "\nFrom the map (scores 0-100):\nMatches for this question:\n" + local.map(row).join("\n")
+    + "\nBest value overall:\n" + queryPlaces({sort:"value", limit:6}).map(row).join("\n")
+    + "\n\nQuestion: " + q;
+  ctl = new AbortController();
+  const r = await fetch("nanobot/v1/chat/completions", {method:"POST", signal:ctl.signal, headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({messages:[{role:"user", content:msg}], session_id:NB_SESSION, stream:true})});
+  if (!r.ok){ let m = ""; try { m = (await r.json()).error?.message || ""; } catch(e){} throw {code:"nanobot_http", status:r.status, message:m}; }
+  nbPrimed = true;
+  let text = "";
+  if ((r.headers.get("Content-Type")||"").includes("event-stream")){
+    const reader = r.body.getReader(), dec = new TextDecoder(); let buf = "";
+    for (;;){
+      const {value, done} = await reader.read(); if (done) break;
+      buf += dec.decode(value, {stream:true});
+      const lines = buf.split("\n"); buf = lines.pop();
+      for (const line of lines){
+        const m = line.match(/^data:\s?(.*)/); if (!m || m[1]==="[DONE]") continue;
+        try { const d = JSON.parse(m[1]).choices?.[0]?.delta?.content; if (d){ text += d; el.querySelector(".body").innerHTML = renderRich(text, true).html; msgsEl.scrollTop = msgsEl.scrollHeight; } } catch(e){}
+      }
+    }
+  } else text = (await r.json()).choices?.[0]?.message?.content || "";
+  return text;
+}
+
+const SUGGEST = ["Cheap places with the most growth","Best value in Europe","Cheapest safe big cities in Asia","High growth under $1,500/m²","Why is Russia rated badly?","Compare Lisbon and Warsaw"];
+sugEl.innerHTML = SUGGEST.map(t=>`<button type="button">${esc(t)}</button>`).join("");
+sugEl.querySelectorAll("button").forEach(b=>b.onclick=()=>ask(b.textContent));
+
+// render assistant text: escape, then **bold**, "- " bullets and [[Place|Country]] links
+function renderRich(text, streaming){
+  let t = text;
+  if (streaming) t = t.replace(/\[\[[^\]]*$/, "");          // hide a half-written link
+  const links = [];
+  const html = esc(t).replace(/\[\[([^\]|]+)\|?([^\]]*)\]\]/g, (m, name, country)=>{
+    const p = findPlace(name, country) || findPlace(name);
+    if (!p) return esc(name);
+    if (!links.includes(p)) links.push(p);
+    return `<button type="button" class="plink" data-i="${p.i}">${esc(p.name)}</button>`;
+  }).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  const out = []; let list = null;
+  for (const line of html.split("\n")){
+    const m = line.match(/^\s*[-•*]\s+(.*)/);
+    if (m){ if (!list){ list = []; } list.push(`<li>${m[1]}</li>`); continue; }
+    if (list){ out.push(`<ul>${list.join("")}</ul>`); list = null; }
+    if (line.trim()) out.push(`<p>${line}</p>`);
+  }
+  if (list) out.push(`<ul>${list.join("")}</ul>`);
+  return {html: out.join(""), links};
+}
+function addMsg(role, html){
+  const d = document.createElement("div");
+  d.className = "msg " + role;
+  d.innerHTML = role==="bot" ? `<div class="who"><i></i>Atlas AI</div><div class="body">${html}</div>` : html;
+  msgsEl.appendChild(d); msgsEl.scrollTop = msgsEl.scrollHeight;
+  return d;
+}
+function bindLinks(root){
+  root.querySelectorAll("[data-i]").forEach(b=>b.onclick=()=>{ showTab("explore"); selectPlace(P[+b.dataset.i], true); });
+}
+function picksHtml(list){
+  return `<div class="picks">${list.map((p,i)=>`<button type="button" class="pick" data-i="${p.i}"><span class="n">${i+1}</span><span class="t"><div>${esc(p.name)}</div><small>${esc(COUNTRIES[p.ck].n)} · ${usd(p.ppm)}/m² · growth ${p.s.potential}%</small></span><span class="pct ${rate(p.s.value)}">${p.s.value}%</span></button>`).join("")}</div>`;
+}
+let hlList = [];
+function highlight(list){
+  for (const p of hlList) p.hl = 0;
+  hlList = list.slice(0, 9);
+  hlList.forEach((p,i)=>p.hl = i+1);
+  dirty = true;
+  if (!hlList.length) return;
+  if (hlList.length === 1){ flyTo(hlList[0].lon, hlList[0].lat, Math.max(state.k, kForZoom(6))); return; }
+  const mp = {type:"MultiPoint", coordinates:hlList.map(p=>[p.lon,p.lat])};
+  const c = d3.geoCentroid(mp);
+  const spread = Math.max(...hlList.map(p=>d3.geoDistance(c,[p.lon,p.lat])));
+  const kk = Math.max(1, Math.min(40, (Math.min(W,H)*0.36) / (R0*Math.sin(Math.min(Math.max(spread,0.02)*1.15, Math.PI/2)))));
+  flyTo(c[0], c[1], kk);
+}
+
+// instant, offline answers from the same data (used when Claude is not available here)
+function localAnswer(q){
+  const t = " " + q.toLowerCase() + " ";
+  let reg = null; for (const [w,r] of REGION_WORDS) if (t.includes(w)) { reg = r; break; }
+  let ck = null;
+  for (const a in ALIASES) if (t.includes(" "+a+" ") || t.includes(" "+a+"?") || t.includes(" "+a+",")) { ck = ALIASES[a]; break; }
+  if (!ck) for (const k of countryKeys){ const n = COUNTRIES[k].n.toLowerCase(); if (n.length > 3 && t.includes(n)) { ck = k; break; } }
+  // named cities
+  const named = [];
+  for (const p of P) if (p.lname.length > 3 && p.pop > 50000 && new RegExp("\\b"+p.lname.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b").test(t) && !named.some(x=>x.lname===p.lname)) named.push(p);
+  named.sort((a,b)=>b.pop-a.pop);
+  const fmt = p => `- [[${p.name}|${COUNTRIES[p.ck].n}]]: ${p.s.value}% value, about ${usd(p.ppm)}/m², growth ${p.s.potential}%, overall ${p.s.overall}%.`;
+  if (named.length && named.length <= 3 && !/cheap|growth|best|where|list|top/.test(t)){
+    const lines = named.slice(0,3).map(p=>{
+      const r = reasons(COUNTRIES[p.ck], p);
+      return `${fmt(p)}\n  ${p.s.value>=65||p.s.overall>=65 ? "Strength: "+(r.pros[0]||"steady fundamentals") : "Main problem: "+(r.cons[0]||"no single big problem")}.`;
+    });
+    return {text:(named.length>1?"Here is how they compare:\n":"")+lines.join("\n"), picks:named.slice(0,3)};
+  }
+  if (ck && /why|bad|good|risk|problem|about/.test(t)){
+    const c = COUNTRIES[ck], r = reasons(c, null);
+    const top = (byCountry[ck]||[]).slice().sort((a,b)=>b.s.value-a.s.value).slice(0,3);
+    return {text:`**${c.n}** scores ${Math.round(c.overall)}% overall, ${c.value}% value and ${Math.round(c.potential)}% growth.\n${r.cons.slice(0,3).map(x=>"- "+x).join("\n")}${r.pros.length?"\nIn its favour: "+r.pros[0].toLowerCase()+".":""}\nBest value there: ${top.map(p=>`[[${p.name}|${c.n}]]`).join(", ")}.`, picks:top};
+  }
+  let sort = "value", lowest = false;
+  const cheap = /cheap|afford|low cost|budget|price|inexpensive/.test(t), grow = /growth|grow|potential|boom|future|rising/.test(t);
+  if (/avoid|worst|riskiest|bad places/.test(t)) { sort = "overall"; lowest = true; }
+  else if (cheap && !grow && !/value|best/.test(t)) sort = "price";
+  else if (grow && !cheap && !/value/.test(t)) sort = "potential";
+  const priceCap = (t.match(/\$\s?([\d,.]+)\s?(k)?/)||[]);
+  let max = priceCap[1] ? parseFloat(priceCap[1].replace(/,/g,"")) * (priceCap[2] ? 1000 : 1) : undefined;
+  const big = /big|large|major/.test(t), small = /town|small/.test(t);
+  const list = queryPlaces({sort, region:reg, countries:ck?[COUNTRIES[ck].n]:undefined, max_price_usd_per_m2:max, lowest_first:lowest,
+    min_population: big ? 1e6 : small ? 20000 : 100000, limit:6});
+  const where = ck ? " in "+COUNTRIES[ck].n : reg ? " in "+reg.replace(/\b\w/g,m=>m.toUpperCase()) : "";
+  const head = {value:`Cheap places with the most growth${where}`, price:`Cheapest stable places${where}`, potential:`Most growth potential${where}`, overall:`Riskiest places${where}`}[lowest?"overall":sort];
+  if (!list.length) return {text:`I found no places matching that${where}. Try a higher price limit or a bigger area.`, picks:[]};
+  return {text:`**${head}** (by ${lowest?"lowest overall score":sort==="value"?"value: cheap + growth":sort==="price"?"lowest price per m²":"growth potential"}):\n${list.map(fmt).join("\n")}${sort!=="overall"&&!lowest?"\nWar zones and very unstable countries are left out.":""}`, picks:list};
+}
+
+function setBusy(b){
+  busy = b;
+  sendBtn.classList.toggle("stop", b);
+  sendBtn.setAttribute("aria-label", b ? "Stop" : "Send");
+  sendBtn.innerHTML = b ? `<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>` : `<svg viewBox="0 0 24 24"><path d="M4 12l16-8-6 16-2-6z"/></svg>`;
+}
+function finishBot(el, text, note){
+  const {html, links} = renderRich(text, false);
+  el.querySelector(".body").innerHTML = html + (links.length ? picksHtml(links) : "") + (note ? `<div class="note">${esc(note)}</div>` : "");
+  bindLinks(el);
+  highlight(links);
+  msgsEl.scrollTop = msgsEl.scrollHeight;
+}
+async function ask(q){
+  q = String(q||"").trim(); if (!q || busy) return;
+  inEl.value = ""; inEl.style.height = "";
+  addMsg("user", esc(q));
+  const el = addMsg("bot", `<div class="thinking" aria-label="Thinking"><span></span><span></span><span></span></div>`);
+  turns.push({role:"user", content:q});
+  if (aiState === "nanobot"){
+    setBusy(true);
+    try {
+      const text = await askNanobot(q, el);
+      turns.push({role:"assistant", content:text});
+      finishBot(el, text || "nanobot sent an empty reply.", "Answered by your nanobot.");
+    } catch(e){
+      turns.pop();
+      if (e && e.name === "AbortError") finishBot(el, "Stopped.", "");
+      else {
+        const a = localAnswer(q);
+        const why = e && e.code === "nanobot_http" ? `nanobot returned an error (${e.status}${e.message ? ": "+e.message : ""}). Check its log; a bigger model context window may help.` : "Could not reach nanobot. Is `nanobot serve` running?";
+        finishBot(el, a.text, why + " Here is a quick answer from the map data.");
+      }
+    } finally { setBusy(false); ctl = null; }
+    return;
+  }
+  if (aiState !== "ready"){
+    const a = localAnswer(q);
+    turns.push({role:"assistant", content:a.text});
+    finishBot(el, a.text, aiState==="off" ? "Quick answer from the map data. For AI answers, open this page in Claude or run it with serve.py and nanobot." : "Quick answer from the map data.");
+    return;
+  }
+  setBusy(true);
+  ctl = new AbortController();
+  const recent = turns.slice(-12);
+  while (recent.length && recent[0].role !== "user") recent.shift();
+  const input = [{role:"user", content:RULES}, ...recent];
+  let useTools = false;
+  try { useTools = !!(await sampleFn.limits()).tools; } catch(e){}
+  const opts = {signal:ctl.signal, cache:false, modelTier:"quick",
+    onText:({text})=>{ el.querySelector(".body").innerHTML = renderRich(text, true).html; msgsEl.scrollTop = msgsEl.scrollHeight; }};
+  if (useTools){ opts.tools = TOOLS; delete opts.cache; }
+  else {
+    // no page tools in this view: hand Claude a compact slice of the data instead
+    const snap = {best_value:queryPlaces({sort:"value", limit:15}).map(summary), cheapest_stable:queryPlaces({sort:"price", limit:10}).map(summary),
+      most_growth:queryPlaces({sort:"potential", limit:10}).map(summary), local_matches:localAnswer(q).picks.map(placeDetail)};
+    input[0] = {role:"user", content:RULES + "\n\nYou cannot call tools here. Use only this data:\n" + JSON.stringify(snap)};
+  }
+  try {
+    const {text, truncated} = await sampleFn(input, opts);
+    turns.push({role:"assistant", content:text});
+    finishBot(el, text, truncated ? "Answer cut short. Ask for less at a time." : "");
+  } catch(e){
+    const code = e && e.code;
+    if (code === "cancelled"){ finishBot(el, e.text || "Stopped.", ""); turns.pop(); }
+    else if (["not_granted","sampling_disabled","not_declared","capability_disabled","capability_removed","tools_unavailable"].includes(code)){
+      aiState = "declined"; turns.pop();
+      const a = localAnswer(q); turns.push({role:"user", content:q}, {role:"assistant", content:a.text});
+      finishBot(el, a.text, "AI chat is off for this view, so this is a quick answer from the map data.");
+    } else if (code === "rate_limited"){ finishBot(el, e.text || "", "Too many questions at once. Wait a moment and ask again."); turns.pop(); }
+    else if (code === "refused"){ finishBot(el, "I can't help with that one. Try asking about places, prices or growth.", ""); turns.pop(); }
+    else { finishBot(el, e.text || "", "The answer was interrupted. Ask again to retry."); turns.pop(); }
+  } finally { setBusy(false); ctl = null; }
+}
+$("composer").addEventListener("submit", ev=>{ ev.preventDefault(); if (busy){ ctl && ctl.abort(); return; } ask(inEl.value); });
+inEl.addEventListener("keydown", ev=>{ if (ev.key==="Enter" && !ev.shiftKey){ ev.preventDefault(); if (!busy) ask(inEl.value); } });
+inEl.addEventListener("input", ()=>{ inEl.style.height = ""; inEl.style.height = Math.min(120, inEl.scrollHeight)+"px"; });
+
+// welcome: the best cheap + high-growth picks, straight from the data
+function welcome(){
+  const top = [], used = new Set();   // one city per country so the picks span the globe
+  for (const p of queryPlaces({sort:"value", min_population:300000, limit:15})) if (!used.has(p.ck) && top.length < 5){ used.add(p.ck); top.push(p); }
+  const el = addMsg("bot", "");
+  el.querySelector(".body").innerHTML = `<p>Hi! I can find cheap places with the most growth potential, compare cities and countries, or explain why a place scores badly. These are the best value picks on the map right now (cheap + high growth):</p>${picksHtml(top)}`;
+  bindLinks(el);
+  return top;
+}
+let welcomed = false;
+function showTab(t){
+  const chat = t === "chat";
+  $("tab-chat").setAttribute("aria-selected", chat); $("tab-explore").setAttribute("aria-selected", !chat);
+  chatEl.hidden = !chat; body.hidden = chat;
+  panel.classList.toggle("chatting", chat);
+  document.body.classList.toggle("chat-open", chat);
+  if (chat){
+    expandSheet();
+    if (!welcomed){ welcomed = true; highlight(welcome()); }
+    if (window.innerWidth > 760) inEl.focus();
+  }
+}
+$("tab-chat").onclick = ()=>showTab("chat");
+$("tab-explore").onclick = ()=>showTab("explore");
 
 /* ---------- boot ---------- */
 document.body.classList.add("has-panel");
