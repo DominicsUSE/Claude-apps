@@ -293,3 +293,94 @@ def parse_hotspots():
             name, delta = item.strip().rsplit(" ", 1)
             out[(iso, name.lower())] = int(delta)
     return out
+
+
+# Estimated typical urban apartment price, USD per square metre (national level).
+# Rough editorial estimates in the spirit of public price-per-m2 surveys; not quotes.
+PRICES = """
+USA 2800 CAN 4200 MEX 1300 GTM 1100 BLZ 1200 SLV 1100 HND 1000 NIC 900 CRI 1600 PAN 1900
+CUB 600 JAM 1500 HTI 700 DOM 1300 PRI 2200 BHS 3500 TTO 1500 BRB 2500 COL 1100 VEN 600
+ECU 1000 PER 1300 BOL 900 BRA 1500 PRY 900 URY 2200 ARG 1600 CHL 2200 GUY 1200 SUR 800
+GBR 5200 IRL 5000 FRA 4200 DEU 4500 NLD 5200 BEL 3300 LUX 9500 CHE 11000 AUT 5000 ITA 2700
+ESP 2600 PRT 3000 GRC 2100 CYP 2600 MLT 3300 POL 2300 CZE 3600 SVK 2600 HUN 2100 ROU 1500
+BGR 1300 HRV 2500 SVN 3200 SRB 1700 BIH 1300 MNE 1900 ALB 1200 MKD 1100 KOS 1000 TUR 1000
+EST 2800 LVA 1700 LTU 2300 FIN 3600 SWE 4500 NOR 5500 DNK 5000 ISL 4800 UKR 900 BLR 900
+MDA 900 RUS 1800 GEO 900 ARM 1300 AZE 1100 AND 4500 MCO 45000 LIE 9000 SMR 3000
+ARE 3500 SAU 1500 QAT 3000 KWT 2800 BHR 1700 OMN 1400 ISR 7500 JOR 1000 LBN 1500 SYR 400
+IRQ 900 IRN 1000 YEM 400 PSX 800 EGY 600 MAR 1200 DZA 1000 TUN 900 LBY 800 SDN 400 SSD 400
+ETH 900 ERI 400 DJI 800 SOM 500 SOL 400 KEN 1000 UGA 800 TZA 900 RWA 900 BDI 500 COD 700
+COG 700 GAB 900 CMR 700 NGA 1000 GHA 1100 CIV 1000 SEN 1100 BEN 700 TGO 700 BFA 500 MLI 500
+NER 500 TCD 500 MRT 600 GMB 700 GIN 700 GNB 500 SLE 600 LBR 700 GNQ 800 CAF 400 AGO 1000
+ZMB 700 ZWE 700 MWI 500 MOZ 700 MDG 500 ZAF 1000 NAM 900 BWA 1000 LSO 500 SWZ 600 MUS 1800
+SYC 2500 CPV 1200 COM 600 STP 600 SAH 400 IND 1100 PAK 600 BGD 900 LKA 900 NPL 800 BTN 900
+MDV 2000 AFG 400 CHN 3500 HKG 18000 MAC 11000 TWN 5500 KOR 6500 PRK 500 JPN 4500 MNG 1000
+VNM 1800 THA 2200 KHM 1300 LAO 800 MMR 700 MYS 1500 SGP 15000 IDN 1200 PHL 1600 BRN 1400
+TLS 700 KAZ 1100 UZB 900 KGZ 900 TJK 700 TKM 600 AUS 6000 NZL 5200 PNG 1200 FJI 1500
+SLB 900 VUT 1200 NCL 3000 PYF 3000 WSM 1000 TON 900 GRL 2500 CYN 1000
+"""
+PRICE_DEFAULT = 1200
+
+# Known city prices (USD / m2) that a size-based estimate would get badly wrong.
+CITY_PRICES = """
+USA New York 11000 | San Francisco 10500 | Los Angeles 7500 | Boston 7500 | Seattle 6500
+USA Miami 5500 | Austin 4000 | Dallas 3000 | Houston 2500 | Chicago 3500 | Washington, D.C. 6500
+USA Denver 4500 | Phoenix 3100 | Atlanta 3000 | Nashville 3600 | Honolulu 8000 | San Diego 7000
+CAN Toronto 8000 | Vancouver 9500 | Montreal 5000 | Calgary 4000
+GBR London 13000 | Manchester 3600 | Birmingham 3000 | Edinburgh 4500
+FRA Paris 11500 | Lyon 5200 | Nice 6000
+DEU Munich 9500 | Berlin 6000 | Frankfurt 7000 | Hamburg 6800
+CHE Zurich 15000 | Geneva 15500
+NLD Amsterdam 8500
+IRL Dublin 6500
+ESP Madrid 5000 | Barcelona 5000 | Malaga 3700
+PRT Lisbon 5200 | Porto 3600
+ITA Milan 5500 | Rome 4500
+POL Warsaw 4000 | Krakow 3700
+CZE Prague 5000
+AUT Vienna 6500
+SWE Stockholm 8000
+NOR Oslo 7500
+DNK Kobenhavn 7000
+TUR Istanbul 1800
+RUS Moscow 4500
+ARE Dubai 4500 | Abu Dhabi 3500
+SAU Riyadh 2000
+ISR Tel Aviv-Yafo 13000
+IND Mumbai 4000 | New Delhi 2000 | Bengaluru 1800
+SGP Singapore 16000
+HKG Hong Kong 20000
+CHN Shanghai 11000 | Beijing 10500 | Shenzhen 9500 | Guangzhou 6000
+JPN Tokyo 9500 | Osaka 5500
+KOR Seoul 12000
+TWN Taipei 9000
+AUS Sydney 9500 | Melbourne 6500
+NZL Auckland 7000
+BRA Sao Paulo 2200 | Rio de Janeiro 2300
+MEX Mexico City 2800
+ARG Buenos Aires 2300
+COL Bogota 1500
+NGA Lagos 1500
+KEN Nairobi 1400
+EGY Cairo 900
+ZAF Cape Town 1800 | Johannesburg 1000
+THA Bangkok 4000
+MYS Kuala Lumpur 2500
+IDN Jakarta 2000
+PHL Manila 3000
+VNM Ho Chi Minh City 3500 | Hanoi 3200
+"""
+
+
+def parse_prices():
+    toks = PRICES.split()
+    return {toks[i]: int(toks[i + 1]) for i in range(0, len(toks), 2)}
+
+
+def parse_city_prices():
+    out = {}
+    for line in CITY_PRICES.strip().splitlines():
+        iso, rest = line.split(" ", 1)
+        for item in rest.split("|"):
+            name, price = item.strip().rsplit(" ", 1)
+            out[(iso, name.lower())] = int(price)
+    return out

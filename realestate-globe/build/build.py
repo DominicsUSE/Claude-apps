@@ -13,7 +13,8 @@ import json
 import os
 import sys
 
-from scores import DEFAULT, WEIGHTS, parse_countries, parse_hotspots
+from scores import (DEFAULT, PRICE_DEFAULT, WEIGHTS, parse_city_prices, parse_countries,
+                    parse_hotspots, parse_prices)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKIP_CLASSES = {"Scientific station", "Meteorological Station", "Historic place"}
@@ -27,6 +28,8 @@ def load(name):
 def main():
     table = parse_countries()
     hotspots = parse_hotspots()
+    prices = parse_prices()
+    city_prices = parse_city_prices()
     num_to_iso = {v["num"]: k for k, v in table.items() if v["num"] != "000"}
 
     topo50 = load("countries-50m.json")
@@ -37,7 +40,7 @@ def main():
     def ensure(key, name):
         if key not in countries:
             f = table[key]["f"] if key in table else DEFAULT
-            countries[key] = {"n": name, "f": list(f)}
+            countries[key] = {"n": name, "f": list(f), "p": prices.get(key, PRICE_DEFAULT)}
         return key
 
     # Tag every map feature with our country key.
@@ -72,16 +75,18 @@ def main():
             p["adm1name"] or "",
             cap,
             0,
+            0,
         ]
         idx = len(places)
         places.append(row)
         k = (iso, row[0].lower())
-        if k in hotspots and (k not in best or places[best[k]][3] < row[3]):
+        if (k in hotspots or k in city_prices) and (k not in best or places[best[k]][3] < row[3]):
             best[k] = idx
 
     for k, idx in best.items():
-        places[idx][8] = hotspots[k]
-    missing = sorted(set(hotspots) - set(best))
+        places[idx][8] = hotspots.get(k, 0)
+        places[idx][9] = city_prices.get(k, 0)
+    missing = sorted((set(hotspots) | set(city_prices)) - set(best))
     if missing:
         print("hotspots without a matching place:", missing, file=sys.stderr)
 
