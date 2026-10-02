@@ -4,8 +4,9 @@
 #   A  Affordability & yield: price-to-income, rental yields, land/build cost
 #   S  Stability: rule of law, property rights, political & currency risk
 #   F  Business & finance: permits, foreign ownership rules, mortgage depth
+#   P  Property safety: see PROPERTY below (added as a sixth factor at build time)
 # These are editorial estimates for a planning tool, not audited data.
-WEIGHTS = {"D": 0.25, "E": 0.25, "A": 0.15, "S": 0.20, "F": 0.15}
+WEIGHTS = {"D": 0.22, "E": 0.22, "A": 0.13, "S": 0.15, "F": 0.13, "P": 0.15}
 
 COUNTRIES = """
 USA 840 62 70 45 80 88
@@ -465,4 +466,174 @@ def parse_notes():
     for line in COUNTRY_NOTES.strip().splitlines():
         iso, kind, text = line.split(" ", 2)
         out.setdefault(iso, []).append([kind, text])
+    return out
+
+
+# Property safety, 0-100 (higher = safer): how likely the government is to seize,
+# nationalise or block your property, plus how freely foreigners may own it.
+# Format: ISO score | short reason (optional). Countries not listed fall back to
+# their stability rating + 5. Editorial estimates; check local law before buying.
+PROPERTY = """
+VEN 5 | Thousands of businesses, farms and buildings were expropriated since 2007
+CUB 5 | The state controls most real estate and foreigners generally cannot buy homes
+PRK 3 | Private property and foreign ownership are effectively banned
+SDN 5 | Civil war: homes and land are being looted and occupied
+SSD 5 | Conflict and almost no working land registry
+SOM 10 | Weak land records and armed groups control many areas
+ERI 10 | One-party state with no independent courts to defend property
+LBY 10 | Rival governments and militias; titles are hard to enforce
+HTI 10 | Gangs control parts of the capital and seize buildings
+SYR 10 | A 2018 law let the state take property of people who fled the war
+AFG 10 | Taliban rule; property titles are insecure and foreign investment is barred
+MMR 10 | The military government seizes property of its opponents
+RUS 10 | Since 2022 the state can put foreign-owned assets under "temporary management", a de facto seizure
+BLR 10 | Laws since 2022 allow seizing property of people who left and foreign-owned firms
+NIC 15 | The government has confiscated universities, NGOs and critics' property since 2018
+IRN 15 | Sanctions, special permits for foreign buyers and a history of asset confiscations
+TKM 15 | Closed state with no independent courts
+CAF 15 | Armed groups control much of the country
+ZWE 25 | Thousands of commercial farms were seized in the 2000s and compensation is still unpaid in full
+LBN 25 | Banks froze people's savings in 2019 and courts are weak
+COD 25 | Weak land registry and frequent ownership disputes
+TCD 25 | Military rule and weak courts
+MLI 25 | Military rule; the government has seized foreign-run mining assets
+BFA 25 | Military rule; the government has nationalised foreign-run gold mines
+NER 25 | The military government nationalised a French-run uranium mine in 2025
+UKR 30 | Active war; property in occupied areas has been seized
+IRQ 30 | Weak land registry, disputed titles and armed groups in some areas
+TJK 30 | Weak courts and politically connected land grabs
+BOL 35 | Gas, mining, telecom and power companies were nationalised in 2006-2012
+ETH 35 | All land is owned by the state; you can only lease it
+DZA 35 | Heavy restrictions on foreign buyers and a history of nationalisation
+MOZ 35 | All land is state-owned; you only get use rights (DUAT)
+PNG 35 | Most land is customary and hard to title
+LAO 40 | Land is state-owned; foreigners only get leases
+CHN 40 | All land is state-owned: you get 70-year use rights, and foreigners may buy only one home to live in
+NPL 40 | Foreigners cannot own land
+PAK 40 | Weak land records and frequent title disputes
+BGD 40 | Weak land records and frequent title disputes
+KWT 40 | Foreigners from outside the Gulf generally cannot own property
+KGZ 40 | The government took over a major foreign-run gold mine in 2022
+HND 40 | Weak land titles; the government turned against private charter cities in 2022
+AGO 40 | Land belongs to the state; you get surface rights
+VNM 45 | All land belongs to the state; foreigners get 50-year leases on apartments within quotas
+KHM 45 | Foreigners cannot own land, only condo units above the ground floor
+TZA 45 | All land is public; foreigners can only lease it through an approved investment
+NGA 45 | The Land Use Act puts land under state governors; titles need the governor's consent
+UZB 45 | Many homes were demolished for development projects with little compensation
+AZE 45 | Weak courts and politically connected land deals
+CMR 45 | Weak land registry and slow courts
+THA 50 | Foreigners cannot own land, only condo units within a 49% foreign quota
+IDN 50 | Foreigners cannot hold freehold title, only right-of-use (Hak Pakai) titles
+PHL 50 | The constitution bars foreigners from owning land; condos only within a 40% foreign quota
+IND 50 | Foreigners living abroad generally cannot buy property, and land disputes are common
+LKA 50 | Foreigners cannot buy freehold land; condos only from the fourth floor up
+MNG 50 | Foreigners cannot own land, only apartments and leases
+ZAF 50 | An expropriation law signed in 2025 allows nil compensation in some cases
+SUR 50 | Weak land registry and slow courts
+TUN 50 | Foreign buyers need the regional governor's approval
+GTM 50 | Weak land titles and slow courts
+ECU 50 | Courts are slow and contract enforcement is weak
+SLV 55
+ARG 55 | History of nationalisations (oil company YPF in 2012) and capital controls
+EGY 55 | Homes have been demolished for state projects; foreigners are limited to two homes
+TUR 55 | The state seized companies and assets after the 2016 coup attempt; military zones are off limits
+KAZ 55 | Foreigners cannot own agricultural land
+KEN 55 | Foreigners can only hold leases of up to 99 years, not freehold land
+GHA 55 | Foreigners can only lease land, for up to 50 years
+NAM 55 | Land reform plans include expropriating farms
+UGA 55 | Overlapping land titles and frequent disputes
+SAU 55 | Foreign ownership needs approval and is limited to designated zones (a 2026 law opens more areas)
+ZMB 55 | Foreigners generally need investor status to own land
+ALB 55 | Many property titles are disputed or unregistered
+KOS 55 | Many property titles are disputed or unregistered
+CIV 55
+FJI 55 | Most land is customary and can only be leased
+RWA 60 | Land is leasehold (up to 99 years) but the registry works well
+SEN 60
+BIH 60
+MKD 60
+MDA 60
+ARM 60 | Foreigners cannot own land, only buildings
+GUY 60
+OMN 65 | Foreigners can own freehold only in approved tourism complexes
+QAT 65 | Foreigners can own only in designated zones
+MEX 65 | Foreigners need a bank trust (fideicomiso) to own within 50 km of the coast or 100 km of a border
+BRA 65 | Limits on foreigners buying rural land and slow courts
+COL 65
+PER 65
+DOM 65
+SRB 65
+JOR 65
+HKG 70 | Land is leased from the government, and the 2020 security law raised legal risk
+NZL 70 | Most foreigners are banned from buying existing homes
+CAN 70 | People who are not Canadian are banned from buying homes until 2027
+PRY 70
+PAN 70
+BLZ 70
+JAM 70
+TTO 70
+MNE 70
+HUN 70
+BWA 70
+MAR 70
+BHR 75
+GEO 75 | Foreigners cannot buy farmland, but city property is quick and easy to register
+CHE 75 | The Lex Koller law strictly limits foreigners buying homes
+MYS 75 | Foreigners can buy only above a minimum price set by each state
+MLT 75 | Buyers from outside the EU need a permit
+ISL 75 | Buyers from outside the European Economic Area need permission
+BGR 75 | Buyers from outside the EU cannot own land directly
+CRI 75
+AUS 80 | Foreign buyers need approval and are banned from buying established homes from 2025 to 2027
+DNK 80 | Non-residents need permission to buy
+AUT 80 | Buyers from outside the EU need state approval
+POL 80 | Buyers from outside the EU need a permit to buy land and houses
+GRC 80 | Some border areas need a permit for non-EU buyers
+ISR 80 | Most land is state-owned and leased long-term, but titles are secure
+CYP 80
+ROU 80
+HRV 80
+LVA 80
+LTU 80
+CHL 80
+BHS 80
+BRB 80
+MUS 80
+ARE 85 | Foreigners can own freehold in designated areas, with a strong title registry in Dubai
+SGP 85 | Foreigners pay a 60% extra stamp duty on homes and need approval for landed houses
+ITA 85
+ESP 85
+PRT 85
+EST 85
+CZE 85
+SVK 85
+SVN 85
+TWN 85
+URY 85
+USA 90
+IRL 90
+FRA 90
+BEL 90
+FIN 90
+KOR 90
+PRI 90
+GBR 92
+DEU 92
+NLD 92
+LUX 92
+SWE 92
+NOR 92
+JPN 95 | No restrictions on foreign ownership and very secure titles
+"""
+
+
+def parse_property():
+    out = {}
+    for line in PROPERTY.strip().splitlines():
+        head, _, note = line.partition("|")
+        iso, score = head.split()
+        if iso.endswith("_"):
+            continue
+        out[iso] = (int(score), note.strip())
     return out

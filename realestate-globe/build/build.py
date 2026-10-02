@@ -17,7 +17,7 @@ import sys
 
 from export_skill import export
 from scores import (DEFAULT, PRICE_DEFAULT, WEIGHTS, parse_city_prices, parse_countries,
-                    parse_hotspots, parse_notes, parse_prices)
+                    parse_hotspots, parse_notes, parse_prices, parse_property)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKIP_CLASSES = {"Scientific station", "Meteorological Station", "Historic place"}
@@ -34,6 +34,7 @@ def main():
     prices = parse_prices()
     city_prices = parse_city_prices()
     notes = parse_notes()
+    prop = parse_property()
     num_to_iso = {v["num"]: k for k, v in table.items() if v["num"] != "000"}
 
     topo50 = load("countries-50m.json")
@@ -47,6 +48,11 @@ def main():
             countries[key] = {"n": name, "f": list(f), "p": prices.get(key, PRICE_DEFAULT)}
             if key in notes:
                 countries[key]["notes"] = notes[key]
+            # sixth factor: property safety (falls back to stability + 5)
+            ps, pnote = prop.get(key, (min(90, f[3] + 5), ""))
+            countries[key]["f"].append(ps)
+            if pnote:
+                countries[key]["pn"] = pnote
         return key
 
     # Tag every map feature with our country key.

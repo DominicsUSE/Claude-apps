@@ -22,6 +22,9 @@ python3 ~/.nanobot/workspace/skills/build-atlas/scripts/atlas.py top --sort valu
 python3 ~/.nanobot/workspace/skills/build-atlas/scripts/atlas.py top --sort overall --worst              # riskiest places
 python3 ~/.nanobot/workspace/skills/build-atlas/scripts/atlas.py place "Lisbon" --country Portugal       # one city, with reasons
 python3 ~/.nanobot/workspace/skills/build-atlas/scripts/atlas.py country "Russia"                        # one country, with reasons
+python3 ~/.nanobot/workspace/skills/build-atlas/scripts/atlas.py property                                # where the government may take property
+python3 ~/.nanobot/workspace/skills/build-atlas/scripts/atlas.py property --safest --region europe       # safest for owners
+python3 ~/.nanobot/workspace/skills/build-atlas/scripts/atlas.py top --sort value --min-property 80      # cheap + growth, safe property
 ```
 
 What the numbers mean (all 0-100; green 65+, yellow 50-64, red under 50):
@@ -31,8 +34,11 @@ What the numbers mean (all 0-100; green 65+, yellow 50-64, red under 50):
 - `price`: higher means cheaper, from an estimated typical apartment price in USD per m².
 - `potential` (growth): population growth, economy and local momentum.
 - `overall`: best all-round place to start and build.
+- `property safety` (per country): how likely the government is to seize, nationalise
+  or block your property, and limits on foreign owners. 70+ safe, 45-69 some risk or
+  limits, under 45 high risk. Use it for "can the government take my property?".
 
-`top` leaves out war zones and very unstable countries unless you pass
+`top` leaves out war zones and countries where the government may take property unless you pass
 `--include-unstable`. Use `--min-pop 20000` to include small towns.
 
 How to answer:
@@ -41,4 +47,6 @@ How to answer:
 - Keep it short: one sentence, then up to 6 bullets of
   "City, Country: value 72%, about $1.6k/m², growth 66%. One short reason."
 - Name the main risk when there is one (from the `Problem:` lines).
+- Always warn clearly when a place has property safety under 45 (the script prints WARNING),
+  and mention limits on foreign owners from the "Can the government take your property?" line.
 - Say once that these are indicative model estimates, not financial advice.

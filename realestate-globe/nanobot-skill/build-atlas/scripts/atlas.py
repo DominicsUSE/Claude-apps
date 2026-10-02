@@ -6,6 +6,10 @@
                [--include-unstable] [--limit N]
   atlas.py place NAME [--country C]
   atlas.py country NAME
+  atlas.py property [--safest] [--region R] [--limit N]
+
+property_safety (country level): how likely the government is to seize, nationalise or
+block your property, and limits on foreign owners (70+ safe, 45-69 some risk, <45 high).
 
 Scores are 0-100 (green 65+, yellow 50-64, red under 50). price: higher = cheaper.
 value = cheap AND high growth potential, marked down in unstable countries.
@@ -22,6 +26,7 @@ C = DATA["countries"]
 COLS = DATA["place_columns"]
 PLACES = [dict(zip(COLS, r)) for r in DATA["places"]]
 STABLE = 35
+SAFE_MIN = 35  # property safety floor for rankings unless --include-unstable
 
 REGIONS = {
     "europe": "ALB AND AUT BEL BIH BGR HRV CYP CZE DNK EST FIN FRA DEU GRC HUN ISL IRL ITA KOS LVA LIE LTU LUX MLT MDA MCO MNE NLD MKD NOR POL PRT ROU SMR SRB SVK SVN ESP SWE CHE UKR GBR BLR",
@@ -64,10 +69,12 @@ def usd(v):
 
 
 def line(p, i=None):
-    c = C[p["country_code"]]["name"]
+    cc = C[p["country_code"]]
     head = f"{i}. " if i else ""
-    return (f"{head}{p['name']}, {c}: value {p['value']}%, about {usd(p['price_usd_m2'])}/m2, "
-            f"growth {p['potential']}%, overall {p['overall']}%, pop {p['population']:,}")
+    ps = cc["factors"]["property_safety"]
+    warn = " WARNING: government may seize property or block real ownership" if ps < 45 else ""
+    return (f"{head}{p['name']}, {cc['name']}: value {p['value']}%, about {usd(p['price_usd_m2'])}/m2, "
+            f"growth {p['potential']}%, overall {p['overall']}%, property safety {ps}%, pop {p['population']:,}{warn}")
 
 
 def top(a):
@@ -83,7 +90,10 @@ def top(a):
             continue
         if p["population"] < a.min_pop or p["price_usd_m2"] > a.max_price or p["potential"] < a.min_potential:
             continue
-        if not a.include_unstable and not a.worst and C[ck]["factors"]["stability"] < STABLE:
+        fac = C[ck]["factors"]
+        if not a.include_unstable and not a.worst and (fac["stability"] < STABLE or fac["property_safety"] < SAFE_MIN):
+            continue
+        if fac["property_safety"] < a.min_property:
             continue
         out.append(p)
     out.sort(key=lambda p: (p[sort], -p["population"]) if a.worst else (-p[sort], -p["population"]))
@@ -91,7 +101,7 @@ def top(a):
         print("No places match. Try a bigger area, a higher price limit or a lower population.")
         return
     print(f"Top {min(a.limit, len(out))} by {sort}{' (worst first)' if a.worst else ''}"
-          f"{'' if a.include_unstable or a.worst else ' (war zones and very unstable countries left out)'}:")
+          f"{'' if a.include_unstable or a.worst else ' (war zones and countries where the government may take property left out)'}:")
     for i, p in enumerate(out[:a.limit], 1):
         print(line(p, i))
 
@@ -121,6 +131,9 @@ def country_block(c):
     print(f"{c['name']} baseline: overall {c['overall']}%, value {c['value']}%, growth {c['potential']}%, "
           f"price score {c['price']}% (typical {usd(c['price_usd_m2'])}/m2)")
     print("Factors 0-100: " + ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in f.items()))
+    ps = f["property_safety"]
+    verdict = "property is safe" if ps >= 70 else "some risk or limits on foreigners" if ps >= 45 else "HIGH risk: the government may seize property, or you cannot really own it"
+    print(f"Can the government take your property? {ps}/100, {verdict}" + (f": {c['property_note']}" if c["property_note"] else ""))
     for kind, text in c["notes"]:
         print(("Problem: " if kind == "-" else "Strength: ") + text)
 
@@ -139,6 +152,17 @@ def country(a):
             print(line(p, i))
 
 
+def prop(a):
+    region = set(REGIONS.get((a.region or "").lower(), "").split())
+    rows = [c for k, c in C.items() if (not region or k in region)]
+    rows.sort(key=lambda c: -c["factors"]["property_safety"] if a.safest else c["factors"]["property_safety"])
+    print(("Safest" if a.safest else "Riskiest") + " countries for property (0-100, higher = safer):")
+    for i, c in enumerate(rows[:a.limit], 1):
+        ps = c["factors"]["property_safety"]
+        note = c["property_note"] or ("strong property rights" if ps >= 85 else "conflict and weak courts" if ps < 25 else "")
+        print(f"{i}. {c['name']}: {c['factors']['property_safety']}%" + (f" - {note}" if note else ""))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -149,6 +173,7 @@ def main(argv=None):
     t.add_argument("--min-pop", type=int, default=100000)
     t.add_argument("--max-price", type=float, default=float("inf"))
     t.add_argument("--min-potential", type=int, default=0)
+    t.add_argument("--min-property", type=int, default=0, help="minimum property safety 0-100")
     t.add_argument("--worst", action="store_true")
     t.add_argument("--include-unstable", action="store_true")
     t.add_argument("--limit", type=int, default=8)
@@ -157,9 +182,13 @@ def main(argv=None):
     p.add_argument("--country")
     c = sub.add_parser("country")
     c.add_argument("name")
+    pr = sub.add_parser("property")
+    pr.add_argument("--safest", action="store_true")
+    pr.add_argument("--region", choices=sorted(REGIONS))
+    pr.add_argument("--limit", type=int, default=10)
     a = ap.parse_args(argv)
     a.limit = max(1, min(25, getattr(a, "limit", 8)))
-    {"top": top, "place": place, "country": country}[a.cmd](a)
+    {"top": top, "place": place, "country": country, "property": prop}[a.cmd](a)
 
 
 if __name__ == "__main__":

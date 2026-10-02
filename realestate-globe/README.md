@@ -16,8 +16,15 @@ small arrow for growth potential (up = high, sideways = some, down = low).
 Open `index.html` in a browser (it loads d3 from cdnjs; everything else is inline).
 
 Scores are indicative estimates, not financial advice:
-- Country baseline = weighted mix of demand growth (25%), economy (25%),
-  affordability & yield (15%), stability (20%) and business & finance (15%).
+- Country baseline = weighted mix of demand growth (22%), economy (22%),
+  affordability & yield (13%), stability (15%), business & finance (13%) and
+  property safety (15%).
+- Property safety = how likely the government is to seize, nationalise or block
+  your property (e.g. Venezuela's expropriations, Russia's "temporary management"
+  of foreign assets) and how freely foreigners may own it (e.g. no land ownership
+  for foreigners in Thailand or the Philippines). Countries under 45% are hatched
+  red on the map, and rankings of cheap places leave out anything under 35%.
+  Edit `PROPERTY` in `build/scores.py`.
 - City score = baseline + market size (−4 to +5) + national capital (+2)
   + local momentum for known hot or overheated markets.
 - Price: country typical $/m² × city size, capital and demand multipliers,

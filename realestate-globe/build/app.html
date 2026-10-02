@@ -73,6 +73,8 @@ button{font:inherit;color:inherit}
 .chip i{width:9px;height:9px;border-radius:50%;display:block;box-shadow:0 0 8px currentColor}
 .chip[aria-pressed="false"]{opacity:.38}
 .chip b{font:500 11px var(--f-data);color:var(--muted)}
+.chip.risk{align-self:flex-start}
+.chip i.hatch{width:12px;height:12px;border-radius:3px;box-shadow:none;background:repeating-linear-gradient(135deg,var(--bad) 0 2px,transparent 2px 5px);border:1px solid var(--bad)}
 .note{font-size:11px;color:var(--muted);max-width:340px}
 .zoomhint{font:500 11px var(--f-data);color:var(--accent)}
 
@@ -145,6 +147,8 @@ body.has-panel .ctrls{right:388px}
 .pot .phead b{font:800 22px/1 var(--f-display);font-variant-numeric:tabular-nums}
 .pot .phead b.g{color:var(--good)}.pot .phead b.y{color:var(--mid)}.pot .phead b.r{color:var(--bad)}
 .pot p{margin:0;font-size:13px}
+.pot p.sub{color:var(--muted);font-size:12px}
+.pot.prop .phead span{color:var(--ink);font-weight:600}
 .pot .track{height:6px;border-radius:3px;background:rgba(160,190,225,.1);overflow:hidden}
 .pot .track div{height:100%;border-radius:3px}
 .arrows{display:flex;gap:12px;font-size:12px;color:var(--muted);align-items:center}
@@ -270,6 +274,7 @@ body.has-panel .ctrls{right:388px}
       <button class="chip" id="chip-y" aria-pressed="true"><i style="background:var(--mid);color:var(--mid)"></i><span id="lab-y"></span> <b id="cnt-y"></b></button>
       <button class="chip" id="chip-r" aria-pressed="true"><i style="background:var(--bad);color:var(--bad)"></i><span id="lab-r"></span> <b id="cnt-r"></b></button>
     </div>
+    <button class="chip risk" id="chip-risk" aria-pressed="true" title="Hatch countries where the government may seize property or foreigners cannot really own it"><i class="hatch"></i>Seizure risk <b id="cnt-risk"></b></button>
     <div class="arrows" id="arrows"><span><i class="tri up"></i>High growth potential</span><span><i class="tri fl"></i>Some</span><span><i class="tri dn"></i>Low</span></div>
     <div class="zoomhint" id="zoomhint"></div>
     <div class="note" id="legendNote"></div>
@@ -317,7 +322,8 @@ const FACTORS = [
   ["E","Economy","GDP growth outlook, incomes, inflation"],
   ["A","Affordability & yield","Price-to-income, rental yields, land and build cost"],
   ["S","Stability","Rule of law, property rights, political and currency risk"],
-  ["F","Business & finance","Permits, foreign ownership, mortgage market depth"]
+  ["F","Business & finance","Permits, foreign ownership, mortgage market depth"],
+  ["P","Property safety","How likely the government is to seize, nationalise or block your property, and limits on foreign owners"]
 ];
 const POT_W = {D:.45, E:.40, S:.15};
 const clamp = v => Math.max(3, Math.min(97, Math.round(v)));
@@ -326,16 +332,21 @@ const LMAX = Math.log(25000), LMIN = Math.log(400);
 const priceScore = p => clamp(100*(LMAX-Math.log(p))/(LMAX-LMIN));
 const priceAt = s => Math.exp(LMAX - s/100*(LMAX-LMIN));
 
-// Best value: cheap to buy and build AND strong growth, marked down where it is unsafe.
-function valueOf(price, potential, stability){
-  return clamp(.45*price + .45*potential + .10*stability - (stability < 30 ? 15 : 0));
+// Best value: cheap to buy and build AND strong growth, marked down where it is unsafe
+// or where the government may take your property.
+function valueOf(price, potential, stability, property){
+  return clamp(.40*price + .40*potential + .10*stability + .10*property - (stability < 30 ? 15 : 0) - (property < 25 ? 10 : 0));
 }
+// property safety bands
+const SAFE_MIN = 35;   // below this, rankings for cheap places leave the country out
+const propRate = v => v >= 70 ? "g" : v >= 45 ? "y" : "r";
+const PROP_LABEL = {g:"Property is safe", y:"Some risk or limits", r:"High risk: seizure or no real ownership"};
 for (const k in COUNTRIES){
   const c = COUNTRIES[k];
   c.overall = FACTORS.reduce((s,[f],i)=>s + c.f[i]*WEIGHTS[f], 0);
   c.potential = c.f[0]*POT_W.D + c.f[1]*POT_W.E + c.f[3]*POT_W.S;
   c.price = priceScore(c.p);
-  c.value = valueOf(c.price, c.potential, c.f[3]);
+  c.value = valueOf(c.price, c.potential, c.f[3], c.f[5]);
 }
 function sizeMod(pop){
   if (pop>=1e7) return 5; if (pop>=5e6) return 4; if (pop>=1e6) return 3;
@@ -357,7 +368,7 @@ const P = PLACES.map((r,i)=>{
     price: priceScore(ppm),
     potential: clamp(c.potential + sm*0.6 + (cap?1:0) + hot*1.3 + (c.f[2]-50)*0.1)
   };
-  p.s.value = valueOf(p.s.price, p.s.potential, c.f[3]);
+  p.s.value = valueOf(p.s.price, p.s.potential, c.f[3], c.f[5]);
   return p;
 });
 const RCOL = {g:"#38d08a", y:"#f4c430", r:"#f25f57"};
@@ -632,6 +643,7 @@ function draw(){
   const feats = z < 4.2 ? F110 : F50;
   const vc = viewCenter(), va = visibleAngle();
   const groups = new Map();
+  const risky = new Path2D(); let hasRisk = false;   // countries where the government may take property
   for (const f of feats){
     if (d3.geoDistance(vc, f.center) - f.rad >= va) continue;
     const c = COUNTRIES[f.k], sc = c[mode];
@@ -642,6 +654,7 @@ function draw(){
     let p2 = groups.get(col);
     if (!p2){ p2 = new Path2D(); groups.set(col, p2); }
     ppath.context(p2); ppath(f);
+    if (showRisk && c.f[5] < 45){ ppath.context(risky); ppath(f); hasRisk = true; }
   }
   const all = new Path2D();
   tctx.setTransform(TDPR,0,0,TDPR,0,0);
@@ -655,6 +668,11 @@ function draw(){
   const flatA = texA*(.26 - .1*clamp01((z-4)/1.5)) + (1-texA)*(.55 - .15*clamp01((z-6)/1.5));
   ctx.globalAlpha = flatA; ctx.drawImage(tintC, 0, 0, W, H);
   ctx.globalAlpha = 1;
+  if (hasRisk){
+    ctx.globalAlpha = .55 * (z < 7 ? 1 : .6);
+    ctx.fillStyle = HATCH; ctx.fill(risky);
+    ctx.globalAlpha = 1;
+  }
   ctx.strokeStyle = "rgba(6,12,22,.75)"; ctx.lineWidth = z<5 ? 1.1 : 1.6; ctx.stroke(all);
   ctx.strokeStyle = "rgba(235,245,255,.32)"; ctx.lineWidth = z<5 ? .5 : .8; ctx.stroke(all);
   if (sel && sel.type==="country" && featByKey[sel.k]){
@@ -714,7 +732,7 @@ function draw(){
     for (const f of list){
       const pt = proj(f.anchor); if (!pt) continue;
       const c = COUNTRIES[f.k], sc = CS(c), rt = rate(sc);
-      const label = c.n.toUpperCase();
+      const label = (c.f[5] < 45 ? "⚠ " : "") + c.n.toUpperCase();
       const lf = `600 ${z<4?10:11}px ${SANS}`;
       const w = mw(lf, label);
       const b = [pt[0]-w/2-4, pt[1]-14, w+8, 32];
@@ -808,6 +826,10 @@ function draw(){
   if (hint !== hintText){ $("zoomhint").textContent = hint; hintText = hint; }
   if (fading) dirty = true;
 }
+const HATCH = (()=>{ const c = document.createElement("canvas"); c.width = c.height = 10; const g = c.getContext("2d");
+  g.strokeStyle = "rgba(255,90,80,.95)"; g.lineWidth = 1.6;
+  g.beginPath(); g.moveTo(-2,12); g.lineTo(12,-2); g.moveTo(-2,2); g.lineTo(2,-2); g.moveTo(8,12); g.lineTo(12,8); g.stroke();
+  return ctx.createPattern(c, "repeat"); })();
 const GLOW = (()=>{ const c = document.createElement("canvas"); c.width = c.height = 64; const g = c.getContext("2d");
   const gr = g.createRadialGradient(32,32,0,32,32,32); gr.addColorStop(0,"rgba(80,240,160,.5)"); gr.addColorStop(1,"rgba(80,240,160,0)");
   g.fillStyle = gr; g.fillRect(0,0,64,64); return c; })();
@@ -1017,6 +1039,9 @@ function setMode(m){
   renderPanel(); dirty = true;
 }
 document.querySelectorAll(".modes button").forEach(b=>b.onclick=()=>setMode(b.dataset.m));
+let showRisk = true;
+$("cnt-risk").textContent = Object.keys(COUNTRIES).filter(k=>featByKey[k] && COUNTRIES[k].f[5] < 45).length + " countries";
+$("chip-risk").onclick = e=>{ showRisk = !showRisk; e.currentTarget.setAttribute("aria-pressed", showRisk); dirty = true; };
 for (const r of ["g","y","r"]){
   $("chip-"+r).onclick = e=>{ show[r] = !show[r]; e.currentTarget.setAttribute("aria-pressed", show[r]); dirty=true; };
 }
@@ -1027,7 +1052,7 @@ let tab = "cities";
 let topCities=[], topCountries=[], lowCities=[];
 const STABLE = 35; // stability floor for the cheapest-places lists (skips war zones)
 function buildRankings(){
-  const ok = c => (mode!=="price" && mode!=="value") || c.f[3] >= STABLE;
+  const ok = c => (mode!=="price" && mode!=="value") || (c.f[3] >= STABLE && c.f[5] >= SAFE_MIN);
   const tie = (a,b) => mode==="price" ? a.ppm-b.ppm : b.pop-a.pop;
   topCities = P.filter(p=>p.pop>=3e5 && ok(COUNTRIES[p.ck])).sort((a,b)=>S(b)-S(a)||tie(a,b)).slice(0,25);
   topCountries = Object.entries(COUNTRIES).filter(([k,c])=>featByKey[k] && byCountry[k] && ok(c)).sort((a,b)=>b[1][mode]-a[1][mode]||a[1].p-b[1].p).slice(0,25);
@@ -1063,14 +1088,19 @@ function bindList(){
 }
 function reasons(c, p){
   const pros = [], cons = [];
-  const [D,E,A,St,F] = c.f;
+  const [D,E,A,St,F,Pr] = c.f;
+  // can the government take your property? (first, because it can wipe out everything else)
+  if (Pr < 25) cons.push(c.pn ? "Government may take your property: " + c.pn.charAt(0).toLowerCase() + c.pn.slice(1) : "High risk that the government seizes or nationalises property");
+  else if (Pr < 45) cons.push(c.pn || "Weak property rights: titles can be challenged or taken");
+  else if (c.pn) cons.push(c.pn);
+  else if (Pr >= 85) pros.push("Strong property rights: the government cannot simply take your property");
   for (const [k,t] of (c.notes||[])) (k==="+" ? pros : cons).push(t);
   // skip a generic line when a country note already says it
   const said = re => (c.notes||[]).some(([k,t])=>k==="-" && re.test(t));
   const noted = said(/war|conflict|military|sanction|gang|coup|collapse|repression|taliban|insurgen|instab|split/i);
   if (St < 30){ if (!noted) cons.push("Conflict or an unstable government makes contracts and property rights hard to enforce"); }
   else if (St < 50) cons.push("Political or currency risk is higher than average");
-  else if (St >= 80) pros.push("Stable, with strong property rights");
+  else if (St >= 80) pros.push("Stable politics and reliable courts");
   if (said(/population|birth/i)) {}
   else if (D < 35) cons.push("Population is flat or shrinking, so there are few new buyers and renters");
   else if (D < 45) cons.push("Slow population growth limits new housing demand");
@@ -1118,6 +1148,15 @@ function whyBlock(c, p, score){
   const good = `<div><h3>${rt==="g" ? "Why it scores well" : "What works in its favour"}</h3></div><ul class="reasons">${proList}</ul>`;
   return `<div class="why">${rt==="g" ? good + bad : bad + good}</div>`;
 }
+function propBlock(c){
+  const v = c.f[5], rt = propRate(v);
+  const what = {g:"Your ownership is well protected by law and courts.",
+                y:"You can usually own property, but there are limits on foreigners or weak spots in the courts.",
+                r:"The government has seized, nationalised or blocked property here, or foreigners cannot really own it."}[rt];
+  return `<div class="pot prop"><div class="phead"><span>Can the government take your property?</span><b class="${rt}">${v}%</b></div>
+    <div class="track"><div style="width:${v}%;background:${RCOL[rt]}"></div></div>
+    <p><strong>${PROP_LABEL[rt]}.</strong> ${esc(c.pn || what)}</p>${c.pn ? `<p class="sub">${esc(what)}</p>` : ""}</div>`;
+}
 function potBlock(c, p, pot){
   if (mode==="potential") return "";
   const rt = rate(pot);
@@ -1127,10 +1166,12 @@ function potBlock(c, p, pot){
 }
 function breakdown(p, c){
   if (mode==="value") return `
-    <dt>Price score (${usd(p.ppm)}/m²) × 0.45</dt><dd>${(p.s.price*.45).toFixed(1)}</dd>
-    <dt>Growth potential × 0.45</dt><dd>${(p.s.potential*.45).toFixed(1)}</dd>
+    <dt>Price score (${usd(p.ppm)}/m²) × 0.40</dt><dd>${(p.s.price*.40).toFixed(1)}</dd>
+    <dt>Growth potential × 0.40</dt><dd>${(p.s.potential*.40).toFixed(1)}</dd>
     <dt>${esc(c.n)} stability × 0.10</dt><dd>${(c.f[3]*.1).toFixed(1)}</dd>
-    ${c.f[3] < 30 ? `<dt>Conflict or instability</dt><dd>−15</dd>` : ""}`;
+    <dt>Property safety × 0.10</dt><dd>${(c.f[5]*.1).toFixed(1)}</dd>
+    ${c.f[3] < 30 ? `<dt>Conflict or instability</dt><dd>−15</dd>` : ""}
+    ${c.f[5] < 25 ? `<dt>Government may seize property</dt><dd>−10</dd>` : ""}`;
   if (mode==="overall") return `
     <dt>${esc(c.n)} baseline</dt><dd>${c.overall.toFixed(1)}</dd>
     <dt>Market size (${fmtPop(p.pop)})</dt><dd>${sign(p.sm)}</dd>
@@ -1158,7 +1199,7 @@ function renderPanel(){
     const heading = {overall:"Best places to build", price:"Cheapest places to build", potential:"Most growth potential", value:"Cheap with the most growth"}[mode];
     body.innerHTML = `
       <div><div class="eyebrow">${M.title}</div><h2>${heading}</h2></div>
-      <p class="p">${M.note}${(mode==="price"||mode==="value")&&tab!=="low"?" Lists leave out war zones and very unstable countries.":""} Drag to spin, scroll or pinch to zoom, and tap any place or country for details.</p>
+      <p class="p">${M.note}${(mode==="price"||mode==="value")&&tab!=="low"?" Lists leave out war zones and countries where the government may take your property.":""} Drag to spin, scroll or pinch to zoom, and tap any place or country for details.</p>
       <div class="tabs" role="tablist">
         <button role="tab" data-t="cities" aria-selected="${tab==="cities"}">Top cities</button>
         <button role="tab" data-t="countries" aria-selected="${tab==="countries"}">Top countries</button>
@@ -1176,6 +1217,7 @@ function renderPanel(){
         <div class="meta">${M.noun} · #${rank} of ${list.length} in ${esc(c.n)} · ${fmtPop(p.pop)} people</div></div></div>
       ${tiles(p.s)}
       ${potBlock(c, p, p.s.potential)}
+      ${propBlock(c)}
       ${whyBlock(c, p, sc)}
       <div class="price"><span>Est. property price</span><b>${usd(p.ppm)}/m²</b></div>
       <div><h3>How the ${M.noun.toLowerCase()} is built</h3></div>
@@ -1197,6 +1239,7 @@ function renderPanel(){
         <div class="meta">${M.noun} · #${allRank} of ${Object.keys(COUNTRIES).length} countries and territories</div></div></div>
       ${tiles(sc)}
       ${potBlock(c, null, sc.potential)}
+      ${propBlock(c)}
       ${whyBlock(c, null, s)}
       <div class="price"><span>Typical price per m²</span><b>${usd(c.p)}</b></div>
       <div><h3>National fundamentals</h3></div>
@@ -1296,7 +1339,8 @@ function findPlace(name, country){
 function summary(p){
   const c = COUNTRIES[p.ck];
   return {name:p.name, country:c.n, region:p.adm1, population:p.pop, price_usd_per_m2:p.ppm,
-    overall:p.s.overall, price_score:p.s.price, growth_potential:p.s.potential, value:p.s.value, country_stability:c.f[3]};
+    overall:p.s.overall, price_score:p.s.price, growth_potential:p.s.potential, value:p.s.value, country_stability:c.f[3],
+    property_safety:c.f[5], property_note:c.pn || undefined};
 }
 const SORTS = {value:"value", overall:"overall", price:"price", cheap:"price", potential:"potential", growth:"potential"};
 function queryPlaces(o){
@@ -1314,7 +1358,8 @@ function queryPlaces(o){
     if (cks.length && !cks.includes(p.ck)) return false;
     if (reg && !reg.has(p.ck)) return false;
     if (p.pop < minPop || p.ppm > maxPrice || p.s.potential < minPot) return false;
-    if (!unstable && !lowest && c.f[3] < STABLE) return false;
+    if (!unstable && !lowest && (c.f[3] < STABLE || c.f[5] < SAFE_MIN)) return false;
+    if (Number(o.min_property_safety) && c.f[5] < Number(o.min_property_safety)) return false;
     return true;
   });
   list.sort((a,b)=> lowest ? a.s[sort]-b.s[sort] : b.s[sort]-a.s[sort] || b.pop-a.pop);
@@ -1329,8 +1374,15 @@ function countryDetail(k){
   const c = COUNTRIES[k], r = reasons(c, null);
   const fac = {}; FACTORS.forEach(([f,t],i)=>fac[t]=c.f[i]);
   return {country:c.n, overall:Math.round(c.overall), price_score:c.price, growth_potential:Math.round(c.potential), value:c.value,
+    property_safety:c.f[5], property_verdict:PROP_LABEL[propRate(c.f[5])], property_note:c.pn || undefined,
     typical_price_usd_per_m2:c.p, factors_0_to_100:fac, strengths:r.pros.slice(0,5), problems:r.cons.slice(0,5),
     best_value_places:(byCountry[k]||[]).slice().sort((a,b)=>b.s.value-a.s.value).slice(0,5).map(summary)};
+}
+function propertyRanking(o){
+  const reg = REGIONS[String(o.region||"").toLowerCase()];
+  const list = Object.entries(COUNTRIES).filter(([k])=>byCountry[k] && featByKey[k] && (!reg || reg.has(k)));
+  list.sort((a,b)=> o.safest_first ? b[1].f[5]-a[1].f[5] || b[1].value-a[1].value : a[1].f[5]-b[1].f[5]);
+  return list.slice(0, Math.max(1, Math.min(20, Number(o.limit) || 10)));
 }
 const TOOLS = [
   {name:"find_places",
@@ -1342,6 +1394,7 @@ const TOOLS = [
      min_population:{type:"number", description:"Default 100000. Use 1000000 for big cities, 20000 to include towns."},
      max_price_usd_per_m2:{type:"number"},
      min_growth_potential:{type:"number"},
+     min_property_safety:{type:"number", description:"0-100; 70+ means the government is unlikely to take your property"},
      lowest_first:{type:"boolean", description:"true to list the worst places first"},
      include_unstable:{type:"boolean"},
      limit:{type:"number", description:"1-15, default 8"}}},
@@ -1350,6 +1403,10 @@ const TOOLS = [
    description:"Full details for one city or town: all scores, estimated price per m², rank in its country, plain-language strengths and problems, and growth outlook.",
    inputSchema:{type:"object", properties:{name:{type:"string"}, country:{type:"string"}}, required:["name"]},
    execute:(i)=>{ const p = findPlace(i.name, i.country); if (!p) throw new Error("No place called "+i.name+" in the dataset"); return placeDetail(p); }},
+  {name:"property_risk",
+   description:"Countries ranked by property safety: how likely the government is to seize, nationalise or block property, and limits on foreign owners. Returns the riskiest (default) or safest countries with a short reason.",
+   inputSchema:{type:"object", properties:{safest_first:{type:"boolean"}, region:{type:"string", enum:["europe","asia","middle east","africa","north america","latin america","oceania"]}, limit:{type:"number"}}},
+   execute:(i)=>propertyRanking(i).map(([k,c])=>({country:c.n, property_safety:c.f[5], verdict:PROP_LABEL[propRate(c.f[5])], reason:c.pn || ""}))},
   {name:"get_country",
    description:"Details for one country: scores, typical price per m², the five factor ratings, strengths, problems and its five best-value places.",
    inputSchema:{type:"object", properties:{name:{type:"string"}}, required:["name"]},
@@ -1360,7 +1417,8 @@ Scores run 0-100 (green 65+, yellow 50-64, red under 50):
 - overall: best all-round place to start and build
 - price: higher means CHEAPER to buy land and build (based on estimated typical apartment price in USD per m²)
 - growth potential: how much demand and prices should grow (population, economy, local momentum)
-- value: cheap AND high growth potential together, marked down in unstable countries
+- value: cheap AND high growth potential together, marked down in unstable countries and where the government may take property
+- property_safety (country level): how likely the government is to seize, nationalise or block your property, and limits on foreign owners (70+ safe, 45-69 some risk or limits, under 45 high risk)
 The numbers are indicative model estimates, not live market data and not financial advice.
 
 How to answer:
@@ -1368,6 +1426,7 @@ How to answer:
 - Whenever you name a place from the data, write it exactly as [[Name|Country]] using the tool's spelling, so the page can link it and show it on the globe. Write countries as plain text.
 - Be brief and concrete: one short sentence, then up to 6 bullets like "- [[Medellin|Colombia]]: 72% value, about $1.6k/m², growth 66%. One short reason." Then one line on the main risk if there is one.
 - Use plain text with "- " bullets and **bold** only. No tables, no headings.
+- Always warn clearly when a recommended place has property safety under 45, and mention foreign-ownership limits when the data has them.
 - If asked about something outside real estate or this map, answer briefly and steer back.`;
 
 const chatEl = $("chat"), msgsEl = $("msgs"), inEl = $("chatIn"), sendBtn = $("send"), sugEl = $("suggest");
@@ -1413,7 +1472,7 @@ async function askNanobot(q, el){
   return text;
 }
 
-const SUGGEST = ["Cheap places with the most growth","Best value in Europe","Cheapest safe big cities in Asia","High growth under $1,500/m²","Why is Russia rated badly?","Compare Lisbon and Warsaw"];
+const SUGGEST = ["Cheap places with the most growth","Where can the government take my property?","Best value in Europe","Cheapest safe big cities in Asia","High growth under $1,500/m²","Why is Russia rated badly?","Compare Lisbon and Warsaw"];
 sugEl.innerHTML = SUGGEST.map(t=>`<button type="button">${esc(t)}</button>`).join("");
 sugEl.querySelectorAll("button").forEach(b=>b.onclick=()=>ask(b.textContent));
 
@@ -1485,6 +1544,15 @@ function localAnswer(q){
     });
     return {text:(named.length>1?"Here is how they compare:\n":"")+lines.join("\n"), picks:named.slice(0,3)};
   }
+  if (/seiz|confiscat|expropriat|nationali|take (my|your|the|our)? ?(property|propert|home|house|land)|property rights|can.t own|cannot own|foreigners? (own|buy)|own property/.test(t)){
+    if (ck){
+      const c = COUNTRIES[ck], v = c.f[5];
+      return {text:`**${c.n}: property safety ${v}%** (${PROP_LABEL[propRate(v)].toLowerCase()}).\n${c.pn ? "- "+c.pn+"\n" : ""}- ${v >= 70 ? "Courts and the land registry protect owners well." : v >= 45 ? "You can usually own property, but check the limits for foreigners and the title history." : "The state has seized or blocked property here, or foreigners cannot really own it. Treat it as high risk."}`, picks:[]};
+    }
+    const worst = propertyRanking({region:reg, limit:8});
+    const safe = queryPlaces({sort:"value", region:reg, min_property_safety:80, min_population:300000, limit:5});
+    return {text:`**Where the government may take your property${reg?" in "+reg.replace(/\b\w/g,m=>m.toUpperCase()):""}** (lowest property safety):\n${worst.map(([k,c])=>`- ${c.n} (${c.f[5]}%): ${c.pn || "weak courts and property rights"}`).join("\n")}\n\n**Cheap with growth where property is safe (80%+):**\n${safe.map(fmt).join("\n")}`, picks:safe};
+  }
   if (ck && /why|bad|good|risk|problem|about/.test(t)){
     const c = COUNTRIES[ck], r = reasons(c, null);
     const top = (byCountry[ck]||[]).slice().sort((a,b)=>b.s.value-a.s.value).slice(0,3);
@@ -1503,7 +1571,7 @@ function localAnswer(q){
   const where = ck ? " in "+COUNTRIES[ck].n : reg ? " in "+reg.replace(/\b\w/g,m=>m.toUpperCase()) : "";
   const head = {value:`Cheap places with the most growth${where}`, price:`Cheapest stable places${where}`, potential:`Most growth potential${where}`, overall:`Riskiest places${where}`}[lowest?"overall":sort];
   if (!list.length) return {text:`I found no places matching that${where}. Try a higher price limit or a bigger area.`, picks:[]};
-  return {text:`**${head}** (by ${lowest?"lowest overall score":sort==="value"?"value: cheap + growth":sort==="price"?"lowest price per m²":"growth potential"}):\n${list.map(fmt).join("\n")}${sort!=="overall"&&!lowest?"\nWar zones and very unstable countries are left out.":""}`, picks:list};
+  return {text:`**${head}** (by ${lowest?"lowest overall score":sort==="value"?"value: cheap + growth":sort==="price"?"lowest price per m²":"growth potential"}):\n${list.map(fmt).join("\n")}${sort!=="overall"&&!lowest?"\nWar zones and countries where the government may take your property are left out.":""}`, picks:list};
 }
 
 function setBusy(b){
