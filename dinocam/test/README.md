@@ -708,6 +708,67 @@ no longer an EU member), and 4 (Poland, Czechia, Netherlands, Belgium) plus Irel
 genuinely too irregular to safely hardcode. Every one of the 23 resolved countries was checked
 against a real source, not assumed.
 
+### Netherlands, Belgium, Ireland researched - and a real corruption bug found and fixed
+
+Continuing past the "net result" above, actually researched the three countries that round
+left unresolved by name only, rather than leaving them as an assumption:
+
+- **Netherlands**: confirmed multi-format, as suspected, but more precisely now - the
+  [current series since June 2024](https://www.dutchnews.nl/2024/06/dutch-numberplate-configuration-changed-again-after-five-years/)
+  is letters-digits-letters (`GBB-01-B`, 3+2+1), the *same* family as the UK/France/Italy group
+  already left alone - but Dutch plates are driver-plate-for-life in a sense that old series
+  stay on the road for decades across 11 different historical patterns since 1951, several of
+  which (e.g. the long-running `12-ABC-3` digit-letter-digit pattern) are a *third*, incompatible
+  shape - confirming real risk already represented in this suite's own `Dutch "12-ABC-3"` test
+  case, not a hypothetical one.
+- **Belgium**: current standard format is `1-AAA-345` (1 digit + 3 letters + 3 digits).
+- **Ireland**: current (since 2013) format is year-half + county code + a 1-6 digit serial
+  (`261-D-12345`), confirmed as the suspected variable-length case, but also newly discovered
+  to be a digit-letter-digit shape at its core.
+
+Testing these three real shapes directly against `fixPlateChars` (not just reasoning about them)
+found a real, serious bug: a Belgian plate like `1ABC345` came back as `IABC345`, and an Irish
+short-serial plate like `131D1` came back as `131DI` - both **already-correct** readings
+actively corrupted into wrong ones, not OCR errors left uncorrected. Root cause: both are
+digit-letter-digit shapes the function was never designed for, but a lone digit sitting right
+at the string's edge next to an otherwise-clean letter/digit run can "fit" the two-segment
+letters-then-digits (or digits-then-letters) hypothesis at a cost of just one correction - the
+same cost threshold that makes a genuine single-OCR-error fix (like Lithuania's `ABC12S` ->
+`ABC125`) trustworthy in the first place.
+
+The Irish case had a clean, zero-sacrifice fix: no digits-then-letters country this suite
+covers (Spain, Estonia) ever needs a 2-letter suffix, so excluding that specific combination
+(`lettersFirst=false` with `lettersLen<3`, in `fixPlateChars`) closes the Irish false positive
+entirely, verified both directly (`'131D1'` and `'261D12345'` now correctly pass through
+unchanged) and via the full 50,000-case fuzz run (still 0 failures).
+
+The Belgian case (and, discovered by the same testing, the new Dutch format's `GBB01B` ->
+`GBB018`) could **not** be fixed the same way - traced down to an honest dead end, not left
+unexamined. Both collide with combinations this suite genuinely needs: Belgium's accepted
+split (`lettersLen:4, digitsLen:3`, letters-then-digits) is the *exact same* combination
+Slovenia's merged region+serial format uses, and the new Dutch format's accepted split
+(`lettersLen:3, digitsLen:3`) is the *exact same* combination Lithuania, Sweden, Hungary,
+Cyprus, and Malta all use. Tried several more targeted discriminators - run-internal vs.
+run-edge position, counting how many "unambiguous" (non-confusable) characters anchor a run,
+requiring extra corroborating neighbors - and each one, checked against both the bad case and
+the legitimate cases it would also need to keep working, turned out to reject or accept the
+*same* pattern both ways: a hypothetical Luxembourg plate with its district letter OCR'd as a
+digit (`"0Y3456"` -> `"OY3456"`) has the exact same shape as Belgium's `1ABC345` bug, and a
+genuine Lithuanian correction (`ABC12S` -> `ABC125`) has the exact same shape as the Dutch
+`GBB01B` bug. These are not solvable from the bare character string alone without knowing which
+country's plate it actually is - which this app, as a generic worldwide camera app with no
+country setting, doesn't have.
+
+Given that, and given Lithuania/Germany accuracy was this work's original, explicitly emphasized
+ask, the responsible call was to keep that coverage rather than trade it away for Belgium/new-
+Dutch plates this app was never asked to specifically support, and state the resulting tradeoff
+plainly instead of either hiding it or pretending a clean fix exists: **a plate from an
+unsupported country whose true shape happens to collide with one of the 15 supported shapes, and
+whose confusable character happens to sit exactly at the segment boundary, can still be
+mis-corrected.** This is the same category of honest limitation as the Greek O/0 "genuinely
+ambiguous glyph" note earlier in this file - a real, bounded, documented tradeoff, not a bug
+left unfixed through oversight.
+
 Validated via the same `plate-formats.test.js` suite, now at 50,100 checks (0 failed) -
 11 new example cases, 2 new full-pipeline confusion tests, and 10+ new direct `fixPlateChars`
 unit cases - plus a full re-run of the entire existing test suite (`fuzz-1000.test.js` through

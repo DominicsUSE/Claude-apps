@@ -1524,6 +1524,13 @@ function fixPlateChars(value){
     let lettersLen=key.length-digitsLen;
     if(lettersLen<2||lettersLen>5)continue;
     for(let lettersFirst of [true,false]){
+      // Every digits-then-letters target this covers (Spain, Estonia) has a 3-letter suffix;
+      // none uses 2. Found by testing: allowing lettersLen 2 here let an Irish-style
+      // digit-letter-digit plate ("131D1" - year code, county letter, a short serial) "fit" this
+      // hypothesis by sacrificing its real trailing digit, even with zero actual OCR error -
+      // corrupting an already-correct reading rather than fixing one. No real covered country
+      // needs this combination, so it's excluded rather than risk that.
+      if(!lettersFirst&&lettersLen<3)continue;
       let plan=[],cost=0,ok=true;
       for(let i=0;i<key.length;i++){
         let c=key[i],wantLetter=lettersFirst?(i<lettersLen):(i>=digitsLen);

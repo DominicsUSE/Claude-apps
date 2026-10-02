@@ -188,6 +188,14 @@ const fixCases = [
   ['Slovak/Croatian letter-digit-letter shape has no valid split - unchanged', 'AB123CD', 'AB123CD'],
   ['Romanian letter-digit-letter shape has no valid split - unchanged', 'AB123CDE', 'AB123CDE'],
   ['Portuguese letter-digit-letter shape has no valid split - unchanged', 'AA00AA', 'AA00AA'],
+  // Found by testing a real Irish plate shape (digits+letter+digits, e.g. year-code + county +
+  // a short serial): a bare digits-then-letters hypothesis with a 2-letter suffix would have
+  // sacrificed Irish's real trailing digit to force-fit a shape, even with zero actual OCR
+  // error - corrupting an already-correct reading, not fixing one. No covered country needs a
+  // 2-letter digits-then-letters suffix (Spain and Estonia both use 3), so that combination is
+  // now excluded outright.
+  ['Irish digit-letter-digit shape (short serial) has no valid split - unchanged', '131D1', '131D1'],
+  ['Irish digit-letter-digit shape (full-length serial) has no valid split - unchanged', '261D12345', '261D12345'],
   ['too short for any shape - unchanged', 'A1', 'A1'],
   ['too long for any shape - unchanged', 'ABCDEFGHIJ', 'ABCDEFGHIJ'],
   ['empty string - unchanged', '', ''],
