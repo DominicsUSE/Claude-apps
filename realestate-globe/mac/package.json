@@ -1,0 +1,17 @@
+{
+  "name": "build-atlas",
+  "productName": "Build Atlas",
+  "version": "1.0.0",
+  "description": "Globe of the best places to start a real-estate company",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build": "node build-mac.js"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "d3": "7.9.0",
+    "electron": "38.2.0"
+  }
+}

@@ -98,3 +98,36 @@ node realestate-globe/tests/chat-understanding.test.js 1   # try other seeds: 2,
 
 San Francisco is used for text, ⌘K (or /) jumps to search, + − 0 and the arrow
 keys move the globe, and trackpad pinch works in Safari and Chrome.
+
+## Mac app
+
+`mac/` wraps the map in a native macOS window (Electron): offline map and imagery,
+Mac title bar and menus, live news, and Ask AI through your local nanobot.
+
+```bash
+cd realestate-globe/mac
+npm install
+node build-mac.js        # -> dist/Build-Atlas-<version>-mac-Apple-Silicon.zip and ...-Intel.zip
+```
+
+The app is ad-hoc signed, not notarised, so the first time macOS asks: right-click
+the app, choose **Open**, then **Open** (or System Settings > Privacy & Security >
+Open Anyway). Optional settings live in
+`~/Library/Application Support/Build Atlas/config.json`:
+`{"nanobotUrl": "http://127.0.0.1:8900", "nanobotApiKey": "..."}`.
+
+## Live news
+
+The Mac app and `serve.py` fetch property and economy headlines from Google News
+every 10 minutes. Each headline is matched to the countries and big cities it names
+and scored positive or negative ("seizes", "sanctions", "crash" vs "boom",
+"investment", "reforms"); newer headlines count more. A country's scores move by at
+most ±6 points, and headlines about seizures or nationalisation lower property
+safety by up to 15. The headlines are listed under **In the news** for each place.
+(The claude.ai version cannot fetch feeds, so it shows the base model only.)
+
+## Why a score is what it is
+
+Every place and country has a **Why X%?** section: what the percentage means
+(very poor, poor, mixed, strong, excellent), and each factor with how many points
+it adds or removes from the 50% midpoint and a plain-language reason.

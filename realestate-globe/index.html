@@ -38,6 +38,10 @@ body{margin:0;background:var(--space);color:var(--ink);font:14px/1.45 var(--f-bo
 #app{position:relative;height:100%;width:100%}
 canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 #stars,#earth,#tint{pointer-events:none}
+.dragbar{display:none}
+html.desktop-mac .dragbar{display:block;position:absolute;top:0;left:0;right:0;height:38px;z-index:5;-webkit-app-region:drag}
+html.desktop-mac .top{top:46px}
+html.desktop-mac .panel{top:46px}
 #tint{mix-blend-mode:color;opacity:0}
 #globe{touch-action:none;cursor:grab}
 #globe.dragging{cursor:grabbing}
@@ -157,6 +161,31 @@ body.has-panel .ctrls{right:388px}
 .tabs button[aria-selected="true"]{background:rgba(142,197,255,.15);color:var(--ink)}
 .p{margin:0;color:var(--muted);font-size:13px}
 .why{display:flex;flex-direction:column;gap:12px}
+.newsline{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink)}
+.newsline i{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 0 rgba(56,208,138,.6);animation:pulse 2s infinite}
+.newsline.off i{background:var(--mid);animation:none}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(56,208,138,.55)}70%{box-shadow:0 0 0 7px rgba(56,208,138,0)}100%{box-shadow:0 0 0 0 rgba(56,208,138,0)}}
+.newsb{display:flex;flex-direction:column;gap:10px}
+.newsb b.g{color:var(--good)}.newsb b.r{color:var(--bad)}
+.news-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}
+.news-list li{display:grid;grid-template-columns:10px 1fr;gap:9px;align-items:start}
+.news-list li i{width:8px;height:8px;border-radius:50%;margin-top:6px}
+.news-list li i.g{background:var(--good)}.news-list li i.r{background:var(--bad)}.news-list li i.n{background:var(--muted)}
+.news-list a{color:var(--ink);font-size:13px;line-height:1.4;text-decoration:none}
+.news-list a:hover{color:var(--accent);text-decoration:underline}
+.news-list small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px}
+.ex{padding:14px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.02)}
+.ex-sum{margin:0;font-size:13.5px;line-height:1.5}
+.ex-sum .verdict{margin-right:4px;vertical-align:1px;padding:3px 8px;font-size:12px}
+.ex h4{margin:0 0 6px;font-size:12px;font-weight:600;color:var(--muted)}
+.ex-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.ex-list li{display:flex;flex-direction:column;gap:2px}
+.ex-h{display:flex;justify-content:space-between;gap:10px;font-size:13px;font-weight:600}
+.ex-h em{font:500 11.5px var(--f-data);color:var(--muted);font-style:normal;margin-left:4px}
+.ex-h b{font:600 12px var(--f-data);font-variant-numeric:tabular-nums}
+.ex-h b.g{color:var(--good)}.ex-h b.r{color:var(--bad)}
+.ex-list p{margin:0;font-size:12.5px;color:var(--muted);line-height:1.4}
+.ex-scale{margin:0;font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px}
 .reasons{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
 .reasons li{display:grid;grid-template-columns:20px 1fr;gap:8px;align-items:start;font-size:13px;line-height:1.4}
 .reasons li i{width:20px;height:20px;border-radius:6px;display:grid;place-items:center;font:700 12px/1 var(--f-data);font-style:normal}
@@ -264,6 +293,7 @@ body.has-panel .ctrls{right:388px}
 </style>
 
 <div id="app">
+  <div class="dragbar" aria-hidden="true"></div>
   <canvas id="stars" aria-hidden="true"></canvas>
   <canvas id="earth" aria-hidden="true"></canvas>
   <canvas id="tint" aria-hidden="true"></canvas>
@@ -299,6 +329,7 @@ body.has-panel .ctrls{right:388px}
     </div>
     <button class="chip risk" id="chip-risk" aria-pressed="true" title="Hatch countries where the government may seize property or foreigners cannot really own it"><i class="hatch"></i>Seizure risk <b id="cnt-risk"></b></button>
     <div class="arrows" id="arrows"><span><i class="tri up"></i>High growth potential</span><span><i class="tri fl"></i>Some</span><span><i class="tri dn"></i>Low</span></div>
+    <div class="newsline" id="newsline" hidden><i></i><span></span></div>
     <div class="zoomhint" id="zoomhint"></div>
     <div class="note" id="legendNote"></div>
   </div>
@@ -370,13 +401,20 @@ function valueOf(price, potential, stability, property){
 const SAFE_MIN = 35;   // below this, rankings for cheap places leave the country out
 const propRate = v => v >= 70 ? "g" : v >= 45 ? "y" : "r";
 const PROP_LABEL = {g:"Property is safe", y:"Some risk or limits", r:"High risk: seizure or no real ownership"};
-for (const k in COUNTRIES){
-  const c = COUNTRIES[k];
-  c.overall = FACTORS.reduce((s,[f],i)=>s + c.f[i]*WEIGHTS[f], 0);
-  c.potential = c.f[0]*POT_W.D + c.f[1]*POT_W.E + c.f[3]*POT_W.S;
+// Country scores. c.f0 keeps the base factors; c.news (from live headlines) nudges them.
+const clamp100 = v => Math.max(0, Math.min(100, Math.round(v)));
+function scoreCountry(c){
+  if (!c.f0) c.f0 = c.f.slice();
+  const n = c.news || {adj:0, propAdj:0};
+  c.f = c.f0.slice();
+  c.f[5] = clamp100(c.f0[5] + n.propAdj);
+  c.overall0 = FACTORS.reduce((s,[f],i)=>s + c.f[i]*WEIGHTS[f], 0);
+  c.overall = c.overall0 + n.adj;
+  c.potential = c.f[0]*POT_W.D + c.f[1]*POT_W.E + c.f[3]*POT_W.S + n.adj*0.8;
   c.price = priceScore(c.p);
   c.value = valueOf(c.price, c.potential, c.f[3], c.f[5]);
 }
+for (const k in COUNTRIES) scoreCountry(COUNTRIES[k]);
 function sizeMod(pop){
   if (pop>=1e7) return 5; if (pop>=5e6) return 4; if (pop>=1e6) return 3;
   if (pop>=3e5) return 1; if (pop>=1e5) return 0; if (pop>=3e4) return -2; return -4;
@@ -392,14 +430,18 @@ const P = PLACES.map((r,i)=>{
   const sm = sizeMod(pop), cm = cap?2:0;
   const ppm = cp || Math.round(c.p * sizePrice(pop) * (cap?1.15:1) * (1+Math.abs(hot)*0.03) / 50) * 50;
   const p = {i,name,lon,lat,pop,mz,ck,adm1,cap,hot,sm,cm,ppm,lname:name.toLowerCase(),known:!!cp};
-  p.s = {
-    overall: clamp(c.overall + sm + cm + hot),
-    price: priceScore(ppm),
-    potential: clamp(c.potential + sm*0.6 + (cap?1:0) + hot*1.3 + (c.f[2]-50)*0.1)
-  };
-  p.s.value = valueOf(p.s.price, p.s.potential, c.f[3], c.f[5]);
+  scorePlace(p);
   return p;
 });
+function scorePlace(p){
+  const c = COUNTRIES[p.ck];
+  p.s = {
+    overall: clamp(c.overall + p.sm + p.cm + p.hot),
+    price: priceScore(p.ppm),
+    potential: clamp(c.potential + p.sm*0.6 + (p.cap?1:0) + p.hot*1.3 + (c.f[2]-50)*0.1)
+  };
+  p.s.value = valueOf(p.s.price, p.s.potential, c.f[3], c.f[5]);
+}
 const RCOL = {g:"#38d08a", y:"#f4c430", r:"#f25f57"};
 const MODES = {
   overall:{title:"Overall opportunity", noun:"Opportunity score",
@@ -1198,6 +1240,78 @@ function potBlock(c, p, pot){
     <div class="track"><div style="width:${pot}%;background:${RCOL[rt]}"></div></div>
     <p><strong>${MODES.potential.labels[rt]}.</strong> ${esc(potentialLine(c, p))}</p></div>`;
 }
+/* ---------- detailed explanations: what each percentage means and why ---------- */
+const LEVELS = {
+  D:[[35,"the population is flat or shrinking, so few new buyers and renters appear"],[50,"the population grows slowly, so new demand is modest"],[65,"the population grows steadily, which keeps demand for homes coming"],[101,"the population is growing fast, so new homes are needed every year"]],
+  E:[[35,"the economy is weak or inflation is high, so buyers struggle to pay and borrow"],[50,"the economy grows slowly"],[65,"the economy grows at a healthy pace"],[101,"the economy is growing strongly and incomes are rising"]],
+  A:[[35,"homes cost far more than local incomes allow, so margins and rents are thin"],[50,"homes are expensive for local buyers"],[65,"prices are reasonable compared with incomes"],[101,"homes are cheap compared with incomes and rents pay well"]],
+  S:[[30,"war, conflict or a very unstable government makes everything risky"],[50,"political or currency risk is high"],[75,"politics and the currency are reasonably stable"],[101,"politics and courts are very stable"]],
+  F:[[35,"permits, loans and foreign investment are very hard to get"],[50,"permits and mortgages are limited"],[75,"business rules and financing are workable"],[101,"permits are easy, mortgages are common and investors are welcome"]],
+  P:[[25,"the government has seized property here, or private ownership barely exists"],[45,"there is a high risk of seizure, or foreigners cannot really own property"],[70,"you can own property, but with limits for foreigners or weak spots in the courts"],[101,"ownership is well protected by law and courts"]]
+};
+const levelText = (f, v) => LEVELS[f].find(([max])=>v < max)[1];
+const BANDS = [[25,"Very poor","almost everything works against building here"],[50,"Poor","serious problems outweigh the positives"],[65,"Mixed","workable, but with clear weak spots"],[80,"Strong","most things favour building here"],[101,"Excellent","nearly everything favours building here"]];
+const band = v => BANDS.find(([max])=>v < max);
+const MEDIAN_PPM = (()=>{ const a = P.map(p=>p.ppm).sort((x,y)=>x-y); return a[a.length>>1]; })();
+function signPts(v){ v = Math.round(v*10)/10; return (v > 0 ? "+" : v < 0 ? "−" : "±") + Math.abs(v); }
+// rows of [label, value shown, points, sentence], strongest effects first
+function explainRows(p, c, m){
+  const rows = [];
+  const fac = (i, w, label) => { const [f] = FACTORS[i], v = c.f[i]; rows.push([label || FACTORS[i][1], v+"/100", w*(v-50), levelText(f, v)]); };
+  if (m === "overall"){
+    FACTORS.forEach(([f], i)=>fac(i, WEIGHTS[f]));
+    if (p){
+      if (p.sm) rows.push(["Market size", fmtPop(p.pop)+" people", p.sm, p.sm > 0 ? "a big market with many buyers and renters" : "a small market where homes can be slow to sell"]);
+      if (p.cm) rows.push(["National capital", "yes", p.cm, "government and business jobs keep demand steady"]);
+      if (p.hot) rows.push(["Local momentum", signPts(p.hot), p.hot, p.hot > 0 ? "people and jobs are moving into this city" : "the local market is overheated or losing residents"]);
+    }
+  } else if (m === "potential"){
+    fac(0, POT_W.D); fac(1, POT_W.E); fac(3, POT_W.S);
+    if (p){
+      if (p.sm) rows.push(["Market size", fmtPop(p.pop)+" people", p.sm*0.6, p.sm > 0 ? "big cities attract more people and money" : "small places grow more slowly"]);
+      if (p.hot) rows.push(["Local momentum", signPts(p.hot*1.3), p.hot*1.3, p.hot > 0 ? "people and jobs are moving in" : "prices already ran ahead or people are leaving"]);
+      rows.push(["Price headroom", c.f[2]+"/100", (c.f[2]-50)*0.1, c.f[2] >= 50 ? "prices still have room to rise compared with incomes" : "prices are already stretched, leaving less room to rise"]);
+    }
+  } else if (m === "value"){
+    const pr = p ? p.s.price : c.price, po = p ? p.s.potential : Math.round(c.potential);
+    rows.push(["Price score", pr+"%", .40*(pr-50), pr >= 65 ? "cheap to buy land and build" : pr >= 50 ? "mid-priced to get started" : "expensive to get started"]);
+    rows.push(["Growth potential", po+"%", .40*(po-50), po >= 65 ? "strong growth ahead" : po >= 50 ? "some growth ahead" : "little growth ahead"]);
+    fac(3, .10); fac(5, .10);
+    if (c.f[3] < 30) rows.push(["Conflict penalty", "yes", -15, "war or a collapsing state can wipe out any investment"]);
+    if (c.f[5] < 25) rows.push(["Seizure penalty", "yes", -10, "the government may take what you build"]);
+  } else if (m === "price"){
+    const ppm = p ? p.ppm : c.p, x = ppm / MEDIAN_PPM;
+    rows.push(["Price per m²", usd(ppm), 0, `about ${x >= 1 ? x.toFixed(1)+"× more than" : (1/x).toFixed(1)+"× less than"} the typical place on the map (${usd(MEDIAN_PPM)}/m²). $400/m² would score 100% and $25k/m² 0%, on a log scale`]);
+  }
+  const n = c.news;
+  if (n && n.adj && m !== "price") rows.push(["Recent news", signPts(n.adj), m === "potential" ? n.adj*0.8 : m === "value" ? .40*n.adj*0.8 : n.adj, n.adj > 0 ? "recent headlines are mostly positive" : "recent headlines are mostly negative"]);
+  return rows;
+}
+function explainBlock(p, c){
+  const m = mode, score = p ? S(p) : CS(c), [, bandName, bandText] = band(score);
+  const rows = explainRows(p, c, m);
+  const ups = rows.filter(r=>r[2] > 0.05).sort((a,b)=>b[2]-a[2]), downs = rows.filter(r=>r[2] < -0.05).sort((a,b)=>a[2]-b[2]);
+  const who = p ? p.name : c.n;
+  const line = r => `<li><div class="ex-h"><span>${esc(r[0])} <em>${esc(r[1])}</em></span>${m !== "price" ? `<b class="${r[2] >= 0 ? "g" : "r"}">${signPts(r[2])}</b>` : ""}</div><p>${esc(r[3].charAt(0).toUpperCase() + r[3].slice(1))}.</p></li>`;
+  let summary;
+  if (m === "price") summary = `${who} scores ${score}% on price: ${score >= 65 ? "it is cheap" : score >= 50 ? "it is mid-priced" : "it is expensive"} to buy land and build.`;
+  else {
+    const top = ups[0], low = downs[0];
+    summary = `${who} scores ${score}%: ${bandName.toLowerCase()}, ${bandText}.`
+      + (top ? ` The biggest boost is ${top[0].toLowerCase()} (${signPts(top[2])} points)` : "")
+      + (low ? `${top ? ", and the biggest drag is" : " The biggest drag is"} ${low[0].toLowerCase()} (${signPts(low[2])} points).` : top ? "." : "");
+  }
+  const scale = m === "price" ? "" : `<p class="ex-scale">Every score starts from 50%. Each factor above adds or removes points depending on how far it is from average. 0% would mean everything is as bad as it gets; 100% would mean everything is ideal.</p>`;
+  return `<div class="why ex"><div><h3>Why ${score}%?</h3></div>
+    <p class="ex-sum"><span class="verdict ${rate(score)}"><i></i>${bandName}</span> ${esc(summary)}</p>
+    ${ups.length || m === "price" ? `<div class="ex-g"><h4>${m === "price" ? "How the price is scored" : "Pushing the score up"}</h4><ul class="ex-list">${(m === "price" ? rows : ups).map(line).join("")}</ul></div>` : ""}
+    ${downs.length ? `<div class="ex-g"><h4>Pulling the score down</h4><ul class="ex-list">${downs.map(line).join("")}</ul></div>` : ""}
+    ${scale}</div>`;
+}
+function explainText(p, c, m){   // plain text for the AI chat tools
+  return explainRows(p, c, m).sort((a,b)=>Math.abs(b[2])-Math.abs(a[2])).map(r=>`${r[0]} ${r[1]} (${signPts(r[2])} pts): ${r[3]}`);
+}
+
 function breakdown(p, c){
   if (mode==="value") return `
     <dt>Price score (${usd(p.ppm)}/m²) × 0.40</dt><dd>${(p.s.price*.40).toFixed(1)}</dd>
@@ -1254,7 +1368,9 @@ function renderPanel(){
       ${propBlock(c)}
       ${whyBlock(c, p, sc)}
       <div class="price"><span>Est. property price</span><b>${usd(p.ppm)}/m²</b></div>
-      <div><h3>How the ${M.noun.toLowerCase()} is built</h3></div>
+      ${explainBlock(p, c)}
+      ${newsBlock(c)}
+      <div><h3>The exact numbers</h3></div>
       <dl class="adj">${breakdown(p,c)}
         <dt class="tot">${M.noun}</dt><dd class="tot">${sc}%</dd></dl>
       <div><h3>National fundamentals</h3></div>
@@ -1274,6 +1390,8 @@ function renderPanel(){
       ${tiles(sc)}
       ${potBlock(c, null, sc.potential)}
       ${propBlock(c)}
+      ${explainBlock(null, c)}
+      ${newsBlock(c)}
       ${whyBlock(c, null, s)}
       <div class="price"><span>Typical price per m²</span><b>${usd(c.p)}</b></div>
       <div><h3>National fundamentals</h3></div>
@@ -1400,7 +1518,9 @@ function queryPlaces(o){
 function placeDetail(p){
   const c = COUNTRIES[p.ck], r = reasons(c, p);
   return {...summary(p), rank_in_country:(byCountry[p.ck].slice().sort((a,b)=>b.s.value-a.s.value).indexOf(p)+1)+" of "+byCountry[p.ck].length+" by value",
-    strengths:r.pros.slice(0,5), problems:r.cons.slice(0,5), growth_outlook:potentialLine(c, p)};
+    strengths:r.pros.slice(0,5), problems:r.cons.slice(0,5), growth_outlook:potentialLine(c, p),
+    why_overall_score:explainText(p, c, "overall"), why_value_score:explainText(p, c, "value"),
+    recent_news:(c.news?.items||[]).slice(0,3).map(n=>n.title)};
 }
 function countryDetail(k){
   const c = COUNTRIES[k], r = reasons(c, null);
@@ -1455,6 +1575,7 @@ The numbers are indicative model estimates, not live market data and not financi
 
 How to answer:
 - Look the data up with the tools; never invent places or numbers. Questions about cheap places with growth, bargains or "best places" mean sort by value.
+- When asked why something scores a percentage, use the why_overall_score / why_value_score lines from get_place: name the biggest boosts and drags with their points.
 - Whenever you name a place from the data, write it exactly as [[Name|Country]] using the tool's spelling, so the page can link it and show it on the globe. Write countries as plain text.
 - Be brief and concrete: one short sentence, then up to 6 bullets like "- [[Medellin|Colombia]]: 72% value, about $1.6k/m², growth 66%. One short reason." Then one line on the main risk if there is one.
 - Use plain text with "- " bullets and **bold** only. No tables, no headings.
@@ -1485,7 +1606,8 @@ let sampleFn, aiState = "unknown", ctl = null, busy = false;
 (async ()=>{ try { sampleFn = window.claude ? await window.claude.use("sample") : null; } catch(e){ sampleFn = null; }
   aiState = sampleFn ? "ready" : "off";
   // Run locally with serve.py and the chat uses your own nanobot agent instead.
-  if (!sampleFn && /^https?:$/.test(location.protocol)){
+  // served over http(s) by serve.py, or inside the Mac app (atlas:), nanobot sits behind /nanobot/
+  if (!sampleFn && (/^https?:$/.test(location.protocol) || location.protocol === "atlas:")){
     try { const r = await fetch("nanobot/health", {cache:"no-store"}); if (r.ok) aiState = "nanobot"; } catch(e){}
   }
 })();
@@ -1887,7 +2009,7 @@ async function ask(q){
   if (aiState !== "ready"){
     const a = localAnswer(q);
     turns.push({role:"assistant", content:a.text});
-    finishBot(el, a.text, aiState==="off" ? "Quick answer from the map data. For AI answers, open this page in Claude or run it with serve.py and nanobot." : "Quick answer from the map data.");
+    finishBot(el, a.text, aiState==="off" ? (location.protocol === "atlas:" ? "Quick answer from the map data. For AI answers, start nanobot (nanobot serve) and reopen the chat." : "Quick answer from the map data. For AI answers, open this page in Claude or run it with serve.py and nanobot.") : "Quick answer from the map data.");
     return;
   }
   setBusy(true);
@@ -1951,6 +2073,74 @@ function showTab(t){
 $("tab-chat").onclick = ()=>showTab("chat");
 $("tab-explore").onclick = ()=>showTab("explore");
 
+/* ---------- live news: the Mac app and serve.py fetch headlines every 10 minutes ---------- */
+const NEG_WORDS = /\b(war|wars|invasion|invades?|conflict|sanction\w*|seiz\w*|expropriat\w*|nationali[sz]\w*|confiscat\w*|crisis|collapse\w*|defaults?|defaulted|crash\w*|plunge\w*|slump\w*|tumbl\w*|falls?|falling|fell|drops?|dropped|declin\w*|bans?|banned|protests?|coup|unrest|riots?|inflation|recession|bankrupt\w*|devalu\w*|earthquake|floods?|flooding|hurricane|cyclone|wildfires?|downgrad\w*|shortages?|freezes?|frozen|halt\w*|evict\w*|demolish\w*|fraud|corruption|curbs?)\b/g;
+const POS_WORDS = /\b(boom\w*|surge\w*|soar\w*|records?|growth|grows?|growing|invest\w*|rises?|rising|rose|recover\w*|rally|rallies|reforms?|upgrad\w*|expan\w*|approv\w*|deals?|opens?|opening|demand|strong|jumps?|jumped|gains?|eases?|easing|incentives?|stimulus|cuts? rates?|rate cuts?)\b/g;
+const SEIZE_WORDS = /\b(seiz\w*|expropriat\w*|nationali[sz]\w*|confiscat\w*)\b/;
+const NEWS_NAMES = new Map();
+for (const [n, k] of COUNTRY_NAMES) if (n.length >= 4 || ["uk","uae","usa"].includes(n)) NEWS_NAMES.set(n, k);
+for (const [n, p] of CITY_INDEX) if (p.pop >= 1e6 && !NEWS_NAMES.has(n)) NEWS_NAMES.set(n, p.ck);
+const NEWS = {fetched:null, count:0, error:null};
+function applyNews(d){
+  const now = Date.now(), by = {};
+  for (const it of d.items || []){
+    const t = norm(it.title || "");
+    const words = t.replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(Boolean);
+    const cks = new Set();
+    for (let n=3; n>=1; n--) for (let i=0; i+n<=words.length; i++){ const k = NEWS_NAMES.get(words.slice(i, i+n).join(" ")); if (k) cks.add(k); }
+    if (!cks.size || cks.size > 3) continue;   // skip headlines about no country, or round-ups of many
+    const neg = (t.match(NEG_WORDS) || []).length, pos = (t.match(POS_WORDS) || []).length;
+    const sent = Math.max(-2, Math.min(2, pos - neg)), seize = SEIZE_WORDS.test(t);
+    const ageH = Math.max(0, (now - (Date.parse(it.published) || now)) / 36e5), w = Math.exp(-ageH / 48);   // older news counts less
+    for (const k of cks){
+      const b = by[k] || (by[k] = {sum:0, prop:0, items:[]});
+      b.sum += sent * w; if (seize) b.prop -= w;
+      b.items.push({title:it.title, link:it.link, source:it.source, published:it.published, sent, seize});
+    }
+  }
+  for (const k in COUNTRIES){
+    const c = COUNTRIES[k], b = by[k];
+    // capped so headlines nudge the model rather than rewrite it
+    c.news = b ? {adj:Math.max(-6, Math.min(6, Math.round(b.sum * 1.5))), propAdj:Math.max(-15, Math.min(0, Math.round(b.prop * 5))),
+      items:b.items.sort((x,y)=>(Date.parse(y.published)||0) - (Date.parse(x.published)||0)).slice(0, 6)} : null;
+    scoreCountry(c);
+  }
+  for (const p of P) scorePlace(p);
+  NEWS.fetched = d.fetched; NEWS.count = (d.items || []).length; NEWS.error = d.error || null;
+  const typing = document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
+  if (!typing) setMode(mode); else { sortCountryLists(); buildRankings(); }
+  updateNewsLine(); dirty = true;
+}
+function ago(ts){
+  const m = Math.round((Date.now() - (Date.parse(ts) || Date.now())) / 60000);
+  return m < 1 ? "just now" : m < 60 ? m + " min ago" : m < 1440 ? Math.round(m/60) + " h ago" : Math.round(m/1440) + " d ago";
+}
+function updateNewsLine(){
+  const el = $("newsline");
+  if (!NEWS.fetched){ el.hidden = true; return; }
+  el.hidden = false;
+  el.classList.toggle("off", !!NEWS.error);
+  el.querySelector("span").textContent = NEWS.error ? `News offline, using data from ${ago(NEWS.fetched)}` : `Live news: ${NEWS.count} headlines, updated ${ago(NEWS.fetched)}`;
+}
+function newsBlock(c){
+  const n = c.news;
+  if (!n || !n.items.length) return NEWS.fetched ? `<div class="newsb"><div><h3>In the news</h3></div><p class="p">No recent headlines about ${esc(c.n)}. Its score uses the base model only.</p></div>` : "";
+  const eff = n.adj ? `Recent headlines move ${esc(c.n)}'s scores by <b class="${n.adj > 0 ? "g" : "r"}">${signPts(n.adj)} points</b>${n.propAdj ? ` and property safety by <b class="r">${signPts(n.propAdj)}</b>` : ""}.` : `Recent headlines are mixed, so they do not change ${esc(c.n)}'s scores.`;
+  return `<div class="newsb"><div><h3>In the news</h3></div><p class="p">${eff}</p><ul class="news-list">${n.items.map(it=>
+    `<li><i class="${it.sent > 0 ? "g" : it.sent < 0 ? "r" : "n"}" title="${it.sent > 0 ? "Positive" : it.sent < 0 ? "Negative" : "Neutral"}"></i><div><a href="${esc(it.link || "#")}" target="_blank" rel="noopener">${esc(it.title)}</a><small>${esc(it.source || "")}${it.source ? " · " : ""}${ago(it.published)}${it.seize ? " · property seizure" : ""}</small></div></li>`).join("")}</ul></div>`;
+}
+async function pollNews(){
+  if (!(/^https?:$/.test(location.protocol) || location.protocol === "atlas:")) return;   // a plain file or claude.ai cannot fetch feeds
+  try {
+    const r = await fetch("news.json", {cache:"no-store"});
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.fetched && d.fetched !== NEWS.fetched) applyNews(d); else updateNewsLine();
+  } catch(e){}
+}
+setInterval(pollNews, 60000);
+setInterval(updateNewsLine, 30000);
+
 /* ---------- Mac and keyboard polish ---------- */
 const IS_MAC = navigator.userAgentData?.platform === "macOS" || /Mac|iPhone|iPad/.test(navigator.platform || "") || /Macintosh|Mac OS X/.test(navigator.userAgent);
 document.documentElement.classList.toggle("mac", IS_MAC);
@@ -1990,6 +2180,7 @@ document.addEventListener("gesturestart", ev=>ev.preventDefault());   // no page
 document.body.classList.add("has-panel");
 resize(); setMode(mode);
 $("loading").remove();
+pollNews();
 requestAnimationFrame(loop);
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(()=>{ MW.clear(); dirty = true; });
 const stopSpin = ()=>{ spin = false; };
