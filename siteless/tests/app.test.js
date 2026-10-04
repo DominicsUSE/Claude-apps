@@ -25,6 +25,7 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascript', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 
 let failures = 0;
+const state = {};   // switches the mocks flip during the test
 function check(cond, msg) {
   if (cond) console.log('  ok  ' + msg);
   else { failures++; console.log('  FAIL ' + msg); }
@@ -51,7 +52,7 @@ function makePlace(id, i, lat, lng, r) {
     id, displayName: { text: name }, location: { latitude: lat, longitude: lng },
     shortFormattedAddress: `${10 + i} Market St`, formattedAddress: `${10 + i} Market St, Testville, TS 12345, USA`,
     rating: Math.round((3.6 + r() * 1.4) * 10) / 10, userRatingCount: Math.floor(r() * 600),
-    websiteUri: SITES[k](i) || undefined, googleMapsUri: `https://maps.google.com/?cid=${encodeURIComponent(id)}`,
+    websiteUri: SITES[k](i) ? SITES[k](i) + (state.siteSuffix ? '?v2' : '') : undefined, googleMapsUri: `https://maps.google.com/?cid=${encodeURIComponent(id)}`,
     primaryType: 'restaurant', primaryTypeDisplayName: { text: 'Restaurant' }, types: ['restaurant', 'food'],
     businessStatus: i === 3 ? 'CLOSED_PERMANENTLY' : 'OPERATIONAL', nationalPhoneNumber: `(555) 010-${String(1000 + i).slice(-4)}`,
   };
@@ -138,7 +139,10 @@ function mockRoutes(ctx, base, state) {
       if (/fasttown/i.test(q)) return route.fulfill({ json: [{ display_name: 'Fasttown', lat: '20', lon: '20' }], headers: cors });
       return route.fulfill({ json: [{ display_name: 'Testville', lat: '40.72', lon: '-73.99', boundingbox: ['40.715', '40.725', '-73.995', '-73.985'] }], headers: cors });
     }
-    if (u.hostname === 'lh3.googleusercontent.com') return route.fulfill({ body: PNG, contentType: 'image/png' });
+    if (u.hostname === 'lh3.googleusercontent.com') {
+      if (state.photoFailOnce) { state.photoFailOnce = false; return route.fulfill({ status: 404, body: 'expired' }); }
+      return route.fulfill({ body: PNG, contentType: 'image/png' });
+    }
     if (u.hostname === 'places.googleapis.com') {
       if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
       if (u.pathname.endsWith(':searchText')) {
@@ -150,8 +154,10 @@ function mockRoutes(ctx, base, state) {
       if (u.pathname.endsWith(':searchNearby')) { const r = nearbyResponse(JSON.parse(req.postData())); return route.fulfill({ status: r.status, json: r.json, headers: cors }); }
       if (u.pathname.endsWith('/media')) {
         calls.photo = (calls.photo || 0) + 1;
+        const n = calls.photo;
         if (u.searchParams.get('key') || !req.headers()['x-goog-api-key'] || u.searchParams.get('skipHttpRedirect') !== 'true') state.photoKeyInUrl = true;
-        return route.fulfill({ json: { name: u.pathname.slice(4), photoUri: 'https://lh3.googleusercontent.com/places/test=w800' }, headers: cors });
+        if (state.photoDelay) await new Promise(r => setTimeout(r, state.photoDelay));
+        return route.fulfill({ json: { name: u.pathname.slice(4), photoUri: `https://lh3.googleusercontent.com/places/test-${n}=w800` }, headers: cors });
       }
       calls.details++;
       const g = generated.get(decodeURIComponent(u.pathname.split('/').pop())) || {};
@@ -159,13 +165,14 @@ function mockRoutes(ctx, base, state) {
         rating: g.rating, userRatingCount: g.userRatingCount, websiteUri: g.websiteUri, formattedAddress: g.formattedAddress,
         regularOpeningHours: { weekdayDescriptions: ['Monday: 9 AM – 5 PM', 'Tuesday: 9 AM – 5 PM', 'Wednesday: 9 AM – 5 PM', 'Thursday: 9 AM – 5 PM', 'Friday: 9 AM – 9 PM', 'Saturday: 10 AM – 9 PM', 'Sunday: Closed'] },
         reviews: [{ rating: 5, relativePublishTimeDescription: '2 weeks ago', text: { text: 'Best <b>pasta</b> in town.' }, authorAttribution: { displayName: 'Sam', uri: 'https://maps.google.com/contrib/1' } }],
-        photos: [{ name: 'places/abc/photos/def', authorAttributions: [{ displayName: 'Owner' }] }],
+        photos: [{ name: `places/${(g.id || 'x').replace(/[^\w-]/g, '')}/photos/p1`, authorAttributions: [{ displayName: 'Owner' }] }],
       } });
     }
     if (u.hostname === 'www.googleapis.com' && u.pathname.includes('pagespeedonline')) {
       calls.psi++;
       if (state.psiDisabled) return route.fulfill({ status: 403, headers: cors, json: { error: { code: 403, message: 'PageSpeed Insights API has not been used in project 1 before or it is disabled.', details: [{ reason: 'SERVICE_DISABLED' }] } } });
       if (u.searchParams.getAll('category').join() !== 'PERFORMANCE,ACCESSIBILITY,BEST_PRACTICES,SEO') state.badCategories = true;
+      if (state.psiSlowFail && !/v2/.test(u.searchParams.get('url'))) { await new Promise(r => setTimeout(r, 1500)); return route.abort('failed'); }
       await new Promise(r => setTimeout(r, state.psiDelay || 15));
       const r = psiResponse(u.searchParams.get('url'));
       return route.fulfill({ status: r.status, json: r.json, headers: cors });
@@ -189,7 +196,6 @@ async function main() {
   const exe = ['/opt/pw-browsers/chromium-1194/chrome-linux/chrome', process.env.CHROMIUM].find(p => p && fs.existsSync(p));
   const browser = await chromium.launch(exe ? { executablePath: exe } : {});
   const ctx = await browser.newContext({ viewport: { width: 1360, height: 860 }, acceptDownloads: true, timezoneId: 'America/New_York', serviceWorkers: 'block' });
-  const state = {};
   await mockRoutes(ctx, base, state);
   const page = await ctx.newPage();
   const stateOf = () => page.evaluate(() => {
@@ -359,6 +365,32 @@ async function main() {
   check((await page.locator('.pin .g').count()) > 0, 'every pin carries a glyph as well as a colour');
   await shot(page, 'google-list');
 
+  console.log('website changes while its check is running');
+  {
+    const home = await page.evaluate(() => { const c = window.__siteless.map.getCenter(); return [c.lat, c.lng, window.__siteless.map.getZoom()]; });
+    await page.evaluate(() => window.__siteless.map.setView([40.80, -73.95], 17, { animate: false }));
+    await settle();
+    state.psiSlowFail = true;
+    await page.click('#btnScan');
+    await scanDone();
+    state.siteSuffix = true;
+    await page.click('#btnScan');
+    await scanDone();
+    await page.waitForTimeout(1800);
+    await page.waitForFunction(() => document.getElementById('checkBadge').hidden, null, { timeout: 90000 });
+    state.psiSlowFail = false;
+    state.siteSuffix = false;
+    const area = await page.evaluate(() => {
+      const { S, map, passes } = window.__siteless;
+      const b = map.getBounds();
+      const ps = [...S.places.values()].filter(p => p.src === 'google' && b.contains([p.lat, p.lng]) && passes(p, true));
+      return { places: ps.length, newSites: ps.filter(p => /v2/.test(p.website || '')).length, errors: ps.filter(p => p.check && p.check.error).length, unchecked: ps.filter(p => p.status === 'unchecked').length };
+    });
+    check(area.newSites > 0 && area.errors === 0 && area.unchecked === 0, `a failed check of an old website never lands on its new one (${JSON.stringify(area)})`);
+    await page.evaluate(h => window.__siteless.map.setView([h[0], h[1]], h[2], { animate: false }), home);
+    await settle();
+  }
+
   console.log('place panel');
   await setZoom(16);
   await page.locator('#list .item', { hasText: 'Poor site' }).first().click();
@@ -391,10 +423,32 @@ async function main() {
     const stops = (u.searchParams.get('waypoints') || '').split('|').filter(Boolean).length + 1;
     check(stops === 10 && u.searchParams.get('waypoint_place_ids').split('|').length === 9, `route goes through the top 10 places with their Google place IDs (${stops} stops)`);
     await pop.close();
+    // places at the end of the list have not been opened yet, so their photos are not cached
+    const others = (await listNames()).filter(n => n !== firstName).slice(-2);
+    // reopening a place while its photo is still loading shares the one request
+    let before = calls.photo;
+    state.photoDelay = 800;
+    await page.locator('#list .item', { hasText: others[0] }).first().click();
+    for (let i = 0; i < 50 && calls.photo === before; i++) await page.waitForTimeout(50);   // the photo request has started
+    await page.click('#btnBack');
+    await page.locator('#list .item', { hasText: others[0] }).first().click();
+    await page.waitForSelector('#dPhoto img', { timeout: 10000 });
+    state.photoDelay = 0;
+    check(calls.photo - before === 1, `reopening a place while its photo loads asks Google once (${calls.photo - before} requests)`);
+    // an image address that no longer works is fetched again, once
+    await page.click('#btnBack');
+    before = calls.photo;
+    state.photoFailOnce = true;
+    await page.locator('#list .item', { hasText: others[1] }).first().click();
+    for (let i = 0; i < 40 && calls.photo - before < 2; i++) await page.waitForTimeout(100);
+    await page.waitForTimeout(300);
+    check(calls.photo - before === 2 && await page.locator('#dPhoto img').isVisible(), 'an expired photo address is replaced with a fresh one');
+    await page.click('#btnBack');
+    before = calls.photo;
     await page.locator('#list .item', { hasText: firstName }).first().click();
     await page.waitForSelector('#dPhoto img');
-    check(calls.photo === 1 && await page.evaluate(() => JSON.parse(localStorage.getItem('siteless.v1.usage')).photos) === 1,
-      `reopening a place does not fetch or count its photo again (${calls.photo} photo request)`);
+    check(calls.photo === before && await page.evaluate(() => JSON.parse(localStorage.getItem('siteless.v1.usage')).photos) === calls.photo,
+      `reopening a place does not fetch or count its photo again (${calls.photo} photo requests in total)`);
   }
   await page.evaluate(() => document.activeElement && document.activeElement.blur());
   await settle();
@@ -457,11 +511,15 @@ async function main() {
   await page.click('#btnClear');
   check(/kept/.test(await page.locator('#clearStatus').innerText()), 'clearing keeps marked leads');
   const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('siteless.v1.places') || '[]').length);
+  const leadId = await page.evaluate(() => { const { S } = window.__siteless; return Object.keys(S.leads).find(id => S.leads[id].s === 'saved' && S.places.has(id)); });
+  await page.evaluate(id => { const p = window.__siteless.S.places.get(id); p.check = undefined; p.seen = 1; }, leadId);
   await page.fill('#meName', 'Somebody else');
   const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('#btnRestore')]);
   await chooser.setFiles(backupFile);
   await page.waitForSelector('#clearStatus.ok');
   check(await page.inputValue('#meName') === 'Dana', 'restoring a backup brings back your settings');
+  check(await page.evaluate(id => { const p = window.__siteless.S.places.get(id); return !!(p.check && p.check.score != null) && p.status !== 'unchecked'; }, leadId),
+    'restoring takes the newer website check from the backup');
   check(/Restored: [\d,]+ new places/.test(await page.locator('#clearStatus').innerText()), `restores the backup (had ${kept} kept places)`);
   {
     // a hand-made backup with a javascript: link and junk fields

@@ -814,7 +814,9 @@ S.order = [];                                 // ids in list order, for next / p
 S.chains = new Map();                         // src:name -> count
 S.shots = new Map();                          // website screenshots, memory only
 S.badTypes = new Set(store.get('badTypes', [])); // place types Google said it does not support
-S.photoUris = new Map();                      // photo name -> image address without the API key
+S.photoUris = new Map();                      // photo name -> { uri, at }: image address without the API key
+S.photoReqs = new Map();                      // photo name -> request in flight, shared by everyone who asks
+const PHOTO_TTL = 30 * 60 * 1000;             // Google's image addresses are short-lived
 S.q = '';                                     // list name filter
 const mode = () => (S.key ? 'google' : 'osm');
 
@@ -1326,13 +1328,16 @@ function fromGoogle(g, kw) {
   };
 }
 
-function addPlace(p) {
+// restoring: p comes from a backup, so its own website check may be newer than ours
+function addPlace(p, restoring) {
   const old = S.places.get(p.id);
   if (!old) { classify(p); S.places.set(p.id, p); return p; }
   // update the existing object in place: a website check that is running holds a reference to it
   const same = old.website === p.website;
+  let check = same ? old.check : undefined;
+  if (restoring && same && !old.checking && p.check && (!old.check || (p.check.at || 0) > (old.check.at || 0))) check = p.check;
   Object.assign(old, p, {
-    check: same ? old.check : undefined, checking: same ? !!old.checking : false,
+    check, checking: same ? !!old.checking : false, checkToken: same ? old.checkToken : undefined,
     hours: p.hours || old.hours, kw: p.kw || old.kw, fullAddress: p.fullAddress || old.fullAddress, _ck: undefined,
   });
   classify(old);
@@ -1669,8 +1674,11 @@ const SERVICE_REASON = /API_KEY|SERVICE_DISABLED|BILLING|RATE_LIMIT|RESOURCE_EXH
 async function checkSite(p) {
   const u = safeUrl(p.website);
   if (!u) return;
-  const site = p.website;
+  const site = p.website, token = {};
   p.checking = true;
+  p.checkToken = token;
+  // false once the listing's website changed or a newer check took over: then this result is dropped
+  const current = () => p.checkToken === token && p.website === site;
   refreshPlace(p);
   const qs = new URLSearchParams({ url: u.href, strategy: 'mobile', key: S.key });
   ['PERFORMANCE', 'ACCESSIBILITY', 'BEST_PRACTICES', 'SEO'].forEach(c => qs.append('category', c));
@@ -1683,14 +1691,17 @@ async function checkSite(p) {
     count('psi');
   } catch (e) {
     clearTimeout(timer);
+    if (!current()) return;
     p.checking = false;
+    p.checkToken = undefined;
     p.check = { at: Date.now(), error: e.name === 'AbortError' ? 'it took too long' : 'network problem' };
     classify(p); savePlaces(); refreshPlace(p);
     return;
   }
   clearTimeout(timer);
+  if (!current()) return;
   p.checking = false;
-  if (p.website !== site) { refreshPlace(p); return; }   // the listing changed while we were checking
+  p.checkToken = undefined;
   if (!res.ok) {
     const msg = (j.error && j.error.message) || `HTTP ${res.status}`;
     const reasons = [...((j.error && j.error.details) || []), ...((j.error && j.error.errors) || [])].map(d => d && d.reason).filter(Boolean).join(' ');
@@ -2058,25 +2069,39 @@ function renderExtra(p, d) {
   if ($('#dPhoto')) showPhoto(p, d.photos[0]);
 }
 
-// Google returns a short-lived image address that carries no API key; one request per photo per session
-async function showPhoto(p, photo) {
-  let uri = S.photoUris.get(photo.name);
-  if (!uri) {
-    if (capLeft('photos') <= 0) return;
-    try {
-      const j = await gFetch(`${PLACES}${photo.name}/media?maxWidthPx=800&skipHttpRedirect=true`, { headers: { 'X-Goog-Api-Key': S.key } }, 'places');
+// Google returns a short-lived image address that carries no API key. Each address is fetched once
+// (shared by every caller while in flight), reused for half an hour, and fetched again if it breaks.
+function photoUri(name) {
+  const hit = S.photoUris.get(name);
+  if (hit && Date.now() - hit.at < PHOTO_TTL) return Promise.resolve(hit.uri);
+  if (S.photoReqs.has(name)) return S.photoReqs.get(name);
+  if (capLeft('photos') <= 0) return Promise.resolve('');
+  const req = gFetch(`${PLACES}${name}/media?maxWidthPx=800&skipHttpRedirect=true`, { headers: { 'X-Goog-Api-Key': S.key } }, 'places')
+    .then(j => {
       count('photos');
-      uri = safeHref(j.photoUri, '');
-      if (!uri) return;
-      S.photoUris.set(photo.name, uri);
-    } catch (e) { return; }
-  }
+      const uri = safeHref(j.photoUri, '');
+      if (uri) S.photoUris.set(name, { uri, at: Date.now() });
+      return uri;
+    })
+    .catch(() => '')
+    .finally(() => S.photoReqs.delete(name));
+  S.photoReqs.set(name, req);
+  return req;
+}
+async function showPhoto(p, photo, retried) {
+  const uri = await photoUri(photo.name);
   const box = $('#dPhoto');
-  if (!box || S.sel !== p.id) return;
+  if (!uri || !box || S.sel !== p.id) return;
   const credit = photo.authorAttributions && photo.authorAttributions[0];
   box.innerHTML = `<img class="photo" alt="Photo of ${esc(p.name)}" src="${esc(uri)}">
     ${credit ? `<div class="credit">Photo: ${safeHref(credit.uri, '') ? `<a href="${esc(safeHref(credit.uri))}" target="_blank" rel="noopener">${esc(credit.displayName || 'Google user')}</a>` : esc(credit.displayName || 'Google user')}</div>` : ''}`;
   box.hidden = false;
+  // an expired address: forget it and ask Google for a fresh one, once
+  box.querySelector('img').addEventListener('error', () => {
+    const hit = S.photoUris.get(photo.name);
+    if (hit && hit.uri === uri) S.photoUris.delete(photo.name);
+    if (retried) box.hidden = true; else showPhoto(p, photo, true);
+  }, { once: true });
 }
 
 function detailsText(p) {
@@ -2169,7 +2194,7 @@ async function restore(file) {
       const p = cleanPlace(o);
       if (!p) continue;
       const old = S.places.get(p.id);
-      if (!old || (p.seen || 0) > (old.seen || 0)) { if (old) addPlace(p); else { classify(p); S.places.set(p.id, p); added++; } }
+      if (!old || (p.seen || 0) > (old.seen || 0)) { if (old) addPlace(p, true); else { classify(p); S.places.set(p.id, p); added++; } }
     }
     applySettings(data.settings);
     for (const [id, l] of Object.entries(data.leads || {})) {
