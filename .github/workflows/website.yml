@@ -1,4 +1,5 @@
 # Publishes the Building Atlas website on GitHub Pages and refreshes its news every 10 minutes.
+# Siteless (siteless/) is published on the same site under /siteless/.
 # One-time setup: Settings > Pages > Source: "GitHub Actions"; custom domain: buildingatlas.eu.org.
 name: Building Atlas website
 
@@ -6,6 +7,7 @@ on:
   push:
     paths:
       - "realestate-globe/**"
+      - "siteless/**"
       - ".github/workflows/website.yml"
   schedule:
     - cron: "*/10 * * * *"   # GitHub runs scheduled jobs from the default branch, sometimes a few minutes late
@@ -31,6 +33,8 @@ jobs:
           python-version: "3.12"
       - name: Build the site and fetch the latest headlines
         run: python3 realestate-globe/site/build_site.py --domain buildingatlas.eu.org --out _site
+      - name: Add Siteless at /siteless/
+        run: mkdir -p _site/siteless && cp siteless/index.html _site/siteless/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
