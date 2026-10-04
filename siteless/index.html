@@ -6,68 +6,88 @@
 <title>Siteless</title>
 <meta name="description" content="Map of well-reviewed restaurants, shops and local businesses that have no website or a bad one. Tap a place to see its Google Maps listing.">
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b1017" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Siteless">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=Public+Sans:ital,wght@0,400..700;1,400&display=swap">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" integrity="sha256-YU3qCpj/P06tdPBJGPax0bm6Q1wltfwjsho5TR4+TYc=" crossorigin="">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" integrity="sha256-Hk4dIpcqOSb0hZjgyvFOP+cEmDXUKKNE/tT542ZbNQg=" crossorigin=""></script>
 <style>
 /* Layout: map-first workbench. A ledger of leads on the left, the map filling the rest;
-   on phones the map sits on top and the ledger below it. Pins are coloured by how weak
-   the website is and labelled with the Google rating. */
+   on phones the map sits on top and the ledger below it. The interface itself is ink on
+   paper so the only colour on screen is the pins: one hue per kind of weak website. */
 :root{
-  --bg:#e8ecf1;
+  --bg:#e9ecf0;
   --surface:#fbfcfd;
-  --surface-2:#f0f3f7;
-  --ink:#131a24;
-  --muted:#556174;
-  --faint:#8893a5;
-  --line:#d5dce6;
-  --accent:#3140c4;
+  --surface-2:#f0f2f5;
+  --ink:#141a23;
+  --muted:#545e6d;
+  --faint:#87909e;
+  --line:#d6dbe2;
+  --accent:#141a23;
   --accent-ink:#ffffff;
-  --accent-soft:#e2e5fb;
-  --star:#d99a00;
+  --link:#1d5fc4;
+  --star:#c98a00;
   --danger:#c2321f;
-  /* website status (semantic, same in both themes: pins and pills use white text on them) */
-  --st-none:#d7372b;
-  --st-broken:#9c2b67;
-  --st-social:#cc5d0a;
-  --st-platform:#9a6c05;
-  --st-poor:#66750e;
-  --st-unchecked:#667086;
-  --st-good:#23855a;
+  --ok:#0c7a0c;
+  /* website status: same fills in both themes (pins are self-contained badges with a
+     white ring). Red, violet, pink, blue and amber pass colour-blind separation for every
+     pair; grey means "not known yet"; every pin also carries a glyph. */
+  --st-none:#d03b3b;
+  --st-broken:#4a3aa7;
+  --st-social:#e87ba4;
+  --st-platform:#2a78d6;
+  --st-poor:#c98500;
+  --st-unchecked:#6b7280;
+  --st-good:#0c8a0c;
   --shadow:0 1px 2px rgba(18,26,40,.06),0 10px 28px rgba(18,26,40,.12);
   --f-display:'Archivo',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
   --f-body:'Public Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
   --r-s:6px;
   --r-m:10px;
-  --side-w:412px;
+  --side-w:420px;
   color-scheme:light;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --bg:#0b1017; --surface:#111822; --surface-2:#18212d; --ink:#e6ebf2; --muted:#9ba7b9; --faint:#6b778a;
-    --line:#243041; --accent:#8e9bff; --accent-ink:#0b1017; --accent-soft:#1c2347; --star:#f2b623; --danger:#ff7b69;
+    --line:#243041; --accent:#eef2f8; --accent-ink:#0b1017; --link:#8fb8ff; --star:#f2b623; --danger:#ff7b69; --ok:#5fd35f;
     --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 28px rgba(0,0,0,.5);
     color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
   --bg:#0b1017; --surface:#111822; --surface-2:#18212d; --ink:#e6ebf2; --muted:#9ba7b9; --faint:#6b778a;
-  --line:#243041; --accent:#8e9bff; --accent-ink:#0b1017; --accent-soft:#1c2347; --star:#f2b623; --danger:#ff7b69;
+  --line:#243041; --accent:#eef2f8; --accent-ink:#0b1017; --link:#8fb8ff; --star:#f2b623; --danger:#ff7b69; --ok:#5fd35f;
   --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 28px rgba(0,0,0,.5);
   color-scheme:dark;
 }
+.s-none{--c:var(--st-none);--t:#fff}
+.s-broken{--c:var(--st-broken);--t:#fff}
+.s-social{--c:var(--st-social);--t:#2b0d1b}
+.s-platform{--c:var(--st-platform);--t:#fff}
+.s-poor{--c:var(--st-poor);--t:#241800}
+.s-unchecked{--c:var(--st-unchecked);--t:#fff}
+.s-good{--c:var(--st-good);--t:#fff}
 
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--f-body);-webkit-font-smoothing:antialiased}
 [hidden]{display:none!important}
-a{color:var(--accent)}
+a{color:var(--link)}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+:focus-visible{outline:2px solid var(--link);outline-offset:2px}
 .num{font-variant-numeric:tabular-nums}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 
 #app{height:100%;display:grid;grid-template-columns:var(--side-w) minmax(0,1fr)}
 #side{background:var(--surface);border-right:1px solid var(--line);overflow-y:auto;overflow-x:hidden;min-width:0;
@@ -86,12 +106,12 @@ button{cursor:pointer}
 .icon-btn svg{width:18px;height:18px}
 
 .sec{padding:0 16px}
-.sec + .sec{margin-top:14px}
+.sec + .sec{margin-top:16px}
 
 /* ---------- search ---------- */
 .search{display:flex;gap:6px}
-.search input{flex:1;min-width:0;height:38px;padding:0 12px;border-radius:var(--r-s);border:1px solid var(--line);background:var(--surface-2)}
-.search input:focus{background:var(--surface);border-color:var(--accent);outline:none}
+.search input,.kw input,.namefilter input{flex:1;min-width:0;height:38px;padding:0 12px;border-radius:var(--r-s);border:1px solid var(--line);background:var(--surface-2)}
+.search input:focus,.kw input:focus,.namefilter input:focus{background:var(--surface);border-color:var(--ink);outline:none}
 .geo-results{margin:6px 0 0;padding:4px;list-style:none;border:1px solid var(--line);border-radius:var(--r-s);background:var(--surface);box-shadow:var(--shadow)}
 .geo-results button{display:block;width:100%;text-align:left;border:0;background:none;padding:7px 8px;border-radius:4px;font-size:13px}
 .geo-results button:hover,.geo-results button:focus-visible{background:var(--surface-2)}
@@ -100,52 +120,75 @@ button{cursor:pointer}
 /* ---------- mode banner ---------- */
 .mode{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:var(--r-m);background:var(--surface-2);border:1px solid var(--line);font-size:12.5px;color:var(--muted)}
 .mode b{color:var(--ink);font-weight:650}
-.mode .tag{flex:none;font:700 10.5px/1 var(--f-display);font-stretch:110%;letter-spacing:.06em;text-transform:uppercase;padding:5px 7px;border-radius:4px;background:var(--accent-soft);color:var(--accent);margin-top:1px}
+.mode .tag{flex:none;font:700 10.5px/1 var(--f-display);font-stretch:110%;letter-spacing:.06em;text-transform:uppercase;padding:5px 7px;border-radius:4px;background:var(--ink);color:var(--surface);margin-top:1px}
 .mode.free .tag{background:var(--surface);color:var(--muted);border:1px solid var(--line)}
-.linkish{border:0;background:none;padding:0;color:var(--accent);font-weight:600;text-decoration:underline;text-underline-offset:2px}
+.meter{height:4px;border-radius:2px;background:var(--line);margin-top:6px;overflow:hidden}
+.meter i{display:block;height:100%;background:var(--ink)}
+.meter.warn i{background:var(--danger)}
+.linkish{border:0;background:none;padding:0;color:var(--link);font-weight:600;text-decoration:underline;text-underline-offset:2px}
 .alert{margin-top:8px;padding:9px 12px;border-radius:var(--r-m);border:1px solid color-mix(in srgb,var(--danger) 45%,var(--line));background:color-mix(in srgb,var(--danger) 8%,var(--surface));font-size:12.5px;color:var(--ink)}
 .alert a{font-weight:600}
 
 /* ---------- labels / chips ---------- */
-.label{display:flex;justify-content:space-between;align-items:baseline;margin:0 0 7px;font:700 11px/1.2 var(--f-display);font-stretch:112%;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.label{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin:0 0 7px;font:700 11px/1.2 var(--f-display);font-stretch:112%;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
 .label output,.label span{font:600 12px/1 var(--f-body);letter-spacing:0;text-transform:none;color:var(--ink)}
+.label .linkish{font:600 12px/1 var(--f-body);letter-spacing:0;text-transform:none}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips.dim{opacity:.45}
 .chip{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--muted);font-size:12.5px;font-weight:550;line-height:1.2}
 .chip:hover{border-color:var(--faint);color:var(--ink)}
 .chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--surface)}
 .chip i{width:9px;height:9px;border-radius:50%;background:var(--c);flex:none}
 .chip[aria-pressed="false"] i{background:none;box-shadow:inset 0 0 0 2px var(--c)}
 .chip b{font-weight:700;font-variant-numeric:tabular-nums}
-.chip[aria-pressed="true"] b{color:var(--surface)}
+.kw{display:flex;gap:6px;margin-top:8px}
+.kw input{height:34px;font-size:13px}
+.kw-note{margin:6px 0 0;font-size:12px;color:var(--muted)}
+
+/* area summary: one stacked bar of website status in view */
+.summary{margin-bottom:10px}
+.sum-head{font-size:13px;color:var(--muted);margin-bottom:6px}
+.sum-head b{font:800 18px/1 var(--f-display);color:var(--ink);font-variant-numeric:tabular-nums;margin-right:2px}
+.sum-bar{position:relative;display:flex;gap:2px;height:10px;border-radius:4px;overflow:hidden;background:var(--surface-2)}
+.sum-bar span{display:block;min-width:3px;background:var(--c);cursor:default}
+.sum-bar span:hover{filter:brightness(1.12)}
+.tip{position:fixed;z-index:3000;pointer-events:none;padding:6px 9px;border-radius:6px;background:var(--ink);color:var(--surface);font-size:12px;line-height:1.3;box-shadow:var(--shadow);transform:translate(-50%,calc(-100% - 8px));white-space:nowrap}
 
 .filters{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px}
 .filters .full{grid-column:1/-1}
 .field{min-width:0}
 .field select{width:100%;height:34px;padding:0 8px;border-radius:var(--r-s);border:1px solid var(--line);background:var(--surface)}
-input[type=range]{width:100%;accent-color:var(--accent);margin:4px 0 0}
+input[type=range]{width:100%;accent-color:var(--ink);margin:4px 0 0}
+.check{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink)}
+.check input{width:16px;height:16px;accent-color:var(--ink);margin:0}
 
 /* ---------- list ---------- */
-.list-head{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:8px;padding:10px 16px;margin-top:16px;background:var(--surface);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.list-head{position:sticky;top:0;z-index:4;padding:10px 16px;margin-top:16px;background:var(--surface);border-top:1px solid var(--line);border-bottom:1px solid var(--line);display:grid;gap:8px}
+.lh-row{display:flex;align-items:center;gap:6px}
 .list-head .count{flex:1;min-width:0;font:700 13px/1.2 var(--f-display);font-stretch:105%}
 .list-head .count small{display:block;font:500 11.5px/1.3 var(--f-body);color:var(--muted)}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 11px;border-radius:var(--r-s);border:1px solid var(--line);background:var(--surface);font-size:12.5px;font-weight:600;color:var(--ink);text-decoration:none;white-space:nowrap}
+.namefilter{display:flex;gap:6px}
+.namefilter input{height:32px;font-size:13px}
+.due{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:999px;border:1px solid color-mix(in srgb,var(--danger) 50%,var(--line));background:color-mix(in srgb,var(--danger) 10%,var(--surface));color:var(--ink);font-size:12px;font-weight:650;justify-self:start}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 10px;border-radius:var(--r-s);border:1px solid var(--line);background:var(--surface);font-size:12.5px;font-weight:600;color:var(--ink);text-decoration:none;white-space:nowrap}
 .btn:hover{border-color:var(--faint)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
-.btn.primary:hover{filter:brightness(1.07)}
+.btn.primary:hover{filter:brightness(1.15)}
 .btn svg{width:15px;height:15px;flex:none}
-.btn[disabled]{opacity:.5;cursor:not-allowed}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
 
 #list{list-style:none;margin:0;padding:0}
 .item{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;width:100%;padding:11px 16px;border:0;border-bottom:1px solid var(--line);background:none;text-align:left}
 .item:hover,.item.hl{background:var(--surface-2)}
-.item .dot{width:10px;height:10px;border-radius:50%;background:var(--c);margin-top:5px}
+.gdot{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--c);color:var(--t);font:800 11px/1 var(--f-display);margin-top:1px}
 .item .nm{display:block;font-weight:650;font-size:14px;line-height:1.3;overflow-wrap:anywhere}
 .item .sub{display:block;color:var(--muted);font-size:12.5px;line-height:1.35;margin-top:1px;overflow-wrap:anywhere}
 .item .meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:5px;font-size:12px;color:var(--muted)}
 .stars{color:var(--star);letter-spacing:-.5px}
 .rating{font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
-.pill{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:4px;background:var(--c);color:#fff;font:700 10.5px/1.35 var(--f-display);font-stretch:108%;letter-spacing:.02em;white-space:nowrap}
-.lead-tag{font-size:11px;font-weight:700;color:var(--accent)}
+.pill{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:4px;background:var(--c);color:var(--t);font:700 10.5px/1.35 var(--f-display);font-stretch:108%;letter-spacing:.02em;white-space:nowrap}
+.lead-tag{font-size:11px;font-weight:700;color:var(--ink)}
+.lead-due{color:var(--danger)}
 .score{text-align:right;min-width:34px}
 .score b{display:block;font:800 18px/1 var(--f-display);font-variant-numeric:tabular-nums}
 .score small{display:block;font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
@@ -155,37 +198,47 @@ input[type=range]{width:100%;accent-color:var(--accent);margin:4px 0 0}
 .empty h3{margin:0 0 6px;font:750 16px/1.25 var(--f-display);font-stretch:108%;color:var(--ink);text-wrap:balance}
 .empty ol{margin:8px 0 0;padding-left:20px;display:grid;gap:5px}
 .empty p{margin:8px 0 0}
+.legend{display:grid;gap:5px;margin-top:10px}
+.legend span{display:flex;align-items:center;gap:8px}
 .foot-note{padding:12px 16px 18px;color:var(--faint);font-size:11.5px}
 
 /* ---------- map overlays ---------- */
-.scanbar{position:absolute;z-index:1000;top:calc(12px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;width:max-content;max-width:calc(100% - 32px);pointer-events:none}
+.scanbar{position:absolute;z-index:1000;top:calc(12px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:8px;width:max-content;max-width:calc(100% - 120px);pointer-events:none}
 .scanbar > *{pointer-events:auto}
-.scan-btn{display:inline-flex;align-items:center;gap:8px;height:42px;padding:0 18px 0 14px;border-radius:999px;border:0;background:var(--accent);color:var(--accent-ink);font:750 14px/1 var(--f-display);font-stretch:110%;box-shadow:var(--shadow);letter-spacing:.01em}
-.scan-btn svg{width:18px;height:18px}
-.scan-btn small{font:600 11.5px/1 var(--f-body);opacity:.8;font-stretch:100%}
+.scan-btn{display:inline-flex;align-items:center;gap:8px;height:42px;padding:0 18px 0 14px;border-radius:999px;border:0;background:var(--accent);color:var(--accent-ink);font:750 14px/1 var(--f-display);font-stretch:110%;box-shadow:var(--shadow);letter-spacing:.01em;white-space:nowrap}
+.scan-btn svg{width:18px;height:18px;flex:none}
+.scan-btn small{font:600 11.5px/1 var(--f-body);opacity:.75}
 .scan-btn[disabled]{background:var(--surface);color:var(--muted);cursor:default}
 .progress{min-width:min(300px,calc(100vw - 32px));padding:10px 12px;border-radius:var(--r-m);background:var(--surface);box-shadow:var(--shadow);border:1px solid var(--line);font-size:12.5px}
 .progress .row{display:flex;justify-content:space-between;align-items:center;gap:10px}
 .progress .bar{height:4px;border-radius:2px;background:var(--surface-2);margin-top:8px;overflow:hidden}
-.progress .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .25s}
-.toast{max-width:min(420px,calc(100vw - 32px));padding:9px 13px;border-radius:var(--r-m);background:var(--ink);color:var(--surface);font-size:12.5px;box-shadow:var(--shadow)}
+.progress .bar i{display:block;height:100%;width:0;background:var(--ink);transition:width .25s}
+.toast{max-width:min(440px,calc(100vw - 32px));padding:9px 13px;border-radius:var(--r-m);background:var(--ink);color:var(--surface);font-size:12.5px;box-shadow:var(--shadow)}
+.toast a,.toast .linkish{color:inherit}
+.map-btn{position:absolute;z-index:1000;top:calc(12px + env(safe-area-inset-top,0px));right:12px;display:grid;place-items:center;width:40px;height:40px;border-radius:var(--r-m);border:1px solid var(--line);background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+.map-btn svg{width:20px;height:20px}
+.map-btn[aria-pressed="true"]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
 .checking-badge{position:absolute;z-index:1000;left:12px;bottom:calc(14px + env(safe-area-inset-bottom,0px));display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:999px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);font-size:12px;color:var(--muted)}
 .checking-badge .linkish{font-size:12px}
-.spin{width:12px;height:12px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--accent);animation:spin .8s linear infinite;flex:none}
+.spin{width:12px;height:12px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--ink);animation:spin .8s linear infinite;flex:none;display:inline-block}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* pins */
 .pinwrap{background:none;border:0}
-.pin{position:absolute;left:0;bottom:6px;transform:translateX(-50%);display:flex;align-items:center;gap:2px;padding:2px 6px;border-radius:7px;background:var(--c);color:#fff;font:750 11.5px/1.25 var(--f-display);font-variant-numeric:tabular-nums;white-space:nowrap;border:1.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);transition:transform .12s}
+.pin{position:absolute;left:0;bottom:6px;transform:translateX(-50%);display:flex;align-items:center;gap:3px;padding:2px 6px 2px 5px;border-radius:7px;background:var(--c);color:var(--t);font:750 11.5px/1.25 var(--f-display);font-variant-numeric:tabular-nums;white-space:nowrap;border:1.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35);transition:transform .12s}
+.pin .g{font-weight:850;font-size:11px;opacity:.92}
 .pin::before{content:"";position:absolute;left:50%;bottom:-7px;margin-left:-6px;border:6px solid transparent;border-top-color:#fff;border-bottom:0}
 .pin::after{content:"";position:absolute;left:50%;bottom:-4.5px;margin-left:-4.5px;border:4.5px solid transparent;border-top-color:var(--c);border-bottom:0}
-.pin.dotpin{width:14px;height:14px;padding:0;border-radius:50%}
+.pin.dotpin{width:20px;height:20px;padding:0;border-radius:50%;justify-content:center;bottom:-10px}
 .pin.dotpin::before,.pin.dotpin::after{display:none}
-.pin.dotpin{bottom:-7px}
+.pin .lm{position:absolute;top:-8px;right:-8px;display:grid;place-items:center;width:15px;height:15px;border-radius:50%;background:#141a23;color:#fff;font-size:8.5px;border:1.5px solid #fff}
 .pinwrap:hover .pin,.pinwrap.hl .pin{transform:translateX(-50%) scale(1.15)}
-.pinwrap.sel .pin{transform:translateX(-50%) scale(1.3);box-shadow:0 0 0 3px var(--accent),0 2px 8px rgba(0,0,0,.4)}
-.pin.contacted{opacity:.62}
-.scanned-area{stroke:var(--accent);stroke-width:1.5;stroke-dasharray:5 5;fill:var(--accent);fill-opacity:.035}
+.pinwrap.sel .pin{transform:translateX(-50%) scale(1.3);box-shadow:0 0 0 3px #141a23,0 0 0 5px #fff,0 2px 8px rgba(0,0,0,.4)}
+.pin.contacted{opacity:.6}
+.clwrap{background:none;border:0}
+.cl{width:100%;height:100%;border-radius:50%;display:grid;place-items:center;box-shadow:0 1px 5px rgba(0,0,0,.35);border:2px solid #fff}
+.cl span{display:grid;place-items:center;width:calc(100% - 12px);height:calc(100% - 12px);border-radius:50%;background:#fff;color:#141a23;font:800 12px/1 var(--f-display);font-variant-numeric:tabular-nums}
+.scanned-area{stroke:var(--ink);stroke-width:1.2;stroke-dasharray:4 5;stroke-opacity:.5;fill:var(--ink);fill-opacity:.025}
 
 /* leaflet theming */
 .leaflet-container{font:12px/1.4 var(--f-body);background:var(--surface-2)}
@@ -195,14 +248,15 @@ input[type=range]{width:100%;accent-color:var(--accent);margin:4px 0 0}
 .leaflet-control-attribution a{color:var(--muted)}
 
 /* ---------- detail ---------- */
-.d-top{position:sticky;top:0;z-index:3;display:flex;align-items:center;gap:8px;padding:10px 16px;padding-top:calc(10px + env(safe-area-inset-top,0px));background:var(--surface);border-bottom:1px solid var(--line)}
-.d-top .src{margin-left:auto;font-size:11.5px;color:var(--faint)}
+.d-top{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:6px;padding:10px 16px;padding-top:calc(10px + env(safe-area-inset-top,0px));background:var(--surface);border-bottom:1px solid var(--line)}
+.d-top .pos{margin-left:auto;font-size:11.5px;color:var(--faint);font-variant-numeric:tabular-nums}
 .back{display:inline-flex;align-items:center;gap:4px;height:32px;padding:0 10px 0 6px;border-radius:var(--r-s);border:1px solid var(--line);background:var(--surface);font-weight:600;font-size:13px}
 .back svg{width:16px;height:16px}
+.d-top .icon-btn{width:32px;height:32px}
 .d-head{padding:16px 16px 0}
 .d-head h2{margin:0;font:800 23px/1.12 var(--f-display);font-stretch:104%;letter-spacing:-.01em;text-wrap:balance;overflow-wrap:anywhere}
 .d-head .sub{margin-top:5px;color:var(--muted);font-size:13px}
-.d-block{padding:14px 16px 0}
+.d-block{padding:16px 16px 0}
 .verdict{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:start;padding:12px 14px;border-radius:var(--r-m);border:1px solid var(--line);background:var(--surface-2)}
 .verdict .big{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .verdict .big .rating{font:800 28px/1 var(--f-display)}
@@ -219,10 +273,16 @@ input[type=range]{width:100%;accent-color:var(--accent);margin:4px 0 0}
 .phone{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;font-size:13px}
 .phone .val{font-weight:650;font-variant-numeric:tabular-nums;user-select:all}
 .seg{display:flex;border:1px solid var(--line);border-radius:var(--r-s);overflow:hidden}
-.seg button{flex:1;min-width:0;height:32px;border:0;border-right:1px solid var(--line);background:var(--surface);font-size:12.5px;font-weight:600;color:var(--muted);padding:0 4px}
+.seg button{flex:1;min-width:0;height:32px;border:0;border-right:1px solid var(--line);background:var(--surface);font-size:12.5px;font-weight:600;color:var(--muted);padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .seg button:last-child{border-right:0}
-.seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
+.seg button[aria-pressed="true"],.seg button[aria-selected="true"]{background:var(--ink);color:var(--surface)}
+.seg.leads button{font-size:12px;padding:0 2px}
+.followup{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px;font-size:13px}
+.followup-label{display:block;margin-top:10px;font-size:12px;color:var(--muted)}
+.followup input{height:32px;padding:0 8px;border-radius:var(--r-s);border:1px solid var(--line);background:var(--surface)}
+.followup .btn{height:30px;font-size:12px;padding:0 8px}
 textarea{width:100%;min-height:58px;margin-top:8px;padding:8px 10px;border-radius:var(--r-s);border:1px solid var(--line);background:var(--surface);resize:vertical;font-size:13px}
+textarea.pitch{min-height:200px;line-height:1.5}
 .h3{margin:0 0 8px;font:750 11px/1.2 var(--f-display);font-stretch:112%;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between;gap:8px;align-items:baseline}
 .h3 .linkish{font:600 12px/1 var(--f-body);letter-spacing:0;text-transform:none}
 .site-url{display:block;font-weight:600;overflow-wrap:anywhere;margin-bottom:8px}
@@ -234,9 +294,10 @@ textarea{width:100%;min-height:58px;margin-top:8px;padding:8px 10px;border-radiu
 .sc i::before{content:"";display:block;height:100%;width:var(--v);background:var(--c)}
 .quality{display:flex;align-items:center;gap:10px;font-size:13px}
 .quality b{font:850 22px/1 var(--f-display);font-variant-numeric:tabular-nums}
+.tech{font-size:12.5px;color:var(--muted);margin-top:6px}
 .shot{display:block;width:150px;max-width:45%;border-radius:8px;border:1px solid var(--line);float:right;margin:0 0 8px 12px}
 .clear{clear:both}
-.embed{display:block;width:100%;height:260px;border:1px solid var(--line);border-radius:var(--r-m);background:var(--surface-2)}
+.embed{display:block;width:100%;height:280px;border:1px solid var(--line);border-radius:var(--r-m);background:var(--surface-2)}
 .photo{display:block;width:100%;max-width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:var(--r-m);border:1px solid var(--line);background:var(--surface-2)}
 .credit{font-size:11px;color:var(--faint);margin-top:4px}
 .hours{list-style:none;margin:0;padding:0;font-size:13px;display:grid;gap:2px}
@@ -247,7 +308,7 @@ textarea{width:100%;min-height:58px;margin-top:8px;padding:8px 10px;border-radiu
 .review .who{display:flex;justify-content:space-between;gap:8px;font-size:12.5px}
 .review .who a,.review .who b{font-weight:650;color:var(--ink);text-decoration:none}
 .review .when{color:var(--faint);white-space:nowrap}
-.review p{margin:4px 0 0;font-size:13px;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
+.review p{margin:4px 0 0;font-size:13px;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer}
 .review p.open{display:block}
 .muted{color:var(--muted)}
 .small{font-size:12px}
@@ -255,11 +316,11 @@ textarea{width:100%;min-height:58px;margin-top:8px;padding:8px 10px;border-radiu
 .loading{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px}
 
 /* ---------- settings dialog ---------- */
-dialog{width:min(560px,calc(100vw - 24px));max-height:calc(100% - 24px);padding:0;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+dialog{width:min(580px,calc(100vw - 24px));max-height:calc(100% - 24px);padding:0;border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
 dialog::backdrop{background:rgba(8,12,20,.45)}
 .dlg-head{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;background:var(--surface);border-bottom:1px solid var(--line)}
 .dlg-head h2{margin:0;font:800 18px/1.2 var(--f-display);font-stretch:110%}
-.dlg-body{padding:16px 18px 20px;display:grid;gap:18px}
+.dlg-body{padding:16px 18px 22px;display:grid;gap:22px}
 .dlg-body h3{margin:0 0 6px;font:750 14px/1.3 var(--f-display);font-stretch:106%}
 .dlg-body p{margin:0 0 8px;color:var(--muted);font-size:13px}
 .dlg-body ol{margin:6px 0 0;padding-left:20px;font-size:13px;display:grid;gap:6px;color:var(--muted)}
@@ -267,15 +328,30 @@ dialog::backdrop{background:rgba(8,12,20,.45)}
 .keyrow{display:flex;gap:6px;flex-wrap:wrap}
 .keyrow input{flex:1 1 220px;min-width:0;height:36px;padding:0 10px;border-radius:var(--r-s);border:1px solid var(--line);background:var(--surface-2);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
 .status-line{margin-top:6px;font-size:12.5px}
-.status-line.ok{color:var(--st-good)}
+.status-line.ok{color:var(--ok)}
 .status-line.err{color:var(--danger)}
-code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em;background:var(--surface-2);padding:1px 4px;border-radius:4px;overflow-wrap:anywhere}
-.usage{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-.usage div{padding:9px 10px;border:1px solid var(--line);border-radius:var(--r-s)}
+code,kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em;background:var(--surface-2);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+kbd{border:1px solid var(--line);border-bottom-width:2px}
+.usage{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.usage div{padding:9px 10px;border:1px solid var(--line);border-radius:var(--r-s);min-width:0}
 .usage b{display:block;font:800 18px/1.1 var(--f-display);font-variant-numeric:tabular-nums}
 .usage span{font-size:11.5px;color:var(--muted)}
 .inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px}
-.inline select{height:32px;border-radius:var(--r-s);border:1px solid var(--line);background:var(--surface);padding:0 8px}
+.inline select,.inline input[type=number]{height:32px;border-radius:var(--r-s);border:1px solid var(--line);background:var(--surface);padding:0 8px}
+.inline input[type=number]{width:90px}
+.radios{display:grid;gap:6px}
+.radios label{display:flex;gap:8px;align-items:flex-start;font-size:13px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-s);cursor:pointer}
+.radios label:has(input:checked){border-color:var(--ink);background:var(--surface-2)}
+.radios input{margin:2px 0 0;accent-color:var(--ink)}
+.radios small{display:block;color:var(--muted);font-size:12px}
+.me{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.me label{display:grid;gap:4px;font-size:12px;color:var(--muted);min-width:0}
+.me input{height:34px;padding:0 10px;border-radius:var(--r-s);border:1px solid var(--line);background:var(--surface-2);min-width:0}
+.keys{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:13px;color:var(--muted);align-items:center}
+
+html.desktop-mac .brand{padding-top:40px}
+html.desktop-mac .d-top{padding-top:38px}
+html.desktop-mac #side::before{content:"";position:fixed;top:0;left:0;width:var(--side-w);height:30px;z-index:3000;-webkit-app-region:drag}
 
 @media (max-width:760px){
   #app{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(220px,46%) minmax(0,1fr)}
@@ -286,6 +362,8 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
   .d-top{padding-top:10px}
   .scan-btn{height:38px;font-size:13px}
   .scan-btn small{display:none}
+  .me{grid-template-columns:1fr}
+  .usage{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (prefers-reduced-motion: reduce){
   *{transition:none!important;animation-duration:.01ms!important}
@@ -300,17 +378,17 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
       <header class="brand">
         <svg class="logo" viewBox="0 0 34 34" aria-hidden="true">
           <path d="M17 2.5c-6.1 0-11 4.8-11 10.8 0 7.6 9.3 16.6 10.3 17.6.4.4 1 .4 1.4 0C18.7 29.9 28 20.9 28 13.3 28 7.3 23.1 2.5 17 2.5z" fill="var(--st-none)"/>
-          <circle cx="17" cy="13.2" r="5.6" fill="none" stroke="#fff" stroke-width="2"/>
-          <path d="M11.4 13.2h11.2M17 7.6c1.6 1.6 2.4 3.5 2.4 5.6s-.8 4-2.4 5.6c-1.6-1.6-2.4-3.5-2.4-5.6s.8-4 2.4-5.6z" fill="none" stroke="#fff" stroke-width="1.4"/>
-          <path d="M10.5 20.2 23.5 6.4" stroke="var(--st-none)" stroke-width="4.2" stroke-linecap="round"/>
-          <path d="M10.5 20.2 23.5 6.4" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+          <circle cx="17" cy="13.3" r="6" fill="none" stroke="#fff" stroke-width="1.5"/>
+          <path d="M11 13.3h12M17 7.3c1.7 1.7 2.5 3.7 2.5 6s-.8 4.3-2.5 6c-1.7-1.7-2.5-3.7-2.5-6s.8-4.3 2.5-6z" fill="none" stroke="#fff" stroke-width="1.2"/>
+          <path d="M11.6 19 22.4 7.6" stroke="var(--st-none)" stroke-width="3.6" stroke-linecap="round"/>
+          <path d="M11.6 19 22.4 7.6" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
         <div class="brand-text">
           <h1>Siteless</h1>
           <p>Well-reviewed places with no website, or a bad one</p>
         </div>
         <button class="icon-btn" id="btnSettings" type="button" aria-label="Settings and Google key" title="Settings">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
         </button>
       </header>
 
@@ -330,12 +408,17 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
       <div class="sec" id="modeBox"></div>
 
       <div class="sec">
-        <div class="label">Look for <span id="catCount"></span></div>
+        <div class="label">Look for <button type="button" class="linkish" id="btnAllCats"></button></div>
         <div class="chips" id="cats" role="group" aria-label="Types of places"></div>
+        <form class="kw" id="kwForm">
+          <input id="kw" type="search" placeholder="Or a keyword: tattoo, mechanic, sushi…" autocomplete="off" aria-label="Search for a keyword instead">
+        </form>
+        <p class="kw-note" id="kwNote" hidden></p>
       </div>
 
       <div class="sec">
         <div class="label">Website</div>
+        <div class="summary" id="summary"></div>
         <div class="chips" id="statusChips" role="group" aria-label="Website status"></div>
       </div>
 
@@ -356,25 +439,34 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
             <label class="label" for="leadFilter">Leads</label>
             <select id="leadFilter">
               <option value="all">All (hide not a fit)</option><option value="new">Not marked yet</option>
-              <option value="saved">Saved</option><option value="contacted">Contacted</option><option value="skip">Not a fit</option>
+              <option value="saved">Saved</option><option value="contacted">Contacted</option><option value="due">Follow-ups due</option>
+              <option value="won">Won</option><option value="skip">Not a fit</option>
             </select>
           </div>
           <div class="field">
             <label class="label" for="sort">Sort</label>
             <select id="sort">
               <option value="lead">Best leads first</option><option value="rating">Highest rated</option>
-              <option value="reviews">Most reviews</option><option value="name">Name</option>
+              <option value="reviews">Most reviews</option><option value="near">Nearest to map centre</option><option value="name">Name</option>
             </select>
           </div>
+          <label class="check full"><input type="checkbox" id="hideChains"> Hide chains and franchises</label>
         </div>
       </div>
 
       <div class="list-head">
-        <div class="count" id="listCount" aria-live="polite"></div>
-        <button class="btn" type="button" id="btnCheckAll" hidden title="Check every listed website with Google PageSpeed">Check sites</button>
-        <button class="btn" type="button" id="btnCsv" title="Download the listed places as a spreadsheet">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>CSV
-        </button>
+        <div class="lh-row">
+          <div class="count" id="listCount" aria-live="polite"></div>
+          <button class="btn" type="button" id="btnCheckAll" hidden title="Check every listed website with Google PageSpeed"></button>
+          <button class="btn" type="button" id="btnRoute" title="Plan a visiting route through these places in Google Maps">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h8.5a3.5 3.5 0 0 0 0-7h-9a3.5 3.5 0 0 1 0-7H16"/></svg>Route
+          </button>
+          <button class="btn" type="button" id="btnCsv" title="Download the listed places as a spreadsheet">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>CSV
+          </button>
+        </div>
+        <button class="due" type="button" id="btnDue" hidden></button>
+        <div class="namefilter"><input id="nameFilter" type="search" placeholder="Filter the list by name, street or type" autocomplete="off" aria-label="Filter the list"></div>
       </div>
       <ol id="list"></ol>
       <div class="empty" id="empty" hidden></div>
@@ -399,9 +491,13 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
       </div>
       <div class="toast" id="toast" role="status" hidden></div>
     </div>
+    <button class="map-btn" type="button" id="btnLayer" aria-pressed="false" aria-label="Satellite view" title="Satellite view">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="m3 12 9 5 9-5"/><path d="m3 16 9 5 9-5"/></svg>
+    </button>
     <div class="checking-badge" id="checkBadge" hidden><span class="spin"></span><span id="checkText" class="num"></span><button class="linkish" type="button" id="btnCheckStop">Stop</button></div>
   </main>
 </div>
+<div class="tip" id="tip" hidden></div>
 
 <dialog id="settings" aria-labelledby="setTitle">
   <form method="dialog" id="settingsForm">
@@ -410,7 +506,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
     <div class="dlg-body">
       <section>
         <h3>Google Maps API key</h3>
-        <p>The key unlocks Google ratings, review counts, phone numbers, the embedded Google listing and website quality checks. It stays in this browser and is only sent to Google.</p>
+        <p>The key unlocks Google ratings, review counts, phone numbers, the embedded Google listing, photos, reviews and website quality checks. It stays in this browser and is only sent to Google.</p>
         <div class="keyrow">
           <input id="keyInput" type="password" placeholder="AIza…" autocomplete="off" spellcheck="false" aria-label="Google Maps API key">
           <button class="btn" type="button" id="btnKeyShow">Show</button>
@@ -425,31 +521,55 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
           <li>Open the <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Google Cloud console</a>, create a project and add a billing account. Google requires one, but the free monthly allowance covers normal use of this app.</li>
           <li>Turn on three APIs: <a href="https://console.cloud.google.com/apis/library/places.googleapis.com" target="_blank" rel="noopener"><b>Places API (New)</b></a>, <a href="https://console.cloud.google.com/apis/library/maps-embed-backend.googleapis.com" target="_blank" rel="noopener"><b>Maps Embed API</b></a> (free) and <a href="https://console.cloud.google.com/apis/library/pagespeedonline.googleapis.com" target="_blank" rel="noopener"><b>PageSpeed Insights API</b></a> (free).</li>
           <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Credentials</a> &rarr; <b>Create credentials</b> &rarr; <b>API key</b>.</li>
-          <li>Edit the key: under <b>Website restrictions</b> add <code id="originCode"></code>, and under <b>API restrictions</b> pick the three APIs above. Paste the key here.</li>
+          <li id="keyStep4">Edit the key: under <b>Website restrictions</b> add <code id="originCode"></code>, and under <b>API restrictions</b> pick the three APIs above. Paste the key here.</li>
         </ol>
       </section>
       <section>
-        <h3>Scanning</h3>
-        <div class="inline">
-          <label for="budget">Google searches per scan</label>
-          <select id="budget"><option>10</option><option>20</option><option>30</option><option>50</option><option>80</option><option>120</option></select>
+        <h3>How thoroughly to scan</h3>
+        <div class="radios" id="depthRadios">
+          <label><input type="radio" name="depth" value="max"><span><b>Maximum</b><small>Keeps splitting busy areas until every place is found. Up to 250 Google searches per scan.</small></span></label>
+          <label><input type="radio" name="depth" value="thorough"><span><b>Thorough</b><small>Up to 60 searches per scan.</small></span></label>
+          <label><input type="radio" name="depth" value="quick"><span><b>Quick</b><small>Up to 15 searches per scan: the most popular places only.</small></span></label>
         </div>
-        <p class="small" style="margin-top:6px">Each search returns up to 20 places. Busy areas get split into smaller squares until the limit is reached.</p>
-        <label class="inline" style="margin-top:6px"><input type="checkbox" id="autoCheck"> Check websites automatically after each scan</label>
+        <label class="inline" style="margin-top:10px"><input type="checkbox" id="capOn"> Stop at <input type="number" id="monthlyCap" min="50" step="50" aria-label="Monthly limit"> searches a month, so you stay inside Google's free allowance</label>
+        <label class="inline" style="margin-top:8px"><input type="checkbox" id="autoCheck"> Check websites automatically after each scan (free)</label>
+        <label class="inline" style="margin-top:8px"><input type="checkbox" id="autoScan"> Scan new areas automatically when I move the map</label>
+      </section>
+      <section>
+        <h3>Your details for outreach messages</h3>
+        <p>Used to fill in the email, message and call script on each place. Stays in this browser.</p>
+        <div class="me">
+          <label>Your name<input id="meName" autocomplete="name"></label>
+          <label>Your business<input id="meBiz" autocomplete="organization"></label>
+          <label>What you offer<input id="meOffer" placeholder="websites for local businesses"></label>
+          <label>Phone, email or website<input id="meContact"></label>
+        </div>
       </section>
       <section>
         <h3>Google usage this month</h3>
         <div class="usage" id="usage"></div>
-        <p class="small" style="margin-top:8px">Google gives a free monthly allowance for each kind of request (about 1,000 for searches with ratings and websites, and for detailed listings). Website checks and the embedded map are free. See <a href="https://developers.google.com/maps/billing-and-pricing/pricing" target="_blank" rel="noopener">Google's pricing</a>, and set a daily cap under Quotas in the Cloud console if you want a hard limit.</p>
+        <p class="small" style="margin-top:8px">Google gives a free monthly allowance for each kind of request: about 1,000 area searches with ratings and websites, 1,000 keyword searches, 1,000 detailed listings and 1,000 photos. Website checks and the embedded map are free. See <a href="https://developers.google.com/maps/billing-and-pricing/pricing" target="_blank" rel="noopener">Google's pricing</a>, and set a daily cap under Quotas in the Cloud console if you want a hard limit.</p>
       </section>
       <section>
         <h3>Your data</h3>
         <p id="dataInfo"></p>
         <div class="keyrow">
-          <button class="btn" type="button" id="btnCsvAll">Download all leads (CSV)</button>
+          <button class="btn" type="button" id="btnCsvAll">Download leads (CSV)</button>
+          <button class="btn" type="button" id="btnBackup">Download backup</button>
+          <button class="btn" type="button" id="btnRestore">Restore backup</button>
+          <input type="file" id="restoreFile" accept="application/json,.json" hidden>
           <button class="btn" type="button" id="btnClear">Clear scanned places</button>
         </div>
-        <div class="status-line" id="clearStatus"></div>
+        <div class="status-line" id="clearStatus" aria-live="polite"></div>
+      </section>
+      <section>
+        <h3>Keyboard shortcuts</h3>
+        <div class="keys">
+          <kbd>/</kbd><span>Go to a place</span><kbd>S</kbd><span>Scan this area</span>
+          <kbd>J</kbd><span>Next place</span><kbd>K</kbd><span>Previous place</span>
+          <kbd>O</kbd><span>Open the place in Google Maps</span><kbd>1</kbd><span>to <kbd>5</kbd> mark as New, Saved, Contacted, Won, Not a fit</span>
+          <kbd>Esc</kbd><span>Back to the list</span>
+        </div>
       </section>
     </div>
   </form>
@@ -468,12 +588,12 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const fmt = n => Number(n || 0).toLocaleString();
 const LANG = (navigator.language || 'en').split('-')[0];
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const IN_APP = !!window.sitelessApp;   // running inside the desktop app
 const DAY = 864e5;
 const NS = 'siteless.v1.';
 const store = {
   get(k, d) { try { const v = localStorage.getItem(NS + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem(NS + k, JSON.stringify(v)); return true; } catch (e) { return false; } },
-  del(k) { try { localStorage.removeItem(NS + k); } catch (e) { /* ignore */ } },
 };
 const safeUrl = s => {
   if (!s) return null;
@@ -483,6 +603,14 @@ const safeUrl = s => {
 };
 const bareHost = h => String(h || '').toLowerCase().replace(/^www\./, '');
 const pretty = s => { s = String(s || '').replace(/_/g, ' '); return s.charAt(0).toUpperCase() + s.slice(1); };
+const lcFirst = s => s.charAt(0).toLowerCase() + s.slice(1);
+// "Free Wix site" -> "free Wix site", but brand names keep their capital ("Facebook page")
+const GENERIC_START = /^(Free|Old|Very|One-page|Link-in-bio|Link|Short|Directory)\b/;
+const lowerGeneric = s => (GENERIC_START.test(s) ? lcFirst(s) : s);
+const withArticle = s => (/^(x\b|[aeio])/i.test(s) ? 'an ' : 'a ') + s;
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const today = () => ymd(new Date());
+const inDays = n => { const d = new Date(); d.setDate(d.getDate() + n); return ymd(d); };
 const ago = t => {
   if (!t) return '';
   const d = (Date.now() - t) / 1000;
@@ -501,29 +629,59 @@ function starStr(r) {
   const full = Math.floor(r + 0.25), half = r - full >= 0.25 && r - full < 0.75;
   return '★'.repeat(Math.min(5, full)) + (half ? '½' : '');
 }
+function cityOf(p) {
+  if (p.city) return p.city;
+  const parts = String(p.fullAddress || p.address || '').split(',').map(s => s.trim()).filter(Boolean);
+  return (parts[1] || '').split(/\s+/).filter(w => !/\d/.test(w)).join(' ');
+}
+function download(name, text, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+function openTab(url) {
+  const a = document.createElement('a');
+  a.href = url; a.target = '_blank'; a.rel = 'noopener';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function copyText(text, onDone, fallbackEl) {
+  const fallback = () => { if (fallbackEl) { fallbackEl.focus(); fallbackEl.select ? fallbackEl.select() : selectText(fallbackEl); } };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(onDone, fallback);
+  else fallback();
+}
+function selectText(el) { const r = document.createRange(); r.selectNodeContents(el); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
 
 /* ================= categories ================= */
 // g: Google Places (New) types, osm: OpenStreetMap tags used in free mode.
 const CATS = [
-  { id: 'food', label: 'Restaurants', g: ['restaurant', 'meal_takeaway', 'fast_food_restaurant'],
+  { id: 'food', label: 'Restaurants', g: ['restaurant', 'meal_takeaway', 'fast_food_restaurant', 'pizza_restaurant', 'sandwich_shop', 'diner'],
     osm: { amenity: ['restaurant', 'fast_food', 'food_court'] } },
   { id: 'cafe', label: 'Cafés & bakeries', g: ['cafe', 'coffee_shop', 'bakery', 'ice_cream_shop', 'dessert_shop', 'donut_shop', 'tea_house', 'juice_shop'],
     osm: { amenity: ['cafe', 'ice_cream'], shop: ['bakery', 'pastry', 'coffee', 'confectionery', 'tea'] } },
-  { id: 'bar', label: 'Bars & pubs', g: ['bar', 'pub', 'wine_bar', 'night_club'],
+  { id: 'bar', label: 'Bars & pubs', g: ['bar', 'pub', 'wine_bar', 'night_club', 'bar_and_grill'],
     osm: { amenity: ['bar', 'pub', 'biergarten', 'nightclub'] } },
-  { id: 'beauty', label: 'Hair & beauty', g: ['hair_salon', 'hair_care', 'barber_shop', 'beauty_salon', 'nail_salon', 'spa'],
+  { id: 'beauty', label: 'Hair & beauty', g: ['hair_salon', 'hair_care', 'barber_shop', 'beauty_salon', 'nail_salon', 'spa', 'tanning_studio'],
     osm: { shop: ['hairdresser', 'beauty', 'massage', 'tattoo'] } },
-  { id: 'fit', label: 'Fitness & wellness', g: ['gym', 'fitness_center', 'yoga_studio', 'massage', 'physiotherapist', 'chiropractor'],
-    osm: { leisure: ['fitness_centre'], healthcare: ['physiotherapist', 'chiropractor'] } },
+  { id: 'fit', label: 'Fitness', g: ['gym', 'fitness_center', 'yoga_studio', 'massage'],
+    osm: { leisure: ['fitness_centre', 'sports_centre'] } },
+  { id: 'health', label: 'Health & vets', g: ['dentist', 'dental_clinic', 'physiotherapist', 'chiropractor', 'skin_care_clinic', 'veterinary_care'],
+    osm: { amenity: ['dentist', 'veterinary'], healthcare: ['physiotherapist', 'chiropractor'] } },
   { id: 'auto', label: 'Auto repair', g: ['car_repair', 'car_wash'],
     osm: { shop: ['car_repair', 'tyres'], amenity: ['car_wash'] } },
-  { id: 'trades', label: 'Trades', g: ['plumber', 'electrician', 'roofing_contractor', 'painter', 'locksmith', 'moving_company'],
+  { id: 'trades', label: 'Trades', g: ['plumber', 'electrician', 'roofing_contractor', 'painter', 'locksmith', 'moving_company', 'general_contractor'],
     osm: { craft: ['plumber', 'electrician', 'roofer', 'painter', 'locksmith', 'carpenter', 'hvac', 'gardener'], shop: ['locksmith'] } },
-  { id: 'shops', label: 'Local shops', g: ['florist', 'butcher_shop', 'gift_shop', 'clothing_store', 'jewelry_store', 'pet_store', 'book_store', 'shoe_store', 'bicycle_store', 'furniture_store'],
-    osm: { shop: ['florist', 'butcher', 'gift', 'clothes', 'jewelry', 'pet', 'books', 'shoes', 'bicycle', 'furniture', 'greengrocer', 'deli'] } },
-  { id: 'services', label: 'Other services', g: ['laundry', 'tailor', 'veterinary_care'],
-    osm: { shop: ['laundry', 'dry_cleaning', 'tailor'], amenity: ['veterinary'] } },
-  { id: 'stay', label: 'B&Bs & motels', g: ['bed_and_breakfast', 'guest_house', 'motel', 'inn'],
+  { id: 'foodshop', label: 'Food shops', g: ['butcher_shop', 'grocery_store', 'convenience_store', 'liquor_store', 'market', 'deli'],
+    osm: { shop: ['butcher', 'greengrocer', 'convenience', 'alcohol', 'deli', 'seafood', 'cheese', 'wine'] } },
+  { id: 'shops', label: 'Local shops', g: ['florist', 'gift_shop', 'clothing_store', 'jewelry_store', 'pet_store', 'book_store', 'shoe_store', 'bicycle_store', 'furniture_store', 'hardware_store', 'home_goods_store'],
+    osm: { shop: ['florist', 'gift', 'clothes', 'jewelry', 'pet', 'books', 'shoes', 'bicycle', 'furniture', 'hardware', 'interior_decoration'] } },
+  { id: 'services', label: 'Other services', g: ['laundry', 'tailor', 'child_care_agency', 'catering_service', 'travel_agency'],
+    osm: { shop: ['laundry', 'dry_cleaning', 'tailor', 'travel_agency'], amenity: ['childcare'] } },
+  { id: 'pro', label: 'Offices & agents', g: ['lawyer', 'accounting', 'insurance_agency', 'real_estate_agency'],
+    osm: { office: ['lawyer', 'accountant', 'insurance', 'estate_agent'] } },
+  { id: 'stay', label: 'B&Bs & motels', g: ['bed_and_breakfast', 'guest_house', 'motel', 'inn', 'hostel'],
     osm: { tourism: ['guest_house', 'motel', 'hostel'] } },
 ];
 const CAT_BY_ID = Object.fromEntries(CATS.map(c => [c.id, c]));
@@ -605,17 +763,102 @@ function matchHost(host) {
 const isParked = host => { const h = bareHost(host); return PARKED.some(p => h === p || h.endsWith('.' + p)); };
 
 const STATUS = {
-  none:      { label: 'No website',               chip: 'No website',        w: 1.00 },
-  broken:    { label: 'Broken website',           chip: 'Broken',            w: 0.95 },
-  social:    { label: 'Social page only',         chip: 'Social only',       w: 0.90 },
-  platform:  { label: 'Free or third-party page', chip: 'Free / 3rd-party',  w: 0.80 },
-  poor:      { label: 'Poor website',             chip: 'Poor site',         w: 0.70 },
-  unchecked: { label: 'Website not checked yet',  chip: 'Not checked',       w: 0.30 },
-  good:      { label: 'Decent website',           chip: 'Decent site',       w: 0.05 },
+  none:      { label: 'No website',               chip: 'No website',       g: '∅', w: 1.00 },
+  broken:    { label: 'Broken website',           chip: 'Broken',           g: '!', w: 0.95 },
+  social:    { label: 'Social page only',         chip: 'Social only',      g: '@', w: 0.90 },
+  platform:  { label: 'Free or third-party page', chip: 'Free / 3rd-party', g: '↗︎', w: 0.80 },
+  poor:      { label: 'Poor website',             chip: 'Poor site',        g: '↓︎', w: 0.70 },
+  unchecked: { label: 'Website not checked yet',  chip: 'Not checked',      g: '?', w: 0.30 },
+  good:      { label: 'Decent website',           chip: 'Decent site',      g: '✓︎', w: 0.05 },
 };
 const ST_ORDER = Object.keys(STATUS);
-const stColor = st => `var(--st-${st})`;
+const WEAK = ['none', 'broken', 'social', 'platform'];
 
+/* ================= chains ================= */
+const KNOWN_CHAINS = new Set(['mcdonalds', 'starbucks', 'subway', 'kfc', 'burger king', 'dominos', 'dominos pizza', 'pizza hut', 'dunkin',
+  'taco bell', 'wendys', 'chipotle', 'chipotle mexican grill', 'tim hortons', 'costa coffee', 'pret a manger', 'greggs', 'five guys', 'popeyes',
+  'popeyes louisiana kitchen', 'papa johns', 'little caesars', 'little caesars pizza', 'chickfila', 'panera bread', '7eleven', 'supercuts',
+  'great clips', 'sport clips haircuts', 'jiffy lube', 'midas', 'pep boys', 'firestone complete auto care', 'planet fitness', 'anytime fitness',
+  'orangetheory fitness', 'snap fitness', 'la fitness', 'dairy queen', 'sonic drivein', 'arbys', 'jack in the box', 'panda express', 'jimmy johns',
+  'jersey mikes subs', 'wingstop', 'buffalo wild wings', 'applebees grill bar', 'olive garden italian kitchen', 'ihop', 'dennys', 'waffle house',
+  'cracker barrel old country store', 'red lobster', 'outback steakhouse', 'chilis grill bar', 'tgi fridays', 'nandos', 'wagamama', 'pizza express',
+  'caffe nero', 'itsu', 'tesco express', 'sainsburys local', 'lidl', 'aldi', 'walmart', 'target', 'cvs pharmacy', 'walgreens', 'h&m',
+  'zara', 'hesburger', 'vapiano', 'telepizza', 'max burgers', 'espresso house', 'carrefour', 'carrefour express', 'spar', 'maxima',
+  'rimi', 'circle k', 'shell', 'bp', 'esso']);
+const chainKey = name => String(name || '').toLowerCase().split(/\s[-–—|@(]\s?|\s\(|,/)[0]
+  .replace(/[^\p{L}\p{N}& ]/gu, '').replace(/\s+/g, ' ').trim();
+
+/* ================= state ================= */
+const DEPTH = { quick: { n: 15, label: 'Quick' }, thorough: { n: 60, label: 'Thorough' }, max: { n: 250, label: 'Maximum' } };
+const DEFAULTS = {
+  v: 2, key: '', depth: 'max', capOn: true, monthlyCap: 1000, autoCheck: true, autoScan: false,
+  cats: CATS.map(c => c.id), kw: '', layer: 'map', hideChains: true,
+  st: ['none', 'broken', 'social', 'platform', 'poor', 'unchecked'], minRating: 4.2, minReviews: 15, lead: 'all', sort: 'lead',
+  me: { name: '', biz: '', offer: '', contact: '' },
+};
+const saved = store.get('settings', {});
+const S = Object.assign({}, DEFAULTS, saved);
+if ((saved.v || 1) < 2) { S.cats = CATS.map(c => c.id); S.depth = 'max'; S.v = 2; }   // older versions scanned fewer types
+S.cats = S.cats.filter(id => CAT_BY_ID[id]);
+S.me = Object.assign({}, DEFAULTS.me, S.me);
+if (!DEPTH[S.depth]) S.depth = 'max';
+S.places = new Map();
+S.leads = store.get('leads', {});            // id -> { s: 'saved'|'contacted'|'won'|'skip', note, due: 'YYYY-MM-DD', at }
+S.areas = store.get('areas', []);            // [s, w, n, e, src]
+S.details = store.get('details', {});        // google id -> { at, d }
+S.sel = null;
+S.order = [];                                 // ids in list order, for next / previous
+S.chains = new Map();                         // src:name -> count
+S.shots = new Map();                          // website screenshots, memory only
+S.badTypes = new Set(store.get('badTypes', [])); // place types Google said it does not support
+S.q = '';                                     // list name filter
+const mode = () => (S.key ? 'google' : 'osm');
+
+function saveSettings() {
+  const { v, key, depth, capOn, monthlyCap, autoCheck, autoScan, cats, kw, layer, hideChains, st, minRating, minReviews, lead, sort, me } = S;
+  store.set('settings', { v, key, depth, capOn, monthlyCap, autoCheck, autoScan, cats, kw, layer, hideChains, st, minRating, minReviews, lead, sort, me });
+}
+const PLACE_KEYS = ['id', 'gid', 'src', 'name', 'lat', 'lng', 'address', 'fullAddress', 'city', 'phone', 'intlPhone', 'rating', 'reviews', 'website', 'social',
+  'socialUrl', 'maps', 'type', 'types', 'cats', 'kw', 'price', 'hours', 'osmUrl', 'seen', 'check'];
+const compact = p => Object.fromEntries(PLACE_KEYS.filter(k => p[k] != null && p[k] !== '').map(k => [k, p[k]]));
+let saveTimer = 0;
+function savePlaces() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    let arr = [...S.places.values()].map(compact);
+    while (!store.set('places', arr) && arr.length > 200) {
+      // storage full: forget the oldest places that are not marked as leads
+      arr.sort((a, b) => (S.leads[b.id] ? 1 : 0) - (S.leads[a.id] ? 1 : 0) || b.seen - a.seen);
+      arr = arr.slice(0, Math.floor(arr.length * 0.8));
+    }
+  }, 500);
+}
+const saveLeads = () => store.set('leads', S.leads);
+const leadOf = id => S.leads[id] || {};
+const isDue = l => !!(l.due && l.due <= today() && l.s !== 'won' && l.s !== 'skip');
+
+const USAGE_KINDS = ['nearby', 'text', 'details', 'photos', 'psi', 'osm'];
+const usageNow = () => {
+  const m = new Date().toISOString().slice(0, 7);
+  const u = store.get('usage', {});
+  return u.month === m ? u : { month: m };
+};
+function count(kind, n = 1) { const u = usageNow(); u[kind] = (u[kind] || 0) + n; store.set('usage', u); }
+const used = kind => usageNow()[kind] || 0;
+const capLeft = kind => (S.capOn ? Math.max(0, S.monthlyCap - used(kind)) : Infinity);
+
+function recountChains() {
+  S.chains = new Map();
+  for (const p of S.places.values()) { p._ck = chainKey(p.name); const k = p.src + ':' + p._ck; S.chains.set(k, (S.chains.get(k) || 0) + 1); }
+}
+function chainInfo(p) {
+  const k = p._ck || (p._ck = chainKey(p.name));
+  if (KNOWN_CHAINS.has(k)) return 'a well-known chain';
+  const n = S.chains.get(p.src + ':' + k) || 0;
+  return n >= 3 ? `${n} places with this name were found` : '';
+}
+
+/* ================= classification and scoring ================= */
 function classify(p) {
   const why = [];
   let st;
@@ -632,7 +875,7 @@ function classify(p) {
     if (!u) { st = 'broken'; why.push('The website on the listing is not a working link'); }
     else if (hit) { st = hit.kind; why.push(hit.label); }
     else if (moved && isParked(fin.hostname)) { st = 'broken'; why.push(`${bareHost(u.hostname)} is a parked domain (it forwards to ${bareHost(fin.hostname)})`); }
-    else if (finHit) { st = finHit.kind === 'broken' ? 'broken' : finHit.kind; why.push(`${bareHost(u.hostname)} just forwards to a ${finHit.label.charAt(0).toLowerCase() + finHit.label.slice(1)}`); }
+    else if (finHit) { st = finHit.kind; why.push(`${bareHost(u.hostname)} just forwards to ${withArticle(lowerGeneric(finHit.label))}`); }
     else if (p.check && p.check.broken) { st = 'broken'; why.push(...p.check.reasons); }
     else if (p.check && p.check.score != null) { st = p.check.poor ? 'poor' : 'good'; why.push(...p.check.reasons); }
     else {
@@ -658,49 +901,8 @@ function leadScore(p) {
   return Math.round(100 * Math.pow(w, 0.9) * (0.3 + 0.7 * r));
 }
 
-/* ================= state ================= */
-const DEFAULTS = {
-  key: '', budget: 30, autoCheck: true, cats: ['food', 'cafe', 'bar'],
-  st: ['none', 'broken', 'social', 'platform', 'poor', 'unchecked'], minRating: 4.2, minReviews: 15, lead: 'all', sort: 'lead',
-};
-const S = Object.assign({}, DEFAULTS, store.get('settings', {}));
-S.cats = S.cats.filter(id => CAT_BY_ID[id]);
-S.places = new Map();
-S.leads = store.get('leads', {});            // id -> { s: 'saved'|'contacted'|'skip', note }
-S.areas = store.get('areas', []);            // [s, w, n, e, src]
-S.details = store.get('details', {});        // google id -> { at, d }
-S.sel = null;
-S.shots = new Map();                         // website screenshots, memory only
-const mode = () => (S.key ? 'google' : 'osm');
-
 for (const p of store.get('places', [])) { if (p && p.id) { classify(p); S.places.set(p.id, p); } }
-
-function saveSettings() {
-  const { key, budget, autoCheck, cats, st, minRating, minReviews, lead, sort } = S;
-  store.set('settings', { key, budget, autoCheck, cats, st, minRating, minReviews, lead, sort });
-}
-let saveTimer = 0;
-function savePlaces() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    const keep = ['id', 'gid', 'src', 'name', 'lat', 'lng', 'address', 'phone', 'intlPhone', 'rating', 'reviews', 'website', 'social', 'socialUrl',
-      'maps', 'type', 'types', 'cats', 'price', 'hours', 'osmUrl', 'seen', 'check'];
-    let arr = [...S.places.values()].map(p => Object.fromEntries(keep.filter(k => p[k] != null && p[k] !== '').map(k => [k, p[k]])));
-    while (!store.set('places', arr) && arr.length > 200) {
-      // storage full: forget the oldest places that are not marked as leads
-      arr.sort((a, b) => (S.leads[b.id] ? 1 : 0) - (S.leads[a.id] ? 1 : 0) || b.seen - a.seen);
-      arr = arr.slice(0, Math.floor(arr.length * 0.8));
-    }
-  }, 500);
-}
-const saveLeads = () => store.set('leads', S.leads);
-
-const usageNow = () => {
-  const m = new Date().toISOString().slice(0, 7);
-  const u = store.get('usage', {});
-  return u.month === m ? u : { month: m, nearby: 0, details: 0, photos: 0, psi: 0, osm: 0 };
-};
-function count(kind, n = 1) { const u = usageNow(); u[kind] = (u[kind] || 0) + n; store.set('usage', u); }
+recountChains();
 
 /* ================= map ================= */
 const TZ_CITY = {
@@ -734,65 +936,96 @@ const startView = store.get('view', null) || (() => {
 
 const map = L.map('map', { zoomControl: false, worldCopyJump: true, minZoom: 3 }).setView([startView.lat, startView.lng], startView.z);
 L.control.zoom({ position: 'bottomright' }).addTo(map);
-const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>';
+const OSM_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
+const CARTO_ATTR = OSM_ATTR + ' &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>';
 const darkQuery = matchMedia('(prefers-color-scheme: dark)');
 const isDark = () => document.documentElement.dataset.theme === 'dark' || (document.documentElement.dataset.theme !== 'light' && darkQuery.matches);
-let tiles = null;
+let baseLayer = null;
 function setTiles() {
-  const url = isDark()
-    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-    : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
-  if (tiles) map.removeLayer(tiles);
-  tiles = L.tileLayer(url, { attribution: TILE_ATTR, subdomains: 'abcd', maxZoom: 20 }).addTo(map);
+  if (baseLayer) map.removeLayer(baseLayer);
+  if (S.layer === 'sat') {
+    baseLayer = L.layerGroup([
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics', maxNativeZoom: 19, maxZoom: 20 }),
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/dark_only_labels/{z}/{x}/{y}{r}.png', { attribution: CARTO_ATTR, subdomains: 'abcd', maxZoom: 20 }),
+    ]);
+  } else {
+    baseLayer = L.tileLayer(isDark()
+      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+      : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution: CARTO_ATTR, subdomains: 'abcd', maxZoom: 20 });
+  }
+  baseLayer.addTo(map);
+  $('#btnLayer').setAttribute('aria-pressed', String(S.layer === 'sat'));
+  const lbl = S.layer === 'sat' ? 'Street map' : 'Satellite view';
+  $('#btnLayer').title = lbl;
+  $('#btnLayer').setAttribute('aria-label', lbl);
 }
 setTiles();
 darkQuery.addEventListener?.('change', setTiles);
 
 const areaLayer = L.layerGroup().addTo(map);
-const pinLayer = L.layerGroup().addTo(map);
+const pinLayer = L.markerClusterGroup({
+  maxClusterRadius: z => (z >= 15 ? 26 : z >= 13 ? 44 : 64),
+  disableClusteringAtZoom: 16, spiderfyOnMaxZoom: true, showCoverageOnHover: false, chunkedLoading: true,
+  iconCreateFunction(cluster) {
+    const ms = cluster.getAllChildMarkers();
+    const n = ms.length, cnt = {};
+    for (const m of ms) cnt[m.options.st] = (cnt[m.options.st] || 0) + 1;
+    let acc = 0;
+    const stops = [];
+    for (const s of ST_ORDER) if (cnt[s]) { stops.push(`var(--st-${s}) ${(acc / n * 360).toFixed(1)}deg ${((acc + cnt[s]) / n * 360).toFixed(1)}deg`); acc += cnt[s]; }
+    const size = n < 10 ? 34 : n < 100 ? 40 : 48;
+    const label = ST_ORDER.filter(s => cnt[s]).map(s => `${cnt[s]} ${STATUS[s].chip.toLowerCase()}`).join(', ');
+    return L.divIcon({ html: `<div class="cl" style="background:conic-gradient(${stops.join(',')})" title="${esc(label)}"><span>${n}</span></div>`, className: 'clwrap', iconSize: [size, size] });
+  },
+}).addTo(map);
 const markers = new Map();   // id -> { m, key }
 
 function drawAreas() {
   areaLayer.clearLayers();
   for (const a of S.areas) {
     if (a[4] !== mode()) continue;
-    L.rectangle([[a[0], a[1]], [a[2], a[3]]], { className: 'scanned-area', interactive: false, weight: 1.5 }).addTo(areaLayer);
+    L.rectangle([[a[0], a[1]], [a[2], a[3]]], { className: 'scanned-area', interactive: false, weight: 1.2 }).addTo(areaLayer);
   }
 }
 
+const LEAD_MARK = { saved: '★', contacted: '✓︎', won: '◆' };
 function pinIcon(p) {
-  const lead = S.leads[p.id] && S.leads[p.id].s;
-  const mark = lead === 'saved' ? '★ ' : lead === 'contacted' ? '✓ ' : '';
-  const html = p.rating != null
-    ? `<div class="pin${lead === 'contacted' ? ' contacted' : ''}" style="--c:${stColor(p.status)}">${mark}${p.rating.toFixed(1)}</div>`
-    : `<div class="pin dotpin${lead === 'contacted' ? ' contacted' : ''}" style="--c:${stColor(p.status)}"></div>`;
+  const l = leadOf(p.id);
+  const mark = LEAD_MARK[l.s] ? `<span class="lm">${LEAD_MARK[l.s]}</span>` : '';
+  const g = `<span class="g">${STATUS[p.status].g}</span>`;
+  const cls = `pin s-${p.status}${l.s === 'contacted' ? ' contacted' : ''}`;
+  const html = p.rating != null ? `<div class="${cls}">${g}${p.rating.toFixed(1)}${mark}</div>` : `<div class="${cls} dotpin">${g}${mark}</div>`;
   return L.divIcon({ className: 'pinwrap' + (S.sel === p.id ? ' sel' : ''), html, iconSize: [0, 0], iconAnchor: [0, 0] });
 }
 
 function syncMarkers(visible) {
-  const near = map.getBounds().pad(0.6);
-  const want = new Set(visible.filter(p => near.contains([p.lat, p.lng])).map(p => p.id));
+  const want = new Set(visible.map(p => p.id));
   if (S.sel && S.places.has(S.sel)) want.add(S.sel);
-  for (const [id, o] of markers) if (!want.has(id)) { pinLayer.removeLayer(o.m); markers.delete(id); }
+  const drop = [], add = [], changed = [];
+  for (const [id, o] of markers) if (!want.has(id)) { drop.push(o.m); markers.delete(id); }
   for (const id of want) {
     const p = S.places.get(id);
-    const lead = S.leads[id] && S.leads[id].s;
-    const key = [p.status, p.rating, lead, S.sel === id].join('|');
+    const key = [p.status, p.rating, leadOf(id).s, S.sel === id].join('|');
     const o = markers.get(id);
     if (!o) {
-      const m = L.marker([p.lat, p.lng], { icon: pinIcon(p), title: p.name, keyboard: false, riseOnHover: true });
+      const m = L.marker([p.lat, p.lng], { icon: pinIcon(p), title: p.name, keyboard: false, st: p.status, zIndexOffset: S.sel === id ? 2000 : 0 });
       m.on('click', () => openDetail(id, { pan: false }));
       m.on('mouseover', () => hl(id, true));
       m.on('mouseout', () => hl(id, false));
-      m.addTo(pinLayer);
+      add.push(m);
       markers.set(id, { m, key });
-      if (S.sel === id) m.setZIndexOffset(2000);
     } else if (o.key !== key) {
+      o.m.options.st = p.status;
       o.m.setIcon(pinIcon(p));
       o.m.setZIndexOffset(S.sel === id ? 2000 : 0);
       o.key = key;
+      changed.push(o.m);
     }
   }
+  if (drop.length) pinLayer.removeLayers(drop);
+  if (add.length) pinLayer.addLayers(add);
+  if (changed.length) pinLayer.refreshClusters(changed);
 }
 function hl(id, on) {
   const li = $(`#list [data-id="${CSS.escape(id)}"]`);
@@ -804,15 +1037,18 @@ function hl(id, on) {
 /* ================= filtering & list ================= */
 function passes(p, ignoreStatus) {
   if (p.src !== mode()) return false;
-  if (p.cats && p.cats.length && !p.cats.some(c => S.cats.includes(c))) return false;
+  if (!p.kw && p.cats && p.cats.length && !p.cats.some(c => S.cats.includes(c))) return false;
   if (p.src === 'google') {
     if ((p.rating || 0) < S.minRating - 1e-9) return false;
     if ((p.reviews || 0) < S.minReviews) return false;
   }
-  const lead = S.leads[p.id] && S.leads[p.id].s;
-  if (S.lead === 'all' && lead === 'skip') return false;
-  if (S.lead === 'new' && lead) return false;
-  if (['saved', 'contacted', 'skip'].includes(S.lead) && lead !== S.lead) return false;
+  if (S.hideChains && chainInfo(p)) return false;
+  const l = leadOf(p.id);
+  if (S.lead === 'all' && l.s === 'skip') return false;
+  if (S.lead === 'new' && l.s) return false;
+  if (S.lead === 'due' && !isDue(l)) return false;
+  if (['saved', 'contacted', 'won', 'skip'].includes(S.lead) && l.s !== S.lead) return false;
+  if (S.q && !`${p.name} ${p.address} ${p.type}`.toLowerCase().includes(S.q)) return false;
   if (!ignoreStatus && !S.st.includes(p.status)) return false;
   return true;
 }
@@ -821,7 +1057,12 @@ const SORTS = {
   rating: (a, b) => (b.rating || 0) - (a.rating || 0) || (b.reviews || 0) - (a.reviews || 0),
   reviews: (a, b) => (b.reviews || 0) - (a.reviews || 0) || (b.rating || 0) - (a.rating || 0),
   name: (a, b) => a.name.localeCompare(b.name),
+  near: (a, b) => a._d - b._d,
 };
+function sorted(list) {
+  if (S.sort === 'near') { const c = map.getCenter(); list.forEach(p => { p._d = haversine(c.lat, c.lng, p.lat, p.lng); }); }
+  return list.sort(SORTS[S.sort] || SORTS.lead);
+}
 
 let listLimit = 150, renderQueued = false;
 function render() {
@@ -835,70 +1076,94 @@ function renderNow() {
   syncMarkers(visible);
 
   const b = map.getBounds().pad(0.02);
-  const inView = visible.filter(p => b.contains([p.lat, p.lng])).sort(SORTS[S.sort] || SORTS.lead);
+  const inView = sorted(visible.filter(p => b.contains([p.lat, p.lng])));
+  S.order = inView.map(p => p.id);
 
-  // status chips with counts for what is in view
+  // status counts for what is in view, ignoring the status filter itself
   const counts = Object.fromEntries(ST_ORDER.map(s => [s, 0]));
   for (const p of all) if (passes(p, true) && b.contains([p.lat, p.lng])) counts[p.status]++;
+  renderSummary(counts);
   const chipBox = $('#statusChips');
-  if (!chipBox.children.length) chipBox.innerHTML = ST_ORDER.map(s => `<button type="button" class="chip" data-st="${s}"><i style="--c:${stColor(s)}"></i>${STATUS[s].chip} <b></b></button>`).join('');
-  for (const b of chipBox.children) {
-    b.setAttribute('aria-pressed', String(S.st.includes(b.dataset.st)));
-    b.lastElementChild.textContent = counts[b.dataset.st];
+  if (!chipBox.children.length) chipBox.innerHTML = ST_ORDER.map(s => `<button type="button" class="chip s-${s}" data-st="${s}"><i></i>${STATUS[s].chip} <b></b></button>`).join('');
+  for (const btn of chipBox.children) {
+    btn.setAttribute('aria-pressed', String(S.st.includes(btn.dataset.st)));
+    btn.lastElementChild.textContent = counts[btn.dataset.st];
   }
 
-  const modeSrcCount = all.filter(p => p.src === mode()).length;
-  const nUnchecked = inView.filter(p => p.status === 'unchecked' && canCheck(p)).length;
+  const modeSrc = all.filter(p => p.src === mode());
+  const nUnchecked = inView.filter(p => canCheck(p)).length;
   $('#btnCheckAll').hidden = !(S.key && nUnchecked);
   $('#btnCheckAll').textContent = `Check ${nUnchecked} site${nUnchecked === 1 ? '' : 's'}`;
-  $('#listCount').innerHTML = `${fmt(inView.length)} place${inView.length === 1 ? '' : 's'} in view<small>${fmt(visible.length)} on the map · ${fmt(modeSrcCount)} scanned in total</small>`;
+  $('#listCount').innerHTML = `${fmt(inView.length)} place${inView.length === 1 ? '' : 's'} in view<small>${fmt(visible.length)} on the map · ${fmt(modeSrc.length)} scanned in total</small>`;
   $('#btnCsv').disabled = !inView.length;
+  $('#btnRoute').disabled = !inView.length;
+  const due = modeSrc.filter(p => isDue(leadOf(p.id))).length;
+  $('#btnDue').hidden = !due || S.lead === 'due';
+  $('#btnDue').textContent = `${due} follow-up${due === 1 ? '' : 's'} due`;
 
-  const items = inView.slice(0, listLimit);
-  $('#list').innerHTML = items.map(itemHtml).join('');
+  $('#list').innerHTML = inView.slice(0, listLimit).map(itemHtml).join('');
   $('#btnMore').hidden = inView.length <= listLimit;
   $('#btnMore').textContent = `Show ${Math.min(150, inView.length - listLimit)} more`;
 
   const empty = $('#empty');
   if (inView.length) empty.hidden = true;
-  else { empty.hidden = false; empty.innerHTML = emptyHtml(modeSrcCount); }
+  else { empty.hidden = false; empty.innerHTML = emptyHtml(modeSrc.length); }
   $('#footNote').innerHTML = mode() === 'google'
     ? 'Listings, ratings and reviews from Google. Website checks by Google PageSpeed Insights.'
     : 'Free mode: places from OpenStreetMap. Ratings need a Google key.';
+  if (S.sel) updateNav();
+}
+
+function renderSummary(counts) {
+  const total = ST_ORDER.reduce((a, s) => a + counts[s], 0);
+  const box = $('#summary');
+  if (!total) { box.innerHTML = '<div class="sum-head">Scan an area to see how many places lack a real website.</div>'; return; }
+  const weak = WEAK.reduce((a, s) => a + counts[s], 0);
+  const pct = Math.round(weak / total * 100);
+  box.innerHTML = `<div class="sum-head"><b>${pct}%</b> of ${fmt(total)} places here have no real website</div>
+    <div class="sum-bar" role="img" aria-label="${ST_ORDER.filter(s => counts[s]).map(s => `${STATUS[s].chip}: ${counts[s]}`).join(', ')}">
+    ${ST_ORDER.filter(s => counts[s]).map(s => `<span class="s-${s}" style="flex:${counts[s]}" data-tip="${esc(STATUS[s].label)}: ${counts[s]} (${Math.round(counts[s] / total * 100)}%)"></span>`).join('')}</div>`;
 }
 
 function itemHtml(p) {
-  const lead = S.leads[p.id] && S.leads[p.id].s;
-  const leadTxt = lead === 'saved' ? '★ Saved' : lead === 'contacted' ? '✓ Contacted' : lead === 'skip' ? 'Not a fit' : '';
+  const l = leadOf(p.id);
+  const leadTxt = { saved: '★ Saved', contacted: '✓ Contacted', won: '◆ Won', skip: 'Not a fit' }[l.s] || '';
+  const due = isDue(l) ? `<span class="lead-tag lead-due">Follow up ${l.due === today() ? 'today' : 'overdue'}</span>` : '';
   const rating = p.rating != null ? `<span><span class="rating">${p.rating.toFixed(1)}</span> <span class="stars">${starStr(p.rating)}</span> <span class="num">(${fmt(p.reviews)})</span></span>` : '';
   const checking = p.checking ? '<span class="spin" title="Checking website"></span>' : '';
   return `<li><button type="button" class="item" data-id="${esc(p.id)}">
-    <span class="dot" style="--c:${stColor(p.status)}"></span>
+    <span class="gdot s-${p.status}" aria-hidden="true">${STATUS[p.status].g}</span>
     <span style="min-width:0"><span class="nm">${esc(p.name)}</span>
       <span class="sub">${esc([p.type, p.address].filter(Boolean).join(' · '))}</span>
-      <span class="meta">${rating}<span class="pill" style="--c:${stColor(p.status)}">${esc(STATUS[p.status].chip)}</span>${checking}${leadTxt ? `<span class="lead-tag">${leadTxt}</span>` : ''}</span></span>
+      <span class="meta">${rating}<span class="pill s-${p.status}">${esc(STATUS[p.status].chip)}</span>${checking}${leadTxt ? `<span class="lead-tag">${leadTxt}</span>` : ''}${due}</span></span>
     <span class="score" title="Lead score: weaker website and better reviews score higher"><b>${p.lead}</b><small>lead</small></span>
   </button></li>`;
 }
 
+function legendHtml() {
+  return `<div class="legend">${ST_ORDER.filter(s => s !== 'good').map(s => `<span><span class="gdot s-${s}">${STATUS[s].g}</span>${esc(STATUS[s].label)}</span>`).join('')}</div>`;
+}
 function emptyHtml(scanned) {
   const z = map.getZoom();
   if (!scanned) {
     return `<h3>Find places that need a website</h3>
       <ol><li>Move the map to a neighbourhood or search for a town.</li>
-      <li>Pick what to look for above.</li>
+      <li>Pick what to look for above, or type a keyword.</li>
       <li>Press <b>Scan this area</b> on the map.</li></ol>
-      <p>Pins show up coloured by website: <b style="color:var(--st-none)">red</b> has none, <b style="color:var(--st-social)">orange</b> only has a social page, <b style="color:var(--st-platform)">brown</b> uses a free or delivery-app page, <b style="color:var(--st-poor)">olive</b> has a poor site. The number on a pin is its Google rating. Tap a pin for its Google Maps listing.</p>
+      <p>Pins show the Google rating and are marked by website:</p>${legendHtml()}
+      <p>Tap a pin for its Google Maps listing, what's wrong with its website, and a ready-made message to send.</p>
       ${mode() === 'osm' ? '<p>You are in free mode, which uses OpenStreetMap and has no reviews. <button type="button" class="linkish" data-open-settings>Add a Google key</button> for ratings, review filters and website checks.</p>' : ''}`;
   }
   return `<h3>Nothing here matches</h3><p>${z < 12 ? 'Zoom in to a scanned area, or ' : ''}scan this part of the map, lower the minimum rating or reviews, or turn on more website types above.</p>`;
 }
 
 function modeHtml() {
-  const u = usageNow();
   if (mode() === 'google') {
-    return `<div class="mode"><span class="tag">Google</span><div>Ratings, reviews and website checks are on. <b class="num">${fmt(u.nearby)}</b> Google searches this month.
-      <button type="button" class="linkish" data-open-settings>Settings</button></div></div>`;
+    const n = used('nearby') + used('text');
+    const cap = S.monthlyCap * 2;
+    const frac = S.capOn ? clamp(n / cap, 0, 1) : 0;
+    return `<div class="mode"><span class="tag">Google</span><div style="flex:1;min-width:0">Ratings, reviews and website checks are on. <b class="num">${fmt(n)}</b> Google searches this month${S.capOn ? `, limit ${fmt(S.monthlyCap)} each for area and keyword searches` : ''}.
+      <button type="button" class="linkish" data-open-settings>Settings</button>${S.capOn ? `<div class="meter${frac > 0.85 ? ' warn' : ''}"><i style="width:${(frac * 100).toFixed(1)}%"></i></div>` : ''}</div></div>`;
   }
   return `<div class="mode free"><span class="tag">Free</span><div><b>Free mode</b> finds places on OpenStreetMap with no website listed, but can't see reviews.
     <button type="button" class="linkish" data-open-settings>Add a Google key</button> to filter by rating and check website quality.</div></div>`;
@@ -909,7 +1174,11 @@ function renderChrome() {
   const catBox = $('#cats');
   if (!catBox.children.length) catBox.innerHTML = CATS.map(c => `<button type="button" class="chip" data-cat="${c.id}">${esc(c.label)}</button>`).join('');
   for (const b of catBox.children) b.setAttribute('aria-pressed', String(S.cats.includes(b.dataset.cat)));
-  $('#catCount').textContent = `${S.cats.length} of ${CATS.length}`;
+  catBox.classList.toggle('dim', !!S.kw);
+  $('#btnAllCats').textContent = S.cats.length === CATS.length ? 'Clear all' : 'Select all';
+  if ($('#kw').value !== S.kw && document.activeElement !== $('#kw')) $('#kw').value = S.kw;
+  $('#kwNote').hidden = !S.kw;
+  $('#kwNote').innerHTML = S.kw ? `Scanning for “${esc(S.kw)}” instead of the types above. <button type="button" class="linkish" id="btnKwClear">Use the types again</button>` : '';
   const g = mode() === 'google';
   $('#minRating').disabled = !g;
   $('#minReviews').disabled = !g;
@@ -920,21 +1189,38 @@ function renderChrome() {
   $('#minReviews').value = String(S.minReviews);
   $('#leadFilter').value = S.lead;
   $('#sort').value = S.sort;
+  $('#hideChains').checked = S.hideChains;
   updateScanButton();
 }
 
 /* ================= scan button ================= */
-const viewRadius = () => { const b = map.getBounds(); return haversine(b.getSouth(), b.getWest(), b.getNorth(), b.getEast()) / 2; };
 const scan = { running: false, stop: false };
+const scanKind = () => (S.kw ? 'text' : 'nearby');
+function osmTiles(b) {
+  const lat = (b.getSouth() + b.getNorth()) / 2;
+  const W = haversine(lat, b.getWest(), lat, b.getEast()), H = haversine(b.getSouth(), b.getWest(), b.getNorth(), b.getWest());
+  const cols = Math.max(1, Math.ceil(W / 5000)), rows = Math.max(1, Math.ceil(H / 5000));
+  if (cols * rows > 16) return null;
+  const tiles = [], dLat = (b.getNorth() - b.getSouth()) / rows, dLng = (b.getEast() - b.getWest()) / cols;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    tiles.push({ s: b.getSouth() + r * dLat, n: b.getSouth() + (r + 1) * dLat, w: b.getWest() + c * dLng, e: b.getWest() + (c + 1) * dLng });
+  }
+  return tiles;
+}
+const viewRadius = () => { const b = map.getBounds(); return haversine(b.getSouth(), b.getWest(), b.getNorth(), b.getEast()) / 2; };
 function updateScanButton() {
   const btn = $('#btnScan');
   btn.hidden = scan.running;
-  const r = viewRadius();
   let label = 'Scan this area', hint = '', ok = true;
-  if (!S.cats.length) { label = 'Pick what to look for'; ok = false; }
-  else if (mode() === 'osm' && r > 5000) { label = 'Zoom in to scan'; ok = false; }
-  else if (mode() === 'google' && r > 60000) { label = 'Zoom in to scan'; ok = false; }
-  else hint = mode() === 'google' ? `up to ${S.budget} searches` : 'free';
+  if (!S.cats.length && !S.kw) { label = 'Pick what to look for'; ok = false; }
+  else if (mode() === 'osm' && !osmTiles(map.getBounds())) { label = 'Zoom in to scan'; ok = false; }
+  else if (mode() === 'google' && viewRadius() > 60000) { label = 'Zoom in to scan'; ok = false; }
+  else if (mode() === 'google' && capLeft(scanKind()) <= 0) { label = 'Monthly limit reached'; hint = 'see Settings'; ok = false; }
+  else if (mode() === 'google') {
+    const left = capLeft(scanKind());
+    hint = `${DEPTH[S.depth].label}${left !== Infinity ? ` · ${fmt(left)} free left` : ''}`;
+  } else hint = 'free';
+  if (S.kw && ok) label = `Scan for “${S.kw.length > 18 ? S.kw.slice(0, 17) + '…' : S.kw}”`;
   btn.disabled = !ok;
   $('#scanLabel').textContent = label;
   $('#scanHint').textContent = hint;
@@ -956,9 +1242,9 @@ function progress(text, frac) {
 
 /* ================= Google Places ================= */
 const PLACES = 'https://places.googleapis.com/v1/';
-const SCAN_FIELDS = ['id', 'displayName', 'formattedAddress', 'shortFormattedAddress', 'location', 'rating', 'userRatingCount', 'websiteUri',
-  'googleMapsUri', 'primaryType', 'primaryTypeDisplayName', 'types', 'businessStatus', 'nationalPhoneNumber', 'internationalPhoneNumber', 'priceLevel']
-  .map(f => 'places.' + f).join(',');
+const PLACE_FIELDS = ['id', 'displayName', 'formattedAddress', 'shortFormattedAddress', 'location', 'rating', 'userRatingCount', 'websiteUri',
+  'googleMapsUri', 'primaryType', 'primaryTypeDisplayName', 'types', 'businessStatus', 'nationalPhoneNumber', 'internationalPhoneNumber', 'priceLevel'];
+const SCAN_FIELDS = PLACE_FIELDS.map(f => 'places.' + f).join(',');
 const DETAIL_FIELDS = ['id', 'displayName', 'formattedAddress', 'nationalPhoneNumber', 'internationalPhoneNumber', 'regularOpeningHours', 'reviews',
   'photos', 'editorialSummary', 'priceLevel', 'rating', 'userRatingCount', 'websiteUri', 'googleMapsUri', 'businessStatus', 'primaryTypeDisplayName'].join(',');
 
@@ -974,7 +1260,9 @@ function googleError(status, j, api) {
   const [apiName, apiUrl] = API_LINKS[api];
   let text;
   if (reason === 'API_KEY_INVALID' || /API key not valid/i.test(msg)) text = 'Your Google API key is not valid. Check it in Settings.';
-  else if (reason === 'API_KEY_HTTP_REFERRER_BLOCKED' || /referer|referrer/i.test(msg)) text = `Your key does not allow this website. Add <code>${esc(location.origin)}/*</code> to the key's website restrictions.`;
+  else if (reason === 'API_KEY_HTTP_REFERRER_BLOCKED' || /referer|referrer/i.test(msg)) text = IN_APP
+    ? 'Your key only works on certain websites. In the Google Cloud console, set the key\'s <b>Application restrictions</b> to <b>None</b> and keep the API restrictions.'
+    : `Your key does not allow this website. Add <code>${esc(location.origin)}/*</code> to the key's website restrictions.`;
   else if (reason === 'SERVICE_DISABLED' || /has not been used|is disabled|not been enabled/i.test(msg)) text = `<b>${apiName}</b> is not turned on for your Google Cloud project. <a href="${apiUrl}" target="_blank" rel="noopener">Turn it on</a>, wait a minute and try again.`;
   else if (reason === 'API_KEY_SERVICE_BLOCKED' || /blocked/i.test(msg)) text = `Your key is not allowed to use <b>${apiName}</b>. Add it under the key's API restrictions.`;
   else if (reason === 'BILLING_DISABLED' || /billing/i.test(msg)) text = 'Google needs a billing account on your Cloud project before the key works. The free monthly allowance still applies.';
@@ -997,18 +1285,18 @@ async function gFetch(url, opts, api) {
   return j;
 }
 
-function fromGoogle(g) {
+function fromGoogle(g, kw) {
   const types = g.types || [];
   return {
     id: 'g:' + g.id, gid: g.id, src: 'google',
     name: (g.displayName && g.displayName.text) || 'Unnamed place',
     lat: g.location.latitude, lng: g.location.longitude,
-    address: g.shortFormattedAddress || g.formattedAddress || '',
+    address: g.shortFormattedAddress || g.formattedAddress || '', fullAddress: g.formattedAddress || '',
     phone: g.nationalPhoneNumber || g.internationalPhoneNumber || '', intlPhone: g.internationalPhoneNumber || '',
     rating: typeof g.rating === 'number' ? g.rating : null, reviews: g.userRatingCount || 0,
     website: g.websiteUri || '', maps: g.googleMapsUri || `https://www.google.com/maps/place/?q=place_id:${g.id}`,
     type: (g.primaryTypeDisplayName && g.primaryTypeDisplayName.text) || pretty(g.primaryType || types[0] || ''),
-    types, cats: CATS.filter(c => c.g.some(t => types.includes(t))).map(c => c.id),
+    types, cats: CATS.filter(c => c.g.some(t => types.includes(t))).map(c => c.id), kw: kw || undefined,
     price: g.priceLevel || '', seen: Date.now(),
   };
 }
@@ -1018,6 +1306,7 @@ function addPlace(p) {
   if (old) {
     if (old.website === p.website && old.check) p.check = old.check;
     if (old.hours && !p.hours) p.hours = old.hours;
+    if (old.kw && !p.kw) p.kw = old.kw;
   }
   classify(p);
   S.places.set(p.id, p);
@@ -1027,10 +1316,8 @@ function addPlace(p) {
 const cellRadius = c => Math.max(60, haversine(c.s, c.w, c.n, c.e) / 2);
 function splitCell(c) {
   const mLat = (c.s + c.n) / 2, mLng = (c.w + c.e) / 2, d = (c.d || 0) + 1;
-  return [
-    { s: c.s, w: c.w, n: mLat, e: mLng, d, types: c.types }, { s: c.s, w: mLng, n: mLat, e: c.e, d, types: c.types },
-    { s: mLat, w: c.w, n: c.n, e: mLng, d, types: c.types }, { s: mLat, w: mLng, n: c.n, e: c.e, d, types: c.types },
-  ];
+  return [[c.s, c.w, mLat, mLng], [c.s, mLng, mLat, c.e], [mLat, c.w, c.n, mLng], [mLat, mLng, c.n, c.e]]
+    .map(([s, w, n, e]) => ({ s, w, n, e, d, types: c.types, kw: c.kw }));
 }
 
 async function nearby(cell) {
@@ -1038,7 +1325,7 @@ async function nearby(cell) {
     includedTypes: cell.types, maxResultCount: 20, rankPreference: 'POPULARITY', languageCode: LANG,
     locationRestriction: { circle: { center: { latitude: (cell.s + cell.n) / 2, longitude: (cell.w + cell.e) / 2 }, radius: Math.min(50000, cellRadius(cell)) } },
   };
-  for (let tries = 0; tries < 4; tries++) {
+  for (let tries = 0; tries < 6; tries++) {
     try {
       const j = await gFetch(PLACES + 'places:searchNearby', {
         method: 'POST',
@@ -1046,51 +1333,86 @@ async function nearby(cell) {
         body: JSON.stringify(body),
       }, 'places');
       count('nearby');
-      return j.places || [];
+      return { places: j.places || [], full: (j.places || []).length >= 20 };
     } catch (e) {
-      // Google rejects the whole search when one type is not supported: drop it and retry.
+      // Google rejects the whole search when one type is not supported: drop it everywhere and retry.
       const bad = e.status === 400 && body.includedTypes.filter(t => new RegExp('\\b' + t + '\\b').test(e.raw || ''));
       if (bad && bad.length && bad.length < body.includedTypes.length) {
         body.includedTypes = body.includedTypes.filter(t => !bad.includes(t));
         cell.types.splice(0, cell.types.length, ...body.includedTypes);
+        bad.forEach(t => S.badTypes.add(t));
+        store.set('badTypes', [...S.badTypes]);
         continue;
       }
       throw e;
     }
   }
-  return [];
+  return { places: [], full: false };
+}
+
+// Keyword search: up to 3 pages of 20. take() asks the scan for budget before each extra page.
+async function textSearch(cell, take) {
+  const places = [];
+  let token = '', pages = 0;
+  do {
+    if (pages > 0 && !take()) break;
+    const body = {
+      textQuery: cell.kw, pageSize: 20, languageCode: LANG,
+      locationRestriction: { rectangle: { low: { latitude: cell.s, longitude: cell.w }, high: { latitude: cell.n, longitude: cell.e } } },
+    };
+    if (token) body.pageToken = token;
+    const j = await gFetch(PLACES + 'places:searchText', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': S.key, 'X-Goog-FieldMask': SCAN_FIELDS + ',nextPageToken' },
+      body: JSON.stringify(body),
+    }, 'places');
+    count('text');
+    pages++;
+    places.push(...(j.places || []));
+    token = j.nextPageToken || '';
+  } while (token && pages < 3 && !scan.stop);
+  return { places, full: pages >= 3 && places.length >= 60 };
 }
 
 async function scanGoogle() {
   const b = map.getBounds();
-  const types = [...new Set(S.cats.flatMap(id => CAT_BY_ID[id].g))];
-  // Google accepts at most 50 types per search
-  const groups = [];
-  for (let i = 0; i < types.length; i += 50) groups.push(types.slice(i, i + 50));
-  let queue = groups.map(g => ({ s: b.getSouth(), w: b.getWest(), n: b.getNorth(), e: b.getEast(), d: 0, types: g }));
-  // very large views: split up front so each circle stays within Google's 50 km limit
-  while (queue.some(c => cellRadius(c) > 50000)) queue = queue.flatMap(c => (cellRadius(c) > 50000 ? splitCell(c) : [c]));
+  const kw = S.kw;
+  const kind = kw ? 'text' : 'nearby';
+  const root = { s: b.getSouth(), w: b.getWest(), n: b.getNorth(), e: b.getEast(), d: 0 };
+  let queue;
+  if (kw) queue = [Object.assign({ kw }, root)];
+  else {
+    const types = [...new Set(S.cats.flatMap(id => CAT_BY_ID[id].g))].filter(t => !S.badTypes.has(t));
+    queue = [];
+    for (let i = 0; i < types.length; i += 50) queue.push(Object.assign({ types: types.slice(i, i + 50) }, root));   // max 50 types per search
+    while (queue.some(c => cellRadius(c) > 50000)) queue = queue.flatMap(c => (cellRadius(c) > 50000 ? splitCell(c) : [c]));
+  }
 
-  const budget = S.budget;
+  const budget = Math.min(DEPTH[S.depth].n, capLeft(kind));
   const found = new Set();
-  let used = 0, inflight = 0, error = null, full = 0;
-  const update = () => progress(`Scanning · ${used} of ${budget} searches · ${found.size} places`, used / budget);
+  let spent = 0, inflight = 0, error = null, full = 0, capped = false;
+  const take = () => {
+    if (spent >= budget) { if (capLeft(kind) <= 0) capped = true; return false; }
+    spent++;
+    return true;
+  };
+  const update = () => progress(`Scanning · ${spent} of ${budget === Infinity ? '∞' : budget} searches · ${fmt(found.size)} places`, spent / budget);
   update();
 
   async function worker() {
     while (!scan.stop && !error) {
       if (!queue.length) { if (!inflight) return; await sleep(60); continue; }
-      if (used >= budget) return;
+      if (!take()) return;
       const cell = queue.shift();
-      used++; inflight++;
+      inflight++;
       try {
-        const res = await nearby(cell);
-        for (const g of res) {
+        const r = kw ? await textSearch(cell, take) : await nearby(cell);
+        for (const g of r.places) {
           if (!g.location || g.businessStatus === 'CLOSED_PERMANENTLY' || g.businessStatus === 'CLOSED_TEMPORARILY') continue;
-          found.add(addPlace(fromGoogle(g)).id);
+          found.add(addPlace(fromGoogle(g, kw)).id);
         }
-        if (res.length >= 20) {
-          if (cellRadius(cell) > 150 && (cell.d || 0) < 8) queue.push(...splitCell(cell));
+        if (r.full) {
+          if (cellRadius(cell) > 90 && (cell.d || 0) < 9) queue.push(...splitCell(cell));
           else full++;
         }
         render();
@@ -1100,7 +1422,8 @@ async function scanGoogle() {
     }
   }
   await Promise.all([worker(), worker(), worker()]);
-  return { found, used, error, more: queue.length > 0 || full > 0 };
+  if (S.capOn && capLeft(kind) <= 0 && queue.length) capped = true;
+  return { found, used: spent, error, more: queue.length > 0 || full > 0, capped };
 }
 
 /* ================= OpenStreetMap (free mode) ================= */
@@ -1116,7 +1439,7 @@ async function overpass(q) {
   }
   throw last;
 }
-function fromOsm(el) {
+function fromOsm(el, kw) {
   const t = el.tags || {};
   if (!t.name || t.brand || t['brand:wikidata']) return null;   // skip chains
   const lat = el.lat != null ? el.lat : el.center && el.center.lat;
@@ -1124,32 +1447,49 @@ function fromOsm(el) {
   if (lat == null || lng == null) return null;
   const cats = CATS.filter(c => Object.entries(c.osm).some(([k, vs]) => vs.includes(t[k]))).map(c => c.id);
   let kind = '';
-  for (const k of ['amenity', 'shop', 'craft', 'leisure', 'healthcare', 'tourism']) if (t[k]) { kind = t[k]; break; }
+  for (const k of ['amenity', 'shop', 'craft', 'leisure', 'healthcare', 'tourism', 'office']) if (t[k]) { kind = t[k]; break; }
   const street = [t['addr:housenumber'], t['addr:street']].filter(Boolean).join(' ');
   const address = [street, t['addr:city']].filter(Boolean).join(', ');
   const fb = t['contact:facebook'] || t.facebook, ig = t['contact:instagram'] || t.instagram;
   const name = t.name;
   return {
-    id: 'o:' + el.type[0] + el.id, src: 'osm', name, lat, lng, address,
+    id: 'o:' + el.type[0] + el.id, src: 'osm', name, lat, lng, address, city: t['addr:city'] || '',
     phone: t.phone || t['contact:phone'] || '', rating: null, reviews: 0,
     website: t.website || t['contact:website'] || t.url || '',
     social: fb ? 'Facebook' : ig ? 'Instagram' : '', socialUrl: fb || ig || '',
     maps: `https://www.google.com/maps/search/${encodeURIComponent(name + (address ? ', ' + address : ''))}/@${lat},${lng},18z`,
     type: pretty(kind) + (t.cuisine ? ' · ' + t.cuisine.split(';').slice(0, 2).map(pretty).join(', ') : ''),
-    cats, hours: t.opening_hours || '', osmUrl: `https://www.openstreetmap.org/${el.type}/${el.id}`, seen: Date.now(),
+    cats, kw: kw || undefined, hours: t.opening_hours || '', osmUrl: `https://www.openstreetmap.org/${el.type}/${el.id}`, seen: Date.now(),
   };
 }
+const overpassStr = s => s.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+function osmQuery(t, kw) {
+  const bb = [t.s, t.w, t.n, t.e].map(v => v.toFixed(6)).join(',');
+  let parts;
+  if (kw) {
+    const re = overpassStr(kw);
+    parts = `nwr["name"~"${re}",i][~"^(amenity|shop|craft|leisure|healthcare|tourism|office)$"~"."](${bb});nwr["cuisine"~"${re}",i](${bb});`;
+  } else {
+    const by = {};
+    for (const id of S.cats) for (const [k, vs] of Object.entries(CAT_BY_ID[id].osm)) { by[k] = by[k] || new Set(); vs.forEach(v => by[k].add(v)); }
+    parts = Object.entries(by).map(([k, vs]) => `nwr["${k}"~"^(${[...vs].join('|')})$"]["name"](${bb});`).join('');
+  }
+  return `[out:json][timeout:50];(${parts});out center tags 4000;`;
+}
 async function scanOsm() {
-  const b = map.getBounds();
-  const bb = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].map(v => v.toFixed(6)).join(',');
-  const by = {};
-  for (const id of S.cats) for (const [k, vs] of Object.entries(CAT_BY_ID[id].osm)) { by[k] = by[k] || new Set(); vs.forEach(v => by[k].add(v)); }
-  const parts = Object.entries(by).map(([k, vs]) => `nwr["${k}"~"^(${[...vs].join('|')})$"]["name"](${bb});`).join('');
-  progress('Asking OpenStreetMap…', 0.3);
-  const j = await overpass(`[out:json][timeout:40];(${parts});out center tags 2500;`);
+  const tiles = osmTiles(map.getBounds()) || [];
   const found = new Set();
-  for (const el of j.elements || []) { const p = fromOsm(el); if (p) found.add(addPlace(p).id); }
-  return { found, used: 1, error: null, more: (j.elements || []).length >= 2500 };
+  let more = false, done = 0;
+  for (const t of tiles) {
+    if (scan.stop) break;
+    progress(`Asking OpenStreetMap · part ${done + 1} of ${tiles.length} · ${fmt(found.size)} places`, (done + 0.3) / tiles.length);
+    const j = await overpass(osmQuery(t, S.kw));
+    for (const el of j.elements || []) { const p = fromOsm(el, S.kw); if (p) found.add(addPlace(p).id); }
+    if ((j.elements || []).length >= 4000) more = true;
+    done++;
+    render();
+  }
+  return { found, used: done, error: null, more };
 }
 
 /* ================= scanning ================= */
@@ -1167,22 +1507,25 @@ async function runScan() {
   $('#progress').hidden = true;
   if (r.found.size) {
     S.areas.push([+b.getSouth().toFixed(5), +b.getWest().toFixed(5), +b.getNorth().toFixed(5), +b.getEast().toFixed(5), mode()]);
-    if (S.areas.length > 80) S.areas = S.areas.slice(-80);
+    if (S.areas.length > 120) S.areas = S.areas.slice(-120);
     store.set('areas', S.areas);
     drawAreas();
+    recountChains();
     savePlaces();
   }
   updateScanButton();
   render();
   renderChrome();
   const matches = [...r.found].map(id => S.places.get(id)).filter(p => passes(p));
-  if (r.error) toast(`${r.error.html ? r.error.message : esc(r.error.message)}${r.found.size ? ` (${r.found.size} places found before that)` : ''}`, 15000);
-  else if (!r.found.size) toast('No places of these types here. Try a busier area or pick more types.');
+  if (r.error) toast(`${r.error.html ? r.error.message : esc(r.error.message)}${r.found.size ? ` (${fmt(r.found.size)} places found before that)` : ''}`, 15000);
+  else if (!r.found.size) toast(r.capped ? 'You have reached your monthly limit of Google searches. Raise it in Settings.' : 'No places of these types here. Try a busier area or pick more types.');
   else {
     let msg = `Found ${fmt(r.found.size)} places · <b>${fmt(matches.length)}</b> match your filters.`;
     if (scan.stop) msg += ' Scan stopped.';
-    else if (r.more && mode() === 'google') msg += ' Busy area: zoom in and scan again to find more.';
-    toast(msg, 8000);
+    else if (r.capped) msg += ` Stopped at your monthly limit of ${fmt(S.monthlyCap)} searches (Settings).`;
+    else if (r.more && mode() === 'google') msg += S.depth === 'max' ? ' Very busy area: zoom in and scan again to find even more.' : ' Busy area: choose Maximum in Settings or zoom in to find more.';
+    else if (r.more) msg += ' Very busy area: zoom in and scan again to find more.';
+    toast(msg, 9000);
   }
   if (mode() === 'google' && S.autoCheck) {
     [...r.found].map(id => S.places.get(id))
@@ -1192,9 +1535,22 @@ async function runScan() {
   }
 }
 
+// share of the view already covered by earlier scans (sampled on a 6 x 6 grid)
+function coverage() {
+  const b = map.getBounds();
+  const rects = S.areas.filter(a => a[4] === mode());
+  let hit = 0;
+  for (let i = 0; i < 6; i++) for (let j = 0; j < 6; j++) {
+    const lat = b.getSouth() + (i + 0.5) / 6 * (b.getNorth() - b.getSouth());
+    const lng = b.getWest() + (j + 0.5) / 6 * (b.getEast() - b.getWest());
+    if (rects.some(a => lat >= a[0] && lat <= a[2] && lng >= a[1] && lng <= a[3])) hit++;
+  }
+  return hit / 36;
+}
+
 /* ================= website checks (PageSpeed Insights) ================= */
 const PSI = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
-const CQ = { list: [], active: 0, max: 3, disabled: '', pausedUntil: 0, done: 0 };
+const CQ = { list: [], active: 0, max: 3, disabled: '', pausedUntil: 0 };
 function canCheck(p) {
   if (!S.key || p.src !== 'google' || !p.website || p.checking || p.status !== 'unchecked') return false;
   if (p.check && p.check.error && Date.now() - p.check.at < 6 * 36e5) return false;
@@ -1214,12 +1570,11 @@ function pump() {
     const p = S.places.get(CQ.list.shift());
     if (!p || !canCheck(p)) continue;
     CQ.active++;
-    checkSite(p).finally(() => { CQ.active--; CQ.done++; pump(); });
+    checkSite(p).finally(() => { CQ.active--; pump(); });
   }
   const left = CQ.list.length + CQ.active;
   $('#checkBadge').hidden = !left;
   $('#checkText').textContent = `Checking websites · ${left} left`;
-  if (!left) CQ.done = 0;
 }
 
 const LH_ERRORS = [
@@ -1271,12 +1626,18 @@ function scoreLighthouse(lh) {
   if (cats.a != null && cats.a < 0.7) reasons.push(`Hard to use for some visitors: accessibility ${pct(cats.a)}/100`);
   if (failed('errors-in-console')) reasons.push('Shows errors in the browser');
   if (failed('deprecations')) { q -= 3; reasons.push('Uses outdated browser features'); }
+  // what it is built with, and very old libraries
+  const stack = (lh.stackPacks || []).map(s => s && s.title).filter(Boolean);
+  const libs = ((audit('js-libraries') || {}).details || {}).items || [];
+  const jq = libs.find(l => /jquery/i.test(l.name || '') && /^[12]\./.test(l.version || ''));
+  if (jq) { q -= 4; reasons.push(`Uses an old jQuery version (${jq.version})`); }
   q = Math.round(clamp(q, 0, 100));
   const poor = critical || q < 50;
   if (!reasons.length) reasons.push('Loads well on phones and covers the basics');
-  return { at, score: q, poor, cats, reasons, final };
+  return { at, score: q, poor, cats, reasons, final, stack };
 }
 
+const SERVICE_REASON = /API_KEY|SERVICE_DISABLED|BILLING|RATE_LIMIT|RESOURCE_EXHAUSTED|rateLimitExceeded|dailyLimitExceeded|keyInvalid|accessNotConfigured|forbidden/i;
 async function checkSite(p) {
   const u = safeUrl(p.website);
   if (!u) return;
@@ -1293,9 +1654,9 @@ async function checkSite(p) {
     j = await res.json().catch(() => ({}));
     count('psi');
   } catch (e) {
+    clearTimeout(timer);
     p.checking = false;
     p.check = { at: Date.now(), error: e.name === 'AbortError' ? 'it took too long' : 'network problem' };
-    clearTimeout(timer);
     classify(p); savePlaces(); refreshPlace(p);
     return;
   }
@@ -1306,8 +1667,7 @@ async function checkSite(p) {
     const msg = (j.error && j.error.message) || `HTTP ${res.status}`;
     const reasons = [...((j.error && j.error.details) || []), ...((j.error && j.error.errors) || [])].map(d => d && d.reason).filter(Boolean).join(' ');
     const broken = lighthouseBroken(msg);
-    const service = !broken && (res.status === 429 || res.status === 401 || res.status === 403 ||
-      /API_KEY|SERVICE_DISABLED|BILLING|RATE_LIMIT|RESOURCE_EXHAUSTED|rateLimitExceeded|dailyLimitExceeded|keyInvalid|accessNotConfigured|forbidden/i.test(reasons) ||
+    const service = !broken && (res.status === 429 || res.status === 401 || res.status === 403 || SERVICE_REASON.test(reasons) ||
       /API key|has not been used|is disabled|referer|referrer|quota|billing/i.test(msg));
     if (service) {
       if (res.status === 429 && !/per day/i.test(msg)) { CQ.pausedUntil = Date.now() + 60000; CQ.list.unshift(p.id); }
@@ -1337,10 +1697,11 @@ function refreshPlace(p) {
 }
 
 /* ================= place details ================= */
-async function loadDetails(p) {
+async function loadDetails(p, force) {
   if (p.src !== 'google' || !S.key) return null;
   const c = S.details[p.gid];
   if (c && Date.now() - c.at < 7 * DAY) return c.d;
+  if (!force && capLeft('details') <= 0) { const e = new Error('cap'); e.cap = true; throw e; }
   const d = await gFetch(`${PLACES}places/${encodeURIComponent(p.gid)}?languageCode=${LANG}`, {
     headers: { 'X-Goog-Api-Key': S.key, 'X-Goog-FieldMask': DETAIL_FIELDS },
   }, 'places');
@@ -1354,83 +1715,187 @@ async function loadDetails(p) {
   if (typeof d.rating === 'number' && d.rating !== p.rating) { p.rating = d.rating; changed = true; }
   if (d.userRatingCount && d.userRatingCount !== p.reviews) { p.reviews = d.userRatingCount; changed = true; }
   if ((d.websiteUri || '') !== (p.website || '')) { p.website = d.websiteUri || ''; p.check = undefined; changed = true; }
+  if (d.formattedAddress && !p.fullAddress) p.fullAddress = d.formattedAddress;
   if (changed) { classify(p); savePlaces(); render(); }
   return d;
+}
+
+/* ================= outreach messages ================= */
+function issue(p, short) {
+  const u = safeUrl(p.website);
+  const host = u ? bareHost(u.hostname) : '';
+  const first = (p.why[0] || '').replace(/\.$/, '');
+  switch (p.status) {
+    case 'none': return short ? `I noticed you don't have a website yet` : `I noticed ${p.name} doesn't have a website yet, so people who find you on Google only see the Maps listing and can't check your menu, prices or story before they come.`;
+    case 'social': {
+      const what = lowerGeneric(p.website ? (matchHost(host) || {}).label || 'social media page' : `${p.social} page`);
+      return short ? `I noticed your Google listing links to ${withArticle(what)} instead of a website` : `I noticed your Google listing links to ${withArticle(what)} instead of a website. Plenty of customers don't use social media or won't log in, so they can't see your hours, prices or photos.`;
+    }
+    case 'platform': return short ? `I noticed your Google listing links to ${withArticle(lowerGeneric(first))} instead of your own website` : `I noticed your Google listing links to ${withArticle(lowerGeneric(first))} rather than your own website, so customers land on a page you don't control, often right next to your competitors.`;
+    case 'broken': return short ? `I noticed the website on your Google listing isn't working` : `I tried the website on your Google listing${host ? ` (${host})` : ''} and it isn't working right now: ${lcFirst(first)}. Anyone who taps it from Google hits a dead end.`;
+    case 'poor': {
+      const top = (p.check && p.check.reasons || []).slice(0, 2).map(r => lcFirst(r.replace(/:.*$/, ''))).join(' and ');
+      return short ? `I noticed your website${host ? ` (${host})` : ''} is hard to use on a phone` : `I ran your website${host ? ` (${host})` : ''} through Google's PageSpeed test and it scored ${p.check ? p.check.score : 'low'} out of 100${top ? `: ${top}` : ''}. Most people look you up on their phone, so that costs you customers.`;
+    }
+    default: return short ? 'I think your website could bring you more customers' : 'I had a look at your website and I think it could be bringing you a lot more customers.';
+  }
+}
+function pitch(p, kind) {
+  const me = S.me;
+  const name = me.name || '[Your name]';
+  const offer = me.offer || 'websites for local businesses';
+  const city = cityOf(p);
+  const praise = p.rating != null && p.reviews ? `${p.rating.toFixed(1)} stars from ${fmt(p.reviews)} reviews` : '';
+  const sign = [name, me.biz, me.contact].filter(Boolean).join('\n');
+  if (kind === 'dm') {
+    return `Hi! I found ${p.name} on Google Maps${praise ? `, ${praise}, great work` : ''}. ${issue(p, true)}. I make ${offer} and could put together a free mock-up of a website for ${p.name}. Want me to send it over? – ${name}${me.biz ? `, ${me.biz}` : ''}`;
+  }
+  if (kind === 'call') {
+    return [
+      `OPENING: "Hi, is this the owner or manager of ${p.name}? I'm ${name}${me.biz ? ` from ${me.biz}` : ''}. I'll be quick."`,
+      praise ? `COMPLIMENT: "I saw you have ${praise} on Google. Customers clearly love you."` : `COMPLIMENT: "I came across ${p.name} and people say great things about you."`,
+      `PROBLEM: "${issue(p, false)}"`,
+      `OFFER: "I make ${offer}${city ? ` here in ${city}` : ''}. I can put together a free mock-up so you can see what it would look like."`,
+      `ASK: "Would you have 10 minutes this week to look at it? What's the best email to send it to?"`,
+      `IF BUSY: "No problem. Can I email you the mock-up so you can look when you have time?"`,
+      `NOTES: ${p.phone ? `call ${p.phone}` : 'no phone number listed'}${p.hours ? ` · hours: ${p.hours}` : ''}`,
+    ].join('\n\n');
+  }
+  return `Subject: A website for ${p.name}\n\nHi ${p.name} team,\n\n` +
+    `I came across ${p.name} on Google Maps.${praise ? ` ${praise.charAt(0).toUpperCase() + praise.slice(1)} is excellent, so your customers clearly love you.` : ''}\n\n` +
+    `${issue(p, false)}\n\n` +
+    `I'm ${name}${me.biz ? ` from ${me.biz}` : ''}, and I make ${offer}${city ? ` in ${city}` : ''}. I'd be happy to put together a free mock-up of a website for ${p.name} so you can see what it would look like, with no obligation.\n\n` +
+    `Would you be open to a quick 10-minute call this week?\n\nBest regards,\n${sign}`;
 }
 
 /* ================= detail view ================= */
 const ICON = {
   back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>',
+  up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>',
+  down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>',
   map: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>',
   dir: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l18-8-8 18-2-8z"/></svg>',
+  street: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2.2"/><path d="M9 21l1-7-2-1 1.5-4h5L16 13l-2 1 1 7"/></svg>',
   web: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>',
+  people: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 4.5a3 3 0 0 1 0 6M21 20c0-2.6-1.6-4.8-4-5.6"/></svg>',
   copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/></svg>',
+  mail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',
 };
 const PRICE = { PRICE_LEVEL_FREE: 'Free', PRICE_LEVEL_INEXPENSIVE: '$', PRICE_LEVEL_MODERATE: '$$', PRICE_LEVEL_EXPENSIVE: '$$$', PRICE_LEVEL_VERY_EXPENSIVE: '$$$$' };
-let listScroll = 0;
+const LEADS = [['', 'New'], ['saved', 'Saved'], ['contacted', 'Contacted'], ['won', 'Won'], ['skip', 'Not a fit']];
+let listScroll = 0, pitchKind = 'email', pitchDirty = false;
 
 function openDetail(id, { pan = true } = {}) {
   const p = S.places.get(id);
   if (!p) return;
   if (!S.sel) listScroll = $('#side').scrollTop;
   S.sel = id;
+  pitchDirty = false;
   $('#app').classList.add('detail-open');
   $('#listView').hidden = true;
   const v = $('#detailView');
   v.hidden = false;
-  const lead = S.leads[id] || {};
-  const city = p.address ? p.address.split(',').slice(-2).join(',') : '';
-  const webSearch = `https://www.google.com/search?q=${encodeURIComponent(p.name + ' ' + city)}`;
+  const l = leadOf(id);
+  const city = cityOf(p);
+  const q = encodeURIComponent(p.name + (city ? ' ' + city : ''));
   const dirs = p.gid
     ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(p.name)}&destination_place_id=${encodeURIComponent(p.gid)}`
     : `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`;
+  const street = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${p.lat},${p.lng}`;
+  const social = `https://www.google.com/search?q=${encodeURIComponent(`"${p.name}" ${city} (site:facebook.com OR site:instagram.com)`)}`;
   const embed = p.gid && S.key
     ? `https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(S.key)}&q=place_id:${encodeURIComponent(p.gid)}`
     : `https://maps.google.com/maps?q=${encodeURIComponent(p.name + (p.address ? ', ' + p.address : ''))}&ll=${p.lat},${p.lng}&z=17&output=embed`;
   v.innerHTML = `
     <div class="d-top"><button type="button" class="back" id="btnBack">${ICON.back}All places</button>
-      <span class="src">${p.src === 'google' ? 'Google listing' : 'OpenStreetMap'}</span></div>
+      <button type="button" class="icon-btn" id="btnPrev" aria-label="Previous place (K)" title="Previous place (K)">${ICON.up}</button>
+      <button type="button" class="icon-btn" id="btnNext" aria-label="Next place (J)" title="Next place (J)">${ICON.down}</button>
+      <span class="pos" id="dPos"></span></div>
     <header class="d-head">
       <h2>${esc(p.name)}</h2>
-      <div class="sub">${esc([p.type, PRICE[p.price]].filter(Boolean).join(' · '))}${p.address ? '<br>' + esc(p.address) : ''}</div>
+      <div class="sub">${esc([p.type, PRICE[p.price]].filter(Boolean).join(' · '))}${p.address ? '<br>' + esc(p.fullAddress || p.address) : ''}</div>
     </header>
     <div class="d-block" id="dStatus"></div>
     <div class="d-block">
       <div class="actions">
-        <a class="btn primary" href="${esc(p.maps)}" target="_blank" rel="noopener">${ICON.map}Open in Google Maps</a>
+        <a class="btn primary" id="lnkMaps" href="${esc(p.maps)}" target="_blank" rel="noopener">${ICON.map}Open in Google Maps</a>
         <a class="btn" href="${esc(dirs)}" target="_blank" rel="noopener">${ICON.dir}Directions</a>
-        <a class="btn" href="${esc(webSearch)}" target="_blank" rel="noopener" title="Search the web for a website the listing might be missing">${ICON.web}Search the web</a>
+        <a class="btn" href="${esc(street)}" target="_blank" rel="noopener">${ICON.street}Street View</a>
+        <a class="btn" href="https://www.google.com/search?q=${q}" target="_blank" rel="noopener" title="Search the web for a website the listing might be missing">${ICON.web}Search the web</a>
+        <a class="btn" href="${esc(social)}" target="_blank" rel="noopener" title="Look for its Facebook and Instagram pages">${ICON.people}Social pages</a>
+        <button class="btn" type="button" id="btnCopyAll">${ICON.copy}<span>Copy details</span></button>
       </div>
       <div id="dPhone"></div>
     </div>
-    <div class="d-block">
-      <div class="h3">Lead</div>
-      <div class="seg" role="group" aria-label="Lead status">
-        ${[['', 'New'], ['saved', 'Saved'], ['contacted', 'Contacted'], ['skip', 'Not a fit']].map(([s, l]) => `<button type="button" data-lead="${s}" aria-pressed="${(lead.s || '') === s}">${l}</button>`).join('')}
-      </div>
-      <textarea id="leadNote" placeholder="Notes: who you spoke to, what they need…" aria-label="Notes">${esc(lead.note || '')}</textarea>
-    </div>
-    <section class="d-block" id="dWebsite"></section>
     <section class="d-block">
       <div class="h3">Google Maps listing <a class="linkish" href="${esc(p.maps)}" target="_blank" rel="noopener">Open full listing</a></div>
       <iframe class="embed" title="Google Maps listing for ${esc(p.name)}" src="${esc(embed)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen></iframe>
     </section>
+    <section class="d-block" id="dWebsite"></section>
+    <section class="d-block">
+      <div class="h3">Lead</div>
+      <div class="seg leads" role="group" aria-label="Lead status">
+        ${LEADS.map(([s, t], i) => `<button type="button" data-lead="${s}" aria-pressed="${(l.s || '') === s}" title="${t} (${i + 1})">${t}</button>`).join('')}
+      </div>
+      <label class="followup-label" for="leadDue">Follow up on</label>
+      <div class="followup"><input type="date" id="leadDue" value="${esc(l.due || '')}">
+        <button class="btn" type="button" data-due="1">Tomorrow</button><button class="btn" type="button" data-due="7">Next week</button>
+        <button class="btn" type="button" data-due="">Clear</button></div>
+      <textarea id="leadNote" placeholder="Notes: who you spoke to, what they need…" aria-label="Notes">${esc(l.note || '')}</textarea>
+    </section>
+    <section class="d-block">
+      <div class="h3">Reach out <button type="button" class="linkish" data-open-settings>Your details</button></div>
+      <div class="seg" role="tablist" aria-label="Message type">
+        ${[['email', 'Email'], ['dm', 'Text or DM'], ['call', 'Call script']].map(([k, t]) => `<button type="button" role="tab" data-pitch="${k}" aria-selected="${pitchKind === k}">${t}</button>`).join('')}
+      </div>
+      <textarea class="pitch" id="pitchText" aria-label="Message"></textarea>
+      <div class="actions" style="margin-top:8px">
+        <button class="btn primary" type="button" id="btnCopyPitch">${ICON.copy}<span>Copy message</span></button>
+        <a class="btn" id="lnkMail" href="#">${ICON.mail}Open in email app</a>
+      </div>
+    </section>
     <section id="dExtra"></section>
     <footer class="d-foot" id="dFoot"></footer>`;
+  setPitch(p);
   updateDetail(p);
   $('#side').scrollTop = 0;
   render();
   if (pan) {
-    const z = Math.max(map.getZoom(), 16);
-    if (!map.getBounds().pad(-0.15).contains([p.lat, p.lng]) || map.getZoom() < 16) map.setView([p.lat, p.lng], z, { animate: !REDUCED });
+    if (!map.getBounds().pad(-0.15).contains([p.lat, p.lng]) || map.getZoom() < 16) map.setView([p.lat, p.lng], Math.max(map.getZoom(), 16), { animate: !REDUCED });
   }
   if (p.src === 'google' && S.key) {
     enqueueCheck(p, true);
-    const extra = $('#dExtra');
-    if (!S.details[p.gid]) extra.innerHTML = '<div class="d-block"><div class="loading"><span class="spin"></span>Loading photos, hours and reviews…</div></div>';
-    loadDetails(p).then(d => { if (S.sel === p.id) { renderExtra(p, d); updateDetail(p); } })
-      .catch(e => { if (S.sel === p.id) extra.innerHTML = `<div class="d-block"><div class="alert">${e.html ? e.message : esc(e.message)}</div></div>`; });
+    loadExtra(p, false);
   } else renderExtra(p, null);
+}
+
+function loadExtra(p, force) {
+  const extra = $('#dExtra');
+  if (!S.details[p.gid]) extra.innerHTML = '<div class="d-block"><div class="loading"><span class="spin"></span>Loading photos, hours and reviews…</div></div>';
+  loadDetails(p, force).then(d => { if (S.sel === p.id) { renderExtra(p, d); updateDetail(p); } })
+    .catch(e => {
+      if (S.sel !== p.id) return;
+      extra.innerHTML = e.cap
+        ? `<div class="d-block"><p class="small muted" style="margin:0">Photos, hours and reviews are paused: you reached your monthly limit of ${fmt(S.monthlyCap)} detailed listings. <button type="button" class="linkish" id="btnLoadAnyway">Load them anyway</button></p></div>`
+        : `<div class="d-block"><div class="alert">${e.html ? e.message : esc(e.message)}</div></div>`;
+    });
+}
+
+function setPitch(p) {
+  const ta = $('#pitchText');
+  if (!ta) return;
+  ta.value = pitch(p, pitchKind);
+  pitchDirty = false;
+  updateMailLink();
+}
+function updateMailLink() {
+  const ta = $('#pitchText'), a = $('#lnkMail');
+  if (!ta || !a) return;
+  const m = /^Subject: (.*)\n\n([\s\S]*)$/.exec(ta.value);
+  const subject = m ? m[1] : `About ${S.places.get(S.sel).name}`;
+  const body = m ? m[2] : ta.value;
+  a.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  a.hidden = pitchKind === 'call';
 }
 
 function closeDetail() {
@@ -1444,30 +1909,65 @@ function closeDetail() {
   requestAnimationFrame(() => { $('#side').scrollTop = listScroll; map.invalidateSize(); });
 }
 
+function step(dir) {
+  if (!S.order.length) return;
+  const i = S.sel ? S.order.indexOf(S.sel) : -1;
+  const next = i < 0 ? (dir > 0 ? 0 : S.order.length - 1) : clamp(i + dir, 0, S.order.length - 1);
+  if (S.order[next] && S.order[next] !== S.sel) openDetail(S.order[next]);
+}
+function updateNav() {
+  const i = S.order.indexOf(S.sel);
+  const pos = $('#dPos');
+  if (!pos) return;
+  pos.textContent = i >= 0 ? `${i + 1} of ${fmt(S.order.length)}` : '';
+  $('#btnPrev').disabled = i <= 0;
+  $('#btnNext').disabled = i < 0 ? !S.order.length : i >= S.order.length - 1;
+}
+
+function setLead(id, s) {
+  const cur = S.leads[id] || {};
+  if (s) cur.s = s; else delete cur.s;
+  cur.at = Date.now();
+  if (!cur.s && !cur.note && !cur.due) delete S.leads[id]; else S.leads[id] = cur;
+  saveLeads();
+  $$('[data-lead]', $('#detailView')).forEach(x => x.setAttribute('aria-pressed', String(x.dataset.lead === (s || ''))));
+  render();
+}
+function setDue(id, due) {
+  const cur = S.leads[id] || {};
+  if (due) { cur.due = due; if (!cur.s) cur.s = 'contacted'; } else delete cur.due;
+  cur.at = Date.now();
+  if (!cur.s && !cur.note && !cur.due) delete S.leads[id]; else S.leads[id] = cur;
+  saveLeads();
+  const inp = $('#leadDue');
+  if (inp) inp.value = due || '';
+  $$('[data-lead]', $('#detailView')).forEach(x => x.setAttribute('aria-pressed', String(x.dataset.lead === (cur.s || ''))));
+  render();
+}
+
 function updateDetail(p) {
   const st = STATUS[p.status];
   const rating = p.rating != null
     ? `<div class="big"><span class="rating">${p.rating.toFixed(1)}</span><span class="stars">${starStr(p.rating)}</span><a class="rc" href="${esc(p.maps)}" target="_blank" rel="noopener">${fmt(p.reviews)} Google review${p.reviews === 1 ? '' : 's'}</a></div>`
     : `<div class="big"><span class="rc">No rating in free mode. <a href="${esc(p.maps)}" target="_blank" rel="noopener">See reviews on Google Maps</a></span></div>`;
+  const chain = chainInfo(p);
+  const why = p.why.concat(chain ? [`Looks like a chain or franchise: ${chain}`] : []);
   $('#dStatus').innerHTML = `<div class="verdict">
-      <div>${rating}<span class="pill" style="--c:${stColor(p.status)}">${esc(st.label)}</span></div>
+      <div>${rating}<span class="pill s-${p.status}">${STATUS[p.status].g} ${esc(st.label)}</span></div>
       <div class="lead" title="Lead score: weaker website and better reviews score higher"><b>${p.lead}</b><small>Lead score</small></div>
-      <ul class="why">${p.why.map(w => `<li>${esc(w)}</li>`).join('')}</ul>
+      <ul class="why">${why.map(w => `<li>${esc(w)}</li>`).join('')}</ul>
     </div>`;
 
   const phone = p.phone || '';
-  $('#dPhone').innerHTML = phone ? `<div class="phone"><span class="muted">Phone</span> <span class="val">${esc(phone)}</span>
+  $('#dPhone').innerHTML = phone ? `<div class="phone"><span class="muted">Phone</span> <span class="val" id="phoneVal">${esc(phone)}</span>
       <a class="btn" href="tel:${esc((p.intlPhone || phone).replace(/[^\d+]/g, ''))}">Call</a>
-      <button class="btn" type="button" data-copy="${esc(phone)}">${ICON.copy}Copy</button></div>` : '';
+      <button class="btn" type="button" id="btnCopyPhone">${ICON.copy}<span>Copy</span></button></div>` : '';
 
   // website section
   const w = $('#dWebsite');
   const u = safeUrl(p.website);
-  let html = '<div class="h3">Website';
-  if (u && p.src === 'google' && S.key && !matchHost(u.hostname)) {
-    html += p.checking ? '' : `<button type="button" class="linkish" id="btnRecheck">${p.check ? 'Check again' : 'Check now'}</button>`;
-  }
-  html += '</div>';
+  const checkable = u && p.src === 'google' && S.key && !matchHost(u.hostname);
+  let html = `<div class="h3">Website${checkable && !p.checking ? `<button type="button" class="linkish" id="btnRecheck">${p.check ? 'Check again' : 'Check now'}</button>` : ''}</div>`;
   if (!p.website) {
     html += p.socialUrl && safeUrl(p.socialUrl)
       ? `<a class="site-url" href="${esc(safeUrl(p.socialUrl).href)}" target="_blank" rel="noopener">${esc(p.socialUrl)}</a>`
@@ -1480,16 +1980,20 @@ function updateDetail(p) {
     else if (p.check && p.check.score != null) {
       const shot = S.shots.get(p.id);
       const c = p.check.cats || {};
-      const bar = (name, v) => v == null ? '' : `<div class="sc"><span>${name}</span><b>${Math.round(v * 100)}</b><i style="--v:${Math.round(v * 100)}%;--c:${v < 0.5 ? 'var(--st-none)' : v < 0.9 ? 'var(--st-platform)' : 'var(--st-good)'}"></i></div>`;
+      const bar = (name, v) => v == null ? '' : `<div class="sc"><span>${name}</span><b>${Math.round(v * 100)}</b><i style="--v:${Math.round(v * 100)}%;--c:${v < 0.5 ? 'var(--st-none)' : v < 0.9 ? 'var(--st-poor)' : 'var(--st-good)'}"></i></div>`;
+      const fin = p.check.final && safeUrl(p.check.final);
       html += `${shot ? `<img class="shot" src="${shot}" alt="How ${esc(p.name)}'s website looks on a phone">` : ''}
-        <div class="quality"><b>${p.check.score}</b><span>/100 website quality<br><span class="muted small">checked ${ago(p.check.at)}${p.check.final && safeUrl(p.check.final) && bareHost(safeUrl(p.check.final).hostname) !== bareHost(u.hostname) ? ' · opens ' + esc(bareHost(safeUrl(p.check.final).hostname)) : ''}</span></span></div>
+        <div class="quality"><b>${p.check.score}</b><span>/100 website quality<br><span class="muted small">checked ${ago(p.check.at)}${fin && bareHost(fin.hostname) !== bareHost(u.hostname) ? ' · opens ' + esc(bareHost(fin.hostname)) : ''}</span></span></div>
         <div class="scores">${bar('Speed', c.p)}${bar('Accessibility', c.a)}${bar('Best practice', c.b)}${bar('SEO', c.s)}</div>
+        ${p.check.stack && p.check.stack.length ? `<div class="tech">Built with ${esc(p.check.stack.join(', '))}</div>` : ''}
         <div class="clear"></div>`;
     } else if (p.check && p.check.broken) html += `<p class="small muted" style="margin:0">Checked ${ago(p.check.at)}.</p>`;
     else if (!S.key && !matchHost(u.hostname)) html += '<p class="small muted" style="margin:0">Add a Google key in Settings to check how good this website is.</p>';
     else if (CQ.disabled && !matchHost(u.hostname)) html += `<p class="small muted" style="margin:0">${CQ.disabled}</p>`;
   }
   w.innerHTML = html;
+  if (!pitchDirty) setPitch(p);
+  updateNav();
 
   const seen = p.seen ? `Scanned ${ago(p.seen)}.` : '';
   $('#dFoot').innerHTML = p.src === 'google'
@@ -1503,7 +2007,7 @@ function renderExtra(p, d) {
   let html = '';
   if (d) {
     const photo = d.photos && d.photos[0];
-    if (photo && photo.name) {
+    if (photo && photo.name && capLeft('photos') > 0) {
       const credit = photo.authorAttributions && photo.authorAttributions[0];
       html += `<div class="d-block"><img class="photo" alt="Photo of ${esc(p.name)}" loading="lazy" src="${esc(`${PLACES}${photo.name}/media?maxWidthPx=800&key=${encodeURIComponent(S.key)}`)}">
         ${credit ? `<div class="credit">Photo: ${credit.uri && safeUrl(credit.uri) ? `<a href="${esc(safeUrl(credit.uri).href)}" target="_blank" rel="noopener">${esc(credit.displayName || 'Google user')}</a>` : esc(credit.displayName || 'Google user')}</div>` : ''}</div>`;
@@ -1512,8 +2016,9 @@ function renderExtra(p, d) {
     if (d.editorialSummary && d.editorialSummary.text) html += `<div class="d-block"><p style="margin:0">${esc(d.editorialSummary.text)}</p></div>`;
     const days = d.regularOpeningHours && d.regularOpeningHours.weekdayDescriptions;
     if (days && days.length) {
-      const today = (new Date().getDay() + 6) % 7;   // Google lists Monday first
-      html += `<div class="d-block"><div class="h3">Hours</div><ul class="hours">${days.map((t, i) => `<li${i === today ? ' class="today"' : ''}>${esc(t)}</li>`).join('')}</ul></div>`;
+      const todayIdx = (new Date().getDay() + 6) % 7;   // Google lists Monday first
+      p.hours = days[todayIdx];
+      html += `<div class="d-block"><div class="h3">Hours</div><ul class="hours">${days.map((t, i) => `<li${i === todayIdx ? ' class="today"' : ''}>${esc(t)}</li>`).join('')}</ul></div>`;
     }
     const revs = (d.reviews || []).filter(r => r && (r.text || r.originalText));
     if (revs.length) {
@@ -1530,7 +2035,44 @@ function renderExtra(p, d) {
   box.innerHTML = html;
 }
 
-/* ================= CSV ================= */
+function detailsText(p) {
+  return [
+    p.name, [p.type, p.rating != null ? `${p.rating.toFixed(1)}★ (${fmt(p.reviews)} reviews)` : ''].filter(Boolean).join(' · '),
+    p.fullAddress || p.address, p.phone ? `Phone: ${p.phone}` : '', `Website: ${p.website || p.socialUrl || 'none'} (${STATUS[p.status].label.toLowerCase()})`,
+    ...p.why.map(w => `- ${w}`), `Google Maps: ${p.maps}`,
+  ].filter(Boolean).join('\n');
+}
+
+/* ================= route ================= */
+function planRoute() {
+  const list = inViewList();
+  let stops = list.filter(p => ['saved', 'contacted'].includes(leadOf(p.id).s) || isDue(leadOf(p.id)));
+  const what = stops.length ? 'your saved leads in view' : 'the top places in the list';
+  if (!stops.length) stops = list.slice(0, 10);
+  // nearest-neighbour order from the map centre, 10 stops at most (Google's limit)
+  const c = map.getCenter();
+  let cur = { lat: c.lat, lng: c.lng };
+  const left = stops.slice(0, 25), route = [];
+  while (left.length && route.length < 10) {
+    let bi = 0, bd = Infinity;
+    left.forEach((p, i) => { const d = haversine(cur.lat, cur.lng, p.lat, p.lng); if (d < bd) { bd = d; bi = i; } });
+    cur = left.splice(bi, 1)[0];
+    route.push(cur);
+  }
+  if (!route.length) return;
+  const dest = route[route.length - 1], ways = route.slice(0, -1);
+  const allIds = route.every(p => p.gid);
+  let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${dest.lat},${dest.lng}`;
+  if (allIds) url += `&destination_place_id=${encodeURIComponent(dest.gid)}`;
+  if (ways.length) {
+    url += `&waypoints=${encodeURIComponent(ways.map(p => `${p.lat},${p.lng}`).join('|'))}`;
+    if (allIds) url += `&waypoint_place_ids=${encodeURIComponent(ways.map(p => p.gid).join('|'))}`;
+  }
+  openTab(url);
+  toast(`Opened a route through ${route.length} of ${what} in Google Maps.`);
+}
+
+/* ================= CSV and backup ================= */
 function csvCell(v) {
   let s = String(v == null ? '' : v);
   if (/^[=@]/.test(s) || /^[+-][^\d\s(]/.test(s)) s = "'" + s;
@@ -1540,21 +2082,50 @@ function downloadCsv(places, name) {
   const cols = [
     ['Name', p => p.name], ['Website status', p => STATUS[p.status].label], ['Why', p => p.why.join('; ')], ['Lead score', p => p.lead],
     ['Rating', p => p.rating == null ? '' : p.rating], ['Reviews', p => p.rating == null ? '' : p.reviews], ['Type', p => p.type],
-    ['Phone', p => p.phone], ['Address', p => p.address], ['Website', p => p.website || p.socialUrl || ''],
+    ['Phone', p => p.phone], ['Address', p => p.fullAddress || p.address], ['Website', p => p.website || p.socialUrl || ''],
     ['Website quality', p => (p.check && p.check.score != null ? p.check.score : '')], ['Google Maps', p => p.maps],
-    ['Lead status', p => ({ saved: 'Saved', contacted: 'Contacted', skip: 'Not a fit' }[(S.leads[p.id] || {}).s] || '')],
-    ['Notes', p => (S.leads[p.id] || {}).note || ''], ['Latitude', p => p.lat.toFixed(6)], ['Longitude', p => p.lng.toFixed(6)],
+    ['Lead status', p => ({ saved: 'Saved', contacted: 'Contacted', won: 'Won', skip: 'Not a fit' }[leadOf(p.id).s] || '')],
+    ['Follow up', p => leadOf(p.id).due || ''], ['Notes', p => leadOf(p.id).note || ''],
+    ['Latitude', p => p.lat.toFixed(6)], ['Longitude', p => p.lng.toFixed(6)],
   ];
   const rows = [cols.map(c => c[0]), ...places.map(p => cols.map(c => c[1](p)))];
-  const csv = '﻿' + rows.map(r => r.map(csvCell).join(',')).join('\r\n');
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  download(name, '﻿' + rows.map(r => r.map(csvCell).join(',')).join('\r\n'), 'text/csv;charset=utf-8');
 }
-const inViewList = () => { const b = map.getBounds(); return [...S.places.values()].filter(p => passes(p) && b.contains([p.lat, p.lng])).sort(SORTS[S.sort]); };
+const inViewList = () => { const b = map.getBounds(); return sorted([...S.places.values()].filter(p => passes(p) && b.contains([p.lat, p.lng]))); };
+
+function backup() {
+  const { key, ...settings } = JSON.parse(JSON.stringify(Object.fromEntries(Object.entries(S).filter(([k]) => k in DEFAULTS))));
+  const data = { app: 'siteless', version: 2, savedAt: new Date().toISOString(), settings, places: [...S.places.values()].map(compact), leads: S.leads, areas: S.areas };
+  download(`siteless-backup-${today()}.json`, JSON.stringify(data), 'application/json');
+}
+async function restore(file) {
+  const st = $('#clearStatus');
+  try {
+    const data = JSON.parse(await file.text());
+    if (!data || data.app !== 'siteless' || !Array.isArray(data.places)) throw new Error('not a Siteless backup');
+    let added = 0;
+    for (const p of data.places) {
+      if (!p || !p.id || typeof p.lat !== 'number' || typeof p.lng !== 'number' || !p.name) continue;
+      const old = S.places.get(p.id);
+      if (!old || (p.seen || 0) > (old.seen || 0)) { classify(p); S.places.set(p.id, p); if (!old) added++; }
+    }
+    for (const [id, l] of Object.entries(data.leads || {})) {
+      if (l && typeof l === 'object' && (!S.leads[id] || (l.at || 0) >= (S.leads[id].at || 0))) S.leads[id] = l;
+    }
+    if (Array.isArray(data.areas)) S.areas = S.areas.concat(data.areas.filter(a => Array.isArray(a) && a.length === 5)).slice(-120);
+    store.set('areas', S.areas);
+    saveLeads();
+    recountChains();
+    savePlaces();
+    afterModeChange();
+    renderSettings();
+    st.className = 'status-line ok';
+    st.textContent = `Restored: ${fmt(added)} new places and ${fmt(Object.keys(data.leads || {}).length)} leads.`;
+  } catch (e) {
+    st.className = 'status-line err';
+    st.textContent = `Could not restore that file (${e.message}).`;
+  }
+}
 
 /* ================= geocoding ================= */
 async function geocode(q) {
@@ -1574,25 +2145,29 @@ function goTo(r) {
   const bb = r.boundingbox && r.boundingbox.map(Number);   // [south, north, west, east]
   if (bb && bb.every(n => !isNaN(n))) {
     map.fitBounds([[bb[0], bb[2]], [bb[1], bb[3]]], { maxZoom: 17, animate: !REDUCED });
-    if (map.getZoom() < 14) map.setView([+r.lat, +r.lon], 15, { animate: !REDUCED });
+    if (map.getZoom() < 13) map.setView([+r.lat, +r.lon], 14, { animate: !REDUCED });
   } else map.setView([+r.lat, +r.lon], 16, { animate: !REDUCED });
 }
 
 /* ================= settings dialog ================= */
 function renderSettings() {
   $('#keyInput').value = S.key;
-  $('#originCode').textContent = location.origin.startsWith('http') ? location.origin + '/*' : 'your website address/*';
-  $('#budget').value = String(S.budget);
+  if (IN_APP) $('#keyStep4').innerHTML = 'Edit the key: set <b>Application restrictions</b> to <b>None</b> (the key stays on this computer) and under <b>API restrictions</b> pick the three APIs above. Paste the key here.';
+  else $('#originCode').textContent = location.origin.startsWith('http') ? location.origin + '/*' : 'your website address/*';
+  $$('#depthRadios input').forEach(r => { r.checked = r.value === S.depth; });
+  $('#capOn').checked = !!S.capOn;
+  $('#monthlyCap').value = S.monthlyCap;
   $('#autoCheck').checked = !!S.autoCheck;
-  const u = usageNow();
+  $('#autoScan').checked = !!S.autoScan;
+  $('#meName').value = S.me.name; $('#meBiz').value = S.me.biz; $('#meOffer').value = S.me.offer; $('#meContact').value = S.me.contact;
   $('#usage').innerHTML = [
-    [u.nearby, 'area searches (ratings + websites)'], [u.details, 'detailed listings (reviews, hours)'],
-    [u.photos, 'photos shown'], [u.psi, 'website checks (free)'],
-  ].map(([n, l]) => `<div><b>${fmt(n)}</b><span>${l}</span></div>`).join('');
+    ['nearby', 'area searches'], ['text', 'keyword searches'], ['details', 'detailed listings'],
+    ['photos', 'photos shown'], ['psi', 'website checks (free)'], ['osm', 'OpenStreetMap scans (free)'],
+  ].map(([k, l]) => `<div><b>${fmt(used(k))}</b><span>${l}${S.capOn && ['nearby', 'text', 'details', 'photos'].includes(k) ? ` of ${fmt(S.monthlyCap)}` : ''}</span></div>`).join('');
   const nG = [...S.places.values()].filter(p => p.src === 'google').length;
   const nO = S.places.size - nG;
-  const nL = Object.values(S.leads).filter(l => l.s).length;
-  $('#dataInfo').textContent = `${fmt(nG)} Google places and ${fmt(nO)} OpenStreetMap places are saved in this browser, plus ${fmt(nL)} marked leads.`;
+  const nL = Object.values(S.leads).filter(l => l.s || l.note).length;
+  $('#dataInfo').textContent = `${fmt(nG)} Google places and ${fmt(nO)} OpenStreetMap places are saved in this browser, plus ${fmt(nL)} leads. Back them up to move them to another device.`;
 }
 async function testAndSaveKey() {
   const key = $('#keyInput').value.trim();
@@ -1628,9 +2203,12 @@ function afterModeChange() {
 $('#btnScan').addEventListener('click', runScan);
 $('#btnStop').addEventListener('click', () => { scan.stop = true; $('#progText').textContent = 'Stopping…'; });
 $('#btnCheckStop').addEventListener('click', () => { CQ.list = []; pump(); });
-$('#btnCheckAll').addEventListener('click', () => inViewList().filter(p => p.status === 'unchecked').forEach(p => enqueueCheck(p)));
-$('#btnCsv').addEventListener('click', () => downloadCsv(inViewList(), `siteless-leads-${new Date().toISOString().slice(0, 10)}.csv`));
+$('#btnCheckAll').addEventListener('click', () => inViewList().forEach(p => enqueueCheck(p)));
+$('#btnCsv').addEventListener('click', () => downloadCsv(inViewList(), `siteless-places-${today()}.csv`));
+$('#btnRoute').addEventListener('click', planRoute);
 $('#btnMore').addEventListener('click', () => { listLimit += 150; render(); });
+$('#btnDue').addEventListener('click', () => { S.lead = 'due'; saveSettings(); renderChrome(); render(); });
+$('#btnLayer').addEventListener('click', () => { S.layer = S.layer === 'sat' ? 'map' : 'sat'; saveSettings(); setTiles(); });
 
 $('#cats').addEventListener('click', e => {
   const b = e.target.closest('[data-cat]');
@@ -1639,6 +2217,15 @@ $('#cats').addEventListener('click', e => {
   S.cats = S.cats.includes(id) ? S.cats.filter(c => c !== id) : [...S.cats, id];
   saveSettings(); renderChrome(); render();
 });
+$('#btnAllCats').addEventListener('click', () => {
+  S.cats = S.cats.length === CATS.length ? [] : CATS.map(c => c.id);
+  saveSettings(); renderChrome(); render();
+});
+$('#kwForm').addEventListener('submit', e => { e.preventDefault(); S.kw = $('#kw').value.trim().slice(0, 60); saveSettings(); renderChrome(); });
+$('#kw').addEventListener('input', e => { if (!e.target.value.trim() && S.kw) { S.kw = ''; saveSettings(); renderChrome(); } });
+$('#kw').addEventListener('change', e => { S.kw = e.target.value.trim().slice(0, 60); saveSettings(); renderChrome(); });
+document.addEventListener('click', e => { if (e.target.closest('#btnKwClear')) { S.kw = ''; $('#kw').value = ''; saveSettings(); renderChrome(); } });
+
 $('#statusChips').addEventListener('click', e => {
   const b = e.target.closest('[data-st]');
   if (!b) return;
@@ -1650,33 +2237,51 @@ $('#minRating').addEventListener('input', e => { S.minRating = +e.target.value; 
 $('#minReviews').addEventListener('change', e => { S.minReviews = +e.target.value; saveSettings(); render(); });
 $('#leadFilter').addEventListener('change', e => { S.lead = e.target.value; saveSettings(); render(); });
 $('#sort').addEventListener('change', e => { S.sort = e.target.value; saveSettings(); render(); });
+$('#hideChains').addEventListener('change', e => { S.hideChains = e.target.checked; saveSettings(); render(); });
+let qTimer = 0;
+$('#nameFilter').addEventListener('input', e => { clearTimeout(qTimer); qTimer = setTimeout(() => { S.q = e.target.value.trim().toLowerCase(); listLimit = 150; render(); }, 120); });
 
 $('#list').addEventListener('click', e => { const b = e.target.closest('[data-id]'); if (b) openDetail(b.dataset.id); });
 $('#list').addEventListener('mouseover', e => { const b = e.target.closest('[data-id]'); if (b) hl(b.dataset.id, true); });
 $('#list').addEventListener('mouseout', e => { const b = e.target.closest('[data-id]'); if (b) hl(b.dataset.id, false); });
 
+// summary bar tooltip
+const tip = $('#tip');
+$('#summary').addEventListener('mousemove', e => {
+  const s = e.target.closest('[data-tip]');
+  if (!s) { tip.hidden = true; return; }
+  const r = s.getBoundingClientRect();
+  tip.textContent = s.dataset.tip;
+  tip.style.left = clamp(r.left + r.width / 2, 90, innerWidth - 90) + 'px';
+  tip.style.top = r.top + 'px';
+  tip.hidden = false;
+});
+$('#summary').addEventListener('mouseleave', () => { tip.hidden = true; });
+
 $('#detailView').addEventListener('click', e => {
   if (e.target.closest('#btnBack')) return closeDetail();
+  if (e.target.closest('#btnPrev')) return step(-1);
+  if (e.target.closest('#btnNext')) return step(1);
   const p = S.places.get(S.sel);
   if (!p) return;
   const lb = e.target.closest('[data-lead]');
-  if (lb) {
-    const s = lb.dataset.lead;
-    const cur = S.leads[p.id] || {};
-    if (s) S.leads[p.id] = Object.assign(cur, { s }); else if (cur.note) { delete cur.s; S.leads[p.id] = cur; } else delete S.leads[p.id];
-    saveLeads();
-    $$('[data-lead]', $('#detailView')).forEach(x => x.setAttribute('aria-pressed', String(x.dataset.lead === s)));
-    render();
+  if (lb) return setLead(p.id, lb.dataset.lead);
+  const db = e.target.closest('[data-due]');
+  if (db) return setDue(p.id, db.dataset.due ? inDays(+db.dataset.due) : '');
+  const pb = e.target.closest('[data-pitch]');
+  if (pb) {
+    pitchKind = pb.dataset.pitch;
+    $$('[data-pitch]', $('#detailView')).forEach(x => x.setAttribute('aria-selected', String(x === pb)));
+    setPitch(p);
     return;
   }
-  const cb = e.target.closest('[data-copy]');
-  if (cb) {
-    const text = cb.dataset.copy;
-    const done = () => { cb.lastChild.textContent = 'Copied'; setTimeout(() => { cb.lastChild.textContent = 'Copy'; }, 1500); };
-    if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, () => selectText(cb.previousElementSibling.previousElementSibling));
-    else selectText(cb.previousElementSibling.previousElementSibling);
-    return;
-  }
+  const done = (btn, text) => () => { const sp = btn.querySelector('span'); const old = sp.textContent; sp.textContent = text; setTimeout(() => { sp.textContent = old; }, 1500); };
+  const cp = e.target.closest('#btnCopyPhone');
+  if (cp) return copyText(p.phone, done(cp, 'Copied'), $('#phoneVal'));
+  const ca = e.target.closest('#btnCopyAll');
+  if (ca) return copyText(detailsText(p), done(ca, 'Copied'));
+  const cpi = e.target.closest('#btnCopyPitch');
+  if (cpi) return copyText($('#pitchText').value, done(cpi, 'Copied'), $('#pitchText'));
   if (e.target.closest('#btnRecheck')) {
     if (p.check) { p.check = undefined; classify(p); }
     if (CQ.disabled) { CQ.disabled = ''; renderChrome(); }
@@ -1684,24 +2289,40 @@ $('#detailView').addEventListener('click', e => {
     updateDetail(p);
     return;
   }
+  if (e.target.closest('#btnLoadAnyway')) return loadExtra(p, true);
   const rp = e.target.closest('.review p');
   if (rp) rp.classList.toggle('open');
 });
-function selectText(el) { if (!el) return; const r = document.createRange(); r.selectNodeContents(el); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
 $('#detailView').addEventListener('input', e => {
-  if (e.target.id !== 'leadNote' || !S.sel) return;
-  const cur = S.leads[S.sel] || {};
-  cur.note = e.target.value;
-  if (!cur.note && !cur.s) delete S.leads[S.sel]; else S.leads[S.sel] = cur;
-  saveLeads();
+  if (!S.sel) return;
+  if (e.target.id === 'leadNote') {
+    const cur = S.leads[S.sel] || {};
+    cur.note = e.target.value;
+    cur.at = Date.now();
+    if (!cur.note && !cur.s && !cur.due) delete S.leads[S.sel]; else S.leads[S.sel] = cur;
+    saveLeads();
+  } else if (e.target.id === 'pitchText') { pitchDirty = true; updateMailLink(); }
 });
+$('#detailView').addEventListener('change', e => { if (e.target.id === 'leadDue' && S.sel) setDue(S.sel, e.target.value); });
 
 document.addEventListener('click', e => {
   if (e.target.closest('[data-open-settings]')) openSettings();
   if (!e.target.closest('#geoResults') && !e.target.closest('#searchForm')) $('#geoResults').hidden = true;
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && S.sel && !$('#settings').open) closeDetail();
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const t = e.target;
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable;
+  if ($('#settings').open) return;
+  if (e.key === 'Escape') { if (typing) t.blur(); else if (S.sel) closeDetail(); return; }
+  if (typing) return;
+  const k = e.key.toLowerCase();
+  if (e.key === '/') { e.preventDefault(); $('#q').focus(); }
+  else if (k === 's') runScan();
+  else if (k === 'j') step(1);
+  else if (k === 'k') step(-1);
+  else if (k === 'o' && S.sel) { const a = $('#lnkMaps'); if (a) openTab(a.href); }
+  else if (S.sel && /^[1-5]$/.test(e.key)) setLead(S.sel, LEADS[+e.key - 1][0]);
 });
 
 $('#searchForm').addEventListener('submit', e => { e.preventDefault(); const q = $('#q').value.trim(); if (q) geocode(q); });
@@ -1709,12 +2330,13 @@ $('#btnLocate').addEventListener('click', () => {
   if (!navigator.geolocation) return toast('Your browser cannot share its location. Search for a place instead.');
   navigator.geolocation.getCurrentPosition(
     pos => map.setView([pos.coords.latitude, pos.coords.longitude], 16, { animate: !REDUCED }),
-    () => toast('Location is blocked. Search for a place instead.'),
+    () => toast(IN_APP ? 'Your location is not available here. Search for a place instead.' : 'Location is blocked. Search for a place instead.'),
     { enableHighAccuracy: false, timeout: 10000 });
 });
 
 function openSettings() { renderSettings(); $('#keyStatus').textContent = ''; $('#clearStatus').textContent = ''; $('#settings').showModal(); }
 $('#btnSettings').addEventListener('click', openSettings);
+$('#settings').addEventListener('close', () => { renderChrome(); render(); if (S.sel) updateDetail(S.places.get(S.sel)); });
 $('#btnKeyShow').addEventListener('click', e => { const i = $('#keyInput'); i.type = i.type === 'password' ? 'text' : 'password'; e.target.textContent = i.type === 'password' ? 'Show' : 'Hide'; });
 $('#btnKeySave').addEventListener('click', testAndSaveKey);
 $('#keyInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); testAndSaveKey(); } });
@@ -1724,42 +2346,55 @@ $('#btnKeyRemove').addEventListener('click', () => {
   $('#keyStatus').className = 'status-line'; $('#keyStatus').textContent = 'Key removed. Free mode is on.';
   afterModeChange(); renderSettings();
 });
-$('#budget').addEventListener('change', e => { S.budget = +e.target.value; saveSettings(); updateScanButton(); });
+$('#depthRadios').addEventListener('change', e => { if (e.target.name === 'depth') { S.depth = e.target.value; saveSettings(); updateScanButton(); } });
+$('#capOn').addEventListener('change', e => { S.capOn = e.target.checked; saveSettings(); renderSettings(); });
+$('#monthlyCap').addEventListener('change', e => { S.monthlyCap = Math.max(50, Math.round(+e.target.value || 1000)); e.target.value = S.monthlyCap; saveSettings(); renderSettings(); });
 $('#autoCheck').addEventListener('change', e => { S.autoCheck = e.target.checked; saveSettings(); });
+$('#autoScan').addEventListener('change', e => { S.autoScan = e.target.checked; saveSettings(); });
+for (const [id, k] of [['meName', 'name'], ['meBiz', 'biz'], ['meOffer', 'offer'], ['meContact', 'contact']]) {
+  $('#' + id).addEventListener('input', e => { S.me[k] = e.target.value.trim(); saveSettings(); });
+}
 $('#btnCsvAll').addEventListener('click', () => {
-  const leads = [...S.places.values()].filter(p => S.leads[p.id] && (S.leads[p.id].s || S.leads[p.id].note));
-  if (!leads.length) { $('#clearStatus').textContent = 'No leads marked yet. Open a place and mark it Saved or Contacted.'; return; }
-  downloadCsv(leads, `siteless-my-leads-${new Date().toISOString().slice(0, 10)}.csv`);
+  const leads = [...S.places.values()].filter(p => { const l = leadOf(p.id); return l.s || l.note || l.due; });
+  if (!leads.length) { $('#clearStatus').className = 'status-line'; $('#clearStatus').textContent = 'No leads marked yet. Open a place and mark it Saved or Contacted.'; return; }
+  downloadCsv(leads, `siteless-my-leads-${today()}.csv`);
 });
+$('#btnBackup').addEventListener('click', backup);
+$('#btnRestore').addEventListener('click', () => $('#restoreFile').click());
+$('#restoreFile').addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) restore(f); e.target.value = ''; });
 let clearArmed = 0;
 $('#btnClear').addEventListener('click', e => {
   if (Date.now() - clearArmed > 4000) { clearArmed = Date.now(); e.target.textContent = 'Press again to clear'; return; }
   clearArmed = 0;
   e.target.textContent = 'Clear scanned places';
-  // keep places you marked as leads
-  for (const [id] of S.places) if (!S.leads[id]) S.places.delete(id);
+  for (const [id] of S.places) if (!S.leads[id]) S.places.delete(id);   // keep places you marked as leads
   S.areas = []; store.set('areas', []);
   S.details = {}; store.set('details', {});
-  savePlaces(); afterModeChange(); renderSettings();
+  recountChains(); savePlaces(); afterModeChange(); renderSettings();
+  $('#clearStatus').className = 'status-line';
   $('#clearStatus').textContent = 'Cleared. Places you marked as leads were kept.';
 });
 
-let moveTimer = 0;
+let moveTimer = 0, autoTimer = 0;
 map.on('moveend', () => {
   updateScanButton();
   listLimit = 150;
   render();
   clearTimeout(moveTimer);
   moveTimer = setTimeout(() => { const c = map.getCenter(); store.set('view', { lat: +c.lat.toFixed(5), lng: +c.lng.toFixed(5), z: map.getZoom() }); }, 400);
+  clearTimeout(autoTimer);
+  if (S.autoScan) autoTimer = setTimeout(() => { if (!scan.running && !$('#btnScan').disabled && coverage() < 0.6) runScan(); }, 1200);
 });
 new ResizeObserver(() => map.invalidateSize()).observe($('#mapWrap'));
 
 /* ================= start ================= */
+if (/[?&]debug\b/.test(location.search)) window.__siteless = { S, map, render, CQ, canCheck, passes };   // for the end-to-end test
 drawAreas();
 renderChrome();
 render();
 // resume checks that were cut off by a reload
 if (S.key && S.autoCheck) [...S.places.values()].filter(p => p.status === 'unchecked' && passes(p)).sort((a, b) => b.reviews - a.reviews).slice(0, 40).forEach(p => enqueueCheck(p));
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
 </script>
 </body>

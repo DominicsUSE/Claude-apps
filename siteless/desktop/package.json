@@ -1,0 +1,42 @@
+{
+  "name": "siteless",
+  "productName": "Siteless",
+  "version": "1.0.0",
+  "description": "Map of well-reviewed places with no website or a bad one",
+  "author": "Siteless",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "node build.js --page-only && electron .",
+    "dist": "node build.js"
+  },
+  "devDependencies": {
+    "electron": "38.8.6",
+    "electron-builder": "26.15.3",
+    "leaflet": "1.9.4",
+    "leaflet.markercluster": "1.5.3"
+  },
+  "build": {
+    "appId": "com.siteless.app",
+    "productName": "Siteless",
+    "copyright": "Map data: OpenStreetMap contributors, CARTO. Listings: Google.",
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": ["main.js", "preload.js", "app/**/*", "package.json"],
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Siteless",
+      "artifactName": "Siteless-Setup-${version}.exe"
+    },
+    "portable": { "artifactName": "Siteless-${version}-portable.exe" }
+  }
+}
