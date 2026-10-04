@@ -51,6 +51,18 @@ async function launch(userData) {
   await win.waitForSelector("#list .item");
   check((await win.locator("#list .item").count()) === 2, "scans and lists places");
 
+  // the app's file server only hands out its own two files
+  const codes = await win.evaluate(async () => {
+    const out = {};
+    for (const u of ["siteless://app/icon.png", "siteless://app/main.js", "siteless://app/../main.js", "siteless://app/%2e%2e/main.js",
+      "siteless://app/..%5Cmain.js", "siteless://other/index.html", "siteless://app/app/index.html"]) {
+      try { out[u] = (await fetch(u)).status; } catch (e) { out[u] = "error"; }
+    }
+    return out;
+  });
+  check(codes["siteless://app/icon.png"] === 200 && Object.entries(codes).filter(([u]) => !u.endsWith("icon.png")).every(([, c]) => c === 404 || c === "error"),
+    "serves only its own files: " + JSON.stringify(codes));
+
   await win.click("#btnSettings");
   check(/Application restrictions/.test(await win.locator("#keyStep4").innerText()), "explains the key setup for an app");
   await win.click("dialog .dlg-head button");

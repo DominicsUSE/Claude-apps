@@ -127,8 +127,18 @@ function mockRoutes(ctx, base, state) {
     if (u.hostname.endsWith('basemaps.cartocdn.com')) return route.fulfill({ body: PNG, contentType: 'image/png' });
     if (u.hostname === 'server.arcgisonline.com') { calls.sat++; return route.fulfill({ body: PNG, contentType: 'image/png' }); }
     if (/fonts\.(googleapis|gstatic)\.com/.test(u.hostname)) return route.fulfill({ body: '', contentType: 'text/css' });
-    if (/overpass/.test(u.hostname)) { calls.overpass.push(decodeURIComponent((req.postData() || '').replace(/^data=/, ''))); return route.fulfill({ json: OSM, headers: cors }); }
-    if (u.hostname === 'nominatim.openstreetmap.org') return route.fulfill({ json: [{ display_name: 'Testville', lat: '40.72', lon: '-73.99', boundingbox: ['40.715', '40.725', '-73.995', '-73.985'] }], headers: cors });
+    if (/overpass/.test(u.hostname)) {
+      calls.overpass.push(decodeURIComponent((req.postData() || '').replace(/^data=/, '')));
+      if (state.overpassFailAfter != null && calls.overpass.length > state.overpassFailAfter) return route.fulfill({ status: 504, body: 'busy', headers: cors });
+      return route.fulfill({ json: OSM, headers: cors });
+    }
+    if (u.hostname === 'nominatim.openstreetmap.org') {
+      const q = u.searchParams.get('q') || '';
+      if (/slowtown/i.test(q)) { await new Promise(r => setTimeout(r, 900)); return route.fulfill({ json: [{ display_name: 'Slowtown', lat: '10', lon: '10' }], headers: cors }); }
+      if (/fasttown/i.test(q)) return route.fulfill({ json: [{ display_name: 'Fasttown', lat: '20', lon: '20' }], headers: cors });
+      return route.fulfill({ json: [{ display_name: 'Testville', lat: '40.72', lon: '-73.99', boundingbox: ['40.715', '40.725', '-73.995', '-73.985'] }], headers: cors });
+    }
+    if (u.hostname === 'lh3.googleusercontent.com') return route.fulfill({ body: PNG, contentType: 'image/png' });
     if (u.hostname === 'places.googleapis.com') {
       if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
       if (u.pathname.endsWith(':searchText')) {
@@ -138,7 +148,11 @@ function mockRoutes(ctx, base, state) {
         return route.fulfill({ status: r.status, json: r.json, headers: cors });
       }
       if (u.pathname.endsWith(':searchNearby')) { const r = nearbyResponse(JSON.parse(req.postData())); return route.fulfill({ status: r.status, json: r.json, headers: cors }); }
-      if (u.pathname.endsWith('/media')) return route.fulfill({ body: PNG, contentType: 'image/png' });
+      if (u.pathname.endsWith('/media')) {
+        calls.photo = (calls.photo || 0) + 1;
+        if (u.searchParams.get('key') || !req.headers()['x-goog-api-key'] || u.searchParams.get('skipHttpRedirect') !== 'true') state.photoKeyInUrl = true;
+        return route.fulfill({ json: { name: u.pathname.slice(4), photoUri: 'https://lh3.googleusercontent.com/places/test=w800' }, headers: cors });
+      }
       calls.details++;
       const g = generated.get(decodeURIComponent(u.pathname.split('/').pop())) || {};
       return route.fulfill({ headers: cors, json: {
@@ -152,7 +166,7 @@ function mockRoutes(ctx, base, state) {
       calls.psi++;
       if (state.psiDisabled) return route.fulfill({ status: 403, headers: cors, json: { error: { code: 403, message: 'PageSpeed Insights API has not been used in project 1 before or it is disabled.', details: [{ reason: 'SERVICE_DISABLED' }] } } });
       if (u.searchParams.getAll('category').join() !== 'PERFORMANCE,ACCESSIBILITY,BEST_PRACTICES,SEO') state.badCategories = true;
-      await new Promise(r => setTimeout(r, 15));
+      await new Promise(r => setTimeout(r, state.psiDelay || 15));
       const r = psiResponse(u.searchParams.get('url'));
       return route.fulfill({ status: r.status, json: r.json, headers: cors });
     }
@@ -178,6 +192,11 @@ async function main() {
   const state = {};
   await mockRoutes(ctx, base, state);
   const page = await ctx.newPage();
+  const stateOf = () => page.evaluate(() => {
+    const { S } = window.__siteless;
+    const ps = [...S.places.values()].filter(p => p.src === 'google' && window.__siteless.passes(p, true));
+    return { checked: ps.filter(p => p.check).length, unchecked: ps.filter(p => p.status === 'unchecked').length };
+  });
   const errors = [];
   page.on('pageerror', e => errors.push(String(e)));
   page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource|ERR_FAILED/.test(m.text())) errors.push(m.text()); });
@@ -209,7 +228,11 @@ async function main() {
   await page.click('#btnScan');
   await scanDone();
   const names = await listNames();
-  check(names.length === 3 && !names.includes('BigChain'), `lists 3 places and skips chains (${names.join(', ')})`);
+  check(names.length === 3 && !names.includes('BigChain'), `lists 3 places and hides chains (${names.join(', ')})`);
+  await page.uncheck('#hideChains');
+  check((await listNames()).includes('BigChain'), 'a place OpenStreetMap lists as a brand shows when chains are not hidden');
+  await page.check('#hideChains');
+  await settle();
   check(/"office"/.test(calls.overpass[0]) && /"tourism"/.test(calls.overpass[0]), 'free scan asks OpenStreetMap for every type');
   check(/\d+% of 3 places here have no real website/.test(await page.locator('#summary').innerText()), 'area summary shows the share without a real website');
   await page.locator('#list .item', { hasText: 'Little Cup' }).click();
@@ -225,6 +248,18 @@ async function main() {
   await page.click('#btnScan');
   await scanDone();
   check(calls.overpass.length - before === 9, `a city-sized free scan is split into ${calls.overpass.length - before} OpenStreetMap requests`);
+  // if a later part fails, what the earlier parts found is still saved
+  await page.evaluate(() => { localStorage.removeItem('siteless.v1.places'); localStorage.removeItem('siteless.v1.areas'); });
+  await page.reload();
+  await page.waitForSelector('#btnScan');
+  await setZoom(13);
+  state.overpassFailAfter = calls.overpass.length + 1;
+  await page.click('#btnScan');
+  await scanDone();
+  state.overpassFailAfter = null;
+  await page.waitForTimeout(700);
+  const savedIds = await page.evaluate(() => JSON.parse(localStorage.getItem('siteless.v1.places') || '[]').map(p => p.id));
+  check(/busy/.test(await page.locator('#toast').innerText()) && savedIds.includes('o:n1'), 'keeps the places from a free scan that failed part-way');
   await setZoom(11);
   check(/Zoom in/.test(await page.locator('#scanLabel').innerText()), 'asks to zoom in when the free scan area is too big');
   await setZoom(15);
@@ -264,6 +299,14 @@ async function main() {
   check(calls.nearby.every(b => b.includedTypes.length <= 50), 'never sends more than 50 types in one search');
   check(calls.nearby.filter(b => b.includedTypes.includes('juice_shop')).length === 1 && okCalls.every(b => !b.includedTypes.includes('juice_shop')), 'drops an unsupported place type and retries');
   check(calls.nearby.every(b => b.rankPreference === 'POPULARITY' && b.maxResultCount === 20), 'searches by popularity, 20 at a time');
+  // scan the same area again while its website checks are still running
+  state.psiDelay = 400;
+  await page.click('#btnScan');
+  await scanDone();
+  state.psiDelay = 15;
+  await page.waitForFunction(() => document.getElementById('checkBadge').hidden, null, { timeout: 90000 });
+  let st = await stateOf();
+  check(st.unchecked === 0 && st.checked === calls.psi, `a rescan during website checks loses none and repeats none (${calls.psi} checks for ${st.checked} sites)`);
 
   console.log('Quick scan and the monthly limit');
   await setZoom(15);
@@ -326,6 +369,9 @@ async function main() {
   check(/\/maps\/embed\/v1\/place\?key=AIzaTEST&q=place_id(%3A|:)/.test(await page.locator('iframe.embed').getAttribute('src')), 'embeds the official Google listing by place ID');
   check(await page.locator('.review p').evaluate(e => e.innerHTML.includes('&lt;b&gt;')), 'review text is escaped');
   check(/Friday: 9 AM/.test(panel), 'shows opening hours');
+  await page.waitForSelector('#dPhoto img');
+  const photoSrc = await page.getAttribute('#dPhoto img', 'src');
+  check(photoSrc.startsWith('https://lh3.googleusercontent.com/') && !/key=/.test(photoSrc) && !state.photoKeyInUrl, 'the photo address never contains the API key');
   const email = await page.inputValue('#pitchText');
   check(/^Subject: A website for /.test(email) && /PageSpeed test and it scored \d+ out of 100/.test(email) && /I'm Dana from Corner Web Co/.test(email) && /in Testville/.test(email),
     'writes a tailored email with the score, your details and the town');
@@ -346,7 +392,9 @@ async function main() {
     check(stops === 10 && u.searchParams.get('waypoint_place_ids').split('|').length === 9, `route goes through the top 10 places with their Google place IDs (${stops} stops)`);
     await pop.close();
     await page.locator('#list .item', { hasText: firstName }).first().click();
-    await page.waitForSelector('#pitchText');
+    await page.waitForSelector('#dPhoto img');
+    check(calls.photo === 1 && await page.evaluate(() => JSON.parse(localStorage.getItem('siteless.v1.usage')).photos) === 1,
+      `reopening a place does not fetch or count its photo again (${calls.photo} photo request)`);
   }
   await page.evaluate(() => document.activeElement && document.activeElement.blur());
   await settle();
@@ -409,11 +457,35 @@ async function main() {
   await page.click('#btnClear');
   check(/kept/.test(await page.locator('#clearStatus').innerText()), 'clearing keeps marked leads');
   const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('siteless.v1.places') || '[]').length);
+  await page.fill('#meName', 'Somebody else');
   const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('#btnRestore')]);
   await chooser.setFiles(backupFile);
   await page.waitForSelector('#clearStatus.ok');
+  check(await page.inputValue('#meName') === 'Dana', 'restoring a backup brings back your settings');
   check(/Restored: [\d,]+ new places/.test(await page.locator('#clearStatus').innerText()), `restores the backup (had ${kept} kept places)`);
-  await page.click('dialog .dlg-head button');
+  {
+    // a hand-made backup with a javascript: link and junk fields
+    const evil = backup.places.find(p => p.src === 'google');
+    const bad = { app: 'siteless', version: 2, places: [Object.assign({}, evil, { id: 'g:EVIL', name: 'Evil Diner', maps: 'javascript:alert(document.domain)', types: 'oops', seen: Date.now() + 1 }), { id: 'x', lat: 'no' }],
+      leads: { 'g:EVIL': { s: 'saved', at: Date.now() + 1 }, '__proto__': { s: 'saved' } }, areas: [[1, 2, 3, 'x', 'osm']], settings: { me: { name: 42 } } };
+    const badFile = path.join(path.dirname(backupFile), 'bad-backup.json');
+    fs.writeFileSync(badFile, JSON.stringify(bad));
+    await page.click('#clearStatus');
+    const [ch2] = await Promise.all([page.waitForEvent('filechooser'), page.click('#btnRestore')]);
+    await ch2.setFiles(badFile);
+    await page.waitForFunction(() => /Restored/.test(document.getElementById('clearStatus').textContent));
+    await page.click('dialog .dlg-head button');
+    await page.evaluate(() => { const { S, map } = window.__siteless; const p = S.places.get('g:EVIL'); map.setView([p.lat, p.lng], 17, { animate: false }); });
+    await settle();
+    await page.fill('#nameFilter', 'Evil Diner');
+    await page.waitForTimeout(300);
+    await page.locator('#list .item', { hasText: 'Evil Diner' }).first().click();
+    const href = await page.getAttribute('#lnkMaps', 'href');
+    check(/^https:\/\/www\.google\.com\/maps\/search\//.test(href) && await page.inputValue('#meName').catch(() => 'Dana') !== '42', `a javascript: link from a backup is replaced with a safe one (${href.slice(0, 40)}…)`);
+    await page.click('#btnBack');
+    await page.fill('#nameFilter', '');
+    await page.evaluate(() => { const { S } = window.__siteless; delete S.leads['g:EVIL']; S.places.delete('g:EVIL'); });
+  }
 
   console.log('satellite and reload');
   const s0 = calls.sat;
@@ -453,6 +525,15 @@ async function main() {
   await p2.locator('#list .item').first().click();
   check(!(await p2.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)), 'place panel fits a phone');
   await shot(p2, 'phone-detail');
+
+  console.log('location search');
+  await page.fill('#q', 'slowtown');
+  await page.press('#q', 'Enter');
+  await page.fill('#q', 'fasttown');
+  await page.press('#q', 'Enter');
+  await page.waitForTimeout(1300);
+  const c = await page.evaluate(() => window.__siteless.map.getCenter());
+  check(Math.abs(c.lat - 20) < 0.01 && Math.abs(c.lng - 20) < 0.01, 'a slow older search cannot move the map after a newer one');
 
   check(errors.length === 0, 'no script errors' + (errors.length ? ': ' + errors.join(' | ') : ''));
   await browser.close();

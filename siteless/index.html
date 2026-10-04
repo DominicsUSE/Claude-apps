@@ -602,6 +602,9 @@ const safeUrl = s => {
   try { const u = new URL(t); return /^https?:$/.test(u.protocol) && u.hostname.includes('.') ? u : null; } catch (e) { return null; }
 };
 const bareHost = h => String(h || '').toLowerCase().replace(/^www\./, '');
+// any link built from place data goes through here, so a stored "javascript:" URL can never run
+const safeHref = (u, fallback = '#') => { const x = typeof u === 'string' && /^https?:\/\//i.test(u.trim()) && safeUrl(u); return x ? x.href : fallback; };
+const mapsLink = p => safeHref(p.maps, `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.name + (p.address ? ', ' + p.address : ''))}`);
 const pretty = s => { s = String(s || '').replace(/_/g, ' '); return s.charAt(0).toUpperCase() + s.slice(1); };
 const lcFirst = s => s.charAt(0).toLowerCase() + s.slice(1);
 // "Free Wix site" -> "free Wix site", but brand names keep their capital ("Facebook page")
@@ -811,6 +814,7 @@ S.order = [];                                 // ids in list order, for next / p
 S.chains = new Map();                         // src:name -> count
 S.shots = new Map();                          // website screenshots, memory only
 S.badTypes = new Set(store.get('badTypes', [])); // place types Google said it does not support
+S.photoUris = new Map();                      // photo name -> image address without the API key
 S.q = '';                                     // list name filter
 const mode = () => (S.key ? 'google' : 'osm');
 
@@ -818,7 +822,7 @@ function saveSettings() {
   const { v, key, depth, capOn, monthlyCap, autoCheck, autoScan, cats, kw, layer, hideChains, st, minRating, minReviews, lead, sort, me } = S;
   store.set('settings', { v, key, depth, capOn, monthlyCap, autoCheck, autoScan, cats, kw, layer, hideChains, st, minRating, minReviews, lead, sort, me });
 }
-const PLACE_KEYS = ['id', 'gid', 'src', 'name', 'lat', 'lng', 'address', 'fullAddress', 'city', 'phone', 'intlPhone', 'rating', 'reviews', 'website', 'social',
+const PLACE_KEYS = ['id', 'gid', 'src', 'name', 'lat', 'lng', 'address', 'fullAddress', 'city', 'brand', 'phone', 'intlPhone', 'rating', 'reviews', 'website', 'social',
   'socialUrl', 'maps', 'type', 'types', 'cats', 'kw', 'price', 'hours', 'osmUrl', 'seen', 'check'];
 const compact = p => Object.fromEntries(PLACE_KEYS.filter(k => p[k] != null && p[k] !== '').map(k => [k, p[k]]));
 let saveTimer = 0;
@@ -852,6 +856,7 @@ function recountChains() {
   for (const p of S.places.values()) { p._ck = chainKey(p.name); const k = p.src + ':' + p._ck; S.chains.set(k, (S.chains.get(k) || 0) + 1); }
 }
 function chainInfo(p) {
+  if (p.brand) return 'OpenStreetMap lists it as a brand';
   const k = p._ck || (p._ck = chainKey(p.name));
   if (KNOWN_CHAINS.has(k)) return 'a well-known chain';
   const n = S.chains.get(p.src + ':' + k) || 0;
@@ -901,7 +906,27 @@ function leadScore(p) {
   return Math.round(100 * Math.pow(w, 0.9) * (0.3 + 0.7 * r));
 }
 
-for (const p of store.get('places', [])) { if (p && p.id) { classify(p); S.places.set(p.id, p); } }
+// keeps only well-formed fields, so a damaged or hand-made backup cannot break the page
+function cleanPlace(o) {
+  if (!o || typeof o !== 'object' || typeof o.id !== 'string' || !/^(g|o):/.test(o.id)) return null;
+  if (typeof o.lat !== 'number' || typeof o.lng !== 'number' || !isFinite(o.lat) || !isFinite(o.lng) || typeof o.name !== 'string') return null;
+  const p = {};
+  for (const k of PLACE_KEYS) {
+    const v = o[k];
+    if (v == null) continue;
+    if (k === 'types' || k === 'cats') { if (Array.isArray(v)) p[k] = v.filter(x => typeof x === 'string'); }
+    else if (k === 'check') { if (typeof v === 'object' && !Array.isArray(v)) p.check = v; }
+    else if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') p[k] = v;
+  }
+  p.src = o.id[0] === 'g' ? 'google' : 'osm';
+  p.rating = typeof p.rating === 'number' ? p.rating : null;
+  p.reviews = typeof p.reviews === 'number' ? p.reviews : 0;
+  p.cats = p.cats || [];
+  p.types = p.types || [];
+  if (p.check && !Array.isArray(p.check.reasons)) p.check.reasons = [];
+  return p;
+}
+for (const o of store.get('places', [])) { const p = cleanPlace(o); if (p) { classify(p); S.places.set(p.id, p); } }
 recountChains();
 
 /* ================= map ================= */
@@ -1303,14 +1328,15 @@ function fromGoogle(g, kw) {
 
 function addPlace(p) {
   const old = S.places.get(p.id);
-  if (old) {
-    if (old.website === p.website && old.check) p.check = old.check;
-    if (old.hours && !p.hours) p.hours = old.hours;
-    if (old.kw && !p.kw) p.kw = old.kw;
-  }
-  classify(p);
-  S.places.set(p.id, p);
-  return p;
+  if (!old) { classify(p); S.places.set(p.id, p); return p; }
+  // update the existing object in place: a website check that is running holds a reference to it
+  const same = old.website === p.website;
+  Object.assign(old, p, {
+    check: same ? old.check : undefined, checking: same ? !!old.checking : false,
+    hours: p.hours || old.hours, kw: p.kw || old.kw, fullAddress: p.fullAddress || old.fullAddress, _ck: undefined,
+  });
+  classify(old);
+  return old;
 }
 
 const cellRadius = c => Math.max(60, haversine(c.s, c.w, c.n, c.e) / 2);
@@ -1441,7 +1467,7 @@ async function overpass(q) {
 }
 function fromOsm(el, kw) {
   const t = el.tags || {};
-  if (!t.name || t.brand || t['brand:wikidata']) return null;   // skip chains
+  if (!t.name) return null;
   const lat = el.lat != null ? el.lat : el.center && el.center.lat;
   const lng = el.lon != null ? el.lon : el.center && el.center.lon;
   if (lat == null || lng == null) return null;
@@ -1454,6 +1480,7 @@ function fromOsm(el, kw) {
   const name = t.name;
   return {
     id: 'o:' + el.type[0] + el.id, src: 'osm', name, lat, lng, address, city: t['addr:city'] || '',
+    brand: t.brand || (t['brand:wikidata'] ? name : ''),
     phone: t.phone || t['contact:phone'] || '', rating: null, reviews: 0,
     website: t.website || t['contact:website'] || t.url || '',
     social: fb ? 'Facebook' : ig ? 'Instagram' : '', socialUrl: fb || ig || '',
@@ -1483,7 +1510,8 @@ async function scanOsm() {
   for (const t of tiles) {
     if (scan.stop) break;
     progress(`Asking OpenStreetMap · part ${done + 1} of ${tiles.length} · ${fmt(found.size)} places`, (done + 0.3) / tiles.length);
-    const j = await overpass(osmQuery(t, S.kw));
+    let j;
+    try { j = await overpass(osmQuery(t, S.kw)); } catch (e) { return { found, used: done, error: e, more: true }; }
     for (const el of j.elements || []) { const p = fromOsm(el, S.kw); if (p) found.add(addPlace(p).id); }
     if ((j.elements || []).length >= 4000) more = true;
     done++;
@@ -1505,14 +1533,14 @@ async function runScan() {
   } catch (e) { r = { found: new Set(), used: 0, error: e }; }
   scan.running = false;
   $('#progress').hidden = true;
-  if (r.found.size) {
+  if (r.found.size) savePlaces();   // keep what was found, even if the scan stopped part-way
+  if (r.found.size && !r.error) {
     S.areas.push([+b.getSouth().toFixed(5), +b.getWest().toFixed(5), +b.getNorth().toFixed(5), +b.getEast().toFixed(5), mode()]);
     if (S.areas.length > 120) S.areas = S.areas.slice(-120);
     store.set('areas', S.areas);
     drawAreas();
-    recountChains();
-    savePlaces();
   }
+  if (r.found.size) recountChains();
   updateScanButton();
   render();
   renderChrome();
@@ -1818,7 +1846,7 @@ function openDetail(id, { pan = true } = {}) {
     <div class="d-block" id="dStatus"></div>
     <div class="d-block">
       <div class="actions">
-        <a class="btn primary" id="lnkMaps" href="${esc(p.maps)}" target="_blank" rel="noopener">${ICON.map}Open in Google Maps</a>
+        <a class="btn primary" id="lnkMaps" href="${esc(mapsLink(p))}" target="_blank" rel="noopener">${ICON.map}Open in Google Maps</a>
         <a class="btn" href="${esc(dirs)}" target="_blank" rel="noopener">${ICON.dir}Directions</a>
         <a class="btn" href="${esc(street)}" target="_blank" rel="noopener">${ICON.street}Street View</a>
         <a class="btn" href="https://www.google.com/search?q=${q}" target="_blank" rel="noopener" title="Search the web for a website the listing might be missing">${ICON.web}Search the web</a>
@@ -1828,7 +1856,7 @@ function openDetail(id, { pan = true } = {}) {
       <div id="dPhone"></div>
     </div>
     <section class="d-block">
-      <div class="h3">Google Maps listing <a class="linkish" href="${esc(p.maps)}" target="_blank" rel="noopener">Open full listing</a></div>
+      <div class="h3">Google Maps listing <a class="linkish" href="${esc(mapsLink(p))}" target="_blank" rel="noopener">Open full listing</a></div>
       <iframe class="embed" title="Google Maps listing for ${esc(p.name)}" src="${esc(embed)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen></iframe>
     </section>
     <section class="d-block" id="dWebsite"></section>
@@ -1948,8 +1976,8 @@ function setDue(id, due) {
 function updateDetail(p) {
   const st = STATUS[p.status];
   const rating = p.rating != null
-    ? `<div class="big"><span class="rating">${p.rating.toFixed(1)}</span><span class="stars">${starStr(p.rating)}</span><a class="rc" href="${esc(p.maps)}" target="_blank" rel="noopener">${fmt(p.reviews)} Google review${p.reviews === 1 ? '' : 's'}</a></div>`
-    : `<div class="big"><span class="rc">No rating in free mode. <a href="${esc(p.maps)}" target="_blank" rel="noopener">See reviews on Google Maps</a></span></div>`;
+    ? `<div class="big"><span class="rating">${p.rating.toFixed(1)}</span><span class="stars">${starStr(p.rating)}</span><a class="rc" href="${esc(mapsLink(p))}" target="_blank" rel="noopener">${fmt(p.reviews)} Google review${p.reviews === 1 ? '' : 's'}</a></div>`
+    : `<div class="big"><span class="rc">No rating in free mode. <a href="${esc(mapsLink(p))}" target="_blank" rel="noopener">See reviews on Google Maps</a></span></div>`;
   const chain = chainInfo(p);
   const why = p.why.concat(chain ? [`Looks like a chain or franchise: ${chain}`] : []);
   $('#dStatus').innerHTML = `<div class="verdict">
@@ -1998,7 +2026,7 @@ function updateDetail(p) {
   const seen = p.seen ? `Scanned ${ago(p.seen)}.` : '';
   $('#dFoot').innerHTML = p.src === 'google'
     ? `${seen} Listing data from Google.`
-    : `${seen} From <a href="${esc(p.osmUrl)}" target="_blank" rel="noopener">OpenStreetMap</a>. The embedded map is a Google search for the name and address, so double-check it is the same business.`;
+    : `${seen} From <a href="${esc(safeHref(p.osmUrl))}" target="_blank" rel="noopener">OpenStreetMap</a>. The embedded map is a Google search for the name and address, so double-check it is the same business.`;
 }
 
 function renderExtra(p, d) {
@@ -2006,13 +2034,7 @@ function renderExtra(p, d) {
   if (!box) return;
   let html = '';
   if (d) {
-    const photo = d.photos && d.photos[0];
-    if (photo && photo.name && capLeft('photos') > 0) {
-      const credit = photo.authorAttributions && photo.authorAttributions[0];
-      html += `<div class="d-block"><img class="photo" alt="Photo of ${esc(p.name)}" loading="lazy" src="${esc(`${PLACES}${photo.name}/media?maxWidthPx=800&key=${encodeURIComponent(S.key)}`)}">
-        ${credit ? `<div class="credit">Photo: ${credit.uri && safeUrl(credit.uri) ? `<a href="${esc(safeUrl(credit.uri).href)}" target="_blank" rel="noopener">${esc(credit.displayName || 'Google user')}</a>` : esc(credit.displayName || 'Google user')}</div>` : ''}</div>`;
-      count('photos');
-    }
+    if (d.photos && d.photos[0] && /^places\/[\w-]+\/photos\/[\w-]+$/.test(d.photos[0].name || '')) html += '<div class="d-block" id="dPhoto" hidden></div>';
     if (d.editorialSummary && d.editorialSummary.text) html += `<div class="d-block"><p style="margin:0">${esc(d.editorialSummary.text)}</p></div>`;
     const days = d.regularOpeningHours && d.regularOpeningHours.weekdayDescriptions;
     if (days && days.length) {
@@ -2022,7 +2044,7 @@ function renderExtra(p, d) {
     }
     const revs = (d.reviews || []).filter(r => r && (r.text || r.originalText));
     if (revs.length) {
-      html += `<div class="d-block"><div class="h3">Recent Google reviews <a class="linkish" href="${esc(p.maps)}" target="_blank" rel="noopener">All ${fmt(p.reviews)}</a></div><ul class="reviews">${revs.map(r => {
+      html += `<div class="d-block"><div class="h3">Recent Google reviews <a class="linkish" href="${esc(mapsLink(p))}" target="_blank" rel="noopener">All ${fmt(p.reviews)}</a></div><ul class="reviews">${revs.map(r => {
         const a = r.authorAttribution || {};
         const who = a.uri && safeUrl(a.uri) ? `<a href="${esc(safeUrl(a.uri).href)}" target="_blank" rel="noopener">${esc(a.displayName || 'Google user')}</a>` : `<b>${esc(a.displayName || 'Google user')}</b>`;
         const text = (r.text && r.text.text) || (r.originalText && r.originalText.text) || '';
@@ -2033,13 +2055,35 @@ function renderExtra(p, d) {
     html += `<div class="d-block"><div class="h3">Hours (OpenStreetMap)</div><p class="small" style="margin:0">${esc(p.hours)}</p></div>`;
   }
   box.innerHTML = html;
+  if ($('#dPhoto')) showPhoto(p, d.photos[0]);
+}
+
+// Google returns a short-lived image address that carries no API key; one request per photo per session
+async function showPhoto(p, photo) {
+  let uri = S.photoUris.get(photo.name);
+  if (!uri) {
+    if (capLeft('photos') <= 0) return;
+    try {
+      const j = await gFetch(`${PLACES}${photo.name}/media?maxWidthPx=800&skipHttpRedirect=true`, { headers: { 'X-Goog-Api-Key': S.key } }, 'places');
+      count('photos');
+      uri = safeHref(j.photoUri, '');
+      if (!uri) return;
+      S.photoUris.set(photo.name, uri);
+    } catch (e) { return; }
+  }
+  const box = $('#dPhoto');
+  if (!box || S.sel !== p.id) return;
+  const credit = photo.authorAttributions && photo.authorAttributions[0];
+  box.innerHTML = `<img class="photo" alt="Photo of ${esc(p.name)}" src="${esc(uri)}">
+    ${credit ? `<div class="credit">Photo: ${safeHref(credit.uri, '') ? `<a href="${esc(safeHref(credit.uri))}" target="_blank" rel="noopener">${esc(credit.displayName || 'Google user')}</a>` : esc(credit.displayName || 'Google user')}</div>` : ''}`;
+  box.hidden = false;
 }
 
 function detailsText(p) {
   return [
     p.name, [p.type, p.rating != null ? `${p.rating.toFixed(1)}★ (${fmt(p.reviews)} reviews)` : ''].filter(Boolean).join(' · '),
     p.fullAddress || p.address, p.phone ? `Phone: ${p.phone}` : '', `Website: ${p.website || p.socialUrl || 'none'} (${STATUS[p.status].label.toLowerCase()})`,
-    ...p.why.map(w => `- ${w}`), `Google Maps: ${p.maps}`,
+    ...p.why.map(w => `- ${w}`), `Google Maps: ${mapsLink(p)}`,
   ].filter(Boolean).join('\n');
 }
 
@@ -2083,7 +2127,7 @@ function downloadCsv(places, name) {
     ['Name', p => p.name], ['Website status', p => STATUS[p.status].label], ['Why', p => p.why.join('; ')], ['Lead score', p => p.lead],
     ['Rating', p => p.rating == null ? '' : p.rating], ['Reviews', p => p.rating == null ? '' : p.reviews], ['Type', p => p.type],
     ['Phone', p => p.phone], ['Address', p => p.fullAddress || p.address], ['Website', p => p.website || p.socialUrl || ''],
-    ['Website quality', p => (p.check && p.check.score != null ? p.check.score : '')], ['Google Maps', p => p.maps],
+    ['Website quality', p => (p.check && p.check.score != null ? p.check.score : '')], ['Google Maps', p => mapsLink(p)],
     ['Lead status', p => ({ saved: 'Saved', contacted: 'Contacted', won: 'Won', skip: 'Not a fit' }[leadOf(p.id).s] || '')],
     ['Follow up', p => leadOf(p.id).due || ''], ['Notes', p => leadOf(p.id).note || ''],
     ['Latitude', p => p.lat.toFixed(6)], ['Longitude', p => p.lng.toFixed(6)],
@@ -2098,21 +2142,47 @@ function backup() {
   const data = { app: 'siteless', version: 2, savedAt: new Date().toISOString(), settings, places: [...S.places.values()].map(compact), leads: S.leads, areas: S.areas };
   download(`siteless-backup-${today()}.json`, JSON.stringify(data), 'application/json');
 }
+function applySettings(o) {
+  if (!o || typeof o !== 'object') return;
+  if (Array.isArray(o.cats)) S.cats = o.cats.filter(id => CAT_BY_ID[id]);
+  if (Array.isArray(o.st)) S.st = o.st.filter(st => STATUS[st]);
+  if (DEPTH[o.depth]) S.depth = o.depth;
+  for (const k of ['capOn', 'autoCheck', 'autoScan', 'hideChains']) if (typeof o[k] === 'boolean') S[k] = o[k];
+  if (typeof o.monthlyCap === 'number' && o.monthlyCap >= 50) S.monthlyCap = Math.round(Math.min(o.monthlyCap, 1e6));
+  if (typeof o.minRating === 'number' && o.minRating >= 3.5 && o.minRating <= 5) S.minRating = o.minRating;
+  if ([0, 5, 15, 30, 50, 100, 250].includes(o.minReviews)) S.minReviews = o.minReviews;
+  if (['all', 'new', 'saved', 'contacted', 'due', 'won', 'skip'].includes(o.lead)) S.lead = o.lead;
+  if (SORTS[o.sort]) S.sort = o.sort;
+  if (o.layer === 'map' || o.layer === 'sat') S.layer = o.layer;
+  if (typeof o.kw === 'string') S.kw = o.kw.slice(0, 60);
+  if (o.me && typeof o.me === 'object') for (const k of Object.keys(DEFAULTS.me)) if (typeof o.me[k] === 'string') S.me[k] = o.me[k].slice(0, 200);
+  saveSettings();
+  setTiles();
+}
 async function restore(file) {
   const st = $('#clearStatus');
   try {
     const data = JSON.parse(await file.text());
     if (!data || data.app !== 'siteless' || !Array.isArray(data.places)) throw new Error('not a Siteless backup');
     let added = 0;
-    for (const p of data.places) {
-      if (!p || !p.id || typeof p.lat !== 'number' || typeof p.lng !== 'number' || !p.name) continue;
+    for (const o of data.places) {
+      const p = cleanPlace(o);
+      if (!p) continue;
       const old = S.places.get(p.id);
-      if (!old || (p.seen || 0) > (old.seen || 0)) { classify(p); S.places.set(p.id, p); if (!old) added++; }
+      if (!old || (p.seen || 0) > (old.seen || 0)) { if (old) addPlace(p); else { classify(p); S.places.set(p.id, p); added++; } }
     }
+    applySettings(data.settings);
     for (const [id, l] of Object.entries(data.leads || {})) {
-      if (l && typeof l === 'object' && (!S.leads[id] || (l.at || 0) >= (S.leads[id].at || 0))) S.leads[id] = l;
+      if (!l || typeof l !== 'object' || !/^(g|o):/.test(id)) continue;
+      const lead = {};
+      if (['saved', 'contacted', 'won', 'skip'].includes(l.s)) lead.s = l.s;
+      if (typeof l.note === 'string') lead.note = l.note.slice(0, 5000);
+      if (typeof l.due === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(l.due)) lead.due = l.due;
+      lead.at = typeof l.at === 'number' ? l.at : 0;
+      if ((lead.s || lead.note || lead.due) && (!S.leads[id] || lead.at >= (S.leads[id].at || 0))) S.leads[id] = lead;
     }
-    if (Array.isArray(data.areas)) S.areas = S.areas.concat(data.areas.filter(a => Array.isArray(a) && a.length === 5)).slice(-120);
+    const okArea = a => Array.isArray(a) && a.length === 5 && a.slice(0, 4).every(n => typeof n === 'number' && isFinite(n)) && (a[4] === 'google' || a[4] === 'osm');
+    if (Array.isArray(data.areas)) S.areas = S.areas.concat(data.areas.filter(okArea)).slice(-120);
     store.set('areas', S.areas);
     saveLeads();
     recountChains();
@@ -2128,18 +2198,21 @@ async function restore(file) {
 }
 
 /* ================= geocoding ================= */
+let geoSeq = 0;
 async function geocode(q) {
+  const my = ++geoSeq;
   const box = $('#geoResults');
   box.hidden = false;
   box.innerHTML = '<li class="msg">Searching…</li>';
   try {
     const res = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&accept-language=${encodeURIComponent(navigator.language || 'en')}&q=${encodeURIComponent(q)}`);
     const list = res.ok ? await res.json() : [];
+    if (my !== geoSeq) return;   // a newer search has started
     if (!list.length) { box.innerHTML = '<li class="msg">No place found with that name. Try adding the country.</li>'; return; }
     if (list.length === 1) { box.hidden = true; goTo(list[0]); return; }
     box.innerHTML = list.map((r, i) => `<li><button type="button" data-geo="${i}">${esc(r.display_name)}</button></li>`).join('');
     box.onclick = e => { const b = e.target.closest('[data-geo]'); if (b) { box.hidden = true; goTo(list[+b.dataset.geo]); } };
-  } catch (e) { box.innerHTML = '<li class="msg">Search is not reachable right now. Drag the map instead.</li>'; }
+  } catch (e) { if (my === geoSeq) box.innerHTML = '<li class="msg">Search is not reachable right now. Drag the map instead.</li>'; }
 }
 function goTo(r) {
   const bb = r.boundingbox && r.boundingbox.map(Number);   // [south, north, west, east]

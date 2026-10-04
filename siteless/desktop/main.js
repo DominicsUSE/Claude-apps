@@ -14,12 +14,13 @@ protocol.registerSchemesAsPrivileged([
   { scheme: "siteless", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
 ]);
 
-// static files from the app folder only
+// The app only has two files, so serve exactly those: no path from a URL ever reaches the disk.
+const FILES = { "/": "index.html", "/index.html": "index.html", "/icon.png": "icon.png" };
 function handle(req) {
-  const rel = decodeURIComponent(new URL(req.url).pathname);
-  const file = path.normalize(path.join(APP_DIR, rel === "/" ? "index.html" : rel));
-  if (!file.startsWith(APP_DIR + path.sep)) return new Response("Forbidden", { status: 403 });
-  return net.fetch(pathToFileURL(file).toString());
+  const url = new URL(req.url);
+  const name = url.host === "app" && Object.hasOwn(FILES, url.pathname) ? FILES[url.pathname] : null;
+  if (!name) return new Response("Not found", { status: 404 });
+  return net.fetch(pathToFileURL(path.join(APP_DIR, name)).toString());
 }
 
 const external = (url) => { if (/^(https?|mailto|tel|sms):/i.test(url)) shell.openExternal(url); };
