@@ -108,8 +108,10 @@ checks are free. You can also set a hard daily cap under Quotas in the Cloud con
 - `index.html`: the whole app (one page; the desktop app wraps it).
 - `desktop/`: the Windows app (Electron). `build.js` bundles Leaflet into the page and builds
   the installer and portable exe with electron-builder; `main.js` serves the page from
-  `siteless://`, opens links in your default browser, mail app or phone app, and keeps one
-  window.
+  `siteless://`, opens links in your default browser, mail app or phone app, keeps one
+  window, and sends the OpenStreetMap requests itself under the app's name (the main
+  OpenStreetMap server turns away requests that look like they come from a web page).
+  In the app the map comes from Esri (CARTO, used by the web page, needs a key there).
 - `icons/`, `tools/make-icons.js`: app icons, rendered from the logo with headless Chromium.
 - `manifest.webmanifest`, `sw.js`: only used if the page is later published as a website
   (installable web app). The website workflow does not publish Siteless.
@@ -129,4 +131,13 @@ node siteless/tests/app.test.js            # --shots DIR saves screenshots
 
 # smoke test of the desktop app (on Linux without a screen: xvfb-run node test.js)
 cd siteless/desktop && npm install && npm i --no-save playwright && node test.js
+
+# the app on the real internet: map tiles, search, "my location", real scans in nine
+# cities, a keyword scan, Google listings, satellite view and Google's key check
+cd siteless/desktop && node live-test.js
 ```
+
+`.github/workflows/test-siteless-windows.yml` runs all of this on Windows Server 2022,
+Windows Server 2025 and Windows 11 on ARM on every change and once a day: it installs the
+app silently, checks the shortcuts and uninstall entry, drives the installed app with mocked
+and real data, runs the portable exe, tests the page in Edge and Chrome, and uninstalls.
