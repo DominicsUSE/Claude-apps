@@ -113,6 +113,13 @@ const count = (win, sel) => win.locator(sel).count();
   const c1 = await win.evaluate(() => window.__siteless.map.getCenter());
   check(Math.abs(c1.lat - 54.69) < 0.5 && Math.abs(c1.lng - 25.28) < 0.6, `searching "Vilnius, Lithuania" moves the map there (${c1.lat.toFixed(3)}, ${c1.lng.toFixed(3)})`);
 
+  // the "my location" button finds where the computer is (Windows location, or roughly from the connection)
+  await win.evaluate(() => window.__siteless.map.setView([0, 0], 5, { animate: false }));
+  await win.click("#btnLocate");
+  await win.waitForFunction(() => { const c = window.__siteless.map.getCenter(); return Math.abs(c.lat) > 1 || Math.abs(c.lng) > 1; }, null, { timeout: 25000 }).catch(() => {});
+  const here = await win.evaluate(() => ({ c: window.__siteless.map.getCenter(), z: window.__siteless.map.getZoom(), t: document.getElementById("toast").innerText }));
+  check(Math.abs(here.c.lat) > 1 || Math.abs(here.c.lng) > 1, `"my location" moves the map to this computer (${here.c.lat.toFixed(2)}, ${here.c.lng.toFixed(2)}, zoom ${here.z}; "${here.t}")`);
+
   // real OpenStreetMap scan of a busy neighbourhood (central London)
   await win.evaluate(() => window.__siteless.map.setView([51.5136, -0.1340], 16, { animate: false }));
   let places = 0, toast = "";
@@ -191,6 +198,16 @@ const count = (win, sel) => win.locator(sel).count();
   }
   check(cityOk === CITIES.length, `real scans in ${CITIES.length} cities find places and open them (${cityOk} of ${CITIES.length}): ${cityLines.join("; ")}`);
   await shot(win, "live-cities");
+
+  // a keyword scan on real data
+  await win.evaluate(() => window.__siteless.map.setView([40.7223, -73.9878], 16, { animate: false }));
+  await win.fill("#kw", "pizza");
+  await win.press("#kw", "Enter");
+  await win.click("#btnScan");
+  await scanDone(win);
+  const kwFound = await win.evaluate(() => [...window.__siteless.S.places.values()].filter(p => p.kw === "pizza").length);
+  check(kwFound > 0, `a keyword scan for "pizza" finds pizza places (${kwFound}; "${(await win.locator("#toast").innerText().catch(() => "")).trim()}")`);
+  await win.click("#btnKwClear").catch(() => {});
 
   // real satellite imagery
   await win.click("#btnLayer");
