@@ -26,7 +26,9 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'application/javascr
 
 let failures = 0;
 const state = {};   // switches the mocks flip during the test
+const results = [];
 function check(cond, msg) {
+  results.push([!!cond, msg]);
   if (cond) console.log('  ok  ' + msg);
   else { failures++; console.log('  FAIL ' + msg); }
 }
@@ -194,7 +196,9 @@ async function main() {
   const base = `http://127.0.0.1:${server.address().port}/`;
 
   const exe = ['/opt/pw-browsers/chromium-1194/chrome-linux/chrome', process.env.CHROMIUM].find(p => p && fs.existsSync(p));
-  const browser = await chromium.launch(exe ? { executablePath: exe } : {});
+  // CHANNEL=msedge or CHANNEL=chrome tests in the installed Edge or Chrome (e.g. on Windows)
+  const browser = await chromium.launch(process.env.CHANNEL ? { channel: process.env.CHANNEL } : exe ? { executablePath: exe } : {});
+  console.log(`browser: ${process.env.CHANNEL || 'chromium'} ${browser.version()}`);
   const ctx = await browser.newContext({ viewport: { width: 1360, height: 860 }, acceptDownloads: true, timezoneId: 'America/New_York', serviceWorkers: 'block' });
   await mockRoutes(ctx, base, state);
   const page = await ctx.newPage();
@@ -597,6 +601,10 @@ async function main() {
   await browser.close();
   server.close();
   console.log(failures ? `\n${failures} check(s) failed` : '\nall checks passed');
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n### Map page in ${process.env.CHANNEL || 'Chromium'} ${browser.version()}: ${results.length - failures} of ${results.length} checks passed\n\n` +
+      results.filter(r => !r[0]).map(r => `- ❌ ${r[1]}`).join('\n') + '\n');
+  }
   process.exit(failures ? 1 : 0);
 }
 main().catch(e => { console.error(e); process.exit(1); });

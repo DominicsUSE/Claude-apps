@@ -51,7 +51,11 @@ function createWindow() {
   win.webContents.on("will-navigate", (ev, url) => {
     if (!url.startsWith("siteless://")) { ev.preventDefault(); external(url); }
   });
-  win.on("closed", () => { win = null; });
+  // tell the page the computer's light or dark theme, now and whenever it changes
+  const sendTheme = () => { if (win && !win.isDestroyed()) win.webContents.send("theme", nativeTheme.shouldUseDarkColors ? "dark" : "light"); };
+  win.webContents.on("dom-ready", sendTheme);
+  nativeTheme.on("updated", sendTheme);
+  win.on("closed", () => { nativeTheme.removeListener("updated", sendTheme); win = null; });
   win.loadURL(START);
 }
 
@@ -79,13 +83,14 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-// one window: opening Siteless again brings the running one to the front
-if (!app.requestSingleInstanceLock()) app.quit();
-app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
+// one window: opening Siteless again brings the running one to the front and the new copy quits
+const firstCopy = app.requestSingleInstanceLock();
+if (!firstCopy) app.quit();
+app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
 
 app.setName("Siteless");
 if (process.platform === "win32") app.setAppUserModelId("com.siteless.app");
-app.whenReady().then(() => {
+if (firstCopy) app.whenReady().then(() => {
   protocol.handle("siteless", handle);
   // only the app's own page may use location and the clipboard; embedded Google maps get nothing
   session.defaultSession.setPermissionRequestHandler((wc, permission, done, details) => {

@@ -989,6 +989,7 @@ function setTiles() {
 }
 setTiles();
 darkQuery.addEventListener?.('change', setTiles);
+window.addEventListener('siteless-theme', setTiles);   // the desktop app reports theme changes itself
 
 const areaLayer = L.layerGroup().addTo(map);
 const pinLayer = L.markerClusterGroup({
