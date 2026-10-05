@@ -522,6 +522,7 @@ async function main() {
   await page.selectOption('#leadFilter', 'all');
 
   const [popup] = await Promise.all([ctx.waitForEvent('page'), page.click('#btnRoute')]);
+  await popup.waitForURL(/^https:\/\/www\.google\.com\/maps\/dir\//, { timeout: 15000 });
   const routeUrl = new URL(popup.url());
   check(routeUrl.pathname === '/maps/dir/' && routeUrl.searchParams.get('destination') && !routeUrl.searchParams.get('waypoints'), 'once you have saved leads, Route visits just those');
   await popup.close();
