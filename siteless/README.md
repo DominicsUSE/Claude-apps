@@ -14,7 +14,7 @@ Every change to `siteless/` builds the app on GitHub's Windows machines
 - Open **Actions > Siteless Windows app**, pick the latest run and download
   **Siteless-Windows-Installer** (installs Siteless with Start menu and desktop shortcuts)
   or **Siteless-Windows-Portable** (one `.exe` that runs without installing).
-- Builds on the default branch also publish both files as a GitHub release (`siteless-v1.0.0`).
+- Builds on the default branch also publish both files as a GitHub release (`siteless-v<version>`, for example `siteless-v1.0.1`).
 
 The app is not code-signed, so the first time Windows may show "Windows protected your PC":
 click **More info**, then **Run anyway**. Siteless needs an internet connection for maps,

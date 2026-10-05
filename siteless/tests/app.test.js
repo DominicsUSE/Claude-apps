@@ -130,9 +130,13 @@ function mockRoutes(ctx, base, state) {
     if (u.hostname.endsWith('basemaps.cartocdn.com')) return route.fulfill({ body: PNG, contentType: 'image/png' });
     if (u.hostname === 'server.arcgisonline.com') { calls.sat++; return route.fulfill({ body: PNG, contentType: 'image/png' }); }
     if (/fonts\.(googleapis|gstatic)\.com/.test(u.hostname)) return route.fulfill({ body: '', contentType: 'text/css' });
-    if (/overpass/.test(u.hostname)) {
+    if (u.pathname.endsWith('/api/interpreter')) {
       calls.overpass.push(decodeURIComponent((req.postData() || '').replace(/^data=/, '')));
+      calls.overpassHosts = (calls.overpassHosts || []).concat(u.hostname);
       if (state.overpassFailAfter != null && calls.overpass.length > state.overpassFailAfter) return route.fulfill({ status: 504, body: 'busy', headers: cors });
+      // a server that never answers (the page gives up on it and asks another one)
+      if (state.overpassHang && u.hostname === state.overpassHang) return new Promise(r => setTimeout(r, 20000)).then(() => route.abort()).catch(() => {});
+      if (state.overpassRemark) return route.fulfill({ json: { elements: [], remark: 'runtime error: Query timed out in "query" at line 1 after 31 seconds.' }, headers: cors });
       return route.fulfill({ json: OSM, headers: cors });
     }
     if (u.hostname === 'nominatim.openstreetmap.org') {
@@ -270,6 +274,40 @@ async function main() {
   await page.waitForTimeout(700);
   const savedIds = await page.evaluate(() => JSON.parse(localStorage.getItem('siteless.v1.places') || '[]').map(p => p.id));
   check(/busy/.test(await page.locator('#toast').innerText()) && savedIds.includes('o:n1'), 'keeps the places from a free scan that failed part-way');
+  // the first server never answers: the page asks the next one and still finds the places
+  await page.evaluate(() => { localStorage.removeItem('siteless.v1.places'); localStorage.removeItem('siteless.v1.areas'); });
+  await page.reload();
+  await page.waitForSelector('#btnScan');
+  await setZoom(15);
+  await page.evaluate(() => Object.assign(window.__siteless.OSM_T, { hedge: 600, wait: 2500 }));
+  state.overpassHang = 'overpass-api.de';
+  calls.overpassHosts = [];
+  await page.click('#btnScan');
+  await scanDone();
+  check((await listNames()).length === 3 && calls.overpassHosts[0] === 'overpass-api.de' && calls.overpassHosts.length === 2,
+    `a server that does not answer is skipped for the next one (${calls.overpassHosts.join(', ')})`);
+  // every server silent: the scan ends with a clear message and the button comes back
+  state.overpassHang = null;
+  await page.route('**/api/interpreter', () => {});   // never answer
+  await page.click('#btnScan');
+  await scanDone();
+  check(/not answering/.test(await page.locator('#toast').innerText()) && await page.locator('#btnScan').isVisible(), 'when no server answers, says so and the scan button comes back');
+  await page.unroute('**/api/interpreter');
+  // Stop works while waiting for a server
+  await page.route('**/api/interpreter', () => {});
+  await page.click('#btnScan');
+  await page.waitForTimeout(300);
+  await page.click('#btnStop');
+  await scanDone();
+  check(await page.locator('#btnScan').isVisible(), 'Stop ends a scan that is waiting for a server');
+  await page.unroute('**/api/interpreter');
+  // a server that ran out of time is reported as busy, not as "no places here"
+  state.overpassRemark = true;
+  await page.click('#btnScan');
+  await scanDone();
+  state.overpassRemark = false;
+  check(/busy/.test(await page.locator('#toast').innerText()), 'a server that ran out of time is reported as busy');
+  await page.evaluate(() => Object.assign(window.__siteless.OSM_T, { hedge: 9000, wait: 35000 }));
   await setZoom(11);
   check(/Zoom in/.test(await page.locator('#scanLabel').innerText()), 'asks to zoom in when the free scan area is too big');
   await setZoom(15);
@@ -345,7 +383,7 @@ async function main() {
   await page.click('#btnSettings');
   await page.uncheck('#capOn');
   await page.click('dialog .dlg-head button');
-  check(!(await page.locator('#btnScan').isDisabled()), 'turning the limit off allows scanning again');
+  check(await page.waitForFunction(() => !document.getElementById('btnScan').disabled, null, { timeout: 5000 }).then(() => true, () => false), 'turning the limit off allows scanning again');
 
   console.log('chains, website checks and clusters');
   await page.waitForFunction(() => document.getElementById('checkBadge').hidden, null, { timeout: 90000 });
@@ -423,6 +461,7 @@ async function main() {
     // with no saved leads yet, Route goes through the top 10 places in the list
     await page.click('#btnBack');
     const [pop] = await Promise.all([ctx.waitForEvent('page'), page.click('#btnRoute')]);
+    await pop.waitForURL(/^https:\/\/www\.google\.com\/maps\/dir\//, { timeout: 15000 });
     const u = new URL(pop.url());
     const stops = (u.searchParams.get('waypoints') || '').split('|').filter(Boolean).length + 1;
     check(stops === 10 && u.searchParams.get('waypoint_place_ids').split('|').length === 9, `route goes through the top 10 places with their Google place IDs (${stops} stops)`);
@@ -574,7 +613,7 @@ async function main() {
   check(/PageSpeed Insights API/.test(await page.locator('#modeBox .alert').innerText()), 'tells you to turn on the PageSpeed Insights API');
 
   console.log('phone and dark mode');
-  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: 'dark', isMobile: true, hasTouch: true, serviceWorkers: 'block' });
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: 'dark', isMobile: true, hasTouch: true, serviceWorkers: 'block', timezoneId: 'America/New_York' });
   await mockRoutes(phone, base, {});
   const p2 = await phone.newPage();
   p2.on('pageerror', e => errors.push('phone: ' + e));

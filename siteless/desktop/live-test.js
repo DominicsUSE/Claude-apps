@@ -15,19 +15,54 @@ const check = (ok, msg) => { console.log((ok ? "  ok  " : "  FAIL ") + msg); res
 const shot = async (win, name) => { if (SHOTS) { fs.mkdirSync(SHOTS, { recursive: true }); await win.screenshot({ path: path.join(SHOTS, name + ".png") }); } };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-async function scanDone(win, timeout = 180000) {
-  await win.waitForFunction(() => document.getElementById("progress").hidden && !document.getElementById("btnScan").hidden, null, { timeout });
+const t0 = Date.now();
+const at = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`;
+const pageState = win => win.evaluate(() => ({
+  progress: document.getElementById("progress").hidden ? "" : document.getElementById("progText").textContent,
+  toast: document.getElementById("toast").hidden ? "" : document.getElementById("toast").innerText,
+  button: document.getElementById("btnScan").hidden ? "(hidden)" : document.getElementById("scanLabel").innerText,
+}));
+// waits for the scan to finish; if it never does, says what the page shows instead of giving up
+async function scanDone(win, timeout = 150000) {
+  const ok = await win.waitForFunction(() => document.getElementById("progress").hidden && !document.getElementById("btnScan").hidden, null, { timeout })
+    .then(() => true, () => false);
+  if (!ok) console.log(`     ${at()} scan still running after ${timeout / 1000} s: ${JSON.stringify(await pageState(win))}`);
   await win.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+  return ok;
 }
+// the OpenStreetMap servers the app uses, read from the page itself
+const SERVERS = JSON.parse(/const OVERPASS = (\[[^\]]*\])/.exec(fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8"))[1].replace(/'/g, '"').replace(/\s+/g, " "));
+const isOsm = u => /\/api\/interpreter$/.test(u);
 const count = (win, sel) => win.locator(sel).count();
 
 (async () => {
+  // first, from outside the app: can this computer reach each OpenStreetMap server, and how fast?
+  console.log("OpenStreetMap servers, asked directly:");
+  const tiny = "[out:json][timeout:20];node[amenity=cafe](51.512,-0.137,51.515,-0.132);out 3;";
+  await Promise.all(SERVERS.map(async ep => {
+    const s0 = Date.now();
+    try {
+      const res = await fetch(ep, { method: "POST", body: "data=" + encodeURIComponent(tiny), headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal: AbortSignal.timeout(40000) });
+      const text = await res.text();
+      console.log(`     ${new URL(ep).hostname}: HTTP ${res.status} in ${Date.now() - s0} ms, ${text.length} bytes, CORS ${res.headers.get("access-control-allow-origin")}`);
+    } catch (e) { console.log(`     ${new URL(ep).hostname}: ${e.name} ${e.message} after ${Date.now() - s0} ms`); }
+  }));
+
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), "siteless-live-"));
   const args = [...(process.platform === "linux" ? ["--no-sandbox"] : []), `--user-data-dir=${userData}`, ...(EXE ? [] : ["."])];
   const app = await electron.launch({ executablePath: EXE || require("electron"), args, cwd: __dirname, timeout: 90000 });
   const win = await app.firstWindow();
   const errors = [];
-  win.on("pageerror", e => errors.push(String(e)));
+  win.on("pageerror", e => { console.log(`     ${at()} page error: ${e}`); errors.push(String(e)); });
+  win.on("console", m => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) console.log(`     ${at()} console: ${m.text()}`); });
+  // log every request to an OpenStreetMap server and how it ended
+  win.on("request", r => { if (isOsm(r.url())) console.log(`     ${at()} app asks ${new URL(r.url()).hostname}`); });
+  win.on("requestfinished", async r => {
+    if (!isOsm(r.url())) return;
+    const res = await r.response().catch(() => null);
+    console.log(`     ${at()} ${new URL(r.url()).hostname} answered HTTP ${res ? res.status() : "?"}`);
+  });
+  win.on("requestfailed", r => { if (isOsm(r.url())) console.log(`     ${at()} ${new URL(r.url()).hostname} failed: ${(r.failure() || {}).errorText}`); });
   await win.waitForSelector("#btnScan");
   // the debug hook lets the test move the map precisely
   await win.goto("siteless://app/index.html?debug");
@@ -54,16 +89,22 @@ const count = (win, sel) => win.locator(sel).count();
   // real OpenStreetMap scan of a busy neighbourhood (central London)
   await win.evaluate(() => window.__siteless.map.setView([51.5136, -0.1340], 16, { animate: false }));
   let places = 0, toast = "";
+  let scanSecs = 0;
   for (let attempt = 1; attempt <= 3 && !places; attempt++) {
+    console.log(`     ${at()} scan, attempt ${attempt}`);
+    const s0 = Date.now();
     await win.click("#btnScan");
-    await scanDone(win);
+    const finished = await scanDone(win);
+    scanSecs = Math.round((Date.now() - s0) / 1000);
     places = await win.evaluate(() => [...window.__siteless.S.places.values()].filter(p => p.src === "osm").length);
     toast = (await win.locator("#toast").innerText().catch(() => "")).trim();
-    if (!places) { console.log(`     attempt ${attempt}: ${toast}`); await sleep(20000); }
+    console.log(`     ${at()} attempt ${attempt} ${finished ? "finished" : "did not finish"} after ${scanSecs} s: ${places} places, "${toast}"`);
+    if (!finished) { await win.click("#btnStop").catch(() => {}); await scanDone(win, 30000); }
+    if (!places && attempt < 3) await sleep(20000);
   }
   const listed = await count(win, "#list .item");
   const pins = await count(win, ".leaflet-marker-icon");
-  check(places > 20 && listed > 0 && pins > 0, `scans real OpenStreetMap data: ${places} places, ${listed} listed, ${pins} pins or groups ("${toast}")`);
+  check(places > 20 && listed > 0 && pins > 0, `scans real OpenStreetMap data: ${places} places in ${scanSecs} s, ${listed} listed, ${pins} pins or groups ("${toast}")`);
   await win.waitForFunction(() => document.querySelectorAll("img.leaflet-tile-loaded").length >= 4, null, { timeout: 30000 }).catch(() => {});
   await shot(win, "live-map");
 

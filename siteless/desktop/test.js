@@ -12,10 +12,16 @@ const { execFileSync, spawn } = require("child_process");
 const EXE = process.env.SITELESS_EXE || "";
 const SHOTS = process.env.SHOTS || "";
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/58BAwAI/AL+hc2rNAAAAABJRU5ErkJggg==", "base64");
-const OSM = { elements: [
-  { type: "node", id: 1, lat: 40.7225, lon: -73.988, tags: { amenity: "restaurant", name: "Nonna Rosa", "addr:city": "New York" } },
-  { type: "node", id: 2, lat: 40.723, lon: -73.987, tags: { amenity: "cafe", name: "Little Cup", "contact:facebook": "https://facebook.com/littlecup" } },
-] };
+// two places in the middle of whatever area the app asks about (the map starts in a city picked
+// from the computer's time zone, so the places must not be tied to one city)
+function osmFor(query) {
+  const m = /\((-?[\d.]+),(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)\)/.exec(decodeURIComponent(query.replace(/^data=/, "").replace(/\+/g, " ")));
+  const lat = m ? (+m[1] + +m[3]) / 2 : 40.7225, lon = m ? (+m[2] + +m[4]) / 2 : -73.988;
+  return { elements: [
+    { type: "node", id: 1, lat, lon, tags: { amenity: "restaurant", name: "Nonna Rosa", "addr:city": "New York" } },
+    { type: "node", id: 2, lat: lat + 0.0005, lon: lon + 0.001, tags: { amenity: "cafe", name: "Little Cup", "contact:facebook": "https://facebook.com/littlecup" } },
+  ] };
+}
 let failures = 0;
 const results = [];
 const check = (ok, msg) => { console.log((ok ? "  ok  " : "  FAIL ") + msg); results.push([ok, msg]); if (!ok) failures++; };
@@ -31,7 +37,7 @@ async function launch(userData, extra) {
   await app.context().route("**/*", route => {
     const u = new URL(route.request().url());
     if (u.protocol === "siteless:") return route.continue();
-    if (/overpass/.test(u.hostname)) return route.fulfill({ json: OSM, headers: { "Access-Control-Allow-Origin": "*" } });
+    if (u.pathname.endsWith("/api/interpreter")) return route.fulfill({ json: osmFor(route.request().postData() || ""), headers: { "Access-Control-Allow-Origin": "*" } });
     if (u.hostname.endsWith("cartocdn.com")) return route.fulfill({ body: PNG, contentType: "image/png" });
     if (/google\.com$/.test(u.hostname)) return route.fulfill({ body: "<html><body>Google Maps (mock)</body></html>", contentType: "text/html" });
     return route.abort();
@@ -58,10 +64,18 @@ async function launch(userData, extra) {
   check(await win.title() === "Siteless", "window is titled Siteless");
   check(await win.evaluate(() => !!window.sitelessApp && document.documentElement.classList.contains("desktop-app")), "page knows it runs in the desktop app");
   check(await win.evaluate(() => typeof L !== "undefined" && typeof L.markerClusterGroup === "function"), "Leaflet works without the internet");
-  if (EXE) check(await app.evaluate(({ app }) => app.isPackaged && app.getName() === "Siteless" && app.getVersion() === "1.0.0"), "runs as the packaged Siteless 1.0.0");
+  const version = require("./package.json").version;
+  if (EXE) check(await app.evaluate(({ app }, v) => app.isPackaged && app.getName() === "Siteless" && app.getVersion() === v, version), `runs as the packaged Siteless ${version}`);
 
   await win.click("#btnScan");
-  await win.waitForSelector("#list .item");
+  await win.waitForSelector("#list .item", { timeout: 45000 }).catch(async () => {
+    console.log("     no places listed; the page shows:", JSON.stringify(await win.evaluate(() => ({
+      progress: document.getElementById("progress").hidden ? "" : document.getElementById("progText").textContent,
+      toast: document.getElementById("toast").hidden ? "" : document.getElementById("toast").innerText,
+      button: document.getElementById("scanLabel").innerText, list: document.getElementById("list").innerText.slice(0, 200),
+    }))));
+    await shot(win, "fail-scan");
+  });
   check((await win.locator("#list .item").count()) === 2, "scans and lists places");
   await shot(win, "app-list");
 

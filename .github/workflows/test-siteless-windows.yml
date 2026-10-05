@@ -64,13 +64,14 @@ jobs:
           $target = if (Test-Path $startMenu) { $shell.CreateShortcut($startMenu).TargetPath } else { '' }
           $uninst = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.DisplayName -like 'Siteless*' } | Select-Object -First 1
           $ver = if (Test-Path $exe) { (Get-Item $exe).VersionInfo } else { $null }
+          $want = (Get-Content siteless/desktop/package.json -Raw | ConvertFrom-Json).version
           $checks = @(
             @("Installer finished (exit code $($p.ExitCode))", ($p.ExitCode -eq 0)),
             @("Installed for this user at $exe", (Test-Path $exe)),
             @("Start menu shortcut opens the app", ($target -eq $exe)),
             @("Desktop shortcut created", (Test-Path $desktop)),
             @("Listed in Settings > Apps for uninstalling ($($uninst.DisplayName), version $($uninst.DisplayVersion))", ($null -ne $uninst)),
-            @("Program details say $($ver.ProductName) $($ver.ProductVersion)", ($ver -and $ver.ProductName -eq 'Siteless' -and $ver.ProductVersion -like '1.0.0*'))
+            @("Program details say $($ver.ProductName) $($ver.ProductVersion)", ($ver -and $ver.ProductName -eq 'Siteless' -and $ver.ProductVersion -like "$want*"))
           )
           "`n### Installer`n" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
           $bad = 0
