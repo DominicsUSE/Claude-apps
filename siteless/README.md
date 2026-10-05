@@ -59,6 +59,17 @@ in Settings.
 Other shortcuts: <kbd>/</kbd> search, <kbd>J</kbd>/<kbd>K</kbd> next and previous place,
 <kbd>O</kbd> open in Google Maps, <kbd>Esc</kbd> back to the list.
 
+### Making sure "no website" really means no website
+
+Map listings often just don't mention a place's website. So the Windows app double-checks
+every place without one, best leads first: it tries the web address made from the name
+(`joespizza.com`, and the country's own ending) and searches the web (Bing, then Brave) for
+the name and street, skipping directories like Yelp, TripAdvisor and Facebook. If it finds
+the place's site, the place moves to the website types (a site that does not load counts
+as broken). If not, the place gets **✓ No site online**. With **Only places double-checked
+on the web to have no website** ticked (the default), places still being checked are not
+shown yet. The spreadsheet export has a column with the result.
+
 ### Free mode (no key)
 
 Without a key Siteless uses OpenStreetMap: it finds places that list no website, or only a
@@ -106,6 +117,8 @@ checks are free. You can also set a hard daily cap under Quotas in the Cloud con
 ## Files
 
 - `index.html`: the whole app (one page; the desktop app wraps it).
+- `desktop/verify.js`: the web double-check for places without a website (tested offline by
+  `desktop/verify.test.js`).
 - `desktop/`: the Windows app (Electron). `build.js` bundles Leaflet into the page and builds
   the installer and portable exe with electron-builder; `main.js` serves the page from
   `siteless://`, opens links in your default browser, mail app or phone app, keeps one

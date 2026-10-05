@@ -73,6 +73,9 @@ setTimeout(() => { console.error(`\nFAIL the live test hung during: ${step}`); p
   await win.goto("siteless://app/index.html?debug");
   await win.waitForFunction(() => !!window.__siteless);
   await app.evaluate(({ shell }) => { global.__opened = []; shell.openExternal = url => { global.__opened.push(url); return Promise.resolve(); }; });
+  // the earlier checks look at every place found; the web double-check is tested on its own at the end
+  await win.evaluate(() => { window.__siteless.S.onlyVerified = false; });
+  const pauseVerify = () => win.evaluate(() => { window.__siteless.VQ.list.length = 0; });
 
   say("map tiles");
   // real map tiles: different squares of the map must be different pictures (a "key required"
@@ -138,6 +141,7 @@ setTimeout(() => { console.error(`\nFAIL the live test hung during: ${step}`); p
     const s0 = Date.now();
     await win.click("#btnScan");
     const finished = await scanDone(win);
+    await pauseVerify();
     scanSecs = Math.round((Date.now() - s0) / 1000);
     places = await win.evaluate(() => [...window.__siteless.S.places.values()].filter(p => p.src === "osm").length);
     toast = (await win.locator("#toast").innerText().catch(() => "")).trim();
@@ -190,6 +194,7 @@ setTimeout(() => { console.error(`\nFAIL the live test hung during: ${step}`); p
       const s0 = Date.now();
       await win.click("#btnScan");
       const finished = await scanDone(win);
+      await pauseVerify();
       secs = Math.round((Date.now() - s0) / 1000);
       n = (await win.evaluate(() => window.__siteless.S.places.size)) - before;
       msg = (await win.locator("#toast").innerText().catch(() => "")).trim();
@@ -215,11 +220,43 @@ setTimeout(() => { console.error(`\nFAIL the live test hung during: ${step}`); p
   await win.evaluate(() => window.__siteless.map.setView([40.7223, -73.9878], 16, { animate: false }));
   await win.fill("#kw", "pizza");
   await win.press("#kw", "Enter");
-  await win.click("#btnScan");
-  await scanDone(win);
+  for (let attempt = 1; attempt <= 2; attempt++) {   // the free servers are sometimes busy
+    await win.click("#btnScan");
+    await scanDone(win);
+    await pauseVerify();
+    if (await win.evaluate(() => [...window.__siteless.S.places.values()].some(p => p.kw === "pizza"))) break;
+    if (attempt < 2) { console.log("     keyword scan: servers busy, trying again"); await sleep(15000); }
+  }
   const kwFound = await win.evaluate(() => [...window.__siteless.S.places.values()].filter(p => p.kw === "pizza").length);
   check(kwFound > 0, `a keyword scan for "pizza" finds pizza places (${kwFound}; "${(await win.locator("#toast").innerText().catch(() => "")).trim()}")`);
   await win.click("#btnKwClear").catch(() => {});
+
+  say("website double-check");
+  // known places that do have a website OpenStreetMap might not list: the app must find it
+  for (const [place, want] of [[{ name: "Katz's Delicatessen", city: "New York", street: "205 East Houston Street" }, /katzsdelicatessen\.com/],
+                               [{ name: "Joe's Pizza", city: "New York", street: "7 Carmine Street" }, /joespizza(nyc)?\.com/]]) {
+    const s0 = Date.now();
+    const r = await win.evaluate(pl => window.sitelessApp.findWebsite(pl), place).catch(e => ({ error: String(e) }));
+    check(want.test((r && r.url) || ""), `finds ${place.name}'s own website on the web (${JSON.stringify(r)}, ${Math.round((Date.now() - s0) / 1000)} s)`);
+  }
+  // a real scan: the places without a listed website get double-checked on the web
+  await win.evaluate(() => { const S = window.__siteless.S; S.onlyVerified = true; window.__siteless.map.setView([54.6812, 25.2876], 18, { animate: false }); });
+  await sleep(500);
+  await win.click("#btnScan");
+  await scanDone(win);
+  await win.waitForFunction(() => window.__siteless.VQ.list.length + window.__siteless.VQ.active === 0, null, { timeout: 240000 }).catch(() => {});
+  const vs = await win.evaluate(() => {
+    const ps = [...window.__siteless.S.places.values()].filter(p => p.web && Date.now() - p.web.at < 600000);
+    return { checked: ps.length, none: ps.filter(p => p.web.none).length, found: ps.filter(p => p.web.url).map(p => `${p.name} → ${p.web.url}`), failed: ps.filter(p => p.web.failed).length,
+      listed: document.querySelectorAll("#list .item").length,
+      // every listed place without a website must be one the search cleared
+      unchecked: [...document.querySelectorAll("#list .item")].filter(i => { const p = window.__siteless.S.places.get(i.dataset.id); return p && !p.website && !/No site online/.test(i.innerText); }).length };
+  });
+  console.log("     double-check after a real scan:", JSON.stringify(vs));
+  check(vs.checked >= 3 && vs.failed <= vs.checked / 2 && vs.unchecked === 0,
+    `after a real scan, places are double-checked on the web (${vs.checked} checked: ${vs.none} have none, ${vs.found.length} have one, ${vs.failed} could not be checked; ${vs.listed} listed, ${vs.unchecked} shown without the check)`);
+  await shot(win, "live-double-checked");
+  await win.evaluate(() => { window.__siteless.S.onlyVerified = false; window.__siteless.render(); });
 
   say("satellite");
   // real satellite imagery
