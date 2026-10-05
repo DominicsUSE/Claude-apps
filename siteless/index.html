@@ -1574,22 +1574,35 @@ function osmQuery(t, kw) {
   }
   return `[out:json][timeout:30];(${parts});out center tags 4000;`;
 }
+// a part of the map the servers could not manage in time is split in four and asked again
+function quarter(t) {
+  const mLat = (t.s + t.n) / 2, mLng = (t.w + t.e) / 2, d = (t.d || 0) + 1;
+  return [{ s: t.s, n: mLat, w: t.w, e: mLng, d }, { s: t.s, n: mLat, w: mLng, e: t.e, d },
+    { s: mLat, n: t.n, w: t.w, e: mLng, d }, { s: mLat, n: t.n, w: mLng, e: t.e, d }];
+}
 async function scanOsm() {
-  const tiles = osmTiles(map.getBounds()) || [];
+  const queue = osmTiles(map.getBounds()) || [];
   const found = new Set();
   let more = false, done = 0;
-  for (const t of tiles) {
+  while (queue.length) {
     if (scan.stop) break;
-    const label = `Asking OpenStreetMap · part ${done + 1} of ${tiles.length} · ${fmt(found.size)} places`;
-    progress(label, (done + 0.3) / tiles.length);
+    const t = queue.shift();
+    const total = done + queue.length + 1;
+    const label = `Asking OpenStreetMap · part ${done + 1} of ${total} · ${fmt(found.size)} places`;
+    progress(label, (done + 0.3) / total);
     const t0 = Date.now();
     const tick = setInterval(() => {
       const s = Math.round((Date.now() - t0) / 1000);
-      if (!scan.stop && s >= 5) progress(`${label} · waiting for the server, ${s} s`, (done + 0.3) / tiles.length);
+      if (!scan.stop && s >= 5) progress(`${label} · waiting for the server, ${s} s`, (done + 0.3) / total);
     }, 1000);
     let j;
     try { j = await overpass(osmQuery(t, S.kw)); }
-    catch (e) { if (scan.stop) break; return { found, used: done, error: e, more: true }; }
+    catch (e) {
+      if (scan.stop) break;
+      // too much at once for the servers right now: try the same area in four smaller parts
+      if (!t.d && !/reach/.test(e.message)) { queue.unshift(...quarter(t)); continue; }   // once; if a smaller part fails too, stop
+      return { found, used: done, error: e, more: true };
+    }
     finally { clearInterval(tick); }
     if (!j) break;   // stopped
     for (const el of j.elements || []) { const p = fromOsm(el, S.kw); if (p) found.add(addPlace(p).id); }
