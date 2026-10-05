@@ -1,7 +1,7 @@
 {
   "name": "siteless",
   "productName": "Siteless",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Map of well-reviewed places with no website or a bad one",
   "author": "Siteless",
   "main": "main.js",
@@ -21,7 +21,7 @@
     "productName": "Siteless",
     "copyright": "Map data: OpenStreetMap contributors, CARTO. Listings: Google.",
     "directories": { "output": "dist", "buildResources": "build" },
-    "files": ["main.js", "preload.js", "app/**/*", "package.json"],
+    "files": ["main.js", "preload.js", "verify.js", "app/**/*", "package.json"],
     "win": {
       "icon": "build/icon.png",
       "target": [

@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld("sitelessApp", {
   // OpenStreetMap requests go through the app itself (see main.js)
   overpass: (id, url, body) => ipcRenderer.invoke("overpass", id, url, body),
   cancelOverpass: id => ipcRenderer.send("overpass-cancel", id),
+  // looks on the web for a website the map data missed (see verify.js)
+  findWebsite: place => ipcRenderer.invoke("find-website", place),
 });
 window.addEventListener("DOMContentLoaded", () => {
   document.documentElement.classList.add("desktop-app");

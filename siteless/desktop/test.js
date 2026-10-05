@@ -32,8 +32,15 @@ async function launch(userData, extra) {
     if (/google\.com$/.test(u.hostname)) return route.fulfill({ body: "<html><body>Google Maps (mock)</body></html>", contentType: "text/html" });
     return route.abort();
   });
-  // OpenStreetMap requests are sent by the app's main process, so answer them there
+  // OpenStreetMap requests and the web search for missed websites run in the app's main
+  // process, so answer them there: Little Cup turns out to have a website, Nonna Rosa has none
   await app.evaluate(({ ipcMain }) => {
+    global.__webChecks = [];
+    ipcMain.removeHandler("find-website");
+    ipcMain.handle("find-website", (e, place) => {
+      global.__webChecks.push(place);
+      return place.name === "Little Cup" ? { url: "https://littlecupcafe.example/", how: "a web search" } : { url: null, searched: true };
+    });
     global.__osmCalls = [];
     ipcMain.removeHandler("overpass");
     ipcMain.handle("overpass", (e, id, url, body) => {
@@ -82,7 +89,17 @@ async function launch(userData, extra) {
     }))));
     await shot(win, "fail-scan");
   });
+  await win.waitForFunction(() => document.querySelectorAll("#list .item").length === 2, null, { timeout: 15000 }).catch(() => {});
   check((await win.locator("#list .item").count()) === 2, "scans and lists places");
+  const webChecks = await app.evaluate(() => global.__webChecks);
+  check(webChecks.length === 2 && webChecks.some(c => c.name === "Nonna Rosa"), `searches the web for a website each place without one may have (${webChecks.map(c => c.name).join(", ")})`);
+  const listText = await win.locator("#list").innerText();
+  check(/Nonna Rosa[\s\S]*No site online/.test(listText) || /No site online[\s\S]*Nonna Rosa/.test(listText), "a place the web search found no website for is marked as double-checked");
+  await win.locator("#list .item", { hasText: "Little Cup" }).click();
+  await win.waitForSelector("#detailView:not([hidden]) .d-head h2");
+  check(/Website found by a web search/.test(await win.locator("#dStatus").innerText()) && /littlecupcafe\.example/.test(await win.locator("#dWebsite").innerText()),
+    "a place whose website the search found shows that website and no longer counts as having none");
+  await win.click("#btnBack");
   check(await app.evaluate(() => global.__osmCalls.length) >= 1, "the app itself asks OpenStreetMap, not the web page");
   await shot(win, "app-list");
 

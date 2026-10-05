@@ -451,6 +451,7 @@ html.desktop-mac #side::before{content:"";position:fixed;top:0;left:0;width:var(
             </select>
           </div>
           <label class="check full"><input type="checkbox" id="hideChains"> Hide chains and franchises</label>
+          <label class="check full" id="onlyVerifiedRow" hidden><input type="checkbox" id="onlyVerified"> Only places double-checked on the web to have no website</label>
         </div>
       </div>
 
@@ -589,6 +590,9 @@ const fmt = n => Number(n || 0).toLocaleString();
 const LANG = (navigator.language || 'en').split('-')[0];
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const IN_APP = !!window.sitelessApp;   // running inside the desktop app
+// the desktop app can search the web for a website a place's map listing is missing
+const CAN_VERIFY = !!(window.sitelessApp && window.sitelessApp.findWebsite);
+const VQ = { list: [], active: 0, max: 3 };
 const DAY = 864e5;
 const NS = 'siteless.v1.';
 const store = {
@@ -795,7 +799,7 @@ const chainKey = name => String(name || '').toLowerCase().split(/\s[-–—|@(]\
 const DEPTH = { quick: { n: 15, label: 'Quick' }, thorough: { n: 60, label: 'Thorough' }, max: { n: 250, label: 'Maximum' } };
 const DEFAULTS = {
   v: 2, key: '', depth: 'max', capOn: true, monthlyCap: 1000, autoCheck: true, autoScan: false,
-  cats: CATS.map(c => c.id), kw: '', layer: 'map', hideChains: true,
+  cats: CATS.map(c => c.id), kw: '', layer: 'map', hideChains: true, onlyVerified: true,
   st: ['none', 'broken', 'social', 'platform', 'poor', 'unchecked'], minRating: 4.2, minReviews: 15, lead: 'all', sort: 'lead',
   me: { name: '', biz: '', offer: '', contact: '' },
 };
@@ -821,11 +825,11 @@ S.q = '';                                     // list name filter
 const mode = () => (S.key ? 'google' : 'osm');
 
 function saveSettings() {
-  const { v, key, depth, capOn, monthlyCap, autoCheck, autoScan, cats, kw, layer, hideChains, st, minRating, minReviews, lead, sort, me } = S;
-  store.set('settings', { v, key, depth, capOn, monthlyCap, autoCheck, autoScan, cats, kw, layer, hideChains, st, minRating, minReviews, lead, sort, me });
+  const { v, key, depth, capOn, monthlyCap, autoCheck, autoScan, cats, kw, layer, hideChains, onlyVerified, st, minRating, minReviews, lead, sort, me } = S;
+  store.set('settings', { v, key, depth, capOn, monthlyCap, autoCheck, autoScan, cats, kw, layer, hideChains, onlyVerified, st, minRating, minReviews, lead, sort, me });
 }
 const PLACE_KEYS = ['id', 'gid', 'src', 'name', 'lat', 'lng', 'address', 'fullAddress', 'city', 'brand', 'phone', 'intlPhone', 'rating', 'reviews', 'website', 'social',
-  'socialUrl', 'maps', 'type', 'types', 'cats', 'kw', 'price', 'hours', 'osmUrl', 'seen', 'check'];
+  'socialUrl', 'maps', 'type', 'types', 'cats', 'kw', 'price', 'hours', 'osmUrl', 'seen', 'check', 'web'];
 const compact = p => Object.fromEntries(PLACE_KEYS.filter(k => p[k] != null && p[k] !== '').map(k => [k, p[k]]));
 let saveTimer = 0;
 function savePlaces() {
@@ -872,7 +876,9 @@ function classify(p) {
   if (!p.website) {
     if (p.social) { st = 'social'; why.push(`Only a ${p.social} page${p.src === 'osm' ? ' listed on OpenStreetMap' : ''}`); }
     else { st = 'none'; why.push(p.src === 'osm' ? 'No website listed on OpenStreetMap' : 'No website on its Google listing'); }
-    if (p.src === 'osm') why.push('OpenStreetMap can miss websites. Check the Google listing to be sure.');
+    if (p.web && p.web.none) why.push('Double-checked: a web search found no website for this name');
+    else if (p.verifying || (CAN_VERIFY && VQ.list.includes(p.id))) why.push('Searching the web for a website it may have…');
+    else if (p.src === 'osm') why.push('OpenStreetMap can miss websites. Check the Google listing to be sure.');
   } else {
     const u = safeUrl(p.website);
     const hit = u && matchHost(u.hostname);
@@ -892,6 +898,7 @@ function classify(p) {
       if (u.protocol === 'http:') why.push('Listed as http://, not https://');
     }
   }
+  if (p.web && p.web.url && p.website === p.web.url) why.unshift(`Website found by ${p.web.how || 'a web search'}; ${p.src === 'osm' ? 'OpenStreetMap' : 'Google'} does not list it`);
   p.status = st;
   p.why = why;
   p.lead = leadScore(p);
@@ -918,6 +925,7 @@ function cleanPlace(o) {
     if (v == null) continue;
     if (k === 'types' || k === 'cats') { if (Array.isArray(v)) p[k] = v.filter(x => typeof x === 'string'); }
     else if (k === 'check') { if (typeof v === 'object' && !Array.isArray(v)) p.check = v; }
+    else if (k === 'web') { if (typeof v === 'object' && !Array.isArray(v) && typeof v.at === 'number') p.web = { at: v.at, none: !!v.none, failed: !!v.failed, url: typeof v.url === 'string' ? v.url : undefined, how: typeof v.how === 'string' ? v.how : undefined, broken: !!v.broken }; }
     else if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') p[k] = v;
   }
   p.src = o.id[0] === 'g' ? 'google' : 'osm';
@@ -1072,7 +1080,7 @@ function hl(id, on) {
 }
 
 /* ================= filtering & list ================= */
-function passes(p, ignoreStatus) {
+function passes(p, ignoreStatus, ignoreVerify) {
   if (p.src !== mode()) return false;
   if (!p.kw && p.cats && p.cats.length && !p.cats.some(c => S.cats.includes(c))) return false;
   if (p.src === 'google') {
@@ -1080,6 +1088,7 @@ function passes(p, ignoreStatus) {
     if ((p.reviews || 0) < S.minReviews) return false;
   }
   if (S.hideChains && chainInfo(p)) return false;
+  if (CAN_VERIFY && S.onlyVerified && !ignoreVerify && !p.website && !(p.web && p.web.none)) return false;   // not yet double-checked
   const l = leadOf(p.id);
   if (S.lead === 'all' && l.s === 'skip') return false;
   if (S.lead === 'new' && l.s) return false;
@@ -1167,12 +1176,13 @@ function itemHtml(p) {
   const leadTxt = { saved: '★ Saved', contacted: '✓ Contacted', won: '◆ Won', skip: 'Not a fit' }[l.s] || '';
   const due = isDue(l) ? `<span class="lead-tag lead-due">Follow up ${l.due === today() ? 'today' : 'overdue'}</span>` : '';
   const rating = p.rating != null ? `<span><span class="rating">${p.rating.toFixed(1)}</span> <span class="stars">${starStr(p.rating)}</span> <span class="num">(${fmt(p.reviews)})</span></span>` : '';
-  const checking = p.checking ? '<span class="spin" title="Checking website"></span>' : '';
+  const checking = p.checking || p.verifying ? `<span class="spin" title="${p.verifying ? 'Searching the web for a website' : 'Checking website'}"></span>` : '';
+  const verified = !p.website && p.web && p.web.none ? '<span class="lead-tag" title="A web search found no website for this name">✓ No site online</span>' : '';
   return `<li><button type="button" class="item" data-id="${esc(p.id)}">
     <span class="gdot s-${p.status}" aria-hidden="true">${STATUS[p.status].g}</span>
     <span style="min-width:0"><span class="nm">${esc(p.name)}</span>
       <span class="sub">${esc([p.type, p.address].filter(Boolean).join(' · '))}</span>
-      <span class="meta">${rating}<span class="pill s-${p.status}">${esc(STATUS[p.status].chip)}</span>${checking}${leadTxt ? `<span class="lead-tag">${leadTxt}</span>` : ''}${due}</span></span>
+      <span class="meta">${rating}<span class="pill s-${p.status}">${esc(STATUS[p.status].chip)}</span>${verified}${checking}${leadTxt ? `<span class="lead-tag">${leadTxt}</span>` : ''}${due}</span></span>
     <span class="score" title="Lead score: weaker website and better reviews score higher"><b>${p.lead}</b><small>lead</small></span>
   </button></li>`;
 }
@@ -1227,6 +1237,8 @@ function renderChrome() {
   $('#leadFilter').value = S.lead;
   $('#sort').value = S.sort;
   $('#hideChains').checked = S.hideChains;
+  $('#onlyVerified').checked = S.onlyVerified;
+  $('#onlyVerifiedRow').hidden = !CAN_VERIFY;
   updateScanButton();
 }
 
@@ -1342,6 +1354,8 @@ function fromGoogle(g, kw) {
 function addPlace(p, restoring) {
   const old = S.places.get(p.id);
   if (!old) { classify(p); S.places.set(p.id, p); return p; }
+  if (!p.website && old.web && old.web.url) { p.website = old.web.url; if (old.web.broken && !p.check) p.check = old.check; }
+  if (!p.web) p.web = old.web;
   // update the existing object in place: a website check that is running holds a reference to it
   const same = old.website === p.website;
   let check = same ? old.check : undefined;
@@ -1659,6 +1673,11 @@ function afterScan(r, b) {
     else if (r.more) msg += ' Very busy area: zoom in and scan again to find more.';
     toast(msg, 9000);
   }
+  if (CAN_VERIFY) {
+    const todo = [...r.found].map(id => S.places.get(id)).filter(p => p && needsVerify(p) && passes(p, true, true));
+    todo.sort((a, c) => c.lead - a.lead).slice(0, 250).forEach(p => enqueueVerify(p));
+    if (todo.length) { todo.forEach(classify); render(); }
+  }
   if (mode() === 'google' && S.autoCheck) {
     [...r.found].map(id => S.places.get(id))
       .filter(p => p.status === 'unchecked' && passes(p, true))
@@ -1678,6 +1697,47 @@ function coverage() {
     if (rects.some(a => lat >= a[0] && lat <= a[2] && lng >= a[1] && lng <= a[3])) hit++;
   }
   return hit / 36;
+}
+
+/* ================= double-checking "no website" (desktop app) ================= */
+// OpenStreetMap, and sometimes Google, simply don't list a website a place does have. The app
+// looks for one: the address made from the name, then a web search for the name and street.
+const WEB_FRESH = 30 * 864e5;
+const needsVerify = p => CAN_VERIFY && !p.website && !p.verifying &&
+  !(p.web && (p.web.none ? Date.now() - p.web.at < WEB_FRESH : p.web.failed && Date.now() - p.web.at < 36e5));
+function enqueueVerify(p, front) {
+  if (!needsVerify(p)) return;
+  const i = VQ.list.indexOf(p.id);
+  if (i >= 0) { if (front) { VQ.list.splice(i, 1); VQ.list.unshift(p.id); } }
+  else if (front) VQ.list.unshift(p.id); else VQ.list.push(p.id);
+  pumpVerify();
+}
+function pumpVerify() {
+  while (VQ.active < VQ.max && VQ.list.length) {
+    const p = S.places.get(VQ.list.shift());
+    if (!p || !needsVerify(p)) continue;
+    VQ.active++;
+    verifyPlace(p).finally(() => { VQ.active--; setTimeout(pumpVerify, 300); });
+  }
+  updateBadge();
+}
+// the country's web address ending, from the computer's language setting (en-GB -> uk, lt-LT -> lt)
+const myTld = (() => { const r = ((navigator.language || '').split('-')[1] || '').toLowerCase(); return r === 'gb' ? 'uk' : /^[a-z]{2}$/.test(r) && r !== 'us' ? r : ''; })();
+async function verifyPlace(p) {
+  p.verifying = true;
+  render();
+  let r = null;
+  try { r = await window.sitelessApp.findWebsite({ name: p.name, city: p.city || '', street: (p.address || '').split(',')[0], tld: myTld }); } catch (e) { /* counts as not checked */ }
+  p.verifying = false;
+  if (r && r.url) {
+    p.web = { at: Date.now(), url: r.url, how: r.how, broken: !!r.broken };
+    p.website = r.url;
+    if (r.broken) p.check = { at: Date.now(), broken: true, reasons: ['The website it has does not load'] };
+  } else p.web = r && r.searched ? { at: Date.now(), none: true } : { at: Date.now(), failed: true };
+  classify(p);
+  savePlaces();
+  render();
+  if (S.sel === p.id) updateDetail(p);
 }
 
 /* ================= website checks (PageSpeed Insights) ================= */
@@ -1704,9 +1764,12 @@ function pump() {
     CQ.active++;
     checkSite(p).finally(() => { CQ.active--; pump(); });
   }
-  const left = CQ.list.length + CQ.active;
-  $('#checkBadge').hidden = !left;
-  $('#checkText').textContent = `Checking websites · ${left} left`;
+  updateBadge();
+}
+function updateBadge() {
+  const c = CQ.list.length + CQ.active, v = VQ.list.length + VQ.active;
+  $('#checkBadge').hidden = !c && !v;
+  $('#checkText').textContent = c ? `Checking websites · ${c} left` : `Searching the web for missed websites · ${v} left`;
 }
 
 const LH_ERRORS = [
@@ -1929,6 +1992,7 @@ function openDetail(id, { pan = true } = {}) {
   if (!S.sel) listScroll = $('#side').scrollTop;
   S.sel = id;
   pitchDirty = false;
+  enqueueVerify(p, true);   // the place being looked at is double-checked first
   $('#app').classList.add('detail-open');
   $('#listView').hidden = true;
   const v = $('#detailView');
@@ -2251,7 +2315,9 @@ function downloadCsv(places, name) {
     ['Name', p => p.name], ['Website status', p => STATUS[p.status].label], ['Why', p => p.why.join('; ')], ['Lead score', p => p.lead],
     ['Rating', p => p.rating == null ? '' : p.rating], ['Reviews', p => p.rating == null ? '' : p.reviews], ['Type', p => p.type],
     ['Phone', p => p.phone], ['Address', p => p.fullAddress || p.address], ['Website', p => p.website || p.socialUrl || ''],
-    ['Website quality', p => (p.check && p.check.score != null ? p.check.score : '')], ['Google Maps', p => mapsLink(p)],
+    ['Website quality', p => (p.check && p.check.score != null ? p.check.score : '')],
+    ['Web search for a website', p => (!p.web ? '' : p.web.url ? `Found ${p.web.url}` : p.web.none ? 'None found' : 'Could not search')],
+    ['Google Maps', p => mapsLink(p)],
     ['Lead status', p => ({ saved: 'Saved', contacted: 'Contacted', won: 'Won', skip: 'Not a fit' }[leadOf(p.id).s] || '')],
     ['Follow up', p => leadOf(p.id).due || ''], ['Notes', p => leadOf(p.id).note || ''],
     ['Latitude', p => p.lat.toFixed(6)], ['Longitude', p => p.lng.toFixed(6)],
@@ -2271,7 +2337,7 @@ function applySettings(o) {
   if (Array.isArray(o.cats)) S.cats = o.cats.filter(id => CAT_BY_ID[id]);
   if (Array.isArray(o.st)) S.st = o.st.filter(st => STATUS[st]);
   if (DEPTH[o.depth]) S.depth = o.depth;
-  for (const k of ['capOn', 'autoCheck', 'autoScan', 'hideChains']) if (typeof o[k] === 'boolean') S[k] = o[k];
+  for (const k of ['capOn', 'autoCheck', 'autoScan', 'hideChains', 'onlyVerified']) if (typeof o[k] === 'boolean') S[k] = o[k];
   if (typeof o.monthlyCap === 'number' && o.monthlyCap >= 50) S.monthlyCap = Math.round(Math.min(o.monthlyCap, 1e6));
   if (typeof o.minRating === 'number' && o.minRating >= 3.5 && o.minRating <= 5) S.minRating = o.minRating;
   if ([0, 5, 15, 30, 50, 100, 250].includes(o.minReviews)) S.minReviews = o.minReviews;
@@ -2399,7 +2465,7 @@ function afterModeChange() {
 /* ================= events ================= */
 $('#btnScan').addEventListener('click', runScan);
 $('#btnStop').addEventListener('click', () => { scan.stop = true; if (scan.abort) scan.abort(); $('#progText').textContent = 'Stopping…'; });
-$('#btnCheckStop').addEventListener('click', () => { CQ.list = []; pump(); });
+$('#btnCheckStop').addEventListener('click', () => { CQ.list = []; VQ.list = []; pump(); pumpVerify(); render(); });
 $('#btnCheckAll').addEventListener('click', () => inViewList().forEach(p => enqueueCheck(p)));
 $('#btnCsv').addEventListener('click', () => downloadCsv(inViewList(), `siteless-places-${today()}.csv`));
 $('#btnRoute').addEventListener('click', planRoute);
@@ -2435,6 +2501,7 @@ $('#minReviews').addEventListener('change', e => { S.minReviews = +e.target.valu
 $('#leadFilter').addEventListener('change', e => { S.lead = e.target.value; saveSettings(); render(); });
 $('#sort').addEventListener('change', e => { S.sort = e.target.value; saveSettings(); render(); });
 $('#hideChains').addEventListener('change', e => { S.hideChains = e.target.checked; saveSettings(); render(); });
+$('#onlyVerified').addEventListener('change', e => { S.onlyVerified = e.target.checked; saveSettings(); render(); });
 let qTimer = 0;
 $('#nameFilter').addEventListener('input', e => { clearTimeout(qTimer); qTimer = setTimeout(() => { S.q = e.target.value.trim().toLowerCase(); listLimit = 150; render(); }, 120); });
 
@@ -2599,7 +2666,7 @@ map.on('moveend', () => {
 new ResizeObserver(() => map.invalidateSize()).observe($('#mapWrap'));
 
 /* ================= start ================= */
-if (/[?&]debug\b/.test(location.search)) window.__siteless = { S, map, render, CQ, canCheck, passes, OSM_T };   // for the end-to-end test
+if (/[?&]debug\b/.test(location.search)) window.__siteless = { S, map, render, CQ, VQ, canCheck, passes, OSM_T };   // for the end-to-end test
 drawAreas();
 renderChrome();
 render();

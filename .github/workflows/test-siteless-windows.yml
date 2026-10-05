@@ -87,6 +87,11 @@ jobs:
           Get-Process Siteless -ErrorAction SilentlyContinue | Stop-Process -Force
           if ($bad) { exit 1 }
 
+      - name: Test the website double-check (offline)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: siteless/desktop
+        run: node verify.test.js
+
       - name: Drive the installed app (mocked data)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         working-directory: siteless/desktop

@@ -109,11 +109,32 @@ async function overpass(e, id, url, body) {
   } finally { pending.delete(id); }
 }
 
+// "Does this place really have no website?" (see verify.js). Pages are fetched like a normal browser
+// would, read up to 2 MB, and given up on after the timeout.
+const { findWebsite } = require("./verify");
+const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+async function getPage(url, { timeout = 8000 } = {}) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeout);
+  try {
+    const res = await net.fetch(url, { signal: ctl.signal, headers: { "User-Agent": BROWSER_UA, "Accept-Language": "en;q=0.9,*;q=0.5", Accept: "text/html,*/*;q=0.8" } });
+    const buf = Buffer.from(await res.arrayBuffer());
+    return { ok: res.ok, status: res.status, url: res.url, text: buf.subarray(0, 2e6).toString("utf8") };
+  } finally { clearTimeout(t); }
+}
+async function findSite(e, place) {
+  if (!place || typeof place.name !== "string" || place.name.length > 200) return { url: null, searched: false };
+  const clean = k => (typeof place[k] === "string" ? place[k].slice(0, 120) : "");
+  try { return await findWebsite({ name: clean("name"), city: clean("city"), street: clean("street"), tld: /^[a-z]{2,3}$/.test(place.tld) ? place.tld : "" }, getPage); }
+  catch (err) { return { url: null, searched: false }; }
+}
+
 app.setName("Siteless");
 if (process.platform === "win32") app.setAppUserModelId("com.siteless.app");
 if (firstCopy) app.whenReady().then(() => {
   protocol.handle("siteless", handle);
   ipcMain.handle("overpass", overpass);
+  ipcMain.handle("find-website", findSite);
   ipcMain.on("overpass-cancel", (e, id) => { const c = pending.get(id); if (c) c.abort(); });
   // only the app's own page may use location and the clipboard; embedded Google maps get nothing
   session.defaultSession.setPermissionRequestHandler((wc, permission, done, details) => {
