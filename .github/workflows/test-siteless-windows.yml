@@ -1,0 +1,168 @@
+# Tests Siteless on real Windows machines: builds the installer, installs it silently, checks the
+# shortcuts and uninstall entry, drives the installed app (mocked and on the live internet), runs the
+# portable exe, tests the map page in Edge and Chrome, then uninstalls. Screenshots are attached to
+# each run, and the results table is on the run's summary page.
+name: Siteless Windows tests
+
+on:
+  push:
+    paths:
+      - "siteless/**"
+      - ".github/workflows/test-siteless-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-2022, name: "Windows Server 2022 (like Windows 10)" }
+          - { os: windows-2025, name: "Windows Server 2025 (like Windows 11)" }
+          - { os: windows-11-arm, name: "Windows 11 on ARM" }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      SHOTS: ${{ github.workspace }}\shots
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build the installer and the portable app
+        id: build
+        working-directory: siteless/desktop
+        run: |
+          npm ci --no-audit --no-fund
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          node build.js
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm i --no-save --no-audit --no-fund playwright@1.55.0
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "## ${{ matrix.name }}" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          "Windows $([Environment]::OSVersion.Version), $env:PROCESSOR_ARCHITECTURE" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+
+      - name: Install silently and check the shortcuts
+        id: install
+        run: |
+          $setup = (Get-ChildItem siteless/desktop/dist/Siteless-Setup-*.exe).FullName
+          $p = Start-Process $setup -ArgumentList '/S' -Wait -PassThru
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\Siteless\Siteless.exe'
+          for ($i = 0; $i -lt 60 -and -not (Test-Path $exe); $i++) { Start-Sleep 1 }
+          $startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Siteless.lnk'
+          $desktop = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Siteless.lnk'
+          $shell = New-Object -ComObject WScript.Shell
+          $target = if (Test-Path $startMenu) { $shell.CreateShortcut($startMenu).TargetPath } else { '' }
+          $uninst = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.DisplayName -like 'Siteless*' } | Select-Object -First 1
+          $ver = if (Test-Path $exe) { (Get-Item $exe).VersionInfo } else { $null }
+          $want = (Get-Content siteless/desktop/package.json -Raw | ConvertFrom-Json).version
+          $checks = @(
+            @("Installer finished (exit code $($p.ExitCode))", ($p.ExitCode -eq 0)),
+            @("Installed for this user at $exe", (Test-Path $exe)),
+            @("Start menu shortcut opens the app", ($target -eq $exe)),
+            @("Desktop shortcut created", (Test-Path $desktop)),
+            @("Listed in Settings > Apps for uninstalling ($($uninst.DisplayName), version $($uninst.DisplayVersion))", ($null -ne $uninst)),
+            @("Program details say $($ver.ProductName) $($ver.ProductVersion)", ($ver -and $ver.ProductName -eq 'Siteless' -and $ver.ProductVersion -like "$want*"))
+          )
+          "`n### Installer`n" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          $bad = 0
+          foreach ($c in $checks) {
+            if ($c[1]) { "  ok  $($c[0])"; "- ✅ $($c[0])" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
+            else { $bad++; "  FAIL $($c[0])"; "- ❌ $($c[0])" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
+          }
+          "SITELESS_EXE=$exe" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          # if the installer started the app, close it so the tests start from a clean state
+          Start-Sleep 3
+          Get-Process Siteless -ErrorAction SilentlyContinue | Stop-Process -Force
+          if ($bad) { exit 1 }
+
+      - name: Drive the installed app (mocked data)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        working-directory: siteless/desktop
+        run: node test.js
+
+      - name: Drive the installed app on the live internet
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        working-directory: siteless/desktop
+        run: node live-test.js
+
+      - name: Run the portable exe
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          Get-Process Siteless -ErrorAction SilentlyContinue | Stop-Process -Force
+          $portable = (Get-ChildItem siteless/desktop/dist/Siteless-*-portable.exe).FullName
+          $started = Start-Process $portable -PassThru
+          $w = $null
+          for ($i = 0; $i -lt 120 -and -not $w; $i++) {
+            Start-Sleep 1
+            $w = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -eq 'Siteless' } | Select-Object -First 1
+          }
+          if ($w) {
+            Start-Sleep 5
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            New-Item -ItemType Directory -Force $env:SHOTS | Out-Null
+            $bmp.Save((Join-Path $env:SHOTS 'portable-desktop.png'))
+          }
+          $ok = [bool]$w
+          $msg = "Portable exe opens the Siteless window" + $(if ($w) { " (process $($w.ProcessName), $($w.Id))" } else { " within 2 minutes" })
+          "`n### Portable app`n" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          "- $(if ($ok) { '✅' } else { '❌' }) $msg" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          "$(if ($ok) { '  ok  ' } else { '  FAIL ' })$msg"
+          Get-Process Siteless -ErrorAction SilentlyContinue | Stop-Process -Force
+          if ($started -and -not $started.HasExited) { Stop-Process $started -Force -ErrorAction SilentlyContinue }
+          if (-not $ok) { exit 1 }
+
+      - name: Test the map page in Microsoft Edge and Google Chrome
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          npm i --no-save --no-audit --no-fund --prefix siteless/tests playwright@1.55.0 leaflet@1.9.4 leaflet.markercluster@1.5.3
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $env:CHANNEL = 'msedge'; node siteless/tests/app.test.js; $edge = $LASTEXITCODE
+          $chrome = 0
+          if (Test-Path "$env:ProgramFiles\Google\Chrome\Application\chrome.exe") { $env:CHANNEL = 'chrome'; node siteless/tests/app.test.js; $chrome = $LASTEXITCODE }
+          else { "`nGoogle Chrome is not installed on this machine, so only Edge was tested." | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
+          if ($edge -or $chrome) { exit 1 }
+
+      - name: Uninstall and check everything is removed
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          Get-Process Siteless -ErrorAction SilentlyContinue | Stop-Process -Force
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\Siteless'
+          $p = Start-Process (Join-Path $dir 'Uninstall Siteless.exe') -ArgumentList '/S' -Wait -PassThru
+          for ($i = 0; $i -lt 60 -and (Test-Path (Join-Path $dir 'Siteless.exe')); $i++) { Start-Sleep 1 }
+          $startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Siteless.lnk'
+          $desktop = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Siteless.lnk'
+          $uninst = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | ForEach-Object { Get-ItemProperty $_.PSPath } | Where-Object { $_.DisplayName -like 'Siteless*' }
+          $checks = @(
+            @("Uninstaller finished (exit code $($p.ExitCode))", ($p.ExitCode -eq 0)),
+            @("Program files removed", -not (Test-Path (Join-Path $dir 'Siteless.exe'))),
+            @("Start menu shortcut removed", -not (Test-Path $startMenu)),
+            @("Desktop shortcut removed", -not (Test-Path $desktop)),
+            @("No longer listed in Settings > Apps", ($null -eq $uninst))
+          )
+          "`n### Uninstaller`n" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          $bad = 0
+          foreach ($c in $checks) {
+            if ($c[1]) { "  ok  $($c[0])"; "- ✅ $($c[0])" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
+            else { $bad++; "  FAIL $($c[0])"; "- ❌ $($c[0])" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY }
+          }
+          if ($bad) { exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: screenshots-${{ matrix.os }}
+          path: shots
+          if-no-files-found: ignore

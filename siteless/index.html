@@ -989,6 +989,7 @@ function setTiles() {
 }
 setTiles();
 darkQuery.addEventListener?.('change', setTiles);
+window.addEventListener('siteless-theme', setTiles);   // the desktop app reports theme changes itself
 
 const areaLayer = L.layerGroup().addTo(map);
 const pinLayer = L.markerClusterGroup({
@@ -1221,7 +1222,7 @@ function renderChrome() {
 }
 
 /* ================= scan button ================= */
-const scan = { running: false, stop: false };
+const scan = { running: false, stop: false, abort: null };
 const scanKind = () => (S.kw ? 'text' : 'nearby');
 function osmTiles(b) {
   const lat = (b.getSouth() + b.getNorth()) / 2;
@@ -1458,17 +1459,56 @@ async function scanGoogle() {
 }
 
 /* ================= OpenStreetMap (free mode) ================= */
-const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
-async function overpass(q) {
-  let last = null;
-  for (const ep of OVERPASS) {
-    try {
-      const res = await fetch(ep, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
-      if (res.ok) { count('osm'); return await res.json(); }
-      last = new Error(`The OpenStreetMap server is busy (${res.status}). Try again in a minute.`);
-    } catch (e) { last = new Error('Could not reach the OpenStreetMap server. Check your connection and try again.'); }
-  }
-  throw last;
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+// A server that is slow to answer gets company: after OSM_T.hedge the next server is asked too, and
+// the first good answer wins. A server that has not answered after OSM_T.wait is given up on.
+const OSM_T = { hedge: 9000, wait: 35000 };
+function overpass(q) {
+  return new Promise((resolve, reject) => {
+    if (scan.stop) return resolve(null);
+    const ctls = [];
+    let next = 0, pending = 0, done = false, stagger = 0, last = null;
+    const finish = (fn, v) => {
+      if (done) return;
+      done = true; clearTimeout(stagger); scan.abort = null;
+      ctls.forEach(c => c.abort());
+      fn(v);
+    };
+    scan.abort = () => finish(resolve, null);   // the Stop button
+    const launch = () => {
+      clearTimeout(stagger);
+      if (done || next >= OVERPASS.length) return;
+      const ep = OVERPASS[next++], ctl = new AbortController();
+      ctls.push(ctl);
+      pending++;
+      let timedOut = false;
+      const timer = setTimeout(() => { timedOut = true; ctl.abort(); }, OSM_T.wait);
+      fetch(ep, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctl.signal })
+        .then(async res => {
+          if (!res.ok) throw new Error(`The OpenStreetMap server is busy (${res.status}). Try again in a minute.`);
+          const j = await res.json();
+          // a server that ran out of time or memory answers 200 with a remark and no places
+          if (j.remark && /runtime error/i.test(j.remark) && !(j.elements || []).length) throw new Error('The OpenStreetMap server is busy. Try again in a minute.');
+          count('osm');
+          finish(resolve, j);
+        })
+        .catch(e => {
+          if (done) return;
+          last = timedOut ? new Error('The OpenStreetMap servers are not answering right now. Try again in a minute.')
+            : /busy/.test(e.message) ? e : new Error('Could not reach the OpenStreetMap server. Check your internet connection and try again.');
+        })
+        .finally(() => {
+          clearTimeout(timer);
+          pending--;
+          if (done) return;
+          if (next < OVERPASS.length) launch();   // that one failed: ask the next server now
+          else if (!pending) finish(reject, last);
+        });
+      if (next < OVERPASS.length) stagger = setTimeout(launch, OSM_T.hedge);
+    };
+    launch();
+  });
 }
 function fromOsm(el, kw) {
   const t = el.tags || {};
@@ -1506,7 +1546,7 @@ function osmQuery(t, kw) {
     for (const id of S.cats) for (const [k, vs] of Object.entries(CAT_BY_ID[id].osm)) { by[k] = by[k] || new Set(); vs.forEach(v => by[k].add(v)); }
     parts = Object.entries(by).map(([k, vs]) => `nwr["${k}"~"^(${[...vs].join('|')})$"]["name"](${bb});`).join('');
   }
-  return `[out:json][timeout:50];(${parts});out center tags 4000;`;
+  return `[out:json][timeout:30];(${parts});out center tags 4000;`;
 }
 async function scanOsm() {
   const tiles = osmTiles(map.getBounds()) || [];
@@ -1514,9 +1554,18 @@ async function scanOsm() {
   let more = false, done = 0;
   for (const t of tiles) {
     if (scan.stop) break;
-    progress(`Asking OpenStreetMap · part ${done + 1} of ${tiles.length} · ${fmt(found.size)} places`, (done + 0.3) / tiles.length);
+    const label = `Asking OpenStreetMap · part ${done + 1} of ${tiles.length} · ${fmt(found.size)} places`;
+    progress(label, (done + 0.3) / tiles.length);
+    const t0 = Date.now();
+    const tick = setInterval(() => {
+      const s = Math.round((Date.now() - t0) / 1000);
+      if (!scan.stop && s >= 5) progress(`${label} · waiting for the server, ${s} s`, (done + 0.3) / tiles.length);
+    }, 1000);
     let j;
-    try { j = await overpass(osmQuery(t, S.kw)); } catch (e) { return { found, used: done, error: e, more: true }; }
+    try { j = await overpass(osmQuery(t, S.kw)); }
+    catch (e) { if (scan.stop) break; return { found, used: done, error: e, more: true }; }
+    finally { clearInterval(tick); }
+    if (!j) break;   // stopped
     for (const el of j.elements || []) { const p = fromOsm(el, S.kw); if (p) found.add(addPlace(p).id); }
     if ((j.elements || []).length >= 4000) more = true;
     done++;
@@ -1536,6 +1585,16 @@ async function runScan() {
   try {
     r = mode() === 'google' ? await scanGoogle() : await scanOsm();
   } catch (e) { r = { found: new Set(), used: 0, error: e }; }
+  try { afterScan(r, b); }
+  catch (e) { console.error(e); toast('Something went wrong while showing the results. Try scanning again.', 9000); }
+  finally {
+    // whatever happens, the scan button comes back
+    scan.running = false;
+    $('#progress').hidden = true;
+    updateScanButton();
+  }
+}
+function afterScan(r, b) {
   scan.running = false;
   $('#progress').hidden = true;
   if (r.found.size) savePlaces();   // keep what was found, even if the scan stopped part-way
@@ -1551,6 +1610,7 @@ async function runScan() {
   renderChrome();
   const matches = [...r.found].map(id => S.places.get(id)).filter(p => passes(p));
   if (r.error) toast(`${r.error.html ? r.error.message : esc(r.error.message)}${r.found.size ? ` (${fmt(r.found.size)} places found before that)` : ''}`, 15000);
+  else if (!r.found.size && scan.stop) toast('Scan stopped.');
   else if (!r.found.size) toast(r.capped ? 'You have reached your monthly limit of Google searches. Raise it in Settings.' : 'No places of these types here. Try a busier area or pick more types.');
   else {
     let msg = `Found ${fmt(r.found.size)} places · <b>${fmt(matches.length)}</b> match your filters.`;
@@ -2299,7 +2359,7 @@ function afterModeChange() {
 
 /* ================= events ================= */
 $('#btnScan').addEventListener('click', runScan);
-$('#btnStop').addEventListener('click', () => { scan.stop = true; $('#progText').textContent = 'Stopping…'; });
+$('#btnStop').addEventListener('click', () => { scan.stop = true; if (scan.abort) scan.abort(); $('#progText').textContent = 'Stopping…'; });
 $('#btnCheckStop').addEventListener('click', () => { CQ.list = []; pump(); });
 $('#btnCheckAll').addEventListener('click', () => inViewList().forEach(p => enqueueCheck(p)));
 $('#btnCsv').addEventListener('click', () => downloadCsv(inViewList(), `siteless-places-${today()}.csv`));
@@ -2486,7 +2546,7 @@ map.on('moveend', () => {
 new ResizeObserver(() => map.invalidateSize()).observe($('#mapWrap'));
 
 /* ================= start ================= */
-if (/[?&]debug\b/.test(location.search)) window.__siteless = { S, map, render, CQ, canCheck, passes };   // for the end-to-end test
+if (/[?&]debug\b/.test(location.search)) window.__siteless = { S, map, render, CQ, canCheck, passes, OSM_T };   // for the end-to-end test
 drawAreas();
 renderChrome();
 render();
