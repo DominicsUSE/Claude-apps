@@ -1,0 +1,59 @@
+# Builds the Siteless Windows app on a real Windows machine: an installer and a portable exe.
+# Every build attaches both to the run (Actions > Siteless Windows app > Artifacts).
+# On the default branch it also publishes them as a release, so there is a stable download link.
+name: Siteless Windows app
+
+on:
+  push:
+    paths:
+      - "siteless/**"
+      - ".github/workflows/build-siteless-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build the installer and the portable app
+        working-directory: siteless/desktop
+        run: |
+          npm ci --no-audit --no-fund
+          node build.js
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Siteless-Windows-Installer
+          path: siteless/desktop/dist/Siteless-Setup-*.exe
+          compression-level: 0
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Siteless-Windows-Portable
+          path: siteless/desktop/dist/Siteless-*-portable.exe
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Publish a release (default branch only)
+        if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(node -p "require('./siteless/desktop/package.json').version")
+          tag="siteless-v$v"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --target "$GITHUB_SHA" --title "Siteless $v for Windows" --notes \
+              "Download **Siteless-Setup-$v.exe** to install Siteless (Start menu and desktop shortcuts), or **Siteless-$v-portable.exe** to run it without installing. Windows may say it protected your PC because the app is not signed: choose **More info**, then **Run anyway**."
+          fi
+          gh release upload "$tag" siteless/desktop/dist/Siteless-Setup-*.exe siteless/desktop/dist/Siteless-*-portable.exe --clobber
