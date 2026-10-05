@@ -38,7 +38,7 @@ async function launch(userData, extra) {
     const u = new URL(route.request().url());
     if (u.protocol === "siteless:") return route.continue();
     if (u.pathname.endsWith("/api/interpreter")) return route.fulfill({ json: osmFor(route.request().postData() || ""), headers: { "Access-Control-Allow-Origin": "*" } });
-    if (u.hostname.endsWith("cartocdn.com")) return route.fulfill({ body: PNG, contentType: "image/png" });
+    if (u.hostname.endsWith("cartocdn.com") || u.hostname === "server.arcgisonline.com") return route.fulfill({ body: PNG, contentType: "image/png" });
     if (/google\.com$/.test(u.hostname)) return route.fulfill({ body: "<html><body>Google Maps (mock)</body></html>", contentType: "text/html" });
     return route.abort();
   });
@@ -64,6 +64,8 @@ async function launch(userData, extra) {
   check(await win.title() === "Siteless", "window is titled Siteless");
   check(await win.evaluate(() => !!window.sitelessApp && document.documentElement.classList.contains("desktop-app")), "page knows it runs in the desktop app");
   check(await win.evaluate(() => typeof L !== "undefined" && typeof L.markerClusterGroup === "function"), "Leaflet works without the internet");
+  check(await win.evaluate(() => { const t = [...document.querySelectorAll("img.leaflet-tile")].map(i => i.src); return t.length > 0 && t.every(u => u.startsWith("https://server.arcgisonline.com/")); }),
+    "the map uses Esri tiles, which need no key in an app");
   const version = require("./package.json").version;
   if (EXE) check(await app.evaluate(({ app }, v) => app.isPackaged && app.getName() === "Siteless" && app.getVersion() === v, version), `runs as the packaged Siteless ${version}`);
 

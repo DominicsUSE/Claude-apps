@@ -968,14 +968,23 @@ const CARTO_ATTR = OSM_ATTR + ' &copy; <a href="https://carto.com/attributions" 
 const darkQuery = matchMedia('(prefers-color-scheme: dark)');
 const isDark = () => document.documentElement.dataset.theme === 'dark' || (document.documentElement.dataset.theme !== 'light' && darkQuery.matches);
 let baseLayer = null;
+// CARTO answers requests that do not come from a website with "API key required" tiles, so the
+// desktop app uses Esri's maps, which need no key.
+const ESRI = n => `https://server.arcgisonline.com/ArcGIS/rest/services/${n}/MapServer/tile/{z}/{y}/{x}`;
+const ESRI_ATTR = 'Map &copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors';
+const esri = (n, o = {}) => L.tileLayer(ESRI(n), Object.assign({ attribution: ESRI_ATTR, maxNativeZoom: 16, maxZoom: 20 }, o));
 function setTiles() {
   if (baseLayer) map.removeLayer(baseLayer);
   if (S.layer === 'sat') {
     baseLayer = L.layerGroup([
-      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics', maxNativeZoom: 19, maxZoom: 20 }),
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/dark_only_labels/{z}/{x}/{y}{r}.png', { attribution: CARTO_ATTR, subdomains: 'abcd', maxZoom: 20 }),
+      L.tileLayer(ESRI('World_Imagery'), { attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics', maxNativeZoom: 19, maxZoom: 20 }),
+      IN_APP ? esri('Reference/World_Boundaries_and_Places', { maxNativeZoom: 19 })
+        : L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/dark_only_labels/{z}/{x}/{y}{r}.png', { attribution: CARTO_ATTR, subdomains: 'abcd', maxZoom: 20 }),
     ]);
+  } else if (IN_APP) {
+    baseLayer = isDark()
+      ? L.layerGroup([esri('Canvas/World_Dark_Gray_Base'), esri('Canvas/World_Dark_Gray_Reference')])
+      : esri('World_Street_Map', { maxNativeZoom: 19 });
   } else {
     baseLayer = L.tileLayer(isDark()
       ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'

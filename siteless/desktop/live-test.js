@@ -69,9 +69,36 @@ const count = (win, sel) => win.locator(sel).count();
   await win.waitForFunction(() => !!window.__siteless);
   await app.evaluate(({ shell }) => { global.__opened = []; shell.openExternal = url => { global.__opened.push(url); return Promise.resolve(); }; });
 
-  // real map tiles
-  await win.waitForFunction(() => document.querySelectorAll("img.leaflet-tile-loaded").length >= 4, null, { timeout: 60000 }).catch(() => {});
-  check(await count(win, "img.leaflet-tile-loaded") >= 4, `street map tiles load (${await count(win, "img.leaflet-tile-loaded")} tiles)`);
+  // real map tiles: different squares of the map must be different pictures (a "key required"
+  // placeholder is the same picture everywhere)
+  await win.reload();
+  await win.waitForFunction(() => !!window.__siteless);
+  await win.evaluate(() => window.__siteless.map.setView([51.5136, -0.1340], 15, { animate: false }));
+  await win.waitForFunction(() => document.querySelectorAll("img.leaflet-tile-loaded").length >= 6, null, { timeout: 60000 }).catch(() => {});
+  await sleep(1500);
+  const tiles = await win.evaluate(async () => {
+    const urls = [...document.querySelectorAll("img.leaflet-tile-loaded")].map(i => i.src).slice(0, 8);
+    const out = [];
+    for (const u of urls) {
+      try {
+        const b = new Uint8Array(await (await fetch(u)).arrayBuffer());
+        let h = 0; for (const x of b) h = (h * 31 + x) >>> 0;
+        out.push({ host: new URL(u).hostname, bytes: b.length, h });
+      } catch (e) { out.push({ host: new URL(u).hostname, bytes: 0, h: "error", err: String(e) }); }
+    }
+    return out;
+  });
+  const distinct = new Set(tiles.map(t => t.h)).size;
+  if (tiles.some(t => t.err)) console.log("     could not read a tile:", tiles.find(t => t.err).err);
+  check(tiles.length >= 4 && !tiles.some(t => t.err) && distinct >= tiles.length - 1, `street map tiles are real map pictures (${tiles.length} tiles from ${[...new Set(tiles.map(t => t.host))].join(", ")}, ${distinct} different)`);
+  await shot(win, "live-street-map");
+  // the dark map, when the computer uses dark mode
+  await app.evaluate(({ nativeTheme }) => { nativeTheme.themeSource = "dark"; });
+  await win.waitForFunction(() => document.querySelectorAll('img.leaflet-tile-loaded[src*="Dark_Gray"]').length >= 4, null, { timeout: 60000 }).catch(() => {});
+  check(await count(win, 'img.leaflet-tile-loaded[src*="Dark_Gray"]') >= 4, `dark map tiles load in dark mode (${await count(win, 'img.leaflet-tile-loaded[src*="Dark_Gray"]')} tiles)`);
+  await sleep(1000);
+  await shot(win, "live-dark-map");
+  await app.evaluate(({ nativeTheme }) => { nativeTheme.themeSource = "light"; });
 
   // real location search (OpenStreetMap Nominatim)
   await win.fill("#q", "Vilnius, Lithuania");
@@ -131,8 +158,8 @@ const count = (win, sel) => win.locator(sel).count();
 
   // real satellite imagery
   await win.click("#btnLayer");
-  await win.waitForFunction(() => [...document.querySelectorAll("img.leaflet-tile-loaded")].some(i => /arcgisonline/.test(i.src)), null, { timeout: 60000 }).catch(() => {});
-  check(await win.evaluate(() => [...document.querySelectorAll("img.leaflet-tile-loaded")].filter(i => /arcgisonline/.test(i.src)).length) > 0, "satellite imagery loads");
+  await win.waitForFunction(() => [...document.querySelectorAll("img.leaflet-tile-loaded")].some(i => /World_Imagery/.test(i.src)), null, { timeout: 60000 }).catch(() => {});
+  check(await win.evaluate(() => [...document.querySelectorAll("img.leaflet-tile-loaded")].filter(i => /World_Imagery/.test(i.src)).length) > 0, "satellite imagery loads");
   await sleep(1500);
   await shot(win, "live-satellite");
   await win.click("#btnLayer");
