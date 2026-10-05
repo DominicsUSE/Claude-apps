@@ -136,6 +136,11 @@ function mockRoutes(ctx, base, state) {
       if (state.overpassFailAfter != null && calls.overpass.length > state.overpassFailAfter) return route.fulfill({ status: 504, body: 'busy', headers: cors });
       // a server that never answers (the page gives up on it and asks another one)
       if (state.overpassHang && u.hostname === state.overpassHang) return new Promise(r => setTimeout(r, 20000)).then(() => route.abort()).catch(() => {});
+      if (state.overpassBusyBig) {
+        // busy for the whole view, fine for a quarter of it
+        const m = /\((-?[\d.]+),(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)\)/.exec(calls.overpass[calls.overpass.length - 1]);
+        if (m && +m[3] - +m[1] > state.overpassBusyBig) return route.fulfill({ status: 504, body: 'busy', headers: cors });
+      }
       if (state.overpassRemark) return route.fulfill({ json: { elements: [], remark: 'runtime error: Query timed out in "query" at line 1 after 31 seconds.' }, headers: cors });
       return route.fulfill({ json: OSM, headers: cors });
     }
@@ -301,6 +306,15 @@ async function main() {
   await scanDone();
   check(await page.locator('#btnScan').isVisible(), 'Stop ends a scan that is waiting for a server');
   await page.unroute('**/api/interpreter');
+  // too much for the servers at once: the view is split in four and asked again
+  const latSpan = await page.evaluate(() => { const b = window.__siteless.map.getBounds(); return b.getNorth() - b.getSouth(); });
+  state.overpassBusyBig = latSpan * 0.75;
+  const nSplit = calls.overpass.length;
+  await page.click('#btnScan');
+  await scanDone();
+  state.overpassBusyBig = 0;
+  check(!/busy/.test(await page.locator('#toast').innerText()) && /Found/.test(await page.locator('#toast').innerText()) && calls.overpass.length - nSplit === 4 + 4,
+    `a view too busy for the servers is scanned in four smaller parts (${calls.overpass.length - nSplit} requests: ${await page.locator('#toast').innerText()})`);
   // a server that ran out of time is reported as busy, not as "no places here"
   state.overpassRemark = true;
   await page.click('#btnScan');

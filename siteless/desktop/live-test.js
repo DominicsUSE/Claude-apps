@@ -156,6 +156,42 @@ const count = (win, sel) => win.locator(sel).count();
     await win.click("#btnBack");
   } else check(false, "embedded Google Maps listing loads (no places to open)");
 
+  // many real scans: busy streets in eight cities on four continents, each must find places
+  // and open a place's listing (at most two tries each, the free servers are shared)
+  const CITIES = [["New York", 40.7223, -73.9878], ["Paris", 48.8530, 2.3499], ["Vilnius", 54.6810, 25.2830],
+    ["Tokyo", 35.6938, 139.7034], ["Sydney", -33.8708, 151.2073], ["Chicago", 41.8919, -87.6278],
+    ["Berlin", 52.5200, 13.4050], ["Mexico City", 19.4326, -99.1332]];
+  let cityOk = 0;
+  const cityLines = [];
+  for (const [name, lat, lng] of CITIES) {
+    let n = 0, secs = 0, msg = "";
+    for (let attempt = 1; attempt <= 2 && !n; attempt++) {
+      await win.evaluate(([la, ln]) => window.__siteless.map.setView([la, ln], 16, { animate: false }), [lat, lng]);
+      await sleep(500);
+      const before = await win.evaluate(() => window.__siteless.S.places.size);
+      const s0 = Date.now();
+      await win.click("#btnScan");
+      const finished = await scanDone(win);
+      secs = Math.round((Date.now() - s0) / 1000);
+      n = (await win.evaluate(() => window.__siteless.S.places.size)) - before;
+      msg = (await win.locator("#toast").innerText().catch(() => "")).trim();
+      if (!finished) { await win.click("#btnStop").catch(() => {}); await scanDone(win, 30000); }
+      if (!n && attempt < 2) { console.log(`     ${name}: no places on try ${attempt} ("${msg}"), trying again`); await sleep(15000); }
+    }
+    let opened = false;
+    if (n && await count(win, "#list .item")) {
+      await win.locator("#list .item").first().click();
+      opened = await win.waitForSelector("#detailView:not([hidden]) iframe.embed", { timeout: 15000 }).then(() => true, () => false);
+      await win.click("#btnBack").catch(() => {});
+    }
+    const line = `${name}: ${n} new places in ${secs} s${opened ? ", listing opens" : ""}`;
+    console.log("     " + line);
+    cityLines.push(line);
+    if (n > 0 && opened) cityOk++;
+  }
+  check(cityOk === CITIES.length, `real scans in ${CITIES.length} cities find places and open them (${cityOk} of ${CITIES.length}): ${cityLines.join("; ")}`);
+  await shot(win, "live-cities");
+
   // real satellite imagery
   await win.click("#btnLayer");
   await win.waitForFunction(() => [...document.querySelectorAll("img.leaflet-tile-loaded")].some(i => /World_Imagery/.test(i.src)), null, { timeout: 60000 }).catch(() => {});

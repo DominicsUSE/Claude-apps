@@ -2,7 +2,7 @@
 // The page is served from the siteless:// scheme, which gives it its own origin (so saved
 // places and leads persist) and lets Google, OpenStreetMap and PageSpeed answer it directly.
 // Google Maps, directions, websites, email and phone links open in the computer's default apps.
-const { app, BrowserWindow, Menu, nativeTheme, net, protocol, session, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, nativeTheme, net, protocol, session, shell } = require("electron");
 const path = require("path");
 const { pathToFileURL } = require("url");
 
@@ -88,10 +88,33 @@ const firstCopy = app.requestSingleInstanceLock();
 if (!firstCopy) app.quit();
 app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
 
+// OpenStreetMap's Overpass servers turn away requests that come from a web page with an unknown
+// origin, and ask apps to say who they are. So the app sends these requests itself, from here,
+// with its own name, and hands the answer to the page. Only these servers can be asked.
+const OVERPASS = new Set(["https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]);
+const pending = new Map();   // request id -> AbortController
+async function overpass(e, id, url, body) {
+  if (!OVERPASS.has(url) || typeof body !== "string" || body.length > 100000) return { status: 400, text: "" };
+  const ctl = new AbortController();
+  pending.set(id, ctl);
+  try {
+    const res = await net.fetch(url, {
+      method: "POST", body, signal: ctl.signal,
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": `Siteless/${app.getVersion()} (Windows desktop app; https://github.com/DominicsUSE/Claude-apps)` },
+    });
+    return { status: res.status, text: await res.text() };
+  } catch (err) {
+    return { status: 0, text: "", aborted: ctl.signal.aborted };
+  } finally { pending.delete(id); }
+}
+
 app.setName("Siteless");
 if (process.platform === "win32") app.setAppUserModelId("com.siteless.app");
 if (firstCopy) app.whenReady().then(() => {
   protocol.handle("siteless", handle);
+  ipcMain.handle("overpass", overpass);
+  ipcMain.on("overpass-cancel", (e, id) => { const c = pending.get(id); if (c) c.abort(); });
   // only the app's own page may use location and the clipboard; embedded Google maps get nothing
   session.defaultSession.setPermissionRequestHandler((wc, permission, done, details) => {
     const ours = String(details.requestingUrl || "").startsWith("siteless://");

@@ -12,16 +12,6 @@ const { execFileSync, spawn } = require("child_process");
 const EXE = process.env.SITELESS_EXE || "";
 const SHOTS = process.env.SHOTS || "";
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/58BAwAI/AL+hc2rNAAAAABJRU5ErkJggg==", "base64");
-// two places in the middle of whatever area the app asks about (the map starts in a city picked
-// from the computer's time zone, so the places must not be tied to one city)
-function osmFor(query) {
-  const m = /\((-?[\d.]+),(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)\)/.exec(decodeURIComponent(query.replace(/^data=/, "").replace(/\+/g, " ")));
-  const lat = m ? (+m[1] + +m[3]) / 2 : 40.7225, lon = m ? (+m[2] + +m[4]) / 2 : -73.988;
-  return { elements: [
-    { type: "node", id: 1, lat, lon, tags: { amenity: "restaurant", name: "Nonna Rosa", "addr:city": "New York" } },
-    { type: "node", id: 2, lat: lat + 0.0005, lon: lon + 0.001, tags: { amenity: "cafe", name: "Little Cup", "contact:facebook": "https://facebook.com/littlecup" } },
-  ] };
-}
 let failures = 0;
 const results = [];
 const check = (ok, msg) => { console.log((ok ? "  ok  " : "  FAIL ") + msg); results.push([ok, msg]); if (!ok) failures++; };
@@ -37,10 +27,24 @@ async function launch(userData, extra) {
   await app.context().route("**/*", route => {
     const u = new URL(route.request().url());
     if (u.protocol === "siteless:") return route.continue();
-    if (u.pathname.endsWith("/api/interpreter")) return route.fulfill({ json: osmFor(route.request().postData() || ""), headers: { "Access-Control-Allow-Origin": "*" } });
+    if (u.pathname.endsWith("/api/interpreter")) return route.abort();   // must not come from the page
     if (u.hostname.endsWith("cartocdn.com") || u.hostname === "server.arcgisonline.com") return route.fulfill({ body: PNG, contentType: "image/png" });
     if (/google\.com$/.test(u.hostname)) return route.fulfill({ body: "<html><body>Google Maps (mock)</body></html>", contentType: "text/html" });
     return route.abort();
+  });
+  // OpenStreetMap requests are sent by the app's main process, so answer them there
+  await app.evaluate(({ ipcMain }) => {
+    global.__osmCalls = [];
+    ipcMain.removeHandler("overpass");
+    ipcMain.handle("overpass", (e, id, url, body) => {
+      global.__osmCalls.push(url);
+      const m = /\((-?[\d.]+),(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)\)/.exec(decodeURIComponent(body.replace(/^data=/, "")));
+      const lat = m ? (+m[1] + +m[3]) / 2 : 40.7225, lon = m ? (+m[2] + +m[4]) / 2 : -73.988;
+      return { status: 200, text: JSON.stringify({ elements: [
+        { type: "node", id: 1, lat, lon, tags: { amenity: "restaurant", name: "Nonna Rosa", "addr:city": "New York" } },
+        { type: "node", id: 2, lat: lat + 0.0005, lon: lon + 0.001, tags: { amenity: "cafe", name: "Little Cup", "contact:facebook": "https://facebook.com/littlecup" } },
+      ] }) };
+    });
   });
   const win = await app.firstWindow();
   await win.waitForSelector("#btnScan");
@@ -79,6 +83,7 @@ async function launch(userData, extra) {
     await shot(win, "fail-scan");
   });
   check((await win.locator("#list .item").count()) === 2, "scans and lists places");
+  check(await app.evaluate(() => global.__osmCalls.length) >= 1, "the app itself asks OpenStreetMap, not the web page");
   await shot(win, "app-list");
 
   // the app's file server only hands out its own two files

@@ -1473,6 +1473,23 @@ const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.p
 // A server that is slow to answer gets company: after OSM_T.hedge the next server is asked too, and
 // the first good answer wins. A server that has not answered after OSM_T.wait is given up on.
 const OSM_T = { hedge: 9000, wait: 35000 };
+// in the desktop app the request is sent by the app itself (web pages get turned away there)
+let osmSeq = 0;
+function osmPost(url, body, signal) {
+  const app = window.sitelessApp;
+  if (!app || !app.overpass) return fetch(url, { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal });
+  const id = ++osmSeq;
+  return new Promise((resolve, reject) => {
+    const abort = () => { app.cancelOverpass(id); reject(new DOMException('Aborted', 'AbortError')); };
+    if (signal.aborted) return abort();
+    signal.addEventListener('abort', abort, { once: true });
+    app.overpass(id, url, body).then(r => {
+      signal.removeEventListener('abort', abort);
+      if (!r.status) return reject(new TypeError('network error'));
+      resolve({ ok: r.status >= 200 && r.status < 300, status: r.status, json: async () => JSON.parse(r.text) });
+    }, reject);
+  });
+}
 function overpass(q) {
   return new Promise((resolve, reject) => {
     if (scan.stop) return resolve(null);
@@ -1493,7 +1510,7 @@ function overpass(q) {
       pending++;
       let timedOut = false;
       const timer = setTimeout(() => { timedOut = true; ctl.abort(); }, OSM_T.wait);
-      fetch(ep, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctl.signal })
+      osmPost(ep, 'data=' + encodeURIComponent(q), ctl.signal)
         .then(async res => {
           if (!res.ok) throw new Error(`The OpenStreetMap server is busy (${res.status}). Try again in a minute.`);
           const j = await res.json();
@@ -1557,22 +1574,35 @@ function osmQuery(t, kw) {
   }
   return `[out:json][timeout:30];(${parts});out center tags 4000;`;
 }
+// a part of the map the servers could not manage in time is split in four and asked again
+function quarter(t) {
+  const mLat = (t.s + t.n) / 2, mLng = (t.w + t.e) / 2, d = (t.d || 0) + 1;
+  return [{ s: t.s, n: mLat, w: t.w, e: mLng, d }, { s: t.s, n: mLat, w: mLng, e: t.e, d },
+    { s: mLat, n: t.n, w: t.w, e: mLng, d }, { s: mLat, n: t.n, w: mLng, e: t.e, d }];
+}
 async function scanOsm() {
-  const tiles = osmTiles(map.getBounds()) || [];
+  const queue = osmTiles(map.getBounds()) || [];
   const found = new Set();
   let more = false, done = 0;
-  for (const t of tiles) {
+  while (queue.length) {
     if (scan.stop) break;
-    const label = `Asking OpenStreetMap · part ${done + 1} of ${tiles.length} · ${fmt(found.size)} places`;
-    progress(label, (done + 0.3) / tiles.length);
+    const t = queue.shift();
+    const total = done + queue.length + 1;
+    const label = `Asking OpenStreetMap · part ${done + 1} of ${total} · ${fmt(found.size)} places`;
+    progress(label, (done + 0.3) / total);
     const t0 = Date.now();
     const tick = setInterval(() => {
       const s = Math.round((Date.now() - t0) / 1000);
-      if (!scan.stop && s >= 5) progress(`${label} · waiting for the server, ${s} s`, (done + 0.3) / tiles.length);
+      if (!scan.stop && s >= 5) progress(`${label} · waiting for the server, ${s} s`, (done + 0.3) / total);
     }, 1000);
     let j;
     try { j = await overpass(osmQuery(t, S.kw)); }
-    catch (e) { if (scan.stop) break; return { found, used: done, error: e, more: true }; }
+    catch (e) {
+      if (scan.stop) break;
+      // too much at once for the servers right now: try the same area in four smaller parts
+      if (!t.d && !/reach/.test(e.message)) { queue.unshift(...quarter(t)); continue; }   // once; if a smaller part fails too, stop
+      return { found, used: done, error: e, more: true };
+    }
     finally { clearInterval(tick); }
     if (!j) break;   // stopped
     for (const el of j.elements || []) { const p = fromOsm(el, S.kw); if (p) found.add(addPlace(p).id); }
