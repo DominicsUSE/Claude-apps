@@ -1473,6 +1473,23 @@ const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.p
 // A server that is slow to answer gets company: after OSM_T.hedge the next server is asked too, and
 // the first good answer wins. A server that has not answered after OSM_T.wait is given up on.
 const OSM_T = { hedge: 9000, wait: 35000 };
+// in the desktop app the request is sent by the app itself (web pages get turned away there)
+let osmSeq = 0;
+function osmPost(url, body, signal) {
+  const app = window.sitelessApp;
+  if (!app || !app.overpass) return fetch(url, { method: 'POST', body, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal });
+  const id = ++osmSeq;
+  return new Promise((resolve, reject) => {
+    const abort = () => { app.cancelOverpass(id); reject(new DOMException('Aborted', 'AbortError')); };
+    if (signal.aborted) return abort();
+    signal.addEventListener('abort', abort, { once: true });
+    app.overpass(id, url, body).then(r => {
+      signal.removeEventListener('abort', abort);
+      if (!r.status) return reject(new TypeError('network error'));
+      resolve({ ok: r.status >= 200 && r.status < 300, status: r.status, json: async () => JSON.parse(r.text) });
+    }, reject);
+  });
+}
 function overpass(q) {
   return new Promise((resolve, reject) => {
     if (scan.stop) return resolve(null);
@@ -1493,7 +1510,7 @@ function overpass(q) {
       pending++;
       let timedOut = false;
       const timer = setTimeout(() => { timedOut = true; ctl.abort(); }, OSM_T.wait);
-      fetch(ep, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctl.signal })
+      osmPost(ep, 'data=' + encodeURIComponent(q), ctl.signal)
         .then(async res => {
           if (!res.ok) throw new Error(`The OpenStreetMap server is busy (${res.status}). Try again in a minute.`);
           const j = await res.json();
