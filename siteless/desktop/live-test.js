@@ -220,9 +220,13 @@ setTimeout(() => { console.error(`\nFAIL the live test hung during: ${step}`); p
   await win.evaluate(() => window.__siteless.map.setView([40.7223, -73.9878], 16, { animate: false }));
   await win.fill("#kw", "pizza");
   await win.press("#kw", "Enter");
-  await win.click("#btnScan");
-  await scanDone(win);
-  await pauseVerify();
+  for (let attempt = 1; attempt <= 2; attempt++) {   // the free servers are sometimes busy
+    await win.click("#btnScan");
+    await scanDone(win);
+    await pauseVerify();
+    if (await win.evaluate(() => [...window.__siteless.S.places.values()].some(p => p.kw === "pizza"))) break;
+    if (attempt < 2) { console.log("     keyword scan: servers busy, trying again"); await sleep(15000); }
+  }
   const kwFound = await win.evaluate(() => [...window.__siteless.S.places.values()].filter(p => p.kw === "pizza").length);
   check(kwFound > 0, `a keyword scan for "pizza" finds pizza places (${kwFound}; "${(await win.locator("#toast").innerText().catch(() => "")).trim()}")`);
   await win.click("#btnKwClear").catch(() => {});

@@ -19,7 +19,7 @@ check(!hostMatches("katzdeli.yelp.com", "Katz's Delicatessen"), "a page on a rev
 // wrong matches seen in a real run on Windows
 check(!hostMatches("firsthorizon.com", "First American Tax Defense") && !hostMatches("theitalianexperiment.com", "The Italian Slice") && !hostMatches("brunchsnobrestaurant.com", "Brunch aux olives")
   && !hostMatches("punjabikitchentogo.com", "Punjabi Deli & Grocery") && !hostMatches("nomads.com", "Nomads Cocktails Bar") && !hostMatches("fromsmash.com", "SMASH by Mama sakė paeis")
-  && !hostMatches("edinburgh.org", "Edinburgh Castle Hotel"), "one shared word is not a match (firsthorizon.com for First American Tax Defense, nomads.com for Nomads Cocktails Bar …)");
+  && !hostMatches("edinburgh.org", "Edinburgh Castle Hotel") && !hostMatches("slip.com", "Slip Inn"), "one shared word is not a match (firsthorizon.com for First American Tax Defense, nomads.com for Nomads Cocktails Bar …)");
 
 // --- page content ---
 check(pageMentions("<title>Katz&#39;s Delicatessen | Since 1888</title>", "Katz's Delicatessen"), "a page with the name in its title mentions the business");

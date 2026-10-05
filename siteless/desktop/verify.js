@@ -28,8 +28,14 @@ function hostMatches(host, name) {
   if (label.length < 4) return false;
   if (full.length >= 6 && label.includes(full)) return true;                       // joespizzanyc.com for Joe's Pizza
   if (full.length >= 6 && label.length >= 8 && label.length >= full.length * 0.7 && full.includes(label)) return true;   // most of the name
-  // otherwise every distinctive word of the name must be in it (not just "first" or "italian")
+  // otherwise every distinctive word of the name must be in it (not just "first" or "italian");
+  // a single short word from a longer name is not enough (slip.com for Slip Inn)
   const d = distinctive(name);
+  if (d.length === 1 && tokens(name).length > 1 && d[0].length < 6) {
+    // except on free site builders, where the first part of the address is the business's own choice
+    const m = /^([a-z0-9-]+)\.(wixsite|weebly|jimdosite|jimdofree|webnode|godaddysites|wordpress|blogspot|squarespace|business|eatbu|site123|ueniweb|carrd)\./.exec(host);
+    return !!m && m[1].replace(/[^a-z0-9]/g, '').startsWith(d[0]);
+  }
   return d.length > 0 && d.every(t => label.includes(t));
 }
 // the address made from the whole name, or the name inside a longer address
@@ -40,8 +46,9 @@ function pageMentions(html, name) {
   const flat = pageText(html).replace(/[^a-z0-9]/g, '');
   const full = compact(name);
   if (full.length >= 4 && flat.includes(full)) return true;
+  // long names are often shortened on the site itself; short ones must appear whole
   const d = distinctive(name);
-  return d.length > 0 && d.every(t => flat.includes(t));
+  return d.length >= 3 && d.every(t => flat.includes(t));
 }
 const parked = html => PARKED.test(String(html).slice(0, 60000));
 // what we know about where the place is: words of its street, its phone, its town
