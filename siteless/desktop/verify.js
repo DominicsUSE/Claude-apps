@@ -26,20 +26,38 @@ function hostMatches(host, name) {
   const label = labelOf(host).replace(/[^a-z0-9]/g, '');
   const full = compact(name);
   if (label.length < 4) return false;
-  if (full.length >= 5 && (label.includes(full) || (full.includes(label) && label.length >= 6))) return true;
+  if (full.length >= 6 && label.includes(full)) return true;                       // joespizzanyc.com for Joe's Pizza
+  if (full.length >= 6 && label.length >= 8 && label.length >= full.length * 0.7 && full.includes(label)) return true;   // most of the name
+  // otherwise every distinctive word of the name must be in it (not just "first" or "italian")
   const d = distinctive(name);
-  return d.some(t => t.length >= 5 && label.includes(t)) || (d.length >= 2 && d.every(t => label.includes(t)));
+  return d.length > 0 && d.every(t => label.includes(t));
 }
+// the address made from the whole name, or the name inside a longer address
+const strongHost = (host, name) => { const full = compact(name.replace(/^the\s+/i, '')); return full.length >= 6 && labelOf(host).replace(/[^a-z0-9]/g, '').includes(full); };
+const pageText = html => fold(String(html).replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#0?39;|&apos;|&rsquo;/g, "'"));
 // does this page talk about the business?
 function pageMentions(html, name) {
-  const text = fold(String(html).replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#0?39;|&apos;|&rsquo;/g, "'"));
-  const flat = text.replace(/[^a-z0-9]/g, '');
+  const flat = pageText(html).replace(/[^a-z0-9]/g, '');
   const full = compact(name);
   if (full.length >= 4 && flat.includes(full)) return true;
   const d = distinctive(name);
   return d.length > 0 && d.every(t => flat.includes(t));
 }
 const parked = html => PARKED.test(String(html).slice(0, 60000));
+// what we know about where the place is: words of its street, its phone, its town
+function whereClues(place) {
+  const street = tokens(place.street).filter(t => t.length >= 4 && !/^\d+$/.test(t) && !GENERIC.has(t) && !['east', 'west', 'north', 'south', 'gatve', 'strasse', 'rue', 'calle', 'via'].includes(t));
+  const phone = String(place.phone || '').replace(/\D/g, '');
+  const city = compact(place.city);
+  return { street, phone: phone.length >= 7 ? phone.slice(-7) : '', city: city.length >= 4 ? city : '' };
+}
+const hasClues = c => c.street.length > 0 || !!c.phone || !!c.city;
+// does the page show it is this place, in this town?
+function pageIsHere(html, clues) {
+  const flat = pageText(html).replace(/[^a-z0-9]/g, '');
+  const digits = String(html).replace(/\D/g, '');
+  return clues.street.some(t => flat.includes(t)) || (!!clues.phone && digits.includes(clues.phone)) || (!!clues.city && flat.includes(clues.city));
+}
 
 // links in a search results page, unwrapped from the engines' redirect links
 function resultLinks(html) {
@@ -77,16 +95,28 @@ const answered = (r, links) => r && r.ok && r.status === 200 && links.filter(u =
 async function findWebsite(place, get, opts = {}) {
   const name = String(place.name || '').trim();
   if (!name) return { url: null, searched: false };
+  // a place named after its town ("Berlin") can't be told apart from the town's own sites
+  if (compact(name) === compact(place.city)) return { url: null, searched: false };
+  const clues = whereClues(place);
   const tried = new Set();
-  const confirm = async (url, how, mustMention) => {
+  // a site counts if it is about this business and shows it is this one (its street, phone or
+  // town on the home or contact page). Without any of those to go on, only an address made of
+  // the whole name counts.
+  const confirm = async (url, how, fromSearch) => {
     const host = hostOf(url);
     if (!host || tried.has(host)) return null;
     tried.add(host);
+    const strong = strongHost(host, name);
     const r = await get(`https://${host}/`, { timeout: 8000 }).catch(() => null);
-    if (!r || !r.ok) return mustMention ? null : { url: `https://${host}/`, how, broken: true };   // a matching address that does not load
-    if (parked(r.text)) return null;
-    if (mustMention && !pageMentions(r.text, name)) return null;
-    return { url: r.url || `https://${host}/`, how };
+    if (!r || !r.ok) return fromSearch && strong ? { url: `https://${host}/`, how, broken: true } : null;   // listed for this search, does not load
+    if (parked(r.text) || !pageMentions(r.text, name)) return null;
+    if (!hasClues(clues)) return strong ? { url: r.url || `https://${host}/`, how } : null;
+    if (pageIsHere(r.text, clues)) return { url: r.url || `https://${host}/`, how };
+    for (const path of ['contact', 'contact-us', 'kontaktai', 'kontakt', 'about']) {
+      const c = await get(`https://${host}/${path}`, { timeout: 6000 }).catch(() => null);
+      if (c && c.ok && pageIsHere(c.text, clues)) return { url: r.url || `https://${host}/`, how };
+    }
+    return null;
   };
 
   // 1. the obvious addresses: joespizza.com, joespizza.<country>
@@ -94,7 +124,7 @@ async function findWebsite(place, get, opts = {}) {
   if (base.length >= 5 && base.length <= 40) {
     const tlds = ['com', ...(place.tld && place.tld !== 'com' ? [place.tld] : [])];
     for (const tld of tlds) {
-      const hit = await confirm(`https://${base}.${tld}/`, 'its name as a web address', true);
+      const hit = await confirm(`https://${base}.${tld}/`, 'its name as a web address', false);
       if (hit) return hit;
     }
   }
@@ -109,7 +139,7 @@ async function findWebsite(place, get, opts = {}) {
     searched = true;
     const links = all.filter(u => hostMatches(hostOf(u), name)).slice(0, 4);
     for (const u of links) {
-      const hit = await confirm(u, 'a web search', false);
+      const hit = await confirm(u, 'a web search', true);
       if (hit) return hit;
     }
     break;   // one engine answered; its results are the answer
@@ -117,4 +147,4 @@ async function findWebsite(place, get, opts = {}) {
   return { url: null, searched };
 }
 
-module.exports = { findWebsite, hostMatches, pageMentions, resultLinks, parked, compact };
+module.exports = { findWebsite, hostMatches, pageMentions, pageIsHere, whereClues, resultLinks, parked, compact };

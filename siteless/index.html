@@ -1727,7 +1727,7 @@ async function verifyPlace(p) {
   p.verifying = true;
   render();
   let r = null;
-  try { r = await window.sitelessApp.findWebsite({ name: p.name, city: p.city || '', street: (p.address || '').split(',')[0], tld: myTld }); } catch (e) { /* counts as not checked */ }
+  try { r = await window.sitelessApp.findWebsite({ name: p.name, city: p.city || '', street: (p.address || '').split(',')[0], phone: p.phone || '', tld: myTld }); } catch (e) { /* counts as not checked */ }
   p.verifying = false;
   if (r && r.url) {
     p.web = { at: Date.now(), url: r.url, how: r.how, broken: !!r.broken };
