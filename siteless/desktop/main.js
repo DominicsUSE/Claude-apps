@@ -118,7 +118,7 @@ if (firstCopy) app.whenReady().then(() => {
   // only the app's own page may use location and the clipboard; embedded Google maps get nothing
   session.defaultSession.setPermissionRequestHandler((wc, permission, done, details) => {
     const ours = String(details.requestingUrl || "").startsWith("siteless://");
-    done(ours && ["geolocation", "clipboard-sanitized-write", "fullscreen"].includes(permission));
+    done(ours && ["clipboard-sanitized-write", "fullscreen"].includes(permission));
   });
   buildMenu();
   createWindow();

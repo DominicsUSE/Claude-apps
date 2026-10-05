@@ -35,6 +35,11 @@ const SERVERS = JSON.parse(/const OVERPASS = (\[[^\]]*\])/.exec(fs.readFileSync(
 const isOsm = u => /\/api\/interpreter$/.test(u);
 const count = (win, sel) => win.locator(sel).count();
 
+// a step that hangs must not hold up the run: say which step it was and stop
+let step = "starting";
+const say = s => { step = s; console.log(`  -- ${s}`); };
+setTimeout(() => { console.error(`\nFAIL the live test hung during: ${step}`); process.exit(1); }, 25 * 60 * 1000).unref();
+
 (async () => {
   // first, from outside the app: can this computer reach each OpenStreetMap server, and how fast?
   console.log("OpenStreetMap servers, asked directly:");
@@ -69,6 +74,7 @@ const count = (win, sel) => win.locator(sel).count();
   await win.waitForFunction(() => !!window.__siteless);
   await app.evaluate(({ shell }) => { global.__opened = []; shell.openExternal = url => { global.__opened.push(url); return Promise.resolve(); }; });
 
+  say("map tiles");
   // real map tiles: different squares of the map must be different pictures (a "key required"
   // placeholder is the same picture everywhere)
   await win.reload();
@@ -100,6 +106,7 @@ const count = (win, sel) => win.locator(sel).count();
   await shot(win, "live-dark-map");
   await app.evaluate(({ nativeTheme }) => { nativeTheme.themeSource = "light"; });
 
+  say("location search");
   // real location search (OpenStreetMap Nominatim)
   await win.fill("#q", "Vilnius, Lithuania");
   await win.press("#q", "Enter");
@@ -113,6 +120,15 @@ const count = (win, sel) => win.locator(sel).count();
   const c1 = await win.evaluate(() => window.__siteless.map.getCenter());
   check(Math.abs(c1.lat - 54.69) < 0.5 && Math.abs(c1.lng - 25.28) < 0.6, `searching "Vilnius, Lithuania" moves the map there (${c1.lat.toFixed(3)}, ${c1.lng.toFixed(3)})`);
 
+  say("my location");
+  // the "my location" button finds where the computer is (Windows location, or roughly from the connection)
+  await win.evaluate(() => window.__siteless.map.setView([0, 0], 5, { animate: false }));
+  await win.click("#btnLocate");
+  await win.waitForFunction(() => { const c = window.__siteless.map.getCenter(); return Math.abs(c.lat) > 1 || Math.abs(c.lng) > 1; }, null, { timeout: 25000 }).catch(() => {});
+  const here = await win.evaluate(() => ({ c: window.__siteless.map.getCenter(), z: window.__siteless.map.getZoom(), t: document.getElementById("toast").innerText }));
+  check(Math.abs(here.c.lat) > 1 || Math.abs(here.c.lng) > 1, `"my location" moves the map to this computer (${here.c.lat.toFixed(2)}, ${here.c.lng.toFixed(2)}, zoom ${here.z}; "${here.t}")`);
+
+  say("London scan");
   // real OpenStreetMap scan of a busy neighbourhood (central London)
   await win.evaluate(() => window.__siteless.map.setView([51.5136, -0.1340], 16, { animate: false }));
   let places = 0, toast = "";
@@ -135,6 +151,7 @@ const count = (win, sel) => win.locator(sel).count();
   await win.waitForFunction(() => document.querySelectorAll("img.leaflet-tile-loaded").length >= 4, null, { timeout: 30000 }).catch(() => {});
   await shot(win, "live-map");
 
+  say("Google listing");
   // a real place: the embedded Google Maps listing loads
   if (listed) {
     await win.locator("#list .item").first().click();
@@ -156,6 +173,7 @@ const count = (win, sel) => win.locator(sel).count();
     await win.click("#btnBack");
   } else check(false, "embedded Google Maps listing loads (no places to open)");
 
+  say("eight-city scans");
   // many real scans: busy streets in eight cities on four continents, each must find places
   // and open a place's listing (at most two tries each, the free servers are shared)
   const CITIES = [["New York", 40.7223, -73.9878], ["Paris", 48.8530, 2.3499], ["Vilnius", 54.6810, 25.2830],
@@ -192,6 +210,18 @@ const count = (win, sel) => win.locator(sel).count();
   check(cityOk === CITIES.length, `real scans in ${CITIES.length} cities find places and open them (${cityOk} of ${CITIES.length}): ${cityLines.join("; ")}`);
   await shot(win, "live-cities");
 
+  say("keyword scan");
+  // a keyword scan on real data
+  await win.evaluate(() => window.__siteless.map.setView([40.7223, -73.9878], 16, { animate: false }));
+  await win.fill("#kw", "pizza");
+  await win.press("#kw", "Enter");
+  await win.click("#btnScan");
+  await scanDone(win);
+  const kwFound = await win.evaluate(() => [...window.__siteless.S.places.values()].filter(p => p.kw === "pizza").length);
+  check(kwFound > 0, `a keyword scan for "pizza" finds pizza places (${kwFound}; "${(await win.locator("#toast").innerText().catch(() => "")).trim()}")`);
+  await win.click("#btnKwClear").catch(() => {});
+
+  say("satellite");
   // real satellite imagery
   await win.click("#btnLayer");
   await win.waitForFunction(() => [...document.querySelectorAll("img.leaflet-tile-loaded")].some(i => /World_Imagery/.test(i.src)), null, { timeout: 60000 }).catch(() => {});
@@ -200,6 +230,7 @@ const count = (win, sel) => win.locator(sel).count();
   await shot(win, "live-satellite");
   await win.click("#btnLayer");
 
+  say("Google key check");
   // real Google: an invalid key is rejected with a clear message, which proves the app reaches Google
   await win.click("#btnSettings");
   await win.fill("#keyInput", "AIzaSyInvalidKeyForSitelessTest000000000");

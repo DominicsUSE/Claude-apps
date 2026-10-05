@@ -2523,12 +2523,26 @@ document.addEventListener('keydown', e => {
 });
 
 $('#searchForm').addEventListener('submit', e => { e.preventDefault(); const q = $('#q').value.trim(); if (q) geocode(q); });
+// where am I: the computer's location if it shares one, otherwise roughly, from the internet connection
+async function locateByIp() {
+  try {
+    const r = await fetch('https://get.geojs.io/v1/ip/geo.json', { signal: AbortSignal.timeout(8000) });
+    const g = await r.json();
+    const lat = +g.latitude, lng = +g.longitude;
+    if (!isFinite(lat) || !isFinite(lng) || (!lat && !lng)) throw new Error('no location');
+    map.setView([lat, lng], 14, { animate: !REDUCED });
+    toast(`Showing roughly where you are${g.city ? ` (${esc(g.city)})` : ''}, from your internet connection. Zoom in on your street, then scan.`, 8000);
+  } catch (e) {
+    toast(IN_APP ? 'Your location is not available here. Search for a place instead.' : 'Location is blocked. Search for a place instead.');
+  }
+}
 $('#btnLocate').addEventListener('click', () => {
-  if (!navigator.geolocation) return toast('Your browser cannot share its location. Search for a place instead.');
+  // in the desktop app Windows' location service may never answer, so go by the connection there
+  if (IN_APP || !navigator.geolocation) return locateByIp();
   navigator.geolocation.getCurrentPosition(
     pos => map.setView([pos.coords.latitude, pos.coords.longitude], 16, { animate: !REDUCED }),
-    () => toast(IN_APP ? 'Your location is not available here. Search for a place instead.' : 'Location is blocked. Search for a place instead.'),
-    { enableHighAccuracy: false, timeout: 10000 });
+    () => locateByIp(),
+    { enableHighAccuracy: false, timeout: 8000 });
 });
 
 function openSettings() { renderSettings(); $('#keyStatus').textContent = ''; $('#clearStatus').textContent = ''; $('#settings').showModal(); }
