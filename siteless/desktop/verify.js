@@ -48,15 +48,16 @@ const parked = html => PARKED.test(String(html).slice(0, 60000));
 function whereClues(place) {
   const street = tokens(place.street).filter(t => t.length >= 4 && !/^\d+$/.test(t) && !GENERIC.has(t) && !['east', 'west', 'north', 'south', 'gatve', 'strasse', 'rue', 'calle', 'via'].includes(t));
   const phone = String(place.phone || '').replace(/\D/g, '');
-  const city = compact(place.city);
-  return { street, phone: phone.length >= 7 ? phone.slice(-7) : '', city: city.length >= 4 ? city : '' };
+  // the town from the listing, and the town the map says the place is in (English and local names)
+  const towns = [...new Set([place.city, ...String(place.area || '').split('|')].map(compact).filter(t => t.length >= 4))];
+  return { street, phone: phone.length >= 7 ? phone.slice(-7) : '', towns };
 }
-const hasClues = c => c.street.length > 0 || !!c.phone || !!c.city;
+const hasClues = c => c.street.length > 0 || !!c.phone || c.towns.length > 0;
 // does the page show it is this place, in this town?
 function pageIsHere(html, clues) {
   const flat = pageText(html).replace(/[^a-z0-9]/g, '');
   const digits = String(html).replace(/\D/g, '');
-  return clues.street.some(t => flat.includes(t)) || (!!clues.phone && digits.includes(clues.phone)) || (!!clues.city && flat.includes(clues.city));
+  return clues.street.some(t => flat.includes(t)) || (!!clues.phone && digits.includes(clues.phone)) || clues.towns.some(t => flat.includes(t));
 }
 
 // links in a search results page, unwrapped from the engines' redirect links
@@ -96,7 +97,7 @@ async function findWebsite(place, get, opts = {}) {
   const name = String(place.name || '').trim();
   if (!name) return { url: null, searched: false };
   // a place named after its town ("Berlin") can't be told apart from the town's own sites
-  if (compact(name) === compact(place.city)) return { url: null, searched: false };
+  if ([place.city, ...String(place.area || '').split('|')].some(t => t && compact(t) === compact(name))) return { url: null, searched: false };
   const clues = whereClues(place);
   const tried = new Set();
   // a site counts if it is about this business and shows it is this one (its street, phone or

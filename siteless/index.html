@@ -1723,11 +1723,26 @@ function pumpVerify() {
 }
 // the country's web address ending, from the computer's language setting (en-GB -> uk, lt-LT -> lt)
 const myTld = (() => { const r = ((navigator.language || '').split('-')[1] || '').toLowerCase(); return r === 'gb' ? 'uk' : /^[a-z]{2}$/.test(r) && r !== 'us' ? r : ''; })();
+// the town a place is in (map listings often leave it out), in English and in the local
+// language, so a website can be matched to the right town; looked up once per area
+const townCache = new Map();
+function townOf(lat, lng) {
+  const k = `${lat.toFixed(1)},${lng.toFixed(1)}`;
+  if (!townCache.has(k)) {
+    const ask = lang => fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&lat=${lat.toFixed(4)}&lon=${lng.toFixed(4)}${lang ? '&accept-language=' + lang : ''}`, { signal: AbortSignal.timeout(8000) })
+      .then(r => r.json()).then(j => { const a = j.address || {}; return a.city || a.town || a.village || a.municipality || a.county || ''; }).catch(() => '');
+    townCache.set(k, Promise.all([ask('en'), ask('')]).then(ns => [...new Set(ns.filter(Boolean))].join('|')));
+  }
+  return townCache.get(k);
+}
 async function verifyPlace(p) {
   p.verifying = true;
   render();
   let r = null;
-  try { r = await window.sitelessApp.findWebsite({ name: p.name, city: p.city || '', street: (p.address || '').split(',')[0], phone: p.phone || '', tld: myTld }); } catch (e) { /* counts as not checked */ }
+  try {
+    const area = await townOf(p.lat, p.lng);
+    r = await window.sitelessApp.findWebsite({ name: p.name, city: p.city || '', area, street: (p.address || '').split(',')[0], phone: p.phone || '', tld: myTld });
+  } catch (e) { /* counts as not checked */ }
   p.verifying = false;
   if (r && r.url) {
     p.web = { at: Date.now(), url: r.url, how: r.how, broken: !!r.broken };

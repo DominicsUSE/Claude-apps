@@ -125,7 +125,7 @@ async function getPage(url, { timeout = 8000 } = {}) {
 async function findSite(e, place) {
   if (!place || typeof place.name !== "string" || place.name.length > 200) return { url: null, searched: false };
   const clean = k => (typeof place[k] === "string" ? place[k].slice(0, 120) : "");
-  try { return await findWebsite({ name: clean("name"), city: clean("city"), street: clean("street"), phone: clean("phone"), tld: /^[a-z]{2,3}$/.test(place.tld) ? place.tld : "" }, getPage); }
+  try { return await findWebsite({ name: clean("name"), city: clean("city"), street: clean("street"), area: clean("area"), phone: clean("phone"), tld: /^[a-z]{2,3}$/.test(place.tld) ? place.tld : "" }, getPage); }
   catch (err) { return { url: null, searched: false }; }
 }
 

@@ -85,6 +85,14 @@ const results200 = (...urls) => urls.map(u => `<li><a href="${bingLink(u)}">${u}
   r = await findWebsite({ name: "Berlin", city: "Berlin" }, w.get);
   check(r.url === null && w.calls.length === 0, "a place named just like its town is not looked up (berlin.de is the town's site)");
 
+  // no address in the listing, but the map knows the town: a same-named site elsewhere does not count
+  w = fakeWeb([[/^sweetwater\.com$/, "<title>Sweetwater</title> Music instruments, Fort Wayne"]]);
+  r = await findWebsite({ name: "Sweetwater", area: "Chicago" }, w.get);
+  check(r.url === null, "with only the town from the map, a same-named site from another town does not count");
+  w = fakeWeb([[/sernas\.lt/, "<title>Šernas</title> Restoranas Vilniaus senamiestyje, Vilnius"]]);
+  r = await findWebsite({ name: "Šernas", area: "Vilnius|Vilnius", tld: "lt" }, w.get);
+  check(r.url === "https://sernas.lt/", `a site in the town the map says is found (${r.url})`);
+
   w = fakeWeb([[/yauatcha\.com/, "<title>Yauatcha</title> dim sum"]]);
   r = await findWebsite({ name: "Yauatcha" }, w.get);
   check(r.url === "https://yauatcha.com/", "with no address to go on, an address made of the whole name still counts (yauatcha.com)");

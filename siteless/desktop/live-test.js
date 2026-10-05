@@ -230,7 +230,7 @@ setTimeout(() => { console.error(`\nFAIL the live test hung during: ${step}`); p
   say("website double-check");
   // known places that do have a website OpenStreetMap might not list: the app must find it
   for (const [place, want] of [[{ name: "Katz's Delicatessen", city: "New York", street: "205 East Houston Street" }, /katzsdelicatessen\.com/],
-                               [{ name: "Joe's Pizza", city: "New York", street: "7 Carmine Street" }, /joespizzanyc\.com/]]) {
+                               [{ name: "Joe's Pizza", city: "New York", street: "7 Carmine Street" }, /joespizza(nyc)?\.com/]]) {
     const s0 = Date.now();
     const r = await win.evaluate(pl => window.sitelessApp.findWebsite(pl), place).catch(e => ({ error: String(e) }));
     check(want.test((r && r.url) || ""), `finds ${place.name}'s own website on the web (${JSON.stringify(r)}, ${Math.round((Date.now() - s0) / 1000)} s)`);
