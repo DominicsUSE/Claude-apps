@@ -103,7 +103,8 @@ class HyperliquidData:
         return self._info(payload)
 
     def open_orders(self, address: str, dex: str = "") -> list:
-        payload = {"type": "openOrders", "user": address}
+        """Includes orderType ("Stop Market", "Take Profit Market", "Limit", ...) and reduceOnly."""
+        payload = {"type": "frontendOpenOrders", "user": address}
         if dex:
             payload["dex"] = dex
         return self._info(payload)

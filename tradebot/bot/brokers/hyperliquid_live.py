@@ -134,9 +134,14 @@ class HyperliquidBroker(Broker):
         return self.ex.order(symbol, is_buy, qty, limit, order_type, reduce_only=True)
 
     def _cancel_triggers(self, symbol: str, kinds=("sl", "tp")) -> None:
-        orders = self.data.open_orders(self.address, dex_of(symbol))
-        for o in orders:
-            if o.get("coin") == symbol and o.get("reduceOnly", True):
+        """Cancel this market's stop-loss ("sl") and/or take-profit ("tp") orders."""
+        for o in self.data.open_orders(self.address, dex_of(symbol)):
+            if o.get("coin") != symbol:
+                continue
+            kind = str(o.get("orderType", "")).lower()
+            is_tp = "take profit" in kind
+            is_sl = "stop" in kind and not is_tp
+            if (is_sl and "sl" in kinds) or (is_tp and "tp" in kinds) or (not kind and o.get("reduceOnly")):
                 try:
                     self.ex.cancel(symbol, int(o["oid"]))
                 except Exception:
@@ -147,7 +152,7 @@ class HyperliquidBroker(Broker):
         if not pos:
             return
         info = self.data.market(symbol)
-        self._cancel_triggers(symbol)
+        self._cancel_triggers(symbol, kinds=("sl",))   # keep the take-profit order in place
         self._place_trigger(symbol, pos.side == "short", pos.qty, stop_price, "sl", info["szDecimals"])
 
     def close(self, venue, symbol, fraction=1.0) -> Fill:

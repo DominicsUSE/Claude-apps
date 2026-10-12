@@ -164,3 +164,19 @@ def test_rounding():
     assert round_price(1234.5678, 2) == 1234.6
     assert round_price(0.000123456, 0) == 0.000123
     assert round_price(123456.7, 5) == 123457
+
+
+def test_moving_the_stop_keeps_the_take_profit(cfg):
+    ex = FakeExchange()
+    ex.cancelled = []
+    ex.cancel = lambda name, oid: ex.cancelled.append(oid)
+    hl = FakeHL()
+    hl.open_orders = lambda addr, dex="": [
+        {"coin": "BTC", "oid": 1, "orderType": "Stop Market", "reduceOnly": True},
+        {"coin": "BTC", "oid": 2, "orderType": "Take Profit Market", "reduceOnly": True},
+        {"coin": "ETH", "oid": 3, "orderType": "Stop Market", "reduceOnly": True}]
+    hl.user_state = lambda addr, dex="": {"assetPositions": [{"position": {"coin": "BTC", "szi": "0.002", "entryPx": "60000", "positionValue": "122", "leverage": {"value": 3}}}]}
+    b = HyperliquidBroker(cfg["venues"]["liquid"], hl, "0xabc", "unused", exchange=ex)
+    b.update_stop("liquid", "BTC", 60500)
+    assert ex.cancelled == [1]
+    assert ex.calls[-1][0] == "trigger" and ex.calls[-1][5]["trigger"]["tpsl"] == "sl" and ex.calls[-1][3] == 0.002
