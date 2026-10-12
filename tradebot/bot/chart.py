@@ -38,6 +38,7 @@ MEME_DEFAULTS = {
     "min_stop_pct": 3.0,          # stops tighter than this get shaken out by noise: widen to this
     "tp_r": [[1.0, 0.5], [2.0, 0.25]],  # sell 50% at +1R, 25% at +2R (R = entry minus stop)
     "trail": "swing",             # after +1R, trail the stop under each new higher low ("swing") or the 9 EMA ("ema9")
+    "exit_on_structure": True,    # sell when the last higher low (made after entry) breaks; training tests on/off
     "exit_on_ema21": True,        # in profit and a candle closes below the 21 EMA: momentum gone, sell
     "exit_on_reversal_candle": True,  # shooting star / bearish engulfing on volume at the highs: sell
     "exit_on_divergence": True,
@@ -306,7 +307,7 @@ def exit_signal(f: Features, t: int, pos: dict, p: dict) -> tuple[str, str, floa
         return "sell", "time limit: the move did not come", None
     ls = swings(f, t, "low", 1)
     # change of character: the last higher low broke
-    if ls and ls[0][0] > pos.get("entry_i", -1) and c < ls[0][1]:
+    if p.get("exit_on_structure", True) and ls and ls[0][0] > pos.get("entry_i", -1) and c < ls[0][1]:
         return "sell", "structure broke: closed below the last higher low", None
     if p["exit_on_ema21"] and gained_r >= 1 and f.ema21[t] and c < f.ema21[t]:
         return "sell", "momentum lost: closed below the 21 EMA after a +1R move", None

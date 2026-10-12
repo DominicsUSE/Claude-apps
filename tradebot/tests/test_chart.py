@@ -121,7 +121,8 @@ def test_training_picks_settings_and_grades_unseen_data():
     charts = {f"T{i}": meme_chart(500, seed=20 + i) for i in range(6)}
     out = train(charts)
     assert out["tokens"] == 6
-    assert set(out["params"]) == {"rvol_min", "range_max_pct", "max_stop_pct", "trail"}
+    assert set(out["params"]) == {"rvol_min", "range_max_pct", "max_stop_pct", "trail", "exit_on_structure"}
+    assert all(t["setup"] in out["setups"] for t in out["sample_trades"])   # graded only on setups chosen in training
     assert out["verdict"] in ("WORKS ON UNSEEN CHARTS", "SLIGHT EDGE", "LOSES ON UNSEEN CHARTS", "NOT ENOUGH TRADES")
     split = int(500 * 0.6)
     first_test_t = charts["T0"][split].t

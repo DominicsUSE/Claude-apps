@@ -26,6 +26,7 @@ GRID = {
     "range_max_pct": [10.0, 15.0, 25.0],
     "max_stop_pct": [10.0, 15.0],
     "trail": ["swing", "ema9"],
+    "exit_on_structure": [True, False],
 }
 TRAIN_SHARE = 0.6
 MIN_TRADES = 15
@@ -39,7 +40,8 @@ PROFILE_BASE = {
 }
 PROFILE_GRIDS = {
     "fomo": GRID,
-    "liquid": {"rvol_min": [1.5, 2.0, 3.0], "range_max_pct": [3.0, 6.0, 10.0], "max_stop_pct": [3.0, 6.0], "trail": ["swing", "ema9"]},
+    "liquid": {"rvol_min": [1.5, 2.0, 3.0], "range_max_pct": [3.0, 6.0, 10.0], "max_stop_pct": [3.0, 6.0], "trail": ["swing", "ema9"],
+               "exit_on_structure": [True, False], "min_stop_pct": [0.8, 1.5]},
 }
 
 
@@ -116,14 +118,14 @@ def train(charts: dict[str, list], base: dict | None = None, progress=None, both
     for n, f in feats.items():
         test_trades += _trades(f, inv[n], p, splits[n], len(f.c), both_sides, token=n)
     names = SETUPS_ALL if both_sides else SETUPS
-    test = stats(test_trades)
     per_setup_test = by_setup(test_trades, names)
     per_setup_train = by_setup(best_train[1], names)
-    enabled = []
-    for s in names:
-        st = per_setup_test[s]
-        if st["trades"] < 8 or st["avg_pct"] > 0:
-            enabled.append(s)  # too few unseen trades to judge, or it made money on unseen charts
+    # Which setups to keep is decided on the TRAINING part only. Choosing them by their unseen
+    # results and then grading on those same results would flatter the verdict (selection bias).
+    enabled = [s for s in names if per_setup_train[s]["trades"] < 8 or per_setup_train[s]["avg_pct"] > 0]
+    all_test = stats(test_trades)
+    test_trades = [t for t in test_trades if t["setup"] in enabled]
+    test = stats(test_trades)
     if test["trades"] < 15:
         verdict = "NOT ENOUGH TRADES"
     elif test["trades"] >= 25 and test["avg_pct"] > 0 and test["profit_factor"] >= 1.2 and test["t_stat"] >= 1.5:
@@ -136,7 +138,7 @@ def train(charts: dict[str, list], base: dict | None = None, progress=None, both
     return {
         "trained_at": time.time(), "tokens": len(feats), "candles": sum(len(f.c) for f in feats.values()),
         "params": {k: p[k] for k in param_grid}, "setups": enabled, "both_sides": both_sides,
-        "cost_pct": p["cost_pct"], "train": best_train[0], "test": test, "verdict": verdict,
+        "cost_pct": p["cost_pct"], "train": best_train[0], "test": test, "test_all_setups": all_test, "verdict": verdict,
         "per_setup": {"train": per_setup_train, "test": per_setup_test},
         "sample_trades": test_trades[-60:],
     }
