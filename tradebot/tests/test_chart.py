@@ -314,3 +314,19 @@ def test_liquid_short_is_closed_when_the_chart_turns_up(cfg):
     s = MemeScalper({**cfg["strategies"]["meme_scalper"], "use_learned": False}, {}, None, None)
     out = s.manage(Context(cfg, HLWithCandles({"WIF": chart_}), MemeSol({}), held, owners, now=chart_[-1].t / 1000 + 600))
     assert out and out[0].action == "close" and "higher low" not in out[0].reason
+
+
+def test_watch_list_skips_tokenized_stocks():
+    import time as _t
+    from bot.config import DEFAULTS
+    from bot.strategies.meme import watch_filter
+    p = DEFAULTS["strategies"]["meme_scalper"]
+    now = int(_t.time() * 1000)
+
+    def pair(symbol, name):
+        return {"baseToken": {"symbol": symbol, "name": name}, "liquidity": {"usd": 900_000}, "volume": {"h24": 5_000_000},
+                "marketCap": 50_000_000, "pairCreatedAt": now - 86_400_000 * 30, "pairAddress": "pool"}
+    assert watch_filter(pair("WIF", "dogwifhat"), p, now)
+    assert not watch_filter(pair("NVDAx", "NVIDIA xStock"), p, now)
+    assert not watch_filter(pair("GOOGLx", "Alphabet xStock"), p, now)
+    assert not watch_filter(pair("SPYX", "SP500 xStock"), p, now)

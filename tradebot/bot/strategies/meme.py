@@ -18,6 +18,7 @@ In live mode a venue only trades with settings that made money on unseen charts 
 from .. import config as config_mod
 from ..chart import MEME_DEFAULTS, SETUPS, entry_signal, exit_signal, features, invert, read
 from ..data.dex_candles import step_seconds
+from ..data.solana import is_stock_token
 from ..models import Signal
 from ..training import PROFILE_BASE, proven
 from .base import Context, Strategy
@@ -46,6 +47,8 @@ def watch_filter(pair: dict, p: dict, now_ms: int) -> bool:
     created = _f(pair.get("pairCreatedAt"))
     age_h = (now_ms - created) / 3_600_000 if created else 0
     too_old = p.get("max_age_hours") and age_h > p["max_age_hours"]
+    if is_stock_token(pair):
+        return False
     return (liq >= p["min_liquidity_usd"] and vol >= p["min_volume_h24_usd"] and age_h >= p["min_age_hours"] and not too_old
             and p["min_market_cap_usd"] <= mcap <= p["max_market_cap_usd"] and bool(pair.get("pairAddress")))
 

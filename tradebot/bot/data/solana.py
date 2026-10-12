@@ -1,5 +1,6 @@
 """Solana token data for the FOMO side: prices and activity from DexScreener and Jupiter,
 and rug-pull checks from Jupiter's token audit and RugCheck. All free; Jupiter can take a key."""
+import re
 import time
 
 from .. import http
@@ -15,6 +16,14 @@ def _f(value, default=0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def is_stock_token(pair: dict) -> bool:
+    """Tokenized shares (xStocks such as NVDAx, "NVIDIA xStock") trade on Solana DEXes too. They move
+    like the stock, not like a memecoin, so the meme scalper neither trades nor trains on them."""
+    base = pair.get("baseToken") or {}
+    name, symbol = str(base.get("name", "")), str(base.get("symbol", ""))
+    return "xstock" in name.lower() or bool(re.fullmatch(r"[A-Z]{2,6}x", symbol))
 
 
 def jupiter_base(kind: str) -> tuple[str, dict]:

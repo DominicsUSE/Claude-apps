@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 
 from .chart import MEME_DEFAULTS, SETUPS, features, invert, simulate
+from .data.solana import is_stock_token
 
 GRID = {
     "rvol_min": [1.5, 2.0, 3.0],
@@ -271,12 +272,13 @@ class Trainer:
             mints = self.sol.candidate_mints()
             pairs = self.sol.pairs(mints)
             fresh = [{"mint": m, "pool": pr.get("pairAddress"), "symbol": (pr.get("baseToken") or {}).get("symbol", "")}
-                     for m, pr in pairs.items() if pr.get("pairAddress")]
+                     for m, pr in pairs.items() if pr.get("pairAddress") and not is_stock_token(pr)]
             if fresh:
                 self.remember(fresh)
                 u = self.universe()
         except Exception:
             pass
+        u = {m: row for m, row in u.items() if not is_stock_token({"baseToken": {"symbol": row.get("symbol", "")}})}
         chosen = sorted(u.items(), key=lambda kv: kv[1].get("last_seen", 0), reverse=True)[:max_tokens]
         for i, (mint, row) in enumerate(chosen):
             self.status["progress"] = f"downloading chart {i + 1}/{len(chosen)}"
