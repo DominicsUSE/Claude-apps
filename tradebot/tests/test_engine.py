@@ -231,3 +231,16 @@ def test_fresh_position_survives_a_lagging_wallet(engine):
     engine.state["owners"]["liquid:SOL"]["opened_at"] -= 600
     engine.tick()
     assert "liquid:SOL" not in engine.state["owners"]
+
+
+def test_candle_strategy_runs_once_per_candle_and_keeps_its_note(cfg):
+    from bot.strategies.base import Context
+    from bot.strategies.candles import CandleStrategy
+    from .conftest import FakeHL, FakeSol, make_candles
+    hl = FakeHL(candles={"BTC": make_candles(500, 60000, seed=9, step_ms=14_400_000)})
+    strat = CandleStrategy("trend", {**cfg["strategies"]["trend"], "symbols": ["BTC"]})
+    ctx = Context(cfg, hl, FakeSol(), [], {})
+    strat.scan(ctx)
+    first = strat.last_note
+    assert first.startswith("BTC: ") and "UTC close" in first
+    assert strat.scan(ctx) == [] and strat.last_note == first   # same candle: no new decision, same note

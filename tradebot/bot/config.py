@@ -86,7 +86,7 @@ DEFAULTS = {
             "max_new_per_hour": 2,
         },
         "trend": {
-            "enabled": True,
+            "enabled": False,             # failed a walk-forward test on ETH 4h: test it yourself before turning it on
             "venue": "liquid",
             "every_seconds": 300,
             "symbols": ["BTC", "ETH", "SOL"],

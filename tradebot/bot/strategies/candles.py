@@ -1,4 +1,7 @@
 """Runs a candle strategy live on Liquid: the newest closed candle decides, once per candle."""
+import time
+
+from ..data.hyperliquid import INTERVAL_MS
 from ..models import Signal
 from .base import Context, Strategy
 from .signals import CANDLE_STRATEGIES, DEFAULT_PARAMS
@@ -30,13 +33,17 @@ class CandleStrategy(Strategy):
                 notes.append(f"{sym}: not enough history yet")
                 continue
             last = candles[-1]
+            remembered = self.state.setdefault("notes", {})
             if seen.get(sym) == last.t:
+                notes.append(remembered.get(sym, f"{sym}: waiting for the next candle"))
                 continue  # already acted on this candle
             seen[sym] = last.t
             sig = self.fn(candles, self.params)[-1]
             held = mine.get(f"{self.venue}:{sym}")
+            when = time.strftime("%d %b %H:%M", time.gmtime((last.t + INTERVAL_MS[self.cfg["interval"]]) / 1000))
             if sig is None:
-                notes.append(f"{sym}: no signal")
+                remembered[sym] = f"{sym}: no signal at the {when} UTC close"
+                notes.append(remembered[sym])
                 continue
             if held and ((held.side == "long" and (sig.exit_long or sig.enter == "short")) or
                          (held.side == "short" and (sig.exit_short or sig.enter == "long"))):
@@ -47,6 +54,7 @@ class CandleStrategy(Strategy):
                                   stop_price=sig.stop, take_profit_price=sig.take_profit,
                                   leverage=self.cfg.get("leverage", 1), price_hint=last.c,
                                   reason=f"{self.name} {sig.enter} signal on the {self.cfg['interval']} close"))
-            notes.append(f"{sym}: {sig.enter or 'exit'}")
+            remembered[sym] = f"{sym}: {sig.enter or 'exit'} signal at the {when} UTC close"
+            notes.append(remembered[sym])
         self.last_note = "; ".join(notes)
         return out

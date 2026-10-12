@@ -84,7 +84,7 @@
       "max_new_per_hour": 2
     },
     "trend": {
-      "enabled": true,
+      "enabled": false,
       "venue": "liquid",
       "every_seconds": 300,
       "symbols": [

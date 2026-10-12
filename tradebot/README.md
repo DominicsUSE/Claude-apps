@@ -106,8 +106,24 @@ paper mode: alerts then trade the practice account. Webhook alerts need a paid T
 | **TradingView alerts** | both | Whatever your alerts say. | your charts |
 
 The backtest lab also has Donchian breakout, Supertrend, MACD, Heikin Ashi and an RSI pullback strategy
-(from *Every Trading Strategy Explained*) so you can compare them. Only FOMO momentum, EMA trend and
-TradingView alerts are on by default.
+(from *Every Trading Strategy Explained*) so you can compare them. Only **FOMO momentum** and
+**TradingView alerts** are on by default; turn others on after they pass your own tests.
+
+### What the first real-data tests showed (12 October 2026)
+
+These come from the automatic test run (default settings, fees included, full position, no leverage).
+They are not a promise. They are why only two strategies are on by default.
+
+| Test | Result | Buy and hold | Verdict |
+|---|---|---|---|
+| BTC volatility regime, 10 years daily (Coinbase) | +9,162%, max drawdown 71% | +13,061% | Lags simply holding; walk-forward **WEAK** (unseen data +137% vs +616% holding) |
+| BTC volatility regime, last 900 days | +53.8%, max drawdown 24% | +30.3% | Best of the 7 strategies over this stretch |
+| BTC/ETH pair, 4 years daily | +33.8% (81% of trades won, but losers were big) | ratio +161% | BTC kept outperforming ETH, so buying "cheap" BTC vs ETH was early; risky |
+| EMA trend on ETH, 4h, last year | walk-forward −26.7% on unseen data | −31.8% | **Fails out-of-sample**, so it is off by default |
+| FOMO momentum | cannot be backtested (no history of the screens) | | Paper trade it for weeks first |
+
+In short: the trend strategies mostly cut drawdowns rather than beat holding, the pair trade is a
+bet that BTC/ETH reverts, and memecoin momentum is unproven until your paper results say otherwise.
 
 **News check (optional):** with a Perplexity or xAI (Grok) key, the bot asks for the last 48 hours of
 news and social sentiment before each trade, and skips buys into clearly bad news. Turn it on in
