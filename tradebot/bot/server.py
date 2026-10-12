@@ -112,24 +112,27 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return self._send(200, e.training_report())
         if path == "/api/chart":
             q = parse_qs(urlparse(self.path).query)
-            mint = (q.get("mint") or [""])[0]
+            arg = lambda k: (q.get(k) or [""])[0]
+            venue, mint = arg("venue") or "fomo", arg("mint")
             meme = e.strategies.get("meme_scalper")
             if not meme or not mint:
                 return self._send(400, {"error": "meme_scalper is not available"})
-            pool = (q.get("pool") or [""])[0] or meme.state.get("pools", {}).get(mint)
             try:
-                if not pool:
-                    pair = e.sol.pairs([mint]).get(mint) or {}
-                    pool = pair.get("pairAddress")
-                if not pool:
-                    return self._send(404, {"error": "no trading pool found for this token"})
-                out = meme.chart_payload(pool, (q.get("interval") or [None])[0])
+                if venue == "liquid":
+                    ident = mint
+                else:
+                    ident = arg("pool") or meme.state.get("pools", {}).get(mint)
+                    if not ident:
+                        ident = (e.sol.pairs([mint]).get(mint) or {}).get("pairAddress")
+                    if not ident:
+                        return self._send(404, {"error": "no trading pool found for this token"})
+                out = meme.chart_payload(venue, ident, arg("interval") or None, e.hl)
             except Exception as ex:
                 return self._send(502, {"error": f"chart data unavailable: {ex}"})
-            out["mint"], out["pool"] = mint, pool
-            out["trades"] = [r for r in e.trades(2000) if r["symbol"] == mint]
-            o = e.state.get("owners", {}).get(f"fomo:{mint}")
-            out["position"] = {"entry": o.get("entry_price"), "stop": o.get("stop"), "setup": o.get("setup")} if o else None
+            out["mint"], out["pool"] = mint, ident
+            out["trades"] = [r for r in e.trades(2000) if r["symbol"] == mint and r["venue"] == venue]
+            o = e.state.get("owners", {}).get(f"{venue}:{mint}")
+            out["position"] = {"entry": o.get("entry_price"), "stop": o.get("stop"), "setup": o.get("setup"), "side": o.get("side")} if o else None
             return self._send(200, out)
         return self._send(404, {"error": "not found"})
 
@@ -175,7 +178,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 write_env(updates)
                 e.event("info", f"Saved {', '.join(updates)}. Restart the bot to reconnect.")
             elif path == "/api/training/start":
-                if not e.trainer.start():
+                if not e.trainer.start(body.get("profile", "fomo")):
                     raise RuntimeError("training is already running")
                 e.event("info", "Training started from the dashboard")
             elif path == "/api/paper_reset":

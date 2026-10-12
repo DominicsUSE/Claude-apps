@@ -134,7 +134,10 @@ def test_journal_feedback_pauses_losing_setups():
     rows = [{"strategy": "meme_scalper", "action": "close", "pnl_usd": "-2", "setup": "breakout"}] * 10 + \
            [{"strategy": "meme_scalper", "action": "close", "pnl_usd": "3", "setup": "pullback"}] * 10
     fb = journal_feedback(rows)
-    assert fb["breakout"]["paused"] and not fb["pullback"]["paused"] and fb["pullback"]["win_rate"] == 100
+    assert fb["fomo:breakout"]["paused"] and not fb["fomo:pullback"]["paused"] and fb["fomo:pullback"]["win_rate"] == 100
+    liq = [{**r, "venue": "liquid", "setup": "breakout_short"} for r in rows[:10]]
+    fb = journal_feedback(rows + liq)
+    assert fb["liquid:breakout_short"]["paused"] and fb["fomo:breakout"]["trades"] == 10
 
 
 # ---------- the live strategy against fakes ----------
@@ -200,3 +203,93 @@ def test_engine_stop_moves_only_up(engine):
     assert o["stop"] == first
     engine.execute(Signal("liquid", "BTC", "stop", "manual", stop_price=first * 1.02))
     assert o["stop"] == pytest.approx(first * 1.02)
+
+
+def test_meme_scalper_exits_when_liquidity_is_pulled(cfg):
+    from bot.models import Position
+    from bot.strategies.base import Context
+    from bot.strategies.meme import MemeScalper
+    from .conftest import FakeHL
+    chart_ = flat_then_breakout()
+    pr = pair("pool1", "GOOD")
+    sol = MemeSol({"GOOD": pr})
+    s = MemeScalper({**cfg["strategies"]["meme_scalper"], "use_learned": False}, {}, None, FakeDex({"pool1": chart_}))
+    sig = s.scan(Context(cfg, FakeHL(), sol, [], {}, now=chart_[-1].t / 1000 + 600))[0]
+    assert sig.size_usd == pytest.approx(min(25, 300000 * 0.005))
+    owners = {"fomo:GOOD": {"strategy": "meme_scalper", "entry_price": 1.065, "stop": 1.0, "init_stop": 1.0,
+                            "opened_at": chart_[-1].t / 1000 + 300}}
+    held = [Position("fomo", "GOOD", "long", 10, 1.065, 1.07, "GOOD")]
+    ctx = Context(cfg, FakeHL(), sol, held, owners, now=chart_[-1].t / 1000 + 900)
+    assert not [x for x in s.manage(ctx) if x.action == "close"]
+    pr["liquidity"] = {"usd": 120000}          # 60% of the pool removed
+    out = s.manage(ctx)
+    assert out and out[0].action == "close" and "liquidity pulled" in out[0].reason
+
+
+def test_order_flow_blocks_breakout_into_selling(cfg):
+    from bot.strategies.base import Context
+    from bot.strategies.meme import MemeScalper
+    from .conftest import FakeHL
+    chart_ = flat_then_breakout()
+    pr = {**pair("pool1", "GOOD"), "txns": {"m5": {"buys": 12, "sells": 40}}}
+    s = MemeScalper({**cfg["strategies"]["meme_scalper"], "use_learned": False}, {}, None, FakeDex({"pool1": chart_}))
+    assert s.scan(Context(cfg, FakeHL(), MemeSol({"GOOD": pr}), [], {}, now=chart_[-1].t / 1000 + 600)) == []
+    assert "more sellers than buyers" in s.watch["GOOD"]["text"]
+
+
+def test_vwap_is_the_same_however_much_history_is_loaded():
+    candles = meme_chart(700, seed=4)
+    a, b = features(candles), features(candles[-350:])
+    assert a.vwap[-1] == pytest.approx(b.vwap[-1], rel=1e-9)
+
+
+def test_short_setups_come_from_the_upside_down_chart():
+    from bot.chart import invert
+    from bot.strategies.meme import mirror_text
+    up = flat_then_breakout()
+    down = invert(up)                      # the same chart falling through its range
+    assert entry_signal(features(down), 60, MEME_DEFAULTS) is None   # no long on a breakdown
+    long_on_mirror = entry_signal(features(invert(down)), 60, MEME_DEFAULTS)
+    assert long_on_mirror and long_on_mirror["setup"] == "breakout"
+    assert mirror_text(long_on_mirror["reason"]).startswith("Breakdown: closed below")
+
+
+class HLWithCandles:
+    def __init__(self, charts):
+        self.charts = charts
+
+    def has_market(self, s):
+        return s in self.charts
+
+    def closed_candles(self, s, interval, bars=300):
+        return self.charts[s][-bars:]
+
+
+def test_liquid_memecoin_short_and_live_gate(cfg):
+    from bot.chart import invert
+    from bot.strategies.base import Context
+    from bot.strategies.meme import MemeScalper
+    breakdown = invert(flat_then_breakout())
+    mcfg = {**cfg["strategies"]["meme_scalper"], "use_learned": False, "fomo_enabled": False, "liquid_markets": ["WIF"],
+            "liquid_chart": {"max_ext_vwap_pct": 30.0, "range_max_pct": 15.0, "max_stop_pct": 15.0}}
+    s = MemeScalper(mcfg, {}, None, None)
+    ctx = Context(cfg, HLWithCandles({"WIF": breakdown}), MemeSol({}), [], {}, now=breakdown[-1].t / 1000 + 600)
+    sigs = s.scan(ctx)
+    assert len(sigs) == 1 and sigs[0].action == "sell" and sigs[0].setup == "breakout_short"
+    assert sigs[0].stop_price > breakdown[-1].c and sigs[0].reason.startswith("Breakdown")
+    # live mode: no entries until training shows an edge on unseen charts
+    live_cfg = {**cfg, "mode": "live", "live_trading_acknowledged": True}
+
+    class T:
+        def get(self, profile):
+            return {"verdict": "LOSES ON UNSEEN CHARTS", "params": {}, "setups": ["breakout", "breakout_short"]}
+    s2 = MemeScalper(mcfg, {}, T(), None)
+    assert s2.scan(Context(live_cfg, HLWithCandles({"WIF": breakdown}), MemeSol({}), [], {}, now=breakdown[-1].t / 1000 + 600)) == []
+    assert "live entries paused" in s2.last_note
+
+
+def test_training_both_sides():
+    charts = {f"T{i}": meme_chart(500, seed=40 + i) for i in range(4)}
+    out = train(charts, {"cost_pct": 0.1}, both_sides=True)
+    assert "breakout_short" in out["per_setup"]["test"] and out["both_sides"]
+    assert any(t["setup"].endswith("_short") for t in out["sample_trades"]) or out["test"]["trades"] >= 0

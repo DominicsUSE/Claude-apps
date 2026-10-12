@@ -3,7 +3,8 @@ Backtest from the terminal: python run.py backtest --strategy btc_regime --symbo
 Walk-forward test:          python run.py walkforward --strategy trend --symbol ETH --interval 4h --days 730
 Compare all strategies:     python run.py compare --symbol BTC --interval 1d
 Check connections:          python run.py check
-Train the meme scalper:     python run.py train --tokens 60
+Train the meme scalper:     python run.py train --tokens 60          (Solana memecoins in the FOMO wallet)
+                            python run.py train --profile liquid     (memecoin perps on Liquid)
 """
 import argparse
 import json
@@ -117,15 +118,19 @@ def cmd_compare(args) -> None:
 
 def cmd_train(args) -> None:
     from bot.data.dex_candles import DexCandles
+    from bot.data.hyperliquid import HyperliquidData
     from bot.data.solana import SolanaData
     from bot.training import Trainer
+    cfg = ensure_config()
     config_mod.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    trainer = Trainer(config_mod.DATA_DIR, SolanaData(), DexCandles(config_mod.DATA_DIR / "candles"))
-    print(f"Collecting up to {args.tokens} memecoin charts ({args.interval}) and training...")
-    r = trainer.run(args.tokens, args.interval)
+    trainer = Trainer(config_mod.DATA_DIR, SolanaData(), DexCandles(config_mod.DATA_DIR / "candles"),
+                      HyperliquidData(cfg["venues"]["liquid"]["api_url"]), cfg["strategies"]["meme_scalper"]["liquid_markets"])
+    what = "Liquid memecoin perps" if args.profile == "liquid" else f"up to {args.tokens} Solana memecoin charts"
+    print(f"Collecting {what} ({args.interval}) and training...")
+    r = trainer.run(args.profile, args.tokens, args.interval)
     if "error" in r:
         sys.exit(r["error"])
-    (config_mod.DATA_DIR / "learned.json").write_text(json.dumps(r), encoding="utf-8")
+    trainer.save(args.profile, r)
     print(f"\n{r['tokens']} charts, {r['candles']} candles. Verdict: {r['verdict']}")
     print(f"Chosen settings: {r['params']}; setups in use: {', '.join(r['setups']) or 'none'}")
     for part in ("train", "test"):
@@ -229,6 +234,7 @@ def main() -> None:
     t = sub.add_parser("train", help="study recent memecoin charts and pick the meme scalper's settings")
     t.add_argument("--tokens", type=int, default=60)
     t.add_argument("--interval", default="5m", choices=["1m", "5m", "15m"])
+    t.add_argument("--profile", default="fomo", choices=["fomo", "liquid"], help="fomo = Solana tokens, liquid = memecoin perps")
     t.set_defaults(func=cmd_train)
     args = p.parse_args()
     if args.cmd in (None, "run"):

@@ -19,7 +19,7 @@ import threading
 import time
 from pathlib import Path
 
-from .chart import MEME_DEFAULTS, SETUPS, features, simulate
+from .chart import MEME_DEFAULTS, SETUPS, features, invert, simulate
 
 GRID = {
     "rvol_min": [1.5, 2.0, 3.0],
@@ -29,6 +29,18 @@ GRID = {
 }
 TRAIN_SHARE = 0.6
 MIN_TRADES = 15
+SETUPS_ALL = SETUPS + tuple(f"{s}_short" for s in SETUPS)
+PROFILES = ("fomo", "liquid")
+# Liquid memecoin perps: about 0.1% cost per side (vs ~1% on DEX swaps) and smaller candles, so
+# tighter stops and ranges, and a tighter "don't chase" limit.
+PROFILE_BASE = {
+    "fomo": {},
+    "liquid": {"cost_pct": 0.1, "min_stop_pct": 0.8, "max_stop_pct": 6.0, "range_max_pct": 6.0, "max_ext_vwap_pct": 8.0},
+}
+PROFILE_GRIDS = {
+    "fomo": GRID,
+    "liquid": {"rvol_min": [1.5, 2.0, 3.0], "range_max_pct": [3.0, 6.0, 10.0], "max_stop_pct": [3.0, 6.0], "trail": ["swing", "ema9"]},
+}
 
 
 def stats(trades: list[dict]) -> dict:
@@ -50,32 +62,49 @@ def stats(trades: list[dict]) -> dict:
     }
 
 
-def by_setup(trades: list[dict]) -> dict:
-    return {s: stats([t for t in trades if t["setup"] == s]) for s in SETUPS}
+def by_setup(trades: list[dict], names=SETUPS_ALL) -> dict:
+    return {s: stats([t for t in trades if t["setup"] == s]) for s in names}
 
 
-def grid() -> list[dict]:
-    keys = list(GRID)
-    return [dict(zip(keys, combo)) for combo in itertools.product(*(GRID[k] for k in keys))]
+def grid(g: dict | None = None) -> list[dict]:
+    g = g or GRID
+    keys = list(g)
+    return [dict(zip(keys, combo)) for combo in itertools.product(*(g[k] for k in keys))]
 
 
-def train(charts: dict[str, list], base: dict | None = None, progress=None) -> dict:
-    """charts: {label: [Candle, ...]}. Returns the learned result (also used by tests)."""
+def _trades(f, fi, p, lo, hi, both_sides, token=None):
+    out = simulate(f, p, lo, hi)
+    if both_sides and fi is not None:
+        for t in simulate(fi, p, lo, hi):
+            t["setup"] += "_short"
+            out.append(t)
+    if token:
+        for t in out:
+            t["token"] = token
+    return out
+
+
+def train(charts: dict[str, list], base: dict | None = None, progress=None, both_sides: bool = False,
+          param_grid: dict | None = None) -> dict:
+    """charts: {label: [Candle, ...]}. Settings are chosen on the first 60% of every chart and graded
+    on the last 40%. With both_sides, short setups are tested too (on the chart turned upside down)."""
     base = {**MEME_DEFAULTS, **(base or {})}
-    feats = {}
+    param_grid = param_grid or GRID
+    feats, inv = {}, {}
     for name, candles in charts.items():
         if len(candles) >= 120:
             feats[name] = features(candles, base["swing_k"])
+            inv[name] = features(invert(candles), base["swing_k"]) if both_sides else None
     if not feats:
         return {"error": "not enough chart data (need at least 120 candles per token)"}
     splits = {n: int(len(f.c) * TRAIN_SHARE) for n, f in feats.items()}
     best, best_score, best_train = None, -1e18, None
-    combos = grid()
+    combos = grid(param_grid)
     for i, combo in enumerate(combos):
         p = {**base, **combo}
         trades = []
         for n, f in feats.items():
-            trades += simulate(f, p, 30, splits[n])
+            trades += _trades(f, inv[n], p, 30, splits[n], both_sides)
         s = stats(trades)
         score = s["t_stat"] if s["trades"] >= MIN_TRADES else -1e9 + s["trades"]
         if score > best_score:
@@ -85,14 +114,13 @@ def train(charts: dict[str, list], base: dict | None = None, progress=None) -> d
     p = {**base, **best}
     test_trades = []
     for n, f in feats.items():
-        for t in simulate(f, p, splits[n], len(f.c)):
-            t["token"] = n
-            test_trades.append(t)
+        test_trades += _trades(f, inv[n], p, splits[n], len(f.c), both_sides, token=n)
+    names = SETUPS_ALL if both_sides else SETUPS
     test = stats(test_trades)
-    per_setup_test = by_setup(test_trades)
-    per_setup_train = by_setup(best_train[1])
+    per_setup_test = by_setup(test_trades, names)
+    per_setup_train = by_setup(best_train[1], names)
     enabled = []
-    for s in SETUPS:
+    for s in names:
         st = per_setup_test[s]
         if st["trades"] < 8 or st["avg_pct"] > 0:
             enabled.append(s)  # too few unseen trades to judge, or it made money on unseen charts
@@ -107,44 +135,63 @@ def train(charts: dict[str, list], base: dict | None = None, progress=None) -> d
     test_trades.sort(key=lambda t: t["entry_t"])
     return {
         "trained_at": time.time(), "tokens": len(feats), "candles": sum(len(f.c) for f in feats.values()),
-        "params": {k: p[k] for k in GRID}, "setups": enabled or [],
-        "train": best_train[0], "test": test, "verdict": verdict,
+        "params": {k: p[k] for k in param_grid}, "setups": enabled, "both_sides": both_sides,
+        "cost_pct": p["cost_pct"], "train": best_train[0], "test": test, "verdict": verdict,
         "per_setup": {"train": per_setup_train, "test": per_setup_test},
         "sample_trades": test_trades[-60:],
     }
 
 
+def proven(learned: dict) -> bool:
+    """Real money only follows settings that made money on charts the optimiser never saw."""
+    return bool(learned) and learned.get("verdict") in ("WORKS ON UNSEEN CHARTS", "SLIGHT EDGE")
+
+
 def journal_feedback(trades: list[dict], min_trades: int = 10) -> dict:
-    """Learns from the bot's own closed meme trades: per setup, and which setups to pause."""
+    """Learns from the bot's own closed meme trades, per venue and setup: which to pause."""
     rows = [r for r in trades if r.get("strategy") == "meme_scalper" and r.get("action") == "close" and r.get("pnl_usd") not in ("", None)]
     out = {}
-    for s in SETUPS:
-        pnl = [float(r["pnl_usd"]) for r in rows if (r.get("setup") or "") == s]
-        wins = [x for x in pnl if x > 0]
-        out[s] = {"trades": len(pnl), "pnl": round(sum(pnl), 2), "win_rate": round(len(wins) / len(pnl) * 100, 1) if pnl else 0,
-                  "paused": len(pnl) >= min_trades and sum(pnl) < 0}
+    for venue, names in (("fomo", SETUPS), ("liquid", SETUPS_ALL)):
+        for s in names:
+            pnl = [float(r["pnl_usd"]) for r in rows if r.get("venue", "fomo") == venue and (r.get("setup") or "") == s]
+            if not pnl and venue == "liquid" and s.endswith("_short"):
+                continue
+            wins = [x for x in pnl if x > 0]
+            out[f"{venue}:{s}"] = {"trades": len(pnl), "pnl": round(sum(pnl), 2),
+                                   "win_rate": round(len(wins) / len(pnl) * 100, 1) if pnl else 0,
+                                   "paused": len(pnl) >= min_trades and sum(pnl) < 0}
     return out
 
 
 class Trainer:
-    """Runs training in the background (so the bot keeps trading) and remembers the result."""
+    """Runs training in the background (so the bot keeps trading) and remembers the results,
+    one per profile: "fomo" (Solana DEX charts) and "liquid" (memecoin perps on Liquid)."""
 
-    def __init__(self, data_dir: Path, sol, candles):
-        self.path = data_dir / "learned.json"
+    def __init__(self, data_dir: Path, sol, candles, hl=None, liquid_markets: list[str] | None = None):
+        self.data_dir = data_dir
         self.universe_path = data_dir / "universe.json"
         self.sol = sol
         self.candles = candles
+        self.hl = hl
+        self.liquid_markets = liquid_markets or []
         self.lock = threading.Lock()
-        self.status = {"running": False, "progress": "", "error": ""}
-        self.learned = self._load()
+        self.status = {"running": False, "progress": "", "error": "", "profile": ""}
+        self.learned = {p: self._load(p) for p in PROFILES}
 
-    def _load(self) -> dict:
-        if self.path.exists():
+    def _path(self, profile: str) -> Path:
+        return self.data_dir / ("learned.json" if profile == "fomo" else f"learned_{profile}.json")
+
+    def _load(self, profile: str) -> dict:
+        path = self._path(profile)
+        if path.exists():
             try:
-                return json.loads(self.path.read_text(encoding="utf-8"))
+                return json.loads(path.read_text(encoding="utf-8"))
             except ValueError:
                 return {}
         return {}
+
+    def get(self, profile: str) -> dict:
+        return self.learned.get(profile) or {}
 
     def universe(self) -> dict:
         if self.universe_path.exists():
@@ -166,24 +213,23 @@ class Trainer:
             u = dict(sorted(u.items(), key=lambda kv: kv[1].get("last_seen", 0))[-400:])
         self.universe_path.write_text(json.dumps(u), encoding="utf-8")
 
-    def due(self, hours: float) -> bool:
-        return not self.status["running"] and time.time() - self.learned.get("trained_at", 0) > hours * 3600
+    def due(self, hours: float, profile: str = "fomo") -> bool:
+        return not self.status["running"] and time.time() - self.get(profile).get("trained_at", 0) > hours * 3600
 
-    def start(self, max_tokens: int = 60, interval: str = "5m") -> bool:
+    def start(self, profile: str = "fomo", max_tokens: int = 60, interval: str = "5m") -> bool:
         if not self.lock.acquire(blocking=False):
             return False
-        self.status = {"running": True, "progress": "collecting charts", "error": ""}
-        threading.Thread(target=self._run, args=(max_tokens, interval), daemon=True).start()
+        self.status = {"running": True, "progress": "collecting charts", "error": "", "profile": profile}
+        threading.Thread(target=self._run, args=(profile, max_tokens, interval), daemon=True).start()
         return True
 
-    def _run(self, max_tokens: int, interval: str) -> None:
+    def _run(self, profile: str, max_tokens: int, interval: str) -> None:
         try:
-            result = self.run(max_tokens, interval)
+            result = self.run(profile, max_tokens, interval)
             if "error" in result:
                 self.status["error"] = result["error"]
             else:
-                self.learned = result
-                self.path.write_text(json.dumps(result), encoding="utf-8")
+                self.save(profile, result)
         except Exception as e:  # report, never crash the bot
             self.status["error"] = str(e)
         finally:
@@ -191,7 +237,33 @@ class Trainer:
             self.status["progress"] = ""
             self.lock.release()
 
-    def run(self, max_tokens: int = 60, interval: str = "5m") -> dict:
+    def save(self, profile: str, result: dict) -> None:
+        self.learned[profile] = result
+        self._path(profile).write_text(json.dumps(result), encoding="utf-8")
+
+    def run(self, profile: str = "fomo", max_tokens: int = 60, interval: str = "5m") -> dict:
+        def prog(done, total):
+            self.status["progress"] = f"testing settings {done}/{total}"
+        charts = self.collect(profile, max_tokens, interval)
+        result = train(charts, {"interval": interval, **PROFILE_BASE[profile]}, prog,
+                       both_sides=profile == "liquid", param_grid=PROFILE_GRIDS[profile])
+        if "error" not in result:
+            result["interval"] = interval
+            result["profile"] = profile
+        return result
+
+    def collect(self, profile: str, max_tokens: int, interval: str) -> dict:
+        charts = {}
+        if profile == "liquid":
+            markets = [m for m in self.liquid_markets if self.hl and self.hl.has_market(m)]
+            for i, sym in enumerate(markets):
+                self.status["progress"] = f"downloading {sym} ({i + 1}/{len(markets)})"
+                try:
+                    candles = self.hl.candles(sym, interval, 4000)
+                    charts[sym] = candles[:-1]  # drop the candle still forming
+                except Exception:
+                    continue
+            return charts
         u = self.universe()
         try:  # add today's trending tokens
             mints = self.sol.candidate_mints()
@@ -204,17 +276,10 @@ class Trainer:
         except Exception:
             pass
         chosen = sorted(u.items(), key=lambda kv: kv[1].get("last_seen", 0), reverse=True)[:max_tokens]
-        charts = {}
         for i, (mint, row) in enumerate(chosen):
             self.status["progress"] = f"downloading chart {i + 1}/{len(chosen)}"
             try:
                 charts[f"{row.get('symbol') or mint[:6]}:{mint[:6]}"] = self.candles.history(row["pool"], interval, 1000)
             except Exception:
                 continue
-
-        def prog(done, total):
-            self.status["progress"] = f"testing settings {done}/{total}"
-        result = train(charts, {"interval": interval}, prog)
-        if "error" not in result:
-            result["interval"] = interval
-        return result
+        return charts

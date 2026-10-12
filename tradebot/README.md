@@ -24,12 +24,23 @@ on the exchange even then.
 
 ## Memecoin trading: the main strategy
 
-The **meme scalper** trades short-term moves in Solana memecoins in your FOMO wallet. It decides
-by reading the chart, not by headlines or hype.
+The **meme scalper** trades short-term memecoin moves and decides by reading the chart, not by
+headlines or hype. It trades in two places:
 
-**What it watches.** Each minute it takes the tokens people are trading right now (DexScreener
-boosts, Jupiter trending). It keeps the 12 with real liquidity (over $50k) and volume (over $250k
-a day) and reads each one's 5-minute chart once per candle.
+| | FOMO wallet (Solana tokens) | Liquid (memecoin perps) |
+|---|---|---|
+| Markets | the 12 most-traded trending tokens with real liquidity (over $50k) and volume (over $250k a day) | kPEPE, WIF, FARTCOIN, kBONK, POPCAT, PENGU, TRUMP, MOODENG and more (Settings → `liquid_markets`) |
+| Direction | buy only | **long and short** (shorts read the same rules on the chart turned upside down) |
+| Cost per buy or sell | about 1% (swap fee + price impact) | about 0.1% |
+| Charts | GeckoTerminal 5-minute candles | Liquid's own 5-minute candles |
+| Extra protection | rug checks, sells at once if liquidity is pulled, buys at most 0.5% of the pool, needs more buyers than sellers | stop-loss also placed on the exchange |
+
+Costs matter for short-term trading: on a DEX swap a trade has to gain over 2% just to break even,
+on Liquid about 0.2%. The first real-data training run (12 October 2026) found the Solana setups
+**losing** on unseen charts, though on only 15 trades from the 11 charts GeckoTerminal let it
+download. That is too few to be sure either way, but it is why live money is gated (below).
+
+**What it watches.** Each minute it reads each market's 5-minute chart once per candle.
 
 **When it buys** (any one of these, on a closed candle):
 
@@ -57,6 +68,10 @@ shows each token's candles with VWAP, the EMAs, swing points and the bot's buys 
 
 - **Training on fresh charts.** Once a day (or when you press *Train now* or run `python run.py train`), it downloads the 5-minute charts of up to 60 tokens. These are all tokens it has watched, not only the ones that pumped. It tries a grid of settings on the first 60% of every chart, then grades the best on the last 40%, which the optimiser never saw (walk-forward, as in your video). Setups that lose money on those unseen charts are switched off.
 - **Learning from its own trades.** After 10 closed paper or live trades, a setup that is losing money is paused.
+- **Real money only follows proof.** In live mode, each venue makes new trades only while its latest training says *works on unseen charts* or *slight edge*. In paper mode it always trades, so it keeps collecting evidence. (Settings → `trade_unproven_live` overrides this; not recommended.)
+
+Liquid trains on about 17 days of 5-minute history for every memecoin perp, long and short:
+`python run.py train --profile liquid`.
 
 The **Training** tab shows all of it. Change the chart settings in Settings → Meme scalper → `chart`,
 for example `{"interval": "1m"}` for faster scalping.
@@ -218,7 +233,8 @@ The dashboard shows a red **LIVE** badge whenever real money is in play.
 python run.py                    start the bot and dashboard
 python run.py --paper            force paper mode
 python run.py check              test every connection
-python run.py train              study recent memecoin charts and pick the meme scalper's settings
+python run.py train              study recent Solana memecoin charts and pick the meme scalper's settings
+python run.py train --profile liquid   the same for memecoin perps on Liquid (long and short)
 python run.py backtest --strategy btc_regime --symbol BTC --source coinbase --days 3650
 python run.py walkforward --strategy trend --symbol ETH --interval 4h --days 730
 python run.py backtest --strategy eth_btc_pair --symbol BTC/ETH --source coinbase --days 1500

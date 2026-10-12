@@ -40,7 +40,8 @@ class Engine:
         self.hl = hl or HyperliquidData(cfg["venues"]["liquid"]["api_url"])
         self.sol = sol or SolanaData()
         self.dex = dex or DexCandles(self.data_dir / "candles")
-        self.trainer = Trainer(self.data_dir, self.sol, self.dex)
+        self.trainer = Trainer(self.data_dir, self.sol, self.dex, self.hl,
+                               cfg["strategies"].get("meme_scalper", {}).get("liquid_markets", []))
         self.state = self._load_state()
         self.live = config_mod.is_live(cfg)
         self.broker_notes: dict[str, str] = {}
@@ -55,6 +56,7 @@ class Engine:
         self.last_tick = 0.0
         self.last_error = ""
         self._stop = threading.Event()
+        self.threaded = False
 
     # ---------- setup ----------
 
@@ -191,8 +193,21 @@ class Engine:
 
     # ---------- main loop ----------
 
+    def _strategy_loop(self) -> None:
+        """Strategies scan in their own thread: a slow chart download never delays stop-losses."""
+        while not self._stop.is_set():
+            started = time.time()
+            try:
+                self._run_strategies()
+            except Exception as e:
+                self.event("error", f"Strategies failed: {e}")
+                log.exception("strategies failed")
+            self._stop.wait(max(1.0, self.cfg["loop_seconds"] - (time.time() - started)))
+
     def run_forever(self) -> None:
         self.event("info", f"Bot started in {'LIVE' if self.live else 'PAPER'} mode")
+        self.threaded = True
+        threading.Thread(target=self._strategy_loop, daemon=True).start()
         while not self._stop.is_set():
             started = time.time()
             try:
@@ -234,7 +249,8 @@ class Engine:
             self._reconcile(positions)
             self._manage_exits(positions)
             self.last_tick = time.time()
-        self._run_strategies()
+        if not self.threaded:
+            self._run_strategies()
         self.save_state()
 
     def _update_day(self, equity: float) -> None:
@@ -324,7 +340,7 @@ class Engine:
                 owners = dict(self.state.get("owners", {}))
                 if not any(o.get("strategy") == name for o in owners.values()):
                     continue
-                ctx = Context(self.cfg, self.hl, self.sol, list(self.last_positions), owners, now)
+                ctx = Context(self.cfg, self.hl, self.sol, list(self.last_positions), owners, now, tuple(self.brokers))
             try:
                 for sig in strat.manage(ctx):
                     self.inbox.put(sig)
@@ -332,23 +348,28 @@ class Engine:
                 self.event("error", f"{name} could not check its open trades: {e}")
         # 2) learning: retrain on fresh charts, and pause setups that keep losing in the journal
         meme = self.strategies.get("meme_scalper")
-        if meme and self.cfg["strategies"]["meme_scalper"].get("enabled"):
+        mcfg = self.cfg["strategies"].get("meme_scalper", {})
+        if meme and mcfg.get("enabled"):
             fb = journal_feedback(self.trades(100000))
             meme.paused_setups = {s for s, v in fb.items() if v["paused"]}
-            if self.trainer.due(self.cfg["strategies"]["meme_scalper"].get("train_every_hours", 24)):
-                if self.trainer.start():
-                    self.event("info", "Training started: studying recent memecoin charts in the background")
+            for profile in ("fomo", "liquid"):
+                if not mcfg.get(f"{profile}_enabled", True) or profile not in self.brokers:
+                    continue
+                if self.trainer.due(mcfg.get("train_every_hours", 24), profile) and self.trainer.start(profile):
+                    self.event("info", f"Training started: studying recent {'Solana memecoin' if profile == 'fomo' else 'Liquid memecoin'} charts in the background")
+                    break
         if self.state.get("paused") or self.state.get("halted"):
             return
         for name, strat in self.strategies.items():
             if not self.cfg["strategies"][name].get("enabled") or not strat.due(now):
                 continue
-            if strat.venue not in self.brokers:
+            if not any(v in self.brokers for v in getattr(strat, "venues", (strat.venue,))):
                 strat.last_note = f"{strat.venue} is not connected"
                 continue
             strat.last_run = now
             with self.lock:
-                ctx = Context(self.cfg, self.hl, self.sol, list(self.last_positions), dict(self.state.get("owners", {})), now)
+                ctx = Context(self.cfg, self.hl, self.sol, list(self.last_positions), dict(self.state.get("owners", {})), now,
+                              tuple(self.brokers))
             try:
                 signals = strat.scan(ctx)
             except Exception as e:
@@ -705,10 +726,9 @@ class Engine:
         meme = self.strategies.get("meme_scalper")
         if not meme:
             return []
-        rows = [{"mint": m, **w} for m, w in meme.watch.items()]
-        return sorted(rows, key=lambda r: (not r.get("setup"), r.get("symbol", "")))
+        rows = [{"key": k, "mint": k.split(":", 1)[1] if k.startswith("liquid:") else k, **w} for k, w in meme.watch.items()]
+        return sorted(rows, key=lambda r: (not r.get("setup"), r.get("venue", ""), r.get("symbol", "")))
 
     def training_report(self) -> dict:
-        learned = {k: v for k, v in (self.trainer.learned or {}).items()}
-        return {"status": self.trainer.status, "learned": learned, "journal": journal_feedback(self.trades(100000)),
+        return {"status": self.trainer.status, "learned": dict(self.trainer.learned), "journal": journal_feedback(self.trades(100000)),
                 "paused_setups": sorted(getattr(self.strategies.get("meme_scalper"), "paused_setups", set()))}

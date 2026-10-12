@@ -76,9 +76,21 @@ DEFAULTS = {
             "max_rugcheck_score": 500,
             "require_safety_check": True,
             "max_new_per_hour": 3,
+            "max_pool_share_pct": 0.5,        # never buy more than this % of the pool's liquidity (keeps slippage small)
+            "liquidity_drop_exit_pct": 30,    # sell at once if the pool loses this much liquidity after we buy (rug pull)
             "use_learned": True,              # use the settings training found
             "train_every_hours": 24,          # retrain on fresh charts once a day
+            "trade_unproven_live": False,     # live money only follows settings that made money on unseen charts
             "chart": {},                      # override chart settings, e.g. {"interval": "1m", "rvol_min": 3}
+            "fomo_enabled": True,             # Solana memecoins in your FOMO wallet
+            "liquid_enabled": True,           # memecoin perps on Liquid (long and short, much lower fees)
+            "liquid_markets": ["kPEPE", "WIF", "FARTCOIN", "kBONK", "POPCAT", "PENGU", "MEME", "TRUMP", "MOODENG",
+                               "PNUT", "kSHIB", "DOGE", "kFLOKI", "SPX", "GOAT", "BRETT", "MEW", "TURBO", "CHILLGUY"],
+            "liquid_position_usd": 25.0,
+            "liquid_leverage": 2,
+            "liquid_shorts": True,
+            "liquid_max_new_per_hour": 4,
+            "liquid_chart": {},               # override chart settings for Liquid only
         },
         "fomo_momentum": {
             "enabled": False,                 # the older screen-only version; meme_scalper reads the chart too

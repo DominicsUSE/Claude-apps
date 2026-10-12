@@ -14,7 +14,7 @@ from ..models import Candle
 GT = "https://api.geckoterminal.com/api/v2/networks/solana/pools/{pool}/ohlcv/{tf}"
 FRAMES = {"1m": ("minute", 1, 60), "5m": ("minute", 5, 300), "15m": ("minute", 15, 900), "1h": ("hour", 1, 3600),
           "4h": ("hour", 4, 14400)}
-http.MIN_INTERVAL.setdefault("api.geckoterminal.com", 2.2)
+http.MIN_INTERVAL.setdefault("api.geckoterminal.com", 6.5)  # the free API is stricter than its docs say
 
 
 def step_seconds(interval: str) -> int:
@@ -33,7 +33,7 @@ class DexCandles:
         if before:
             params["before_timestamp"] = int(before)
         raw = http.get(GT.format(pool=pool, tf=tf), params=params,
-                       headers={"Accept": "application/json;version=20230302"}, timeout=20)
+                       headers={"Accept": "application/json;version=20230302"}, timeout=20, retries=3)
         rows = (((raw or {}).get("data") or {}).get("attributes") or {}).get("ohlcv_list") or []
         out = {}
         for t, o, h, lo, c, v in rows:

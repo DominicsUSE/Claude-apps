@@ -47,7 +47,9 @@ jobs:
           python run.py walkforward --strategy trend --symbol ETH --interval 4h --days 600
       - name: Train the meme scalper on real memecoin charts
         if: matrix.os == 'ubuntu-latest'
-        run: python run.py train --tokens 40
+        run: |
+          python run.py train --profile liquid
+          python run.py train --tokens 40
       - name: Connection check
         if: matrix.os == 'ubuntu-latest'
         run: python run.py check

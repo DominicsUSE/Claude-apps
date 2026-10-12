@@ -68,18 +68,37 @@ class Features:
     _sl_conf: list = field(default_factory=list)
 
 
+def vwap_bars(candles: list[Candle]) -> int:
+    """How many candles make 24 hours (the rolling VWAP window, as Liquid uses)."""
+    if len(candles) < 2:
+        return 288
+    step = max(candles[1].t - candles[0].t, 1)
+    return max(int(86_400_000 / step), 1)
+
+
+def invert(candles: list[Candle]) -> list[Candle]:
+    """The chart upside down (price -> 1/price): a short setup on the real chart is a long setup here.
+    Lets every buy rule double as a short-selling rule on Liquid perps."""
+    return [Candle(c.t, 1 / c.o, 1 / c.l, 1 / c.h, 1 / c.c, c.v) for c in candles if c.o > 0 and c.l > 0]
+
+
 def features(candles: list[Candle], k: int = 2) -> Features:
     o = [x.o for x in candles]
     h = [x.h for x in candles]
     lo = [x.l for x in candles]
     c = [x.c for x in candles]
     v = [x.v for x in candles]
-    # VWAP anchored at the first candle of the window (memecoins have no "session")
+    # Rolling 24-hour VWAP, so it reads the same however much history was loaded
+    n = vwap_bars(candles)
     vwap, pv, vol = [], 0.0, 0.0
     for i in range(len(c)):
         pv += (h[i] + lo[i] + c[i]) / 3 * v[i]
         vol += v[i]
-        vwap.append(pv / vol if vol > 0 else c[i])
+        if i >= n:
+            j = i - n
+            pv -= (h[j] + lo[j] + c[j]) / 3 * v[j]
+            vol -= v[j]
+        vwap.append(pv / vol if vol > 1e-12 else c[i])
     # relative volume: this candle vs the average of the 20 before it
     rvol = [None] * len(v)
     run = 0.0

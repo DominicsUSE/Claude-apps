@@ -44,7 +44,16 @@ def request(method: str, url: str, *, json=None, params=None, headers=None, time
         except requests.RequestException as e:
             last_error = e
         else:
-            if r.status_code == 429 or r.status_code >= 500:
+            if r.status_code == 429:
+                last_error = HttpError(f"{host} answered 429 (too many requests)")
+                if attempt < retries:
+                    try:
+                        wait = float(r.headers.get("Retry-After") or 0)
+                    except ValueError:
+                        wait = 0
+                    time.sleep(min(wait or 12.0 * (attempt + 1), 60))
+                    continue
+            elif r.status_code >= 500:
                 last_error = HttpError(f"{host} answered {r.status_code}")
             elif r.status_code >= 400:
                 raise HttpError(f"{host} answered {r.status_code}: {r.text[:300]}")

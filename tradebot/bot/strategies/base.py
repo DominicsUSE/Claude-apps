@@ -13,6 +13,7 @@ class Context:
     positions: list[Position]
     owners: dict[str, dict]          # position key -> what the engine knows about it (strategy, opened_at, ...)
     now: float = field(default_factory=time.time)
+    venues: tuple = ("fomo", "liquid")   # venues that are connected right now
 
     def mine(self, strategy: str) -> dict[str, Position]:
         """Open positions this strategy opened, by key."""

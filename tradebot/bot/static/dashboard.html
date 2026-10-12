@@ -199,6 +199,7 @@ ol.steps{margin:6px 0 0 18px;padding:0;font-size:13px}ol.steps li{margin:3px 0}
           <div class="metric"><div class="l">BUY: breakout</div><div style="font-size:13px">A tight range (consolidation), then a candle closes above it on 2x+ normal volume, above VWAP. Stop under the range.</div></div>
           <div class="metric"><div class="l">BUY: pullback</div><div style="font-size:13px">Higher highs and higher lows, price dips into the 21 EMA, VWAP or the 0.382-0.618 Fibonacci zone, then a hammer or bullish engulfing candle. Stop under the dip.</div></div>
           <div class="metric"><div class="l">BUY: VWAP reclaim</div><div style="font-size:13px">Price was under VWAP and closes back above it on 1.5x volume. Stop under the reclaim candle.</div></div>
+          <div class="metric"><div class="l">SHORT (Liquid perps only)</div><div style="font-size:13px">The same rules on the chart turned upside down: a breakdown below a range, a bounce into the 21 EMA/VWAP in a downtrend that gets rejected, or losing VWAP. Stops sit above.</div></div>
           <div class="metric"><div class="l">NEVER BUY</div><div style="font-size:13px">More than 30% above VWAP (chasing), RSI over 80, a long upper wick (sellers), bearish divergence, a downtrend, or a token that fails the rug checks.</div></div>
           <div class="metric"><div class="l">SELL in steps</div><div style="font-size:13px">Half at +1R (R = entry minus stop), a quarter at +2R. After +1R the stop goes to break-even and then trails under each new higher low.</div></div>
           <div class="metric"><div class="l">SELL everything when</div><div style="font-size:13px">The last higher low breaks, a candle closes under the 21 EMA after a good move, a shooting star or bearish engulfing appears on volume at the highs, RSI diverges, volume dries up, or 4 hours pass.</div></div>
@@ -212,8 +213,11 @@ ol.steps{margin:6px 0 0 18px;padding:0;font-size:13px}ol.steps li{margin:3px 0}
     <div class="grid">
       <div class="card c12">
         <h2>Training <small>the bot studies recent memecoin charts and keeps only what works on charts it has not seen</small></h2>
-        <div class="row"><button class="btn primary" id="trainBtn">Train now</button><span class="dim" id="trainStatus" role="status"></span></div>
-        <div id="trainOut" style="margin-top:var(--s3)"></div>
+        <div class="row"><button class="btn primary" data-train="fomo">Train FOMO (Solana) now</button><button class="btn" data-train="liquid">Train Liquid perps now</button><span class="dim" id="trainStatus" role="status"></span></div>
+        <h2 style="margin-top:var(--s4)">FOMO wallet: Solana memecoins <small>about 1% fees and slippage per side</small></h2>
+        <div id="trainOut-fomo"></div>
+        <h2 style="margin-top:var(--s4)">Liquid: memecoin perps, long and short <small>about 0.1% per side</small></h2>
+        <div id="trainOut-liquid"></div>
       </div>
       <div class="card c12">
         <h2>Learning from its own trades <small>paper or live, per setup</small></h2>
@@ -381,7 +385,7 @@ const NAMES = {fomo_momentum: "FOMO momentum", trend: "EMA trend", btc_regime: "
   congress: "Congress buys", tradingview: "TradingView alerts", meme_scalper: "Meme scalper", breakout: "Breakout", mean_reversion: "RSI pullback",
   supertrend: "Supertrend", macd: "MACD", heikin_ashi: "Heikin Ashi", manual: "Manual"};
 const DESCS = {
-  meme_scalper: "Reads 5-minute memecoin charts: buys breakouts, pullbacks and VWAP reclaims in your FOMO wallet, sells in steps as the chart turns.",
+  meme_scalper: "Reads 5-minute memecoin charts: trades breakouts, pullbacks and VWAP reclaims in your FOMO wallet and on Liquid memecoin perps (long and short), and sells in steps as the chart turns.",
   fomo_momentum: "Trending Solana memecoins in your FOMO wallet, after rug checks. Sells in steps with a trailing stop.",
   trend: "EMA 20/50 crossover with a 200 EMA trend filter and ATR stops, on Liquid. Failed a walk-forward test on ETH 4h: test before using.",
   btc_regime: "Bitcoin video: in the market during bull regimes, in cash during bear ones.",
@@ -702,32 +706,32 @@ $("#saveSecrets").onclick = async () => {
 };
 
 // ---------- charts ----------
-let chartMint = null, chartPool = null;
+let chartMint = null, chartPool = null, chartVenue = "fomo";
 function renderWatch() {
   const rows = (last && last.watch) || [];
   $("#noWatch").classList.toggle("hidden", rows.length > 0);
-  const mine = ((last && last.positions) || []).filter(p => p.venue === "fomo");
-  const all = [...mine.filter(p => !rows.some(r => r.mint === p.symbol)).map(p => ({mint: p.symbol, symbol: p.label, structure: "in trade", setup: "", text: ""})), ...rows];
-  $("#watchTable tbody").innerHTML = all.map(r => `<tr data-mint="${esc(r.mint)}" data-pool="${esc(r.pool || "")}" style="cursor:pointer${r.mint === chartMint ? ";background:var(--muted)" : ""}">
-    <td><b>${esc(r.symbol)}</b>${mine.some(p => p.symbol === r.mint) ? ' <span class="badge ok" style="font-size:10px">holding</span>' : ""}<div class="dim" style="font-size:11px">${esc((r.text || "").slice(0, 70))}${(r.text || "").length > 70 ? "…" : ""}</div></td>
+  const mine = ((last && last.positions) || []).filter(p => p.strategy === "meme_scalper");
+  const all = [...mine.filter(p => !rows.some(r => r.mint === p.symbol && r.venue === p.venue)).map(p => ({mint: p.symbol, venue: p.venue, symbol: p.label, structure: "in trade", setup: "", text: ""})), ...rows];
+  $("#watchTable tbody").innerHTML = all.map(r => `<tr data-mint="${esc(r.mint)}" data-pool="${esc(r.pool || "")}" data-venue="${esc(r.venue || "fomo")}" style="cursor:pointer${r.mint === chartMint ? ";background:var(--muted)" : ""}">
+    <td><b>${esc(r.symbol)}</b> <span class="badge" style="font-size:10px">${r.venue === "liquid" ? "Liquid" : "FOMO"}</span>${mine.some(p => p.symbol === r.mint && p.venue === r.venue) ? ' <span class="badge ok" style="font-size:10px">holding</span>' : ""}<div class="dim" style="font-size:11px">${esc((r.text || "").slice(0, 70))}${(r.text || "").length > 70 ? "…" : ""}</div></td>
     <td><span class="badge ${r.structure === "up" ? "ok" : r.structure === "down" ? "bad" : ""}" style="font-size:11px">${esc(r.structure || "–")}</span></td>
-    <td>${r.setup ? `<span class="badge ok" style="font-size:11px">${esc(r.setup)}</span>` : ""}</td></tr>`).join("");
+    <td>${r.setup ? `<span class="badge ${r.setup.endsWith("_short") ? "bad" : "ok"}" style="font-size:11px">${esc(r.setup.replace("_short", " (short)"))}</span>` : ""}</td></tr>`).join("");
 }
-$("#watchTable").addEventListener("click", ev => { const tr = ev.target.closest("[data-mint]"); if (tr) { chartMint = tr.dataset.mint; chartPool = tr.dataset.pool; loadChart(); renderWatch(); } });
+$("#watchTable").addEventListener("click", ev => { const tr = ev.target.closest("[data-mint]"); if (tr) { chartMint = tr.dataset.mint; chartPool = tr.dataset.pool; chartVenue = tr.dataset.venue; loadChart(); renderWatch(); } });
 $("#chartInterval").onchange = () => chartMint && loadChart();
 async function loadChart() {
   $("#chartTitle").textContent = "Loading…";
   try {
-    const q = new URLSearchParams({mint: chartMint, interval: $("#chartInterval").value}); if (chartPool) q.set("pool", chartPool);
+    const q = new URLSearchParams({mint: chartMint, venue: chartVenue, interval: $("#chartInterval").value}); if (chartPool) q.set("pool", chartPool);
     const d = await api("/api/chart?" + q);
     const name = ((last && last.watch) || []).find(w => w.mint === chartMint)?.symbol || ((last && last.positions) || []).find(p => p.symbol === chartMint)?.label || chartMint.slice(0, 6);
     $("#chartTitle").textContent = `${name} · ${d.interval}`;
-    const a = $("#dexLink"); a.href = `https://dexscreener.com/solana/${encodeURIComponent(d.pool)}`; a.classList.remove("hidden");
+    const a = $("#dexLink"); a.classList.toggle("hidden", d.venue === "liquid"); a.href = `https://dexscreener.com/solana/${encodeURIComponent(d.pool)}`;
     drawCandles($("#candleChart"), d);
     const r = d.read, sig = d.signal;
     $("#chartRead").innerHTML = `<p>${esc(r.text)}</p>` +
-      (sig ? `<div class="alert blue" style="margin-top:8px"><span><b>Setup now: ${esc(sig.setup)}</b>. ${esc(sig.reason)} Stop ${px(sig.stop)}.</span></div>` : `<p class="dim">No buy setup on the last closed candle.</p>`) +
-      (d.position ? `<p>Holding: entry ${px(d.position.entry)}, stop ${px(d.position.stop)}${d.position.setup ? " (" + esc(d.position.setup) + ")" : ""}.</p>` : "");
+      (sig ? `<div class="alert blue" style="margin-top:8px"><span><b>Setup now: ${esc(sig.setup.replace("_short", " (short)"))}</b>. ${esc(sig.reason)} Stop ${px(sig.stop)}.</span></div>` : `<p class="dim">No setup on the last closed candle.</p>`) +
+      (d.position ? `<p>Holding ${esc(d.position.side || "")}: entry ${px(d.position.entry)}, stop ${px(d.position.stop)}${d.position.setup ? " (" + esc(d.position.setup) + ")" : ""}.</p>` : "");
   } catch (e) { $("#chartTitle").textContent = "Chart unavailable"; $("#chartRead").innerHTML = `<p class="dim">${esc(e.message)}</p>`; }
 }
 function drawCandles(canvas, d) {
@@ -773,24 +777,27 @@ function drawCandles(canvas, d) {
 
 // ---------- training ----------
 async function loadTraining() {
-  const d = await api("/api/training"), st = d.status, L = d.learned || {};
-  $("#trainBtn").disabled = st.running;
-  $("#trainStatus").textContent = st.running ? "Training… " + (st.progress || "") : st.error ? "Last training failed: " + st.error : L.trained_at ? "Last trained " + new Date(L.trained_at * 1000).toLocaleString() : "Not trained yet: press Train now, or wait for the daily run.";
-  if (L.params) {
+  const d = await api("/api/training"), st = d.status;
+  $$("[data-train]").forEach(b => b.disabled = st.running);
+  $("#trainStatus").textContent = st.running ? `Training ${st.profile === "liquid" ? "Liquid" : "FOMO"}… ${st.progress || ""}` : st.error ? "Last training failed: " + st.error : "";
+  for (const profile of ["fomo", "liquid"]) {
+    const L = (d.learned || {})[profile] || {}, box = $("#trainOut-" + profile);
+    if (!L.params) { box.innerHTML = `<p class="dim">Not trained yet: press Train now, or wait for the daily run.</p>`; continue; }
     const v = L.verdict, c = v === "WORKS ON UNSEEN CHARTS" ? "ok" : v === "SLIGHT EDGE" ? "warn" : "bad";
-    const row = (name, s) => `<tr><td>${name}</td><td class="n">${s.trades}</td><td class="n">${s.win_rate}%</td><td class="n ${cls(s.avg_pct)}">${pct(s.avg_pct)}</td><td class="n">${s.avg_r}</td><td class="n">${s.profit_factor}</td></tr>`;
-    $("#trainOut").innerHTML = `<p><span class="badge ${c}">${esc(v)}</span> <span class="dim">${L.tokens} token charts, ${L.candles.toLocaleString()} candles (${esc(L.interval || "5m")}). Settings were chosen on the first 60% of each chart and graded on the last 40%.</span></p>
-      <p>Chosen settings: <code>${esc(JSON.stringify(L.params))}</code>. Setups in use: <b>${esc((L.setups || []).join(", ") || "none")}</b>.</p>
+    const row = (name, s) => s && s.trades ? `<tr><td>${name}</td><td class="n">${s.trades}</td><td class="n">${s.win_rate}%</td><td class="n ${cls(s.avg_pct)}">${pct(s.avg_pct)}</td><td class="n">${s.avg_r}</td><td class="n">${s.profit_factor}</td></tr>` : "";
+    const setups = Object.keys(L.per_setup.test);
+    box.innerHTML = `<p><span class="badge ${c}">${esc(v)}</span> <span class="dim">${L.tokens} charts, ${L.candles.toLocaleString()} candles (${esc(L.interval || "5m")}), trained ${new Date(L.trained_at * 1000).toLocaleString()}. Settings chosen on the first 60% of each chart, graded on the last 40%.</span></p>
+      <p>Chosen settings: <code>${esc(JSON.stringify(L.params))}</code>. Setups in use: <b>${esc((L.setups || []).map(x => x.replace("_short", " (short)")).join(", ") || "none")}</b>.
+      ${["WORKS ON UNSEEN CHARTS", "SLIGHT EDGE"].includes(v) ? "" : '<span class="neg">In live mode this venue makes no new trades until a retrain shows an edge; paper mode keeps trading to learn.</span>'}</p>
       <div class="scroll"><table><thead><tr><th></th><th class="n">Trades</th><th class="n">Win rate</th><th class="n">Avg trade</th><th class="n">Avg R</th><th class="n">Profit factor</th></tr></thead><tbody>
       ${row("Practice charts (settings chosen here)", L.train)}${row("<b>Unseen charts</b>", L.test)}
-      ${["breakout", "pullback", "vwap_reclaim"].map(s => row("&nbsp;&nbsp;unseen: " + s, L.per_setup.test[s])).join("")}</tbody></table></div>
-      <details><summary>Last ${L.sample_trades.length} unseen-chart trades</summary><div class="scroll"><table><thead><tr><th>Token</th><th>Setup</th><th class="n">Result</th><th class="n">R</th><th>Exit</th></tr></thead><tbody>
-      ${L.sample_trades.slice().reverse().map(t => `<tr><td>${esc(t.token)}</td><td>${esc(t.setup)}</td><td class="n ${cls(t.ret_pct)}">${pct(t.ret_pct)}</td><td class="n">${(+t.r).toFixed(2)}</td><td class="dim">${esc(t.exit_reason)}</td></tr>`).join("")}</tbody></table></div></details>
-      <p class="dim" style="font-size:12px">Includes about 1% fees and slippage per buy and per sell. Charts come from every token the bot has watched, not only the ones that pumped, so the results are not just winners.</p>`;
-  } else $("#trainOut").innerHTML = "";
-  $("#fbTable tbody").innerHTML = Object.entries(d.journal).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="n">${v.trades}</td><td class="n">${v.win_rate}</td><td class="n ${cls(v.pnl)}">${signed(v.pnl)}</td><td>${v.paused ? '<span class="badge bad">paused: losing</span>' : v.trades < 10 ? '<span class="badge">learning</span>' : '<span class="badge ok">active</span>'}</td></tr>`).join("");
+      ${setups.map(s => row("&nbsp;&nbsp;unseen: " + s.replace("_short", " (short)"), L.per_setup.test[s])).join("")}</tbody></table></div>
+      <details><summary>Last ${L.sample_trades.length} unseen-chart trades</summary><div class="scroll"><table><thead><tr><th>Market</th><th>Setup</th><th class="n">Result</th><th class="n">R</th><th>Exit</th></tr></thead><tbody>
+      ${L.sample_trades.slice().reverse().map(t => `<tr><td>${esc(t.token)}</td><td>${esc(t.setup)}</td><td class="n ${cls(t.ret_pct)}">${pct(t.ret_pct)}</td><td class="n">${(+t.r).toFixed(2)}</td><td class="dim">${esc(t.exit_reason)}</td></tr>`).join("")}</tbody></table></div></details>`;
+  }
+  $("#fbTable tbody").innerHTML = Object.entries(d.journal).map(([k, v]) => `<tr><td>${esc(k.replace("fomo:", "FOMO · ").replace("liquid:", "Liquid · ").replace("_short", " (short)"))}</td><td class="n">${v.trades}</td><td class="n">${v.win_rate}</td><td class="n ${cls(v.pnl)}">${signed(v.pnl)}</td><td>${v.paused ? '<span class="badge bad">paused: losing</span>' : v.trades < 10 ? '<span class="badge">learning</span>' : '<span class="badge ok">active</span>'}</td></tr>`).join("");
 }
-$("#trainBtn").onclick = async () => { try { await api("/api/training/start", {}); toast("Training started"); setTimeout(loadTraining, 800); } catch (e) { toast(e.message); } };
+$$("[data-train]").forEach(b => b.onclick = async () => { try { await api("/api/training/start", {profile: b.dataset.train}); toast("Training started"); setTimeout(loadTraining, 800); } catch (e) { toast(e.message); } });
 
 // ---------- journal ----------
 async function loadJournal() {
