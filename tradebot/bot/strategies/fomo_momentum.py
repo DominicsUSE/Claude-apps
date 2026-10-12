@@ -87,7 +87,7 @@ class FomoMomentum(Strategy):
             out.append(Signal("fomo", mint, "buy", self.name, label=label, size_usd=p["position_usd"],
                               stop_pct=p["stop_loss_pct"], take_profit_ladder=p.get("take_profit"),
                               trailing_stop_pct=p.get("trailing_stop_pct"), max_hold_hours=p.get("max_hold_hours"),
-                              price_hint=_f(pair.get("priceUsd")), reason=why))
+                              reason=why))
             self.state["buys"].append(time.time())
             if len(self.state["buys"]) >= p["max_new_per_hour"]:
                 break

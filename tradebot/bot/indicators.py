@@ -91,15 +91,6 @@ def rolling_std(values: list[float], period: int) -> Series:
     return out
 
 
-def zscore(values: list[float], period: int) -> Series:
-    means = sma(values, period)
-    stds = rolling_std(values, period)
-    out: Series = [None] * len(values)
-    for i, v in enumerate(values):
-        if means[i] is not None and stds[i]:
-            out[i] = (v - means[i]) / stds[i]
-    return out
-
 
 def highest(values: list[float], period: int) -> Series:
     return [max(values[i - period + 1:i + 1]) if i >= period - 1 else None for i in range(len(values))]

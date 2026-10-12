@@ -1,10 +1,10 @@
 import pytest
 
 from bot import backtest as bt
-from bot.indicators import atr, ema, rsi, sma, zscore
+from bot.indicators import atr, ema, rsi, sma
 from bot.models import Candle
 from bot.strategies.pair import pair_signals, ratio_candles
-from bot.strategies.signals import CANDLE_STRATEGIES, DEFAULT_PARAMS, PARAM_GRIDS, current_regime, heikin_ashi
+from bot.strategies.signals import CANDLE_STRATEGIES, DEFAULT_PARAMS, PARAM_GRIDS, heikin_ashi
 
 from .conftest import make_candles
 
@@ -18,8 +18,6 @@ def test_indicators_basic():
     assert rsi(list(range(30, 1, -1)), 14)[-1] == 0.0
     a = atr([2] * 20, [1] * 20, [1.5] * 20, 14)
     assert a[-1] == pytest.approx(1.0)
-    z = zscore([1, 1, 1, 1, 5], 5)
-    assert z[-1] > 1.5
 
 
 @pytest.mark.parametrize("name", list(CANDLE_STRATEGIES))
@@ -127,6 +125,6 @@ def test_monte_carlo():
 
 def test_regime_and_heikin_ashi():
     up = [Candle(i, 100 + i, 101 + i, 99 + i, 100.5 + i) for i in range(200)]
-    assert current_regime(up, DEFAULT_PARAMS["btc_regime"]) == "bull"
+    assert any(s and s.enter == "long" for s in CANDLE_STRATEGIES["btc_regime"](up, DEFAULT_PARAMS["btc_regime"]))
     ha = heikin_ashi(up)
     assert len(ha) == len(up) and all(c.h >= max(c.o, c.c) for c in ha)

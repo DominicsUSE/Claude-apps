@@ -31,7 +31,6 @@ class Signal:
     max_hold_hours: Optional[float] = None
     leverage: Optional[float] = None
     close_fraction: float = 1.0
-    price_hint: Optional[float] = None
     reason: str = ""
     group: str = ""             # positions opened together (pair trades) share a group and close together
     setup: str = ""             # which chart setup triggered it (meme scalper), for per-setup learning

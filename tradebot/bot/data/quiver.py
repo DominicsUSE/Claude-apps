@@ -21,8 +21,6 @@ class CongressTrade:
     amount_usd: float   # lower bound of the reported range
     traded: date
     reported: date
-    chamber: str = ""
-    party: str = ""
 
 
 def _date(value) -> date | None:
@@ -69,7 +67,6 @@ def parse(rows: list[dict]) -> list[CongressTrade]:
         out.append(CongressTrade(
             member=str(row.get("Representative") or row.get("Name") or ""),
             ticker=ticker, side=side, amount_usd=_amount(row), traded=traded, reported=reported,
-            chamber=str(row.get("House") or row.get("Chamber") or ""), party=str(row.get("Party") or ""),
         ))
     return out
 

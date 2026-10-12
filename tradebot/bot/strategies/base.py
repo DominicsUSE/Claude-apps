@@ -35,6 +35,3 @@ class Strategy:
 
     def scan(self, ctx: Context) -> list[Signal]:
         raise NotImplementedError
-
-    def describe(self) -> str:
-        return self.__doc__.strip().splitlines()[0] if self.__doc__ else self.name

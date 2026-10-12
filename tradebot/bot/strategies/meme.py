@@ -192,7 +192,7 @@ class MemeScalper(Strategy):
             out.append(Signal("fomo", mint, "buy", self.name, label=symbol, size_usd=size,
                               stop_pct=stop_pct, take_profit_ladder=self._ladder(stop_pct, p),
                               max_hold_hours=p["max_hold_bars"] * step_seconds(p["interval"]) / 3600,
-                              price_hint=price, setup=sig["setup"],
+                              setup=sig["setup"],
                               reason=f"{sig['reason']} Chart: {r['text']}"))
             recent.append(ctx.now)
         self.state["last_bar"] = {m: v for m, v in seen.items() if m in pairs or m in held or ":" in m}
@@ -251,7 +251,7 @@ class MemeScalper(Strategy):
                               stop_price=stop, take_profit_ladder=self._ladder(stop_pct, p),
                               leverage=p.get("liquid_leverage", 2),
                               max_hold_hours=p["max_hold_bars"] * step_seconds(p["interval"]) / 3600,
-                              price_hint=price, setup=setup, reason=f"{reason} Chart: {r['text']}"))
+                              setup=setup, reason=f"{reason} Chart: {r['text']}"))
             recent.append(ctx.now)
         if blocked:
             self.notes["liquid"] = blocked

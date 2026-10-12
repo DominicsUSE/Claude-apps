@@ -38,7 +38,6 @@ class Trade:
     size_usd: float
     pnl_usd: float
     ret_pct: float           # on the position, after costs
-    equity_after: float
     exit_reason: str
 
 
@@ -77,7 +76,7 @@ def simulate(candles: list[Candle], signals: list[BarSignal | None], start: int 
         pnl = size * ret
         equity += pnl
         trades.append(Trade(side, pos["i"], i, candles[pos["i"]].t, candles[i].t, entry_px, exit_px, size, pnl,
-                            ret * 100, equity, reason))
+                            ret * 100, reason))
         pos = None
 
     for i in range(start, end):

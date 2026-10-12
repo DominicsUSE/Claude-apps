@@ -52,7 +52,7 @@ class CandleStrategy(Strategy):
             if sig.enter and not held:
                 out.append(Signal(self.venue, sym, "buy" if sig.enter == "long" else "sell", self.name, label=sym,
                                   stop_price=sig.stop, take_profit_price=sig.take_profit,
-                                  leverage=self.cfg.get("leverage", 1), price_hint=last.c,
+                                  leverage=self.cfg.get("leverage", 1),
                                   reason=f"{self.name} {sig.enter} signal on the {self.cfg['interval']} close"))
             remembered[sym] = f"{sym}: {sig.enter or 'exit'} signal at the {when} UTC close"
             notes.append(remembered[sym])

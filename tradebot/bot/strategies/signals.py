@@ -92,18 +92,6 @@ def regime_signals(candles: list[Candle], p: dict) -> list[BarSignal | None]:
     return out
 
 
-def current_regime(candles: list[Candle], p: dict) -> str | None:
-    _, upper, lower = regime_bands(candles, p)
-    regime = None
-    for i, c in enumerate(candles):
-        if upper[i] is None:
-            continue
-        if c.c > upper[i]:
-            regime = "bull"
-        elif c.c < lower[i]:
-            regime = "bear"
-    return regime
-
 
 def breakout_signals(candles: list[Candle], p: dict) -> list[BarSignal | None]:
     """Donchian channel breakout (turtle style): buy a close above the highest high of the last
