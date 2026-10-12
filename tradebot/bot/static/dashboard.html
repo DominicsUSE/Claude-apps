@@ -321,6 +321,11 @@ ol.steps{margin:6px 0 0 18px;padding:0;font-size:13px}ol.steps li{margin:3px 0}
     <div class="grid">
       <div class="card c12"><h2>Status</h2><div id="connStatus"></div></div>
       <div class="card c12">
+        <h2>Test my connections <small>read-only: checks your keys, wallet and balances, never places a trade</small></h2>
+        <div class="row"><button class="btn primary" id="testConnBtn">Test my connections</button><span class="dim" id="testConnStatus" role="status"></span></div>
+        <div id="testConnOut" style="margin-top:var(--s3)"></div>
+      </div>
+      <div class="card c12">
         <h2>Keys and passwords <small>stored only in the .env file on this computer; never shown again after saving</small></h2>
         <div id="secrets"></div>
         <div class="row" style="margin-top:var(--s3)"><button class="btn primary" id="saveSecrets">Save keys</button><span class="dim" id="secretStatus" role="status"></span></div>
@@ -798,6 +803,18 @@ async function loadTraining() {
   $("#fbTable tbody").innerHTML = Object.entries(d.journal).map(([k, v]) => `<tr><td>${esc(k.replace("fomo:", "FOMO · ").replace("liquid:", "Liquid · ").replace("_short", " (short)"))}</td><td class="n">${v.trades}</td><td class="n">${v.win_rate}</td><td class="n ${cls(v.pnl)}">${signed(v.pnl)}</td><td>${v.paused ? '<span class="badge bad">paused: losing</span>' : v.trades < 10 ? '<span class="badge">learning</span>' : '<span class="badge ok">active</span>'}</td></tr>`).join("");
 }
 $$("[data-train]").forEach(b => b.onclick = async () => { try { await api("/api/training/start", {profile: b.dataset.train}); toast("Training started"); setTimeout(loadTraining, 800); } catch (e) { toast(e.message); } });
+
+$("#testConnBtn").onclick = async () => {
+  const b = $("#testConnBtn"); b.disabled = true; $("#testConnStatus").textContent = "Checking… (up to 30 seconds)";
+  try {
+    const r = await api("/api/connections/test", {});
+    const icon = ok => ok === true ? '<span class="badge ok">OK</span>' : ok === false ? '<span class="badge bad">fix this</span>' : '<span class="badge warn">not set</span>';
+    $("#testConnOut").innerHTML = [["FOMO wallet (Solana)", r.fomo], ["Liquid", r.liquid]].map(([title, rows]) =>
+      `<h2 style="margin-top:var(--s3)">${title}</h2>` + rows.map(x => `<div class="sec"><div><b>${esc(x.name)}</b><p>${esc(x.detail)}</p></div>${icon(x.ok)}</div>`).join("")).join("");
+    $("#testConnStatus").textContent = "";
+  } catch (e) { $("#testConnStatus").textContent = "Failed: " + e.message; }
+  b.disabled = false;
+};
 
 // ---------- journal ----------
 async function loadJournal() {

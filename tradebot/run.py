@@ -182,16 +182,12 @@ def cmd_check(args) -> None:
         return f"{(pr.get('baseToken') or {}).get('symbol')}: {len(candles)} five-minute candles"
     line("GeckoTerminal memecoin charts", meme_chart)
     print("Your accounts")
-    if secret("FOMO_WALLET_PRIVATE_KEY"):
-        from bot.brokers.fomo_wallet import FomoWalletBroker
-        line("FOMO wallet", lambda: FomoWalletBroker(cfg["venues"]["fomo"], sol, secret("FOMO_WALLET_PRIVATE_KEY"), secret("SOLANA_RPC_URL"),
-                                                     secret("JUPITER_API_KEY")).status()["detail"])
-    else:
-        print("  --   FOMO wallet: FOMO_WALLET_PRIVATE_KEY not set")
-    if secret("HL_ACCOUNT_ADDRESS"):
-        line("Liquid account", lambda: f"value ${sum(float(hl.user_state(secret('HL_ACCOUNT_ADDRESS'), d).get('marginSummary', {}).get('accountValue', 0)) for d in ('', 'xyz')):,.2f}")
-    else:
-        print("  --   Liquid account: HL_ACCOUNT_ADDRESS not set")
+    from bot.connections import test_fomo, test_liquid
+    for title, rows in (("FOMO", test_fomo(cfg["venues"]["fomo"])), ("Liquid", test_liquid(cfg["venues"]["liquid"]))):
+        for r in rows:
+            mark = {True: "OK  ", False: "FAIL", None: "--  "}[r["ok"]]
+            ok = ok and r["ok"] is not False
+            print(f"  {mark} {title} {r['name']}: {r['detail']}")
     print("Optional services")
     if secret("QUIVER_API_TOKEN"):
         from bot.data import quiver

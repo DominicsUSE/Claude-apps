@@ -177,6 +177,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 updates = {k: str(v).strip() for k, v in body.items() if k in EDITABLE_SECRETS}
                 write_env(updates)
                 e.event("info", f"Saved {', '.join(updates)}. Restart the bot to reconnect.")
+            elif path == "/api/connections/test":
+                from .connections import test_fomo, test_liquid
+                return self._send(200, {"fomo": test_fomo(e.cfg["venues"]["fomo"]), "liquid": test_liquid(e.cfg["venues"]["liquid"])})
             elif path == "/api/training/start":
                 if not e.trainer.start(body.get("profile", "fomo")):
                     raise RuntimeError("training is already running")

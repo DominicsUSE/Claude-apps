@@ -180,3 +180,49 @@ def test_moving_the_stop_keeps_the_take_profit(cfg):
     b.update_stop("liquid", "BTC", 60500)
     assert ex.cancelled == [1]
     assert ex.calls[-1][0] == "trigger" and ex.calls[-1][5]["trigger"]["tpsl"] == "sl" and ex.calls[-1][3] == 0.002
+
+
+def test_connection_checks_never_trade_and_explain(monkeypatch):
+    from bot import connections, http as http_mod
+    from bot.config import DEFAULTS
+    from solders.keypair import Keypair
+    import base58
+    kp = Keypair()
+    agent_key = "0x" + "11" * 32
+    from eth_account import Account
+    agent = Account.from_key(agent_key).address
+    account = "0x" + "ab" * 20
+    env = {"FOMO_WALLET_PRIVATE_KEY": base58.b58encode(bytes(kp)).decode(), "JUPITER_API_KEY": "k",
+           "HL_ACCOUNT_ADDRESS": account, "HL_API_PRIVATE_KEY": agent_key}
+    monkeypatch.setattr(connections, "secret", lambda n: env.get(n))
+    calls = []
+
+    def fake_post(url, json=None, **kw):
+        calls.append(("POST", url, json.get("method") or json.get("type")))
+        if "method" in json:
+            if json["method"] == "getBalance":
+                return {"result": {"value": 50_000_000}}
+            return {"result": {"value": [{"account": {"data": {"parsed": {"info": {"tokenAmount": {"uiAmount": 42.5}}}}}}]}}
+        if json["type"] == "clearinghouseState":
+            return {"marginSummary": {"accountValue": "100"}}
+        if json["type"] == "userRole":
+            return {"role": "agent", "data": {"user": account}}
+        return [{"address": agent, "validUntil": (time.time() + 30 * 86400) * 1000}]
+
+    def fake_get(url, params=None, headers=None, **kw):
+        calls.append(("GET", url, params.get("taker")))
+        assert headers == {"x-api-key": "k"}
+        return {"outAmount": "6500000", "transaction": None}
+    import time
+    monkeypatch.setattr(http_mod, "post", fake_post)
+    monkeypatch.setattr(http_mod, "get", fake_get)
+    fomo = connections.test_fomo(DEFAULTS["venues"]["fomo"])
+    assert all(r["ok"] for r in fomo), fomo
+    assert str(kp.pubkey()) in fomo[0]["detail"] and "42.50 USDC" in fomo[2]["detail"]
+    liq = connections.test_liquid(DEFAULTS["venues"]["liquid"])
+    assert all(r["ok"] for r in liq), liq
+    assert "approved" in liq[-1]["detail"]
+    # quote only: no taker, so Jupiter never builds a transaction we could sign
+    assert all(c[2] is None for c in calls if c[0] == "GET")
+    env["HL_ACCOUNT_ADDRESS"] = "not-an-address"
+    assert connections.test_liquid(DEFAULTS["venues"]["liquid"])[0]["ok"] is False
