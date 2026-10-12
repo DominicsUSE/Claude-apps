@@ -45,6 +45,9 @@ jobs:
           python run.py backtest --strategy eth_btc_pair --symbol BTC/ETH --source coinbase --days 1500
           python run.py compare --symbol BTC --interval 1d --days 900
           python run.py walkforward --strategy trend --symbol ETH --interval 4h --days 600
+      - name: Train the meme scalper on real memecoin charts
+        if: matrix.os == 'ubuntu-latest'
+        run: python run.py train --tokens 40
       - name: Connection check
         if: matrix.os == 'ubuntu-latest'
         run: python run.py check

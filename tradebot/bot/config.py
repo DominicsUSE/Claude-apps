@@ -60,8 +60,28 @@ DEFAULTS = {
         },
     },
     "strategies": {
-        "fomo_momentum": {
+        "meme_scalper": {
             "enabled": True,
+            "venue": "fomo",
+            "every_seconds": 60,
+            "position_usd": 25.0,
+            "watch_count": 12,                # how many trending tokens to chart at once
+            "min_liquidity_usd": 50000,
+            "min_volume_h24_usd": 250000,
+            "min_age_hours": 1,               # skip brand-new launches (sniper and rug territory)
+            "max_age_hours": 0,               # 0 = no upper limit: established memecoins like BONK and WIF count too
+            "min_market_cap_usd": 200000,
+            "max_market_cap_usd": 200000000,
+            "max_top10_holders_pct": 35,
+            "max_rugcheck_score": 500,
+            "require_safety_check": True,
+            "max_new_per_hour": 3,
+            "use_learned": True,              # use the settings training found
+            "train_every_hours": 24,          # retrain on fresh charts once a day
+            "chart": {},                      # override chart settings, e.g. {"interval": "1m", "rvol_min": 3}
+        },
+        "fomo_momentum": {
+            "enabled": False,                 # the older screen-only version; meme_scalper reads the chart too
             "venue": "fomo",
             "every_seconds": 120,
             "position_usd": 25.0,

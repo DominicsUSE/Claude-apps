@@ -19,7 +19,7 @@ def main(minutes: float) -> int:
     sys.stdout.reconfigure(errors="replace")
     cfg = config_mod.deep_merge(config_mod.DEFAULTS, {})
     cfg["loop_seconds"] = 10
-    for name in ("fomo_momentum", "trend", "btc_regime", "eth_btc_pair"):
+    for name in ("meme_scalper", "fomo_momentum", "trend", "btc_regime", "eth_btc_pair"):
         cfg["strategies"][name]["enabled"] = True
         cfg["strategies"][name]["every_seconds"] = 30
     cfg["strategies"]["trend"]["interval"] = "1h"
@@ -50,8 +50,15 @@ def main(minutes: float) -> int:
     print("\nActivity:")
     for e in reversed(st["events"]):
         print(f"  [{e['kind']}] {e['text']}")
+    print("\nMeme scalper chart reads:")
+    for w in st["watch"]:
+        print(f"  {w['symbol']:10} {w.get('structure', ''):8} {w.get('setup', ''):12} {w['text'][:150]}")
     print(f"\nPositions: {[(p['label'], p['side'], round(p['notional'], 2)) for p in st['positions']]}")
-    problems = [e for e in st["events"] if e["kind"] == "error"]
+    if not st["watch"]:
+        problems_extra = [{"text": "the meme scalper read no charts (GeckoTerminal unreachable?)"}]
+    else:
+        problems_extra = []
+    problems = [e for e in st["events"] if e["kind"] == "error"] + problems_extra
     if not any(p["symbol"] == "ETH" for p in st["positions"]) and not engine.trades():
         problems.append({"text": "the ETH paper trade did not happen"})
     if problems:

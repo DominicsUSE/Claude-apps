@@ -18,7 +18,7 @@ class Signal:
     """A request to trade. Strategies, TradingView alerts and the dashboard all produce these."""
     venue: str                  # "fomo" or "liquid"
     symbol: str                 # Solana mint address for fomo; "BTC" or "xyz:NVDA" for liquid
-    action: str                 # "buy" (open long), "sell" (open short), "close"
+    action: str                 # "buy" (open long), "sell" (open short), "close", "stop" (raise the stop to stop_price)
     strategy: str
     label: str = ""             # human readable name, e.g. "BONK"
     size_usd: Optional[float] = None
@@ -34,6 +34,7 @@ class Signal:
     price_hint: Optional[float] = None
     reason: str = ""
     group: str = ""             # positions opened together (pair trades) share a group and close together
+    setup: str = ""             # which chart setup triggered it (meme scalper), for per-setup learning
 
     @property
     def key(self) -> str:

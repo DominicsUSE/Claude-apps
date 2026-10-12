@@ -22,11 +22,56 @@ The first start takes a minute to install what it needs. The dashboard then open
 <http://localhost:8787>. Keep the window open: closing it stops the bot. Stops on Liquid stay
 on the exchange even then.
 
+## Memecoin trading: the main strategy
+
+The **meme scalper** trades short-term moves in Solana memecoins in your FOMO wallet. It decides
+by reading the chart, not by headlines or hype.
+
+**What it watches.** Each minute it takes the tokens people are trading right now (DexScreener
+boosts, Jupiter trending). It keeps the 12 with real liquidity (over $50k) and volume (over $250k
+a day) and reads each one's 5-minute chart once per candle.
+
+**When it buys** (any one of these, on a closed candle):
+
+- **Breakout.** A tight range (consolidation), then a candle closes above it on at least 2x normal volume, above VWAP. Stop under the range.
+- **Pullback.** An uptrend (higher highs and higher lows) dips into the 21 EMA, VWAP or the 0.382-0.618 Fibonacci zone, then prints a hammer or bullish engulfing candle. Stop under the dip.
+- **VWAP reclaim.** After trading under VWAP, price closes back above it on 1.5x volume. Stop under that candle.
+
+**When it never buys:** more than 30% above VWAP (chasing), RSI over 80, a long upper wick (sellers
+rejected the move), bearish RSI divergence, a downtrend, a stop wider than 15%, or a token failing
+the rug checks (mint or freeze authority on, top holders over 35%, RugCheck danger flags).
+
+**When it sells:**
+
+- Half at +1R (R = the distance from entry to stop) and another quarter at +2R. The stop then moves to break-even.
+- After +1R the stop trails under each new higher low (or the 9 EMA).
+- Everything goes when the last higher low breaks, a candle closes under the 21 EMA after a good
+  move, a shooting star or bearish engulfing candle shows up on volume at the highs, RSI diverges,
+  volume dries up, or 4 hours pass without the move.
+
+Every trade has a written reason, e.g. *"Breakout: closed above a 12-candle range (4% tall) on 8x
+volume, above VWAP. Chart: 9 EMA above 21 EMA, RSI 73, bullish engulfing…"*. The **Charts** tab
+shows each token's candles with VWAP, the EMAs, swing points and the bot's buys and sells.
+
+**How it learns.**
+
+- **Training on fresh charts.** Once a day (or when you press *Train now* or run `python run.py train`), it downloads the 5-minute charts of up to 60 tokens. These are all tokens it has watched, not only the ones that pumped. It tries a grid of settings on the first 60% of every chart, then grades the best on the last 40%, which the optimiser never saw (walk-forward, as in your video). Setups that lose money on those unseen charts are switched off.
+- **Learning from its own trades.** After 10 closed paper or live trades, a setup that is losing money is paused.
+
+The **Training** tab shows all of it. Change the chart settings in Settings → Meme scalper → `chart`,
+for example `{"interval": "1m"}` for faster scalping.
+
+Chart rules come from *Every Trading Strategy Explained*: market structure, dynamic
+support/resistance, breakouts, candlestick patterns, divergence and volume. The testing rules come
+from the look-ahead-bias, walk-forward and risk-of-ruin videos.
+
 ## The dashboard
 
 | Tab | What it's for |
 |---|---|
 | **Overview** | Account value chart, open positions (with a Close button), the activity log, strategies on/off, and a manual trade form. |
+| **Charts** | The memecoins the bot is watching, each with its candle chart, VWAP/EMAs, swing points, the bot's trades and its written read. |
+| **Training** | What the bot learned from recent memecoin charts (graded on charts it never saw), and how each setup is doing in your own trades. |
 | **Backtest lab** | Test any strategy on real history: single backtest, **walk-forward test**, or **compare all** next to buy-and-hold. Includes a Monte Carlo reshuffle of the trades. |
 | **Risk** | Risk-of-ruin calculator (simple and Ralph Vince formulas), your real results per strategy, and a checklist for going live. |
 | **Settings** | Every limit and strategy setting, saved to `config.json`. |
@@ -98,7 +143,8 @@ paper mode: alerts then trade the practice account. Webhook alerts need a paid T
 
 | Strategy | Where | Idea | Source |
 |---|---|---|---|
-| **FOMO momentum** | FOMO | Buys trending Solana memecoins with real liquidity, volume and more buyers than sellers. Skips anything under 2 hours old or already up 60%+ in an hour, and anything failing rug checks: mint/freeze authority still on, top holders over 35%, RugCheck danger flags. Small fixed size, -15% stop, sells 50% at +30% and 25% at +80%, then moves the stop to break-even. 18% trailing stop, 12-hour time limit. | DexScreener, Jupiter, RugCheck |
+| **Meme scalper** (main) | FOMO | Reads 5-minute memecoin charts and trades breakouts, pullbacks and VWAP reclaims, then sells in steps as the chart turns (see above). | chart-reading video, walk-forward training |
+| **FOMO momentum** (off) | FOMO | Buys trending Solana memecoins with real liquidity, volume and more buyers than sellers. Skips anything under 2 hours old or already up 60%+ in an hour, and anything failing rug checks: mint/freeze authority still on, top holders over 35%, RugCheck danger flags. Small fixed size, -15% stop, sells 50% at +30% and 25% at +80%, then moves the stop to break-even. 18% trailing stop, 12-hour time limit. | DexScreener, Jupiter, RugCheck |
 | **EMA trend** | Liquid | 20/50 EMA crossover, only in the direction of the 200 EMA, RSI 50-75 (25-50 for shorts), ATR stop with a 2.5x target. Same as the Pine script. | classic trend following |
 | **BTC volatility regime** | Liquid | Bands around fast/slow EMAs of the typical price. Long in a bull regime, cash in a bear regime. | *The Bitcoin Strategy That Beats Buy & Hold* |
 | **BTC/ETH pair** | Liquid | When BTC/ETH drops below its 30-day mean minus 1 std, go long BTC + short ETH. Close above mean plus 2 std. | *ETH Pair Trading Strategy* |
@@ -106,7 +152,7 @@ paper mode: alerts then trade the practice account. Webhook alerts need a paid T
 | **TradingView alerts** | both | Whatever your alerts say. | your charts |
 
 The backtest lab also has Donchian breakout, Supertrend, MACD, Heikin Ashi and an RSI pullback strategy
-(from *Every Trading Strategy Explained*) so you can compare them. Only **FOMO momentum** and
+(from *Every Trading Strategy Explained*) so you can compare them. Only the **meme scalper** and
 **TradingView alerts** are on by default; turn others on after they pass your own tests.
 
 ### What the first real-data tests showed (12 October 2026)
@@ -172,6 +218,7 @@ The dashboard shows a red **LIVE** badge whenever real money is in play.
 python run.py                    start the bot and dashboard
 python run.py --paper            force paper mode
 python run.py check              test every connection
+python run.py train              study recent memecoin charts and pick the meme scalper's settings
 python run.py backtest --strategy btc_regime --symbol BTC --source coinbase --days 3650
 python run.py walkforward --strategy trend --symbol ETH --interval 4h --days 730
 python run.py backtest --strategy eth_btc_pair --symbol BTC/ETH --source coinbase --days 1500
@@ -193,9 +240,11 @@ Liquid history only goes back to 2023. `--source coinbase` gives Bitcoin, Ethere
 bot/engine.py           main loop: values the account, enforces limits, manages exits, runs strategies
 bot/risk.py             position sizing and every risk limit
 bot/brokers/            paper.py (practice), fomo_wallet.py (Solana/Jupiter), hyperliquid_live.py (Liquid)
-bot/strategies/         fomo_momentum, signals (all candle strategies), pair, congress
+bot/chart.py            memecoin chart reading: structure, VWAP/EMAs, patterns, setups, exits, chart backtest
+bot/training.py         daily training on recent memecoin charts + learning from the journal
+bot/strategies/         meme (meme scalper), fomo_momentum, signals (candle strategies), pair, congress
 bot/backtest.py         backtester, walk-forward, Monte Carlo, risk of ruin
-bot/data/               Hyperliquid, DexScreener/Jupiter/RugCheck, Quiver, Coinbase history
+bot/data/               Hyperliquid, DexScreener/Jupiter/RugCheck, GeckoTerminal memecoin candles, Quiver, Coinbase
 bot/tradingview.py      alert parsing
 bot/server.py           dashboard and webhook servers
 bot/static/dashboard.html

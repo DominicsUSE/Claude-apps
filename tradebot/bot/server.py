@@ -10,7 +10,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from . import config as config_mod
 from . import lab
@@ -108,6 +108,29 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return self._send(200, {k: bool(config_mod.secret(k)) for k in config_mod.SECRET_NAMES})
         if path == "/api/lab/strategies":
             return self._send(200, lab.strategies_list())
+        if path == "/api/training":
+            return self._send(200, e.training_report())
+        if path == "/api/chart":
+            q = parse_qs(urlparse(self.path).query)
+            mint = (q.get("mint") or [""])[0]
+            meme = e.strategies.get("meme_scalper")
+            if not meme or not mint:
+                return self._send(400, {"error": "meme_scalper is not available"})
+            pool = (q.get("pool") or [""])[0] or meme.state.get("pools", {}).get(mint)
+            try:
+                if not pool:
+                    pair = e.sol.pairs([mint]).get(mint) or {}
+                    pool = pair.get("pairAddress")
+                if not pool:
+                    return self._send(404, {"error": "no trading pool found for this token"})
+                out = meme.chart_payload(pool, (q.get("interval") or [None])[0])
+            except Exception as ex:
+                return self._send(502, {"error": f"chart data unavailable: {ex}"})
+            out["mint"], out["pool"] = mint, pool
+            out["trades"] = [r for r in e.trades(2000) if r["symbol"] == mint]
+            o = e.state.get("owners", {}).get(f"fomo:{mint}")
+            out["position"] = {"entry": o.get("entry_price"), "stop": o.get("stop"), "setup": o.get("setup")} if o else None
+            return self._send(200, out)
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -151,6 +174,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 updates = {k: str(v).strip() for k, v in body.items() if k in EDITABLE_SECRETS}
                 write_env(updates)
                 e.event("info", f"Saved {', '.join(updates)}. Restart the bot to reconnect.")
+            elif path == "/api/training/start":
+                if not e.trainer.start():
+                    raise RuntimeError("training is already running")
+                e.event("info", "Training started from the dashboard")
             elif path == "/api/paper_reset":
                 e.reset_paper(float(body.get("balance", 1000)))
             elif path.startswith("/api/lab/"):

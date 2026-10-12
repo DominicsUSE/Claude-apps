@@ -77,7 +77,7 @@ form.f>*{min-width:0}
 label.fld input:not([type=checkbox]),label.fld select{width:100%}
 .card.fill{display:flex;flex-direction:column}.card.fill canvas{flex:1;min-height:260px}
 label.fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--fg2)}
-label.fld input,label.fld select,textarea{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px;min-height:40px;color:var(--fg)}
+#chartInterval,label.fld input,label.fld select,textarea{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px;min-height:40px;color:var(--fg)}
 label.fld .help{font-size:11px;color:var(--fg2)}
 .row{display:flex;gap:var(--s2);flex-wrap:wrap;align-items:center}
 .metrics{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:var(--s2)}
@@ -125,6 +125,8 @@ ol.steps{margin:6px 0 0 18px;padding:0;font-size:13px}ol.steps li{margin:3px 0}
   </div>
   <nav class="tabs" role="tablist" aria-label="Sections">
     <button role="tab" aria-selected="true" data-tab="overview">Overview</button>
+    <button role="tab" aria-selected="false" data-tab="charts">Charts</button>
+    <button role="tab" aria-selected="false" data-tab="training">Training</button>
     <button role="tab" aria-selected="false" data-tab="lab">Backtest lab</button>
     <button role="tab" aria-selected="false" data-tab="risk">Risk</button>
     <button role="tab" aria-selected="false" data-tab="settings">Settings</button>
@@ -171,6 +173,52 @@ ol.steps{margin:6px 0 0 18px;padding:0;font-size:13px}ol.steps li{margin:3px 0}
           <button class="btn primary" style="grid-column:span 2" type="submit">Place trade</button>
         </form>
         <p class="dim" style="font-size:12px">Manual trades go through the same risk limits as the bot's own trades.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- CHARTS -->
+  <section data-panel="charts" class="hidden">
+    <div class="grid">
+      <div class="card c4">
+        <h2>Watching now <small>trending tokens the bot is charting</small></h2>
+        <div class="scroll" style="max-height:640px"><table id="watchTable"><thead><tr><th>Token</th><th>Trend</th><th>Setup</th></tr></thead><tbody></tbody></table></div>
+        <p class="dim" id="noWatch" style="font-size:12px">The list fills once the meme scalper has run (about a minute after start).</p>
+      </div>
+      <div class="card c8">
+        <h2><span id="chartTitle">Pick a token</span>
+          <span class="row"><select id="chartInterval" aria-label="Candle size"><option>1m</option><option selected>5m</option><option>15m</option></select>
+          <a id="dexLink" class="btn sm hidden" target="_blank" rel="noopener">DexScreener</a></span></h2>
+        <canvas id="candleChart" style="height:420px" aria-label="Candlestick chart"></canvas>
+        <div class="legend"><span><i style="background:var(--blue)"></i>VWAP</span><span><i style="background:var(--amber)"></i>9 EMA</span><span><i style="background:#a78bfa"></i>21 EMA</span><span>▲▼ swing points</span><span><b class="pos">B</b>/<b class="neg">S</b> bot trades</span></div>
+        <div id="chartRead" style="margin-top:var(--s3)"></div>
+      </div>
+      <div class="card c12">
+        <h2>How the bot reads a chart</h2>
+        <div class="metrics" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))">
+          <div class="metric"><div class="l">BUY: breakout</div><div style="font-size:13px">A tight range (consolidation), then a candle closes above it on 2x+ normal volume, above VWAP. Stop under the range.</div></div>
+          <div class="metric"><div class="l">BUY: pullback</div><div style="font-size:13px">Higher highs and higher lows, price dips into the 21 EMA, VWAP or the 0.382-0.618 Fibonacci zone, then a hammer or bullish engulfing candle. Stop under the dip.</div></div>
+          <div class="metric"><div class="l">BUY: VWAP reclaim</div><div style="font-size:13px">Price was under VWAP and closes back above it on 1.5x volume. Stop under the reclaim candle.</div></div>
+          <div class="metric"><div class="l">NEVER BUY</div><div style="font-size:13px">More than 30% above VWAP (chasing), RSI over 80, a long upper wick (sellers), bearish divergence, a downtrend, or a token that fails the rug checks.</div></div>
+          <div class="metric"><div class="l">SELL in steps</div><div style="font-size:13px">Half at +1R (R = entry minus stop), a quarter at +2R. After +1R the stop goes to break-even and then trails under each new higher low.</div></div>
+          <div class="metric"><div class="l">SELL everything when</div><div style="font-size:13px">The last higher low breaks, a candle closes under the 21 EMA after a good move, a shooting star or bearish engulfing appears on volume at the highs, RSI diverges, volume dries up, or 4 hours pass.</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TRAINING -->
+  <section data-panel="training" class="hidden">
+    <div class="grid">
+      <div class="card c12">
+        <h2>Training <small>the bot studies recent memecoin charts and keeps only what works on charts it has not seen</small></h2>
+        <div class="row"><button class="btn primary" id="trainBtn">Train now</button><span class="dim" id="trainStatus" role="status"></span></div>
+        <div id="trainOut" style="margin-top:var(--s3)"></div>
+      </div>
+      <div class="card c12">
+        <h2>Learning from its own trades <small>paper or live, per setup</small></h2>
+        <table id="fbTable"><thead><tr><th>Setup</th><th class="n">Closed trades</th><th class="n">Win %</th><th class="n">P/L</th><th>Status</th></tr></thead><tbody></tbody></table>
+        <p class="dim" style="font-size:12px">After 10 closed trades, a setup that is losing money is paused until a retrain on fresh charts shows it working again.</p>
       </div>
     </div>
   </section>
@@ -330,9 +378,10 @@ const cls = v => v > 0 ? "pos" : v < 0 ? "neg" : "";
 const dd = v => +v > 0 ? "-" + (+v).toFixed(1) + "%" : "0%";
 const time = t => new Date(t * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
 const NAMES = {fomo_momentum: "FOMO momentum", trend: "EMA trend", btc_regime: "BTC volatility regime", eth_btc_pair: "BTC/ETH pair",
-  congress: "Congress buys", tradingview: "TradingView alerts", breakout: "Breakout", mean_reversion: "RSI pullback",
+  congress: "Congress buys", tradingview: "TradingView alerts", meme_scalper: "Meme scalper", breakout: "Breakout", mean_reversion: "RSI pullback",
   supertrend: "Supertrend", macd: "MACD", heikin_ashi: "Heikin Ashi", manual: "Manual"};
 const DESCS = {
+  meme_scalper: "Reads 5-minute memecoin charts: buys breakouts, pullbacks and VWAP reclaims in your FOMO wallet, sells in steps as the chart turns.",
   fomo_momentum: "Trending Solana memecoins in your FOMO wallet, after rug checks. Sells in steps with a trailing stop.",
   trend: "EMA 20/50 crossover with a 200 EMA trend filter and ATR stops, on Liquid. Failed a walk-forward test on ETH 4h: test before using.",
   btc_regime: "Bitcoin video: in the market during bull regimes, in cash during bear ones.",
@@ -357,6 +406,8 @@ $$("nav.tabs button").forEach(b => b.addEventListener("click", () => {
   if (b.dataset.tab === "risk") loadStats();
   if (b.dataset.tab === "settings") loadSettings();
   if (b.dataset.tab === "connect") loadSecrets();
+  if (b.dataset.tab === "training") loadTraining();
+  if (b.dataset.tab === "charts") renderWatch();
   try { localStorage.setItem("tab", b.dataset.tab); } catch (e) {}
   redraw();
 }));
@@ -400,7 +451,11 @@ function drawLines(canvas, series, opts = {}) {
   };
   canvas.onmouseleave = () => $("#tip").style.display = "none";
 }
-function redraw() { Object.entries(charts).forEach(([id, c]) => drawLines(document.getElementById(id), c.series, c.opts)); }
+let lastCandles = null;
+function redraw() {
+  Object.entries(charts).forEach(([id, c]) => c && drawLines(document.getElementById(id), c.series, c.opts));
+  if (lastCandles && !$('[data-panel="charts"]').classList.contains("hidden")) drawCandles($("#candleChart"), lastCandles);
+}
 addEventListener("resize", redraw);
 
 // ---------- overview ----------
@@ -457,6 +512,8 @@ async function refresh() {
   // equity chart
   drawLines($("#eqChart"), [{name: "Account value", data: s.equity_history, color: "--accent"}], {fmt: v => usd(v, 0), empty: "The chart fills in as the bot runs."});
   $("#eqNote").textContent = s.peak_equity ? "peak " + usd(s.peak_equity) : "";
+  if (!$('[data-panel="charts"]').classList.contains("hidden")) renderWatch();
+  if (!$('[data-panel="training"]').classList.contains("hidden") && s.training.running) loadTraining();
   // connections tab status
   $("#connStatus").innerHTML = Object.entries(s.connections).map(([k, c]) => `<div class="sec"><div><b>${k === "fomo" ? "FOMO wallet (Solana)" : "Liquid (Hyperliquid)"}</b><p>${esc(c.detail)}</p></div><span class="badge ${c.connected ? (s.mode === "paper" ? "paper" : "ok") : "warn"}">${c.connected ? (s.mode === "paper" ? "practice" : "connected") : "not connected"}</span></div>`).join("");
 }
@@ -643,6 +700,97 @@ $("#saveSecrets").onclick = async () => {
   if (!Object.keys(body).length) return toast("Nothing to save");
   try { await api("/api/secrets", body); $$("[data-secret]").forEach(el => el.value = ""); $("#secretStatus").textContent = "Saved. Restart the bot to connect."; loadSecrets(); } catch (e) { toast(e.message); }
 };
+
+// ---------- charts ----------
+let chartMint = null, chartPool = null;
+function renderWatch() {
+  const rows = (last && last.watch) || [];
+  $("#noWatch").classList.toggle("hidden", rows.length > 0);
+  const mine = ((last && last.positions) || []).filter(p => p.venue === "fomo");
+  const all = [...mine.filter(p => !rows.some(r => r.mint === p.symbol)).map(p => ({mint: p.symbol, symbol: p.label, structure: "in trade", setup: "", text: ""})), ...rows];
+  $("#watchTable tbody").innerHTML = all.map(r => `<tr data-mint="${esc(r.mint)}" data-pool="${esc(r.pool || "")}" style="cursor:pointer${r.mint === chartMint ? ";background:var(--muted)" : ""}">
+    <td><b>${esc(r.symbol)}</b>${mine.some(p => p.symbol === r.mint) ? ' <span class="badge ok" style="font-size:10px">holding</span>' : ""}<div class="dim" style="font-size:11px">${esc((r.text || "").slice(0, 70))}${(r.text || "").length > 70 ? "…" : ""}</div></td>
+    <td><span class="badge ${r.structure === "up" ? "ok" : r.structure === "down" ? "bad" : ""}" style="font-size:11px">${esc(r.structure || "–")}</span></td>
+    <td>${r.setup ? `<span class="badge ok" style="font-size:11px">${esc(r.setup)}</span>` : ""}</td></tr>`).join("");
+}
+$("#watchTable").addEventListener("click", ev => { const tr = ev.target.closest("[data-mint]"); if (tr) { chartMint = tr.dataset.mint; chartPool = tr.dataset.pool; loadChart(); renderWatch(); } });
+$("#chartInterval").onchange = () => chartMint && loadChart();
+async function loadChart() {
+  $("#chartTitle").textContent = "Loading…";
+  try {
+    const q = new URLSearchParams({mint: chartMint, interval: $("#chartInterval").value}); if (chartPool) q.set("pool", chartPool);
+    const d = await api("/api/chart?" + q);
+    const name = ((last && last.watch) || []).find(w => w.mint === chartMint)?.symbol || ((last && last.positions) || []).find(p => p.symbol === chartMint)?.label || chartMint.slice(0, 6);
+    $("#chartTitle").textContent = `${name} · ${d.interval}`;
+    const a = $("#dexLink"); a.href = `https://dexscreener.com/solana/${encodeURIComponent(d.pool)}`; a.classList.remove("hidden");
+    drawCandles($("#candleChart"), d);
+    const r = d.read, sig = d.signal;
+    $("#chartRead").innerHTML = `<p>${esc(r.text)}</p>` +
+      (sig ? `<div class="alert blue" style="margin-top:8px"><span><b>Setup now: ${esc(sig.setup)}</b>. ${esc(sig.reason)} Stop ${px(sig.stop)}.</span></div>` : `<p class="dim">No buy setup on the last closed candle.</p>`) +
+      (d.position ? `<p>Holding: entry ${px(d.position.entry)}, stop ${px(d.position.stop)}${d.position.setup ? " (" + esc(d.position.setup) + ")" : ""}.</p>` : "");
+  } catch (e) { $("#chartTitle").textContent = "Chart unavailable"; $("#chartRead").innerHTML = `<p class="dim">${esc(e.message)}</p>`; }
+}
+function drawCandles(canvas, d) {
+  lastCandles = d;
+  const dpr = devicePixelRatio || 1, w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const g = canvas.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  const cs = d.candles; if (!cs.length) return;
+  const L = 8, R = 70, T = 10, volH = h * 0.18, B = 22, priceH = h - T - B - volH - 6;
+  let lo = Math.min(...cs.map(c => c[3])), hi = Math.max(...cs.map(c => c[2]));
+  const pad = (hi - lo) * 0.06 || hi * 0.01; lo -= pad; hi += pad;
+  const n = cs.length, cw = (w - L - R) / n, X = i => L + i * cw + cw / 2, Y = v => T + (1 - (v - lo) / (hi - lo)) * priceH;
+  const maxV = Math.max(...cs.map(c => c[5])) || 1;
+  g.font = "11px Inter,sans-serif"; g.fillStyle = css("--fg2"); g.strokeStyle = css("--muted");
+  for (let i = 0; i <= 4; i++) { const v = lo + (hi - lo) * i / 4; g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(w - R, Y(v)); g.stroke(); g.fillText(px(v), w - R + 4, Y(v) + 4); }
+  const up = css("--pos"), dn = css("--neg");
+  cs.forEach((c, i) => {
+    const [t, o, hh, ll, cl, v] = c, col = cl >= o ? up : dn;
+    g.strokeStyle = col; g.fillStyle = col; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(X(i), Y(hh)); g.lineTo(X(i), Y(ll)); g.stroke();
+    const top = Y(Math.max(o, cl)), bh = Math.max(1, Math.abs(Y(o) - Y(cl)));
+    g.fillRect(X(i) - Math.max(1, cw * 0.35), top, Math.max(2, cw * 0.7), bh);
+    g.globalAlpha = 0.35; const vh = v / maxV * volH; g.fillRect(X(i) - Math.max(1, cw * 0.35), h - B - vh, Math.max(2, cw * 0.7), vh); g.globalAlpha = 1;
+  });
+  const line = (arr, color) => { g.strokeStyle = color; g.lineWidth = 1.5; g.beginPath(); let on = false;
+    arr.forEach((v, i) => { if (v == null) { on = false; return; } on ? g.lineTo(X(i), Y(v)) : g.moveTo(X(i), Y(v)); on = true; }); g.stroke(); };
+  line(d.vwap, css("--blue")); line(d.ema9, css("--amber")); line(d.ema21, "#a78bfa");
+  const idx = t => cs.findIndex(c => c[0] >= t);
+  g.font = "10px Inter,sans-serif";
+  d.swings.forEach(([t, p, kind]) => { const i = idx(t); if (i < 0) return; g.fillStyle = kind === "high" ? dn : up; g.fillText(kind === "high" ? "▼" : "▲", X(i) - 4, kind === "high" ? Y(p) - 4 : Y(p) + 12); });
+  const step = n > 1 ? cs[1][0] - cs[0][0] : 300000;
+  (d.trades || []).forEach(tr => { const tt = Date.parse(tr.time); const i = cs.findIndex(c => c[0] <= tt && tt < c[0] + step); if (i < 0) return;
+    const buy = tr.side === "buy"; g.fillStyle = buy ? up : dn; g.font = "bold 12px Inter,sans-serif"; g.fillText(buy ? "B" : "S", X(i) - 4, buy ? Y(cs[i][3]) + 26 : Y(cs[i][2]) - 14); });
+  if (d.position) [["entry", d.position.entry, css("--fg2")], ["stop", d.position.stop, dn]].forEach(([lbl, v, col]) => { if (!v || v < lo || v > hi) return;
+    g.strokeStyle = col; g.setLineDash([4, 4]); g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(w - R, Y(v)); g.stroke(); g.setLineDash([]); g.fillStyle = col; g.fillText(lbl, L + 4, Y(v) - 3); });
+  for (let k = 0; k <= 3; k++) { const i = Math.min(n - 1, Math.round((n - 1) * k / 3)); g.fillStyle = css("--fg2"); g.font = "11px Inter,sans-serif";
+    g.fillText(new Date(cs[i][0]).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}), Math.min(X(i) - 14, w - R - 40), h - 6); }
+  canvas.onmousemove = ev => { const r = canvas.getBoundingClientRect(), i = Math.max(0, Math.min(n - 1, Math.floor((ev.clientX - r.left - L) / cw))); const c = cs[i];
+    const tip = $("#tip"); tip.innerHTML = `<div class="dim">${new Date(c[0]).toLocaleString()}</div>O ${px(c[1])} H ${px(c[2])}<br>L ${px(c[3])} C ${px(c[4])}<br>Vol ${(+c[5]).toLocaleString(undefined, {maximumFractionDigits: 0})}`;
+    tip.style.display = "block"; tip.style.left = Math.min(ev.clientX + 12, innerWidth - 200) + "px"; tip.style.top = ev.clientY + 12 + "px"; };
+  canvas.onmouseleave = () => $("#tip").style.display = "none";
+}
+
+// ---------- training ----------
+async function loadTraining() {
+  const d = await api("/api/training"), st = d.status, L = d.learned || {};
+  $("#trainBtn").disabled = st.running;
+  $("#trainStatus").textContent = st.running ? "Training… " + (st.progress || "") : st.error ? "Last training failed: " + st.error : L.trained_at ? "Last trained " + new Date(L.trained_at * 1000).toLocaleString() : "Not trained yet: press Train now, or wait for the daily run.";
+  if (L.params) {
+    const v = L.verdict, c = v === "WORKS ON UNSEEN CHARTS" ? "ok" : v === "SLIGHT EDGE" ? "warn" : "bad";
+    const row = (name, s) => `<tr><td>${name}</td><td class="n">${s.trades}</td><td class="n">${s.win_rate}%</td><td class="n ${cls(s.avg_pct)}">${pct(s.avg_pct)}</td><td class="n">${s.avg_r}</td><td class="n">${s.profit_factor}</td></tr>`;
+    $("#trainOut").innerHTML = `<p><span class="badge ${c}">${esc(v)}</span> <span class="dim">${L.tokens} token charts, ${L.candles.toLocaleString()} candles (${esc(L.interval || "5m")}). Settings were chosen on the first 60% of each chart and graded on the last 40%.</span></p>
+      <p>Chosen settings: <code>${esc(JSON.stringify(L.params))}</code>. Setups in use: <b>${esc((L.setups || []).join(", ") || "none")}</b>.</p>
+      <div class="scroll"><table><thead><tr><th></th><th class="n">Trades</th><th class="n">Win rate</th><th class="n">Avg trade</th><th class="n">Avg R</th><th class="n">Profit factor</th></tr></thead><tbody>
+      ${row("Practice charts (settings chosen here)", L.train)}${row("<b>Unseen charts</b>", L.test)}
+      ${["breakout", "pullback", "vwap_reclaim"].map(s => row("&nbsp;&nbsp;unseen: " + s, L.per_setup.test[s])).join("")}</tbody></table></div>
+      <details><summary>Last ${L.sample_trades.length} unseen-chart trades</summary><div class="scroll"><table><thead><tr><th>Token</th><th>Setup</th><th class="n">Result</th><th class="n">R</th><th>Exit</th></tr></thead><tbody>
+      ${L.sample_trades.slice().reverse().map(t => `<tr><td>${esc(t.token)}</td><td>${esc(t.setup)}</td><td class="n ${cls(t.ret_pct)}">${pct(t.ret_pct)}</td><td class="n">${(+t.r).toFixed(2)}</td><td class="dim">${esc(t.exit_reason)}</td></tr>`).join("")}</tbody></table></div></details>
+      <p class="dim" style="font-size:12px">Includes about 1% fees and slippage per buy and per sell. Charts come from every token the bot has watched, not only the ones that pumped, so the results are not just winners.</p>`;
+  } else $("#trainOut").innerHTML = "";
+  $("#fbTable tbody").innerHTML = Object.entries(d.journal).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="n">${v.trades}</td><td class="n">${v.win_rate}</td><td class="n ${cls(v.pnl)}">${signed(v.pnl)}</td><td>${v.paused ? '<span class="badge bad">paused: losing</span>' : v.trades < 10 ? '<span class="badge">learning</span>' : '<span class="badge ok">active</span>'}</td></tr>`).join("");
+}
+$("#trainBtn").onclick = async () => { try { await api("/api/training/start", {}); toast("Training started"); setTimeout(loadTraining, 800); } catch (e) { toast(e.message); } };
 
 // ---------- journal ----------
 async function loadJournal() {

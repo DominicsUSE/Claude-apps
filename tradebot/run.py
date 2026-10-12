@@ -3,6 +3,7 @@ Backtest from the terminal: python run.py backtest --strategy btc_regime --symbo
 Walk-forward test:          python run.py walkforward --strategy trend --symbol ETH --interval 4h --days 730
 Compare all strategies:     python run.py compare --symbol BTC --interval 1d
 Check connections:          python run.py check
+Train the meme scalper:     python run.py train --tokens 60
 """
 import argparse
 import json
@@ -114,6 +115,29 @@ def cmd_compare(args) -> None:
         print(f"  {x['label']:34} {x['total_return_pct']:>8.1f}% {x['buy_and_hold_pct']:>8.1f}% {x['max_drawdown_pct']:>7.1f}% {x['sharpe']:>7} {x['trades']:>6}")
 
 
+def cmd_train(args) -> None:
+    from bot.data.dex_candles import DexCandles
+    from bot.data.solana import SolanaData
+    from bot.training import Trainer
+    config_mod.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    trainer = Trainer(config_mod.DATA_DIR, SolanaData(), DexCandles(config_mod.DATA_DIR / "candles"))
+    print(f"Collecting up to {args.tokens} memecoin charts ({args.interval}) and training...")
+    r = trainer.run(args.tokens, args.interval)
+    if "error" in r:
+        sys.exit(r["error"])
+    (config_mod.DATA_DIR / "learned.json").write_text(json.dumps(r), encoding="utf-8")
+    print(f"\n{r['tokens']} charts, {r['candles']} candles. Verdict: {r['verdict']}")
+    print(f"Chosen settings: {r['params']}; setups in use: {', '.join(r['setups']) or 'none'}")
+    for part in ("train", "test"):
+        st = r[part]
+        print(f"  {'practice' if part == 'train' else 'UNSEEN':8} trades {st['trades']:4}  win {st['win_rate']:5}%  avg {st['avg_pct']:+6.2f}%  "
+              f"avg R {st['avg_r']:+5.2f}  PF {st['profit_factor']}  t {st['t_stat']}")
+    for s, st in r["per_setup"]["test"].items():
+        print(f"    unseen {s:13} trades {st['trades']:4}  win {st['win_rate']:5}%  avg {st['avg_pct']:+6.2f}%")
+    from collections import Counter
+    print("  exits on unseen charts:", dict(Counter(t["exit_reason"] for t in r["sample_trades"])))
+
+
 def cmd_check(args) -> None:
     cfg = ensure_config()
     from bot.data.hyperliquid import HyperliquidData
@@ -139,6 +163,16 @@ def cmd_check(args) -> None:
             raise RuntimeError("no trending tokens returned (DexScreener and Jupiter unreachable?)")
         return f"{len(mints)} trending tokens found"
     line("DexScreener + Jupiter (FOMO tokens)", tokens)
+
+    def meme_chart():
+        from bot.data.dex_candles import DexCandles
+        pairs = sol.pairs(sol.candidate_mints()[:30])
+        mint, pr = max(pairs.items(), key=lambda kv: float((kv[1].get("liquidity") or {}).get("usd") or 0))
+        candles = DexCandles().closed(pr["pairAddress"], "5m", 100)
+        if not candles:
+            raise RuntimeError("no candles returned")
+        return f"{(pr.get('baseToken') or {}).get('symbol')}: {len(candles)} five-minute candles"
+    line("GeckoTerminal memecoin charts", meme_chart)
     print("Your accounts")
     if secret("FOMO_WALLET_PRIVATE_KEY"):
         from bot.brokers.fomo_wallet import FomoWalletBroker
@@ -192,6 +226,10 @@ def main() -> None:
         b.add_argument("--params", help='JSON, e.g. \'{"fast": 10}\'')
         b.set_defaults(func=fn)
     sub.add_parser("check", help="test every connection").set_defaults(func=cmd_check)
+    t = sub.add_parser("train", help="study recent memecoin charts and pick the meme scalper's settings")
+    t.add_argument("--tokens", type=int, default=60)
+    t.add_argument("--interval", default="5m", choices=["1m", "5m", "15m"])
+    t.set_defaults(func=cmd_train)
     args = p.parse_args()
     if args.cmd in (None, "run"):
         if args.cmd is None:

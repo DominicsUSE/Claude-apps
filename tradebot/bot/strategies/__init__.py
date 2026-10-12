@@ -1,11 +1,13 @@
 from .candles import CandleStrategy
 from .congress import CongressStrategy
 from .fomo_momentum import FomoMomentum
+from .meme import MemeScalper
 from .pair import PairStrategy
 
 CANDLE_NAMES = ("trend", "btc_regime", "breakout", "mean_reversion", "supertrend", "macd", "heikin_ashi")
 
 DESCRIPTIONS = {
+    "meme_scalper": "Reads 5-minute memecoin charts and trades breakouts, pullbacks and VWAP reclaims in your FOMO wallet.",
     "fomo_momentum": "Buys trending Solana memecoins in your FOMO wallet after rug checks; sells in steps with a trailing stop.",
     "trend": "EMA crossover with a 200 EMA trend filter, RSI check and ATR stops on Liquid perps.",
     "btc_regime": "Bitcoin volatility-regime trend following (from your Bitcoin video): long in bull regimes, cash in bear ones.",
@@ -15,7 +17,9 @@ DESCRIPTIONS = {
 }
 
 
-def build(name: str, cfg: dict, state: dict):
+def build(name: str, cfg: dict, state: dict, trainer=None, candles=None):
+    if name == "meme_scalper":
+        return MemeScalper(cfg, state, trainer, candles)
     if name == "fomo_momentum":
         return FomoMomentum(cfg, state)
     if name == "eth_btc_pair":

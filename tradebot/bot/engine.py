@@ -11,21 +11,23 @@ from datetime import datetime, timezone
 
 from . import config as config_mod
 from .brokers.paper import PaperBroker
+from .data.dex_candles import DexCandles
 from .data.hyperliquid import HyperliquidData
 from .data.solana import SolanaData
 from .models import Fill, Position, Signal
 from .research import Research
 from .risk import RiskManager
 from .strategies import build as build_strategy
+from .training import Trainer, journal_feedback
 
 log = logging.getLogger("tradebot")
 
 TRADE_FIELDS = ["time", "mode", "venue", "symbol", "label", "strategy", "action", "side", "qty", "price", "usd",
-                "fee_usd", "pnl_usd", "reason", "tx"]
+                "fee_usd", "pnl_usd", "reason", "tx", "setup"]
 
 
 class Engine:
-    def __init__(self, cfg: dict, data_dir=None, hl=None, sol=None, brokers=None):
+    def __init__(self, cfg: dict, data_dir=None, hl=None, sol=None, brokers=None, dex=None):
         self.cfg = cfg
         self.data_dir = data_dir or config_mod.DATA_DIR
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -37,6 +39,8 @@ class Engine:
         self.events: deque = deque(maxlen=400)
         self.hl = hl or HyperliquidData(cfg["venues"]["liquid"]["api_url"])
         self.sol = sol or SolanaData()
+        self.dex = dex or DexCandles(self.data_dir / "candles")
+        self.trainer = Trainer(self.data_dir, self.sol, self.dex)
         self.state = self._load_state()
         self.live = config_mod.is_live(cfg)
         self.broker_notes: dict[str, str] = {}
@@ -126,7 +130,7 @@ class Engine:
         for name, scfg in self.cfg["strategies"].items():
             if name == "tradingview":
                 continue
-            strat = build_strategy(name, scfg, saved.get(name, {}))
+            strat = build_strategy(name, scfg, saved.get(name, {}), trainer=self.trainer, candles=self.dex)
             if strat:
                 self.strategies[name] = strat
 
@@ -155,7 +159,7 @@ class Engine:
                 "venue": sig.venue, "symbol": sig.symbol, "label": sig.label, "strategy": sig.strategy, "action": action,
                 "side": fill.side, "qty": f"{fill.qty:.8g}", "price": f"{fill.price:.8g}", "usd": f"{fill.notional:.2f}",
                 "fee_usd": f"{fill.fee_usd:.4f}", "pnl_usd": f"{fill.realized_pnl:.4f}" if action != "open" else "",
-                "reason": reason, "tx": fill.tx,
+                "reason": reason, "tx": fill.tx, "setup": sig.setup,
             })
 
     def trades(self, limit: int = 300) -> list[dict]:
@@ -310,9 +314,32 @@ class Engine:
                 self.event("error", f"Could not move the exchange stop for {pos.label or pos.symbol}: {e}")
 
     def _run_strategies(self) -> None:
+        from .strategies.base import Context
+        now = time.time()
+        # 1) open trades are always managed, even while paused: exits must never stop
+        for name, strat in self.strategies.items():
+            if not hasattr(strat, "manage"):
+                continue
+            with self.lock:
+                owners = dict(self.state.get("owners", {}))
+                if not any(o.get("strategy") == name for o in owners.values()):
+                    continue
+                ctx = Context(self.cfg, self.hl, self.sol, list(self.last_positions), owners, now)
+            try:
+                for sig in strat.manage(ctx):
+                    self.inbox.put(sig)
+            except Exception as e:
+                self.event("error", f"{name} could not check its open trades: {e}")
+        # 2) learning: retrain on fresh charts, and pause setups that keep losing in the journal
+        meme = self.strategies.get("meme_scalper")
+        if meme and self.cfg["strategies"]["meme_scalper"].get("enabled"):
+            fb = journal_feedback(self.trades(100000))
+            meme.paused_setups = {s for s, v in fb.items() if v["paused"]}
+            if self.trainer.due(self.cfg["strategies"]["meme_scalper"].get("train_every_hours", 24)):
+                if self.trainer.start():
+                    self.event("info", "Training started: studying recent memecoin charts in the background")
         if self.state.get("paused") or self.state.get("halted"):
             return
-        now = time.time()
         for name, strat in self.strategies.items():
             if not self.cfg["strategies"][name].get("enabled") or not strat.due(now):
                 continue
@@ -320,7 +347,6 @@ class Engine:
                 strat.last_note = f"{strat.venue} is not connected"
                 continue
             strat.last_run = now
-            from .strategies.base import Context
             with self.lock:
                 ctx = Context(self.cfg, self.hl, self.sol, list(self.last_positions), dict(self.state.get("owners", {})), now)
             try:
@@ -373,6 +399,8 @@ class Engine:
 
     def execute(self, sig: Signal) -> Fill | None:
         with self.lock:
+            if sig.action == "stop":
+                return self._tighten_stop(sig)
             why = self._blocked(sig)
             if why:
                 self.event("blocked", f"{sig.label or sig.symbol} {sig.action} ({sig.strategy}) not taken: {why}")
@@ -435,6 +463,21 @@ class Engine:
                     return
                 opened.append(sig)
 
+    def _tighten_stop(self, sig: Signal) -> None:
+        """Stops only ever move in the trade's favour."""
+        o = self.state.get("owners", {}).get(sig.key)
+        if not o or not sig.stop_price:
+            return None
+        long = o.get("side") == "long"
+        cur = o.get("stop")
+        if cur is None or (long and sig.stop_price > cur) or (not long and sig.stop_price < cur):
+            o["stop"] = sig.stop_price
+            pos = next((p for p in self.last_positions if p.key == sig.key), None)
+            if pos:
+                self._push_stop(pos, sig.stop_price)
+            self.event("info", f"{sig.label or o.get('label') or sig.symbol}: stop moved to {sig.stop_price:.6g} ({sig.reason})")
+        return None
+
     def _fresh_positions(self, venue: str) -> list[Position]:
         broker = self.brokers.get(venue)
         try:
@@ -485,6 +528,7 @@ class Engine:
             "entry_price": fill.price, "orig_qty": fill.qty, "stop": d.stop_price, "take_profit": d.take_profit_price,
             "ladder": sig.take_profit_ladder or [], "ladder_done": 0, "trail_pct": sig.trailing_stop_pct,
             "max_hold_hours": sig.max_hold_hours, "group": sig.group, "peak": fill.price, "reason": sig.reason,
+            "setup": sig.setup, "init_stop": d.stop_price,
         }
         self.journal(sig, fill, "open", sig.reason)
         self.event("trade", f"Opened {side} {sig.label or sig.symbol} ${fill.notional:,.2f} at {fill.price:.6g} "
@@ -515,6 +559,7 @@ class Engine:
             fill.realized_pnl = (diff if pos.side == "long" else -diff) * fill.qty - fill.fee_usd
         sig.strategy = o.get("strategy", sig.strategy)
         sig.label = sig.label or o.get("label") or pos.label
+        sig.setup = sig.setup or o.get("setup", "")
         self.journal(sig, fill, "close" if full else "partial close", sig.reason)
         self.event("trade", f"{'Closed' if full else 'Took profit on part of'} {sig.label or sig.symbol}: "
                             f"{'+' if fill.realized_pnl >= 0 else '-'}${abs(fill.realized_pnl):,.2f} ({sig.reason})", venue=sig.venue)
@@ -652,4 +697,18 @@ class Engine:
                 "last_tick": self.last_tick,
                 "last_error": self.last_error,
                 "equity_history": [(int(t), v) for t, v in list(self.equity_history)[-2000:]],
+                "watch": self.watchlist(),
+                "training": {"running": self.trainer.status["running"], "progress": self.trainer.status["progress"]},
             }
+
+    def watchlist(self) -> list[dict]:
+        meme = self.strategies.get("meme_scalper")
+        if not meme:
+            return []
+        rows = [{"mint": m, **w} for m, w in meme.watch.items()]
+        return sorted(rows, key=lambda r: (not r.get("setup"), r.get("symbol", "")))
+
+    def training_report(self) -> dict:
+        learned = {k: v for k, v in (self.trainer.learned or {}).items()}
+        return {"status": self.trainer.status, "learned": learned, "journal": journal_feedback(self.trades(100000)),
+                "paused_setups": sorted(getattr(self.strategies.get("meme_scalper"), "paused_setups", set()))}
