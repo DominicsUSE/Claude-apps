@@ -53,5 +53,8 @@ jobs:
       - name: Connection check
         if: matrix.os == 'ubuntu-latest'
         run: python run.py check
+      - name: Jupiter swap API still answers as the FOMO broker expects
+        if: matrix.os == 'ubuntu-latest'
+        run: python tests/jupiter_contract.py
       - name: Paper trading for 3 minutes on live prices
         run: python tests/live_smoke.py 3
