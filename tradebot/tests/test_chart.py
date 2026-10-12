@@ -293,3 +293,23 @@ def test_training_both_sides():
     out = train(charts, {"cost_pct": 0.1}, both_sides=True)
     assert "breakout_short" in out["per_setup"]["test"] and out["both_sides"]
     assert any(t["setup"].endswith("_short") for t in out["sample_trades"]) or out["test"]["trades"] >= 0
+
+
+def test_liquid_short_is_closed_when_the_chart_turns_up(cfg):
+    from bot.chart import invert
+    from bot.models import Position
+    from bot.strategies.base import Context
+    from bot.strategies.meme import MemeScalper
+    cs = meme_chart(300, seed=5)
+    f = features(cs)
+    conf, i, low = next(s for s in f.swing_lows if s[0] > 60)
+    t = next(t for t in range(conf, len(cs)) if f.c[t] < low)
+    # on the upside-down chart this is a short whose last lower high just broke upwards
+    chart_ = invert(cs[:t + 1])
+    entry, stop = 1 / (low * 1.2), 1 / (low * 0.9)
+    owners = {"liquid:WIF": {"strategy": "meme_scalper", "entry_price": entry, "stop": stop, "init_stop": stop, "side": "short",
+                             "opened_at": cs[i - 1].t / 1000}}
+    held = [Position("liquid", "WIF", "short", 1, entry, chart_[-1].c, "WIF")]
+    s = MemeScalper({**cfg["strategies"]["meme_scalper"], "use_learned": False}, {}, None, None)
+    out = s.manage(Context(cfg, HLWithCandles({"WIF": chart_}), MemeSol({}), held, owners, now=chart_[-1].t / 1000 + 600))
+    assert out and out[0].action == "close" and "higher low" not in out[0].reason
