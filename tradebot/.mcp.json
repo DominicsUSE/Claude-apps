@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tradingview": {
+      "command": "uvx",
+      "args": ["--from", "tradingview-mcp-server==0.9.0", "tradingview-mcp"]
+    }
+  }
+}

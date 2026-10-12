@@ -1,0 +1,52 @@
+# Tests Tradebot on Windows, Mac and Linux: the unit tests, then backtests and a few minutes of
+# paper trading against the real market-data APIs (Hyperliquid, Coinbase, DexScreener, Jupiter,
+# RugCheck). No keys and no real money are involved.
+name: Tradebot tests
+
+on:
+  push:
+    paths:
+      - "tradebot/**"
+      - ".github/workflows/tradebot-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, python: "3.12" }
+          - { os: macos-latest, python: "3.13" }
+          - { os: ubuntu-latest, python: "3.11" }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: tradebot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: python -m pip install -r requirements.txt pytest
+      - name: Unit tests
+        run: python -m pytest -q tests
+      - name: Backtests on real history
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          python run.py backtest --strategy btc_regime --symbol BTC --source coinbase --days 3650
+          python run.py walkforward --strategy btc_regime --symbol BTC --source coinbase --days 3650
+          python run.py backtest --strategy eth_btc_pair --symbol BTC/ETH --source coinbase --days 1500
+          python run.py compare --symbol BTC --interval 1d --days 900
+          python run.py walkforward --strategy trend --symbol ETH --interval 4h --days 600
+      - name: Connection check
+        if: matrix.os == 'ubuntu-latest'
+        run: python run.py check
+      - name: Paper trading for 3 minutes on live prices
+        run: python tests/live_smoke.py 3

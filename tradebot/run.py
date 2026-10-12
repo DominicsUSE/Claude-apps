@@ -1,0 +1,205 @@
+"""Start the bot:            python run.py
+Backtest from the terminal: python run.py backtest --strategy btc_regime --symbol BTC --source coinbase --days 3650
+Walk-forward test:          python run.py walkforward --strategy trend --symbol ETH --interval 4h --days 730
+Compare all strategies:     python run.py compare --symbol BTC --interval 1d
+Check connections:          python run.py check
+"""
+import argparse
+import json
+import logging
+import logging.handlers
+import sys
+import time
+import webbrowser
+
+from bot import __version__
+from bot import config as config_mod
+
+
+def setup_logging() -> None:
+    config_mod.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s", "%Y-%m-%d %H:%M:%S")
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    fh = logging.handlers.RotatingFileHandler(config_mod.DATA_DIR / "bot.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+    fh.setFormatter(fmt)
+    sh = logging.StreamHandler(sys.stdout)
+    sh.setFormatter(fmt)
+    root.addHandler(fh)
+    root.addHandler(sh)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+
+def ensure_config() -> dict:
+    if not config_mod.CONFIG_PATH.exists():
+        example = config_mod.ROOT / "config.example.json"
+        config_mod.CONFIG_PATH.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+        print("Created config.json with safe defaults (paper mode).")
+    return config_mod.load_config()
+
+
+def cmd_run(args) -> None:
+    cfg = ensure_config()
+    if args.paper:
+        cfg["mode"] = "paper"
+    from bot.engine import Engine
+    from bot.server import serve
+    engine = Engine(cfg)
+    if cfg["mode"] == "live" and not config_mod.is_live(cfg):
+        engine.event("blocked", 'config.json says "live" but live_trading_acknowledged is not true, so the bot is running in PAPER mode')
+    serve(engine)
+    url = f"http://{'localhost' if cfg['dashboard']['host'] in ('127.0.0.1', '0.0.0.0') else cfg['dashboard']['host']}:{cfg['dashboard']['port']}"
+    print(f"\nTradebot {__version__} is running in {'LIVE' if engine.live else 'PAPER'} mode.")
+    print(f"Dashboard: {url}")
+    if cfg["webhook"]["enabled"]:
+        print(f"TradingView webhook: http://127.0.0.1:{cfg['webhook']['port']}/webhook (see README to make it public)")
+    print("Press Ctrl+C to stop. Open positions keep their exchange-side stops on Liquid.\n")
+    if not args.no_browser:
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+    try:
+        engine.run_forever()
+    except KeyboardInterrupt:
+        engine.stop()
+        engine.save_state()
+        print("Stopped.")
+
+
+def lab_opts(args) -> dict:
+    opts = {k: v for k, v in vars(args).items() if v is not None and k not in ("func",)}
+    if args.strategy == "eth_btc_pair" and "/" in args.symbol:
+        opts["symbol_a"], opts["symbol_b"] = [s.strip() for s in args.symbol.split("/")]
+    if args.params:
+        opts["params"] = json.loads(args.params)
+    return opts
+
+
+def print_metrics(m: dict) -> None:
+    for k, v in m.items():
+        print(f"  {k:22} {v}")
+
+
+def cmd_backtest(args) -> None:
+    from bot import lab
+    r = lab.run_backtest(lab_opts(args))
+    if "error" in r:
+        sys.exit(r["error"])
+    print(f"\n{args.strategy} on {args.symbol} {args.interval}, {r['candles']} candles, settings {r['params']}")
+    print_metrics(r["metrics"])
+    print("\nMonte Carlo:", json.dumps(r["monte_carlo"], indent=1))
+
+
+def cmd_walkforward(args) -> None:
+    from bot import lab
+    r = lab.run_walk_forward(lab_opts(args))
+    if "error" in r:
+        sys.exit(r["error"])
+    print(f"\nWalk-forward {args.strategy} on {args.symbol} {args.interval}: {r['verdict']}  "
+          f"(efficiency {r['walk_forward_efficiency']}, profitable windows {r['profitable_folds']})")
+    for f in r["folds"]:
+        print(f"  {time.strftime('%Y-%m-%d', time.gmtime(f['test_from'] / 1000))} -> {time.strftime('%Y-%m-%d', time.gmtime(f['test_to'] / 1000))}"
+              f"  picked {f['params']}  in-sample {f['in_sample']['total_return_pct']:+.1f}%  out-of-sample {f['out_of_sample']['total_return_pct']:+.1f}%")
+    print("\nOut-of-sample only:")
+    print_metrics(r["out_of_sample"])
+
+
+def cmd_compare(args) -> None:
+    from bot import lab
+    r = lab.compare(lab_opts(args))
+    print(f"\n{args.symbol} {args.interval}, {r['candles']} candles")
+    print(f"  {'strategy':34} {'return':>9} {'buy&hold':>9} {'max dd':>8} {'sharpe':>7} {'trades':>6}")
+    for x in r["rows"]:
+        print(f"  {x['label']:34} {x['total_return_pct']:>8.1f}% {x['buy_and_hold_pct']:>8.1f}% {x['max_drawdown_pct']:>7.1f}% {x['sharpe']:>7} {x['trades']:>6}")
+
+
+def cmd_check(args) -> None:
+    cfg = ensure_config()
+    from bot.data.hyperliquid import HyperliquidData
+    from bot.data.solana import SolanaData
+    from bot.config import secret
+    ok = True
+
+    def line(name, fn):
+        nonlocal ok
+        try:
+            print(f"  OK   {name}: {fn()}")
+        except Exception as e:
+            ok = False
+            print(f"  FAIL {name}: {e}")
+
+    hl, sol = HyperliquidData(cfg["venues"]["liquid"]["api_url"]), SolanaData()
+    print("Market data")
+    line("Liquid / Hyperliquid prices", lambda: f"BTC ${hl.price('BTC'):,.0f}")
+    line("Liquid stock markets", lambda: f"{len(hl.markets('xyz'))} markets, e.g. NVDA listed: {hl.has_market('xyz:NVDA')}")
+    def tokens():
+        mints = sol.candidate_mints()
+        if not mints:
+            raise RuntimeError("no trending tokens returned (DexScreener and Jupiter unreachable?)")
+        return f"{len(mints)} trending tokens found"
+    line("DexScreener + Jupiter (FOMO tokens)", tokens)
+    print("Your accounts")
+    if secret("FOMO_WALLET_PRIVATE_KEY"):
+        from bot.brokers.fomo_wallet import FomoWalletBroker
+        line("FOMO wallet", lambda: FomoWalletBroker(cfg["venues"]["fomo"], sol, secret("FOMO_WALLET_PRIVATE_KEY"), secret("SOLANA_RPC_URL"),
+                                                     secret("JUPITER_API_KEY")).status()["detail"])
+    else:
+        print("  --   FOMO wallet: FOMO_WALLET_PRIVATE_KEY not set")
+    if secret("HL_ACCOUNT_ADDRESS"):
+        line("Liquid account", lambda: f"value ${sum(float(hl.user_state(secret('HL_ACCOUNT_ADDRESS'), d).get('marginSummary', {}).get('accountValue', 0)) for d in ('', 'xyz')):,.2f}")
+    else:
+        print("  --   Liquid account: HL_ACCOUNT_ADDRESS not set")
+    print("Optional services")
+    if secret("QUIVER_API_TOKEN"):
+        from bot.data import quiver
+        line("Quiver congress data", lambda: f"{len(quiver.fetch())} recent filings")
+    else:
+        print("  --   Quiver: QUIVER_API_TOKEN not set (needed for the congress strategy)")
+    if cfg["research"]["enabled"]:
+        from bot.research import Research
+        line("News check", lambda: Research(cfg["research"]).sentiment("Bitcoin"))
+    print("TradingView alerts:", "password set" if secret("TV_WEBHOOK_SECRET") else "TV_WEBHOOK_SECRET not set (alerts will be refused)")
+    sys.exit(0 if ok else 1)
+
+
+def main() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")  # token names with emoji must not crash a Windows console
+        except (AttributeError, ValueError):
+            pass
+    config_mod.load_env()
+    p = argparse.ArgumentParser(description="Tradebot: FOMO, Liquid and TradingView trading bot")
+    p.add_argument("--version", action="version", version=__version__)
+    sub = p.add_subparsers(dest="cmd")
+    r = sub.add_parser("run", help="start the bot and dashboard (default)")
+    r.add_argument("--paper", action="store_true", help="force paper mode")
+    r.add_argument("--no-browser", action="store_true")
+    for name, fn in (("backtest", cmd_backtest), ("walkforward", cmd_walkforward), ("compare", cmd_compare)):
+        b = sub.add_parser(name)
+        b.add_argument("--strategy", default="trend")
+        b.add_argument("--symbol", default="BTC", help='e.g. BTC, ETH, xyz:NVDA, or "BTC/ETH" for the pair strategy')
+        b.add_argument("--interval", default="1d")
+        b.add_argument("--days", type=int, default=1095)
+        b.add_argument("--source", default="liquid", choices=["liquid", "coinbase"])
+        b.add_argument("--capital", type=float)
+        b.add_argument("--position-pct", dest="position_pct", type=float)
+        b.add_argument("--leverage", type=float)
+        b.add_argument("--fee-pct", dest="fee_pct", type=float)
+        b.add_argument("--slippage-pct", dest="slippage_pct", type=float)
+        b.add_argument("--objective", choices=["sharpe", "return", "return_over_drawdown", "profit_factor"])
+        b.add_argument("--params", help='JSON, e.g. \'{"fast": 10}\'')
+        b.set_defaults(func=fn)
+    sub.add_parser("check", help="test every connection").set_defaults(func=cmd_check)
+    args = p.parse_args()
+    if args.cmd in (None, "run"):
+        if args.cmd is None:
+            args = p.parse_args(["run"] + sys.argv[1:])
+        setup_logging()
+        return cmd_run(args)
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

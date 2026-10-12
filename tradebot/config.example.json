@@ -1,0 +1,167 @@
+{
+  "mode": "paper",
+  "live_trading_acknowledged": false,
+  "loop_seconds": 20,
+  "dashboard": {
+    "host": "127.0.0.1",
+    "port": 8787
+  },
+  "webhook": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8788
+  },
+  "paper": {
+    "starting_balance_usd": 1000.0,
+    "fee_pct": 0.1,
+    "slippage_pct": 0.3
+  },
+  "risk": {
+    "risk_per_trade_pct": 1.0,
+    "max_position_usd": 100.0,
+    "min_position_usd": 10.0,
+    "max_open_positions": 5,
+    "max_positions_per_strategy": 3,
+    "max_total_exposure_pct": 150.0,
+    "max_leverage": 3,
+    "daily_loss_limit_pct": 5.0,
+    "max_drawdown_pct": 20.0,
+    "default_stop_loss_pct": 5.0,
+    "max_stop_loss_pct": 30.0,
+    "cooldown_minutes": 60,
+    "max_consecutive_errors": 5,
+    "allowed_symbols": [],
+    "blocked_symbols": []
+  },
+  "venues": {
+    "fomo": {
+      "enabled": true,
+      "quote": "USDC",
+      "slippage_bps": 300,
+      "min_sol_for_fees": 0.02,
+      "jupiter_url": "https://api.jup.ag/swap/v2",
+      "rpc_url": "https://api.mainnet-beta.solana.com"
+    },
+    "liquid": {
+      "enabled": true,
+      "api_url": "https://api.hyperliquid.xyz",
+      "slippage_pct": 1.0
+    }
+  },
+  "strategies": {
+    "fomo_momentum": {
+      "enabled": true,
+      "venue": "fomo",
+      "every_seconds": 120,
+      "position_usd": 25.0,
+      "min_liquidity_usd": 75000,
+      "min_volume_h1_usd": 50000,
+      "min_volume_h24_usd": 400000,
+      "min_age_hours": 2,
+      "max_age_hours": 504,
+      "min_market_cap_usd": 300000,
+      "max_market_cap_usd": 150000000,
+      "min_change_h1_pct": 3,
+      "max_change_h1_pct": 60,
+      "min_change_m5_pct": 0,
+      "min_buy_sell_ratio_h1": 1.15,
+      "max_top10_holders_pct": 35,
+      "max_rugcheck_score": 500,
+      "require_safety_check": true,
+      "stop_loss_pct": 15,
+      "take_profit": [
+        [
+          30,
+          0.5
+        ],
+        [
+          80,
+          0.25
+        ]
+      ],
+      "trailing_stop_pct": 18,
+      "max_hold_hours": 12,
+      "max_new_per_hour": 2
+    },
+    "trend": {
+      "enabled": true,
+      "venue": "liquid",
+      "every_seconds": 300,
+      "symbols": [
+        "BTC",
+        "ETH",
+        "SOL"
+      ],
+      "interval": "4h",
+      "fast": 20,
+      "slow": 50,
+      "trend_filter": 200,
+      "rsi_period": 14,
+      "atr_period": 14,
+      "atr_stop": 2.0,
+      "reward_risk": 2.5,
+      "allow_shorts": true,
+      "leverage": 2
+    },
+    "btc_regime": {
+      "enabled": false,
+      "venue": "liquid",
+      "every_seconds": 900,
+      "symbol": "BTC",
+      "interval": "1d",
+      "fast": 21,
+      "slow": 55,
+      "std_period": 50,
+      "std_smooth": 10,
+      "mult": 1.0,
+      "slope_ma": 0,
+      "atr_period": 14,
+      "atr_stop": 3.0,
+      "leverage": 1
+    },
+    "eth_btc_pair": {
+      "enabled": false,
+      "venue": "liquid",
+      "every_seconds": 900,
+      "symbol_a": "BTC",
+      "symbol_b": "ETH",
+      "interval": "1d",
+      "lookback": 30,
+      "upper_k": 2.0,
+      "lower_k": 1.0,
+      "both_sides": false,
+      "stop_k": 0,
+      "leg_usd": 50.0,
+      "leg_stop_pct": 20,
+      "max_hold_bars": 60,
+      "leverage": 1
+    },
+    "congress": {
+      "enabled": false,
+      "venue": "liquid",
+      "every_seconds": 3600,
+      "lookback_days": 10,
+      "min_trade_usd": 15001,
+      "min_buyers": 1,
+      "position_usd": 40.0,
+      "stop_loss_pct": 10,
+      "take_profit_pct": 25,
+      "max_hold_days": 30,
+      "max_new_per_day": 2
+    },
+    "tradingview": {
+      "enabled": true,
+      "default_size_usd": 25.0,
+      "default_stop_loss_pct": 4,
+      "default_venue": "liquid"
+    }
+  },
+  "research": {
+    "enabled": false,
+    "provider": "perplexity",
+    "perplexity_model": "sonar",
+    "grok_model": "grok-4",
+    "veto_score": 0.5,
+    "cache_minutes": 30
+  }
+}

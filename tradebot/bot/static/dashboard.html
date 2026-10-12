@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tradebot</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='none' stroke='%2322c55e' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' d='M3 17l6-6 4 4 8-8M15 7h6v6'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#020617;--card:#0e1223;--muted:#1a1e2f;--border:#334155;--fg:#f8fafc;--fg2:#94a3b8;
+  --accent:#22c55e;--on-accent:#0f172a;--red:#ef4444;--amber:#f59e0b;--blue:#38bdf8;--ring:#ffffff;
+  --pos:#22c55e;--neg:#f87171;--r:10px;--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;
+}
+:root[data-theme="light"]{
+  --bg:#f8fafc;--card:#ffffff;--muted:#f1f5f9;--border:#cbd5e1;--fg:#0f172a;--fg2:#475569;
+  --accent:#15803d;--on-accent:#ffffff;--red:#b91c1c;--amber:#b45309;--blue:#0369a1;--ring:#0f172a;--pos:#15803d;--neg:#b91c1c;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-variant-numeric:tabular-nums}
+a{color:var(--blue)}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.wrap{max-width:1400px;margin:0 auto;padding:0 var(--s4) var(--s6)}
+header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--border)}
+.bar{max-width:1400px;margin:0 auto;padding:var(--s3) var(--s4);display:flex;gap:var(--s4);align-items:center;flex-wrap:wrap}
+.brand{display:flex;gap:var(--s2);align-items:center;font-weight:700;font-size:16px}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;letter-spacing:.04em;border:1px solid var(--border)}
+.badge.paper{color:var(--blue);border-color:var(--blue)}
+.badge.live{color:#fff;background:var(--red);border-color:var(--red)}
+.badge.ok{color:var(--pos);border-color:var(--pos)}
+.badge.warn{color:var(--amber);border-color:var(--amber)}
+.badge.bad{color:var(--neg);border-color:var(--neg)}
+.kpis{display:flex;gap:var(--s5);flex-wrap:wrap;margin-left:auto;align-items:center}
+.kpi .l{font-size:12px;color:var(--fg2)}.kpi .v{font-size:18px;font-weight:600}
+.btn{min-height:40px;padding:0 14px;border-radius:8px;border:1px solid var(--border);background:var(--muted);cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:background .15s,border-color .15s}
+.btn:hover{border-color:var(--fg2)}
+.btn.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:600}
+.btn.danger{background:transparent;color:var(--neg);border-color:var(--neg)}
+.btn.danger:hover{background:color-mix(in srgb,var(--neg) 12%,transparent)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.sm{min-height:32px;padding:0 10px;font-size:13px}
+nav.tabs{display:flex;gap:var(--s1);max-width:1400px;margin:0 auto;padding:0 var(--s4);overflow-x:auto}
+nav.tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:10px 12px;cursor:pointer;color:var(--fg2);white-space:nowrap;min-height:44px}
+nav.tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent);font-weight:600}
+.grid{display:grid;gap:var(--s4);grid-template-columns:repeat(12,1fr);margin-top:var(--s4)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:var(--s4);min-width:0}
+.card h2{font-size:14px;margin:0 0 var(--s3);display:flex;align-items:center;gap:var(--s2);justify-content:space-between}
+.card h2 small{font-weight:400;color:var(--fg2)}
+.c12{grid-column:span 12}.c8{grid-column:span 8}.c6{grid-column:span 6}.c4{grid-column:span 4}.c3{grid-column:span 3}
+@media (max-width:1000px){.c8,.c6,.c4,.c3{grid-column:span 12}}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--muted);vertical-align:top}
+th{color:var(--fg2);font-weight:500;font-size:12px}
+td.n,th.n{text-align:right}
+.scroll{overflow:auto;max-height:420px}
+.pos{color:var(--pos)}.neg{color:var(--neg)}.dim{color:var(--fg2)}
+.alert{padding:var(--s3);border-radius:8px;border:1px solid var(--amber);color:var(--amber);margin-top:var(--s4);display:flex;gap:var(--s2);align-items:flex-start}
+.alert.red{border-color:var(--neg);color:var(--neg)}
+.alert.blue{border-color:var(--blue);color:var(--blue)}
+.feed{list-style:none;margin:0;padding:0;max-height:460px;overflow:auto}
+.feed li{padding:8px 0;border-bottom:1px solid var(--muted);display:grid;grid-template-columns:62px 1fr;gap:8px;font-size:13px}
+.feed .t{color:var(--fg2)}
+.feed .trade{color:var(--fg)}.feed .blocked{color:var(--amber)}.feed .error{color:var(--neg)}.feed .info,.feed .signal{color:var(--fg2)}
+.strat{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;padding:10px 0;border-bottom:1px solid var(--muted)}
+.strat .name{font-weight:600}.strat .desc,.strat .note{grid-column:2;font-size:12px;color:var(--fg2)}
+.switch{position:relative;width:44px;height:26px;flex:none}
+.switch input{opacity:0;width:100%;height:100%;margin:0;cursor:pointer;position:absolute;z-index:1}
+.switch span{position:absolute;inset:0;border-radius:999px;background:var(--muted);border:1px solid var(--border);transition:background .15s}
+.switch span::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--fg2);transition:transform .15s}
+.switch input:checked+span{background:var(--accent);border-color:var(--accent)}
+.switch input:checked+span::after{transform:translateX(18px);background:var(--on-accent)}
+.switch input:focus-visible+span{outline:2px solid var(--ring);outline-offset:2px}
+form.f{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:var(--s3)}
+form.f>*{min-width:0}
+label.fld input:not([type=checkbox]),label.fld select{width:100%}
+.card.fill{display:flex;flex-direction:column}.card.fill canvas{flex:1;min-height:260px}
+label.fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--fg2)}
+label.fld input,label.fld select,textarea{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px;min-height:40px;color:var(--fg)}
+label.fld .help{font-size:11px;color:var(--fg2)}
+.row{display:flex;gap:var(--s2);flex-wrap:wrap;align-items:center}
+.metrics{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:var(--s2)}
+.metric{background:var(--muted);border-radius:8px;padding:10px}
+.metric .l{font-size:11px;color:var(--fg2)}.metric .v{font-size:17px;font-weight:600}
+canvas{width:100%;height:260px;display:block}
+.legend{display:flex;gap:var(--s4);font-size:12px;color:var(--fg2);margin-top:6px}
+.legend i{display:inline-block;width:12px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle}
+.tip{position:fixed;pointer-events:none;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:12px;display:none;z-index:20}
+.sec{display:grid;grid-template-columns:1fr auto;gap:var(--s2);align-items:end;padding:10px 0;border-bottom:1px solid var(--muted)}
+.sec p{margin:2px 0 0;font-size:12px;color:var(--fg2)}
+code,pre{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}
+pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;white-space:pre-wrap;word-break:break-all}
+.hidden{display:none!important}
+.toast{position:fixed;bottom:16px;right:16px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 14px;z-index:30;max-width:360px}
+details summary{cursor:pointer;color:var(--fg2);margin:6px 0}
+ol.steps{margin:6px 0 0 18px;padding:0;font-size:13px}ol.steps li{margin:3px 0}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-pause" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M9 5v14M15 5v14"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M7 5l12 7-12 7z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></g></symbol>
+  <symbol id="i-logo" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 17l6-6 4 4 8-8M15 7h6v6"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></symbol>
+</svg>
+
+<header>
+  <div class="bar">
+    <div class="brand"><svg width="22" height="22" aria-hidden="true" style="color:var(--accent)"><use href="#i-logo"/></svg>Tradebot
+      <span id="mode" class="badge paper" title="Paper = practice money with live prices. Live = real orders.">PAPER</span>
+      <span id="health" class="badge">starting…</span>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Account value</div><div class="v" id="equity">–</div></div>
+      <div class="kpi"><div class="l">Today</div><div class="v" id="day">–</div></div>
+      <div class="kpi"><div class="l">Open positions</div><div class="v" id="npos">–</div></div>
+      <button class="btn" id="pauseBtn" aria-label="Pause new trades"><svg width="16" height="16" aria-hidden="true"><use href="#i-pause"/></svg><span>Pause</span></button>
+      <button class="btn danger" id="closeAllBtn"><svg width="16" height="16" aria-hidden="true"><use href="#i-x"/></svg>Close all</button>
+      <button class="btn sm" id="themeBtn" aria-label="Switch light or dark theme"><svg width="16" height="16" aria-hidden="true"><use href="#i-sun"/></svg></button>
+    </div>
+  </div>
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button role="tab" aria-selected="true" data-tab="overview">Overview</button>
+    <button role="tab" aria-selected="false" data-tab="lab">Backtest lab</button>
+    <button role="tab" aria-selected="false" data-tab="risk">Risk</button>
+    <button role="tab" aria-selected="false" data-tab="settings">Settings</button>
+    <button role="tab" aria-selected="false" data-tab="connect">Connections</button>
+    <button role="tab" aria-selected="false" data-tab="journal">Trade journal</button>
+  </nav>
+</header>
+
+<main class="wrap">
+  <div id="banner"></div>
+
+  <!-- OVERVIEW -->
+  <section data-panel="overview">
+    <div class="grid">
+      <div class="card c8 fill">
+        <h2>Account value <small id="eqNote"></small></h2>
+        <canvas id="eqChart" aria-label="Account value over time"></canvas>
+      </div>
+      <div class="card c4">
+        <h2>Strategies <small>on / off</small></h2>
+        <div id="strats"></div>
+      </div>
+      <div class="card c12">
+        <h2>Open positions <small>Positions bought outside the bot are shown but never touched</small></h2>
+        <div class="scroll"><table id="posTable"><thead><tr>
+          <th>Market</th><th>Venue</th><th>Side</th><th class="n">Size</th><th class="n">Entry</th><th class="n">Now</th>
+          <th class="n">P/L</th><th class="n">Stop</th><th class="n">Target</th><th>Strategy</th><th></th></tr></thead><tbody></tbody></table></div>
+        <p class="dim" id="noPos">No open positions.</p>
+      </div>
+      <div class="card c8">
+        <h2>Activity <small>newest first</small></h2>
+        <ul class="feed" id="feed" aria-live="polite"></ul>
+      </div>
+      <div class="card c4">
+        <h2>Manual trade</h2>
+        <form class="f" id="tradeForm" style="grid-template-columns:1fr 1fr">
+          <label class="fld">Venue<select name="venue"><option value="liquid">Liquid</option><option value="fomo">FOMO wallet</option></select></label>
+          <label class="fld">Side<select name="side"><option value="buy">Buy / long</option><option value="sell">Sell / short</option></select></label>
+          <label class="fld" style="grid-column:span 2">Market<input name="symbol" required placeholder="BTC, xyz:NVDA or a Solana token address"></label>
+          <label class="fld">Size (USD)<input name="size_usd" type="number" min="1" step="any" value="20" required></label>
+          <label class="fld">Stop-loss %<input name="stop_pct" type="number" min="0" step="any" value="5"></label>
+          <label class="fld">Take-profit %<input name="take_profit_pct" type="number" min="0" step="any" placeholder="optional"></label>
+          <label class="fld">Leverage<input name="leverage" type="number" min="1" max="20" step="1" value="1"></label>
+          <button class="btn primary" style="grid-column:span 2" type="submit">Place trade</button>
+        </form>
+        <p class="dim" style="font-size:12px">Manual trades go through the same risk limits as the bot's own trades.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- LAB -->
+  <section data-panel="lab" class="hidden">
+    <div class="grid">
+      <div class="card c12">
+        <h2>Backtest lab <small>Signals use closed candles only and trade at the next open, with fees and slippage</small></h2>
+        <form class="f" id="labForm">
+          <label class="fld">Strategy<select name="strategy" id="labStrategy"></select></label>
+          <label class="fld">Market<input name="symbol" value="BTC"><span class="help">Pair strategy: BTC/ETH</span></label>
+          <label class="fld">Candle size<select name="interval"><option>1h</option><option>4h</option><option selected>1d</option></select></label>
+          <label class="fld">History (days)<input name="days" type="number" value="1095" min="30"></label>
+          <label class="fld">Data source<select name="source"><option value="liquid">Liquid (since 2023)</option><option value="coinbase">Coinbase (since 2015, BTC/ETH/SOL)</option></select></label>
+          <label class="fld">Start capital<input name="capital" type="number" value="10000"></label>
+          <label class="fld">Position % of account<input name="position_pct" type="number" value="100" min="1" max="100"></label>
+          <label class="fld">Leverage<input name="leverage" type="number" value="1" min="1" max="10"></label>
+          <label class="fld">Fee % per trade<input name="fee_pct" type="number" step="any" value="0.045"></label>
+          <label class="fld">Slippage %<input name="slippage_pct" type="number" step="any" value="0.05"></label>
+          <label class="fld">Optimise for<select name="objective"><option value="sharpe">Sharpe (return per risk)</option><option value="return">Total return</option><option value="return_over_drawdown">Return / drawdown</option><option value="profit_factor">Profit factor</option></select></label>
+        </form>
+        <div class="row" style="margin-top:var(--s3)">
+          <button class="btn primary" data-lab="backtest">Run backtest</button>
+          <button class="btn" data-lab="walkforward">Walk-forward test</button>
+          <button class="btn" data-lab="compare">Compare all strategies</button>
+          <span class="dim" id="labStatus" role="status"></span>
+        </div>
+        <details><summary>What do these mean?</summary>
+          <p class="dim"><b>Backtest</b>: runs the strategy with its current settings over the history. <b>Walk-forward</b>: picks the best settings on one stretch of history, then trades them on the next stretch it never saw, and repeats. Only the out-of-sample (unseen) result tells you much about the future. <b>Compare</b>: every strategy on the same data next to buy-and-hold. A great backtest that fails walk-forward is usually curve-fitted.</p>
+        </details>
+      </div>
+      <div class="card c12 hidden" id="labOut">
+        <h2 id="labTitle">Result</h2>
+        <div id="labVerdict"></div>
+        <div class="metrics" id="labMetrics"></div>
+        <canvas id="labChart" style="margin-top:var(--s3)" aria-label="Strategy equity versus buy and hold"></canvas>
+        <div class="legend"><span><i style="background:var(--accent)"></i>Strategy</span><span><i style="background:var(--fg2)"></i>Buy and hold</span></div>
+        <div id="labExtra"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RISK -->
+  <section data-panel="risk" class="hidden">
+    <div class="grid">
+      <div class="card c6">
+        <h2>Risk of ruin calculator <small>from the risk-of-ruin video</small></h2>
+        <form class="f" id="ruinForm">
+          <label class="fld">Win rate %<input name="win_rate" type="number" step="any" value="45"></label>
+          <label class="fld">Average win ($)<input name="avg_win" type="number" step="any" value="30"></label>
+          <label class="fld">Average loss ($)<input name="avg_loss" type="number" step="any" value="15"></label>
+          <label class="fld">Account ($)<input name="equity" type="number" step="any" value="1000"></label>
+          <label class="fld">"Ruin" = losing %<input name="ruin_pct" type="number" step="any" value="30"></label>
+          <label class="fld">Risk per trade %<input name="risk_pct" type="number" step="any" value="1"></label>
+        </form>
+        <div class="row" style="margin-top:var(--s3)"><button class="btn primary" id="ruinBtn">Calculate</button><button class="btn" id="ruinFill">Use my real trades</button></div>
+        <div class="metrics" id="ruinOut" style="margin-top:var(--s3)"></div>
+        <p class="dim" style="font-size:12px">Simple formula: ((1-A)/(1+A))^U, only valid when wins and losses are the same size. Ralph Vince's formula works for any win rate and uneven wins/losses. Under 1% is comfortable; above 5% means size down.</p>
+      </div>
+      <div class="card c6">
+        <h2>Your results so far <small>closed trades</small></h2>
+        <div class="metrics" id="statsAll"></div>
+        <table id="statsBy" style="margin-top:var(--s3)"><thead><tr><th>Strategy</th><th class="n">Trades</th><th class="n">Win %</th><th class="n">P/L</th><th class="n">Profit factor</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="card c12">
+        <h2>Before you switch to live money</h2>
+        <ol class="steps" id="checklist">
+          <li>Run the walk-forward test for every strategy you turn on. Only use ones rated ROBUST or MODERATE.</li>
+          <li>Paper trade for 1 to 3 months (walk-forward video) and compare the results above with the backtest. Big gaps mean something is off.</li>
+          <li>Check the risk of ruin with your real paper results. Keep it under 1% for the loss you could live with.</li>
+          <li>Start live with small sizes: lower "max position" and "risk per trade" in Settings.</li>
+          <li>Never put more in the bot's wallet than you can afford to lose. Memecoins can go to zero in minutes.</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section data-panel="settings" class="hidden">
+    <div class="grid">
+      <div class="card c12">
+        <h2>Settings <small>saved to config.json; take effect within one cycle</small></h2>
+        <div id="settingsForm"></div>
+        <div class="row" style="margin-top:var(--s4)"><button class="btn primary" id="saveSettings">Save settings</button><span class="dim" id="settingsStatus" role="status"></span></div>
+      </div>
+      <div class="card c6" id="paperCard">
+        <h2>Practice account</h2>
+        <form class="row" id="paperForm"><label class="fld">New balance ($)<input name="balance" type="number" value="1000" min="10"></label><button class="btn" type="submit">Reset practice account</button></form>
+      </div>
+    </div>
+  </section>
+
+  <!-- CONNECTIONS -->
+  <section data-panel="connect" class="hidden">
+    <div class="grid">
+      <div class="card c12"><h2>Status</h2><div id="connStatus"></div></div>
+      <div class="card c12">
+        <h2>Keys and passwords <small>stored only in the .env file on this computer; never shown again after saving</small></h2>
+        <div id="secrets"></div>
+        <div class="row" style="margin-top:var(--s3)"><button class="btn primary" id="saveSecrets">Save keys</button><span class="dim" id="secretStatus" role="status"></span></div>
+      </div>
+      <div class="card c6">
+        <h2>Connect FOMO</h2>
+        <ol class="steps">
+          <li>In the FOMO app: Settings → Account → Export (Face ID). Copy the <b>Solana</b> private key.</li>
+          <li>Paste it into <b>FOMO_WALLET_PRIVATE_KEY</b> above and save. It stays on this computer.</li>
+          <li>Keep some USDC (what the bot spends) and about 0.05 SOL (network fees) in the FOMO wallet.</li>
+          <li>Optional: a free Jupiter key (portal.jup.ag) and a private Solana RPC (e.g. Helius) make swaps faster and more reliable.</li>
+          <li>Trades the bot makes show up in the FOMO app like your own.</li>
+        </ol>
+        <div class="alert red" role="note"><svg width="18" height="18" aria-hidden="true"><use href="#i-alert"/></svg><span>Anyone with this key can take everything in the wallet. Never paste it into a chat, a website or a message. Consider a separate FOMO account just for the bot.</span></div>
+      </div>
+      <div class="card c6">
+        <h2>Connect Liquid</h2>
+        <ol class="steps">
+          <li>Liquid trades on Hyperliquid. Open app.hyperliquid.xyz → More → API, connect the same wallet your Liquid account uses, and create an API wallet. It can trade but can never withdraw.</li>
+          <li>Paste the API wallet's private key into <b>HL_API_PRIVATE_KEY</b>, and your account address (Liquid shows it, starts with 0x) into <b>HL_ACCOUNT_ADDRESS</b>.</li>
+          <li>Stock markets like NVDA trade as <code>xyz:NVDA</code> and may need USDC moved to that market in Liquid first.</li>
+        </ol>
+      </div>
+      <div class="card c12">
+        <h2>Connect TradingView</h2>
+        <ol class="steps">
+          <li>Pick any password and save it as <b>TV_WEBHOOK_SECRET</b> above.</li>
+          <li>Make the webhook port reachable from the internet with a free tunnel, e.g. <code>cloudflared tunnel --url http://localhost:<span class="whport">8788</span></code>. Use the https address it prints, plus <code>/webhook</code>. Never tunnel the dashboard's port.</li>
+          <li>In TradingView: create an alert → Notifications → Webhook URL, and paste this as the message:</li>
+        </ol>
+        <pre id="tvMsg"></pre>
+        <p class="dim">For a Pine strategy, use <code>"action": "{{strategy.order.action}}", "position": "{{strategy.market_position}}"</code>. The ready-made strategy <code>tradingview/tradebot_strategy.pine</code> sends these for you. TradingView webhooks need a paid TradingView plan. Practise with TradingView's own Strategy Tester first, and keep the bot in paper mode while you test alerts.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- JOURNAL -->
+  <section data-panel="journal" class="hidden">
+    <div class="grid">
+      <div class="card c12">
+        <h2>Trade journal <small>every fill, also saved to data/trades.csv</small></h2>
+        <div class="scroll" style="max-height:640px"><table id="journal"><thead><tr><th>Time (UTC)</th><th>Mode</th><th>Market</th><th>Strategy</th><th>Action</th><th class="n">USD</th><th class="n">Price</th><th class="n">P/L</th><th>Why</th></tr></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+  </section>
+</main>
+<div class="tip" id="tip"></div>
+<div class="toast hidden" id="toast" role="status"></div>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const usd = (v, d = 2) => v == null || isNaN(v) ? "–" : (v < 0 ? "-$" : "$") + Math.abs(+v).toLocaleString(undefined, {minimumFractionDigits: d, maximumFractionDigits: d});
+const signed = v => (v >= 0 ? "+" : "") + usd(v);
+const px = v => v == null || v === "" ? "–" : (+v >= 1 ? (+v).toLocaleString(undefined, {maximumFractionDigits: 4}) : (+v).toPrecision(4));
+const pct = v => v == null ? "–" : (v >= 0 ? "+" : "") + (+v).toFixed(2) + "%";
+const cls = v => v > 0 ? "pos" : v < 0 ? "neg" : "";
+const dd = v => +v > 0 ? "-" + (+v).toFixed(1) + "%" : "0%";
+const time = t => new Date(t * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+const NAMES = {fomo_momentum: "FOMO momentum", trend: "EMA trend", btc_regime: "BTC volatility regime", eth_btc_pair: "BTC/ETH pair",
+  congress: "Congress buys", tradingview: "TradingView alerts", breakout: "Breakout", mean_reversion: "RSI pullback",
+  supertrend: "Supertrend", macd: "MACD", heikin_ashi: "Heikin Ashi", manual: "Manual"};
+const DESCS = {
+  fomo_momentum: "Trending Solana memecoins in your FOMO wallet, after rug checks. Sells in steps with a trailing stop.",
+  trend: "EMA 20/50 crossover with a 200 EMA trend filter and ATR stops, on Liquid.",
+  btc_regime: "Bitcoin video: in the market during bull regimes, in cash during bear ones.",
+  eth_btc_pair: "Pair-trading video: long BTC + short ETH when BTC is cheap against ETH.",
+  congress: "Stocks members of Congress report buying (needs a Quiver key).",
+  tradingview: "Executes the alerts your TradingView charts send."};
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json", "X-Tradebot": "1"}, body: JSON.stringify(body)};
+  const r = await fetch(path, opt);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.remove("hidden"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.add("hidden"), 3500); }
+
+// ---------- tabs and theme ----------
+$$("nav.tabs button").forEach(b => b.addEventListener("click", () => {
+  $$("nav.tabs button").forEach(x => x.setAttribute("aria-selected", x === b));
+  $$("[data-panel]").forEach(p => p.classList.toggle("hidden", p.dataset.panel !== b.dataset.tab));
+  if (b.dataset.tab === "journal") loadJournal();
+  if (b.dataset.tab === "risk") loadStats();
+  if (b.dataset.tab === "settings") loadSettings();
+  if (b.dataset.tab === "connect") loadSecrets();
+  try { localStorage.setItem("tab", b.dataset.tab); } catch (e) {}
+  redraw();
+}));
+try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+$("#themeBtn").onclick = () => {
+  const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = t; try { localStorage.setItem("theme", t); } catch (e) {} redraw();
+};
+
+// ---------- chart ----------
+const charts = {};
+function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function drawLines(canvas, series, opts = {}) {
+  charts[canvas.id] = {series, opts};
+  const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, h = canvas.clientHeight;
+  if (!w) return;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const g = canvas.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  const pts = series.flatMap(s => s.data);
+  if (pts.length < 2) { g.fillStyle = css("--fg2"); g.font = "13px Inter,sans-serif"; g.fillText(opts.empty || "Not enough data yet", 12, 24); return; }
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  let x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  if (y0 === y1) { y0 -= 1; y1 += 1; }
+  const pad = (y1 - y0) * 0.08, allPos = y0 >= 0; y0 -= pad; y1 += pad; if (allPos) y0 = Math.max(0, y0);
+  const L = 64, R = 10, T = 10, B = 24;
+  const X = x => L + (x - x0) / (x1 - x0 || 1) * (w - L - R), Y = y => T + (1 - (y - y0) / (y1 - y0)) * (h - T - B);
+  g.strokeStyle = css("--muted"); g.fillStyle = css("--fg2"); g.font = "11px Inter,sans-serif"; g.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) { const v = y0 + (y1 - y0) * i / 4, y = Y(v); g.beginPath(); g.moveTo(L, y); g.lineTo(w - R, y); g.stroke(); g.fillText(opts.fmt ? opts.fmt(v) : v.toFixed(0), 4, y + 4); }
+  const span = x1 - x0, nx = Math.max(2, Math.min(5, Math.floor((w - L) / 110)));
+  for (let i = 0; i <= nx; i++) { const v = x0 + span * i / nx; const d = new Date(opts.ms ? v : v * 1000);
+    const label = span > (opts.ms ? 2 * 86400e3 : 2 * 86400) ? d.toLocaleDateString([], {month: "short", day: "numeric", year: span > (opts.ms ? 200 * 86400e3 : 200 * 86400) ? "2-digit" : undefined}) : d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+    g.fillText(label, Math.min(X(v) - 16, w - 60), h - 6); }
+  series.forEach(s => { if (s.data.length < 2) return; g.strokeStyle = css(s.color); g.lineWidth = s.width || 2; g.setLineDash(s.dash || []);
+    g.beginPath(); s.data.forEach((p, i) => i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1]))); g.stroke(); g.setLineDash([]); });
+  canvas.onmousemove = ev => {
+    const r = canvas.getBoundingClientRect(), mx = ev.clientX - r.left, xv = x0 + (mx - L) / (w - L - R) * (x1 - x0);
+    const lines = series.map(s => { if (!s.data.length) return ""; let best = s.data[0]; for (const p of s.data) if (Math.abs(p[0] - xv) < Math.abs(best[0] - xv)) best = p;
+      return `${esc(s.name)}: ${opts.fmt ? opts.fmt(best[1]) : best[1].toFixed(2)}`; }).filter(Boolean);
+    const tip = $("#tip"); tip.innerHTML = `<div class="dim">${new Date(opts.ms ? xv : xv * 1000).toLocaleString()}</div>` + lines.join("<br>");
+    tip.style.display = "block"; tip.style.left = Math.min(ev.clientX + 12, innerWidth - 220) + "px"; tip.style.top = ev.clientY + 12 + "px";
+  };
+  canvas.onmouseleave = () => $("#tip").style.display = "none";
+}
+function redraw() { Object.entries(charts).forEach(([id, c]) => drawLines(document.getElementById(id), c.series, c.opts)); }
+addEventListener("resize", redraw);
+
+// ---------- overview ----------
+let last = null;
+async function refresh() {
+  try { last = await api("/api/status"); } catch (e) { $("#health").className = "badge bad"; $("#health").textContent = "dashboard offline"; return; }
+  const s = last;
+  $("#mode").className = "badge " + s.mode; $("#mode").textContent = s.mode.toUpperCase();
+  $("#equity").textContent = usd(s.equity);
+  $("#day").textContent = signed(s.day_pnl); $("#day").className = "v " + cls(s.day_pnl);
+  $("#npos").textContent = s.positions.length;
+  const age = s.last_tick ? Date.now() / 1000 - s.last_tick : 1e9;
+  const h = $("#health");
+  if (s.halted) { h.className = "badge bad"; h.textContent = "trading stopped"; }
+  else if (s.paused) { h.className = "badge warn"; h.textContent = "paused"; }
+  else if (age > 180) { h.className = "badge warn"; h.textContent = "waiting for data"; }
+  else { h.className = "badge ok"; h.textContent = "running"; }
+  $("#pauseBtn span").textContent = s.paused || s.halted ? "Resume" : "Pause";
+  $("#pauseBtn use").setAttribute("href", s.paused || s.halted ? "#i-play" : "#i-pause");
+  let banner = "";
+  if (s.mode === "live") banner += `<div class="alert red" role="alert"><svg width="18" height="18" aria-hidden="true"><use href="#i-alert"/></svg><span><b>LIVE MODE:</b> the bot is trading real money.</span></div>`;
+  if (s.halted) banner += `<div class="alert red" role="alert"><svg width="18" height="18" aria-hidden="true"><use href="#i-alert"/></svg><span>${esc(s.halted)}</span></div>`;
+  if (s.last_error && age > 120) banner += `<div class="alert"><svg width="18" height="18" aria-hidden="true"><use href="#i-alert"/></svg><span>Last problem: ${esc(s.last_error)}</span></div>`;
+  const off = Object.entries(s.connections).filter(([, c]) => !c.connected);
+  if (s.mode === "live" && off.length) banner += `<div class="alert blue"><span>${off.map(([k, c]) => `<b>${k === "fomo" ? "FOMO" : "Liquid"}:</b> ${esc(c.detail)}`).join("<br>")} (see Connections)</span></div>`;
+  $("#banner").innerHTML = banner;
+  // positions
+  const tb = $("#posTable tbody");
+  tb.innerHTML = s.positions.map(p => `<tr>
+    <td><b>${esc(p.label)}</b>${p.venue === "fomo" ? `<div class="dim" style="font-size:11px">${esc(p.symbol.slice(0, 6))}…</div>` : ""}</td>
+    <td>${p.venue === "fomo" ? "FOMO" : "Liquid"}</td><td class="${p.side === "long" ? "pos" : "neg"}">${p.side}${p.leverage > 1 ? " " + p.leverage + "x" : ""}</td>
+    <td class="n">${usd(p.notional)}</td><td class="n">${px(p.entry_price)}</td><td class="n">${px(p.mark_price)}</td>
+    <td class="n ${cls(p.unrealized_pnl)}">${signed(p.unrealized_pnl)}<div style="font-size:11px">${pct(p.pnl_pct)}</div></td>
+    <td class="n">${px(p.stop)}</td><td class="n">${px(p.take_profit)}</td>
+    <td>${esc(NAMES[p.strategy] || p.strategy)}${p.reason ? `<div class="dim" style="font-size:11px">${esc(p.reason)}</div>` : ""}</td>
+    <td>${p.managed ? `<button class="btn sm danger" data-close="${esc(p.key)}" data-label="${esc(p.label)}">Close</button>` : ""}</td></tr>`).join("");
+  $("#noPos").classList.toggle("hidden", s.positions.length > 0);
+  // feed
+  $("#feed").innerHTML = s.events.map(e => `<li><span class="t">${time(e.time)}</span><span class="${esc(e.kind)}">${esc(e.text)}</span></li>`).join("") || `<li><span></span><span class="dim">Nothing yet.</span></li>`;
+  // strategies
+  const names = [...Object.keys(s.strategies), "tradingview"];
+  const box = $("#strats");
+  if (box.dataset.names !== names.join()) {
+    box.dataset.names = names.join();
+    box.innerHTML = names.map(n => `<div class="strat"><label class="switch"><input type="checkbox" data-strat="${n}" aria-label="${esc(NAMES[n] || n)}"><span></span></label>
+      <div class="name">${esc(NAMES[n] || n)} <span class="badge" style="font-size:11px">${n === "tradingview" ? "alerts" : (s.strategies[n].venue === "fomo" ? "FOMO" : "Liquid")}</span></div>
+      <div class="desc">${esc(DESCS[n] || "")}</div><div class="note" data-note="${n}"></div></div>`).join("");
+  }
+  names.forEach(n => {
+    const on = n === "tradingview" ? s.tradingview_enabled : s.strategies[n].enabled;
+    const cb = box.querySelector(`[data-strat="${n}"]`); if (cb && document.activeElement !== cb) cb.checked = on;
+    const note = box.querySelector(`[data-note="${n}"]`); if (note) note.textContent = n === "tradingview" ? "" : (s.strategies[n].note || (on ? "waiting for its first run" : ""));
+  });
+  // equity chart
+  drawLines($("#eqChart"), [{name: "Account value", data: s.equity_history, color: "--accent"}], {fmt: v => usd(v, 0), empty: "The chart fills in as the bot runs."});
+  $("#eqNote").textContent = s.peak_equity ? "peak " + usd(s.peak_equity) : "";
+  // connections tab status
+  $("#connStatus").innerHTML = Object.entries(s.connections).map(([k, c]) => `<div class="sec"><div><b>${k === "fomo" ? "FOMO wallet (Solana)" : "Liquid (Hyperliquid)"}</b><p>${esc(c.detail)}</p></div><span class="badge ${c.connected ? (s.mode === "paper" ? "paper" : "ok") : "warn"}">${c.connected ? (s.mode === "paper" ? "practice" : "connected") : "not connected"}</span></div>`).join("");
+}
+$("#strats").addEventListener("change", async ev => {
+  const n = ev.target.dataset.strat; if (!n) return;
+  try { await api("/api/strategy", {name: n, enabled: ev.target.checked}); toast(`${NAMES[n] || n} ${ev.target.checked ? "on" : "off"}`); } catch (e) { toast(e.message); ev.target.checked = !ev.target.checked; }
+});
+$("#posTable").addEventListener("click", async ev => {
+  const b = ev.target.closest("[data-close]"); if (!b) return;
+  if (!confirm(`Close ${b.dataset.label} now at the market price?`)) return;
+  b.disabled = true; try { await api("/api/close", {key: b.dataset.close, label: b.dataset.label}); toast("Closing…"); } catch (e) { toast(e.message); }
+});
+$("#pauseBtn").onclick = async () => {
+  const resume = last && (last.paused || last.halted);
+  if (resume && last.halted && !confirm("Trading was stopped by a risk limit. Resume anyway?")) return;
+  await api(resume ? "/api/resume" : "/api/pause", {}); refresh();
+};
+$("#closeAllBtn").onclick = async () => {
+  if (!confirm("Close every position the bot manages, at market price?" + (last && last.mode === "live" ? "\n\nThis is LIVE: real orders will be sent." : ""))) return;
+  await api("/api/close_all", {}); toast("Closing all positions…"); refresh();
+};
+$("#tradeForm").onsubmit = async ev => {
+  ev.preventDefault();
+  const d = Object.fromEntries(new FormData(ev.target));
+  if (last && last.mode === "live" && !confirm(`LIVE: ${d.side} $${d.size_usd} of ${d.symbol}?`)) return;
+  try { await api("/api/trade", d); toast("Order sent to the bot"); setTimeout(refresh, 1500); } catch (e) { toast(e.message); }
+};
+
+// ---------- lab ----------
+(async () => {
+  const list = await api("/api/lab/strategies");
+  $("#labStrategy").innerHTML = list.map(s => `<option value="${esc(s.id)}">${esc(s.label)}</option>`).join("");
+})();
+let lastLab = null;
+$$("[data-lab]").forEach(b => b.onclick = async () => {
+  const kind = b.dataset.lab, f = Object.fromEntries(new FormData($("#labForm")));
+  if (f.strategy === "eth_btc_pair") { const [a, bb] = (f.symbol.includes("/") ? f.symbol : "BTC/ETH").split("/"); f.symbol_a = a.trim(); f.symbol_b = bb.trim(); }
+  $$("[data-lab]").forEach(x => x.disabled = true); $("#labStatus").textContent = kind === "walkforward" ? "Optimising and testing… this can take a minute" : "Running…";
+  try {
+    const r = await api("/api/lab/" + kind, f); if (r.error) throw new Error(r.error);
+    lastLab = r; showLab(kind, r, f); $("#labStatus").textContent = "";
+  } catch (e) { $("#labStatus").textContent = "Failed: " + e.message; }
+  $$("[data-lab]").forEach(x => x.disabled = false);
+});
+function metricCards(m) {
+  const items = [["Total return", pct(m.total_return_pct), cls(m.total_return_pct)], ["Buy and hold", pct(m.buy_and_hold_pct), cls(m.buy_and_hold_pct)],
+    ["Yearly (CAGR)", pct(m.cagr_pct), cls(m.cagr_pct)], ["Max drawdown", dd(m.max_drawdown_pct), +m.max_drawdown_pct > 0 ? "neg" : ""], ["Sharpe", m.sharpe, ""],
+    ["Trades", m.trades, ""], ["Win rate", m.win_rate_pct + "%", ""], ["Profit factor", m.profit_factor, ""], ["Avg win", m.avg_win_pct ? pct(m.avg_win_pct) : "–", "pos"], ["Avg loss", m.avg_loss_pct ? pct(m.avg_loss_pct) : "–", "neg"]];
+  return items.map(([l, v, c]) => `<div class="metric"><div class="l">${l}</div><div class="v ${c}">${esc(v)}</div></div>`).join("");
+}
+function mcCard(mc) {
+  if (!mc || mc.error) return "";
+  return `<h2 style="margin-top:var(--s4)">Monte Carlo <small>${mc.runs} reshuffles of the trades</small></h2><div class="metrics">
+    <div class="metric"><div class="l">Median return</div><div class="v ${cls(mc.return_pct.median)}">${pct(mc.return_pct.median)}</div></div>
+    <div class="metric"><div class="l">Bad case (5%)</div><div class="v ${cls(mc.return_pct.worst_5)}">${pct(mc.return_pct.worst_5)}</div></div>
+    <div class="metric"><div class="l">Typical drawdown</div><div class="v neg">${dd(mc.max_drawdown_pct.median)}</div></div>
+    <div class="metric"><div class="l">Bad drawdown (5%)</div><div class="v neg">${dd(mc.max_drawdown_pct.worst_5)}</div></div>
+    <div class="metric"><div class="l">Chance of a loss</div><div class="v">${mc.chance_of_losing_money_pct}%</div></div>
+    <div class="metric"><div class="l">Risk of -${mc.ruin_level_pct}%</div><div class="v">${mc.risk_of_ruin_pct}%</div></div></div>${mc.trades_per_run < 20 ? `<p class="dim">Only ${mc.trades_per_run} trades: too few for these numbers to mean much. Use more history or a smaller candle size.</p>` : ""}`;
+}
+function tradesTable(trades) {
+  if (!trades || !trades.length) return "";
+  const rows = trades.slice(-200).reverse().map(t => `<tr><td>${new Date(t.entry_t).toLocaleDateString()}</td><td>${new Date(t.exit_t).toLocaleDateString()}</td><td>${t.side}</td>
+    <td class="n">${px(t.entry_px)}</td><td class="n">${px(t.exit_px)}</td><td class="n ${cls(t.ret_pct)}">${pct(t.ret_pct)}</td><td>${esc(t.exit_reason)}</td></tr>`).join("");
+  return `<details style="margin-top:var(--s3)"><summary>${trades.length} trades</summary><div class="scroll"><table><thead><tr><th>In</th><th>Out</th><th>Side</th><th class="n">Entry</th><th class="n">Exit</th><th class="n">Result</th><th>Exit</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+}
+function showLab(kind, r, f) {
+  $("#labOut").classList.remove("hidden");
+  const name = $("#labStrategy").selectedOptions[0].textContent;
+  $("#labVerdict").innerHTML = ""; $("#labExtra").innerHTML = "";
+  if (kind === "compare") {
+    $("#labTitle").textContent = `All strategies on ${f.symbol} (${r.candles} candles)`;
+    $("#labMetrics").innerHTML = ""; charts.labChart = null; $("#labChart").classList.add("hidden"); $(".legend", $("#labOut")).classList.add("hidden");
+    $("#labExtra").innerHTML = `<div class="scroll"><table><thead><tr><th>Strategy</th><th class="n">Return</th><th class="n">Buy & hold</th><th class="n">Max DD</th><th class="n">Sharpe</th><th class="n">Trades</th><th class="n">Win %</th></tr></thead><tbody>${
+      r.rows.map(x => `<tr><td>${esc(x.label)}</td><td class="n ${cls(x.total_return_pct)}">${pct(x.total_return_pct)}</td><td class="n">${pct(x.buy_and_hold_pct)}</td><td class="n neg">${dd(x.max_drawdown_pct)}</td><td class="n">${x.sharpe}</td><td class="n">${x.trades}</td><td class="n">${x.win_rate_pct}</td></tr>`).join("")}</tbody></table></div>
+      <p class="dim">Ranked by Sharpe ratio. These use default settings on all of the history: run a walk-forward test before trusting any of them.</p>`;
+    return;
+  }
+  $("#labChart").classList.remove("hidden"); $(".legend", $("#labOut")).classList.remove("hidden");
+  const series = [{name: "Strategy", data: r.curve, color: "--accent"}];
+  if (kind === "backtest") {
+    $("#labTitle").textContent = `${name}: backtest on ${f.symbol}, ${r.candles} candles`;
+    $("#labMetrics").innerHTML = metricCards(r.metrics);
+    series.push({name: "Buy and hold", data: r.buy_and_hold_curve, color: "--fg2", width: 1.5});
+    $("#labExtra").innerHTML = mcCard(r.monte_carlo) + tradesTable(r.trades);
+  } else {
+    $("#labTitle").textContent = `${name}: walk-forward on ${f.symbol}`;
+    const v = r.verdict, c = v === "ROBUST" ? "ok" : v === "MODERATE" ? "warn" : "bad";
+    $("#labVerdict").innerHTML = `<p><span class="badge ${c}">${esc(v)}</span> <span class="dim">Out-of-sample efficiency ${r.walk_forward_efficiency} (unseen-data yearly return ÷ optimised yearly return), ${esc(r.profitable_folds)} test windows profitable.</span></p>`;
+    $("#labMetrics").innerHTML = metricCards(r.out_of_sample);
+    $("#labExtra").innerHTML = `<h2 style="margin-top:var(--s4)">Windows</h2><div class="scroll"><table><thead><tr><th>Optimised on</th><th>Settings picked</th><th class="n">In-sample</th><th>Tested on (unseen)</th><th class="n">Out-of-sample</th></tr></thead><tbody>${
+      r.folds.map(x => `<tr><td>${new Date(x.train_from).toLocaleDateString()} – ${new Date(x.train_to).toLocaleDateString()}</td><td><code>${esc(JSON.stringify(x.params))}</code></td><td class="n ${cls(x.in_sample.total_return_pct)}">${pct(x.in_sample.total_return_pct)}</td><td>${new Date(x.test_from).toLocaleDateString()} – ${new Date(x.test_to).toLocaleDateString()}</td><td class="n ${cls(x.out_of_sample.total_return_pct)}">${pct(x.out_of_sample.total_return_pct)}</td></tr>`).join("")}</tbody></table></div>` + mcCard(r.monte_carlo) + tradesTable(r.trades);
+  }
+  drawLines($("#labChart"), series, {fmt: v => usd(v, 0), ms: true});
+}
+
+// ---------- risk ----------
+async function loadStats() {
+  const s = await api("/api/stats"), a = s.all;
+  $("#statsAll").innerHTML = [["Closed trades", a.trades], ["Win rate", a.win_rate + "%"], ["Total P/L", signed(a.pnl)], ["Avg win", usd(a.avg_win)], ["Avg loss", usd(a.avg_loss)],
+    ["Profit factor", a.profit_factor ?? "–"]].map(([l, v]) => `<div class="metric"><div class="l">${l}</div><div class="v">${esc(v)}</div></div>`).join("") +
+    (s.ruin ? `<div class="metric"><div class="l">Risk of ruin (Vince)</div><div class="v">${s.ruin.vince_pct ?? "–"}%</div></div>` : "");
+  $("#statsBy tbody").innerHTML = Object.entries(s.by_strategy).map(([k, v]) => `<tr><td>${esc(NAMES[k] || k)}</td><td class="n">${v.trades}</td><td class="n">${v.win_rate}</td><td class="n ${cls(v.pnl)}">${signed(v.pnl)}</td><td class="n">${v.profit_factor ?? "–"}</td></tr>`).join("") || `<tr><td colspan="5" class="dim">No closed trades yet.</td></tr>`;
+  return s;
+}
+$("#ruinBtn").onclick = async () => {
+  try {
+    const r = await api("/api/lab/ruin", Object.fromEntries(new FormData($("#ruinForm"))));
+    $("#ruinOut").innerHTML = `<div class="metric"><div class="l">Simple formula</div><div class="v">${r.simple_pct == null ? "n/a" : r.simple_pct + "%"}</div>${r.simple_pct == null ? `<div class="l">needs a win rate above 50%</div>` : ""}</div>` + (r.vince_pct != null ? `<div class="metric"><div class="l">Ralph Vince formula</div><div class="v">${r.vince_pct}%</div></div>` : "");
+  } catch (e) { toast(e.message); }
+};
+$("#ruinFill").onclick = async () => {
+  const s = await loadStats(), a = s.all, f = $("#ruinForm");
+  if (!a.trades) return toast("No closed trades yet: paper trade first");
+  f.win_rate.value = a.win_rate; f.avg_win.value = a.avg_win; f.avg_loss.value = Math.abs(a.avg_loss); f.equity.value = last ? last.equity : 1000;
+  $("#ruinBtn").click();
+};
+
+// ---------- settings ----------
+const HELP = {
+  mode: "paper = practice money; live = real orders (also needs live_trading_acknowledged)",
+  live_trading_acknowledged: "Tick only when you accept that live mode trades real money", loop_seconds: "How often the bot checks everything",
+  risk_per_trade_pct: "Max % of the account lost if a stop is hit", max_position_usd: "Hard cap on any single position",
+  daily_loss_limit_pct: "Stop opening trades for the rest of the day after this loss", max_drawdown_pct: "Stop until you press Resume after this drop from the peak",
+  default_stop_loss_pct: "Stop used when a signal has none", cooldown_minutes: "Wait before re-entering a market after a losing exit",
+  position_usd: "Size of each trade", stop_loss_pct: "Sell if down this much", trailing_stop_pct: "Sell if it falls this much from its best price",
+  take_profit: "[[gain %, share to sell], ...]", max_hold_hours: "Sell after this many hours anyway"};
+let cfgCache = null;
+async function loadSettings() {
+  cfgCache = await api("/api/config");
+  const sections = [["General", ["mode", "live_trading_acknowledged", "loop_seconds"], cfgCache], ["Risk limits", Object.keys(cfgCache.risk), cfgCache.risk, "risk"],
+    ...Object.keys(cfgCache.strategies).map(k => [NAMES[k] || k, Object.keys(cfgCache.strategies[k]).filter(x => x !== "enabled"), cfgCache.strategies[k], "strategies." + k]),
+    ["FOMO wallet", Object.keys(cfgCache.venues.fomo), cfgCache.venues.fomo, "venues.fomo"], ["Liquid", Object.keys(cfgCache.venues.liquid), cfgCache.venues.liquid, "venues.liquid"],
+    ["News check (Perplexity / Grok)", Object.keys(cfgCache.research), cfgCache.research, "research"], ["Practice account", Object.keys(cfgCache.paper), cfgCache.paper, "paper"]];
+  $("#settingsForm").innerHTML = sections.map(([title, keys, obj, path]) => `<details ${title === "Risk limits" ? "open" : ""}><summary><b>${esc(title)}</b></summary><form class="f" style="margin:8px 0 12px">${
+    keys.map(k => field(path ? path + "." + k : k, k, obj[k])).join("")}</form></details>`).join("");
+}
+function field(path, key, v) {
+  const help = HELP[key] ? `<span class="help">${esc(HELP[key])}</span>` : "";
+  if (key === "mode") return `<label class="fld">${key}<select data-path="${path}"><option ${v === "paper" ? "selected" : ""}>paper</option><option ${v === "live" ? "selected" : ""}>live</option></select>${help}</label>`;
+  if (typeof v === "boolean") return `<label class="fld">${esc(key)}<input type="checkbox" data-path="${path}" ${v ? "checked" : ""} style="min-height:auto;width:20px;height:20px">${help}</label>`;
+  if (typeof v === "number") return `<label class="fld">${esc(key)}<input type="number" step="any" data-path="${path}" value="${v}">${help}</label>`;
+  if (Array.isArray(v) || (v && typeof v === "object")) return `<label class="fld">${esc(key)}<input data-path="${path}" data-json="1" value="${esc(JSON.stringify(v))}">${help}</label>`;
+  return `<label class="fld">${esc(key)}<input data-path="${path}" value="${esc(v ?? "")}">${help}</label>`;
+}
+$("#saveSettings").onclick = async () => {
+  const cfg = JSON.parse(JSON.stringify(cfgCache));
+  try {
+    $$("[data-path]", $("#settingsForm")).forEach(el => {
+      const parts = el.dataset.path.split("."); let o = cfg; parts.slice(0, -1).forEach(p => o = o[p]);
+      const k = parts[parts.length - 1];
+      o[k] = el.type === "checkbox" ? el.checked : el.type === "number" ? +el.value : el.dataset.json ? JSON.parse(el.value || "null") : el.value;
+    });
+    if (cfg.mode === "live" && cfgCache.mode !== "live" && !confirm("Switch to LIVE trading with real money after the next restart?")) return;
+    await api("/api/config", cfg); cfgCache = cfg; $("#settingsStatus").textContent = "Saved."; toast("Settings saved");
+  } catch (e) { $("#settingsStatus").textContent = "Not saved: " + e.message; }
+};
+$("#paperForm").onsubmit = async ev => {
+  ev.preventDefault(); if (!confirm("Erase the practice account history and start again?")) return;
+  try { await api("/api/paper_reset", Object.fromEntries(new FormData(ev.target))); toast("Practice account reset"); refresh(); } catch (e) { toast(e.message); }
+};
+
+// ---------- connections ----------
+const SECRETS = [
+  ["FOMO_WALLET_PRIVATE_KEY", "FOMO wallet private key (Solana)", "Exported from FOMO: Settings → Account → Export"],
+  ["JUPITER_API_KEY", "Jupiter API key (optional)", "Free at portal.jup.ag; needed by Jupiter's newer swap API"],
+  ["SOLANA_RPC_URL", "Solana RPC URL (optional)", "e.g. a free Helius URL; the public one is slow"],
+  ["HL_ACCOUNT_ADDRESS", "Liquid / Hyperliquid account address", "0x…, the address of your Liquid account"],
+  ["HL_API_PRIVATE_KEY", "Hyperliquid API wallet private key", "Created at app.hyperliquid.xyz → API; cannot withdraw"],
+  ["TV_WEBHOOK_SECRET", "TradingView alert password", "Any long random text; put the same in your alert messages"],
+  ["QUIVER_API_TOKEN", "Quiver Quantitative token", "For the Congress strategy (quiverquant.com)"],
+  ["PERPLEXITY_API_KEY", "Perplexity API key", "For the news check (perplexity.ai → API)"],
+  ["XAI_API_KEY", "xAI (Grok) API key", "For the news check with Grok (console.x.ai)"]];
+async function loadSecrets() {
+  const have = await api("/api/secrets");
+  $("#secrets").innerHTML = SECRETS.map(([k, label, help]) => `<div class="sec"><label class="fld">${esc(label)} <code>${k}</code>
+    <input type="password" autocomplete="off" spellcheck="false" data-secret="${k}" placeholder="${have[k] ? "saved: leave empty to keep" : "not set"}"><span class="help">${esc(help)}</span></label>
+    <span class="badge ${have[k] ? "ok" : ""}">${have[k] ? "saved" : "empty"}</span></div>`).join("");
+  const port = cfgCache ? cfgCache.webhook.port : 8788; $$(".whport").forEach(x => x.textContent = port);
+  $("#tvMsg").textContent = JSON.stringify({secret: "YOUR_TV_WEBHOOK_SECRET", symbol: "{{ticker}}", action: "buy", size_usd: 25, stop_pct: 4}, null, 0);
+}
+$("#saveSecrets").onclick = async () => {
+  const body = {}; $$("[data-secret]").forEach(el => { if (el.value.trim()) body[el.dataset.secret] = el.value.trim(); });
+  if (!Object.keys(body).length) return toast("Nothing to save");
+  try { await api("/api/secrets", body); $$("[data-secret]").forEach(el => el.value = ""); $("#secretStatus").textContent = "Saved. Restart the bot to connect."; loadSecrets(); } catch (e) { toast(e.message); }
+};
+
+// ---------- journal ----------
+async function loadJournal() {
+  const rows = await api("/api/trades");
+  $("#journal tbody").innerHTML = rows.map(r => `<tr><td>${esc(r.time.replace("T", " ").slice(0, 16))}</td><td>${esc(r.mode)}</td><td>${esc(r.label || r.symbol)}</td><td>${esc(NAMES[r.strategy] || r.strategy)}</td>
+    <td>${esc(r.action)} ${esc(r.side)}</td><td class="n">${usd(+r.usd)}</td><td class="n">${px(r.price)}</td><td class="n ${cls(+r.pnl_usd)}">${r.pnl_usd === "" ? "" : signed(+r.pnl_usd)}</td><td class="dim">${esc(r.reason)}${r.tx && r.tx !== "paper" && r.venue === "fomo" ? ` <a href="https://solscan.io/tx/${encodeURIComponent(r.tx)}" target="_blank" rel="noopener">tx</a>` : ""}</td></tr>`).join("") || `<tr><td colspan="9" class="dim">No trades yet.</td></tr>`;
+}
+
+try { const t = localStorage.getItem("tab"); if (t) { const b = $(`nav.tabs [data-tab="${t}"]`); if (b) b.click(); } } catch (e) {}
+api("/api/config").then(c => { cfgCache = c; }).catch(() => {});
+refresh(); setInterval(refresh, 4000);
+</script>
+</body>
+</html>

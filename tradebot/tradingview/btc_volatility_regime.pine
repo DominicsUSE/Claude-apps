@@ -1,0 +1,50 @@
+//@version=6
+// Volatility regime trend strategy (from the Bitcoin video), same maths as the bot's "btc_regime".
+// Fast and slow EMAs of the typical price (H+L+C)/3 are averaged into a basis; bands sit
+// +- mult x smoothed standard deviation around it. A close above the upper band starts a bull
+// regime (long), a close below the lower band starts a bear regime (cash). Long only.
+// Practise it in the Strategy Tester on BTCUSD daily (or weekly) before trusting it.
+strategy("Tradebot volatility regime", overlay = true, initial_capital = 1000, default_qty_type = strategy.percent_of_equity,
+     default_qty_value = 100, commission_type = strategy.commission.percent, commission_value = 0.1)
+
+secret    = input.string("CHANGE_ME", "Webhook secret (TV_WEBHOOK_SECRET)")
+sizeUsd   = input.float(50, "Bot position size (USD)", minval = 10)
+fastLen   = input.int(21, "Fast EMA", minval = 1)
+slowLen   = input.int(55, "Slow EMA", minval = 2)
+stdLen    = input.int(50, "Std dev length", minval = 2)
+stdSmooth = input.int(10, "Std dev smoothing", minval = 1)
+mult      = input.float(1.0, "Band width (x std dev)", minval = 0.1, step = 0.1)
+slopeLen  = input.int(0, "Only enter while this EMA rises (0 = off)", minval = 0)
+
+tp     = hlc3
+basis  = (ta.ema(tp, fastLen) + ta.ema(tp, slowLen)) / 2
+sd     = ta.ema(ta.stdev(tp, stdLen, false), stdSmooth)
+upper  = basis + mult * sd
+lower  = basis - mult * sd
+
+var int regime = 0
+flipBull = regime != 1 and close > upper
+flipBear = regime != -1 and close < lower
+if flipBull
+    regime := 1
+if flipBear
+    regime := -1
+
+slopeMa = ta.ema(close, math.max(slopeLen, 1))
+rising  = slopeLen == 0 or slopeMa > slopeMa[10]
+
+sym = syminfo.prefix + ":" + syminfo.ticker
+buyMsg   = '{"secret":"' + secret + '","symbol":"' + sym + '","action":"buy","size_usd":' + str.tostring(sizeUsd) + ',"stop_pct":15,"comment":"Pine volatility regime: bull"}'
+closeMsg = '{"secret":"' + secret + '","symbol":"' + sym + '","action":"close","comment":"Pine volatility regime: bear"}'
+
+if flipBull and rising
+    strategy.entry("Bull", strategy.long, alert_message = buyMsg)
+if flipBear
+    strategy.close("Bull", alert_message = closeMsg)
+
+plot(basis, "Basis", color.new(color.gray, 0))
+p1 = plot(upper, "Upper band", color.new(color.green, 40))
+p2 = plot(lower, "Lower band", color.new(color.red, 40))
+fill(p1, p2, color = regime == 1 ? color.new(color.green, 90) : regime == -1 ? color.new(color.red, 90) : na)
+plotshape(flipBull, "Bull flag", shape.triangleup, location.belowbar, color.green, size = size.small)
+plotshape(flipBear, "Bear flag", shape.triangledown, location.abovebar, color.red, size = size.small)
