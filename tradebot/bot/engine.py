@@ -57,6 +57,8 @@ class Engine:
         self.last_error = ""
         self._stop = threading.Event()
         self.threaded = False
+        self.pending: dict[str, dict] = {}     # trades waiting for your OK (approvals)
+        self._pending_seq = 0
 
     # ---------- setup ----------
 
@@ -246,6 +248,7 @@ class Engine:
                 self.event("blocked", reason)
             self._reconcile(positions)
             self._manage_exits(positions)
+            self._expire_pending()
             self.last_tick = time.time()
         if not self.threaded:
             self._run_strategies()
@@ -440,10 +443,15 @@ class Engine:
                     return None
                 return self._close(sig, pos)
             want = "long" if sig.action == "buy" else "short"
+            if pos and pos.side == want:
+                self.event("info", f"{sig.label or sig.symbol}: already {want}, signal from {sig.strategy} ignored")
+                return None
+            if self._needs_approval(sig) and not sig.approved:
+                d = self._decide(sig)        # only trades that pass every risk check are proposed
+                if d:
+                    self._propose([sig], [d])
+                return None
             if pos:
-                if pos.side == want:
-                    self.event("info", f"{sig.label or sig.symbol}: already {want}, signal from {sig.strategy} ignored")
-                    return None
                 flip = Signal(sig.venue, sig.symbol, "close", sig.strategy, label=sig.label, reason="reversing position")
                 if not self._close(flip, pos):
                     return None
@@ -469,6 +477,11 @@ class Engine:
                     return
                 decisions.append(d)
             size = min(d.size_usd for d in decisions)
+            if self._needs_approval(legs[0]) and not all(s.approved for s in legs):
+                for d in decisions:
+                    d.size_usd = size
+                self._propose(legs, decisions)
+                return
             opened = []
             for sig, d in zip(legs, decisions):
                 d.size_usd = size
@@ -481,6 +494,92 @@ class Engine:
                                                reason="other leg failed"), pos)
                     return
                 opened.append(sig)
+
+    # ---------- approvals: the bot proposes, you decide ----------
+
+    def _needs_approval(self, sig: Signal) -> bool:
+        """New automatic trades wait for your OK; exits, stop moves and your own dashboard trades never do."""
+        if sig.action not in ("buy", "sell") or sig.strategy == "manual":
+            return False
+        ask = self.cfg.get("approvals", {}).get("ask", "live")
+        return ask == "always" or (ask == "live" and self.live)
+
+    def _propose(self, legs: list[Signal], decisions: list) -> None:
+        cfg = self.cfg.get("approvals", {})
+        first = legs[0]
+        for pid, item in list(self.pending.items()):   # a newer signal for the same market replaces the old one
+            if {s.key for s in item["legs"]} & {s.key for s in legs}:
+                self.pending.pop(pid)
+        every = self.cfg["strategies"].get(first.strategy, {}).get("every_seconds", 0) or 0
+        ttl = max(float(cfg.get("expire_minutes", 5)) * 60, 2 * every)
+        prices = []
+        for s in legs:
+            try:
+                prices.append(self.price(s.venue, s.symbol))
+            except Exception:
+                prices.append(None)
+        self._pending_seq += 1
+        pid = f"p{self._pending_seq}"
+        now = time.time()
+        self.pending[pid] = {"id": pid, "legs": legs, "decisions": decisions, "prices": prices, "created": now, "expires": now + ttl}
+        what = " + ".join(f"{'BUY' if s.action == 'buy' else 'SHORT'} {s.label or s.symbol}" for s in legs)
+        self.event("approval", f"Waiting for your OK: {what} ${decisions[0].size_usd:,.2f} ({first.strategy}"
+                               f"{'; ' + first.reason if first.reason else ''}). Expires in {ttl / 60:.0f} min.",
+                   venue=first.venue)
+
+    def _expire_pending(self) -> None:
+        now = time.time()
+        for pid, item in list(self.pending.items()):
+            if now > item["expires"]:
+                self.pending.pop(pid)
+                self.event("info", f"{' + '.join(s.label or s.symbol for s in item['legs'])}: proposal expired without an answer")
+
+    def answer(self, pid: str, approve: bool) -> dict:
+        """Your answer from the dashboard. Approving re-checks everything at the current price first."""
+        with self.lock:
+            item = self.pending.pop(pid, None)
+            if not item:
+                raise ValueError("this proposal expired or was already answered")
+            legs = item["legs"]
+            name = " + ".join(s.label or s.symbol for s in legs)
+            if not approve:
+                self.event("info", f"{name}: skipped by you")
+                return {"ok": True, "placed": False}
+            if time.time() > item["expires"]:
+                raise ValueError("this proposal has expired")
+            limit = float(self.cfg.get("approvals", {}).get("max_price_move_pct", 2.0))
+            for s, then in zip(legs, item["prices"]):
+                if not then:
+                    continue
+                now_px = self.price(s.venue, s.symbol)
+                move = abs(now_px / then - 1) * 100
+                if move > limit:
+                    self.event("blocked", f"{name}: not placed, the price moved {move:.1f}% since the proposal (limit {limit:g}%)")
+                    return {"ok": False, "placed": False, "error": f"the price moved {move:.1f}% since the proposal, so it was not placed"}
+            for s in legs:
+                s.approved = True
+                s.reason = f"{s.reason}; approved by you" if s.reason else "approved by you"
+            if len(legs) > 1:
+                self.execute_group(legs)
+                placed = all(any(p.key == s.key for p in self.last_positions) for s in legs)
+                return {"ok": placed, "placed": placed, "error": "" if placed else "see the activity feed"}
+            fill = self.execute(legs[0])
+            ok = bool(fill and fill.ok)
+            return {"ok": ok, "placed": ok, "error": "" if ok else (fill.error if fill else "not placed: see the activity feed")}
+
+    def approvals(self) -> list[dict]:
+        now = time.time()
+        out = []
+        for item in self.pending.values():
+            legs, ds = item["legs"], item["decisions"]
+            out.append({
+                "id": item["id"], "expires_in": max(0, round(item["expires"] - now)), "strategy": legs[0].strategy,
+                "reason": legs[0].reason, "warning": legs[0].warning, "setup": legs[0].setup,
+                "legs": [{"venue": s.venue, "symbol": s.symbol, "label": s.label or s.symbol[:8], "side": "long" if s.action == "buy" else "short",
+                          "size_usd": round(d.size_usd, 2), "leverage": d.leverage, "stop": d.stop_price, "take_profit": d.take_profit_price,
+                          "price": px} for s, d, px in zip(legs, ds, item["prices"])],
+            })
+        return sorted(out, key=lambda r: r["expires_in"])
 
     def _tighten_stop(self, sig: Signal) -> None:
         """Stops only ever move in the trade's favour."""
@@ -616,6 +715,7 @@ class Engine:
     def pause(self) -> None:
         with self.lock:
             self.state["paused"] = True
+            self.pending.clear()
             self.event("info", "Paused: no new trades. Open positions keep their stops and targets.")
             self.save_state()
 
@@ -630,6 +730,7 @@ class Engine:
             self.save_state()
 
     def close_all(self) -> None:
+        self.pending.clear()
         with self.lock:
             for pos in list(self.last_positions):
                 if pos.key in self.state.get("owners", {}) or not self.live:
@@ -720,6 +821,9 @@ class Engine:
                 "equity_history": [(int(t), v) for t, v in list(self.equity_history)[-2000:]],
                 "watch": self.watchlist(),
                 "training": {"running": self.trainer.status["running"], "progress": self.trainer.status["progress"]},
+                "approvals": self.approvals(),
+                "asks_approval": self.cfg.get("approvals", {}).get("ask", "live") == "always"
+                                 or (self.cfg.get("approvals", {}).get("ask", "live") == "live" and self.live),
             }
 
     def watchlist(self) -> list[dict]:

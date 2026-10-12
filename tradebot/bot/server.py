@@ -167,6 +167,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 cfg = config_mod.deep_merge(config_mod.DEFAULTS, body)
                 config_mod.save_config(cfg)
                 e.reload_config(cfg)
+            elif path == "/api/approvals":
+                return self._send(200, e.answer(str(body["id"]), bool(body.get("approve"))))
             elif path == "/api/strategy":
                 cfg = e.cfg
                 cfg["strategies"][body["name"]]["enabled"] = bool(body["enabled"])

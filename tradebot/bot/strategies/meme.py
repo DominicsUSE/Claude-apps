@@ -53,6 +53,17 @@ def watch_filter(pair: dict, p: dict, now_ms: int) -> bool:
             and p["min_market_cap_usd"] <= mcap <= p["max_market_cap_usd"] and bool(pair.get("pairAddress")))
 
 
+def unproven_warning(learned: dict) -> str:
+    """Plain-language warning for the approval card when training has not shown an edge."""
+    if proven(learned):
+        return ""
+    if not learned:
+        return "Not trained yet: nobody knows whether this setup makes money."
+    t = learned.get("test") or {}
+    stats = f" ({t['trades']} trades on unseen charts, {t['avg_pct']:+.2f}% per trade)" if t.get("trades") else ""
+    return f"Unproven: training says {str(learned.get('verdict', '')).lower()}{stats}."
+
+
 class MemeScalper(Strategy):
     """Reads memecoin charts and trades breakouts, pullbacks and VWAP reclaims (FOMO wallet and Liquid perps)."""
     name = "meme_scalper"
@@ -87,8 +98,11 @@ class MemeScalper(Strategy):
         return p
 
     def live_blocked(self, ctx: Context, venue: str, p: dict) -> str:
-        """In live mode, refuse new entries until training shows an edge on unseen charts."""
+        """In live mode, refuse new entries until training shows an edge on unseen charts, unless you
+        approve every trade yourself (then the proposals carry a warning instead)."""
         if not config_mod.is_live(ctx.cfg) or self.cfg.get("trade_unproven_live", False):
+            return ""
+        if config_mod.asks_approval(ctx.cfg) and ctx.cfg.get("approvals", {}).get("propose_unproven", True):
             return ""
         if not proven(p["learned"]):
             v = p["learned"].get("verdict", "not trained yet")
@@ -109,6 +123,9 @@ class MemeScalper(Strategy):
             out += self._scan_fomo(ctx)
         if self.cfg.get("liquid_enabled", True) and "liquid" in ctx.venues:
             out += self._scan_liquid(ctx)
+        for sig in out:
+            if sig.action in ("buy", "sell"):
+                sig.warning = unproven_warning(self.params(sig.venue)["learned"])
         self.watch = {m: w for m, w in self.watch.items() if ctx.now - w["time"] < 3600}
         self.last_note = " | ".join(self.notes.values())
         return out

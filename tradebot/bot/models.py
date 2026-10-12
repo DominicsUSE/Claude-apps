@@ -35,6 +35,8 @@ class Signal:
     reason: str = ""
     group: str = ""             # positions opened together (pair trades) share a group and close together
     setup: str = ""             # which chart setup triggered it (meme scalper), for per-setup learning
+    warning: str = ""           # shown on the approval card, e.g. "training has not proven this setup"
+    approved: bool = False      # you approved it on the dashboard: place it without asking again
 
     @property
     def key(self) -> str:

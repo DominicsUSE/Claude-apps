@@ -32,6 +32,15 @@ DEFAULTS = {
     # TradingView alerts arrive here. Keep it on its own port so a public tunnel never exposes the dashboard.
     "webhook": {"enabled": True, "host": "127.0.0.1", "port": 8788},
     "paper": {"starting_balance_usd": 1000.0, "fee_pct": 0.1, "slippage_pct": 0.3},
+    # Ask before trading: the bot proposes each new trade on the dashboard and only places it when
+    # you press Approve. Exits (stops, targets, chart exits) never wait for you.
+    "approvals": {
+        "ask": "live",                    # live = ask before every automatic trade with real money; always = also in paper; off = never ask
+        "expire_minutes": 5,              # an unanswered proposal expires (slow strategies get at least two of their checks)
+        "max_price_move_pct": 2.0,        # if the price moved more than this since the proposal, approving it is refused
+        "propose_unproven": True,         # while you approve each trade, the meme scalper may also propose setups
+                                          # training has not proven yet (clearly marked); without approvals they stay blocked
+    },
     "risk": {
         "risk_per_trade_pct": 1.0,        # at most this % of equity is lost if a stop is hit
         "max_position_usd": 100.0,        # hard cap per position
@@ -274,9 +283,17 @@ def validate(cfg: dict) -> None:
         raise ValueError("risk_per_trade_pct above 10% is not allowed: a short losing streak would wipe the account")
     if r["max_leverage"] < 1 or r["max_leverage"] > 20:
         raise ValueError("max_leverage must be between 1 and 20")
+    if cfg["approvals"]["ask"] not in ("live", "always", "off"):
+        raise ValueError('approvals "ask" must be "live", "always" or "off"')
     if cfg["venues"]["fomo"]["quote"] not in ("USDC", "SOL"):
         raise ValueError('fomo "quote" must be "USDC" or "SOL"')
 
 
 def is_live(cfg: dict) -> bool:
     return cfg["mode"] == "live" and cfg.get("live_trading_acknowledged") is True
+
+
+def asks_approval(cfg: dict) -> bool:
+    """True when automatic new trades wait for your OK on the dashboard."""
+    ask = cfg.get("approvals", {}).get("ask", "live")
+    return ask == "always" or (ask == "live" and is_live(cfg))

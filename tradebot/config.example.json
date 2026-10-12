@@ -16,6 +16,12 @@
     "fee_pct": 0.1,
     "slippage_pct": 0.3
   },
+  "approvals": {
+    "ask": "live",
+    "expire_minutes": 5,
+    "max_price_move_pct": 2.0,
+    "propose_unproven": true
+  },
   "risk": {
     "risk_per_trade_pct": 1.0,
     "max_position_usd": 100.0,

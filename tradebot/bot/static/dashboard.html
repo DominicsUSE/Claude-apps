@@ -62,7 +62,7 @@ td.n,th.n{text-align:right}
 .feed{list-style:none;margin:0;padding:0;max-height:460px;overflow:auto}
 .feed li{padding:8px 0;border-bottom:1px solid var(--muted);display:grid;grid-template-columns:62px 1fr;gap:8px;font-size:13px}
 .feed .t{color:var(--fg2)}
-.feed .trade{color:var(--fg)}.feed .blocked{color:var(--amber)}.feed .error{color:var(--neg)}.feed .info,.feed .signal{color:var(--fg2)}
+.feed .trade{color:var(--fg)}.feed .approval{color:var(--accent);font-weight:600}.feed .blocked{color:var(--amber)}.feed .error{color:var(--neg)}.feed .info,.feed .signal{color:var(--fg2)}
 .strat{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;padding:10px 0;border-bottom:1px solid var(--muted)}
 .strat .name{font-weight:600}.strat .desc,.strat .note{grid-column:2;font-size:12px;color:var(--fg2)}
 .switch{position:relative;width:44px;height:26px;flex:none}
@@ -141,6 +141,11 @@ ol.steps{margin:6px 0 0 18px;padding:0;font-size:13px}ol.steps li{margin:3px 0}
   <!-- OVERVIEW -->
   <section data-panel="overview">
     <div class="grid">
+      <div class="card c12 hidden" id="approvalCard" aria-live="assertive">
+        <h2>Waiting for your OK <small>The bot only places these when you approve. Exits never wait for you.</small>
+          <button class="btn sm" id="notifyBtn" type="button" style="margin-left:auto">Alert me</button></h2>
+        <div id="approvals"></div>
+      </div>
       <div class="card c8 fill">
         <h2>Account value <small id="eqNote"></small></h2>
         <canvas id="eqChart" aria-label="Account value over time"></canvas>
@@ -491,6 +496,7 @@ async function refresh() {
   const off = Object.entries(s.connections).filter(([, c]) => !c.connected);
   if (s.mode === "live" && off.length) banner += `<div class="alert blue"><span>${off.map(([k, c]) => `<b>${k === "fomo" ? "FOMO" : "Liquid"}:</b> ${esc(c.detail)}`).join("<br>")} (see Connections)</span></div>`;
   $("#banner").innerHTML = banner;
+  renderApprovals(s);
   // positions
   const tb = $("#posTable tbody");
   tb.innerHTML = s.positions.map(p => `<tr>
@@ -526,6 +532,43 @@ async function refresh() {
   // connections tab status
   $("#connStatus").innerHTML = Object.entries(s.connections).map(([k, c]) => `<div class="sec"><div><b>${k === "fomo" ? "FOMO wallet (Solana)" : "Liquid (Hyperliquid)"}</b><p>${esc(c.detail)}</p></div><span class="badge ${c.connected ? (s.mode === "paper" ? "paper" : "ok") : "warn"}">${c.connected ? (s.mode === "paper" ? "practice" : "connected") : "not connected"}</span></div>`).join("");
 }
+// ---------- approvals ----------
+const seenApprovals = new Set();
+function renderApprovals(s) {
+  const list = s.approvals || [];
+  $("#approvalCard").classList.toggle("hidden", !list.length);
+  document.title = list.length ? `(${list.length}) OK? Tradebot` : "Tradebot";
+  $("#notifyBtn").classList.toggle("hidden", !("Notification" in window) || Notification.permission !== "default");
+  $("#approvals").innerHTML = list.map(a => {
+    const legs = a.legs.map(l => `<b>${l.side === "long" ? "BUY" : "SHORT"} ${esc(l.label)}</b> on ${l.venue === "fomo" ? "FOMO" : "Liquid"}
+      for ${usd(l.size_usd)}${l.leverage > 1 ? ` at ${l.leverage}x` : ""} · now ${px(l.price)} · stop ${px(l.stop)}${l.take_profit ? " · target " + px(l.take_profit) : ""}`).join("<br>");
+    const m = Math.floor(a.expires_in / 60), sec = String(a.expires_in % 60).padStart(2, "0");
+    return `<div class="sec" style="align-items:flex-start;gap:12px;flex-wrap:wrap"><div style="flex:1;min-width:240px">${legs}
+      <p>${esc(NAMES[a.strategy] || a.strategy)}${a.setup ? " · " + esc(a.setup.replace(/_/g, " ")) : ""}: ${esc(a.reason || "")}</p>
+      ${a.warning ? `<div class="alert" role="note" style="margin-top:6px"><svg width="18" height="18" aria-hidden="true"><use href="#i-alert"/></svg><span>${esc(a.warning)}</span></div>` : ""}
+      <p class="dim" style="font-size:12px">Expires in ${m}:${sec}${s.mode === "live" ? " · REAL MONEY" : " · practice"}</p></div>
+      <div style="display:flex;gap:8px"><button class="btn primary" data-approve="${esc(a.id)}">Approve</button><button class="btn" data-skip="${esc(a.id)}">Skip</button></div></div>`;
+  }).join("");
+  for (const a of list) {
+    if (seenApprovals.has(a.id)) continue;
+    seenApprovals.add(a.id);
+    try { if ("Notification" in window && Notification.permission === "granted")
+      new Notification("Tradebot: your OK?", {body: a.legs.map(l => `${l.side === "long" ? "BUY" : "SHORT"} ${l.label} ${usd(l.size_usd)}`).join(", ") + (a.warning ? " (unproven)" : ""), tag: a.id}); } catch (e) {}
+  }
+}
+$("#approvals").addEventListener("click", async ev => {
+  const b = ev.target.closest("[data-approve],[data-skip]"); if (!b) return;
+  const approve = !!b.dataset.approve, id = b.dataset.approve || b.dataset.skip;
+  if (approve && last && last.mode === "live" && !confirm("Place this trade with REAL money now?")) return;
+  $$("#approvals button").forEach(x => x.disabled = true);
+  try {
+    const r = await api("/api/approvals", {id, approve});
+    toast(approve ? (r.placed ? "Trade placed" : "Not placed: " + (r.error || "see Activity")) : "Skipped");
+  } catch (e) { toast(e.message); }
+  refresh();
+});
+$("#notifyBtn").onclick = async () => { try { await Notification.requestPermission(); } catch (e) {} refresh(); };
+
 $("#strats").addEventListener("change", async ev => {
   const n = ev.target.dataset.strat; if (!n) return;
   try { await api("/api/strategy", {name: n, enabled: ev.target.checked}); toast(`${NAMES[n] || n} ${ev.target.checked ? "on" : "off"}`); } catch (e) { toast(e.message); ev.target.checked = !ev.target.checked; }
@@ -643,6 +686,9 @@ $("#ruinFill").onclick = async () => {
 
 // ---------- settings ----------
 const HELP = {
+  ask: "live = the bot asks before every automatic trade with real money; always = also in practice mode; off = never asks",
+  expire_minutes: "An unanswered proposal expires after this long", max_price_move_pct: "Approving is refused if the price moved more than this % since the proposal",
+  propose_unproven: "While you approve each trade, also propose setups training has not proven yet (marked as unproven)",
   mode: "paper = practice money; live = real orders (also needs live_trading_acknowledged)",
   live_trading_acknowledged: "Tick only when you accept that live mode trades real money", loop_seconds: "How often the bot checks everything",
   risk_per_trade_pct: "Max % of the account lost if a stop is hit", max_position_usd: "Hard cap on any single position",
@@ -653,7 +699,8 @@ const HELP = {
 let cfgCache = null;
 async function loadSettings() {
   cfgCache = await api("/api/config");
-  const sections = [["General", ["mode", "live_trading_acknowledged", "loop_seconds"], cfgCache], ["Risk limits", Object.keys(cfgCache.risk), cfgCache.risk, "risk"],
+  const sections = [["General", ["mode", "live_trading_acknowledged", "loop_seconds"], cfgCache], ["Ask before trading", Object.keys(cfgCache.approvals), cfgCache.approvals, "approvals"],
+    ["Risk limits", Object.keys(cfgCache.risk), cfgCache.risk, "risk"],
     ...Object.keys(cfgCache.strategies).map(k => [NAMES[k] || k, Object.keys(cfgCache.strategies[k]).filter(x => x !== "enabled"), cfgCache.strategies[k], "strategies." + k]),
     ["FOMO wallet", Object.keys(cfgCache.venues.fomo), cfgCache.venues.fomo, "venues.fomo"], ["Liquid", Object.keys(cfgCache.venues.liquid), cfgCache.venues.liquid, "venues.liquid"],
     ["News check (Perplexity / Grok)", Object.keys(cfgCache.research), cfgCache.research, "research"], ["Practice account", Object.keys(cfgCache.paper), cfgCache.paper, "paper"]];
@@ -663,6 +710,7 @@ async function loadSettings() {
 function field(path, key, v) {
   const help = HELP[key] ? `<span class="help">${esc(HELP[key])}</span>` : "";
   if (key === "mode") return `<label class="fld">${key}<select data-path="${path}"><option ${v === "paper" ? "selected" : ""}>paper</option><option ${v === "live" ? "selected" : ""}>live</option></select>${help}</label>`;
+  if (key === "ask") return `<label class="fld">${key}<select data-path="${path}">${["live", "always", "off"].map(o => `<option ${v === o ? "selected" : ""}>${o}</option>`).join("")}</select>${help}</label>`;
   if (typeof v === "boolean") return `<label class="fld">${esc(key)}<input type="checkbox" data-path="${path}" ${v ? "checked" : ""} style="min-height:auto;width:20px;height:20px">${help}</label>`;
   if (typeof v === "number") return `<label class="fld">${esc(key)}<input type="number" step="any" data-path="${path}" value="${v}">${help}</label>`;
   if (Array.isArray(v) || (v && typeof v === "object")) return `<label class="fld">${esc(key)}<input data-path="${path}" data-json="1" value="${esc(JSON.stringify(v))}">${help}</label>`;

@@ -77,3 +77,17 @@ def test_webhook(servers, engine):
     assert code == 200
     engine._drain_inbox()
     assert engine.state["owners"]["liquid:ETH"]["strategy"] == "tradingview"
+
+
+def test_approve_from_the_dashboard(servers, engine):
+    from bot.models import Signal
+    dash = servers[0]
+    engine.cfg["approvals"]["ask"] = "always"
+    engine.execute(Signal("liquid", "BTC", "buy", "trend", label="BTC", size_usd=50, stop_pct=5))
+    code, st = call(dash + "/api/status")
+    [a] = st["approvals"]
+    assert call(dash + "/api/approvals", {"id": a["id"], "approve": True})[0] == 403      # no X-Tradebot header
+    code, r = call(dash + "/api/approvals", {"id": a["id"], "approve": True}, {"X-Tradebot": "1"})
+    assert code == 200 and r["placed"] and "liquid:BTC" in engine.state["owners"]
+    code, r = call(dash + "/api/approvals", {"id": a["id"], "approve": True}, {"X-Tradebot": "1"})
+    assert code >= 400                                                                     # already answered

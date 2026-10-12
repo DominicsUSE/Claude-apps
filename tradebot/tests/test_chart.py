@@ -278,8 +278,8 @@ def test_liquid_memecoin_short_and_live_gate(cfg):
     sigs = s.scan(ctx)
     assert len(sigs) == 1 and sigs[0].action == "sell" and sigs[0].setup == "breakout_short"
     assert sigs[0].stop_price > breakdown[-1].c and sigs[0].reason.startswith("Breakdown")
-    # live mode: no entries until training shows an edge on unseen charts
-    live_cfg = {**cfg, "mode": "live", "live_trading_acknowledged": True}
+    # live mode without approvals: no entries until training shows an edge on unseen charts
+    live_cfg = {**cfg, "mode": "live", "live_trading_acknowledged": True, "approvals": {**cfg["approvals"], "ask": "off"}}
 
     class T:
         def get(self, profile):
@@ -287,6 +287,11 @@ def test_liquid_memecoin_short_and_live_gate(cfg):
     s2 = MemeScalper(mcfg, {}, T(), None)
     assert s2.scan(Context(live_cfg, HLWithCandles({"WIF": breakdown}), MemeSol({}), [], {}, now=breakdown[-1].t / 1000 + 600)) == []
     assert "live entries paused" in s2.last_note
+    # live mode where you approve each trade: proposed, with the training result as a warning
+    asking_cfg = {**live_cfg, "approvals": {**cfg["approvals"], "ask": "live"}}
+    s3 = MemeScalper(mcfg, {}, T(), None)
+    [sig] = s3.scan(Context(asking_cfg, HLWithCandles({"WIF": breakdown}), MemeSol({}), [], {}, now=breakdown[-1].t / 1000 + 600))
+    assert sig.warning.startswith("Unproven") and sig.setup == "breakout_short"
 
 
 def test_training_both_sides():
