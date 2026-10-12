@@ -148,7 +148,8 @@ class FomoWalletBroker(Broker):
         try:
             order = http.get(f"{self.jupiter_url}/order", params=params, headers=self.jupiter_headers, timeout=20, retries=1)
         except http.HttpError as e:
-            if "slippage" not in str(e).lower():
+            # Some Jupiter versions set slippage themselves and reject the parameter: retry once without it.
+            if "slippage" not in str(e).lower() and "400" not in str(e):
                 raise
             params.pop("slippageBps")
             order = http.get(f"{self.jupiter_url}/order", params=params, headers=self.jupiter_headers, timeout=20, retries=1)

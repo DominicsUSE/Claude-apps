@@ -46,8 +46,9 @@ so the bot's trades show up in your FOMO app like your own.
 1. In FOMO: Settings → Account → Export (needs Face ID). Copy the **Solana** key.
 2. Dashboard → Connections → paste it into `FOMO_WALLET_PRIVATE_KEY` → Save keys.
 3. Keep USDC in the wallet (what the bot buys with) and about 0.05 SOL for network fees.
-4. Recommended: a free Jupiter key from [portal.jup.ag](https://portal.jup.ag) in `JUPITER_API_KEY`
-   (Jupiter's newer swap API asks for one), and a free private Solana RPC (e.g. Helius) in `SOLANA_RPC_URL`.
+4. Get a free Jupiter API key at [portal.jup.ag](https://portal.jup.ag) and save it as `JUPITER_API_KEY`:
+   swaps go through Jupiter, which needs it. A free private Solana RPC (e.g. Helius) in `SOLANA_RPC_URL`
+   is optional but more reliable than the public one.
 
 > Anyone with that key can take everything in the wallet. Never paste it into a chat, a website or
 > a message. A separate FOMO account just for the bot keeps your main money apart.

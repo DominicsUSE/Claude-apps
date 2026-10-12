@@ -87,7 +87,9 @@ class Engine:
         fomo_cfg, liq_cfg = self.cfg["venues"]["fomo"], self.cfg["venues"]["liquid"]
         if fomo_cfg["enabled"]:
             key = config_mod.secret("FOMO_WALLET_PRIVATE_KEY")
-            if key:
+            if key and not config_mod.secret("JUPITER_API_KEY") and "api.jup.ag" in fomo_cfg["jupiter_url"]:
+                self.broker_notes["fomo"] = "Add a free JUPITER_API_KEY (portal.jup.ag): Jupiter needs it to make swaps"
+            elif key:
                 from .brokers.fomo_wallet import FomoWalletBroker
                 try:
                     brokers["fomo"] = FomoWalletBroker(fomo_cfg, self.sol, key, config_mod.secret("SOLANA_RPC_URL"),
