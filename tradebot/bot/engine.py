@@ -93,9 +93,7 @@ class Engine:
         fomo_cfg, liq_cfg = self.cfg["venues"]["fomo"], self.cfg["venues"]["liquid"]
         if fomo_cfg["enabled"]:
             key = config_mod.secret("FOMO_WALLET_PRIVATE_KEY")
-            if key and not config_mod.secret("JUPITER_API_KEY") and "api.jup.ag" in fomo_cfg["jupiter_url"]:
-                self.broker_notes["fomo"] = "Add a free JUPITER_API_KEY (portal.jup.ag): Jupiter needs it to make swaps"
-            elif key:
+            if key:
                 from .brokers.fomo_wallet import FomoWalletBroker
                 try:
                     brokers["fomo"] = FomoWalletBroker(fomo_cfg, self.sol, key, config_mod.secret("SOLANA_RPC_URL"),
@@ -552,6 +550,8 @@ class Engine:
             "setup": sig.setup, "init_stop": d.stop_price,
         }
         self.journal(sig, fill, "open", sig.reason)
+        if fill.error:   # filled, but with a warning (e.g. the exchange stop order was refused)
+            self.event("error", f"{sig.label or sig.symbol}: {fill.error}", venue=sig.venue)
         self.event("trade", f"Opened {side} {sig.label or sig.symbol} ${fill.notional:,.2f} at {fill.price:.6g} "
                             f"({sig.strategy}{'; ' + sig.reason if sig.reason else ''})", venue=sig.venue)
         self.last_positions = [p for p in self.last_positions if p.key != sig.key] + [

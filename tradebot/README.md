@@ -113,20 +113,31 @@ from the look-ahead-bias, walk-forward and risk-of-ruin videos.
 ### FOMO
 
 FOMO has no official bot API. It does let you **export your wallet's private key**, though. With
-it, the bot trades that same Solana wallet through Jupiter (the swap router most Solana apps use),
-so the bot's trades show up in your FOMO app like your own.
+it, the bot trades that same Solana wallet through Jupiter (the swap router most Solana apps use).
+The coins it buys sit in your FOMO wallet next to your own; FOMO's own trade history and PnL may not
+list them (FOMO routes its own trades through DFlow), so the bot's dashboard and journal are where
+its trades are recorded.
 
-1. In FOMO: Settings → Account → Export (needs Face ID). Copy the **Solana** key.
-2. Dashboard → Connections → paste it into `FOMO_WALLET_PRIVATE_KEY` → Save keys.
-3. Keep USDC in the wallet (what the bot buys with) and about 0.05 SOL for network fees.
-4. Get a free Jupiter API key at [portal.jup.ag](https://portal.jup.ag) and save it as `JUPITER_API_KEY`:
-   swaps go through Jupiter, which needs it. A free private Solana RPC (e.g. Helius) in `SOLANA_RPC_URL`
-   is optional but more reliable than the public one.
+1. In FOMO: Settings → Account → Export (needs Face ID). Copy the **Solana** key (about 88
+   characters), not the 0x one: that is FOMO's EVM key.
+2. Dashboard → Connections → paste it into `FOMO_WALLET_PRIVATE_KEY` → Save keys → **Test my connections**.
+   The test shows the wallet address: check it matches the Solana address in your FOMO app.
+3. Keep USDC in the wallet (what the bot buys with). FOMO pays gas only inside its own app, so its
+   wallets usually hold no SOL: send about 0.05 SOL for network fees. Without it Jupiter can still pay
+   the gas on buys of about $10+, but selling needs SOL.
+4. Optional: a free Jupiter API key from [developers.jup.ag/portal](https://developers.jup.ag/portal)
+   in `JUPITER_API_KEY` doubles the request limit (swaps work without one). A free private Solana RPC
+   (e.g. Helius) in `SOLANA_RPC_URL` is more reliable than the public one.
+
+Jupiter charges about 0.1% per swap (more on brand-new tokens) on top of the pool's own fee. The bot
+refuses swaps that would move the price more than 3% or that ask for an unusual network fee.
 
 > Anyone with that key can take everything in the wallet. Never paste it into a chat, a website or
 > a message. A separate FOMO account just for the bot keeps your main money apart.
 
-The bot never touches tokens it did not buy itself.
+The bot never touches tokens it did not buy itself: it only ever sells the amount it bought, even
+when you hold the same coin. If a swap's answer gets lost on the way, the bot checks the wallet
+balance to see whether it went through instead of buying or selling twice.
 
 ### Liquid
 

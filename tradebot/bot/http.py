@@ -22,7 +22,9 @@ class HttpError(Exception):
     pass
 
 
-def _wait_turn(host: str) -> None:
+def _wait_turn(host: str, url: str = "") -> None:
+    if url.endswith("/execute"):
+        return  # Jupiter's /execute has its own, much larger limit: never delay a signed swap
     gap = MIN_INTERVAL.get(host, 0)
     if not gap:
         return
@@ -38,7 +40,7 @@ def request(method: str, url: str, *, json=None, params=None, headers=None, time
     host = urlparse(url).hostname or ""
     last_error = None
     for attempt in range(retries + 1):
-        _wait_turn(host)
+        _wait_turn(host, url)
         try:
             r = _session.request(method, url, json=json, params=params, headers=headers, timeout=timeout)
         except requests.RequestException as e:
@@ -49,6 +51,9 @@ def request(method: str, url: str, *, json=None, params=None, headers=None, time
                 if attempt < retries:
                     try:
                         wait = float(r.headers.get("Retry-After") or 0)
+                        reset = r.headers.get("x-ratelimit-reset")   # Jupiter: unix time when the window resets
+                        if reset:
+                            wait = max(wait, float(reset) - time.time())
                     except ValueError:
                         wait = 0
                     time.sleep(min(wait or 12.0 * (attempt + 1), 60))

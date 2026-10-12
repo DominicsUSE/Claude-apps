@@ -18,11 +18,10 @@ def _f(value, default=0.0) -> float:
 
 
 def jupiter_base(kind: str) -> tuple[str, dict]:
-    """Jupiter's free tier needs no key (lite-api). With JUPITER_API_KEY the faster api.jup.ag is used."""
+    """Jupiter answers without a key at 0.5 requests/second; a free key (developers.jup.ag/portal)
+    doubles that. lite-api.jup.ag is being retired, so api.jup.ag is always used."""
     key = secret("JUPITER_API_KEY")
-    if key:
-        return f"https://api.jup.ag/{kind}", {"x-api-key": key}
-    return f"https://lite-api.jup.ag/{kind}", {}
+    return f"https://api.jup.ag/{kind}", ({"x-api-key": key} if key else {})
 
 
 class SolanaData:
@@ -104,15 +103,16 @@ class SolanaData:
 
     def _jupiter_prices(self, mints: list[str]) -> None:
         base, headers = jupiter_base("price/v3")
-        try:
-            raw = http.get(base, params={"ids": ",".join(mints[:50])}, headers=headers) or {}
-        except http.HttpError:
-            return
-        now = time.time()
-        for mint, row in raw.items():
-            price = _f((row or {}).get("usdPrice"))
-            if price > 0:
-                self._price_cache[mint] = (now, price)
+        for i in range(0, len(mints), 50):
+            try:
+                raw = http.get(base, params={"ids": ",".join(mints[i:i + 50])}, headers=headers) or {}
+            except http.HttpError:
+                continue
+            now = time.time()
+            for mint, row in raw.items():
+                price = _f((row or {}).get("usdPrice"))
+                if price > 0:
+                    self._price_cache[mint] = (now, price)
 
     # ---------- safety ----------
 
@@ -139,9 +139,11 @@ class SolanaData:
             if info:
                 sources += 1
                 audit = info.get("audit") or {}
-                if audit.get("mintAuthorityDisabled") is False:
+                if "isSus" in audit:
+                    reasons.append("Jupiter flags this token as suspicious")
+                if audit.get("mintAuthorityDisabled") is False or info.get("mintAuthority"):
                     reasons.append("the creator can still print more tokens (mint authority on)")
-                if audit.get("freezeAuthorityDisabled") is False:
+                if audit.get("freezeAuthorityDisabled") is False or info.get("freezeAuthority"):
                     reasons.append("the creator can freeze your tokens (freeze authority on)")
                 top = audit.get("topHoldersPercentage")
                 if top is not None and _f(top) > max_top10_pct:

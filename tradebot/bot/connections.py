@@ -36,7 +36,9 @@ def test_fomo(venue_cfg: dict) -> list[dict]:
     try:
         sol = rpc_call("getBalance", [address, {"commitment": "confirmed"}])["value"] / 1e9
         need = venue_cfg.get("min_sol_for_fees", 0.02)
-        rows.append(_row("SOL for network fees", sol >= need, f"{sol:.4f} SOL" + ("" if sol >= need else f" (keep at least {need} SOL so swaps can pay fees)")))
+        rows.append(_row("SOL for network fees", sol >= need or None, f"{sol:.4f} SOL" + ("" if sol >= need else
+                         f". FOMO pays gas only inside its own app. Jupiter can cover gas on buys of about $10+, "
+                         f"but sells and small trades need SOL: send about 0.05 SOL to {address}")))
         usdc = 0.0
         res = rpc_call("getTokenAccountsByOwner", [address, {"mint": USDC_MINT}, {"encoding": "jsonParsed"}])
         for acct in res.get("value", []):
@@ -48,17 +50,17 @@ def test_fomo(venue_cfg: dict) -> list[dict]:
         rows.append(_row("Solana network", False, f"Could not read the wallet: {e}. A private RPC (SOLANA_RPC_URL, e.g. Helius) helps."))
     jkey = secret("JUPITER_API_KEY")
     url = venue_cfg["jupiter_url"].rstrip("/")
-    if not jkey and "api.jup.ag" in url:
-        rows.append(_row("Jupiter API key", False, "Not set. Get a free key at portal.jup.ag and paste it above: every swap goes through Jupiter."))
-    else:
-        try:
-            q = http.get(f"{url}/order", params={"inputMint": USDC_MINT, "outputMint": SOL_MINT, "amount": "1000000"},
-                         headers={"x-api-key": jkey} if jkey else {}, timeout=20, retries=1)
-            out = q.get("outAmount")
-            rows.append(_row("Jupiter swaps", bool(out), f"Price check OK: 1 USDC = {int(out) / 1e9:.5f} SOL" if out
-                             else f"Unexpected answer: {str(q)[:160]}"))
-        except Exception as e:
-            rows.append(_row("Jupiter swaps", False, f"{e}"))
+    if not jkey:
+        rows.append(_row("Jupiter API key", None, "Not set: swaps still work, at most one request every 2 seconds. "
+                         "A free key from developers.jup.ag/portal doubles that."))
+    try:
+        q = http.get(f"{url}/order", params={"inputMint": USDC_MINT, "outputMint": SOL_MINT, "amount": "1000000"},
+                     headers={"x-api-key": jkey} if jkey else {}, timeout=20, retries=1)
+        out = q.get("outAmount")
+        rows.append(_row("Jupiter swaps", bool(out), f"Price check OK: 1 USDC = {int(out) / 1e9:.5f} SOL" if out
+                         else f"Unexpected answer: {str(q)[:160]}"))
+    except Exception as e:
+        rows.append(_row("Jupiter swaps", False, f"{e}"))
     return rows
 
 

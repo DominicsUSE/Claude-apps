@@ -37,7 +37,9 @@
     "fomo": {
       "enabled": true,
       "quote": "USDC",
-      "slippage_bps": 300,
+      "slippage_bps": null,
+      "max_price_impact_pct": 3.0,
+      "max_priority_fee_lamports": 2000000,
       "min_sol_for_fees": 0.02,
       "jupiter_url": "https://api.jup.ag/swap/v2",
       "rpc_url": "https://api.mainnet-beta.solana.com"

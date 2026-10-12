@@ -333,11 +333,11 @@ ol.steps{margin:6px 0 0 18px;padding:0;font-size:13px}ol.steps li{margin:3px 0}
       <div class="card c6">
         <h2>Connect FOMO</h2>
         <ol class="steps">
-          <li>In the FOMO app: Settings → Account → Export (Face ID). Copy the <b>Solana</b> private key.</li>
-          <li>Paste it into <b>FOMO_WALLET_PRIVATE_KEY</b> above and save. It stays on this computer.</li>
-          <li>Keep some USDC (what the bot spends) and about 0.05 SOL (network fees) in the FOMO wallet.</li>
-          <li>Get a free Jupiter API key at portal.jup.ag and save it as <b>JUPITER_API_KEY</b>: swaps go through Jupiter. A private Solana RPC (e.g. Helius) is optional but more reliable.</li>
-          <li>Trades the bot makes show up in the FOMO app like your own.</li>
+          <li>In the FOMO app: Settings → Account → Export (Face ID). Copy the <b>Solana</b> private key (about 88 characters), not the 0x one.</li>
+          <li>Paste it into <b>FOMO_WALLET_PRIVATE_KEY</b> above, save, then press <b>Test my connections</b>. Check the wallet address matches the one in FOMO. The key stays on this computer.</li>
+          <li>Keep some USDC (what the bot spends) in the wallet and send about 0.05 SOL for network fees: FOMO pays gas only inside its own app, and selling needs SOL.</li>
+          <li>Optional: a free Jupiter API key from developers.jup.ag/portal as <b>JUPITER_API_KEY</b> (faster), and a private Solana RPC such as Helius (more reliable).</li>
+          <li>The coins the bot buys appear in your FOMO holdings; FOMO's own history may not list them, the Trade journal here does. The bot only ever sells what it bought.</li>
         </ol>
         <div class="alert red" role="note"><svg width="18" height="18" aria-hidden="true"><use href="#i-alert"/></svg><span>Anyone with this key can take everything in the wallet. Never paste it into a chat, a website or a message. Consider a separate FOMO account just for the bot.</span></div>
       </div>
@@ -688,7 +688,7 @@ $("#paperForm").onsubmit = async ev => {
 // ---------- connections ----------
 const SECRETS = [
   ["FOMO_WALLET_PRIVATE_KEY", "FOMO wallet private key (Solana)", "Exported from FOMO: Settings → Account → Export"],
-  ["JUPITER_API_KEY", "Jupiter API key", "Free at portal.jup.ag; FOMO trading needs it"],
+  ["JUPITER_API_KEY", "Jupiter API key", "Optional, free at developers.jup.ag/portal: faster swaps"],
   ["SOLANA_RPC_URL", "Solana RPC URL (optional)", "e.g. a free Helius URL; the public one is slow"],
   ["HL_ACCOUNT_ADDRESS", "Liquid / Hyperliquid account address", "0x…, the address of your Liquid account"],
   ["HL_API_PRIVATE_KEY", "Hyperliquid API wallet private key", "Created at app.hyperliquid.xyz → API; cannot withdraw"],

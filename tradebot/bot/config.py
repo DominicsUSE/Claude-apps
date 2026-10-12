@@ -52,9 +52,11 @@ DEFAULTS = {
     "venues": {
         "fomo": {
             "enabled": True,
-            "quote": "USDC",              # USDC or SOL: what the bot spends and receives
-            "slippage_bps": 300,          # 3%: memecoins move fast
-            "min_sol_for_fees": 0.02,     # keep this much SOL so swaps can always pay fees
+            "quote": "USDC",              # USDC or SOL: what the bot spends and receives (FOMO's cash is USDC)
+            "slippage_bps": None,         # None = Jupiter estimates slippage itself (also allows gasless swaps)
+            "max_price_impact_pct": 3.0,  # refuse swaps that would move the price more than this
+            "max_priority_fee_lamports": 2000000,  # refuse if Jupiter wants more than 0.002 SOL priority fee
+            "min_sol_for_fees": 0.02,     # below this the bot only buys if Jupiter sponsors the gas
             "jupiter_url": "https://api.jup.ag/swap/v2",
             "rpc_url": "https://api.mainnet-beta.solana.com",
         },

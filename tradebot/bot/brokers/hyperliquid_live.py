@@ -114,17 +114,25 @@ class HyperliquidBroker(Broker):
             fqty = float(filled.get("totalSz", 0))
             if fqty <= 0:
                 return Fill(False, venue, symbol, error="order did not fill (price moved too fast)")
-            price = float(filled.get("avgPx", mid))
-            self.opened_at[symbol] = time.time()
-            self.labels[symbol] = label or symbol
-            if stop_price:
-                self._place_trigger(symbol, not is_buy, fqty, stop_price, "sl", info["szDecimals"])
-            if take_profit_price:
-                self._place_trigger(symbol, not is_buy, fqty, take_profit_price, "tp", info["szDecimals"])
-            return Fill(True, venue, symbol, "buy" if is_buy else "sell", fqty, price, fqty * price * 0.00045,
-                        tx=str(filled.get("oid", "")), raw=resp)
         except Exception as e:
             return Fill(False, venue, symbol, error=str(e))
+        # The position is open from here on: report it as filled whatever happens next, so the bot owns
+        # it and its own stop check guards it even if the exchange stop order could not be placed.
+        price = float(filled.get("avgPx", mid) or mid)
+        self.opened_at[symbol] = time.time()
+        self.labels[symbol] = label or symbol
+        warnings = []
+        for trigger, kind, name in ((stop_price, "sl", "stop-loss"), (take_profit_price, "tp", "take-profit")):
+            if not trigger:
+                continue
+            try:
+                ok, err, _ = self._parse(self._place_trigger(symbol, not is_buy, fqty, trigger, kind, info["szDecimals"]))
+            except Exception as e:
+                ok, err = False, str(e)
+            if not ok:
+                warnings.append(f"the exchange {name} order could not be placed ({err}); the bot watches the {name} itself")
+        return Fill(True, venue, symbol, "buy" if is_buy else "sell", fqty, price, fqty * price * 0.00045,
+                    error="; ".join(warnings), tx=str(filled.get("oid", "")), raw=resp)
 
     def _place_trigger(self, symbol: str, is_buy: bool, qty: float, trigger: float, kind: str, sz_decimals: int):
         px = round_price(trigger, sz_decimals)
