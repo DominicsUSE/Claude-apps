@@ -49,8 +49,28 @@
     }
   },
   "strategies": {
-    "fomo_momentum": {
+    "meme_scalper": {
       "enabled": true,
+      "venue": "fomo",
+      "every_seconds": 60,
+      "position_usd": 25.0,
+      "watch_count": 12,
+      "min_liquidity_usd": 50000,
+      "min_volume_h24_usd": 250000,
+      "min_age_hours": 1,
+      "max_age_hours": 0,
+      "min_market_cap_usd": 200000,
+      "max_market_cap_usd": 200000000,
+      "max_top10_holders_pct": 35,
+      "max_rugcheck_score": 500,
+      "require_safety_check": true,
+      "max_new_per_hour": 3,
+      "use_learned": true,
+      "train_every_hours": 24,
+      "chart": {}
+    },
+    "fomo_momentum": {
+      "enabled": false,
       "venue": "fomo",
       "every_seconds": 120,
       "position_usd": 25.0,
