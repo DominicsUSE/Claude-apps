@@ -19,7 +19,7 @@ import threading
 import time
 from pathlib import Path
 
-from .chart import MEME_DEFAULTS, SETUPS, features, invert, simulate
+from .chart import MEME_DEFAULTS, SETUPS, attach_funding, features, invert, simulate
 from .data.solana import is_stock_token
 
 GRID = {
@@ -34,7 +34,9 @@ MIN_TRADES = 15
 SETUPS_ALL = SETUPS + tuple(f"{s}_short" for s in SETUPS)
 PROFILES = ("fomo", "liquid")
 # Liquid memecoin perps: about 0.1% cost per side (vs ~1% on DEX swaps) and smaller candles, so
-# tighter stops and ranges, and a tighter "don't chase" limit.
+# tighter stops and ranges, and a tighter "don't chase" limit. Perps also pay or earn funding every
+# hour; training counts it and tests skipping entries on the side paying more than 0.0025% an hour
+# (twice Hyperliquid's base rate).
 PROFILE_BASE = {
     "fomo": {},
     "liquid": {"cost_pct": 0.1, "min_stop_pct": 0.8, "max_stop_pct": 6.0, "range_max_pct": 6.0, "max_ext_vwap_pct": 8.0},
@@ -42,7 +44,7 @@ PROFILE_BASE = {
 PROFILE_GRIDS = {
     "fomo": GRID,
     "liquid": {"rvol_min": [1.5, 2.0, 3.0], "range_max_pct": [3.0, 6.0, 10.0], "max_stop_pct": [3.0, 6.0], "trail": ["swing", "ema9"],
-               "exit_on_structure": [True, False], "min_stop_pct": [0.8, 1.5]},
+               "exit_on_structure": [True, False], "min_stop_pct": [0.8, 1.5], "max_funding_pct": [None, 0.0025]},
 }
 
 
@@ -88,9 +90,10 @@ def _trades(f, fi, p, lo, hi, both_sides, token=None):
 
 
 def train(charts: dict[str, list], base: dict | None = None, progress=None, both_sides: bool = False,
-          param_grid: dict | None = None) -> dict:
+          param_grid: dict | None = None, funding: dict | None = None) -> dict:
     """charts: {label: [Candle, ...]}. Settings are chosen on the first 60% of every chart and graded
-    on the last 40%. With both_sides, short setups are tested too (on the chart turned upside down)."""
+    on the last 40%. With both_sides, short setups are tested too (on the chart turned upside down).
+    funding: {label: [(time_ms, hourly_rate), ...]} for perps, so every trade pays or earns it."""
     base = {**MEME_DEFAULTS, **(base or {})}
     param_grid = param_grid or GRID
     feats, inv = {}, {}
@@ -98,6 +101,10 @@ def train(charts: dict[str, list], base: dict | None = None, progress=None, both
         if len(candles) >= 120:
             feats[name] = features(candles, base["swing_k"])
             inv[name] = features(invert(candles), base["swing_k"]) if both_sides else None
+            if (funding or {}).get(name):
+                attach_funding(feats[name], funding[name], 1)
+                if inv[name] is not None:
+                    attach_funding(inv[name], funding[name], -1)
     if not feats:
         return {"error": "not enough chart data (need at least 120 candles per token)"}
     splits = {n: int(len(f.c) * TRAIN_SHARE) for n, f in feats.items()}
@@ -138,6 +145,7 @@ def train(charts: dict[str, list], base: dict | None = None, progress=None, both
     test_trades.sort(key=lambda t: t["entry_t"])
     return {
         "trained_at": time.time(), "tokens": len(feats), "candles": sum(len(f.c) for f in feats.values()),
+        "funding_charts": sum(1 for f in feats.values() if f.funding_cum),
         "params": {k: p[k] for k in param_grid}, "setups": enabled, "both_sides": both_sides,
         "cost_pct": p["cost_pct"], "train": best_train[0], "test": test, "test_all_setups": all_test, "verdict": verdict,
         "per_setup": {"train": per_setup_train, "test": per_setup_test},
@@ -247,16 +255,17 @@ class Trainer:
     def run(self, profile: str = "fomo", max_tokens: int = 60, interval: str = "5m") -> dict:
         def prog(done, total):
             self.status["progress"] = f"testing settings {done}/{total}"
-        charts = self.collect(profile, max_tokens, interval)
+        charts, funding = self.collect(profile, max_tokens, interval)
         result = train(charts, {"interval": interval, **PROFILE_BASE[profile]}, prog,
-                       both_sides=profile == "liquid", param_grid=PROFILE_GRIDS[profile])
+                       both_sides=profile == "liquid", param_grid=PROFILE_GRIDS[profile], funding=funding)
         if "error" not in result:
             result["interval"] = interval
             result["profile"] = profile
         return result
 
-    def collect(self, profile: str, max_tokens: int, interval: str) -> dict:
-        charts = {}
+    def collect(self, profile: str, max_tokens: int, interval: str) -> tuple[dict, dict]:
+        """(charts, funding): candles per market, and for Liquid perps their hourly funding history."""
+        charts, funding = {}, {}
         if profile == "liquid":
             markets = [m for m in self.liquid_markets if self.hl and self.hl.has_market(m)]
             for i, sym in enumerate(markets):
@@ -266,7 +275,11 @@ class Trainer:
                     charts[sym] = candles[:-1]  # drop the candle still forming
                 except Exception:
                     continue
-            return charts
+                try:
+                    funding[sym] = self.hl.funding_history(sym, charts[sym][0].t) if charts[sym] else []
+                except Exception:
+                    funding[sym] = []   # train on price alone rather than skip the market
+            return charts, funding
         u = self.universe()
         try:  # add today's trending tokens
             mints = self.sol.candidate_mints()
@@ -286,4 +299,4 @@ class Trainer:
                 charts[f"{row.get('symbol') or mint[:6]}:{mint[:6]}"] = self.candles.history(row["pool"], interval, 1000)
             except Exception:
                 continue
-        return charts
+        return charts, funding

@@ -335,3 +335,90 @@ def test_watch_list_skips_tokenized_stocks():
     assert not watch_filter(pair("NVDAx", "NVIDIA xStock"), p, now)
     assert not watch_filter(pair("GOOGLx", "Alphabet xStock"), p, now)
     assert not watch_filter(pair("SPYX", "SP500 xStock"), p, now)
+
+
+# ---------- perp funding ----------
+
+def hourly(candles, rate):
+    """A funding payment at every full hour the chart covers."""
+    return [(h, rate) for h in range(0, candles[-1].t + STEP, 3_600_000)]
+
+
+def test_funding_is_paid_by_longs_and_earned_by_shorts():
+    from bot.chart import attach_funding, invert
+    candles = meme_chart(600, seed=8)
+    plain = simulate(features(candles), MEME_DEFAULTS)
+    f = features(candles)
+    attach_funding(f, hourly(candles, 0.0005))            # 0.05% an hour, longs pay
+    paid = simulate(f, MEME_DEFAULTS)
+    assert len(paid) == len(plain) and any(t["funding_pct"] > 0 for t in paid)
+    for a, b in zip(plain, paid):
+        assert b["ret_pct"] == pytest.approx(a["ret_pct"] - b["funding_pct"])
+        held_hours = (b["exit_t"] - b["entry_t"]) / 3_600_000
+        assert b["funding_pct"] <= 0.05 * (held_hours + 2)   # never more than the hours the trade was open
+    fi = features(invert(candles))
+    attach_funding(fi, hourly(candles, 0.0005), -1)        # the upside-down chart is the short side
+    assert all(t["funding_pct"] <= 0 for t in simulate(fi, MEME_DEFAULTS))
+
+
+def test_funding_filter_skips_the_side_that_pays():
+    from bot.chart import attach_funding
+    candles = meme_chart(600, seed=8)
+    capped = {**MEME_DEFAULTS, "max_funding_pct": 0.0025}
+    f = features(candles)
+    attach_funding(f, hourly(candles, 0.0005))
+    assert simulate(f, capped) == []                       # longs pay 0.05%/h: no long entries
+    f2 = features(candles)
+    attach_funding(f2, hourly(candles, -0.0005))
+    assert simulate(f2, capped)                            # longs are paid: entries go ahead
+    f3 = features(candles)
+    attach_funding(f3, [(candles[-1].t + STEP, 0.01)])     # a rate paid after the chart ends
+    assert f3.funding_now[-1] == 0 and f3.funding_cum[-1] == 0   # is never seen early
+
+
+def test_training_counts_funding():
+    charts = {f"T{i}": meme_chart(500, seed=60 + i) for i in range(4)}
+    funding = {n: hourly(c, 0.0005) for n, c in charts.items()}
+    out = train(charts, {"cost_pct": 0.1}, both_sides=True, funding=funding,
+                param_grid={"rvol_min": [2.0], "max_funding_pct": [None, 0.0025]})
+    assert out["funding_charts"] == 4 and "max_funding_pct" in out["params"]
+
+
+def test_hyperliquid_funding_history_pages_and_current_rates(monkeypatch):
+    from bot.data.hyperliquid import HyperliquidData
+    hl = HyperliquidData()
+    calls = []
+
+    def fake_info(payload):
+        calls.append(payload)
+        if payload["type"] == "metaAndAssetCtxs":
+            return [{"universe": [{"name": "WIF"}, {"name": "kPEPE"}]}, [{"funding": "0.0000125"}, {"funding": "-0.0002"}]]
+        start = payload["startTime"]
+        n = 500 if len(calls) == 1 else 3
+        return [{"coin": "WIF", "fundingRate": "0.00001", "time": start + i * 3_600_000} for i in range(n)]
+    monkeypatch.setattr(hl, "_info", fake_info)
+    rows = hl.funding_history("WIF", 0, 10**13)
+    assert len(rows) == 503 and len(calls) == 2 and calls[1]["startTime"] == rows[499][0] + 1
+    assert hl.funding_rates() == {"WIF": 0.0000125, "kPEPE": -0.0002}
+
+
+def test_liquid_scan_skips_the_side_paying_funding(cfg):
+    from bot.chart import invert
+    from bot.strategies.base import Context
+    from bot.strategies.meme import MemeScalper
+    breakdown = invert(flat_then_breakout())               # a short setup on WIF
+    mcfg = {**cfg["strategies"]["meme_scalper"], "use_learned": False, "fomo_enabled": False, "liquid_markets": ["WIF"],
+            "liquid_chart": {"max_ext_vwap_pct": 30.0, "range_max_pct": 15.0, "max_stop_pct": 15.0, "max_funding_pct": 0.0025}}
+
+    class HL(HLWithCandles):
+        def __init__(self, charts, rate):
+            super().__init__(charts)
+            self.rate = rate
+
+        def funding_rates(self):
+            return {"WIF": self.rate}
+    now = breakdown[-1].t / 1000 + 600
+    shorts_pay = MemeScalper(mcfg, {}, None, None).scan(Context(cfg, HL({"WIF": breakdown}, -0.001), MemeSol({}), [], {}, now=now))
+    assert shorts_pay == []
+    [sig] = MemeScalper(mcfg, {}, None, None).scan(Context(cfg, HL({"WIF": breakdown}, 0.001), MemeSol({}), [], {}, now=now))
+    assert sig.action == "sell" and "Funding +0.1000%/h (longs pay)" in sig.reason

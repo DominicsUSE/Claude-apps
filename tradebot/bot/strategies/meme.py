@@ -212,6 +212,11 @@ class MemeScalper(Strategy):
         recent = [t for t in self.state.get("liquid_entries", []) if ctx.now - t < 3600]
         self.state["liquid_entries"] = recent
         out, watched = [], 0
+        cap = p.get("max_funding_pct")   # skip the side paying more funding than this, % per hour
+        try:
+            rates = ctx.hl.funding_rates()
+        except Exception:
+            rates = {}                   # unknown funding never blocks a trade
         for sym in self.cfg.get("liquid_markets", []):
             try:
                 if not ctx.hl.has_market(sym):
@@ -235,16 +240,21 @@ class MemeScalper(Strategy):
                 continue
             seen[key] = bar_t
             price = f.c[t]
-            side, sig = None, entry_signal(f, t, {**p, "setups": p["setups"]}) if p["setups"] else None
+            rate = rates.get(sym)
+            long_ok = cap is None or rate is None or rate * 100 <= cap
+            short_ok = cap is None or rate is None or -rate * 100 <= cap
+            side, sig = None, entry_signal(f, t, {**p, "setups": p["setups"]}) if p["setups"] and long_ok else None
             if sig:
                 side, stop, reason, setup = "buy", sig["stop"], sig["reason"], sig["setup"]
-            elif p["short_setups"]:
+            elif p["short_setups"] and short_ok:
                 fi = features(invert(candles), p["swing_k"])
                 s2 = entry_signal(fi, t, {**p, "setups": p["short_setups"]})
                 if s2:
                     side, stop, reason, setup = "sell", 1 / s2["stop"], mirror_text(s2["reason"]), f"{s2['setup']}_short"
             if not side:
                 continue
+            if rate is not None:
+                reason += f" Funding {rate * 100:+.4f}%/h ({'longs pay' if rate > 0 else 'shorts pay' if rate < 0 else 'none'})."
             self.watch[key]["setup"] = setup
             stop_pct = abs(price - stop) / price * 100
             out.append(Signal("liquid", sym, side, self.name, label=sym, size_usd=p.get("liquid_position_usd", 25),

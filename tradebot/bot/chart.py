@@ -63,6 +63,8 @@ class Features:
     atr: list
     rvol: list
     k: int
+    funding_cum: list = field(default_factory=list)   # perps: funding paid by a long from candle 0 up to candle i
+    funding_now: list = field(default_factory=list)   # perps: the latest hourly funding rate known at candle i's close
     swing_highs: list = field(default_factory=list)   # (confirmed_at, index, price)
     swing_lows: list = field(default_factory=list)
     _sh_conf: list = field(default_factory=list)
@@ -81,6 +83,26 @@ def invert(candles: list[Candle]) -> list[Candle]:
     """The chart upside down (price -> 1/price): a short setup on the real chart is a long setup here.
     Lets every buy rule double as a short-selling rule on Liquid perps."""
     return [Candle(c.t, 1 / c.o, 1 / c.l, 1 / c.h, 1 / c.c, c.v) for c in candles if c.o > 0 and c.l > 0]
+
+
+def attach_funding(f: Features, events: list, sign: int = 1) -> None:
+    """Adds perp funding to a chart: events [(time_ms, hourly_rate)], positive = longs pay shorts.
+    sign=-1 for the upside-down chart, whose "long" is really a short (shorts receive what longs pay).
+    A rate counts as known from the moment it is paid, so the backtest never peeks ahead."""
+    n = len(f.candles)
+    step = f.candles[1].t - f.candles[0].t if n > 1 else 3_600_000
+    ev = sorted(events)
+    cum, now, j, last = [0.0], [], 0, 0.0
+    for cdl in f.candles:
+        paid = 0.0
+        while j < len(ev) and ev[j][0] < cdl.t + step:
+            if ev[j][0] >= cdl.t:
+                paid += sign * ev[j][1]
+            last = sign * ev[j][1]
+            j += 1
+        cum.append(cum[-1] + paid)
+        now.append(last)
+    f.funding_cum, f.funding_now = cum, now
 
 
 def features(candles: list[Candle], k: int = 2) -> Features:
@@ -345,7 +367,7 @@ def simulate(f: Features, p: dict, start: int = 30, end: int | None = None) -> l
             # stop inside the candle
             if bar.l <= pos["stop"]:
                 px = min(bar.o, pos["stop"])
-                pos["fills"].append((pos["left"], px, "stop" if pos["stop"] < pos["entry"] else "trailing stop"))
+                pos["fills"].append((pos["left"], px, "stop" if pos["stop"] < pos["entry"] else "trailing stop", t + 1))
                 pos["left"] = 0
             else:
                 for j, (rr, frac) in enumerate(p["tp_r"]):
@@ -354,7 +376,7 @@ def simulate(f: Features, p: dict, start: int = 30, end: int | None = None) -> l
                     target = pos["entry"] + rr * (pos["entry"] - pos["init_stop"])
                     if bar.h >= target and pos["left"] > 0:
                         part = min(frac, pos["left"])
-                        pos["fills"].append((part, max(bar.o, target), f"take profit +{rr}R"))
+                        pos["fills"].append((part, max(bar.o, target), f"take profit +{rr}R", t + 1))
                         pos["left"] -= part
                         pos["tp_done"] = j + 1
                         pos["stop"] = max(pos["stop"], pos["entry"])  # rest can no longer lose
@@ -371,6 +393,9 @@ def simulate(f: Features, p: dict, start: int = 30, end: int | None = None) -> l
                 continue
         if pos is None and t + 1 < end:
             sig = entry_signal(f, t, p)
+            cap = p.get("max_funding_pct")
+            if sig and cap is not None and f.funding_now and f.funding_now[t] * 100 > cap:
+                sig = None   # this side is paying too much funding right now
             if sig:
                 entry = f.o[t + 1]
                 if entry > sig["stop"]:
@@ -380,21 +405,26 @@ def simulate(f: Features, p: dict, start: int = 30, end: int | None = None) -> l
                     continue
         if pos is not None and pos.get("pending_exit") and t + 1 < end:
             nxt = f.candles[t + 1]
-            pos["fills"].append((pos["left"], nxt.o, pos.pop("pending_exit")))
+            pos["fills"].append((pos["left"], nxt.o, pos.pop("pending_exit"), t + 1))
             pos["left"] = 0
             trades.append(_close(pos, f, t + 1, cost))
             pos = None
     if pos is not None:
-        pos["fills"].append((pos["left"], f.c[end - 1], "end of data"))
+        pos["fills"].append((pos["left"], f.c[end - 1], "end of data", end))
         trades.append(_close(pos, f, end - 1, cost))
     return trades
 
 
 def _close(pos: dict, f: Features, t: int, cost: float) -> dict:
     entry = pos["entry"] * (1 + cost)
-    ret = sum(frac * (px * (1 - cost) / entry - 1) for frac, px, _ in pos["fills"])
+    ret = sum(frac * (px * (1 - cost) / entry - 1) for frac, px, _, _ in pos["fills"])
+    funding = 0.0
+    if f.funding_cum:
+        start = f.funding_cum[pos["entry_i"]]
+        funding = sum(frac * (f.funding_cum[min(until, len(f.funding_cum) - 1)] - start) for frac, _, _, until in pos["fills"])
+    ret -= funding
     r_pct = (pos["entry"] - pos["init_stop"]) / pos["entry"]
     return {"setup": pos["setup"], "entry_t": f.candles[pos["entry_i"]].t, "exit_t": f.candles[t].t,
             "entry": pos["entry"], "stop": pos["init_stop"], "ret_pct": ret * 100,
             "r": ret / r_pct if r_pct > 0 else 0.0, "bars": max(pos["bars"], 0),
-            "exit_reason": pos["fills"][-1][2], "reason": pos["reason"]}
+            "exit_reason": pos["fills"][-1][2], "reason": pos["reason"], "funding_pct": funding * 100}

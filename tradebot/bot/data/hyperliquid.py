@@ -24,6 +24,7 @@ class HyperliquidData:
         self.url = api_url.rstrip("/") + "/info"
         self._meta: dict[str, tuple[float, dict]] = {}
         self._mids: dict[str, tuple[float, dict]] = {}
+        self._funding: dict[str, tuple[float, dict]] = {}
 
     def _info(self, payload: dict):
         return http.post(self.url, json=payload)
@@ -95,6 +96,31 @@ class HyperliquidData:
         now = int(time.time() * 1000)
         step = INTERVAL_MS[interval]
         return [c for c in self.candles(symbol, interval, bars + 1, now) if c.t + step <= now][-bars:]
+
+    def funding_history(self, coin: str, start_ms: int, end_ms: int | None = None) -> list[tuple[int, float]]:
+        """Hourly funding [(time_ms, rate)], oldest first. Positive: longs pay shorts that much of the
+        position's value. The API returns at most 500 rows per call, so longer spans are paged."""
+        end = end_ms or int(time.time() * 1000)
+        out: dict[int, float] = {}
+        cursor = start_ms
+        while cursor < end:
+            raw = self._info({"type": "fundingHistory", "coin": coin, "startTime": cursor, "endTime": end}) or []
+            for row in raw:
+                out[int(row["time"])] = float(row["fundingRate"])
+            if len(raw) < 500:
+                break
+            cursor = int(raw[-1]["time"]) + 1
+        return sorted(out.items())
+
+    def funding_rates(self, dex: str = "", max_age: float = 60.0) -> dict[str, float]:
+        """The current hourly funding rate of every market (positive: longs pay shorts)."""
+        cached = self._funding.get(dex)
+        if cached and time.time() - cached[0] < max_age:
+            return cached[1]
+        meta, ctxs = self._info({"type": "metaAndAssetCtxs", "dex": dex} if dex else {"type": "metaAndAssetCtxs"})
+        rates = {m["name"]: float(c.get("funding") or 0) for m, c in zip(meta.get("universe", []), ctxs)}
+        self._funding[dex] = (time.time(), rates)
+        return rates
 
     def user_state(self, address: str, dex: str = "") -> dict:
         payload = {"type": "clearinghouseState", "user": address}

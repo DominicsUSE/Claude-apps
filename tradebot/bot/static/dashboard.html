@@ -839,9 +839,9 @@ async function loadTraining() {
     const v = L.verdict, c = v === "WORKS ON UNSEEN CHARTS" ? "ok" : v === "SLIGHT EDGE" ? "warn" : "bad";
     const row = (name, s) => s && s.trades ? `<tr><td>${name}</td><td class="n">${s.trades}</td><td class="n">${s.win_rate}%</td><td class="n ${cls(s.avg_pct)}">${pct(s.avg_pct)}</td><td class="n">${s.avg_r}</td><td class="n">${s.profit_factor}</td></tr>` : "";
     const setups = Object.keys(L.per_setup.test);
-    box.innerHTML = `<p><span class="badge ${c}">${esc(v)}</span> <span class="dim">${L.tokens} charts, ${L.candles.toLocaleString()} candles (${esc(L.interval || "5m")}), trained ${new Date(L.trained_at * 1000).toLocaleString()}. Settings chosen on the first 60% of each chart, graded on the last 40%.</span></p>
+    box.innerHTML = `<p><span class="badge ${c}">${esc(v)}</span> <span class="dim">${L.tokens} charts, ${L.candles.toLocaleString()} candles (${esc(L.interval || "5m")}), trained ${new Date(L.trained_at * 1000).toLocaleString()}. Settings chosen on the first 60% of each chart, graded on the last 40%.${L.funding_charts ? ` Funding counted on ${L.funding_charts} charts.` : ""}</span></p>
       <p>Chosen settings: <code>${esc(JSON.stringify(L.params))}</code>. Setups in use: <b>${esc((L.setups || []).map(x => x.replace("_short", " (short)")).join(", ") || "none")}</b>.
-      ${["WORKS ON UNSEEN CHARTS", "SLIGHT EDGE"].includes(v) ? "" : '<span class="neg">In live mode this venue makes no new trades until a retrain shows an edge; paper mode keeps trading to learn.</span>'}</p>
+      ${["WORKS ON UNSEEN CHARTS", "SLIGHT EDGE"].includes(v) ? "" : '<span class="neg">Unproven: in live mode trades here only happen if you approve each one (Ask before trading); with that off it makes no new trades until a retrain shows an edge. Paper mode keeps trading to learn.</span>'}</p>
       <div class="scroll"><table><thead><tr><th></th><th class="n">Trades</th><th class="n">Win rate</th><th class="n">Avg trade</th><th class="n">Avg R</th><th class="n">Profit factor</th></tr></thead><tbody>
       ${row("Practice charts (settings chosen here)", L.train)}${row("<b>Unseen charts</b>", L.test)}
       ${setups.map(s => row("&nbsp;&nbsp;unseen: " + s.replace("_short", " (short)"), L.per_setup.test[s])).join("")}</tbody></table></div>
