@@ -10,7 +10,20 @@ it. Real trading needs two separate switches in Settings, plus your keys.
 > can wipe out an account, and any strategy that worked in the past can stop working. Only trade with
 > money you can afford to lose. This software is a tool, not financial advice.
 
-## Start it
+## Download the app (easiest)
+
+Every change builds a one-file app on GitHub (Actions → **Tradebot app**), published as the
+release **Tradebot vX.Y.Z** (Releases on the repository page):
+
+- **Windows:** download `Tradebot-Windows.exe` and double-click it. Windows may say it protected your
+  PC, because the app is not signed: choose **More info**, then **Run anyway**.
+- **Mac:** download `Tradebot-macOS`, then run `chmod +x ~/Downloads/Tradebot-macOS && ~/Downloads/Tradebot-macOS`
+  in Terminal. If macOS blocks it: System Settings → Privacy & Security → **Open Anyway**.
+
+No Python needed. Your settings, keys and trade journal are kept in the `Tradebot` folder in your
+home folder, so a newer download keeps them.
+
+## Start it from the source code
 
 **Windows:** install Python from [python.org](https://www.python.org/downloads/) (tick *Add python.exe
 to PATH*), then double-click **`Start Tradebot (Windows).bat`**.

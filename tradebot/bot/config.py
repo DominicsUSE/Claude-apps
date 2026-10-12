@@ -7,9 +7,14 @@ Anything missing from config.json falls back to DEFAULTS below.
 import copy
 import json
 import os
+import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+# The downloadable app (Tradebot.exe / Mac) bundles its files read-only, so your settings, keys and
+# trade journal live in a "Tradebot" folder in your home folder instead.
+FROZEN = bool(getattr(sys, "frozen", False))
+BUNDLE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+ROOT = Path.home() / "Tradebot" if FROZEN else Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 CONFIG_PATH = ROOT / "config.json"
 ENV_PATH = ROOT / ".env"

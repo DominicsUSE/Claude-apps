@@ -34,7 +34,8 @@ def setup_logging() -> None:
 
 def ensure_config() -> dict:
     if not config_mod.CONFIG_PATH.exists():
-        example = config_mod.ROOT / "config.example.json"
+        config_mod.ROOT.mkdir(parents=True, exist_ok=True)
+        example = config_mod.BUNDLE / "config.example.json"
         config_mod.CONFIG_PATH.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
         print("Created config.json with safe defaults (paper mode).")
     return config_mod.load_config()
@@ -42,6 +43,8 @@ def ensure_config() -> dict:
 
 def cmd_run(args) -> None:
     cfg = ensure_config()
+    if config_mod.FROZEN:
+        print(f"Your settings, keys and trade journal are kept in {config_mod.ROOT}")
     if args.paper:
         cfg["mode"] = "paper"
     from bot.engine import Engine
@@ -236,10 +239,12 @@ def main() -> None:
     t.add_argument("--interval", default="5m", choices=["1m", "5m", "15m"])
     t.add_argument("--profile", default="fomo", choices=["fomo", "liquid"], help="fomo = Solana tokens, liquid = memecoin perps")
     t.set_defaults(func=cmd_train)
-    args = p.parse_args()
-    if args.cmd in (None, "run"):
-        if args.cmd is None:
-            args = p.parse_args(["run"] + sys.argv[1:])
+    argv = sys.argv[1:]
+    commands = {"run", "backtest", "walkforward", "compare", "check", "train"}
+    if not argv or (argv[0] not in commands and argv[0] not in ("-h", "--help", "--version")):
+        argv = ["run"] + argv          # "Tradebot --paper" means "Tradebot run --paper"
+    args = p.parse_args(argv)
+    if args.cmd == "run":
         setup_logging()
         return cmd_run(args)
     args.func(args)

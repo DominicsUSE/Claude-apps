@@ -1,0 +1,66 @@
+# Builds the one-file Tradebot app for Windows and macOS (no Python needed), starts each one to
+# check the dashboard comes up, and publishes both as a GitHub release for a stable download link.
+name: Tradebot app
+
+on:
+  push:
+    paths:
+      - "tradebot/**"
+      - ".github/workflows/build-tradebot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, name: Windows, file: Tradebot.exe, asset: Tradebot-Windows.exe }
+          - { os: macos-latest, name: macOS, file: Tradebot, asset: Tradebot-macOS }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: tradebot
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          python -m pip install -r requirements.txt pyinstaller
+          pyinstaller --noconfirm packaging/Tradebot.spec
+          cp "dist/${{ matrix.file }}" "dist/${{ matrix.asset }}"
+      - name: Start the app and check the dashboard answers
+        run: |
+          export HOME="$RUNNER_TEMP/home" USERPROFILE="$RUNNER_TEMP/home"
+          mkdir -p "$HOME"
+          "dist/${{ matrix.file }}" --no-browser > app.log 2>&1 &
+          for i in $(seq 1 45); do
+            if curl -sf http://localhost:8787/api/status > status.json; then break; fi
+            sleep 2
+          done
+          cat app.log
+          python -c "import json; s = json.load(open('status.json')); assert s['mode'] == 'paper'; print('dashboard OK, mode', s['mode'])"
+          "dist/${{ matrix.file }}" --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: tradebot/dist/${{ matrix.asset }}
+          if-no-files-found: error
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(python -c "import bot; print(bot.__version__)")
+          tag="tradebot-v$v"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --target "$GITHUB_SHA" --prerelease --title "Tradebot $v" --notes-file packaging/RELEASE.md || true
+          fi
+          gh release upload "$tag" "dist/${{ matrix.asset }}" --clobber
