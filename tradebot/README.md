@@ -163,30 +163,46 @@ the bot. Stocks such as NVDA trade as `xyz:NVDA`.
 
 ### TradingView
 
-TradingView can't place trades itself, but its alerts can tell the bot to trade.
+TradingView can't place trades itself, but its alerts can tell the bot to trade. Use TradingView to
+find and test a strategy on its charts; the bot then places each trade with its own risk limits.
 
-1. Set any long password as `TV_WEBHOOK_SECRET` in Connections.
-2. TradingView must reach your computer from the internet. A free tunnel does it:
-   `cloudflared tunnel --url http://localhost:8788`
-   ([download cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)).
-   Your webhook URL is the `https://…trycloudflare.com` address it prints, plus `/webhook`.
-   Only tunnel port **8788** (the alert port), never 8787 (the dashboard).
-3. In TradingView, create an alert, tick *Webhook URL*, and use this message:
-   ```json
-   {"secret": "your password", "symbol": "{{ticker}}", "action": "buy", "size_usd": 25, "stop_pct": 4}
-   ```
-   `action` can be `buy`, `sell` (short) or `close`. Optional fields: `stop_price`,
-   `take_profit_pct`, `take_profit_price`, `leverage`, and `venue` (`liquid` or `fomo`). A Solana token
-   address as the symbol trades it in your Solana wallet (Phantom or FOMO).
-4. Ready-made Pine strategies are in [`tradingview/`](tradingview):
-   - `tradebot_strategy.pine` is the bot's EMA trend strategy.
-   - `btc_volatility_regime.pine` is the Bitcoin video strategy.
+1. Overview → Strategies: turn on **TradingView alerts**. Connections: save any long password as
+   `TV_WEBHOOK_SECRET`, then restart the bot.
+2. TradingView only sends alerts to an internet address, and the bot runs on your computer. Install
+   Cloudflare's free tunnel once: `winget install --id Cloudflare.cloudflared` (Windows) or
+   `brew install cloudflared` (Mac). On every start the bot then opens a quick tunnel to its alert
+   port (8788, never the dashboard) and shows **Your TradingView webhook URL** in Connections, with a
+   Copy button. The address changes each time the bot starts, so update your alerts after a restart.
+   With your own fixed address (e.g. a named Cloudflare tunnel or ngrok), put it in Settings →
+   `webhook.public_url` instead.
+3. Connections → **Ready-made strategies** → *Copy code* → TradingView Pine Editor → paste → *Add to
+   chart*. Check it in the **Strategy Tester** (free) on the coins and timeframe you want to trade.
+4. If it tests well: type the same password into the strategy's settings, create an alert on the
+   strategy with the message `{{strategy.order.alert_message}}`, tick *Webhook URL* and paste the
+   address from step 2.
 
-   Add one to a chart, set its webhook secret, and create the alert with the message `{{strategy.order.alert_message}}`.
+Ready-made strategies (also in [`tradingview/`](tradingview)):
+- **Meme breakout** (`tradebot_meme_breakout.pine`): the bot's main memecoin rules (range breakout,
+  pullback and VWAP reclaim on 5-minute charts, +1R/+2R partial exits, trailing stop), so you can see
+  how they would have done on any coin's chart.
+- **Donchian trend** (`trend_donchian.pine`): Turtle-style trend following on 4h or daily charts,
+  long and short, with ATR stops and a trailing exit. Trend following across markets is one of the
+  best-documented edges in futures and crypto.
+- **EMA trend** (`tradebot_strategy.pine`) and **Volatility regime** (`btc_volatility_regime.pine`,
+  the Bitcoin video).
 
-**Practising on TradingView:** the Strategy Tester (free) backtests the Pine scripts on any chart.
-TradingView's paper trading is separate from the bot. To practise with the bot itself, keep it in
-paper mode: alerts then trade the practice account. Webhook alerts need a paid TradingView plan.
+To write your own alerts instead, use a message like:
+```json
+{"secret": "your password", "symbol": "{{ticker}}", "action": "buy", "size_usd": 25, "stop_pct": 4}
+```
+`action` can be `buy`, `sell` (short) or `close`. Optional fields: `stop_price`, `take_profit_pct`,
+`take_profit_price`, `trailing_stop_pct`, `leverage`, `close_fraction`, and `venue` (`liquid` or
+`fomo`). A Solana token address as the symbol trades it in your Solana wallet (Phantom or FOMO);
+anything else (e.g. `BINANCE:WIFUSDT.P`, `BTCUSD`) trades the matching Liquid market.
+
+Alerts go through the same risk limits and *Ask before trading* as the bot's own trades. Webhook
+alerts need a paid TradingView plan; the Strategy Tester is free. Keep the bot in paper mode while
+you test alerts.
 
 ## Strategies
 
@@ -295,7 +311,7 @@ bot/training.py         daily training on recent memecoin charts + learning from
 bot/strategies/         meme (meme scalper), fomo_momentum, signals (candle strategies), pair, congress
 bot/backtest.py         backtester, walk-forward, Monte Carlo, risk of ruin
 bot/data/               Hyperliquid, DexScreener/Jupiter/RugCheck, GeckoTerminal memecoin candles, Quiver, Coinbase
-bot/tradingview.py      alert parsing
+bot/tradingview.py      alert parsing; bot/tunnel.py: the public address for TradingView alerts
 bot/server.py           dashboard and webhook servers
 bot/static/dashboard.html
 tradingview/            Pine scripts

@@ -366,14 +366,17 @@ ol.steps{margin:6px 0 0 18px;padding:0;font-size:13px}ol.steps li{margin:3px 0}
         </ol>
       </div>
       <div class="card c12">
-        <h2>Connect TradingView</h2>
+        <h2>Connect TradingView <small>TradingView finds the trade, the bot places it with its risk limits</small></h2>
+        <div id="tvStatus" role="status"></div>
         <ol class="steps">
-          <li>Pick any password and save it as <b>TV_WEBHOOK_SECRET</b> above.</li>
-          <li>Make the webhook port reachable from the internet with a free tunnel, e.g. <code>cloudflared tunnel --url http://localhost:<span class="whport">8788</span></code>. Use the https address it prints, plus <code>/webhook</code>. Never tunnel the dashboard's port.</li>
-          <li>In TradingView: create an alert → Notifications → Webhook URL, and paste this as the message:</li>
+          <li>Turn on <b>TradingView alerts</b> in Overview → Strategies, pick any long password, save it as <b>TV_WEBHOOK_SECRET</b> above and restart the bot.</li>
+          <li>Install Cloudflare's free tunnel once: <code>winget install --id Cloudflare.cloudflared</code> (Windows) or <code>brew install cloudflared</code> (Mac). The bot then opens a public address for alerts on every start and shows it above. Only the alert port is reachable from the internet, never this dashboard.</li>
+          <li>In TradingView: Pine Editor → paste a strategy below → <b>Add to chart</b>. Check it in the <b>Strategy Tester</b> (free) on the coins and timeframe you want to trade.</li>
+          <li>If it tests well: in the strategy's settings type the same password as TV_WEBHOOK_SECRET. Create an alert on the strategy with the message <code>{{strategy.order.alert_message}}</code>, tick <b>Webhook URL</b> and paste the address shown above.</li>
         </ol>
-        <pre id="tvMsg"></pre>
-        <p class="dim">For a Pine strategy, use <code>"action": "{{strategy.order.action}}", "position": "{{strategy.market_position}}"</code>. The ready-made strategy <code>tradingview/tradebot_strategy.pine</code> sends these for you. TradingView webhooks need a paid TradingView plan. Practise with TradingView's own Strategy Tester first, and keep the bot in paper mode while you test alerts.</p>
+        <p class="dim">Webhook alerts need a paid TradingView plan. The tunnel address changes each time the bot starts: update your alerts after a restart. Alerts go through the same risk limits and "Ask before trading" as the bot's own trades; keep the bot in paper mode while you test.</p>
+        <h3 style="font-size:13px;margin:var(--s3) 0 var(--s2)">Ready-made strategies</h3>
+        <div id="pineList" class="dim">Loading…</div>
       </div>
     </div>
   </section>
@@ -430,7 +433,7 @@ $$("nav.tabs button").forEach(b => b.addEventListener("click", () => {
   if (b.dataset.tab === "journal") loadJournal();
   if (b.dataset.tab === "risk") loadStats();
   if (b.dataset.tab === "settings") loadSettings();
-  if (b.dataset.tab === "connect") loadSecrets();
+  if (b.dataset.tab === "connect") { loadSecrets(); loadPine(); }
   if (b.dataset.tab === "training") loadTraining();
   if (b.dataset.tab === "charts") renderWatch();
   try { localStorage.setItem("tab", b.dataset.tab); } catch (e) {}
@@ -540,9 +543,38 @@ async function refresh() {
   $("#eqNote").textContent = s.peak_equity ? "peak " + usd(s.peak_equity) : "";
   if (!$('[data-panel="charts"]').classList.contains("hidden")) renderWatch();
   if (!$('[data-panel="training"]').classList.contains("hidden") && s.training.running) loadTraining();
+  renderTradingView(s.tradingview);
   // connections tab status
   $("#connStatus").innerHTML = Object.entries(s.connections).map(([k, c]) => `<div class="sec"><div><b>${k === "fomo" ? "Solana wallet (Phantom or FOMO)" : "Liquid (Hyperliquid)"}</b><p>${esc(c.detail)}</p></div><span class="badge ${c.connected ? (s.mode === "paper" ? "paper" : "ok") : "warn"}">${c.connected ? (s.mode === "paper" ? "practice" : "connected") : "not connected"}</span></div>`).join("");
 }
+// ---------- TradingView ----------
+function renderTradingView(tv) {
+  if (!tv) return;
+  let html;
+  if (tv.webhook_url) html = `<div class="alert blue"><span>Your TradingView webhook URL: <code id="tvUrl">${esc(tv.webhook_url)}</code> <button class="btn sm" type="button" data-copy="#tvUrl">Copy</button></span></div>`;
+  else if (!tv.secret_set) html = `<div class="alert"><span>No alert password yet: save <b>TV_WEBHOOK_SECRET</b> above and restart the bot.</span></div>`;
+  else if (tv.tunnel === "off") html = `<div class="alert"><span>The tunnel is off in Settings: set <code>webhook.public_url</code> to your own address, or turn the tunnel back on.</span></div>`;
+  else if (tv.running) html = `<div class="alert"><span>Opening the public address…</span></div>`;
+  else html = `<div class="alert"><span>${esc(tv.error || "The tunnel opens when the bot starts with TradingView alerts on.")}</span></div>`;
+  if ($("#tvStatus").dataset.html !== html) { $("#tvStatus").innerHTML = html; $("#tvStatus").dataset.html = html; }
+}
+async function loadPine() {
+  try {
+    const list = await api("/api/pine");
+    $("#pineList").classList.remove("dim");
+    $("#pineList").innerHTML = list.map((p, i) => `<div class="sec" style="align-items:flex-start"><div style="flex:1;min-width:220px"><b>${esc(p.title)}</b><p>${esc(p.about)}</p></div>
+      <button class="btn sm" type="button" data-pine="${i}">Copy code</button></div>`).join("") || "None found.";
+    $("#pineList").onclick = async ev => {
+      const b = ev.target.closest("[data-pine]"); if (!b) return;
+      try { await navigator.clipboard.writeText(list[+b.dataset.pine].code); toast("Copied: paste it into TradingView's Pine Editor"); } catch (e) { toast("Copy failed: " + e.message); }
+    };
+  } catch (e) { $("#pineList").textContent = "Could not load: " + e.message; }
+}
+document.addEventListener("click", async ev => {
+  const b = ev.target.closest("[data-copy]"); if (!b) return;
+  try { await navigator.clipboard.writeText($(b.dataset.copy).textContent); toast("Copied"); } catch (e) { toast("Copy failed: " + e.message); }
+});
+
 // ---------- approvals ----------
 const seenApprovals = new Set();
 function renderApprovals(s) {
@@ -760,8 +792,6 @@ async function loadSecrets() {
   $("#secrets").innerHTML = SECRETS.map(([k, label, help]) => `<div class="sec"><label class="fld">${esc(label)} <code>${k}</code>
     <input type="password" autocomplete="off" spellcheck="false" data-secret="${k}" placeholder="${have[k] ? "saved: leave empty to keep" : "not set"}"><span class="help">${esc(help)}</span></label>
     <span class="badge ${have[k] ? "ok" : ""}">${have[k] ? "saved" : "empty"}</span></div>`).join("");
-  const port = cfgCache ? cfgCache.webhook.port : 8788; $$(".whport").forEach(x => x.textContent = port);
-  $("#tvMsg").textContent = JSON.stringify({secret: "YOUR_TV_WEBHOOK_SECRET", symbol: "{{ticker}}", action: "buy", size_usd: 25, stop_pct: 4}, null, 0);
 }
 $("#saveSecrets").onclick = async () => {
   const body = {}; $$("[data-secret]").forEach(el => { if (el.value.trim()) body[el.dataset.secret] = el.value.trim(); });

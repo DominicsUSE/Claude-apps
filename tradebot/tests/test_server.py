@@ -99,3 +99,9 @@ def test_saving_the_wallet_key_replaces_the_old_name(servers, tmp_path):
     assert call(dash + "/api/secrets", {"SOLANA_WALLET_PRIVATE_KEY": "new"}, {"X-Tradebot": "1"})[0] == 200
     env = (tmp_path / ".env").read_text()
     assert "SOLANA_WALLET_PRIVATE_KEY=new" in env and "FOMO_WALLET_PRIVATE_KEY" not in env and "QUIVER_API_TOKEN=q" in env
+
+
+def test_pine_strategies_are_listed_with_their_code(servers):
+    code, items = call(servers[0] + "/api/pine")
+    assert code == 200 and len(items) >= 2
+    assert all(i["code"].startswith("//@version=6") and i["title"] and i["file"].endswith(".pine") for i in items)

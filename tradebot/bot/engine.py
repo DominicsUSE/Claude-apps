@@ -57,6 +57,7 @@ class Engine:
         self.last_error = ""
         self._stop = threading.Event()
         self.threaded = False
+        self.tunnel = None                       # public address for TradingView alerts (bot/tunnel.py)
         self.pending: dict[str, dict] = {}     # trades waiting for your OK (approvals)
         self._pending_seq = 0
 
@@ -822,9 +823,19 @@ class Engine:
                 "watch": self.watchlist(),
                 "training": {"running": self.trainer.status["running"], "progress": self.trainer.status["progress"]},
                 "approvals": self.approvals(),
+                "tradingview": self.tradingview_status(),
                 "asks_approval": self.cfg.get("approvals", {}).get("ask", "live") == "always"
                                  or (self.cfg.get("approvals", {}).get("ask", "live") == "live" and self.live),
             }
+
+    def tradingview_status(self) -> dict:
+        """Where TradingView should send alerts, and why there is no address yet if there is none."""
+        from .tunnel import INSTALL_HINT
+        w = self.cfg["webhook"]
+        st = self.tunnel.status() if self.tunnel else {"running": False, "url": "", "error": "", "install": INSTALL_HINT}
+        url = w.get("public_url") or (st["url"] + "/webhook" if st["url"] else "")
+        return {**st, "webhook_url": url, "tunnel": w.get("tunnel", "auto"),
+                "secret_set": bool(config_mod.secret("TV_WEBHOOK_SECRET"))}
 
     def watchlist(self) -> list[dict]:
         meme = self.strategies.get("meme_scalper")

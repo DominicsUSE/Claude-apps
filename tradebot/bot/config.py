@@ -30,7 +30,9 @@ DEFAULTS = {
     "loop_seconds": 20,
     "dashboard": {"host": "127.0.0.1", "port": 8787},
     # TradingView alerts arrive here. Keep it on its own port so a public tunnel never exposes the dashboard.
-    "webhook": {"enabled": True, "host": "127.0.0.1", "port": 8788},
+    # tunnel "auto": once TV_WEBHOOK_SECRET is set, open a free Cloudflare quick tunnel to this port (needs
+    # cloudflared installed) and show its address in Connections. public_url: your own fixed address instead.
+    "webhook": {"enabled": True, "host": "127.0.0.1", "port": 8788, "tunnel": "auto", "public_url": ""},
     "paper": {"starting_balance_usd": 1000.0, "fee_pct": 0.1, "slippage_pct": 0.3},
     # Ask before trading: the bot proposes each new trade on the dashboard and only places it when
     # you press Approve. Exits (stops, targets, chart exits) never wait for you.
@@ -289,6 +291,8 @@ def validate(cfg: dict) -> None:
         raise ValueError("risk_per_trade_pct above 10% is not allowed: a short losing streak would wipe the account")
     if r["max_leverage"] < 1 or r["max_leverage"] > 20:
         raise ValueError("max_leverage must be between 1 and 20")
+    if cfg["webhook"]["tunnel"] not in ("auto", "off"):
+        raise ValueError('webhook "tunnel" must be "auto" or "off"')
     if cfg["approvals"]["ask"] not in ("live", "always", "off"):
         raise ValueError('approvals "ask" must be "live", "always" or "off"')
     if cfg["venues"]["fomo"]["quote"] not in ("USDC", "SOL"):

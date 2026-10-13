@@ -9,7 +9,9 @@
   "webhook": {
     "enabled": true,
     "host": "127.0.0.1",
-    "port": 8788
+    "port": 8788,
+    "tunnel": "auto",
+    "public_url": ""
   },
   "paper": {
     "starting_balance_usd": 1000.0,

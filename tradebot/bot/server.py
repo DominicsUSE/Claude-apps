@@ -6,6 +6,7 @@
 """
 import json
 import logging
+import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,6 +22,17 @@ log = logging.getLogger("tradebot")
 STATIC = Path(__file__).resolve().parent / "static"
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 EDITABLE_SECRETS = set(config_mod.SECRET_NAMES)
+
+
+def pine_scripts(folder: Path | None = None) -> list[dict]:
+    """The ready-made TradingView strategies shipped with the bot: title, what it does, and the code."""
+    out = []
+    for f in sorted((folder or config_mod.BUNDLE / "tradingview").glob("*.pine")):
+        code = f.read_text(encoding="utf-8")
+        m = re.search(r'strategy\(\s*"([^"]+)"', code)
+        about = [ln[2:].strip() for ln in code.splitlines()[1:] if ln.startswith("//")][:2]
+        out.append({"file": f.name, "title": m.group(1) if m else f.stem, "about": " ".join(about), "code": code})
+    return out
 
 
 def write_env(updates: dict, path: Path | None = None) -> None:
@@ -106,6 +118,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return self._send(200, e.cfg)
         if path == "/api/secrets":
             return self._send(200, {k: bool(config_mod.secret(k)) for k in config_mod.SECRET_NAMES})
+        if path == "/api/pine":
+            return self._send(200, pine_scripts())
         if path == "/api/lab/strategies":
             return self._send(200, lab.strategies_list())
         if path == "/api/training":

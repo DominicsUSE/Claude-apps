@@ -16,6 +16,7 @@ import webbrowser
 
 from bot import __version__
 from bot import config as config_mod
+from bot import tunnel
 
 
 def setup_logging() -> None:
@@ -52,12 +53,18 @@ def cmd_run(args) -> None:
     engine = Engine(cfg)
     if cfg["mode"] == "live" and not config_mod.is_live(cfg):
         engine.event("blocked", 'config.json says "live" but live_trading_acknowledged is not true, so the bot is running in PAPER mode')
-    serve(engine)
+    servers = serve(engine)
+    if tunnel.wanted(cfg):
+        engine.tunnel = tunnel.Tunnel()
+        if engine.tunnel.start(servers[1].server_address[1], [config_mod.ROOT]):
+            print("Opening a public address for TradingView alerts (Cloudflare quick tunnel): see Connections.")
+        else:
+            print(f"TradingView alerts: {engine.tunnel.error}")
     url = f"http://{'localhost' if cfg['dashboard']['host'] in ('127.0.0.1', '0.0.0.0') else cfg['dashboard']['host']}:{cfg['dashboard']['port']}"
     print(f"\nTradebot {__version__} is running in {'LIVE' if engine.live else 'PAPER'} mode.")
     print(f"Dashboard: {url}")
-    if cfg["webhook"]["enabled"]:
-        print(f"TradingView webhook: http://127.0.0.1:{cfg['webhook']['port']}/webhook (see README to make it public)")
+    if cfg["webhook"]["enabled"] and not engine.tunnel:
+        print(f"TradingView webhook: http://127.0.0.1:{cfg['webhook']['port']}/webhook (see Connections to make it public)")
     print("Press Ctrl+C to stop. Open positions keep their exchange-side stops on Liquid.\n")
     if not args.no_browser:
         try:
@@ -70,6 +77,9 @@ def cmd_run(args) -> None:
         engine.stop()
         engine.save_state()
         print("Stopped.")
+    finally:
+        if engine.tunnel:
+            engine.tunnel.stop()
 
 
 def lab_opts(args) -> dict:
