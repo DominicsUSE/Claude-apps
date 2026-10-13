@@ -1,4 +1,4 @@
-"""Read-only checks of your FOMO wallet and Liquid account: never places a trade.
+"""Read-only checks of your Solana wallet (Phantom or FOMO) and Liquid account: never places a trade.
 
 Run from the dashboard (Connections > Test my connections) or `python run.py check`, right after
 pasting your keys, so mistakes show up before any money moves.
@@ -17,15 +17,15 @@ def _row(name: str, ok: bool | None, detail: str) -> dict:
 
 def test_fomo(venue_cfg: dict) -> list[dict]:
     rows = []
-    key = secret("FOMO_WALLET_PRIVATE_KEY")
+    key = secret("SOLANA_WALLET_PRIVATE_KEY")
     if not key:
-        return [_row("FOMO wallet key", None, "Not set. In FOMO: Settings > Account > Export, copy the Solana key, paste it above.")]
+        return [_row("Solana wallet key", None, "Not set. Paste your Phantom or FOMO Solana private key above (see the steps below).")]
     try:
         from .brokers.fomo_wallet import load_keypair
         address = str(load_keypair(key).pubkey())
-        rows.append(_row("FOMO wallet key", True, f"Wallet {address}. Check it matches the Solana address in your FOMO app."))
+        rows.append(_row("Solana wallet key", True, f"Wallet {address}. Check it matches the Solana address in Phantom or FOMO."))
     except Exception as e:
-        return [_row("FOMO wallet key", False, f"Could not read the key: {e}")]
+        return [_row("Solana wallet key", False, f"Could not read the key: {e}")]
     rpc = secret("SOLANA_RPC_URL") or venue_cfg["rpc_url"]
 
     def rpc_call(method, params):
@@ -37,7 +37,7 @@ def test_fomo(venue_cfg: dict) -> list[dict]:
         sol = rpc_call("getBalance", [address, {"commitment": "confirmed"}])["value"] / 1e9
         need = venue_cfg.get("min_sol_for_fees", 0.02)
         rows.append(_row("SOL for network fees", sol >= need or None, f"{sol:.4f} SOL" + ("" if sol >= need else
-                         f". FOMO pays gas only inside its own app. Jupiter can cover gas on buys of about $10+, "
+                         f". Jupiter can cover gas on buys of about $10+, "
                          f"but sells and small trades need SOL: send about 0.05 SOL to {address}")))
         usdc = 0.0
         res = rpc_call("getTokenAccountsByOwner", [address, {"mint": USDC_MINT}, {"encoding": "jsonParsed"}])
@@ -45,7 +45,7 @@ def test_fomo(venue_cfg: dict) -> list[dict]:
             usdc += float(acct["account"]["data"]["parsed"]["info"]["tokenAmount"].get("uiAmount") or 0)
         quote = venue_cfg.get("quote", "USDC")
         rows.append(_row("Money to trade with", (usdc > 1) if quote == "USDC" else (sol > need + 0.05),
-                         f"{usdc:,.2f} USDC" + (" (the bot buys with USDC: deposit some in FOMO)" if quote == "USDC" and usdc <= 1 else "")))
+                         f"{usdc:,.2f} USDC" + (" (the bot buys with USDC: send some to this wallet)" if quote == "USDC" and usdc <= 1 else "")))
     except Exception as e:
         rows.append(_row("Solana network", False, f"Could not read the wallet: {e}. A private RPC (SOLANA_RPC_URL, e.g. Helius) helps."))
     jkey = secret("JUPITER_API_KEY")

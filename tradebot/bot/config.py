@@ -98,7 +98,7 @@ DEFAULTS = {
             "train_every_hours": 24,          # retrain on fresh charts once a day
             "trade_unproven_live": False,     # live money only follows settings that made money on unseen charts
             "chart": {},                      # override chart settings, e.g. {"interval": "1m", "rvol_min": 3}
-            "fomo_enabled": True,             # Solana memecoins in your FOMO wallet
+            "fomo_enabled": True,             # Solana memecoins in your Solana wallet (Phantom or FOMO)
             "liquid_enabled": True,           # memecoin perps on Liquid (long and short, much lower fees)
             "liquid_markets": ["kPEPE", "WIF", "FARTCOIN", "kBONK", "POPCAT", "PENGU", "MEME", "TRUMP", "MOODENG",
                                "PNUT", "kSHIB", "DOGE", "kFLOKI", "SPX", "GOAT", "BRETT", "MEW", "TURBO", "CHILLGUY"],
@@ -213,7 +213,7 @@ DEFAULTS = {
 }
 
 SECRET_NAMES = [
-    "FOMO_WALLET_PRIVATE_KEY",
+    "SOLANA_WALLET_PRIVATE_KEY",
     "JUPITER_API_KEY",
     "SOLANA_RPC_URL",
     "HL_ACCOUNT_ADDRESS",
@@ -249,8 +249,14 @@ def load_env(path: Path | None = None) -> None:
         os.environ.setdefault(key.strip(), value)
 
 
+# Older versions called the wallet key FOMO_WALLET_PRIVATE_KEY; a key saved under that name still works.
+FALLBACK_SECRETS = {"SOLANA_WALLET_PRIVATE_KEY": "FOMO_WALLET_PRIVATE_KEY"}
+
+
 def secret(name: str):
     value = os.environ.get(name, "").strip()
+    if not value and name in FALLBACK_SECRETS:
+        value = os.environ.get(FALLBACK_SECRETS[name], "").strip()
     return value or None
 
 

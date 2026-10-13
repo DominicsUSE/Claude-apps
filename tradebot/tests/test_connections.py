@@ -192,7 +192,7 @@ def test_connection_checks_never_trade_and_explain(monkeypatch):
     from eth_account import Account
     agent = Account.from_key(agent_key).address
     account = "0x" + "ab" * 20
-    env = {"FOMO_WALLET_PRIVATE_KEY": base58.b58encode(bytes(kp)).decode(), "JUPITER_API_KEY": "k",
+    env = {"SOLANA_WALLET_PRIVATE_KEY": base58.b58encode(bytes(kp)).decode(), "JUPITER_API_KEY": "k",
            "HL_ACCOUNT_ADDRESS": account, "HL_API_PRIVATE_KEY": agent_key}
     monkeypatch.setattr(connections, "secret", lambda n: env.get(n))
     calls = []
@@ -226,3 +226,12 @@ def test_connection_checks_never_trade_and_explain(monkeypatch):
     assert all(c[2] is None for c in calls if c[0] == "GET")
     env["HL_ACCOUNT_ADDRESS"] = "not-an-address"
     assert connections.test_liquid(DEFAULTS["venues"]["liquid"])[0]["ok"] is False
+
+
+def test_old_wallet_key_name_still_works(monkeypatch):
+    from bot.config import secret
+    monkeypatch.delenv("SOLANA_WALLET_PRIVATE_KEY", raising=False)
+    monkeypatch.setenv("FOMO_WALLET_PRIVATE_KEY", "old-name-key")
+    assert secret("SOLANA_WALLET_PRIVATE_KEY") == "old-name-key"
+    monkeypatch.setenv("SOLANA_WALLET_PRIVATE_KEY", "new-name-key")
+    assert secret("SOLANA_WALLET_PRIVATE_KEY") == "new-name-key"

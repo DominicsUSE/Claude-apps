@@ -40,7 +40,7 @@ on the exchange even then.
 The **meme scalper** trades short-term memecoin moves and decides by reading the chart, not by
 headlines or hype. It trades in two places:
 
-| | FOMO wallet (Solana tokens) | Liquid (memecoin perps) |
+| | Solana wallet: Phantom or FOMO (Solana tokens) | Liquid (memecoin perps) |
 |---|---|---|
 | Markets | the 12 most-traded trending tokens with real liquidity (over $50k) and volume (over $250k a day) | kPEPE, WIF, FARTCOIN, kBONK, POPCAT, PENGU, TRUMP, MOODENG and more (Settings → `liquid_markets`) |
 | Direction | buy only | **long and short** (shorts read the same rules on the chart turned upside down) |
@@ -112,22 +112,30 @@ from the look-ahead-bias, walk-forward and risk-of-ruin videos.
 
 ## Connecting your accounts
 
-### FOMO
+### Solana wallet: Phantom or FOMO
 
-FOMO has no official bot API. It does let you **export your wallet's private key**, though. With
-it, the bot trades that same Solana wallet through Jupiter (the swap router most Solana apps use).
-The coins it buys sit in your FOMO wallet next to your own; FOMO's own trade history and PnL may not
-list them (FOMO routes its own trades through DFlow), so the bot's dashboard and journal are where
-its trades are recorded.
+The bot trades one Solana wallet through Jupiter (the swap router most Solana apps use), signing with
+that wallet's **private key**, which stays on your computer. Phantom and FOMO both let you export it.
+Best is a separate account just for the bot, holding only what it may trade.
 
-1. In FOMO: Settings → Account → Export (needs Face ID). Copy the **Solana** key (about 88
-   characters), not the 0x one: that is FOMO's EVM key.
-2. Dashboard → Connections → paste it into `FOMO_WALLET_PRIVATE_KEY` → Save keys → **Test my connections**.
-   The test shows the wallet address: check it matches the Solana address in your FOMO app.
-3. Keep USDC in the wallet (what the bot buys with). FOMO pays gas only inside its own app, so its
-   wallets usually hold no SOL: send about 0.05 SOL for network fees. Without it Jupiter can still pay
-   the gas on buys of about $10+, but selling needs SOL.
-4. Optional: a free Jupiter API key from [developers.jup.ag/portal](https://developers.jup.ag/portal)
+**From Phantom (Chrome extension)**
+1. Optional, safer: account name at the top left → *Add / Connect Wallet* → *Create new account*,
+   then send it the USDC the bot may use plus about 0.05 SOL.
+2. Account name at the top left → *Manage Accounts* → the account → *Show Private Key* → your Phantom
+   password. If it asks for a network, choose **Solana**. Copy the key (about 88 characters).
+
+**From FOMO (phone app)**
+1. Settings → Account → Export (needs Face ID). Copy the **Solana** key, not the 0x one (that is
+   FOMO's EVM key). FOMO's own history may not list the bot's trades (FOMO routes its own trades
+   through DFlow); the bot's dashboard and journal record them.
+
+**Then**
+1. Dashboard → Connections → paste it into **Solana wallet private key** (`SOLANA_WALLET_PRIVATE_KEY`;
+   older versions called it `FOMO_WALLET_PRIVATE_KEY`, which still works) → Save keys → restart the bot
+   → **Test my connections**. Check the wallet address shown matches your Phantom or FOMO address.
+2. Keep USDC in the wallet (what the bot buys with) and about 0.05 SOL for network fees. Without SOL,
+   Jupiter can still pay the gas on buys of about $10+, but selling needs SOL.
+3. Optional: a free Jupiter API key from [developers.jup.ag/portal](https://developers.jup.ag/portal)
    in `JUPITER_API_KEY` doubles the request limit (swaps work without one). A free private Solana RPC
    (e.g. Helius) in `SOLANA_RPC_URL` is more reliable than the public one.
 
@@ -135,7 +143,7 @@ Jupiter charges about 0.1% per swap (more on brand-new tokens) on top of the poo
 refuses swaps that would move the price more than 3% or that ask for an unusual network fee.
 
 > Anyone with that key can take everything in the wallet. Never paste it into a chat, a website or
-> a message. A separate FOMO account just for the bot keeps your main money apart.
+> a message. A separate account just for the bot keeps your main money apart.
 
 The bot never touches tokens it did not buy itself: it only ever sells the amount it bought, even
 when you hold the same coin. If a swap's answer gets lost on the way, the bot checks the wallet
@@ -169,7 +177,7 @@ TradingView can't place trades itself, but its alerts can tell the bot to trade.
    ```
    `action` can be `buy`, `sell` (short) or `close`. Optional fields: `stop_price`,
    `take_profit_pct`, `take_profit_price`, `leverage`, and `venue` (`liquid` or `fomo`). A Solana token
-   address as the symbol trades it in your FOMO wallet.
+   address as the symbol trades it in your Solana wallet (Phantom or FOMO).
 4. Ready-made Pine strategies are in [`tradingview/`](tradingview):
    - `tradebot_strategy.pine` is the bot's EMA trend strategy.
    - `btc_volatility_regime.pine` is the Bitcoin video strategy.

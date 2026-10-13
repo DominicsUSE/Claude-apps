@@ -3,7 +3,7 @@ Backtest from the terminal: python run.py backtest --strategy btc_regime --symbo
 Walk-forward test:          python run.py walkforward --strategy trend --symbol ETH --interval 4h --days 730
 Compare all strategies:     python run.py compare --symbol BTC --interval 1d
 Check connections:          python run.py check
-Train the meme scalper:     python run.py train --tokens 60          (Solana memecoins in the FOMO wallet)
+Train the meme scalper:     python run.py train --tokens 60          (Solana memecoins, Phantom or FOMO wallet)
                             python run.py train --profile liquid     (memecoin perps on Liquid)
 """
 import argparse

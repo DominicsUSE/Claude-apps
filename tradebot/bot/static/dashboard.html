@@ -168,7 +168,7 @@ ol.steps{margin:6px 0 0 18px;padding:0;font-size:13px}ol.steps li{margin:3px 0}
       <div class="card c4">
         <h2>Manual trade</h2>
         <form class="f" id="tradeForm" style="grid-template-columns:1fr 1fr">
-          <label class="fld">Venue<select name="venue"><option value="liquid">Liquid</option><option value="fomo">FOMO wallet</option></select></label>
+          <label class="fld">Venue<select name="venue"><option value="liquid">Liquid</option><option value="fomo">Solana wallet (Phantom or FOMO)</option></select></label>
           <label class="fld">Side<select name="side"><option value="buy">Buy / long</option><option value="sell">Sell / short</option></select></label>
           <label class="fld" style="grid-column:span 2">Market<input name="symbol" required placeholder="BTC, xyz:NVDA or a Solana token address"></label>
           <label class="fld">Size (USD)<input name="size_usd" type="number" min="1" step="any" value="20" required></label>
@@ -218,8 +218,8 @@ ol.steps{margin:6px 0 0 18px;padding:0;font-size:13px}ol.steps li{margin:3px 0}
     <div class="grid">
       <div class="card c12">
         <h2>Training <small>the bot studies recent memecoin charts and keeps only what works on charts it has not seen</small></h2>
-        <div class="row"><button class="btn primary" data-train="fomo">Train FOMO (Solana) now</button><button class="btn" data-train="liquid">Train Liquid perps now</button><span class="dim" id="trainStatus" role="status"></span></div>
-        <h2 style="margin-top:var(--s4)">FOMO wallet: Solana memecoins <small>about 1% fees and slippage per side</small></h2>
+        <div class="row"><button class="btn primary" data-train="fomo">Train Solana memecoins now</button><button class="btn" data-train="liquid">Train Liquid perps now</button><span class="dim" id="trainStatus" role="status"></span></div>
+        <h2 style="margin-top:var(--s4)">Solana wallet (Phantom or FOMO): Solana memecoins <small>about 1% fees and slippage per side</small></h2>
         <div id="trainOut-fomo"></div>
         <h2 style="margin-top:var(--s4)">Liquid: memecoin perps, long and short <small>about 0.1% per side</small></h2>
         <div id="trainOut-liquid"></div>
@@ -336,15 +336,26 @@ ol.steps{margin:6px 0 0 18px;padding:0;font-size:13px}ol.steps li{margin:3px 0}
         <div class="row" style="margin-top:var(--s3)"><button class="btn primary" id="saveSecrets">Save keys</button><span class="dim" id="secretStatus" role="status"></span></div>
       </div>
       <div class="card c6">
-        <h2>Connect FOMO</h2>
+        <h2>Connect your Solana wallet <small>Phantom or FOMO</small></h2>
+        <p class="dim">Best: a separate Phantom account just for the bot, holding only what it may trade.</p>
+        <h3 style="font-size:13px;margin:var(--s3) 0 var(--s2)">From Phantom (Chrome extension)</h3>
         <ol class="steps">
-          <li>In the FOMO app: Settings → Account → Export (Face ID). Copy the <b>Solana</b> private key (about 88 characters), not the 0x one.</li>
-          <li>Paste it into <b>FOMO_WALLET_PRIVATE_KEY</b> above, save, then press <b>Test my connections</b>. Check the wallet address matches the one in FOMO. The key stays on this computer.</li>
-          <li>Keep some USDC (what the bot spends) in the wallet and send about 0.05 SOL for network fees: FOMO pays gas only inside its own app, and selling needs SOL.</li>
-          <li>Optional: a free Jupiter API key from developers.jup.ag/portal as <b>JUPITER_API_KEY</b> (faster), and a private Solana RPC such as Helius (more reliable).</li>
-          <li>The coins the bot buys appear in your FOMO holdings; FOMO's own history may not list them, the Trade journal here does. The bot only ever sells what it bought.</li>
+          <li>Optional, safer: click your account name at the top left → <b>Add / Connect Wallet</b> → <b>Create new account</b>, then send it the USDC the bot may use plus about 0.05 SOL.</li>
+          <li>Click your account name at the top left → <b>Manage Accounts</b> → pick the account → <b>Show Private Key</b>. Enter your Phantom password. If it asks for a network, choose <b>Solana</b>.</li>
+          <li>Copy the key (about 88 characters) and paste it into <b>Solana wallet private key</b> above, then press <b>Save keys</b>.</li>
         </ol>
-        <div class="alert red" role="note"><svg width="18" height="18" aria-hidden="true"><use href="#i-alert"/></svg><span>Anyone with this key can take everything in the wallet. Never paste it into a chat, a website or a message. Consider a separate FOMO account just for the bot.</span></div>
+        <h3 style="font-size:13px;margin:var(--s3) 0 var(--s2)">From FOMO (phone app)</h3>
+        <ol class="steps">
+          <li>Settings → Account → Export (Face ID). Copy the <b>Solana</b> private key, not the 0x one, and paste it into the same box above.</li>
+        </ol>
+        <h3 style="font-size:13px;margin:var(--s3) 0 var(--s2)">Then</h3>
+        <ol class="steps">
+          <li>Close the bot and open it again, then press <b>Test my connections</b>. Check the wallet address shown matches your Phantom or FOMO address.</li>
+          <li>Keep USDC (what the bot buys with) and about 0.05 SOL for network fees in that wallet: selling needs SOL.</li>
+          <li>Optional: a free Jupiter API key from developers.jup.ag/portal as <b>JUPITER_API_KEY</b> (faster), and a private Solana RPC such as Helius (more reliable).</li>
+          <li>The bot only ever sells what it bought, never your other coins in the same wallet. Its trades are listed in the Trade journal here.</li>
+        </ol>
+        <div class="alert red" role="note"><svg width="18" height="18" aria-hidden="true"><use href="#i-alert"/></svg><span>Anyone with this key can take everything in the wallet. Never paste it into a chat, a website or a message. The key stays in the Tradebot folder on this computer.</span></div>
       </div>
       <div class="card c6">
         <h2>Connect Liquid</h2>
@@ -395,7 +406,7 @@ const NAMES = {fomo_momentum: "FOMO momentum", trend: "EMA trend", btc_regime: "
   congress: "Congress buys", tradingview: "TradingView alerts", meme_scalper: "Meme scalper", breakout: "Breakout", mean_reversion: "RSI pullback",
   supertrend: "Supertrend", macd: "MACD", heikin_ashi: "Heikin Ashi", manual: "Manual"};
 const DESCS = {
-  meme_scalper: "Reads 5-minute memecoin charts: trades breakouts, pullbacks and VWAP reclaims in your FOMO wallet and on Liquid memecoin perps (long and short), and sells in steps as the chart turns.",
+  meme_scalper: "Reads 5-minute memecoin charts: trades breakouts, pullbacks and VWAP reclaims in your Solana wallet (Phantom or FOMO) and on Liquid memecoin perps (long and short), and sells in steps as the chart turns.",
   fomo_momentum: "Trending Solana memecoins in your FOMO wallet, after rug checks. Sells in steps with a trailing stop.",
   trend: "EMA 20/50 crossover with a 200 EMA trend filter and ATR stops, on Liquid. Failed a walk-forward test on ETH 4h: test before using.",
   btc_regime: "Bitcoin video: in the market during bull regimes, in cash during bear ones.",
@@ -494,14 +505,14 @@ async function refresh() {
   if (s.halted) banner += `<div class="alert red" role="alert"><svg width="18" height="18" aria-hidden="true"><use href="#i-alert"/></svg><span>${esc(s.halted)}</span></div>`;
   if (s.last_error && age > 120) banner += `<div class="alert"><svg width="18" height="18" aria-hidden="true"><use href="#i-alert"/></svg><span>Last problem: ${esc(s.last_error)}</span></div>`;
   const off = Object.entries(s.connections).filter(([, c]) => !c.connected);
-  if (s.mode === "live" && off.length) banner += `<div class="alert blue"><span>${off.map(([k, c]) => `<b>${k === "fomo" ? "FOMO" : "Liquid"}:</b> ${esc(c.detail)}`).join("<br>")} (see Connections)</span></div>`;
+  if (s.mode === "live" && off.length) banner += `<div class="alert blue"><span>${off.map(([k, c]) => `<b>${k === "fomo" ? "Solana wallet" : "Liquid"}:</b> ${esc(c.detail)}`).join("<br>")} (see Connections)</span></div>`;
   $("#banner").innerHTML = banner;
   renderApprovals(s);
   // positions
   const tb = $("#posTable tbody");
   tb.innerHTML = s.positions.map(p => `<tr>
     <td><b>${esc(p.label)}</b>${p.venue === "fomo" ? `<div class="dim" style="font-size:11px">${esc(p.symbol.slice(0, 6))}…</div>` : ""}</td>
-    <td>${p.venue === "fomo" ? "FOMO" : "Liquid"}</td><td class="${p.side === "long" ? "pos" : "neg"}">${p.side}${p.leverage > 1 ? " " + p.leverage + "x" : ""}</td>
+    <td>${p.venue === "fomo" ? "Solana" : "Liquid"}</td><td class="${p.side === "long" ? "pos" : "neg"}">${p.side}${p.leverage > 1 ? " " + p.leverage + "x" : ""}</td>
     <td class="n">${usd(p.notional)}</td><td class="n">${px(p.entry_price)}</td><td class="n">${px(p.mark_price)}</td>
     <td class="n ${cls(p.unrealized_pnl)}">${signed(p.unrealized_pnl)}<div style="font-size:11px">${pct(p.pnl_pct)}</div></td>
     <td class="n">${px(p.stop)}</td><td class="n">${px(p.take_profit)}</td>
@@ -516,7 +527,7 @@ async function refresh() {
   if (box.dataset.names !== names.join()) {
     box.dataset.names = names.join();
     box.innerHTML = names.map(n => `<div class="strat"><label class="switch"><input type="checkbox" data-strat="${n}" aria-label="${esc(NAMES[n] || n)}"><span></span></label>
-      <div class="name">${esc(NAMES[n] || n)} <span class="badge" style="font-size:11px">${n === "tradingview" ? "alerts" : (s.strategies[n].venue === "fomo" ? "FOMO" : "Liquid")}</span></div>
+      <div class="name">${esc(NAMES[n] || n)} <span class="badge" style="font-size:11px">${n === "tradingview" ? "alerts" : (s.strategies[n].venue === "fomo" ? "Solana" : "Liquid")}</span></div>
       <div class="desc">${esc(DESCS[n] || "")}</div><div class="note" data-note="${n}"></div></div>`).join("");
   }
   names.forEach(n => {
@@ -530,7 +541,7 @@ async function refresh() {
   if (!$('[data-panel="charts"]').classList.contains("hidden")) renderWatch();
   if (!$('[data-panel="training"]').classList.contains("hidden") && s.training.running) loadTraining();
   // connections tab status
-  $("#connStatus").innerHTML = Object.entries(s.connections).map(([k, c]) => `<div class="sec"><div><b>${k === "fomo" ? "FOMO wallet (Solana)" : "Liquid (Hyperliquid)"}</b><p>${esc(c.detail)}</p></div><span class="badge ${c.connected ? (s.mode === "paper" ? "paper" : "ok") : "warn"}">${c.connected ? (s.mode === "paper" ? "practice" : "connected") : "not connected"}</span></div>`).join("");
+  $("#connStatus").innerHTML = Object.entries(s.connections).map(([k, c]) => `<div class="sec"><div><b>${k === "fomo" ? "Solana wallet (Phantom or FOMO)" : "Liquid (Hyperliquid)"}</b><p>${esc(c.detail)}</p></div><span class="badge ${c.connected ? (s.mode === "paper" ? "paper" : "ok") : "warn"}">${c.connected ? (s.mode === "paper" ? "practice" : "connected") : "not connected"}</span></div>`).join("");
 }
 // ---------- approvals ----------
 const seenApprovals = new Set();
@@ -540,7 +551,7 @@ function renderApprovals(s) {
   document.title = list.length ? `(${list.length}) OK? Tradebot` : "Tradebot";
   $("#notifyBtn").classList.toggle("hidden", !("Notification" in window) || Notification.permission !== "default");
   $("#approvals").innerHTML = list.map(a => {
-    const legs = a.legs.map(l => `<b>${l.side === "long" ? "BUY" : "SHORT"} ${esc(l.label)}</b> on ${l.venue === "fomo" ? "FOMO" : "Liquid"}
+    const legs = a.legs.map(l => `<b>${l.side === "long" ? "BUY" : "SHORT"} ${esc(l.label)}</b> on ${l.venue === "fomo" ? "Solana" : "Liquid"}
       for ${usd(l.size_usd)}${l.leverage > 1 ? ` at ${l.leverage}x` : ""} · now ${px(l.price)} · stop ${px(l.stop)}${l.take_profit ? " · target " + px(l.take_profit) : ""}`).join("<br>");
     const m = Math.floor(a.expires_in / 60), sec = String(a.expires_in % 60).padStart(2, "0");
     return `<div class="sec" style="align-items:flex-start;gap:12px;flex-wrap:wrap"><div style="flex:1;min-width:240px">${legs}
@@ -702,7 +713,7 @@ async function loadSettings() {
   const sections = [["General", ["mode", "live_trading_acknowledged", "loop_seconds"], cfgCache], ["Ask before trading", Object.keys(cfgCache.approvals), cfgCache.approvals, "approvals"],
     ["Risk limits", Object.keys(cfgCache.risk), cfgCache.risk, "risk"],
     ...Object.keys(cfgCache.strategies).map(k => [NAMES[k] || k, Object.keys(cfgCache.strategies[k]).filter(x => x !== "enabled"), cfgCache.strategies[k], "strategies." + k]),
-    ["FOMO wallet", Object.keys(cfgCache.venues.fomo), cfgCache.venues.fomo, "venues.fomo"], ["Liquid", Object.keys(cfgCache.venues.liquid), cfgCache.venues.liquid, "venues.liquid"],
+    ["Solana wallet (Phantom or FOMO)", Object.keys(cfgCache.venues.fomo), cfgCache.venues.fomo, "venues.fomo"], ["Liquid", Object.keys(cfgCache.venues.liquid), cfgCache.venues.liquid, "venues.liquid"],
     ["News check (Perplexity / Grok)", Object.keys(cfgCache.research), cfgCache.research, "research"], ["Practice account", Object.keys(cfgCache.paper), cfgCache.paper, "paper"]];
   $("#settingsForm").innerHTML = sections.map(([title, keys, obj, path]) => `<details ${title === "Risk limits" ? "open" : ""}><summary><b>${esc(title)}</b></summary><form class="f" style="margin:8px 0 12px">${
     keys.map(k => field(path ? path + "." + k : k, k, obj[k])).join("")}</form></details>`).join("");
@@ -735,7 +746,7 @@ $("#paperForm").onsubmit = async ev => {
 
 // ---------- connections ----------
 const SECRETS = [
-  ["FOMO_WALLET_PRIVATE_KEY", "FOMO wallet private key (Solana)", "Exported from FOMO: Settings → Account → Export"],
+  ["SOLANA_WALLET_PRIVATE_KEY", "Solana wallet private key (Phantom or FOMO)", "The Solana private key of the wallet the bot trades: see the steps below"],
   ["JUPITER_API_KEY", "Jupiter API key", "Optional, free at developers.jup.ag/portal: faster swaps"],
   ["SOLANA_RPC_URL", "Solana RPC URL (optional)", "e.g. a free Helius URL; the public one is slow"],
   ["HL_ACCOUNT_ADDRESS", "Liquid / Hyperliquid account address", "0x…, the address of your Liquid account"],
@@ -766,7 +777,7 @@ function renderWatch() {
   const mine = ((last && last.positions) || []).filter(p => p.strategy === "meme_scalper");
   const all = [...mine.filter(p => !rows.some(r => r.mint === p.symbol && r.venue === p.venue)).map(p => ({mint: p.symbol, venue: p.venue, symbol: p.label, structure: "in trade", setup: "", text: ""})), ...rows];
   $("#watchTable tbody").innerHTML = all.map(r => `<tr data-mint="${esc(r.mint)}" data-pool="${esc(r.pool || "")}" data-venue="${esc(r.venue || "fomo")}" style="cursor:pointer${r.mint === chartMint ? ";background:var(--muted)" : ""}">
-    <td><b>${esc(r.symbol)}</b> <span class="badge" style="font-size:10px">${r.venue === "liquid" ? "Liquid" : "FOMO"}</span>${mine.some(p => p.symbol === r.mint && p.venue === r.venue) ? ' <span class="badge ok" style="font-size:10px">holding</span>' : ""}<div class="dim" style="font-size:11px">${esc((r.text || "").slice(0, 70))}${(r.text || "").length > 70 ? "…" : ""}</div></td>
+    <td><b>${esc(r.symbol)}</b> <span class="badge" style="font-size:10px">${r.venue === "liquid" ? "Liquid" : "Solana"}</span>${mine.some(p => p.symbol === r.mint && p.venue === r.venue) ? ' <span class="badge ok" style="font-size:10px">holding</span>' : ""}<div class="dim" style="font-size:11px">${esc((r.text || "").slice(0, 70))}${(r.text || "").length > 70 ? "…" : ""}</div></td>
     <td><span class="badge ${r.structure === "up" ? "ok" : r.structure === "down" ? "bad" : ""}" style="font-size:11px">${esc(r.structure || "–")}</span></td>
     <td>${r.setup ? `<span class="badge ${r.setup.endsWith("_short") ? "bad" : "ok"}" style="font-size:11px">${esc(r.setup.replace("_short", " (short)"))}</span>` : ""}</td></tr>`).join("");
 }
@@ -832,7 +843,7 @@ function drawCandles(canvas, d) {
 async function loadTraining() {
   const d = await api("/api/training"), st = d.status;
   $$("[data-train]").forEach(b => b.disabled = st.running);
-  $("#trainStatus").textContent = st.running ? `Training ${st.profile === "liquid" ? "Liquid" : "FOMO"}… ${st.progress || ""}` : st.error ? "Last training failed: " + st.error : "";
+  $("#trainStatus").textContent = st.running ? `Training ${st.profile === "liquid" ? "Liquid" : "Solana"}… ${st.progress || ""}` : st.error ? "Last training failed: " + st.error : "";
   for (const profile of ["fomo", "liquid"]) {
     const L = (d.learned || {})[profile] || {}, box = $("#trainOut-" + profile);
     if (!L.params) { box.innerHTML = `<p class="dim">Not trained yet: press Train now, or wait for the daily run.</p>`; continue; }
@@ -848,7 +859,7 @@ async function loadTraining() {
       <details><summary>Last ${L.sample_trades.length} unseen-chart trades</summary><div class="scroll"><table><thead><tr><th>Market</th><th>Setup</th><th class="n">Result</th><th class="n">R</th><th>Exit</th></tr></thead><tbody>
       ${L.sample_trades.slice().reverse().map(t => `<tr><td>${esc(t.token)}</td><td>${esc(t.setup)}</td><td class="n ${cls(t.ret_pct)}">${pct(t.ret_pct)}</td><td class="n">${(+t.r).toFixed(2)}</td><td class="dim">${esc(t.exit_reason)}</td></tr>`).join("")}</tbody></table></div></details>`;
   }
-  $("#fbTable tbody").innerHTML = Object.entries(d.journal).map(([k, v]) => `<tr><td>${esc(k.replace("fomo:", "FOMO · ").replace("liquid:", "Liquid · ").replace("_short", " (short)"))}</td><td class="n">${v.trades}</td><td class="n">${v.win_rate}</td><td class="n ${cls(v.pnl)}">${signed(v.pnl)}</td><td>${v.paused ? '<span class="badge bad">paused: losing</span>' : v.trades < 10 ? '<span class="badge">learning</span>' : '<span class="badge ok">active</span>'}</td></tr>`).join("");
+  $("#fbTable tbody").innerHTML = Object.entries(d.journal).map(([k, v]) => `<tr><td>${esc(k.replace("fomo:", "Solana · ").replace("liquid:", "Liquid · ").replace("_short", " (short)"))}</td><td class="n">${v.trades}</td><td class="n">${v.win_rate}</td><td class="n ${cls(v.pnl)}">${signed(v.pnl)}</td><td>${v.paused ? '<span class="badge bad">paused: losing</span>' : v.trades < 10 ? '<span class="badge">learning</span>' : '<span class="badge ok">active</span>'}</td></tr>`).join("");
 }
 $$("[data-train]").forEach(b => b.onclick = async () => { try { await api("/api/training/start", {profile: b.dataset.train}); toast("Training started"); setTimeout(loadTraining, 800); } catch (e) { toast(e.message); } });
 
@@ -857,7 +868,7 @@ $("#testConnBtn").onclick = async () => {
   try {
     const r = await api("/api/connections/test", {});
     const icon = ok => ok === true ? '<span class="badge ok">OK</span>' : ok === false ? '<span class="badge bad">fix this</span>' : '<span class="badge warn">not set</span>';
-    $("#testConnOut").innerHTML = [["FOMO wallet (Solana)", r.fomo], ["Liquid", r.liquid]].map(([title, rows]) =>
+    $("#testConnOut").innerHTML = [["Solana wallet (Phantom or FOMO)", r.fomo], ["Liquid", r.liquid]].map(([title, rows]) =>
       `<h2 style="margin-top:var(--s3)">${title}</h2>` + rows.map(x => `<div class="sec"><div><b>${esc(x.name)}</b><p>${esc(x.detail)}</p></div>${icon(x.ok)}</div>`).join("")).join("");
     $("#testConnStatus").textContent = "";
   } catch (e) { $("#testConnStatus").textContent = "Failed: " + e.message; }

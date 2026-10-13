@@ -91,3 +91,11 @@ def test_approve_from_the_dashboard(servers, engine):
     assert code == 200 and r["placed"] and "liquid:BTC" in engine.state["owners"]
     code, r = call(dash + "/api/approvals", {"id": a["id"], "approve": True}, {"X-Tradebot": "1"})
     assert code >= 400                                                                     # already answered
+
+
+def test_saving_the_wallet_key_replaces_the_old_name(servers, tmp_path):
+    dash = servers[0]
+    (tmp_path / ".env").write_text("FOMO_WALLET_PRIVATE_KEY=old\nQUIVER_API_TOKEN=q\n")
+    assert call(dash + "/api/secrets", {"SOLANA_WALLET_PRIVATE_KEY": "new"}, {"X-Tradebot": "1"})[0] == 200
+    env = (tmp_path / ".env").read_text()
+    assert "SOLANA_WALLET_PRIVATE_KEY=new" in env and "FOMO_WALLET_PRIVATE_KEY" not in env and "QUIVER_API_TOKEN=q" in env

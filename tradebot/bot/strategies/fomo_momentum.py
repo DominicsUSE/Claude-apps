@@ -53,7 +53,7 @@ def screen_pair(pair: dict, p: dict, now_ms: int) -> tuple[bool, str, float]:
 
 
 class FomoMomentum(Strategy):
-    """Buys trending Solana memecoins in your FOMO wallet, with rug checks and tight exits."""
+    """Buys trending Solana memecoins in your Solana wallet (Phantom or FOMO), with rug checks and tight exits."""
     name = "fomo_momentum"
     venue = "fomo"
 

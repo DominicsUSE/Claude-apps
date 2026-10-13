@@ -1,7 +1,7 @@
 """Meme scalper: short-term memecoin trades decided by reading the chart.
 
 Two places to trade:
-* FOMO wallet (Solana tokens, buy only): each minute take the tokens people are trading right
+* Solana wallet, Phantom or FOMO (Solana tokens, buy only): each minute take the tokens people are trading right
   now (DexScreener boosts, Jupiter trending), keep the ones with real liquidity and volume, and
   read each one's 5-minute chart (GeckoTerminal) once per candle.
 * Liquid (memecoin perps such as kPEPE, WIF, FARTCOIN, kBONK, POPCAT, PENGU): long AND short,
@@ -65,7 +65,7 @@ def unproven_warning(learned: dict) -> str:
 
 
 class MemeScalper(Strategy):
-    """Reads memecoin charts and trades breakouts, pullbacks and VWAP reclaims (FOMO wallet and Liquid perps)."""
+    """Reads memecoin charts and trades breakouts, pullbacks and VWAP reclaims (Solana wallet and Liquid perps)."""
     name = "meme_scalper"
     venue = "fomo"
     venues = ("fomo", "liquid")

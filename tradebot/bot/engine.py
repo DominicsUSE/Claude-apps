@@ -94,16 +94,16 @@ class Engine:
         brokers = {}
         fomo_cfg, liq_cfg = self.cfg["venues"]["fomo"], self.cfg["venues"]["liquid"]
         if fomo_cfg["enabled"]:
-            key = config_mod.secret("FOMO_WALLET_PRIVATE_KEY")
+            key = config_mod.secret("SOLANA_WALLET_PRIVATE_KEY")
             if key:
                 from .brokers.fomo_wallet import FomoWalletBroker
                 try:
                     brokers["fomo"] = FomoWalletBroker(fomo_cfg, self.sol, key, config_mod.secret("SOLANA_RPC_URL"),
                                                        config_mod.secret("JUPITER_API_KEY"), saved.get("fomo"))
                 except Exception as e:
-                    self.broker_notes["fomo"] = f"FOMO wallet key could not be read: {e}"
+                    self.broker_notes["fomo"] = f"Solana wallet key could not be read: {e}"
             else:
-                self.broker_notes["fomo"] = "Add FOMO_WALLET_PRIVATE_KEY to .env to trade your FOMO wallet"
+                self.broker_notes["fomo"] = "Add your Solana wallet key (Phantom or FOMO) in Connections to trade it"
         if liq_cfg["enabled"]:
             addr, key = config_mod.secret("HL_ACCOUNT_ADDRESS"), config_mod.secret("HL_API_PRIVATE_KEY")
             if addr and key:

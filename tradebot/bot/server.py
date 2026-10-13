@@ -177,7 +177,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 e.event("info", f"{body['name']} {'turned on' if body['enabled'] else 'turned off'}")
             elif path == "/api/secrets":
                 updates = {k: str(v).strip() for k, v in body.items() if k in EDITABLE_SECRETS}
-                write_env(updates)
+                write_env({**updates, **{old: "" for new, old in config_mod.FALLBACK_SECRETS.items() if new in updates}})
                 e.event("info", f"Saved {', '.join(updates)}. Restart the bot to reconnect.")
             elif path == "/api/connections/test":
                 from .connections import test_fomo, test_liquid
