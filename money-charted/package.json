@@ -1,0 +1,32 @@
+{
+  "name": "money-charted",
+  "private": true,
+  "type": "module",
+  "description": "Turns official money data into YouTube Shorts: data, script, voice, captions, render.",
+  "scripts": {
+    "make": "tsx pipeline/run.ts",
+    "studio": "remotion studio video/index.ts",
+    "test": "tsx --test pipeline/lib.test.ts",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.131.0",
+    "@remotion/bundler": "4.0.531",
+    "@remotion/captions": "4.0.531",
+    "@remotion/fonts": "4.0.531",
+    "@remotion/media": "4.0.531",
+    "@remotion/media-parser": "4.0.531",
+    "@remotion/renderer": "4.0.531",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "remotion": "4.0.531",
+    "tsx": "4.23.15",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@remotion/cli": "4.0.531",
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "typescript": "5.9.3"
+  }
+}
