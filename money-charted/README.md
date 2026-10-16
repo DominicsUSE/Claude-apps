@@ -82,9 +82,11 @@ Need a chart these recipes can't draw (a map, a mortgage comparison)? Ask Claude
 
 ## Look and feel
 
-- Change colors, fonts and layout in `video/Short.tsx`. Preview with `npm run studio` (opens a browser editor).
+The house style follows newsroom data graphics: one typeface (Libre Franklin) in a few weights, one accent green, black and two greys for everything else, hairline gridlines, labels written at the end of each line instead of a legend, and a short leader-line callout for the one thing worth noticing. No glow, grain or gradients. When one bar matters (the US in a world ranking), it is green and the rest are grey.
+
+- Change colors, type sizes and layout in `video/Short.tsx` (the palette is the `C` object at the top). Preview with `npm run studio` (opens a browser editor).
 - Optional background music: put a licensed track at `public/music/bed.mp3`. It plays quietly under the voice. Don't use tracks from YouTube's Shorts music picker; those send half your Shorts revenue to the music owner.
-- Fonts are in `public/fonts` under the SIL Open Font License, so renders work offline.
+- The font is in `public/fonts` under the SIL Open Font License, so renders work offline.
 
 ## How the number check works
 

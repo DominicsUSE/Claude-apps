@@ -340,7 +340,6 @@ export const RECIPES: Record<string, (p: P) => Built | Promise<Built>> = {
     return {
       headline: `*${t[0]}×* vs ${t[1]}×`,
       sub: `${labels.join(" vs ")}, ${start}–${end}`,
-      annotation: labels[0].toLowerCase(),
       source: `Source: US Bureau of Labor Statistics (FRED ${ids.join(", ")})`,
       chart: { kind: "line", x: "year", format: { suffix: "×", decimals: 1 }, lines },
       facts,
@@ -370,7 +369,6 @@ export const RECIPES: Record<string, (p: P) => Built | Promise<Built>> = {
     return {
       headline: `$${fmt(total(start), { decimals: 2 })} → *$${fmt(total(end), { decimals: 2 })}*`,
       sub: `${labels.join(" + ")}, ${start} vs ${end}`,
-      annotation: labels[0].toLowerCase(),
       source: `Source: US Bureau of Labor Statistics average prices (FRED ${ids.join(", ")})`,
       chart: { kind: "line", x: "year", format: { prefix: "$", decimals: 2 }, lines },
       facts,

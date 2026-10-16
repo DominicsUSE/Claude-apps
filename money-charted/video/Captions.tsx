@@ -27,7 +27,7 @@ export const Captions: React.FC<{ captions: Caption[]; top: number; font: string
         if (until <= from) return null;
         return (
           <Sequence key={i} from={from} durationInFrames={until - from} layout="none">
-            <div style={{ position: "absolute", top, left: 72, right: 150, textAlign: "center", fontFamily: font, fontWeight: 700, fontSize: 56, lineHeight: 1.22, color: ink, textShadow: "0 2px 10px rgba(0,0,0,0.55)" }}>
+            <div style={{ position: "absolute", top, left: 72, right: 150, textAlign: "center", fontFamily: font, fontWeight: 700, fontSize: 52, lineHeight: 1.22, letterSpacing: "-0.01em", color: ink }}>
               {g.map((c, j) => (
                 <span key={j} style={{ color: /\d/.test(c.text) ? number : ink }}>
                   {(j ? " " : "") + c.text.trim()}
