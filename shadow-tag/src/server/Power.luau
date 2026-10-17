@@ -69,7 +69,7 @@ local function setupEnvironment()
 	bloom.Threshold = 1.6
 
 	local grade = effect("ColorCorrectionEffect", "StationGrade") :: ColorCorrectionEffect
-	grade.Contrast = 0.12
+	grade.Contrast = 0.04 -- higher crushes the near-black ambient to pure black
 	grade.Saturation = -0.2
 	grade.TintColor = Color3.fromRGB(225, 230, 245)
 

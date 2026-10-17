@@ -87,18 +87,32 @@ local function spawnStick(origin: Vector3, direction: Vector3)
 	part.CastShadow = false
 	part.CustomPhysicalProperties = PhysicalProperties.new(0.6, 0.9, 0.1)
 	part.CFrame = CFrame.lookAt(origin, origin + direction)
+	local anchor = Instance.new("Attachment")
+	anchor.Parent = part
 	local light = Instance.new("PointLight")
 	light.Color = GLOW
-	-- The pool of light is the safe zone, so players can read it at a glance.
-	light.Range = Config.GlowstickSafeRadius + 1
+	light.Range = Config.GlowstickSafeRadius + 4
 	light.Brightness = 2.6
 	light.Shadows = false
-	light.Parent = part
+	light.Parent = anchor
 	part.Parent = folder
 	part:SetNetworkOwner(nil)
 	part.AssemblyLinearVelocity = direction * Config.GlowstickThrowSpeed + Vector3.new(0, 10, 0)
 	part.AssemblyAngularVelocity = Vector3.new(math.random(-8, 8), math.random(-8, 8), math.random(-8, 8))
 	Sounds.play("GlowstickCrack", part)
+
+	-- Once it settles, pin it and lift the light 3 studs: a light lying on the
+	-- floor only grazes it, a raised one pools out to about the safe radius.
+	task.spawn(function()
+		local deadline = os.clock() + 3
+		repeat
+			task.wait(0.2)
+		until not part.Parent or part.AssemblyLinearVelocity.Magnitude < 1 or os.clock() > deadline
+		if part.Parent then
+			part.Anchored = true
+			anchor.WorldPosition = part.Position + Vector3.new(0, 3, 0)
+		end
+	end)
 
 	local entry = { part = part, expires = os.clock() + Config.GlowstickLifetime }
 	table.insert(active, entry)

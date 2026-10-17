@@ -172,13 +172,13 @@ function Roster.giveFlashlight(character: Model)
 	dust.Speed = NumberRange.new(0.1, 0.3)
 	dust.SpreadAngle = Vector2.new(180, 180)
 	dust.Drag = 1
-	dust.Size = NumberSequence.new(0.07)
+	dust.Size = NumberSequence.new(0.16)
 	dust.Transparency = NumberSequence.new({
 		NumberSequenceKeypoint.new(0, 1),
 		NumberSequenceKeypoint.new(0.3, 0.35),
 		NumberSequenceKeypoint.new(1, 1),
 	})
-	dust.LightEmission = 0.1
+	dust.LightEmission = 0.4
 	dust.LightInfluence = 1
 	dust.Color = ColorSequence.new(Color3.fromRGB(255, 240, 220))
 	dust.Enabled = false

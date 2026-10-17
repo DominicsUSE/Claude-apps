@@ -265,8 +265,8 @@ local function fixture(zone: string, pos: Vector3, yaw: number?)
 		ghost(box(F.Lights, Vector3.new(6, 0.4, 1.4), CFrame.new(pos) * CFrame.Angles(0, math.rad(yaw or 0), 0), C.fixtureOn, Enum.Material.Neon, "Fixture"))
 	local light = Instance.new("SurfaceLight")
 	light.Face = Enum.NormalId.Bottom
-	light.Angle = 100
-	light.Range = 20
+	light.Angle = 80
+	light.Range = 28 -- reaches the floor from the 20-stud platform ceiling
 	light.Brightness = 1.6
 	light.Color = Color3.fromRGB(222, 230, 255)
 	light.Shadows = false

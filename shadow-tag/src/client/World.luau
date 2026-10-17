@@ -18,11 +18,11 @@ local player = Players.LocalPlayer
 local state = Net.state()
 
 local AMBIENT = {
-	Lobby = Color3.fromRGB(26, 26, 30),
-	Lit = Color3.fromRGB(14, 14, 18),
+	Lobby = Color3.fromRGB(36, 36, 42),
+	Lit = Color3.fromRGB(32, 32, 38),
 	Dark = Color3.fromRGB(4, 4, 6),
-	ShadowLit = Color3.fromRGB(36, 38, 50),
-	ShadowDark = Color3.fromRGB(26, 28, 40),
+	ShadowLit = Color3.fromRGB(48, 50, 64),
+	ShadowDark = Color3.fromRGB(30, 32, 44),
 }
 local ZONE_TEXT = { On = "POWER ON", Off = "NO POWER", Restored = "EMERGENCY POWER" }
 local ZONE_COLOR = {
