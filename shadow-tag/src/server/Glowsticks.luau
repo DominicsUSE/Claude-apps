@@ -89,8 +89,9 @@ local function spawnStick(origin: Vector3, direction: Vector3)
 	part.CFrame = CFrame.lookAt(origin, origin + direction)
 	local light = Instance.new("PointLight")
 	light.Color = GLOW
-	light.Range = Config.GlowstickSafeRadius + 4
-	light.Brightness = 2.2
+	-- The pool of light is the safe zone, so players can read it at a glance.
+	light.Range = Config.GlowstickSafeRadius + 1
+	light.Brightness = 2.6
 	light.Shadows = false
 	light.Parent = part
 	part.Parent = folder

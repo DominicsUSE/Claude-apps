@@ -18,11 +18,11 @@ local player = Players.LocalPlayer
 local state = Net.state()
 
 local AMBIENT = {
-	Lobby = Color3.fromRGB(95, 95, 102),
-	Lit = Color3.fromRGB(56, 56, 64),
-	Dark = Color3.fromRGB(7, 7, 10),
-	ShadowLit = Color3.fromRGB(72, 76, 92),
-	ShadowDark = Color3.fromRGB(42, 46, 62),
+	Lobby = Color3.fromRGB(26, 26, 30),
+	Lit = Color3.fromRGB(14, 14, 18),
+	Dark = Color3.fromRGB(4, 4, 6),
+	ShadowLit = Color3.fromRGB(36, 38, 50),
+	ShadowDark = Color3.fromRGB(26, 28, 40),
 }
 local ZONE_TEXT = { On = "POWER ON", Off = "NO POWER", Restored = "EMERGENCY POWER" }
 local ZONE_COLOR = {
@@ -116,7 +116,7 @@ function World.init(setZone: (string, Color3) -> ())
 				lastAmbient = ambient
 				local info = TweenInfo.new(1.2)
 				TweenService:Create(Lighting, info, { Ambient = ambient }):Play()
-				TweenService:Create(air, info, { Density = if dark and not shadow then 0.52 else 0.38 }):Play()
+				TweenService:Create(air, info, { Density = if dark and not shadow then 0.62 else 0.55 }):Play()
 			end
 			vision.Enabled = shadow
 			if currentZone then
@@ -134,17 +134,27 @@ function World.init(setZone: (string, Color3) -> ())
 			table.insert(flickering, fixture)
 		end
 	end
+	local warnings = CollectionService:GetTagged("WarningLight")
 	task.spawn(function()
 		while true do
 			for _, fixture in flickering do
 				local light = fixture:FindFirstChildOfClass("SurfaceLight")
-				if light and zoneState(fixture:GetAttribute("Zone")) ~= "Off" and math.random() < 0.05 then
+				-- Transparency 0 means no flicker is in progress, so Brightness is the base value.
+				if light and fixture.Transparency == 0 and zoneState(fixture:GetAttribute("Zone")) ~= "Off" and math.random() < 0.05 then
+					local base = light.Brightness
 					light.Brightness = 0.15
 					fixture.Transparency = 0.7
 					task.delay(math.random() * 0.2 + 0.04, function()
-						light.Brightness = 1.25
+						light.Brightness = base
 						fixture.Transparency = 0
 					end)
+				end
+			end
+			local pulse = 0.55 + 0.45 * math.sin(os.clock() * 2.5)
+			for _, lamp in warnings do
+				local light = lamp:FindFirstChildOfClass("PointLight")
+				if light then
+					light.Brightness = 1.5 * pulse
 				end
 			end
 			for _, other in Players:GetPlayers() do

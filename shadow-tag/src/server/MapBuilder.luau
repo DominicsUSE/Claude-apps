@@ -265,14 +265,17 @@ local function fixture(zone: string, pos: Vector3, yaw: number?)
 		ghost(box(F.Lights, Vector3.new(6, 0.4, 1.4), CFrame.new(pos) * CFrame.Angles(0, math.rad(yaw or 0), 0), C.fixtureOn, Enum.Material.Neon, "Fixture"))
 	local light = Instance.new("SurfaceLight")
 	light.Face = Enum.NormalId.Bottom
-	light.Angle = 120
-	light.Range = 22
-	light.Brightness = 1.25
+	light.Angle = 100
+	light.Range = 20
+	light.Brightness = 1.6
 	light.Color = Color3.fromRGB(222, 230, 255)
 	light.Shadows = false
 	light.Parent = p
+	-- Some tubes are long dead, some buzz and flicker; the rest hold steady.
+	local dead = rng:NextNumber() < 0.2
 	p:SetAttribute("Zone", zone)
-	p:SetAttribute("Flicker", rng:NextNumber() < 0.3)
+	p:SetAttribute("Dead", dead)
+	p:SetAttribute("Flicker", not dead and rng:NextNumber() < 0.35)
 	CollectionService:AddTag(p, "LightFixture")
 	table.insert(refs.fixtures[zone], p)
 end
@@ -293,6 +296,19 @@ local function emergency(zone: string, pos: Vector3, facing: Vector3)
 	light.Parent = p
 	p:SetAttribute("Zone", zone)
 	table.insert(refs.emergency[zone], p)
+end
+
+-- Always-on red warning lamp (train, breaker room); clients pulse it.
+local function warning(pos: Vector3)
+	local p = ghost(box(F.Lights, Vector3.new(1, 1, 1), CFrame.new(pos), C.emergency, Enum.Material.Neon, "WarningLamp"))
+	p.Shape = Enum.PartType.Ball
+	local light = Instance.new("PointLight")
+	light.Color = C.emergency
+	light.Range = 18
+	light.Brightness = 1.5
+	light.Shadows = false
+	light.Parent = p
+	CollectionService:AddTag(p, "WarningLight")
 end
 
 -- Neon panels (vending machines, ticket screens) that die with their zone.
@@ -428,6 +444,8 @@ local function buildPlatform()
 	sign("MAINTENANCE", Vector3.new(95, 12, 58.7), Vector3.new(0, 0, -1), Vector2.new(13, 2), C.safety, C.black)
 	sign("<  WEST TUNNEL", Vector3.new(-118.7, 14, 28), Vector3.new(1, 0, 0), Vector2.new(18, 2.5), Color3.fromRGB(30, 70, 150), C.fixtureOn)
 	sign("EAST TUNNEL  >", Vector3.new(118.7, 14, 28), Vector3.new(-1, 0, 0), Vector2.new(18, 2.5), Color3.fromRGB(170, 90, 20), C.fixtureOn)
+	warning(Vector3.new(40, 17.5, 2))
+	warning(Vector3.new(100, 17.5, 2))
 	sign("LAST TRAIN", Vector3.new(70, 15, 4), Vector3.new(0, 0, 1), Vector2.new(14, 2.5), C.trainStripe, C.fixtureOn, true)
 
 	local board = decor(box(F.Props, Vector3.new(18, 5, 0.8), CFrame.new(0, 15, 24), C.black, Enum.Material.Metal, "DepartureBoard"))
@@ -693,6 +711,8 @@ local function buildMaintenance()
 	fixture("Maintenance", Vector3.new(95, 11.6, 65), 90)
 	emergency("Maintenance", Vector3.new(51.4, 11, 92), Vector3.new(1, 0, 0))
 	emergency("Maintenance", Vector3.new(128.6, 11, 90), Vector3.new(-1, 0, 0))
+	warning(Vector3.new(57, 12.5, 137))
+	warning(Vector3.new(119, 12.5, 137))
 
 	pickup(Vector3.new(122, 1.5, 78))
 	dripPoint(Vector3.new(90, 14, 120))
@@ -714,9 +734,9 @@ local function buildTunnel(zone: string, s: number, cEnd: number, stripe: Color3
 	local a1, a2 = span(120, 340)
 	local b1, b2 = span(320, 340)
 	local c1, c2 = math.min(cEnd, X(320)), math.max(cEnd, X(320))
-	room(a1, a2, 18, 38, 0, 16, C.concreteDark, Enum.Material.Concrete)
-	room(b1, b2, 38, 130, 0, 16, C.concreteDark, Enum.Material.Concrete)
-	room(c1, c2, 110, 130, 0, 16, C.concreteDark, Enum.Material.Concrete)
+	room(a1, a2, 18, 38, 0, 16, C.concreteDark, Enum.Material.Slate)
+	room(b1, b2, 38, 130, 0, 16, C.concreteDark, Enum.Material.Slate)
+	room(c1, c2, 110, 130, 0, 16, C.concreteDark, Enum.Material.Slate)
 
 	local n1, n2 = span(120, 320)
 	wall(S, "X", 18, a1, a2, 0, 16, nil, style)
@@ -865,8 +885,8 @@ local function buildTrain()
 			local panel = ghost(body(lx - 4, lx + 4, 9.2, 9.4, -7, -5, C.warm, Enum.Material.Neon, "CabinLight"))
 			local light = Instance.new("PointLight")
 			light.Color = C.warm
-			light.Range = 16
-			light.Brightness = 1.4
+			light.Range = 18
+			light.Brightness = 2
 			light.Shadows = false
 			light.Parent = panel
 		end

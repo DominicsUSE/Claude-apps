@@ -31,13 +31,15 @@ local LAMP = {
 }
 
 local function setupEnvironment()
-	Lighting.Ambient = Color3.fromRGB(58, 58, 66)
-	Lighting.OutdoorAmbient = Color3.fromRGB(16, 16, 22)
-	Lighting.Brightness = 0
+	-- Near-black ambient: fixtures, flashlights, glowsticks and warning lamps
+	-- are the only real light. Clients retune Ambient per zone.
+	Lighting.Ambient = Color3.fromRGB(10, 10, 14)
+	Lighting.OutdoorAmbient = Color3.fromRGB(8, 8, 12)
+	Lighting.Brightness = 0.3
 	Lighting.ClockTime = 0
 	Lighting.GlobalShadows = true
 	Lighting.EnvironmentDiffuseScale = 0.1
-	Lighting.EnvironmentSpecularScale = 0.4
+	Lighting.EnvironmentSpecularScale = 0.7 -- wet sheen on tile and concrete
 	Lighting.ExposureCompensation = 0
 
 	local function effect(className: string, name: string): Instance
@@ -52,12 +54,14 @@ local function setupEnvironment()
 	end
 
 	local atmosphere = effect("Atmosphere", "StationAir") :: Atmosphere
-	atmosphere.Density = 0.38
-	atmosphere.Offset = 0
-	atmosphere.Color = Color3.fromRGB(24, 24, 30)
-	atmosphere.Decay = Color3.fromRGB(14, 14, 20)
+	-- Visibility of roughly 40-70 studs. Atmosphere replaces Lighting.Fog*,
+	-- which Roblox ignores while an Atmosphere exists.
+	atmosphere.Density = 0.55
+	atmosphere.Offset = 0.1
+	atmosphere.Color = Color3.fromRGB(20, 22, 28)
+	atmosphere.Decay = Color3.fromRGB(8, 8, 12)
 	atmosphere.Glare = 0
-	atmosphere.Haze = 1.2
+	atmosphere.Haze = 2
 
 	local bloom = effect("BloomEffect", "StationBloom") :: BloomEffect
 	bloom.Intensity = 0.7
@@ -78,11 +82,12 @@ local function apply(zone: string, state: State)
 	local on = state ~= "Off"
 
 	for _, p in refs.fixtures[zone] do
-		p.Material = if on then Enum.Material.Neon else Enum.Material.SmoothPlastic
-		p.Color = if on then C.fixtureOn else C.fixtureOff
+		local lit = on and not p:GetAttribute("Dead")
+		p.Material = if lit then Enum.Material.Neon else Enum.Material.SmoothPlastic
+		p.Color = if lit then C.fixtureOn else C.fixtureOff
 		local light = p:FindFirstChildWhichIsA("Light")
 		if light then
-			light.Enabled = on
+			light.Enabled = lit
 		end
 	end
 	for _, p in refs.emergency[zone] do

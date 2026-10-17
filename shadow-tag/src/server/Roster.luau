@@ -167,7 +167,7 @@ function Roster.giveFlashlight(character: Model)
 	dust.Texture = "rbxasset://textures/particles/sparkles_main.dds"
 	dust.Shape = Enum.ParticleEmitterShape.Box
 	dust.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
-	dust.Rate = 16
+	dust.Rate = 24
 	dust.Lifetime = NumberRange.new(2, 4)
 	dust.Speed = NumberRange.new(0.1, 0.3)
 	dust.SpreadAngle = Vector2.new(180, 180)

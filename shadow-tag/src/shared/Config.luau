@@ -36,9 +36,9 @@ Config.BatteryDrain = 1.1 -- per second while on (~90 s of continuous light)
 Config.BatteryRecharge = 0.6 -- per second while off
 Config.BatteryMinToTurnOn = 5
 Config.BatteryFlickerBelow = 15
-Config.FlashlightRange = 46
-Config.FlashlightAngle = 52
-Config.FlashlightBrightness = 3.2
+Config.FlashlightRange = 60
+Config.FlashlightAngle = 34 -- narrow cone: the station stays dark around it
+Config.FlashlightBrightness = 4
 Config.ShadowSeesFlashlightsWithin = 90 -- Shadows get a faint marker on lit survivors
 
 -- Glowsticks ------------------------------------------------------------------
