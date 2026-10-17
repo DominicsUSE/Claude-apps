@@ -1,0 +1,24 @@
+{
+  "name": "ShadowTag",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "Shared": { "$path": "src/shared" }
+    },
+    "ServerScriptService": {
+      "Server": { "$path": "src/server" }
+    },
+    "StarterPlayer": {
+      "$properties": { "GameSettingsAvatar": "R15" },
+      "StarterPlayerScripts": {
+        "Client": { "$path": "src/client" }
+      }
+    },
+    "Workspace": {
+      "$properties": { "StreamingEnabled": false }
+    },
+    "Lighting": {
+      "$properties": { "Technology": "Future" }
+    }
+  }
+}
