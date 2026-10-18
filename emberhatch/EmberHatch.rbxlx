@@ -1,0 +1,3733 @@
+<roblox version="4">
+  <Item class="ReplicatedStorage" referent="0">
+    <Properties>
+      <string name="Name">ReplicatedStorage</string>
+    </Properties>
+    <Item class="Folder" referent="1">
+      <Properties>
+        <string name="Name">Shared</string>
+      </Properties>
+      <Item class="ModuleScript" referent="2">
+        <Properties>
+          <string name="Name">HubConfig</string>
+          <string name="Source"><![CDATA[-- World layout. +X is east, -Z is north. Spawn faces north toward the Forge.
+
+local HubConfig = {}
+
+HubConfig.Landmarks = {
+	Spawn = Vector3.new(0, 0, 60), -- south
+	Forge = Vector3.new(0, 0, 0), -- center
+	Nursery = Vector3.new(62, 0, 22), -- east
+	EggShop = Vector3.new(66, 0, -18), -- east
+	QuestBoard = Vector3.new(-60, 0, -6), -- west
+	UpgradeShop = Vector3.new(-62, 0, 28), -- west
+	PortalPlaza = Vector3.new(0, 0, -82), -- north
+}
+
+-- Portal gates across the north plaza, west to east by unlock order.
+HubConfig.Portals = {
+	{ id = "SunkenGrove", x = -24, z = -86 },
+	{ id = "FungalHollow", x = 0, z = -90 },
+	{ id = "Cinderworks", x = 24, z = -86 },
+}
+
+-- The Sunken Grove sits away from the hub; portals connect the two.
+HubConfig.GroveOrigin = Vector3.new(0, 0, 400)
+
+HubConfig.Color = {
+	Ground = Color3.fromRGB(46, 40, 34),
+	GroundEdge = Color3.fromRGB(30, 27, 24),
+	StoneDark = Color3.fromRGB(26, 26, 30),
+	StoneBase = Color3.fromRGB(40, 40, 46),
+	StoneRaised = Color3.fromRGB(70, 64, 58),
+	Path = Color3.fromRGB(92, 80, 66),
+	Brass = Color3.fromRGB(196, 150, 72),
+	BrassBright = Color3.fromRGB(238, 190, 106),
+	Amber = Color3.fromRGB(255, 176, 66),
+	EmberRed = Color3.fromRGB(255, 92, 56),
+	Parchment = Color3.fromRGB(238, 228, 208),
+	Wood = Color3.fromRGB(110, 76, 48),
+	WoodDark = Color3.fromRGB(68, 46, 30),
+	Leaf = Color3.fromRGB(92, 150, 84),
+	Grass = Color3.fromRGB(104, 168, 86),
+	Moss = Color3.fromRGB(78, 128, 70),
+	Rock = Color3.fromRGB(120, 118, 112),
+}
+
+return HubConfig
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="3">
+        <Properties>
+          <string name="Name">QuestConfig</string>
+          <string name="Source"><![CDATA[-- Starter quests. Each listens for one server event.
+-- mode "max": progress is the highest value seen (used for levels), otherwise it adds up.
+
+return {
+	{
+		id = "FirstShard",
+		title = "Collect your first Ember Shard",
+		hint = "Walk up to a glowing shard and press Collect.",
+		event = "ShardCollected",
+		target = 1,
+		reward = { coins = 25, xp = 10 },
+	},
+	{
+		id = "HatchForgekin",
+		title = "Hatch a Forgekin",
+		hint = "The Nursery is east of the Forge.",
+		event = "ForgekinHatched",
+		target = 1,
+		reward = { coins = 50, gems = 5 },
+	},
+	{
+		id = "BreakPod",
+		title = "Break an Ember Crystal Pod",
+		hint = "Hold Break on a large glowing crystal.",
+		event = "PodBroken",
+		target = 1,
+		reward = { coins = 50, xp = 25 },
+	},
+	{
+		id = "ForgeItem",
+		title = "Forge your first item",
+		hint = "The Forge Station opens soon.",
+		event = "ItemForged",
+		target = 1,
+		reward = { coins = 100, xp = 50 },
+	},
+	{
+		id = "UnlockFungal",
+		title = "Unlock Fungal Hollow",
+		hint = "Reach level 5.",
+		event = "LevelReached",
+		mode = "max",
+		target = 5,
+		reward = { gems = 10 },
+	},
+}
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="4">
+        <Properties>
+          <string name="Name">ResourceConfig</string>
+          <string name="Source"><![CDATA[-- Collection tuning and placement. Edit numbers here; no other file needs to change.
+-- Designers can also tag their own parts/models "EmberShard" or "CrystalPod" in Studio.
+
+local ResourceConfig = {}
+
+ResourceConfig.Shard = {
+	amount = 1,
+	xp = 2,
+	respawnSeconds = 8,
+	promptDistance = 9,
+	hoverHeight = 1.8,
+}
+
+ResourceConfig.Pod = {
+	holdSeconds = 1,
+	promptDistance = 11,
+	shardsMin = 3,
+	shardsMax = 10,
+	coinsMin = 4,
+	coinsMax = 12,
+	xpBonus = 10, -- on top of the per-shard xp
+	respawnMin = 30,
+	respawnMax = 60,
+	rareCoreChance = 0.6, -- rare pods only
+	rareCoresMin = 1,
+	rareCoresMax = 2,
+}
+
+-- Seconds a player must wait between two collections (stops prompt spam).
+ResourceConfig.ShardCooldown = 0.15
+ResourceConfig.PodCooldown = 0.9
+
+-- Hub placements (world positions on the ground; shards hover above them).
+-- The first shard is a few steps in front of spawn: first pickup in under 10 seconds.
+ResourceConfig.HubShards = {
+	Vector3.new(0, 0, 51),
+	Vector3.new(-3, 0, 45),
+	Vector3.new(3, 0, 39),
+	Vector3.new(-3, 0, 33),
+	Vector3.new(14, 0, 24),
+	Vector3.new(-14, 0, 24),
+	Vector3.new(26, 0, 8),
+	Vector3.new(-26, 0, 8),
+	Vector3.new(40, 0, 14),
+	Vector3.new(-40, 0, -2),
+	Vector3.new(16, 0, -38),
+	Vector3.new(-16, 0, -38),
+}
+
+ResourceConfig.HubPods = {
+	{ position = Vector3.new(22, 0, 50) },
+	{ position = Vector3.new(-34, 0, -40) },
+}
+
+-- Sunken Grove placements, relative to HubConfig.GroveOrigin.
+ResourceConfig.GroveShards = {
+	Vector3.new(0, 0, 62),
+	Vector3.new(-4, 0, 54),
+	Vector3.new(4, 0, 46),
+	Vector3.new(-8, 0, 38),
+	Vector3.new(8, 0, 30),
+	Vector3.new(-14, 0, 22),
+	Vector3.new(14, 0, 14),
+	Vector3.new(0, 0, 8),
+	Vector3.new(-24, 0, 0),
+	Vector3.new(24, 0, 0),
+	Vector3.new(-30, 0, -20),
+	Vector3.new(30, 0, -20),
+	Vector3.new(-10, 0, -32),
+	Vector3.new(10, 0, -32),
+	Vector3.new(0, 0, -46),
+	Vector3.new(-44, 0, 34),
+}
+
+ResourceConfig.GrovePods = {
+	{ position = Vector3.new(14, 0, 42) },
+	{ position = Vector3.new(-18, 0, 30) },
+	{ position = Vector3.new(28, 0, -8) },
+	{ position = Vector3.new(-30, 0, -10) },
+	-- Hidden behind the boulders in the north-west corner.
+	{ position = Vector3.new(-66, 0, -66), rare = true },
+}
+
+return ResourceConfig
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="5">
+        <Properties>
+          <string name="Name">Theme</string>
+          <string name="Source"><![CDATA[-- Theme: one palette for UI and world. Dark stone, brass, amber, parchment.
+
+local Theme = {}
+
+Theme.Color = {
+	-- Stone panels
+	StoneDeep = Color3.fromRGB(16, 15, 14),
+	StoneBase = Color3.fromRGB(30, 28, 26),
+	StoneRaised = Color3.fromRGB(46, 42, 38),
+
+	-- Brass borders and amber highlights
+	Brass = Color3.fromRGB(196, 150, 72),
+	BrassBright = Color3.fromRGB(238, 190, 106),
+	BrassDim = Color3.fromRGB(120, 92, 50),
+	Amber = Color3.fromRGB(255, 176, 66),
+	Ember = Color3.fromRGB(255, 112, 52),
+
+	-- Text
+	Parchment = Color3.fromRGB(238, 228, 208),
+	ParchmentDim = Color3.fromRGB(186, 174, 152),
+	ParchmentMute = Color3.fromRGB(128, 120, 106),
+
+	-- Currencies and resources
+	Coin = Color3.fromRGB(240, 196, 92),
+	Gem = Color3.fromRGB(222, 84, 108),
+	Shard = Color3.fromRGB(255, 150, 48),
+	Core = Color3.fromRGB(178, 120, 255),
+
+	-- Feedback
+	Success = Color3.fromRGB(150, 204, 116),
+	Error = Color3.fromRGB(226, 96, 80),
+}
+
+Theme.Font = {
+	Display = Enum.Font.GrenzeGotisch, -- big brand text only
+	Title = Enum.Font.Merriweather,
+	Body = Enum.Font.Nunito,
+	Number = Enum.Font.Oswald,
+}
+
+Theme.Radius = {
+	Small = UDim.new(0, 6),
+	Medium = UDim.new(0, 10),
+	Large = UDim.new(0, 14),
+}
+
+Theme.Game = {
+	Title = "EMBERHATCH",
+	Subtitle = "HATCH · FORGE · EXPLORE",
+}
+
+return Theme
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="6">
+        <Properties>
+          <string name="Name">ZoneConfig</string>
+          <string name="Source"><![CDATA[-- Areas. Only three worlds for now, plus the hub.
+-- Fungal Hollow and Cinderworks have portals but are built in Milestone E.
+
+local ZoneConfig = {}
+
+ZoneConfig.Hub = "EmberHollow"
+
+ZoneConfig.Zones = {
+	EmberHollow = {
+		displayName = "Ember Hollow",
+		subtitle = "Forge town",
+		unlockLevel = 1,
+	},
+	SunkenGrove = {
+		displayName = "Sunken Grove",
+		subtitle = "Starter area",
+		tier = 1,
+		unlockLevel = 1,
+		portalColor = Color3.fromRGB(126, 196, 120),
+		portalGlow = Color3.fromRGB(186, 244, 168),
+	},
+	FungalHollow = {
+		displayName = "Fungal Hollow",
+		subtitle = "Mushroom caves",
+		tier = 2,
+		unlockLevel = 5,
+		portalColor = Color3.fromRGB(96, 206, 190),
+		portalGlow = Color3.fromRGB(196, 150, 255),
+	},
+	Cinderworks = {
+		displayName = "Cinderworks",
+		subtitle = "Lava foundry",
+		tier = 3,
+		unlockLevel = 10,
+		portalColor = Color3.fromRGB(255, 112, 60),
+		portalGlow = Color3.fromRGB(255, 168, 96),
+	},
+}
+
+return ZoneConfig
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="ServerScriptService" referent="7">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Folder" referent="8">
+      <Properties>
+        <string name="Name">Server</string>
+      </Properties>
+      <Item class="ModuleScript" referent="9">
+        <Properties>
+          <string name="Name">DataService</string>
+          <string name="Source"><![CDATA[-- DataService: the only module that talks to DataStores.
+-- Gameplay code changes the in-memory profile through this module; it saves on
+-- an autosave timer, when the player leaves, and when the server shuts down.
+-- Session lock: one server owns a profile at a time, so rejoining fast can't
+-- roll back or duplicate progress.
+
+local DataStoreService = game:GetService("DataStoreService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+-- Point STORE_NAME / KEY_PREFIX at your existing store to keep old saves.
+-- Old saves are cleaned on load: only the fields in TEMPLATE are kept.
+local STORE_NAME = "EmberHatch_v1"
+local KEY_PREFIX = "Player_"
+local AUTOSAVE_SECONDS = 60
+local LOCK_STALE_SECONDS = AUTOSAVE_SECONDS * 2 + 30
+local LOCK_RETRIES = 5
+local MAX_LEVEL = 100
+
+local TEMPLATE = {
+	version = 2,
+	coins = 0,
+	gems = 0,
+	xp = 0,
+	level = 1,
+	emberShards = 0,
+	crystalCores = 0,
+	forgekin = {}, -- list of { id = "Stoneback" }
+	activeForgekin = "",
+	quests = {}, -- [questId] = { progress = n, done = bool }
+	stats = {
+		shardsCollected = 0,
+		podsBroken = 0,
+		coresFound = 0,
+		hatched = 0,
+		itemsForged = 0,
+	},
+	settings = {},
+}
+
+-- Fields gameplay code may add to with DataService.Add, and the attribute each one mirrors to.
+local CURRENCIES = {
+	coins = "Coins",
+	gems = "Gems",
+	emberShards = "EmberShards",
+	crystalCores = "CrystalCores",
+}
+
+local DataService = {}
+
+local store = nil
+local profiles = {} -- [Player] = profile
+local busy = {} -- [Player] = true while a save is running
+local nextAutosave = {} -- [Player] = os.clock() time
+local loadedCallbacks = {}
+local levelCallbacks = {}
+
+local function deepCopy(value)
+	if type(value) ~= "table" then
+		return value
+	end
+	local copy = {}
+	for k, v in pairs(value) do
+		copy[k] = deepCopy(v)
+	end
+	return copy
+end
+
+-- Builds a clean profile from whatever was stored. Unknown fields are dropped,
+-- so data from removed systems disappears on the player's next save.
+local function reconcile(stored)
+	local profile = deepCopy(TEMPLATE)
+	if type(stored) ~= "table" then
+		return profile
+	end
+	for key, default in pairs(TEMPLATE) do
+		local value = stored[key]
+		if value ~= nil and type(value) == type(default) then
+			profile[key] = deepCopy(value)
+		end
+	end
+	for key, default in pairs(TEMPLATE.stats) do
+		if type(profile.stats[key]) ~= "number" then
+			profile.stats[key] = default
+		end
+	end
+	for field in pairs(CURRENCIES) do
+		profile[field] = math.max(0, math.floor(profile[field]))
+	end
+	profile.level = math.clamp(math.floor(profile.level), 1, MAX_LEVEL)
+	profile.xp = math.max(0, math.floor(profile.xp))
+	profile.version = TEMPLATE.version
+	return profile
+end
+
+-- pcall with exponential backoff. Returns ok, result-or-error.
+local function withRetry(attempts, fn)
+	local delaySeconds = 1
+	local lastError
+	for attempt = 1, attempts do
+		local ok, result = pcall(fn)
+		if ok then
+			return true, result
+		end
+		lastError = result
+		warn(("[DataService] attempt %d/%d failed: %s"):format(attempt, attempts, tostring(result)))
+		if attempt < attempts then
+			task.wait(delaySeconds)
+			delaySeconds = math.min(delaySeconds * 2, 8)
+		end
+	end
+	return false, lastError
+end
+
+function DataService.XPForLevel(level)
+	return 40 + (level - 1) * 30
+end
+
+local function syncAttributes(player, profile)
+	for field, attribute in pairs(CURRENCIES) do
+		player:SetAttribute(attribute, profile[field])
+	end
+	player:SetAttribute("Level", profile.level)
+	player:SetAttribute("XP", profile.xp)
+	player:SetAttribute("XPNext", DataService.XPForLevel(profile.level))
+	player:SetAttribute("ActiveForgekin", profile.activeForgekin)
+end
+
+-- Returns profile, status ("ok" | "offline" | "locked" | "error").
+local function loadProfile(player)
+	if not store then
+		return deepCopy(TEMPLATE), "offline"
+	end
+
+	local key = KEY_PREFIX .. player.UserId
+	for _ = 1, LOCK_RETRIES do
+		local claimed, lockedElsewhere = nil, false
+		local ok, err = withRetry(3, function()
+			store:UpdateAsync(key, function(stored)
+				claimed, lockedElsewhere = nil, false
+				local lock = type(stored) == "table" and stored._lock
+				if
+					type(lock) == "table"
+					and lock.jobId ~= game.JobId
+					and os.time() - (lock.time or 0) < LOCK_STALE_SECONDS
+				then
+					lockedElsewhere = true
+					return nil -- another live server owns it; don't write
+				end
+				local profile = reconcile(stored)
+				profile._lock = { jobId = game.JobId, time = os.time() }
+				claimed = profile
+				return profile
+			end)
+		end)
+
+		if not ok then
+			if RunService:IsStudio() then
+				warn("[DataService] DataStore unavailable in Studio, playing without saving:", err)
+				store = nil
+				return deepCopy(TEMPLATE), "offline"
+			end
+			return nil, "error"
+		end
+		if claimed then
+			return claimed, "ok"
+		end
+		if not lockedElsewhere then
+			return nil, "error"
+		end
+		task.wait(3) -- the other server may be finishing its final save
+	end
+	return nil, "locked"
+end
+
+-- Writes the profile. release = true also clears the session lock.
+local function saveProfile(player, release)
+	while busy[player] do
+		task.wait(0.1)
+	end
+	local profile = profiles[player]
+	if not profile or not store then
+		return
+	end
+	busy[player] = true
+
+	local payload = deepCopy(profile)
+	payload._lock = if release then nil else { jobId = game.JobId, time = os.time() }
+
+	withRetry(3, function()
+		store:UpdateAsync(KEY_PREFIX .. player.UserId, function(stored)
+			local lock = type(stored) == "table" and stored._lock
+			if type(lock) == "table" and lock.jobId ~= game.JobId then
+				return nil -- another server took over this profile; never overwrite it
+			end
+			return payload
+		end)
+	end)
+
+	busy[player] = nil
+end
+
+local function onPlayerAdded(player)
+	local profile, status = loadProfile(player)
+
+	if not profile then
+		if status == "locked" then
+			player:Kick("Your progress is still saving from another server. Please rejoin in a minute.")
+		else
+			player:Kick("We couldn't load your progress. Please rejoin.")
+		end
+		return
+	end
+
+	if not player:IsDescendantOf(Players) then
+		-- Left while loading: hand the lock straight back.
+		profiles[player] = profile
+		saveProfile(player, true)
+		profiles[player] = nil
+		return
+	end
+
+	profiles[player] = profile
+	nextAutosave[player] = os.clock() + AUTOSAVE_SECONDS * (0.5 + (player.UserId % 10) / 20)
+	syncAttributes(player, profile)
+	player:SetAttribute("SaveMode", status)
+	player:SetAttribute("DataLoaded", true)
+
+	for _, callback in ipairs(loadedCallbacks) do
+		task.spawn(callback, player, profile)
+	end
+end
+
+local function onPlayerRemoving(player)
+	if profiles[player] then
+		saveProfile(player, true)
+	end
+	profiles[player] = nil
+	nextAutosave[player] = nil
+end
+
+-- ── Public API ───────────────────────────────────────────
+
+function DataService.Get(player)
+	return profiles[player]
+end
+
+function DataService.OnLoaded(callback)
+	table.insert(loadedCallbacks, callback)
+end
+
+function DataService.OnLevelUp(callback)
+	table.insert(levelCallbacks, callback)
+end
+
+-- Adds to coins, gems, emberShards or crystalCores. Returns the new total.
+function DataService.Add(player, field, amount)
+	local profile = profiles[player]
+	local attribute = CURRENCIES[field]
+	if not profile or not attribute or type(amount) ~= "number" or amount ~= amount or amount <= 0 then
+		return nil
+	end
+	profile[field] += math.floor(amount)
+	player:SetAttribute(attribute, profile[field])
+	return profile[field]
+end
+
+function DataService.AddXP(player, amount)
+	local profile = profiles[player]
+	if not profile or type(amount) ~= "number" or amount <= 0 then
+		return
+	end
+
+	profile.xp += math.floor(amount)
+	local leveled = false
+	while profile.level < MAX_LEVEL and profile.xp >= DataService.XPForLevel(profile.level) do
+		profile.xp -= DataService.XPForLevel(profile.level)
+		profile.level += 1
+		leveled = true
+	end
+	if profile.level >= MAX_LEVEL then
+		profile.xp = 0
+	end
+
+	player:SetAttribute("Level", profile.level)
+	player:SetAttribute("XP", profile.xp)
+	player:SetAttribute("XPNext", DataService.XPForLevel(profile.level))
+
+	if leveled then
+		for _, callback in ipairs(levelCallbacks) do
+			task.spawn(callback, player, profile.level)
+		end
+	end
+end
+
+function DataService.SetActiveForgekin(player, id)
+	local profile = profiles[player]
+	if profile then
+		profile.activeForgekin = id
+		player:SetAttribute("ActiveForgekin", id)
+	end
+end
+
+function DataService.Init()
+	local ok, result = pcall(function()
+		return DataStoreService:GetDataStore(STORE_NAME)
+	end)
+	if ok and RunService:IsStudio() then
+		-- Fail fast in Studio when API access is off, instead of retrying on every join.
+		ok, result = pcall(function()
+			result:GetAsync("_studio_probe")
+			return result
+		end)
+	end
+	if ok then
+		store = result
+	else
+		warn("[DataService] Saving is off (publish the place and enable Studio API access):", result)
+	end
+end
+
+-- Call after every other service has registered its callbacks.
+function DataService.Start()
+	Players.PlayerAdded:Connect(onPlayerAdded)
+	Players.PlayerRemoving:Connect(onPlayerRemoving)
+	for _, player in ipairs(Players:GetPlayers()) do
+		task.spawn(onPlayerAdded, player)
+	end
+
+	task.spawn(function()
+		while true do
+			task.wait(5)
+			local now = os.clock()
+			for player in pairs(profiles) do
+				if now >= (nextAutosave[player] or 0) then
+					nextAutosave[player] = now + AUTOSAVE_SECONDS
+					task.spawn(saveProfile, player, false)
+				end
+			end
+		end
+	end)
+
+	game:BindToClose(function()
+		local pending = 0
+		for player in pairs(profiles) do
+			pending += 1
+			task.spawn(function()
+				saveProfile(player, true)
+				pending -= 1
+			end)
+		end
+		local deadline = os.clock() + (if RunService:IsStudio() then 5 else 25)
+		while pending > 0 and os.clock() < deadline do
+			task.wait(0.1)
+		end
+	end)
+end
+
+return DataService
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="10">
+        <Properties>
+          <string name="Name">ForgekinService</string>
+          <string name="Source"><![CDATA[-- ForgekinService: the starter egg in the Nursery and the Forgekin that follows you.
+-- Uses ReplicatedStorage.Assets.Forgekin.<Name> if that model exists,
+-- otherwise a simple stone-and-brass placeholder.
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Theme = require(ReplicatedStorage.Shared.Theme)
+local DataService = require(script.Parent.DataService)
+local QuestService = require(script.Parent.QuestService)
+
+local STARTER_FORGEKIN = "Stoneback"
+local FOLLOW_OFFSET = CFrame.new(2.8, 0, 3.2) -- behind and to the right of the player
+
+local ForgekinService = {}
+
+local remotes
+local followers = {} -- [Player] = { model = Model, phase = number }
+local hatching = {} -- [Player] = true while a hatch is playing
+
+local function makePlaceholder(name)
+	local model = Instance.new("Model")
+	model.Name = name
+
+	local body = Instance.new("Part")
+	body.Name = "Body"
+	body.Shape = Enum.PartType.Ball
+	body.Size = Vector3.new(2.2, 2.2, 2.2)
+	body.Color = Color3.fromRGB(112, 104, 96)
+	body.Material = Enum.Material.Slate
+	body.Parent = model
+
+	for _, side in ipairs({ -1, 1 }) do
+		local eye = Instance.new("Part")
+		eye.Name = "Eye"
+		eye.Shape = Enum.PartType.Ball
+		eye.Size = Vector3.new(0.45, 0.45, 0.45)
+		eye.Color = Theme.Color.Amber
+		eye.Material = Enum.Material.Neon
+		eye.CFrame = body.CFrame * CFrame.new(side * 0.45, 0.25, -0.95)
+		eye.Parent = model
+	end
+
+	local plate = Instance.new("Part")
+	plate.Name = "BrassPlate"
+	plate.Size = Vector3.new(1.6, 0.25, 1.4)
+	plate.Color = Theme.Color.Brass
+	plate.Material = Enum.Material.Metal
+	plate.CFrame = body.CFrame * CFrame.new(0, 1.05, 0.2)
+	plate.Parent = model
+
+	model.PrimaryPart = body
+	return model
+end
+
+local function buildModel(id)
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	local folder = assets and assets:FindFirstChild("Forgekin")
+	local prefab = folder and folder:FindFirstChild(id)
+	local model = if prefab and prefab:IsA("Model") then prefab:Clone() else makePlaceholder(id)
+	if not model.PrimaryPart then
+		model.PrimaryPart = model:FindFirstChildWhichIsA("BasePart", true)
+	end
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Anchored = true
+			part.CanCollide = false
+			part.CanQuery = false
+			part.CanTouch = false
+			part.Massless = true
+		end
+	end
+	return model
+end
+
+local function removeFollower(player)
+	local follower = followers[player]
+	if follower then
+		follower.model:Destroy()
+		followers[player] = nil
+	end
+end
+
+local function spawnFollower(player)
+	removeFollower(player)
+	local profile = DataService.Get(player)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not profile or profile.activeForgekin == "" or not root then
+		return
+	end
+	local model = buildModel(profile.activeForgekin)
+	if not model.PrimaryPart then
+		model:Destroy()
+		return
+	end
+	model.Name = player.Name .. "_Forgekin"
+	model:PivotTo(root.CFrame * FOLLOW_OFFSET)
+	model.Parent = workspace
+	followers[player] = { model = model, phase = math.random() * math.pi * 2 }
+end
+
+-- chisle: server-side follow is simplest; move it to the client if many players lag.
+local function updateFollowers(dt)
+	local alpha = 1 - math.exp(-dt * 6)
+	local t = os.clock()
+	for player, follower in pairs(followers) do
+		local character = player.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if root then
+			local bob = math.sin(t * 3 + follower.phase) * 0.25
+			local goal = root.CFrame * FOLLOW_OFFSET * CFrame.new(0, bob - 1, 0)
+			follower.model:PivotTo(follower.model:GetPivot():Lerp(goal, alpha))
+		end
+	end
+end
+
+local function onStarterEgg(pedestal, prompt, player)
+	local profile = DataService.Get(player)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not profile or not root or hatching[player] then
+		return
+	end
+	if (root.Position - pedestal.Position).Magnitude > prompt.MaxActivationDistance + 5 then
+		return
+	end
+	if #profile.forgekin > 0 then
+		remotes.Notify:FireClient(player, "You already hatched your starter Forgekin.", "info")
+		return
+	end
+
+	hatching[player] = true
+	table.insert(profile.forgekin, { id = STARTER_FORGEKIN })
+	profile.stats.hatched += 1
+	DataService.SetActiveForgekin(player, STARTER_FORGEKIN)
+
+	local display = pedestal.Parent:FindFirstChild("StarterEggDisplay")
+	remotes.EggHatched:FireClient(player, display or pedestal, STARTER_FORGEKIN)
+	QuestService.Progress(player, "ForgekinHatched", 1)
+
+	task.delay(1.3, function() -- let the egg wobble and burst first
+		hatching[player] = nil
+		if player.Parent then
+			spawnFollower(player)
+		end
+	end)
+end
+
+function ForgekinService.Init()
+	remotes = ReplicatedStorage.Remotes
+
+	local function hookEgg(pedestal)
+		local prompt = pedestal:FindFirstChildWhichIsA("ProximityPrompt")
+		if prompt then
+			prompt.Triggered:Connect(function(player)
+				onStarterEgg(pedestal, prompt, player)
+			end)
+		end
+	end
+	CollectionService:GetInstanceAddedSignal("StarterEgg"):Connect(hookEgg)
+	for _, pedestal in ipairs(CollectionService:GetTagged("StarterEgg")) do
+		hookEgg(pedestal)
+	end
+
+	local function watchCharacter(player)
+		player.CharacterAdded:Connect(function(character)
+			character:WaitForChild("HumanoidRootPart", 10)
+			spawnFollower(player)
+		end)
+	end
+	Players.PlayerAdded:Connect(watchCharacter)
+	for _, player in ipairs(Players:GetPlayers()) do
+		watchCharacter(player)
+	end
+
+	DataService.OnLoaded(function(player)
+		if player.Character then
+			spawnFollower(player)
+		end
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		removeFollower(player)
+		hatching[player] = nil
+	end)
+
+	RunService.Heartbeat:Connect(updateFollowers)
+end
+
+return ForgekinService
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="11">
+        <Properties>
+          <string name="Name">GroveBuilder</string>
+          <string name="Source"><![CDATA[-- GroveBuilder: a simple Sunken Grove so the starter portal has somewhere to go.
+-- Skipped if workspace.SunkenGrove already exists. A hand-built grove needs one part
+-- tagged "ZoneEntry_SunkenGrove" (where players land) and a prompt tagged "Portal"
+-- with the attribute Portal = "EmberHollow" to get back.
+
+local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Theme = require(ReplicatedStorage.Shared.Theme)
+local HubConfig = require(ReplicatedStorage.Shared.HubConfig)
+local ZoneConfig = require(ReplicatedStorage.Shared.ZoneConfig)
+
+local C = HubConfig.Color
+
+local GroveBuilder = {}
+
+local function part(parent, name, size, cframe, color, material, opts)
+	opts = opts or {}
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Size = size
+	p.CFrame = cframe
+	p.Color = color
+	p.Material = material
+	p.Anchored = true
+	p.CanCollide = opts.collide ~= false
+	p.CanQuery = p.CanCollide
+	p.CanTouch = false
+	p.Transparency = opts.transparency or 0
+	if opts.shape then
+		p.Shape = opts.shape
+	end
+	p.Parent = parent
+	return p
+end
+
+local function sign(parent, title, subtitle, accent, position)
+	local anchor = part(
+		parent,
+		"Sign",
+		Vector3.new(0.2, 0.2, 0.2),
+		CFrame.new(position),
+		Color3.new(),
+		Enum.Material.SmoothPlastic,
+		{
+			collide = false,
+			transparency = 1,
+		}
+	)
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.new(14, 0, 3.6, 0)
+	gui.AlwaysOnTop = true
+	gui.LightInfluence = 0
+	gui.MaxDistance = 180
+	gui.Parent = anchor
+
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.fromScale(1, 1)
+	frame.BackgroundColor3 = Theme.Color.StoneBase
+	frame.BackgroundTransparency = 0.1
+	frame.Parent = gui
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0.18, 0)
+	corner.Parent = frame
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = accent
+	stroke.Thickness = 2
+	stroke.Parent = frame
+
+	for _, line in ipairs({
+		{ title, Theme.Font.Title, Theme.Color.Parchment, 0.08, 0.56 },
+		{ subtitle, Theme.Font.Body, accent, 0.64, 0.28 },
+	}) do
+		local label = Instance.new("TextLabel")
+		label.BackgroundTransparency = 1
+		label.Position = UDim2.fromScale(0.05, line[4])
+		label.Size = UDim2.fromScale(0.9, line[5])
+		label.Text = line[1]
+		label.Font = line[2]
+		label.TextColor3 = line[3]
+		label.TextScaled = true
+		label.Parent = frame
+	end
+end
+
+local function tree(parent, position, height)
+	part(
+		parent,
+		"Trunk",
+		Vector3.new(height, 1.6, 1.6),
+		CFrame.new(position + Vector3.new(0, height / 2, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+		C.Wood,
+		Enum.Material.Wood,
+		{
+			shape = Enum.PartType.Cylinder,
+		}
+	)
+	part(
+		parent,
+		"Leaves",
+		Vector3.new(8, 8, 8),
+		CFrame.new(position + Vector3.new(0, height + 2.5, 0)),
+		C.Leaf,
+		Enum.Material.Grass,
+		{
+			shape = Enum.PartType.Ball,
+		}
+	)
+end
+
+local function rock(parent, position, size, yaw)
+	part(
+		parent,
+		"Rock",
+		size,
+		CFrame.new(position + Vector3.new(0, size.Y / 2 - 0.4, 0)) * CFrame.Angles(0, yaw, 0.15),
+		C.Rock,
+		Enum.Material.Slate
+	)
+end
+
+function GroveBuilder.Build()
+	if workspace:FindFirstChild("SunkenGrove") then
+		if #CollectionService:GetTagged("ZoneEntry_SunkenGrove") == 0 then
+			warn(
+				"[GroveBuilder] workspace.SunkenGrove has no part tagged ZoneEntry_SunkenGrove; its portal won't work."
+			)
+		end
+		return
+	end
+
+	local o = HubConfig.GroveOrigin
+	local zone = ZoneConfig.Zones.SunkenGrove
+	local root = Instance.new("Folder")
+	root.Name = "SunkenGrove"
+
+	part(root, "Ground", Vector3.new(180, 2, 180), CFrame.new(o + Vector3.new(0, -1, 0)), C.Grass, Enum.Material.Grass)
+	for _, patch in ipairs({
+		Vector3.new(-20, 0, 20),
+		Vector3.new(30, 0, -30),
+		Vector3.new(-40, 0, -40),
+		Vector3.new(36, 0, 40),
+	}) do
+		part(
+			root,
+			"Moss",
+			Vector3.new(0.2, 18, 18),
+			CFrame.new(o + patch + Vector3.new(0, 0.05, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+			C.Moss,
+			Enum.Material.Grass,
+			{
+				shape = Enum.PartType.Cylinder,
+				collide = false,
+			}
+		)
+	end
+
+	-- Low stone rim plus invisible walls so nobody walks off the edge.
+	for _, wall in ipairs({
+		{ Vector3.new(0, 0, 89), Vector3.new(180, 1, 2) },
+		{ Vector3.new(0, 0, -89), Vector3.new(180, 1, 2) },
+		{ Vector3.new(89, 0, 0), Vector3.new(2, 1, 180) },
+		{ Vector3.new(-89, 0, 0), Vector3.new(2, 1, 180) },
+	}) do
+		part(
+			root,
+			"Rim",
+			wall[2] + Vector3.new(0, 2, 0),
+			CFrame.new(o + wall[1] + Vector3.new(0, 1.5, 0)),
+			C.Rock,
+			Enum.Material.Slate
+		)
+		part(
+			root,
+			"Boundary",
+			wall[2] + Vector3.new(0, 60, 0),
+			CFrame.new(o + wall[1] + Vector3.new(0, 30, 0)),
+			Color3.new(),
+			Enum.Material.SmoothPlastic,
+			{
+				transparency = 1,
+			}
+		)
+	end
+
+	for i, position in ipairs({
+		Vector3.new(-50, 0, 60),
+		Vector3.new(52, 0, 54),
+		Vector3.new(-62, 0, 10),
+		Vector3.new(64, 0, 4),
+		Vector3.new(-40, 0, -52),
+		Vector3.new(46, 0, -58),
+		Vector3.new(-14, 0, -70),
+		Vector3.new(20, 0, -72),
+	}) do
+		tree(root, o + position, 9 + (i % 3) * 2)
+	end
+
+	for i, position in ipairs({
+		Vector3.new(-22, 0, 48),
+		Vector3.new(30, 0, 22),
+		Vector3.new(-36, 0, -24),
+		Vector3.new(12, 0, -54),
+	}) do
+		rock(root, o + position, Vector3.new(5, 3, 4), i)
+	end
+	-- Boulders that hide the rare pod in the north-west corner.
+	rock(root, o + Vector3.new(-56, 0, -60), Vector3.new(8, 7, 6), 0.4)
+	rock(root, o + Vector3.new(-62, 0, -54), Vector3.new(7, 6, 7), 1.2)
+	rock(root, o + Vector3.new(-54, 0, -70), Vector3.new(6, 6, 8), 2)
+
+	-- Arrival spot (faces north, into the grove) and the gate home behind it.
+	local entry = part(
+		root,
+		"GroveEntry",
+		Vector3.new(1, 1, 1),
+		CFrame.new(o + Vector3.new(0, 0.5, 72)),
+		Color3.new(),
+		Enum.Material.SmoothPlastic,
+		{
+			collide = false,
+			transparency = 1,
+		}
+	)
+	CollectionService:AddTag(entry, "ZoneEntry_SunkenGrove")
+
+	local gate = o + Vector3.new(0, 0, 82)
+	local pad = part(
+		root,
+		"ReturnPad",
+		Vector3.new(10, 0.6, 6),
+		CFrame.new(gate + Vector3.new(0, 0.3, 0)),
+		C.StoneDark,
+		Enum.Material.Slate
+	)
+	for _, side in ipairs({ -1, 1 }) do
+		part(
+			root,
+			"Pillar",
+			Vector3.new(2, 12, 2),
+			CFrame.new(gate + Vector3.new(side * 4, 6, 0)),
+			C.StoneBase,
+			Enum.Material.Basalt
+		)
+	end
+	part(
+		root,
+		"Lintel",
+		Vector3.new(10.4, 1.5, 2.4),
+		CFrame.new(gate + Vector3.new(0, 12.6, 0)),
+		C.Brass,
+		Enum.Material.Metal
+	)
+	part(
+		root,
+		"Surface",
+		Vector3.new(6, 11, 0.4),
+		CFrame.new(gate + Vector3.new(0, 6.2, 0)),
+		C.Amber,
+		Enum.Material.Neon,
+		{
+			collide = false,
+			transparency = 0.35,
+		}
+	)
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = "Return"
+	prompt.ObjectText = ZoneConfig.Zones[ZoneConfig.Hub].displayName
+	prompt.HoldDuration = 0.3
+	prompt.RequiresLineOfSight = false
+	prompt:SetAttribute("Portal", ZoneConfig.Hub)
+	prompt.Parent = pad
+	CollectionService:AddTag(prompt, "Portal")
+
+	sign(
+		root,
+		zone.displayName:upper(),
+		"Collect shards · break crystal pods",
+		zone.portalColor,
+		o + Vector3.new(0, 12, 60)
+	)
+	sign(root, "EMBER HOLLOW", "Back to town", Theme.Color.Amber, gate + Vector3.new(0, 16, 0))
+
+	root.Parent = workspace
+end
+
+return GroveBuilder
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="12">
+        <Properties>
+          <string name="Name">HubBuilder</string>
+          <string name="Source"><![CDATA[-- HubBuilder: builds Ember Hollow from parts when the server starts.
+-- Skips building if workspace.EmberHollow already exists, so you can replace
+-- this with a hand-built map later (keep the same tags and attributes).
+--
+-- Cylinders: a Roblox cylinder's round faces point along its X axis, so every
+-- upright cylinder here is Size = (height, diameter, diameter) rotated 90° on Z.
+
+local CollectionService = game:GetService("CollectionService")
+local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Theme = require(ReplicatedStorage.Shared.Theme)
+local HubConfig = require(ReplicatedStorage.Shared.HubConfig)
+local ZoneConfig = require(ReplicatedStorage.Shared.ZoneConfig)
+
+local C = HubConfig.Color
+local L = HubConfig.Landmarks
+
+local HubBuilder = {}
+
+-- ── Primitives ───────────────────────────────────────────
+
+local function newFolder(parent, name)
+	local folder = Instance.new("Folder")
+	folder.Name = name
+	folder.Parent = parent
+	return folder
+end
+
+local function newPart(parent, name, size, cframe, color, material, opts)
+	opts = opts or {}
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Size = size
+	part.CFrame = cframe
+	part.Color = color
+	part.Material = material or Enum.Material.SmoothPlastic
+	part.Anchored = true
+	part.CanCollide = opts.collide ~= false
+	part.CanTouch = false
+	part.CanQuery = part.CanCollide -- raycasts (ground snapping, camera) only see solid parts
+	part.CastShadow = opts.shadow ~= false
+	part.Transparency = opts.transparency or 0
+	if opts.shape then
+		part.Shape = opts.shape
+	end
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.Parent = parent
+	return part
+end
+
+-- Upright cylinder centered at position.
+local function cylinder(parent, name, height, diameter, position, color, material, opts)
+	opts = opts or {}
+	opts.shape = Enum.PartType.Cylinder
+	return newPart(
+		parent,
+		name,
+		Vector3.new(height, diameter, diameter),
+		CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90)),
+		color,
+		material,
+		opts
+	)
+end
+
+-- Egg-shaped part: a block with a sphere mesh stretches to any size.
+local function egg(parent, name, size, position, color, opts)
+	local part = newPart(parent, name, size, CFrame.new(position), color, Enum.Material.SmoothPlastic, opts)
+	local mesh = Instance.new("SpecialMesh")
+	mesh.MeshType = Enum.MeshType.Sphere
+	mesh.Parent = part
+	return part
+end
+
+local function newLight(parent, color, brightness, range)
+	local light = Instance.new("PointLight")
+	light.Color = color
+	light.Brightness = brightness
+	light.Range = range
+	light.Shadows = false
+	light.Parent = parent
+	return light
+end
+
+local function anchorAt(parent, name, position)
+	return newPart(parent, name, Vector3.new(0.2, 0.2, 0.2), CFrame.new(position), Color3.new(), nil, {
+		collide = false,
+		transparency = 1,
+		shadow = false,
+	})
+end
+
+local function newPrompt(parent, action, object, hold, distance)
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = action
+	prompt.ObjectText = object
+	prompt.HoldDuration = hold or 0
+	prompt.MaxActivationDistance = distance or 10
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = parent
+	return prompt
+end
+
+-- Floating name sign, sized in studs so it shrinks with distance.
+local function newBillboard(parent, title, subtitle, accent, worldPosition, width)
+	local anchor = anchorAt(parent, "Sign_" .. title:gsub("%W", ""), worldPosition)
+	width = width or 14
+
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "Sign"
+	gui.Size = UDim2.new(width, 0, if subtitle then 3.6 else 2.4, 0)
+	gui.AlwaysOnTop = true
+	gui.LightInfluence = 0
+	gui.MaxDistance = 180
+	gui.Adornee = anchor
+	gui.Parent = anchor
+
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.fromScale(1, 1)
+	frame.BackgroundColor3 = Theme.Color.StoneBase
+	frame.BackgroundTransparency = 0.1
+	frame.Parent = gui
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0.18, 0)
+	corner.Parent = frame
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = accent
+	stroke.Thickness = 2
+	stroke.Parent = frame
+
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.new(0.92, 0, if subtitle then 0.56 else 0.8, 0)
+	label.Position = UDim2.fromScale(0.04, if subtitle then 0.08 else 0.1)
+	label.Font = Theme.Font.Title
+	label.Text = title
+	label.TextColor3 = Theme.Color.Parchment
+	label.TextScaled = true
+	label.Parent = frame
+
+	if subtitle then
+		local sub = Instance.new("TextLabel")
+		sub.BackgroundTransparency = 1
+		sub.Size = UDim2.new(0.9, 0, 0.28, 0)
+		sub.Position = UDim2.fromScale(0.05, 0.64)
+		sub.Font = Theme.Font.Body
+		sub.Text = subtitle
+		sub.TextColor3 = accent
+		sub.TextScaled = true
+		sub.Parent = frame
+	end
+	return anchor
+end
+
+-- Flat strip on the ground from one point to another.
+local function pathStrip(parent, name, from, to, width, color, material, y)
+	local delta = Vector3.new(to.X - from.X, 0, to.Z - from.Z)
+	local middle = (from + to) / 2
+	return newPart(
+		parent,
+		name,
+		Vector3.new(width, 0.1, delta.Magnitude),
+		CFrame.lookAt(Vector3.new(middle.X, y, middle.Z), Vector3.new(to.X, y, to.Z)),
+		color,
+		material,
+		{ collide = false, shadow = false }
+	)
+end
+
+-- ── Sections ─────────────────────────────────────────────
+
+local function applyLighting()
+	Lighting.Ambient = Color3.fromRGB(88, 66, 48)
+	Lighting.OutdoorAmbient = Color3.fromRGB(112, 90, 68)
+	Lighting.Brightness = 1.6
+	Lighting.ClockTime = 17.4
+	Lighting.EnvironmentDiffuseScale = 0.4
+	Lighting.EnvironmentSpecularScale = 0.3
+
+	local function effect(className, name, props)
+		if Lighting:FindFirstChild(name) then
+			return
+		end
+		local instance = Instance.new(className)
+		instance.Name = name
+		for key, value in pairs(props) do
+			instance[key] = value
+		end
+		instance.Parent = Lighting
+	end
+	effect("Atmosphere", "EmberAtmosphere", {
+		Density = 0.32,
+		Offset = 0.1,
+		Color = Color3.fromRGB(255, 198, 142),
+		Decay = Color3.fromRGB(122, 80, 50),
+		Glare = 0.2,
+		Haze = 1.2,
+	})
+	effect("BloomEffect", "EmberBloom", { Intensity = 0.5, Size = 20, Threshold = 1.4 })
+	effect("ColorCorrectionEffect", "EmberGrade", {
+		TintColor = Color3.fromRGB(255, 244, 230),
+		Saturation = 0.05,
+		Contrast = 0.05,
+	})
+end
+
+local function buildGround(root)
+	local f = newFolder(root, "Ground")
+	newPart(f, "Floor", Vector3.new(220, 2, 220), CFrame.new(0, -1, 0), C.Ground, Enum.Material.Slate)
+	cylinder(f, "PlazaRing", 0.3, 62, Vector3.new(0, 0.15, 0), C.Brass, Enum.Material.Metal, { collide = false })
+	cylinder(f, "Plaza", 0.4, 60, Vector3.new(0, 0.2, 0), C.StoneRaised, Enum.Material.Slate)
+	cylinder(f, "ForgePad", 0.5, 30, Vector3.new(0, 0.25, 0), C.StoneDark, Enum.Material.Basalt)
+
+	for _, wall in ipairs({
+		{ Vector3.new(0, 30, 109), Vector3.new(220, 60, 2) },
+		{ Vector3.new(0, 30, -109), Vector3.new(220, 60, 2) },
+		{ Vector3.new(109, 30, 0), Vector3.new(2, 60, 220) },
+		{ Vector3.new(-109, 30, 0), Vector3.new(2, 60, 220) },
+	}) do
+		newPart(f, "Boundary", wall[2], CFrame.new(wall[1]), Color3.new(), nil, { transparency = 1, shadow = false })
+	end
+end
+
+local function buildPaths(root)
+	local f = newFolder(root, "Paths")
+	local paths = {
+		{ "Spawn", Vector3.new(0, 0, 52), Vector3.new(0, 0, 30), 10 },
+		{ "Portals", Vector3.new(0, 0, -30), Vector3.new(0, 0, -74), 12 },
+		{ "Nursery", Vector3.new(29, 0, 6), Vector3.new(50, 0, 18), 8 },
+		{ "EggShop", Vector3.new(29, 0, -6), Vector3.new(61, 0, -16), 8 },
+		{ "Quests", Vector3.new(-29, 0, -2), Vector3.new(-56, 0, -5), 8 },
+		{ "Upgrades", Vector3.new(-28, 0, 9), Vector3.new(-57, 0, 26), 8 },
+	}
+	for _, path in ipairs(paths) do
+		pathStrip(f, path[1], path[2], path[3], path[4], C.Path, Enum.Material.Cobblestone, 0.05)
+		pathStrip(f, path[1] .. "Line", path[2], path[3], 1, C.Brass, Enum.Material.Metal, 0.07)
+	end
+end
+
+local function buildSpawn(root)
+	local f = newFolder(root, "Spawn")
+	local origin = L.Spawn
+
+	cylinder(f, "StartDisc", 0.15, 12, origin + Vector3.new(0, 0.08, 0), C.Amber, Enum.Material.Neon, {
+		collide = false,
+		transparency = 0.25,
+		shadow = false,
+	})
+	newLight(anchorAt(f, "StartLight", origin + Vector3.new(0, 2, 0)), C.Amber, 1.6, 16)
+
+	-- Amber trail from spawn to the Forge. Dots sit on whichever floor is under them.
+	for i = 1, 6 do
+		local position = origin:Lerp(L.Forge, i / 7)
+		local radius = Vector3.new(position.X, 0, position.Z).Magnitude
+		local y = if radius < 15 then 0.57 elseif radius < 30 then 0.47 else 0.18
+		cylinder(f, "TrailDot" .. i, 0.1, 1.6, Vector3.new(position.X, y, position.Z), C.Amber, Enum.Material.Neon, {
+			collide = false,
+			shadow = false,
+		})
+	end
+
+	local spawn = Instance.new("SpawnLocation")
+	spawn.Name = "PlayerSpawn"
+	spawn.Size = Vector3.new(12, 0.2, 12)
+	spawn.CFrame = CFrame.new(origin + Vector3.new(0, 0.1, 0)) -- faces north, toward the Forge
+	spawn.Anchored = true
+	spawn.Transparency = 1
+	spawn.Neutral = true
+	spawn.Duration = 0
+	spawn.Parent = f
+
+	-- Landing spot for portals back to the hub.
+	local entry = anchorAt(f, "HubEntry", origin + Vector3.new(0, 0.5, -3))
+	CollectionService:AddTag(entry, "ZoneEntry_" .. ZoneConfig.Hub)
+
+	newBillboard(f, "START HERE", "Follow the amber trail", Theme.Color.Amber, origin + Vector3.new(0, 9, 0), 12)
+end
+
+local function buildForge(root)
+	local f = newFolder(root, "Forge")
+	local o = L.Forge
+
+	newPart(f, "Base", Vector3.new(20, 8, 14), CFrame.new(o + Vector3.new(0, 4, 0)), C.StoneDark, Enum.Material.Basalt)
+	newPart(
+		f,
+		"Chimney",
+		Vector3.new(4, 12, 4),
+		CFrame.new(o + Vector3.new(0, 14, -4)),
+		C.StoneDark,
+		Enum.Material.Basalt
+	)
+	newPart(
+		f,
+		"Trim",
+		Vector3.new(20.4, 0.6, 14.4),
+		CFrame.new(o + Vector3.new(0, 8.1, 0)),
+		C.Brass,
+		Enum.Material.Metal
+	)
+
+	local mouth = newPart(
+		f,
+		"FurnaceMouth",
+		Vector3.new(6, 5, 0.6),
+		CFrame.new(o + Vector3.new(0, 3.5, 7.2)),
+		C.EmberRed,
+		Enum.Material.Neon
+	)
+	newLight(mouth, C.Amber, 2, 26)
+
+	local fire = Instance.new("ParticleEmitter")
+	fire.Texture = "rbxasset://textures/particles/fire_main.dds"
+	fire.Lifetime = NumberRange.new(0.7, 1.2)
+	fire.Speed = NumberRange.new(2, 4)
+	fire.SpreadAngle = Vector2.new(18, 18)
+	fire.Rate = 14
+	fire.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.8),
+		NumberSequenceKeypoint.new(0.6, 1.3),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	fire.Color = ColorSequence.new(C.Amber, C.EmberRed)
+	fire.LightEmission = 0.8
+	fire.Parent = anchorAt(f, "FireAnchor", o + Vector3.new(0, 6.2, 7.6))
+
+	-- Anvil: the Forge Station prompt lives here.
+	local anvil = newPart(
+		f,
+		"Anvil",
+		Vector3.new(4, 2, 2.4),
+		CFrame.new(o + Vector3.new(10, 1.5, 11)),
+		C.StoneBase,
+		Enum.Material.Metal
+	)
+	newPart(
+		f,
+		"AnvilTop",
+		Vector3.new(5.5, 1, 2),
+		CFrame.new(o + Vector3.new(10, 3, 11)),
+		C.StoneRaised,
+		Enum.Material.Metal
+	)
+	local prompt = newPrompt(anvil, "Forge", "Forge Station", 0, 10)
+	prompt:SetAttribute("HubObject", "ForgeStation")
+	CollectionService:AddTag(prompt, "HubPrompt")
+
+	newPart(
+		f,
+		"Bellows",
+		Vector3.new(4, 3, 3.5),
+		CFrame.new(o + Vector3.new(-10, 2, 10)),
+		C.Wood,
+		Enum.Material.WoodPlanks
+	)
+	newPart(
+		f,
+		"BellowsHandle",
+		Vector3.new(0.8, 0.8, 3),
+		CFrame.new(o + Vector3.new(-10, 3.9, 10)),
+		C.WoodDark,
+		Enum.Material.Wood
+	)
+
+	cylinder(f, "QuenchBarrel", 3.2, 3, o + Vector3.new(-5.5, 2.1, 11), C.WoodDark, Enum.Material.WoodPlanks)
+	cylinder(
+		f,
+		"BarrelBand",
+		0.35,
+		3.2,
+		o + Vector3.new(-5.5, 2.7, 11),
+		C.Brass,
+		Enum.Material.Metal,
+		{ collide = false }
+	)
+
+	-- Gears on the chimney face. Axis points south; clients spin them.
+	for _, gear in ipairs({
+		{ "GearLarge", 3, Vector3.new(-0.6, 12.5, -1.75), 0.8 },
+		{ "GearSmall", 2, Vector3.new(1.3, 14.6, -1.75), -1.2 },
+	}) do
+		local part = newPart(
+			f,
+			gear[1],
+			Vector3.new(0.4, gear[2], gear[2]),
+			CFrame.new(o + gear[3]) * CFrame.Angles(0, math.rad(90), 0),
+			C.BrassBright,
+			Enum.Material.Metal,
+			{ shape = Enum.PartType.Cylinder }
+		)
+		part:SetAttribute("Spin", gear[4])
+		part:SetAttribute("SpinAxis", "X")
+		CollectionService:AddTag(part, "Spin")
+	end
+
+	newBillboard(
+		f,
+		"FORGE STATION",
+		"Anvil · Furnace · Quench",
+		Theme.Color.BrassBright,
+		o + Vector3.new(0, 23, 0),
+		16
+	)
+end
+
+local function buildNursery(root)
+	local f = newFolder(root, "Nursery")
+	local o = L.Nursery
+
+	cylinder(f, "NestPad", 0.4, 26, o + Vector3.new(0, 0.2, 0), C.StoneRaised, Enum.Material.Slate)
+	cylinder(f, "NestRing", 0.3, 27, o + Vector3.new(0, 0.15, 0), C.Brass, Enum.Material.Metal, { collide = false })
+
+	-- Starter egg in the middle, display eggs around it.
+	local pedestal = newPart(
+		f,
+		"StarterEggPedestal",
+		Vector3.new(4, 3, 4),
+		CFrame.new(o + Vector3.new(0, 1.9, 0)),
+		C.Brass,
+		Enum.Material.Metal
+	)
+	local starterEgg = egg(f, "StarterEggDisplay", Vector3.new(2.6, 3.4, 2.6), o + Vector3.new(0, 5.1, 0), C.Parchment)
+	newLight(starterEgg, C.BrassBright, 1.6, 16)
+	newPrompt(pedestal, "Hatch", "Starter Egg", 0.5, 12)
+	CollectionService:AddTag(pedestal, "StarterEgg")
+
+	for i = 1, 3 do
+		local angle = math.rad(i * 120 + 30)
+		local position = o + Vector3.new(math.cos(angle) * 8, 0, math.sin(angle) * 8)
+		newPart(
+			f,
+			"Pedestal" .. i,
+			Vector3.new(2, 2.4, 2),
+			CFrame.new(position + Vector3.new(0, 1.4, 0)),
+			C.StoneBase,
+			Enum.Material.Slate
+		)
+		egg(
+			f,
+			"DisplayEgg" .. i,
+			Vector3.new(1.6, 2.1, 1.6),
+			position + Vector3.new(0, 3.6, 0),
+			({ C.Amber, C.Leaf, Theme.Color.Core })[i]
+		)
+	end
+
+	newBillboard(f, "FORGEKIN NURSERY", "Hatch your first Forgekin", Theme.Color.Amber, o + Vector3.new(0, 13, 0), 16)
+end
+
+local function buildEggShop(root)
+	local f = newFolder(root, "EggShop")
+	local o = L.EggShop
+
+	-- Counter faces west, toward the plaza.
+	local counter = newPart(
+		f,
+		"Counter",
+		Vector3.new(5, 3, 14),
+		CFrame.new(o + Vector3.new(0, 1.5, 0)),
+		C.Wood,
+		Enum.Material.WoodPlanks
+	)
+	newPart(
+		f,
+		"CounterTop",
+		Vector3.new(6, 0.4, 15),
+		CFrame.new(o + Vector3.new(0, 3.2, 0)),
+		C.WoodDark,
+		Enum.Material.WoodPlanks
+	)
+	newPart(
+		f,
+		"Shelves",
+		Vector3.new(1, 10, 14),
+		CFrame.new(o + Vector3.new(4.5, 5, 0)),
+		C.StoneBase,
+		Enum.Material.WoodPlanks
+	)
+	for i, color in ipairs({ C.Amber, C.Leaf, Theme.Color.Core }) do
+		egg(
+			f,
+			"DisplayEgg" .. i,
+			Vector3.new(1.4, 1.9, 1.4),
+			o + Vector3.new(3.4, 4 + (i % 2) * 3, -5 + (i - 1) * 5),
+			color
+		)
+	end
+	local prompt = newPrompt(counter, "Browse", "Egg Shop", 0, 10)
+	prompt:SetAttribute("HubObject", "EggShop")
+	CollectionService:AddTag(prompt, "HubPrompt")
+
+	newBillboard(f, "EGG SHOP", "New eggs for coins", Theme.Color.Amber, o + Vector3.new(0, 14, 0), 13)
+end
+
+local function buildQuestBoard(root)
+	local f = newFolder(root, "QuestBoard")
+	local o = L.QuestBoard
+
+	for _, z in ipairs({ -3.5, 3.5 }) do
+		newPart(
+			f,
+			"Post",
+			Vector3.new(0.8, 9, 0.8),
+			CFrame.new(o + Vector3.new(0, 4.5, z)),
+			C.WoodDark,
+			Enum.Material.Wood
+		)
+	end
+	local board = newPart(
+		f,
+		"Board",
+		Vector3.new(0.4, 5, 7),
+		CFrame.new(o + Vector3.new(0, 5.5, 0)),
+		C.Wood,
+		Enum.Material.WoodPlanks
+	)
+	for i = 1, 3 do
+		newPart(
+			f,
+			"Note" .. i,
+			Vector3.new(0.1, 1.6, 1.3),
+			CFrame.new(o + Vector3.new(0.26, 5.2 + (i % 2) * 1.1, -2 + (i - 1) * 2)),
+			C.Parchment,
+			Enum.Material.SmoothPlastic,
+			{ collide = false }
+		)
+	end
+	local prompt = newPrompt(board, "Read", "Quest Board", 0, 10)
+	prompt:SetAttribute("HubObject", "QuestBoard")
+	CollectionService:AddTag(prompt, "HubPrompt")
+
+	newBillboard(f, "QUEST BOARD", "Goals and rewards", Theme.Color.Success, o + Vector3.new(0, 12, 0), 13)
+end
+
+local function buildUpgradeShop(root)
+	local f = newFolder(root, "UpgradeShop")
+	local o = L.UpgradeShop
+
+	local counter = newPart(
+		f,
+		"Counter",
+		Vector3.new(4, 3, 12),
+		CFrame.new(o + Vector3.new(0, 1.5, 0)),
+		C.Wood,
+		Enum.Material.WoodPlanks
+	)
+	for i = 1, 3 do
+		local position = o + Vector3.new(-3.5, 0, -4 + (i - 1) * 4)
+		newPart(
+			f,
+			"Pedestal" .. i,
+			Vector3.new(2.2, 2.4, 2.2),
+			CFrame.new(position + Vector3.new(0, 1.2, 0)),
+			C.StoneRaised,
+			Enum.Material.Slate
+		)
+		newPart(
+			f,
+			"Charm" .. i,
+			Vector3.new(1, 1, 1),
+			CFrame.new(position + Vector3.new(0, 3.1, 0)) * CFrame.Angles(0, 0.7, 0.7),
+			C.BrassBright,
+			Enum.Material.Neon
+		)
+	end
+	local prompt = newPrompt(counter, "Browse", "Upgrade Shop", 0, 10)
+	prompt:SetAttribute("HubObject", "UpgradeShop")
+	CollectionService:AddTag(prompt, "HubPrompt")
+
+	newBillboard(f, "UPGRADES", "Boost your adventure", Theme.Color.BrassBright, o + Vector3.new(0, 12, 0), 12)
+end
+
+local function buildPortals(root)
+	local f = newFolder(root, "Portals")
+	newPart(f, "PlazaFloor", Vector3.new(80, 0.3, 22), CFrame.new(0, 0.15, -86), C.GroundEdge, Enum.Material.Basalt)
+
+	for _, def in ipairs(HubConfig.Portals) do
+		local zone = ZoneConfig.Zones[def.id]
+		local model = Instance.new("Model")
+		model.Name = def.id
+		model.Parent = f
+		local base = Vector3.new(def.x, 0, def.z)
+		local open = zone.unlockLevel <= 1
+
+		local pad = newPart(
+			model,
+			"Pad",
+			Vector3.new(10, 0.6, 6),
+			CFrame.new(base + Vector3.new(0, 0.3, 0)),
+			C.StoneDark,
+			Enum.Material.Slate
+		)
+		for _, side in ipairs({ -1, 1 }) do
+			newPart(
+				model,
+				"Pillar",
+				Vector3.new(2, 12, 2),
+				CFrame.new(base + Vector3.new(side * 4, 6, 0)),
+				C.StoneBase,
+				Enum.Material.Basalt
+			)
+		end
+		newPart(
+			model,
+			"Lintel",
+			Vector3.new(10.4, 1.5, 2.4),
+			CFrame.new(base + Vector3.new(0, 12.6, 0)),
+			C.Brass,
+			Enum.Material.Metal
+		)
+
+		-- Clients restyle the surface and prompt for their own level (see client Main).
+		local surface = newPart(
+			model,
+			"Surface",
+			Vector3.new(6, 11, 0.4),
+			CFrame.new(base + Vector3.new(0, 6.2, 0)),
+			zone.portalColor,
+			Enum.Material.Neon,
+			{
+				collide = false,
+				transparency = if open then 0.3 else 0.8,
+				shadow = false,
+			}
+		)
+		newLight(surface, zone.portalGlow, if open then 2 else 0.4, 20)
+
+		local prompt = newPrompt(pad, if open then "Enter" else "Locked", zone.displayName, 0.3, 10)
+		prompt:SetAttribute("Portal", def.id)
+		prompt:SetAttribute("UnlockLevel", zone.unlockLevel)
+		CollectionService:AddTag(prompt, "Portal")
+
+		newBillboard(
+			model,
+			zone.displayName:upper(),
+			if open then "Open" else ("Level %d"):format(zone.unlockLevel),
+			zone.portalColor,
+			base + Vector3.new(0, 16, 0),
+			12
+		)
+		model.PrimaryPart = pad
+	end
+
+	newBillboard(f, "PORTAL PLAZA", "Unlock new worlds", Theme.Color.BrassBright, Vector3.new(0, 22, -80), 15)
+end
+
+local function buildSigns(root)
+	local f = newFolder(root, "Signs")
+
+	-- Board faces +Z (back face) so players walking north from spawn can read it.
+	local function groundSign(position, yaw, title, subtitle)
+		newPart(
+			f,
+			"Post",
+			Vector3.new(0.6, 5, 0.6),
+			CFrame.new(position + Vector3.new(0, 2.5, 0)),
+			C.WoodDark,
+			Enum.Material.Wood
+		)
+		local board = newPart(
+			f,
+			"Board",
+			Vector3.new(6, 2.4, 0.4),
+			CFrame.new(position + Vector3.new(0, 5.2, 0)) * CFrame.Angles(0, math.rad(yaw), 0),
+			C.Wood,
+			Enum.Material.WoodPlanks
+		)
+		local gui = Instance.new("SurfaceGui")
+		gui.Face = Enum.NormalId.Back
+		gui.CanvasSize = Vector2.new(600, 240)
+		gui.LightInfluence = 0
+		gui.Parent = board
+
+		local label = Instance.new("TextLabel")
+		label.BackgroundTransparency = 1
+		label.Size = UDim2.fromScale(0.9, 0.55)
+		label.Position = UDim2.fromScale(0.05, 0.08)
+		label.Font = Theme.Font.Title
+		label.Text = title
+		label.TextColor3 = C.Parchment
+		label.TextScaled = true
+		label.Parent = gui
+
+		local sub = label:Clone()
+		sub.Size = UDim2.fromScale(0.9, 0.28)
+		sub.Position = UDim2.fromScale(0.05, 0.64)
+		sub.Font = Theme.Font.Body
+		sub.Text = subtitle
+		sub.TextColor3 = C.Amber
+		sub.Parent = gui
+	end
+
+	local s = L.Spawn
+	groundSign(s + Vector3.new(-7, 0, -9), 20, "FORGE", "Straight ahead")
+	groundSign(s + Vector3.new(7, 0, -9), -20, "NURSERY  ·  EGGS", "East, on your right")
+	groundSign(s + Vector3.new(-13, 0, -4), 40, "QUESTS  ·  UPGRADES", "West, on your left")
+	groundSign(s + Vector3.new(13, 0, -4), -40, "PORTALS", "North, past the Forge")
+end
+
+local function buildDecor(root)
+	local f = newFolder(root, "Decor")
+
+	for i, position in ipairs({
+		Vector3.new(-10, 0, 46),
+		Vector3.new(10, 0, 46),
+		Vector3.new(-40, 0, -50),
+		Vector3.new(40, 0, -50),
+	}) do
+		newPart(
+			f,
+			"LanternPole" .. i,
+			Vector3.new(0.6, 10, 0.6),
+			CFrame.new(position + Vector3.new(0, 5, 0)),
+			C.WoodDark,
+			Enum.Material.Wood
+		)
+		newPart(
+			f,
+			"LanternCap" .. i,
+			Vector3.new(1.8, 0.3, 1.8),
+			CFrame.new(position + Vector3.new(0, 11.6, 0)),
+			C.Brass,
+			Enum.Material.Metal
+		)
+		local glow = newPart(
+			f,
+			"LanternGlow" .. i,
+			Vector3.new(1.2, 1.4, 1.2),
+			CFrame.new(position + Vector3.new(0, 10.8, 0)),
+			C.Amber,
+			Enum.Material.Neon,
+			{ shadow = false }
+		)
+		newLight(glow, C.Amber, 1.4, 18)
+	end
+
+	for i, position in ipairs({
+		Vector3.new(-15, 0, 13),
+		Vector3.new(-13, 0, 15.5),
+		Vector3.new(16, 0, 13),
+		Vector3.new(14, 0, 15.5),
+	}) do
+		newPart(
+			f,
+			"Crate" .. i,
+			Vector3.new(2.4, 2.4, 2.4),
+			CFrame.new(position + Vector3.new(0, 1.6, 0)) * CFrame.Angles(0, math.rad(i * 17), 0),
+			C.Wood,
+			Enum.Material.WoodPlanks
+		)
+	end
+
+	for i, position in ipairs({
+		Vector3.new(-17, 0, -6),
+		Vector3.new(17, 0, -6),
+		Vector3.new(-20, 0, 40),
+		Vector3.new(20, 0, 40),
+	}) do
+		local floor = if Vector3.new(position.X, 0, position.Z).Magnitude < 30 then 0.4 else 0
+		cylinder(
+			f,
+			"Barrel" .. i,
+			3,
+			2.4,
+			position + Vector3.new(0, floor + 1.5, 0),
+			C.WoodDark,
+			Enum.Material.WoodPlanks
+		)
+	end
+
+	for i, position in ipairs({ Vector3.new(-9, 0, 34), Vector3.new(9, 0, 34) }) do
+		newPart(
+			f,
+			"BenchSeat" .. i,
+			Vector3.new(4.5, 0.4, 1.4),
+			CFrame.new(position + Vector3.new(0, 1.2, 0)),
+			C.Wood,
+			Enum.Material.WoodPlanks
+		)
+		for _, side in ipairs({ -1.8, 1.8 }) do
+			newPart(
+				f,
+				"BenchLeg",
+				Vector3.new(0.3, 1, 1.1),
+				CFrame.new(position + Vector3.new(side, 0.5, 0)),
+				C.WoodDark,
+				Enum.Material.Wood
+			)
+		end
+	end
+
+	for i, position in ipairs({
+		Vector3.new(-34, 0, 20),
+		Vector3.new(34, 0, 32),
+		Vector3.new(-42, 0, -22),
+		Vector3.new(44, 0, -30),
+	}) do
+		cylinder(f, "Pot" .. i, 1.6, 1.8, position + Vector3.new(0, 0.8, 0), C.WoodDark, Enum.Material.Slate)
+		newPart(
+			f,
+			"Plant" .. i,
+			Vector3.new(2.2, 2.2, 2.2),
+			CFrame.new(position + Vector3.new(0, 2.5, 0)),
+			C.Leaf,
+			Enum.Material.Grass,
+			{ shape = Enum.PartType.Ball }
+		)
+	end
+end
+
+local function buildAmbient(root)
+	local f = newFolder(root, "Ambient")
+
+	local dust = Instance.new("ParticleEmitter")
+	dust.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	dust.Lifetime = NumberRange.new(4, 7)
+	dust.Speed = NumberRange.new(0.3, 1)
+	dust.Rate = 5
+	dust.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.35), NumberSequenceKeypoint.new(1, 0) })
+	dust.Color = ColorSequence.new(C.Amber)
+	dust.SpreadAngle = Vector2.new(180, 180)
+	dust.LightEmission = 0.3
+	local dustAnchor = anchorAt(f, "Dust", Vector3.new(0, 5, 20))
+	dust.Parent = dustAnchor
+	newLight(dustAnchor, C.Amber, 1, 50)
+
+	local embers = Instance.new("ParticleEmitter")
+	embers.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	embers.Lifetime = NumberRange.new(1.5, 3)
+	embers.Speed = NumberRange.new(2, 4)
+	embers.Rate = 4
+	embers.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.4), NumberSequenceKeypoint.new(1, 0) })
+	embers.Color = ColorSequence.new(C.Amber, C.EmberRed)
+	embers.SpreadAngle = Vector2.new(50, 50)
+	embers.LightEmission = 0.7
+	embers.Parent = anchorAt(f, "Embers", Vector3.new(0, 20, -4))
+end
+
+function HubBuilder.Build()
+	applyLighting()
+	if workspace:FindFirstChild("EmberHollow") then
+		return
+	end
+	local root = Instance.new("Folder")
+	root.Name = "EmberHollow"
+
+	buildGround(root)
+	buildPaths(root)
+	buildSpawn(root)
+	buildForge(root)
+	buildNursery(root)
+	buildEggShop(root)
+	buildQuestBoard(root)
+	buildUpgradeShop(root)
+	buildPortals(root)
+	buildSigns(root)
+	buildDecor(root)
+	buildAmbient(root)
+
+	root.Parent = workspace
+end
+
+return HubBuilder
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="13">
+        <Properties>
+          <string name="Name">Main</string>
+          <token name="RunContext">0</token>
+          <string name="Source"><![CDATA[-- EMBERHATCH server entry point. Builds the world, creates remotes, starts services.
+
+local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Server → client only. Clients never send gameplay requests: every action goes
+-- through a ProximityPrompt, which the server checks itself.
+local remotes = Instance.new("Folder")
+remotes.Name = "Remotes"
+for _, name in ipairs({ "Notify", "ResourceCollected", "PodBroken", "EggHatched", "PortalFlash" }) do
+	local remote = Instance.new("RemoteEvent")
+	remote.Name = name
+	remote.Parent = remotes
+end
+remotes.Parent = ReplicatedStorage
+
+local Server = script.Parent
+local DataService = require(Server.DataService)
+local QuestService = require(Server.QuestService)
+local ResourceService = require(Server.ResourceService)
+local ForgekinService = require(Server.ForgekinService)
+local PortalService = require(Server.PortalService)
+
+require(Server.HubBuilder).Build()
+require(Server.GroveBuilder).Build()
+
+DataService.Init()
+QuestService.Init()
+ResourceService.Init()
+ForgekinService.Init()
+PortalService.Init()
+
+-- Hub stations that open in later milestones.
+local HUB_MESSAGES = {
+	ForgeStation = "The Forge Station is warming up. Recipes arrive soon.",
+	EggShop = "The Egg Shop opens soon. Your starter egg waits in the Nursery.",
+	QuestBoard = "Your quests are listed on the right of your screen.",
+	UpgradeShop = "Upgrades arrive soon.",
+}
+local function hookHubPrompt(prompt)
+	prompt.Triggered:Connect(function(player)
+		local message = HUB_MESSAGES[prompt:GetAttribute("HubObject")]
+		if message then
+			remotes.Notify:FireClient(player, message, "info")
+		end
+	end)
+end
+CollectionService:GetInstanceAddedSignal("HubPrompt"):Connect(hookHubPrompt)
+for _, prompt in ipairs(CollectionService:GetTagged("HubPrompt")) do
+	hookHubPrompt(prompt)
+end
+
+-- Load players last, after every service has registered its callbacks.
+DataService.Start()
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="14">
+        <Properties>
+          <string name="Name">PortalService</string>
+          <string name="Source"><![CDATA[-- PortalService: gates in the Portal Plaza and the way back to the hub.
+-- A prompt tagged "Portal" with a Portal attribute (zone id) teleports the player
+-- once the server confirms their level. Landing spots are parts tagged
+-- "ZoneEntry_<ZoneId>"; the player is placed on the ground found below them.
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local ZoneConfig = require(ReplicatedStorage.Shared.ZoneConfig)
+local DataService = require(script.Parent.DataService)
+
+local PortalService = {}
+
+local remotes
+local lastUse = {} -- [Player] = os.clock()
+
+local function landingFor(zoneId)
+	local entry = CollectionService:GetTagged("ZoneEntry_" .. zoneId)[1]
+	if not entry or not entry:IsA("BasePart") then
+		return nil
+	end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { entry }
+	local hit = workspace:Raycast(entry.Position + Vector3.new(0, 20, 0), Vector3.new(0, -60, 0), params)
+	local ground = if hit then hit.Position else entry.Position
+	-- Keep the entry part's facing so players arrive looking into the area.
+	return CFrame.new(ground + Vector3.new(0, 3.5, 0)) * entry.CFrame.Rotation
+end
+
+local function teleport(player, zoneId, promptPart)
+	local now = os.clock()
+	if now - (lastUse[player] or 0) < 1.5 then
+		return
+	end
+	local zone = ZoneConfig.Zones[zoneId]
+	local profile = DataService.Get(player)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not zone or not profile or not root then
+		return
+	end
+	if promptPart and (root.Position - promptPart.Position).Magnitude > 20 then
+		return
+	end
+	lastUse[player] = now
+
+	if profile.level < zone.unlockLevel then
+		remotes.Notify:FireClient(
+			player,
+			("%s unlocks at level %d."):format(zone.displayName, zone.unlockLevel),
+			"error"
+		)
+		return
+	end
+
+	local landing = landingFor(zoneId)
+	if not landing then
+		remotes.Notify:FireClient(player, zone.displayName .. " opens soon.", "info")
+		return
+	end
+
+	remotes.PortalFlash:FireClient(player, zone.portalGlow or Color3.fromRGB(255, 214, 150), zone.displayName)
+	task.wait(0.15)
+	if character.Parent then
+		character:PivotTo(landing)
+		player:SetAttribute("Zone", zoneId)
+	end
+end
+
+local function hookPortal(prompt)
+	if not prompt:IsA("ProximityPrompt") then
+		return
+	end
+	prompt.Triggered:Connect(function(player)
+		local zoneId = prompt:GetAttribute("Portal")
+		if type(zoneId) == "string" then
+			teleport(player, zoneId, prompt.Parent:IsA("BasePart") and prompt.Parent or nil)
+		end
+	end)
+end
+
+function PortalService.Init()
+	remotes = ReplicatedStorage.Remotes
+
+	CollectionService:GetInstanceAddedSignal("Portal"):Connect(hookPortal)
+	for _, prompt in ipairs(CollectionService:GetTagged("Portal")) do
+		hookPortal(prompt)
+	end
+
+	-- Everyone (re)spawns in the hub.
+	local function watch(player)
+		player:SetAttribute("Zone", ZoneConfig.Hub)
+		player.CharacterAdded:Connect(function()
+			player:SetAttribute("Zone", ZoneConfig.Hub)
+		end)
+	end
+	Players.PlayerAdded:Connect(watch)
+	for _, player in ipairs(Players:GetPlayers()) do
+		watch(player)
+	end
+	Players.PlayerRemoving:Connect(function(player)
+		lastUse[player] = nil
+	end)
+end
+
+return PortalService
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="15">
+        <Properties>
+          <string name="Name">QuestService</string>
+          <string name="Source"><![CDATA[-- QuestService: starter quests. Other services report events with
+-- QuestService.Progress(player, eventName, amount); the server alone decides
+-- when a quest is done and pays the reward.
+-- Quest state reaches the client as a JSON attribute, so it never misses an update.
+
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local QuestConfig = require(ReplicatedStorage.Shared.QuestConfig)
+local DataService = require(script.Parent.DataService)
+
+local QuestService = {}
+
+local notify -- RemoteEvent
+
+local function rewardText(reward)
+	local parts = {}
+	if reward.coins then
+		table.insert(parts, ("+%d Coins"):format(reward.coins))
+	end
+	if reward.gems then
+		table.insert(parts, ("+%d Gems"):format(reward.gems))
+	end
+	if reward.xp then
+		table.insert(parts, ("+%d XP"):format(reward.xp))
+	end
+	return table.concat(parts, "  ")
+end
+
+function QuestService.Sync(player)
+	local profile = DataService.Get(player)
+	if not profile then
+		return
+	end
+	local list = {}
+	for _, quest in ipairs(QuestConfig) do
+		local state = profile.quests[quest.id]
+		table.insert(list, {
+			id = quest.id,
+			title = quest.title,
+			hint = quest.hint,
+			progress = state and state.progress or 0,
+			target = quest.target,
+			done = state ~= nil and state.done == true,
+		})
+	end
+	player:SetAttribute("QuestState", HttpService:JSONEncode(list))
+end
+
+local function complete(player, quest)
+	local reward = quest.reward
+	if reward.coins then
+		DataService.Add(player, "coins", reward.coins)
+	end
+	if reward.gems then
+		DataService.Add(player, "gems", reward.gems)
+	end
+	notify:FireClient(player, "Quest complete: " .. quest.title, "success", rewardText(reward))
+	if reward.xp then
+		DataService.AddXP(player, reward.xp) -- may level up, which reports LevelReached
+	end
+end
+
+function QuestService.Progress(player, event, amount)
+	local profile = DataService.Get(player)
+	if not profile then
+		return
+	end
+	amount = amount or 1
+
+	local changed = false
+	for _, quest in ipairs(QuestConfig) do
+		if quest.event == event then
+			local state = profile.quests[quest.id] or { progress = 0, done = false }
+			if not state.done then
+				if quest.mode == "max" then
+					state.progress = math.max(state.progress, amount)
+				else
+					state.progress += amount
+				end
+				state.progress = math.min(state.progress, quest.target)
+				state.done = state.progress >= quest.target
+				profile.quests[quest.id] = state
+				changed = true
+				if state.done then
+					complete(player, quest)
+				end
+			end
+		end
+	end
+
+	if changed then
+		QuestService.Sync(player)
+	end
+end
+
+function QuestService.Init()
+	notify = ReplicatedStorage.Remotes.Notify
+
+	DataService.OnLoaded(function(player, profile)
+		QuestService.Progress(player, "LevelReached", profile.level)
+		QuestService.Sync(player)
+	end)
+
+	DataService.OnLevelUp(function(player, level)
+		notify:FireClient(player, ("Level %d!"):format(level), "success")
+		QuestService.Progress(player, "LevelReached", level)
+	end)
+end
+
+return QuestService
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="16">
+        <Properties>
+          <string name="Name">ResourceService</string>
+          <string name="Source"><![CDATA[-- ResourceService: Ember Shard pickups and Ember Crystal Pods.
+-- Anything tagged "EmberShard" (a Part) or "CrystalPod" (a Model or Part) works,
+-- whether it was spawned from ResourceConfig or placed by hand in Studio.
+-- The server checks every collection: the resource is up, the player is alive
+-- and close, and they aren't spamming. Clients only get told what happened.
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Theme = require(ReplicatedStorage.Shared.Theme)
+local HubConfig = require(ReplicatedStorage.Shared.HubConfig)
+local ResourceConfig = require(ReplicatedStorage.Shared.ResourceConfig)
+local DataService = require(script.Parent.DataService)
+local QuestService = require(script.Parent.QuestService)
+
+local SHARD_TAG = "EmberShard"
+local POD_TAG = "CrystalPod"
+
+local ResourceService = {}
+
+local rng = Random.new()
+local available = {} -- [Instance] = true while it can be collected
+local lastShard = {} -- [Player] = os.clock()
+local lastPod = {} -- [Player] = os.clock()
+local remotes
+local resourceFolder
+
+-- ── Helpers ──────────────────────────────────────────────
+
+local function positionOf(inst)
+	return if inst:IsA("Model") then inst:GetPivot().Position else inst.Position
+end
+
+-- Hides or restores every part, light, emitter and prompt in a resource.
+local function setShown(inst, shown)
+	local parts = if inst:IsA("BasePart") then { inst } else {}
+	for _, descendant in ipairs(inst:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			table.insert(parts, descendant)
+		elseif descendant:IsA("ParticleEmitter") or descendant:IsA("Light") or descendant:IsA("ProximityPrompt") then
+			descendant.Enabled = shown
+		end
+	end
+	for _, part in ipairs(parts) do
+		if part:GetAttribute("ShownTransparency") == nil then
+			part:SetAttribute("ShownTransparency", part.Transparency)
+			part:SetAttribute("ShownCollide", part.CanCollide)
+		end
+		part.Transparency = if shown then part:GetAttribute("ShownTransparency") else 1
+		part.CanCollide = shown and part:GetAttribute("ShownCollide")
+	end
+end
+
+-- The player's root part if they are alive and within reach, else nil.
+local function rootNear(player, position, maxDistance)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or humanoid.Health <= 0 or not root then
+		return nil
+	end
+	if (root.Position - position).Magnitude > maxDistance then
+		return nil
+	end
+	return root
+end
+
+local function groundAt(position)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { resourceFolder }
+	local hit = workspace:Raycast(position + Vector3.new(0, 60, 0), Vector3.new(0, -120, 0), params)
+	return if hit then hit.Position else position
+end
+
+-- Decides what one pod gives. Runs only on the server.
+local function rollPodReward(isRare)
+	local cfg = ResourceConfig.Pod
+	local shards = rng:NextInteger(cfg.shardsMin, cfg.shardsMax)
+	local coins = rng:NextInteger(cfg.coinsMin, cfg.coinsMax)
+	local cores = 0
+	if isRare and rng:NextNumber() < cfg.rareCoreChance then
+		cores = rng:NextInteger(cfg.rareCoresMin, cfg.rareCoresMax)
+	end
+	return shards, cores, coins
+end
+
+-- ── Collection ───────────────────────────────────────────
+
+local function onShardTriggered(shard, prompt, player)
+	if not available[shard] then
+		return
+	end
+	local now = os.clock()
+	if now - (lastShard[player] or 0) < ResourceConfig.ShardCooldown then
+		return
+	end
+	local profile = DataService.Get(player)
+	local position = positionOf(shard)
+	if not profile or not rootNear(player, position, prompt.MaxActivationDistance + 5) then
+		return
+	end
+
+	lastShard[player] = now
+	available[shard] = nil
+	setShown(shard, false)
+
+	local amount = ResourceConfig.Shard.amount
+	DataService.Add(player, "emberShards", amount)
+	profile.stats.shardsCollected += amount
+	remotes.ResourceCollected:FireClient(player, { kind = "shard", position = position, shards = amount })
+	DataService.AddXP(player, ResourceConfig.Shard.xp * amount)
+	QuestService.Progress(player, "ShardCollected", amount)
+
+	task.delay(ResourceConfig.Shard.respawnSeconds, function()
+		if shard.Parent then
+			available[shard] = true
+			setShown(shard, true)
+		end
+	end)
+end
+
+local function onPodTriggered(pod, prompt, player)
+	if not available[pod] then
+		return
+	end
+	local now = os.clock()
+	if now - (lastPod[player] or 0) < ResourceConfig.PodCooldown then
+		return
+	end
+	local profile = DataService.Get(player)
+	local position = positionOf(pod)
+	if not profile or not rootNear(player, position, prompt.MaxActivationDistance + 5) then
+		return
+	end
+
+	lastPod[player] = now
+	available[pod] = nil
+	setShown(pod, false)
+
+	local rare = pod:GetAttribute("Rare") == true
+	local shards, cores, coins = rollPodReward(rare)
+	remotes.PodBroken:FireAllClients(position, rare)
+
+	DataService.Add(player, "emberShards", shards)
+	DataService.Add(player, "coins", coins)
+	if cores > 0 then
+		DataService.Add(player, "crystalCores", cores)
+	end
+	profile.stats.podsBroken += 1
+	profile.stats.shardsCollected += shards
+	profile.stats.coresFound += cores
+
+	remotes.ResourceCollected:FireClient(player, {
+		kind = "pod",
+		position = position,
+		shards = shards,
+		cores = cores,
+		coins = coins,
+	})
+	DataService.AddXP(player, ResourceConfig.Shard.xp * shards + ResourceConfig.Pod.xpBonus)
+	QuestService.Progress(player, "PodBroken", 1)
+	QuestService.Progress(player, "ShardCollected", shards)
+
+	task.delay(rng:NextNumber(ResourceConfig.Pod.respawnMin, ResourceConfig.Pod.respawnMax), function()
+		if pod.Parent then
+			available[pod] = true
+			setShown(pod, true)
+		end
+	end)
+end
+
+-- Gives a tagged resource its prompt and starts listening to it.
+local function hook(inst, isPod)
+	if inst:GetAttribute("Hooked") then
+		return
+	end
+	local prompt = inst:FindFirstChildWhichIsA("ProximityPrompt", true)
+	if not prompt then
+		local host = if inst:IsA("Model")
+			then inst.PrimaryPart or inst:FindFirstChildWhichIsA("BasePart", true)
+			else inst
+		if not host or not host:IsA("BasePart") then
+			warn("[ResourceService] Tagged resource has no part to hold a prompt:", inst:GetFullName())
+			return
+		end
+		prompt = Instance.new("ProximityPrompt")
+		prompt.RequiresLineOfSight = false
+		if isPod then
+			prompt.ActionText = "Break"
+			prompt.ObjectText = if inst:GetAttribute("Rare") then "Rare Crystal Pod" else "Ember Crystal Pod"
+			prompt.HoldDuration = ResourceConfig.Pod.holdSeconds
+			prompt.MaxActivationDistance = ResourceConfig.Pod.promptDistance
+		else
+			prompt.ActionText = "Collect"
+			prompt.ObjectText = "Ember Shard"
+			prompt.HoldDuration = 0
+			prompt.MaxActivationDistance = ResourceConfig.Shard.promptDistance
+		end
+		prompt.Parent = host
+	end
+
+	inst:SetAttribute("Hooked", true)
+	available[inst] = true
+	local handler = if isPod then onPodTriggered else onShardTriggered
+	prompt.Triggered:Connect(function(player)
+		handler(inst, prompt, player)
+	end)
+end
+
+-- ── Builders for config-placed resources ─────────────────
+
+local function makeShard(groundPosition)
+	local shard = Instance.new("Part")
+	shard.Name = "EmberShard"
+	shard.Size = Vector3.new(0.8, 1.6, 0.8)
+	shard.CFrame = CFrame.new(groundAt(groundPosition) + Vector3.new(0, ResourceConfig.Shard.hoverHeight, 0))
+		* CFrame.Angles(0, rng:NextNumber(0, math.pi * 2), math.rad(14))
+	shard.Color = Theme.Color.Shard
+	shard.Material = Enum.Material.Neon
+	shard.Anchored = true
+	shard.CanCollide = false
+	shard.CanTouch = false
+	shard.CanQuery = false
+	shard.CastShadow = false
+
+	local sparkle = Instance.new("ParticleEmitter")
+	sparkle.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	sparkle.Color = ColorSequence.new(Theme.Color.Amber)
+	sparkle.LightEmission = 1
+	sparkle.Rate = 3
+	sparkle.Lifetime = NumberRange.new(0.6, 1)
+	sparkle.Speed = NumberRange.new(0.4, 1)
+	sparkle.SpreadAngle = Vector2.new(180, 180)
+	sparkle.Size = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.25),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	sparkle.Parent = shard
+
+	-- Spin and bob are drawn by each client (see CollectVFX).
+	shard:SetAttribute("Spin", 1.6)
+	shard:SetAttribute("Bob", 0.25)
+	CollectionService:AddTag(shard, "Spin")
+	CollectionService:AddTag(shard, SHARD_TAG)
+	shard.Parent = resourceFolder
+end
+
+local CRYSTALS = {
+	-- offset from the rock's top, size, tilt
+	{ Vector3.new(0, 1.8, 0), Vector3.new(1.4, 3.6, 1.4), CFrame.Angles(0, 0, 0) },
+	{ Vector3.new(1.1, 1.2, 0.5), Vector3.new(1, 2.6, 1), CFrame.Angles(0, 0, -0.45) },
+	{ Vector3.new(-1, 1.1, -0.6), Vector3.new(1, 2.4, 1), CFrame.Angles(0.3, 0, 0.4) },
+	{ Vector3.new(0.2, 0.9, 1.2), Vector3.new(0.8, 2, 0.8), CFrame.Angles(-0.5, 0, 0.1) },
+}
+
+local function makePod(groundPosition, rare)
+	local model = Instance.new("Model")
+	model.Name = if rare then "RareCrystalPod" else "CrystalPod"
+	local ground = groundAt(groundPosition)
+	local glow = if rare then Theme.Color.Core else Theme.Color.Shard
+
+	local rock = Instance.new("Part")
+	rock.Name = "Rock"
+	rock.Size = Vector3.new(4.2, 1.4, 4.2)
+	rock.CFrame = CFrame.new(ground + Vector3.new(0, 0.7, 0)) * CFrame.Angles(0, rng:NextNumber(0, math.pi), 0)
+	rock.Color = Color3.fromRGB(62, 56, 52)
+	rock.Material = Enum.Material.Slate
+	rock.Anchored = true
+	rock.Parent = model
+
+	for index, crystal in ipairs(CRYSTALS) do
+		local part = Instance.new("Part")
+		part.Name = "Crystal" .. index
+		part.Size = crystal[2]
+		part.CFrame = rock.CFrame * CFrame.new(crystal[1]) * crystal[3]
+		part.Color = if index == 1 then glow else glow:Lerp(Color3.new(0, 0, 0), 0.2)
+		part.Material = Enum.Material.Neon
+		part.Anchored = true
+		part.CanCollide = index == 1
+		part.CastShadow = false
+		part.Parent = model
+		if index == 1 then
+			local light = Instance.new("PointLight")
+			light.Color = glow
+			light.Range = 12
+			light.Brightness = 1.4
+			light.Shadows = false
+			light.Parent = part
+		end
+	end
+
+	model.PrimaryPart = rock
+	model:SetAttribute("Rare", rare)
+	CollectionService:AddTag(model, POD_TAG)
+	model.Parent = resourceFolder
+end
+
+local function spawnFromConfig()
+	for _, position in ipairs(ResourceConfig.HubShards) do
+		makeShard(position)
+	end
+	for _, pod in ipairs(ResourceConfig.HubPods) do
+		makePod(pod.position, pod.rare == true)
+	end
+	local grove = HubConfig.GroveOrigin
+	for _, offset in ipairs(ResourceConfig.GroveShards) do
+		makeShard(grove + offset)
+	end
+	for _, pod in ipairs(ResourceConfig.GrovePods) do
+		makePod(grove + pod.position, pod.rare == true)
+	end
+end
+
+function ResourceService.Init()
+	remotes = ReplicatedStorage.Remotes
+
+	resourceFolder = Instance.new("Folder")
+	resourceFolder.Name = "Resources"
+	resourceFolder.Parent = workspace
+
+	for tag, isPod in pairs({ [SHARD_TAG] = false, [POD_TAG] = true }) do
+		CollectionService:GetInstanceAddedSignal(tag):Connect(function(inst)
+			hook(inst, isPod)
+		end)
+		CollectionService:GetInstanceRemovedSignal(tag):Connect(function(inst)
+			available[inst] = nil
+		end)
+		for _, inst in ipairs(CollectionService:GetTagged(tag)) do
+			hook(inst, isPod)
+		end
+	end
+
+	spawnFromConfig()
+
+	Players.PlayerRemoving:Connect(function(player)
+		lastShard[player] = nil
+		lastPod[player] = nil
+	end)
+end
+
+return ResourceService
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="StarterPlayer" referent="17">
+    <Properties>
+      <string name="Name">StarterPlayer</string>
+    </Properties>
+    <Item class="StarterPlayerScripts" referent="18">
+      <Properties>
+        <string name="Name">StarterPlayerScripts</string>
+      </Properties>
+      <Item class="Folder" referent="19">
+        <Properties>
+          <string name="Name">Client</string>
+        </Properties>
+        <Item class="ModuleScript" referent="20">
+          <Properties>
+            <string name="Name">CollectVFX</string>
+            <string name="Source"><![CDATA[-- CollectVFX: everything players see when they collect. Purely visual and local;
+-- the server has already decided what was earned before any of this runs.
+--   shard sparkle + spin (tag "Spin"), shard flies to the player, floating "+1 Ember Shard",
+--   pod shakes while Break is held, pod burst, egg wobble + hatch burst.
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ProximityPromptService = game:GetService("ProximityPromptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+local Theme = require(ReplicatedStorage.Shared.Theme)
+
+local player = Players.LocalPlayer
+local T = Theme.Color
+local rng = Random.new()
+local GRAVITY = Vector3.new(0, -60, 0)
+
+local CollectVFX = {}
+
+local HUD
+local spinners = {} -- [BasePart] = { base, speed, axis, bob }
+local shaking = {} -- [Model] = base pivot
+local bits = {} -- flying pieces, updated every frame
+local emitters = {} -- [Color3 key] = ParticleEmitter
+
+local function characterRoot()
+	local character = player.Character
+	return character and character:FindFirstChild("HumanoidRootPart")
+end
+
+local function plural(count, word)
+	return ("+%d %s%s"):format(count, word, if count == 1 then "" else "s")
+end
+
+-- ── Particles and pieces ─────────────────────────────────
+
+local function burst(position, color, count)
+	local key = color:ToHex()
+	local emitter = emitters[key]
+	if not emitter then
+		local holder = Instance.new("Part")
+		holder.Anchored = true
+		holder.CanCollide = false
+		holder.CanQuery = false
+		holder.CanTouch = false
+		holder.Transparency = 1
+		holder.Size = Vector3.new(1, 1, 1)
+		holder.Parent = workspace
+		emitter = Instance.new("ParticleEmitter")
+		emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		emitter.Color = ColorSequence.new(color)
+		emitter.LightEmission = 1
+		emitter.Rate = 0
+		emitter.Lifetime = NumberRange.new(0.4, 0.9)
+		emitter.Speed = NumberRange.new(8, 16)
+		emitter.SpreadAngle = Vector2.new(180, 180)
+		emitter.Drag = 4
+		emitter.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.6), NumberSequenceKeypoint.new(1, 0) })
+		emitter.Parent = holder
+		emitters[key] = emitter
+	end
+	emitter.Parent.CFrame = CFrame.new(position)
+	emitter:Emit(count)
+end
+
+local function newPiece(color, size)
+	local part = Instance.new("Part")
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	part.Material = Enum.Material.Neon
+	part.Color = color
+	part.Size = Vector3.new(size, size * 1.6, size)
+	part.Parent = workspace
+	return part
+end
+
+-- A piece that arcs from a point into the player.
+local function seek(from, color, delaySeconds)
+	task.delay(delaySeconds, function()
+		table.insert(bits, {
+			kind = "seek",
+			part = newPiece(color, 0.45),
+			from = from,
+			lift = Vector3.new(rng:NextNumber(-2.5, 2.5), rng:NextNumber(3, 5), rng:NextNumber(-2.5, 2.5)),
+			start = os.clock(),
+			duration = rng:NextNumber(0.4, 0.55),
+		})
+	end)
+end
+
+-- A piece thrown outward that falls and shrinks.
+local function debris(from, color)
+	local direction = Vector3.new(rng:NextNumber(-1, 1), rng:NextNumber(0.8, 1.6), rng:NextNumber(-1, 1)).Unit
+	table.insert(bits, {
+		kind = "debris",
+		part = newPiece(color, rng:NextNumber(0.4, 0.8)),
+		position = from,
+		velocity = direction * rng:NextNumber(14, 22),
+		start = os.clock(),
+		duration = 0.8,
+	})
+end
+
+local function floatText(message, color, row)
+	local character = player.Character
+	local head = character and (character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart"))
+	if not head then
+		return
+	end
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.fromOffset(260, 34)
+	gui.StudsOffset = Vector3.new(0, 2.4 + row * 1.1, 0)
+	gui.AlwaysOnTop = true
+	gui.LightInfluence = 0
+	gui.Adornee = head
+	gui.Parent = player.PlayerGui
+
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.fromScale(1, 1)
+	label.Font = Theme.Font.Title
+	label.TextSize = 22
+	label.TextColor3 = color
+	label.Text = message
+	label.Parent = gui
+	local outline = Instance.new("UIStroke")
+	outline.Color = T.StoneDeep
+	outline.Thickness = 2
+	outline.Parent = label
+
+	TweenService
+		:Create(
+			gui,
+			TweenInfo.new(1.2, Enum.EasingStyle.Quad),
+			{ StudsOffset = gui.StudsOffset + Vector3.new(0, 2.2, 0) }
+		)
+		:Play()
+	local fade = TweenInfo.new(0.5, Enum.EasingStyle.Linear, Enum.EasingDirection.In, 0, false, 0.7)
+	TweenService:Create(label, fade, { TextTransparency = 1 }):Play()
+	TweenService:Create(outline, fade, { Transparency = 1 }):Play()
+	task.delay(1.3, function()
+		gui:Destroy()
+	end)
+end
+
+-- ── Per-frame update ─────────────────────────────────────
+
+local function step()
+	local now = os.clock()
+	local camera = workspace.CurrentCamera
+	local cameraPosition = camera and camera.CFrame.Position or Vector3.zero
+
+	for part, spin in pairs(spinners) do
+		if (spin.base.Position - cameraPosition).Magnitude < 160 then
+			local angle = now * spin.speed
+			local rotation = if spin.axis == "X" then CFrame.Angles(angle, 0, 0) else CFrame.Angles(0, angle, 0)
+			local bob = math.sin(now * 2 + spin.base.X) * spin.bob
+			part.CFrame = CFrame.new(0, bob, 0) * spin.base * rotation
+		end
+	end
+
+	for model, base in pairs(shaking) do
+		local jitter = Vector3.new(rng:NextNumber(-1, 1), 0, rng:NextNumber(-1, 1)) * 0.12
+		model:PivotTo(base + jitter)
+	end
+
+	local root = characterRoot()
+	for i = #bits, 1, -1 do
+		local bit = bits[i]
+		local alpha = math.min((now - bit.start) / bit.duration, 1)
+		if bit.kind == "seek" then
+			local target = if root then root.Position else bit.from
+			local a = alpha * alpha
+			local control = bit.from + bit.lift
+			local position = bit.from:Lerp(control, a):Lerp(control:Lerp(target, a), a)
+			bit.part.CFrame = CFrame.new(position) * CFrame.Angles(now * 9, now * 7, 0)
+		else
+			local dt = now - (bit.last or bit.start)
+			bit.last = now
+			bit.velocity += GRAVITY * dt
+			bit.position += bit.velocity * dt
+			bit.part.CFrame = CFrame.new(bit.position) * CFrame.Angles(now * 6, 0, now * 4)
+			bit.part.Transparency = alpha
+		end
+		if alpha >= 1 then
+			bit.part:Destroy()
+			table.remove(bits, i)
+		end
+	end
+end
+
+-- ── Events from the server ───────────────────────────────
+
+function CollectVFX.Collect(payload)
+	local position = payload.position
+	if payload.kind == "shard" then
+		seek(position, T.Shard, 0)
+		task.delay(0.35, floatText, plural(payload.shards, "Ember Shard"), T.Shard, 0)
+		HUD.Feed(plural(payload.shards, "Ember Shard"), T.Shard)
+		return
+	end
+
+	for i = 1, math.min(payload.shards, 8) do
+		seek(position + Vector3.new(0, 2, 0), T.Shard, 0.15 + i * 0.05)
+	end
+	local row = 0
+	local function line(message, color)
+		task.delay(0.5, floatText, message, color, row)
+		HUD.Feed(message, color)
+		row += 1
+	end
+	line(plural(payload.shards, "Ember Shard"), T.Shard)
+	if payload.cores > 0 then
+		for i = 1, payload.cores do
+			seek(position + Vector3.new(0, 2.5, 0), T.Core, 0.3 + i * 0.1)
+		end
+		line(plural(payload.cores, "Crystal Core"), T.Core)
+	end
+	if payload.coins > 0 then
+		line(plural(payload.coins, "Coin"), T.Coin)
+	end
+end
+
+function CollectVFX.PodBurst(position, rare)
+	local color = if rare then T.Core else T.Shard
+	burst(position + Vector3.new(0, 2.5, 0), color, 36)
+	for _ = 1, 8 do
+		debris(position + Vector3.new(0, 2, 0), color)
+	end
+end
+
+function CollectVFX.Hatch(eggPart, forgekinName)
+	local message = ("You hatched %s!"):format(forgekinName)
+	if eggPart and eggPart:IsA("BasePart") then
+		local base = eggPart.CFrame
+		task.spawn(function()
+			for i = 1, 6 do
+				local tilt = math.rad(if i % 2 == 0 then -14 else 14) * (1 - i / 8)
+				local tween = TweenService:Create(
+					eggPart,
+					TweenInfo.new(0.11, Enum.EasingStyle.Sine),
+					{ CFrame = base * CFrame.Angles(0, 0, tilt) }
+				)
+				tween:Play()
+				tween.Completed:Wait()
+			end
+			eggPart.CFrame = base
+			burst(base.Position, T.Amber, 48)
+			for _ = 1, 10 do
+				debris(base.Position, T.Parchment)
+			end
+			floatText(message, T.BrassBright, 0)
+		end)
+	end
+	HUD.Toast(message, "success", "Your Forgekin follows you everywhere.")
+end
+
+-- ── Setup ────────────────────────────────────────────────
+
+local function trackSpinner(part)
+	if part:IsA("BasePart") then
+		spinners[part] = {
+			base = part.CFrame,
+			speed = part:GetAttribute("Spin") or 1,
+			axis = part:GetAttribute("SpinAxis") or "Y",
+			bob = part:GetAttribute("Bob") or 0,
+		}
+	end
+end
+
+local function podOf(prompt)
+	local holder = prompt.Parent
+	local model = holder and holder.Parent
+	if model and model:IsA("Model") and CollectionService:HasTag(model, "CrystalPod") then
+		return model
+	end
+	return nil
+end
+
+local function stopShake(prompt)
+	local model = podOf(prompt)
+	if model and shaking[model] then
+		model:PivotTo(shaking[model])
+		shaking[model] = nil
+	end
+end
+
+function CollectVFX.Init(hud)
+	HUD = hud
+
+	CollectionService:GetInstanceAddedSignal("Spin"):Connect(trackSpinner)
+	CollectionService:GetInstanceRemovedSignal("Spin"):Connect(function(part)
+		spinners[part] = nil
+	end)
+	for _, part in ipairs(CollectionService:GetTagged("Spin")) do
+		trackSpinner(part)
+	end
+
+	ProximityPromptService.PromptButtonHoldBegan:Connect(function(prompt)
+		local model = podOf(prompt)
+		if model and not shaking[model] then
+			shaking[model] = model:GetPivot()
+		end
+	end)
+	ProximityPromptService.PromptButtonHoldEnded:Connect(stopShake)
+	ProximityPromptService.PromptTriggered:Connect(stopShake)
+
+	RunService.RenderStepped:Connect(step)
+end
+
+return CollectVFX
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="21">
+          <Properties>
+            <string name="Name">HUD</string>
+            <string name="Source"><![CDATA[-- HUD: stone panels with brass borders, kept to the screen edges.
+--   top left    area name
+--   top center  coins, gems, level, XP
+--   right       starter quests
+--   bottom left Ember Shards and Crystal Cores
+--   bottom right recent pickups
+-- All numbers come from player attributes the server sets, so the HUD can't drift.
+
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+local Theme = require(ReplicatedStorage.Shared.Theme)
+local ZoneConfig = require(ReplicatedStorage.Shared.ZoneConfig)
+
+local player = Players.LocalPlayer
+local T = Theme.Color
+
+local HUD = {}
+
+local gui
+local refs = {}
+local feed, toasts
+
+-- ── Small UI kit ─────────────────────────────────────────
+
+local function make(className, props, children)
+	local instance = Instance.new(className)
+	for key, value in pairs(props) do
+		if key ~= "Parent" then
+			instance[key] = value
+		end
+	end
+	for _, child in ipairs(children or {}) do
+		child.Parent = instance
+	end
+	instance.Parent = props.Parent
+	return instance
+end
+
+local function corner(radius)
+	return make("UICorner", { CornerRadius = radius or Theme.Radius.Medium })
+end
+
+local function stroke(color, thickness)
+	return make("UIStroke", { Color = color or T.Brass, Thickness = thickness or 1.5, Transparency = 0.1 })
+end
+
+-- Stone panel with brass border, soft drop shadow and a small ember accent on top.
+local function panel(props)
+	local frame = make("Frame", {
+		Parent = props.Parent,
+		Name = props.Name,
+		Size = props.Size,
+		Position = props.Position,
+		AnchorPoint = props.AnchorPoint or Vector2.zero,
+		BackgroundColor3 = T.StoneBase,
+		BackgroundTransparency = 0.06,
+		AutomaticSize = props.AutomaticSize or Enum.AutomaticSize.None,
+	}, { corner(), stroke(T.BrassDim) })
+
+	make("Frame", {
+		Parent = frame,
+		Name = "Shadow",
+		ZIndex = 0,
+		Size = UDim2.new(1, 4, 1, 4),
+		Position = UDim2.fromOffset(-2, 3),
+		BackgroundColor3 = Color3.new(0, 0, 0),
+		BackgroundTransparency = 0.65,
+	}, { corner() })
+
+	make("Frame", {
+		Parent = frame,
+		Name = "EmberAccent",
+		Size = UDim2.new(0.3, 0, 0, 2),
+		Position = UDim2.new(0.5, 0, 0, 0),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundColor3 = T.Amber,
+		BorderSizePixel = 0,
+	}, { corner(UDim.new(1, 0)) })
+	return frame
+end
+
+local function text(props)
+	return make("TextLabel", {
+		Parent = props.Parent,
+		Name = props.Name,
+		Size = props.Size,
+		Position = props.Position or UDim2.new(),
+		AnchorPoint = props.AnchorPoint or Vector2.zero,
+		BackgroundTransparency = 1,
+		Text = props.Text or "",
+		Font = props.Font or Theme.Font.Body,
+		TextSize = props.TextSize or 14,
+		TextColor3 = props.Color or T.Parchment,
+		TextXAlignment = props.XAlign or Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		RichText = props.RichText == true,
+		LayoutOrder = props.LayoutOrder or 0,
+		TextTransparency = props.TextTransparency or 0,
+	})
+end
+
+-- Diamond or coin icon drawn from frames (no image uploads needed).
+local function icon(parent, color, round, size)
+	size = size or 16
+	local holder =
+		make("Frame", { Parent = parent, Size = UDim2.fromOffset(size + 6, size + 6), BackgroundTransparency = 1 })
+	make("Frame", {
+		Parent = holder,
+		Size = UDim2.fromOffset(size, size),
+		Position = UDim2.fromScale(0.5, 0.5),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Rotation = if round then 0 else 45,
+		BackgroundColor3 = color,
+	}, { corner(if round then UDim.new(1, 0) else UDim.new(0, 3)), stroke(color:Lerp(Color3.new(1, 1, 1), 0.35), 1) })
+	return holder
+end
+
+local function formatNumber(n)
+	n = math.floor(n or 0)
+	if n >= 1e6 then
+		return ("%.1fM"):format(n / 1e6)
+	end
+	local s = tostring(n)
+	return (s:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", ""))
+end
+
+local function pop(label)
+	local scale = label:FindFirstChildOfClass("UIScale") or make("UIScale", { Parent = label })
+	scale.Scale = 1.25
+	TweenService:Create(scale, TweenInfo.new(0.25, Enum.EasingStyle.Back), { Scale = 1 }):Play()
+end
+
+-- ── Sections ─────────────────────────────────────────────
+
+local function buildArea()
+	local frame =
+		panel({ Parent = gui, Name = "Area", Size = UDim2.fromOffset(200, 50), Position = UDim2.fromOffset(12, 8) })
+	refs.areaName = text({
+		Parent = frame,
+		Size = UDim2.new(1, -24, 0, 24),
+		Position = UDim2.fromOffset(12, 5),
+		Font = Theme.Font.Title,
+		TextSize = 17,
+	})
+	refs.areaSub = text({
+		Parent = frame,
+		Size = UDim2.new(1, -24, 0, 16),
+		Position = UDim2.fromOffset(12, 28),
+		TextSize = 12,
+		Color = T.ParchmentDim,
+	})
+end
+
+local function buildStats()
+	local outer = panel({
+		Parent = gui,
+		Name = "Stats",
+		Size = UDim2.fromOffset(0, 44),
+		Position = UDim2.new(0.5, 0, 0, 8),
+		AnchorPoint = Vector2.new(0.5, 0),
+	})
+	outer.AutomaticSize = Enum.AutomaticSize.X
+	-- Layouts live in a content frame so they don't pick up the shadow and accent.
+	local frame = make("Frame", {
+		Parent = outer,
+		Size = UDim2.fromOffset(0, 44),
+		AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundTransparency = 1,
+	})
+	make("UIPadding", { Parent = frame, PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 14) })
+	make("UIListLayout", {
+		Parent = frame,
+		FillDirection = Enum.FillDirection.Horizontal,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		Padding = UDim.new(0, 8),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	})
+
+	local function counter(order, color, round, key)
+		local i = icon(frame, color, round)
+		i.LayoutOrder = order
+		refs[key] = text({
+			Parent = frame,
+			Size = UDim2.fromOffset(58, 28),
+			Font = Theme.Font.Number,
+			TextSize = 18,
+			LayoutOrder = order + 1,
+		})
+	end
+	counter(1, T.Coin, true, "coins")
+	counter(3, T.Gem, false, "gems")
+
+	local badge = make(
+		"Frame",
+		{ Parent = frame, Size = UDim2.fromOffset(46, 26), BackgroundColor3 = T.StoneRaised, LayoutOrder = 5 },
+		{
+			corner(Theme.Radius.Small),
+			stroke(T.Brass, 1),
+		}
+	)
+	refs.level = text({
+		Parent = badge,
+		Size = UDim2.fromScale(1, 1),
+		Font = Theme.Font.Number,
+		TextSize = 16,
+		Color = T.BrassBright,
+		XAlign = Enum.TextXAlignment.Center,
+	})
+
+	local bar = make(
+		"Frame",
+		{ Parent = frame, Size = UDim2.fromOffset(110, 14), BackgroundColor3 = T.StoneDeep, LayoutOrder = 6 },
+		{
+			corner(UDim.new(1, 0)),
+			stroke(T.BrassDim, 1),
+		}
+	)
+	refs.xpFill = make(
+		"Frame",
+		{ Parent = bar, Size = UDim2.fromScale(0, 1), BackgroundColor3 = T.Amber },
+		{ corner(UDim.new(1, 0)) }
+	)
+	refs.xpText = text({
+		Parent = bar,
+		Size = UDim2.fromScale(1, 1),
+		Font = Theme.Font.Number,
+		TextSize = 11,
+		Color = T.StoneDeep,
+		XAlign = Enum.TextXAlignment.Center,
+	})
+	refs.xpText.ZIndex = 2
+end
+
+local function buildResources()
+	local frame = panel({
+		Parent = gui,
+		Name = "Resources",
+		Size = UDim2.fromOffset(176, 74),
+		Position = UDim2.new(0, 12, 1, -12),
+		AnchorPoint = Vector2.new(0, 1),
+	})
+	for row, def in ipairs({
+		{ "shards", "Ember Shards", T.Shard },
+		{ "cores", "Crystal Cores", T.Core },
+	}) do
+		local y = 8 + (row - 1) * 31
+		local i = icon(frame, def[3], false, 14)
+		i.Position = UDim2.fromOffset(10, y + 2)
+		text({
+			Parent = frame,
+			Size = UDim2.fromOffset(90, 26),
+			Position = UDim2.fromOffset(36, y),
+			Text = def[2],
+			TextSize = 13,
+			Color = T.ParchmentDim,
+		})
+		refs[def[1]] = text({
+			Parent = frame,
+			Size = UDim2.fromOffset(50, 26),
+			Position = UDim2.new(1, -10, 0, y),
+			AnchorPoint = Vector2.new(1, 0),
+			Font = Theme.Font.Number,
+			TextSize = 19,
+			XAlign = Enum.TextXAlignment.Right,
+		})
+	end
+end
+
+local function buildQuests()
+	local outer = panel({
+		Parent = gui,
+		Name = "Quests",
+		Size = UDim2.fromOffset(236, 0),
+		Position = UDim2.new(1, -12, 0, 64),
+		AnchorPoint = Vector2.new(1, 0),
+	})
+	outer.AutomaticSize = Enum.AutomaticSize.Y
+	local frame = make("Frame", {
+		Parent = outer,
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+	})
+	make("UIPadding", {
+		Parent = frame,
+		PaddingTop = UDim.new(0, 8),
+		PaddingBottom = UDim.new(0, 10),
+		PaddingLeft = UDim.new(0, 12),
+		PaddingRight = UDim.new(0, 12),
+	})
+	make("UIListLayout", { Parent = frame, Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder })
+	refs.questHeader = text({
+		Parent = frame,
+		Size = UDim2.new(1, 0, 0, 20),
+		Font = Theme.Font.Title,
+		TextSize = 14,
+		Color = T.BrassBright,
+	})
+	refs.questFrame = frame
+	refs.questPanel = outer
+end
+
+local function buildFeedAndToasts()
+	-- On touch screens the jump button sits bottom right, so the feed moves up.
+	local lift = if UserInputService.TouchEnabled then 170 else 12
+	feed = make("Frame", {
+		Parent = gui,
+		Name = "PickupFeed",
+		Size = UDim2.fromOffset(210, 160),
+		Position = UDim2.new(1, -12, 1, -lift),
+		AnchorPoint = Vector2.new(1, 1),
+		BackgroundTransparency = 1,
+	}, {
+		make("UIListLayout", {
+			VerticalAlignment = Enum.VerticalAlignment.Bottom,
+			HorizontalAlignment = Enum.HorizontalAlignment.Right,
+			Padding = UDim.new(0, 4),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+
+	toasts = make("Frame", {
+		Parent = gui,
+		Name = "Toasts",
+		Size = UDim2.fromOffset(360, 120),
+		Position = UDim2.new(0.5, 0, 0, 60),
+		AnchorPoint = Vector2.new(0.5, 0),
+		BackgroundTransparency = 1,
+	}, {
+		make("UIListLayout", {
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+			Padding = UDim.new(0, 4),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	})
+end
+
+-- ── Live updates ─────────────────────────────────────────
+
+local function refreshArea()
+	local zone = ZoneConfig.Zones[player:GetAttribute("Zone") or ZoneConfig.Hub] or ZoneConfig.Zones[ZoneConfig.Hub]
+	refs.areaName.Text = zone.displayName
+	refs.areaSub.Text = zone.subtitle
+end
+
+local function refreshStats()
+	refs.coins.Text = formatNumber(player:GetAttribute("Coins"))
+	refs.gems.Text = formatNumber(player:GetAttribute("Gems"))
+	refs.level.Text = "Lv " .. (player:GetAttribute("Level") or 1)
+	local xp, nextXp = player:GetAttribute("XP") or 0, player:GetAttribute("XPNext") or 1
+	refs.xpText.Text = ("%d / %d"):format(xp, nextXp)
+	TweenService:Create(refs.xpFill, TweenInfo.new(0.3), { Size = UDim2.fromScale(math.clamp(xp / nextXp, 0, 1), 1) })
+		:Play()
+end
+
+local function refreshResources()
+	refs.shards.Text = formatNumber(player:GetAttribute("EmberShards"))
+	refs.cores.Text = formatNumber(player:GetAttribute("CrystalCores"))
+end
+
+local function refreshQuests()
+	local ok, quests = pcall(HttpService.JSONDecode, HttpService, player:GetAttribute("QuestState") or "[]")
+	if not ok then
+		return
+	end
+	for _, child in ipairs(refs.questFrame:GetChildren()) do
+		if child:GetAttribute("QuestRow") then
+			child:Destroy()
+		end
+	end
+
+	local done, shown, hinted = 0, 0, false
+	for index, quest in ipairs(quests) do
+		if quest.done then
+			done += 1
+		elseif shown < 3 then
+			shown += 1
+			local row = make("Frame", {
+				Parent = refs.questFrame,
+				Size = UDim2.new(1, 0, 0, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BackgroundTransparency = 1,
+				LayoutOrder = index,
+			})
+			row:SetAttribute("QuestRow", true)
+			make("UIListLayout", { Parent = row, SortOrder = Enum.SortOrder.LayoutOrder })
+
+			local progress = if quest.target > 1 then ("  %d/%d"):format(quest.progress, quest.target) else ""
+			local title = text({
+				Parent = row,
+				Size = UDim2.new(1, 0, 0, 18),
+				Text = "◆ " .. quest.title .. progress,
+				TextSize = 13,
+				LayoutOrder = 1,
+			})
+			title.TextTruncate = Enum.TextTruncate.None
+			title.TextWrapped = true
+			title.AutomaticSize = Enum.AutomaticSize.Y
+			if not hinted then
+				hinted = true
+				local hint = text({
+					Parent = row,
+					Size = UDim2.new(1, 0, 0, 16),
+					Text = "    " .. quest.hint,
+					TextSize = 12,
+					Color = T.Amber,
+					LayoutOrder = 2,
+				})
+				hint.TextWrapped = true
+				hint.TextTruncate = Enum.TextTruncate.None
+				hint.AutomaticSize = Enum.AutomaticSize.Y
+			end
+		end
+	end
+	refs.questHeader.Text = ("Starter Quests   %d/%d"):format(done, #quests)
+	refs.questPanel.Visible = #quests > 0
+end
+
+-- ── Public ───────────────────────────────────────────────
+
+function HUD.Build()
+	gui = make("ScreenGui", {
+		Parent = player:WaitForChild("PlayerGui"),
+		Name = "EmberHatchHUD",
+		ResetOnSpawn = false,
+		ZIndexBehavior = Enum.ZIndexBehavior.Global, -- lets panel shadows (ZIndex 0) sit under their panel
+	})
+	make("UIScale", { Parent = gui, Scale = 1 })
+
+	buildArea()
+	buildStats()
+	buildResources()
+	buildQuests()
+	buildFeedAndToasts()
+
+	local watch = {
+		Zone = refreshArea,
+		Coins = refreshStats,
+		Gems = refreshStats,
+		Level = refreshStats,
+		XP = refreshStats,
+		XPNext = refreshStats,
+		EmberShards = refreshResources,
+		CrystalCores = refreshResources,
+		QuestState = refreshQuests,
+	}
+	for attribute, refresh in pairs(watch) do
+		player:GetAttributeChangedSignal(attribute):Connect(refresh)
+	end
+	player:GetAttributeChangedSignal("Coins"):Connect(function()
+		pop(refs.coins)
+	end)
+	player:GetAttributeChangedSignal("Gems"):Connect(function()
+		pop(refs.gems)
+	end)
+	player:GetAttributeChangedSignal("EmberShards"):Connect(function()
+		pop(refs.shards)
+	end)
+	player:GetAttributeChangedSignal("CrystalCores"):Connect(function()
+		pop(refs.cores)
+	end)
+	player:GetAttributeChangedSignal("Level"):Connect(function()
+		pop(refs.level)
+	end)
+
+	refreshArea()
+	refreshStats()
+	refreshResources()
+	refreshQuests()
+
+	-- Scale up a little on big screens; phones stay at 1.
+	local camera = workspace.CurrentCamera
+	local function rescale()
+		gui.UIScale.Scale = math.clamp(camera.ViewportSize.Y / 720, 0.9, 1.3)
+	end
+	camera:GetPropertyChangedSignal("ViewportSize"):Connect(rescale)
+	rescale()
+
+	if player:GetAttribute("SaveMode") == "offline" then
+		HUD.Toast("Saving is off in this test. Enable Studio API access to save.", "info")
+	end
+	player:GetAttributeChangedSignal("SaveMode"):Connect(function()
+		if player:GetAttribute("SaveMode") == "offline" then
+			HUD.Toast("Saving is off in this test. Enable Studio API access to save.", "info")
+		end
+	end)
+end
+
+-- Short message under the stats bar. kind: "info" | "success" | "error".
+function HUD.Toast(message, kind, detail)
+	local color = if kind == "success" then T.Success elseif kind == "error" then T.Error else T.Amber
+	local frame = panel({ Parent = toasts, Size = UDim2.fromOffset(340, if detail then 48 else 32) })
+	frame.UIStroke.Color = color
+	text({
+		Parent = frame,
+		Size = UDim2.new(1, -20, 0, 24),
+		Position = UDim2.fromOffset(10, 4),
+		Text = message,
+		TextSize = 14,
+		XAlign = Enum.TextXAlignment.Center,
+	})
+	if detail then
+		text({
+			Parent = frame,
+			Size = UDim2.new(1, -20, 0, 16),
+			Position = UDim2.fromOffset(10, 26),
+			Text = detail,
+			TextSize = 12,
+			Color = color,
+			XAlign = Enum.TextXAlignment.Center,
+		})
+	end
+	local children = toasts:GetChildren()
+	if #children > 4 then -- layout + 3 toasts
+		for _, child in ipairs(children) do
+			if child:IsA("Frame") and child ~= frame then
+				child:Destroy()
+				break
+			end
+		end
+	end
+	task.delay(3.5, function()
+		if frame.Parent then
+			frame:Destroy()
+		end
+	end)
+end
+
+-- One line in the bottom-right pickup feed.
+local feedOrder = 0
+function HUD.Feed(message, color)
+	feedOrder += 1
+	local frame = panel({ Parent = feed, Size = UDim2.fromOffset(0, 28) })
+	frame.AutomaticSize = Enum.AutomaticSize.X
+	frame.LayoutOrder = feedOrder
+	frame.EmberAccent.Visible = false
+	local content = make("Frame", {
+		Parent = frame,
+		Size = UDim2.fromOffset(0, 28),
+		AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundTransparency = 1,
+	})
+	make("UIPadding", { Parent = content, PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 12) })
+	make("UIListLayout", {
+		Parent = content,
+		FillDirection = Enum.FillDirection.Horizontal,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		Padding = UDim.new(0, 6),
+	})
+	icon(content, color, false, 10)
+	local label = text({ Parent = content, Size = UDim2.fromOffset(0, 24), Text = message, TextSize = 14 })
+	label.AutomaticSize = Enum.AutomaticSize.X
+
+	local rows = {}
+	for _, child in ipairs(feed:GetChildren()) do
+		if child:IsA("Frame") then
+			table.insert(rows, child)
+		end
+	end
+	table.sort(rows, function(a, b)
+		return a.LayoutOrder < b.LayoutOrder
+	end)
+	for i = 1, #rows - 4 do
+		rows[i]:Destroy()
+	end
+
+	task.delay(3, function()
+		if frame.Parent then
+			TweenService:Create(frame, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
+			TweenService:Create(label, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
+			task.wait(0.4)
+			frame:Destroy()
+		end
+	end)
+end
+
+-- Full-screen tint while a portal moves you.
+function HUD.Flash(color, title)
+	local flash = make("Frame", {
+		Parent = gui,
+		Size = UDim2.new(1, 0, 1, 80),
+		Position = UDim2.fromOffset(0, -60),
+		BackgroundColor3 = color,
+		BackgroundTransparency = 0.2,
+		ZIndex = 50,
+	})
+	TweenService:Create(
+		flash,
+		TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In, 0, false, 0.25),
+		{ BackgroundTransparency = 1 }
+	):Play()
+	task.delay(1, function()
+		flash:Destroy()
+	end)
+	HUD.Toast("Entering " .. title, "info")
+end
+
+-- Game title card, shown once on join in the upper third (never the center).
+function HUD.TitleCard()
+	local card = make("Frame", {
+		Parent = gui,
+		Size = UDim2.fromOffset(420, 90),
+		Position = UDim2.fromScale(0.5, 0.16),
+		AnchorPoint = Vector2.new(0.5, 0),
+		BackgroundTransparency = 1,
+	})
+	local title = text({
+		Parent = card,
+		Size = UDim2.new(1, 0, 0, 56),
+		Text = Theme.Game.Title,
+		Font = Theme.Font.Display,
+		TextSize = 52,
+		Color = T.BrassBright,
+		XAlign = Enum.TextXAlignment.Center,
+		TextTransparency = 1,
+	})
+	local sub = text({
+		Parent = card,
+		Size = UDim2.new(1, 0, 0, 22),
+		Position = UDim2.fromOffset(0, 58),
+		Text = Theme.Game.Subtitle,
+		Font = Theme.Font.Title,
+		TextSize = 16,
+		Color = T.Parchment,
+		XAlign = Enum.TextXAlignment.Center,
+		TextTransparency = 1,
+	})
+	make("UIStroke", { Parent = title, Color = T.StoneDeep, Thickness = 2, Transparency = 1 })
+
+	local show, hide = TweenInfo.new(0.6), TweenInfo.new(0.8)
+	TweenService:Create(title, show, { TextTransparency = 0 }):Play()
+	TweenService:Create(title.UIStroke, show, { Transparency = 0.2 }):Play()
+	TweenService:Create(sub, show, { TextTransparency = 0 }):Play()
+	task.delay(3.5, function()
+		TweenService:Create(title, hide, { TextTransparency = 1 }):Play()
+		TweenService:Create(title.UIStroke, hide, { Transparency = 1 }):Play()
+		TweenService:Create(sub, hide, { TextTransparency = 1 }):Play()
+		task.wait(0.9)
+		card:Destroy()
+	end)
+end
+
+return HUD
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="LocalScript" referent="22">
+          <Properties>
+            <string name="Name">Main</string>
+            <string name="Source"><![CDATA[-- EMBERHATCH client entry point: HUD, collection effects, portal gate styling.
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local HUD = require(script.Parent.HUD)
+local CollectVFX = require(script.Parent.CollectVFX)
+
+local player = Players.LocalPlayer
+local remotes = ReplicatedStorage:WaitForChild("Remotes")
+
+HUD.Build()
+CollectVFX.Init(HUD)
+HUD.TitleCard()
+
+remotes.Notify.OnClientEvent:Connect(HUD.Toast)
+remotes.PortalFlash.OnClientEvent:Connect(HUD.Flash)
+remotes.ResourceCollected.OnClientEvent:Connect(CollectVFX.Collect)
+remotes.PodBroken.OnClientEvent:Connect(CollectVFX.PodBurst)
+remotes.EggHatched.OnClientEvent:Connect(CollectVFX.Hatch)
+
+-- Portal gates look open or locked for *this* player's level.
+-- Only the look changes here; the server still checks the level on use.
+local function styleGate(prompt)
+	local unlockLevel = prompt:GetAttribute("UnlockLevel")
+	if not unlockLevel then
+		return
+	end
+	local open = (player:GetAttribute("Level") or 1) >= unlockLevel
+	prompt.ActionText = if open then "Enter" else ("Locked · Lv %d"):format(unlockLevel)
+	local surface = prompt.Parent and prompt.Parent.Parent and prompt.Parent.Parent:FindFirstChild("Surface")
+	if surface then
+		surface.Transparency = if open then 0.3 else 0.8
+		local light = surface:FindFirstChildOfClass("PointLight")
+		if light then
+			light.Brightness = if open then 2 else 0.4
+		end
+	end
+end
+
+local function styleAllGates()
+	for _, prompt in ipairs(CollectionService:GetTagged("Portal")) do
+		styleGate(prompt)
+	end
+end
+CollectionService:GetInstanceAddedSignal("Portal"):Connect(styleGate)
+player:GetAttributeChangedSignal("Level"):Connect(styleAllGates)
+styleAllGates()
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+    </Item>
+  </Item>
+</roblox>
