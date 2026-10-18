@@ -1197,23 +1197,65 @@ function Engine.boot(placePath)
 		game:GetService(name)
 	end
 
+	-- Copies the saved place: scripts, and any prebuilt world with its properties,
+	-- attributes and tags. References (PrimaryPart, Adornee) are matched by path.
 	local place = roblox.deserializePlace(fs.readFile(placePath))
+	local byPath, refs = {}, {}
+	local function readProps(source, inst)
+		for name, prop in pairs(classInfo(source.ClassName).props) do
+			if prop.Scriptability == "ReadWrite" and name ~= "Name" and name ~= "Parent" then
+				local ok, value = pcall(function()
+					return source[name]
+				end)
+				if ok and value ~= nil then
+					if luneTypeof(value) == "Instance" then
+						table.insert(refs, { inst, name, value:GetFullName() })
+					else
+						data[inst].props[name] = value
+					end
+				end
+			end
+		end
+	end
 	local function copy(source, target)
 		for _, child in ipairs(source:GetChildren()) do
 			local inst = newInstance(child.ClassName, true)
-			data[inst].Name = child.Name
+			local d = data[inst]
+			d.Name = child.Name
 			if child:IsA("LuaSourceContainer") then
-				data[inst].source = child.Source
+				d.source = child.Source
+			else
+				readProps(child, inst)
+				d.attrs = child:GetAttributes()
+				for _, tag in ipairs(child:GetTags()) do
+					d.tags[tag] = true
+					tagged[tag] = tagged[tag] or {}
+					tagged[tag][inst] = true
+				end
 			end
+			local path = child:GetFullName()
+			byPath[path] = byPath[path] or inst
 			copy(child, inst)
 			inst.Parent = target
 		end
 	end
 	for _, service in ipairs(place:GetChildren()) do
-		if services[service.ClassName] then
-			copy(service, services[service.ClassName])
+		local target = services[service.ClassName]
+		if target then
+			if service.ClassName == "Lighting" then
+				readProps(service, target)
+			end
+			copy(service, target)
 		end
 	end
+	for _, ref in ipairs(refs) do
+		data[ref[1]].props[ref[2]] = byPath[ref[3]]
+	end
+end
+
+-- Internal state of an instance (class, props, attributes, tags, children).
+function Engine.dataOf(inst)
+	return data[inst]
 end
 
 -- The value a ModuleScript returned to the game (the same table the game uses).

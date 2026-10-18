@@ -7,13 +7,13 @@ Milestone A takes mining out of the game and replaces it with collecting:
 - **Ember Shards**: small glowing shards. Walk up and press **Collect**. The shard flies into you, "+1 Ember Shard" floats up, and the shard comes back 8 seconds later.
 - **Ember Crystal Pods**: big crystal clusters. Hold **Break** for 1 second. The pod bursts and gives 3–10 Ember Shards plus a few coins, then grows back after 30–60 seconds. Rare (violet) pods can also give **Crystal Cores**. One is hidden behind the boulders in the north-west corner of the Sunken Grove.
 
-`EmberHatch.rbxlx` is the game file. Open it in Roblox Studio and press **Play**.
+`EmberHatch.rbxl` is the game file. Open it in Roblox Studio and press **Play**. (`EmberHatch.rbxlx` is the same place saved as text.)
 
 ## Open and play
 
-1. Download `EmberHatch.rbxlx` (on GitHub: open the file, then **Download raw file**).
+1. Download `EmberHatch.rbxl` (on GitHub: open the file, then **Download raw file**).
 2. Double-click it, or in Roblox Studio use **File → Open from File**.
-3. Press **Play**. The world builds itself when the game starts, so Workspace looks empty until then.
+3. The whole world is already in Workspace: Ember Hollow, the Sunken Grove, every shard and pod, and the lighting. Move or restyle anything in Studio, then press **Play**.
 
 You spawn on the amber circle. The first shard is a few steps ahead. Follow the amber trail north to the Forge.
 
@@ -54,7 +54,7 @@ To switch your place over, in this order:
 1. **Back up your place** (File → Save to File As…).
 2. **Delete the old scripts.** In `ServerScriptService`: RemotesSetup, DataService, InventoryService, StaminaService, OreService, PickaxeService, ForgekinService, ZoneService, QuestService, PlayerStatsService, HubBuilder, HubNPCService, PortalService, HubInteractionService and Main. In `StarterPlayerScripts`: HUDRoot, HUDController, HUDInit, MiningController, MiningHUD, NotificationOverlay, ForgekinPanel, InventoryPanel, QuestTracker, HubMinimap and PortalPanel. In `ReplicatedStorage.Shared`: GameConfig, OreConfig, ForgekinConfig, HubConfig, ZoneConfig and Theme.
 3. **Delete the old world pieces:** `Workspace.ForgeHollow` (the hub is now built as `EmberHollow`), `Workspace.Hub` and its SpawnLocation, and every part tagged `OreNode`. Delete `Workspace.SunkenQuarry` too, or rename it to `SunkenGrove` and tag one part in it `ZoneEntry_SunkenGrove` (that's where players land).
-4. **Copy in** `ReplicatedStorage.Shared`, `ServerScriptService.Server` and `StarterPlayer.StarterPlayerScripts.Client` from `EmberHatch.rbxlx`.
+4. **Copy in** `ReplicatedStorage.Shared`, `ServerScriptService.Server` and `StarterPlayer.StarterPlayerScripts.Client` from `EmberHatch.rbxl`. To get the built world too, also copy `Workspace.EmberHollow`, `Workspace.SunkenGrove`, `Workspace.Resources` and the three effects in `Lighting`; without them the scripts build the world when the server starts.
 5. **Keep** `ReplicatedStorage.Assets.Forgekin` (your Stoneback model). Without it, a stone-and-brass placeholder is used.
 
 Settings, sound, loading screen and mobile controls weren't in the files you sent, so they aren't in this build. To keep your Settings panel: leave SettingsService, SettingsPanel and their RemoteEvents in place, move `UILibrary` into the new `ReplicatedStorage.Shared`, and add `require(Server.SettingsService).Init()` to `Server/Main`. The new Theme still has every key the old UILibrary uses.
@@ -80,10 +80,11 @@ src/server  → ServerScriptService.Server     (Main, DataService, ResourceServi
 src/client  → StarterPlayerScripts.Client    (Main, HUD, CollectVFX)
 ```
 
-Rebuild the game file after editing:
+Rebuild the game file after editing. Rojo builds the scripts, then the bake step runs the world builders once and saves the world into the place:
 
 ```
-rojo build default.project.json -o EmberHatch.rbxlx
+rojo build default.project.json -o build/scripts.rbxlx
+lune run tools/bake.luau
 ```
 
 Playtest the built file without Studio (needs [Lune](https://lune-org.github.io/docs), e.g. `cargo install lune`):

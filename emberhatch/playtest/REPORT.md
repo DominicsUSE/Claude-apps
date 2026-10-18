@@ -1,8 +1,8 @@
 # EMBERHATCH playtest report
 
-The real scripts from `EmberHatch.rbxlx` were run in a headless stand-in for the Roblox engine (`playtest/engine.luau`) and played from a script (`playtest/run.luau`): a test player joins, collects shards, breaks pods, hatches the starter egg, uses every portal, plays to level 5, finds Crystal Cores, leaves and rejoins. Separate players test an old Milestone 1 save, a profile still locked by another server, a crashed server's stale lock and a server shutdown. A second run plays Studio with API access off on a phone screen.
+The finished game file (`EmberHatch.rbxlx`, with the world baked in) were run in a headless stand-in for the Roblox engine (`playtest/engine.luau`) and played from a script (`playtest/run.luau`): a test player joins, collects shards, breaks pods, hatches the starter egg, uses every portal, plays to level 5, finds Crystal Cores, leaves and rejoins. Separate players test an old Milestone 1 save, a profile still locked by another server, a crashed server's stale lock and a server shutdown. A second run plays Studio with API access off on a phone screen.
 
-**Result: 95 checks passed, 0 failed, no script errors.**
+**Result: 97 checks passed, 0 failed, no script errors.** The binary `EmberHatch.rbxl` passes the same live run.
 
 ## Bugs the playtest found (fixed)
 
@@ -29,11 +29,12 @@ Open the place in Studio once for a visual pass.
 ![Top-down map with the test player's route](map.png)
 
 ## Live server run (details)
-77 passed, 0 failed, 4 minutes of play simulated.
+78 passed, 0 failed, 6 minutes of play simulated.
 
 
 **World**
 
+- ✅ The place file already holds the whole world (opens complete in Studio) — 28 shards before any script ran
 - ✅ Server starts with no script errors
 - ✅ Ember Hollow hub is built
 - ✅ Sunken Grove is built
@@ -74,14 +75,14 @@ Open the place in Studio once for a visual pass.
 **Ember Crystal Pod**
 
 - ✅ Break needs a 1-second hold
-- ✅ Pod gives 3–10 Ember Shards — 4
-- ✅ Pod gives 4–12 coins — 5
+- ✅ Pod gives 3–10 Ember Shards — 7
+- ✅ Pod gives 4–12 coins — 8
 - ✅ HUD totals match what the pod gave (+50 coin quest reward)
 - ✅ Quest 'Break an Ember Crystal Pod' complete
 - ✅ Pod disappears and stops blocking
 - ✅ Pod burst effect plays
 - ✅ Pod stays broken for at least 30 seconds
-- ✅ Pod grows back within 30–60 seconds — 56 s
+- ✅ Pod grows back within 30–60 seconds — 43 s
 
 **Starter egg**
 
@@ -90,7 +91,7 @@ Open the place in Studio once for a visual pass.
 - ✅ Saved like Milestone 1: { uid, species, rarity, level, xp }
 - ✅ Stoneback is equipped
 - ✅ Quest 'Hatch a Forgekin' complete, +5 gems
-- ✅ Stoneback follows the player — 3.6 studs behind
+- ✅ Stoneback follows the player — 3.7 studs behind
 - ✅ Starter egg can't be hatched twice
 
 **Hub stations**
@@ -107,14 +108,14 @@ Open the place in Studio once for a visual pass.
 
 **Playing to level 5 in the Sunken Grove**
 
-- ✅ Reaches level 5 (unlocks Fungal Hollow) — 1.0 min
+- ✅ Reaches level 5 (unlocks Fungal Hollow) — 2.5 min
 - ✅ Quest 'Unlock Fungal Hollow' complete, +10 gems — 15
 - ✅ Fungal Hollow gate now shows 'Enter' — Enter
 - ✅ XP bar text matches the server
 
 **Rare pod and Crystal Cores**
 
-- ✅ Rare pod gives Crystal Cores — 2 core(s) after 2 break(s)
+- ✅ Rare pod gives Crystal Cores — 2 core(s) after 4 break(s)
 - ✅ Crystal Cores panel updates
 
 **Going home**
@@ -167,16 +168,17 @@ Open the place in Studio once for a visual pass.
 - Particle emitters: 31
 - Seconds from spawn to first Ember Shard: 0.2
 - Walk from spawn to the starter egg (seconds at normal speed): 5
-- Minutes from spawning to level 5 (includes test pauses, ~1.5 min): 2.5
-- Minutes of grove play from level 1–2 to level 5: 1.0
-- Shards picked up / pods broken on the way: 51 / 8
+- Minutes from spawning to level 5 (includes test pauses, ~1.5 min): 3.7
+- Minutes of grove play from level 1–2 to level 5: 2.5
+- Shards picked up / pods broken on the way: 139 / 0
 
 ## Studio run, API access off, phone screen (details)
-18 passed, 0 failed, 0 minutes of play simulated.
+19 passed, 0 failed, 0 minutes of play simulated.
 
 
 **World**
 
+- ✅ The place file already holds the whole world (opens complete in Studio) — 28 shards before any script ran
 - ✅ Server starts with no script errors
 - ✅ Ember Hollow hub is built
 - ✅ Sunken Grove is built

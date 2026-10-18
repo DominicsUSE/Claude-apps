@@ -21,6 +21,7 @@ local ResourceService = {}
 
 local rng = Random.new()
 local available = {} -- [Instance] = true while it can be collected
+local hooked = setmetatable({}, { __mode = "k" }) -- [Instance] = true once its prompt is wired
 local lastShard = {} -- [Player] = os.clock()
 local lastPod = {} -- [Player] = os.clock()
 local remotes
@@ -173,7 +174,7 @@ end
 
 -- Gives a tagged resource its prompt and starts listening to it.
 local function hook(inst, isPod)
-	if inst:GetAttribute("Hooked") then
+	if hooked[inst] then
 		return
 	end
 	local prompt = inst:FindFirstChildWhichIsA("ProximityPrompt", true)
@@ -201,7 +202,7 @@ local function hook(inst, isPod)
 		prompt.Parent = host
 	end
 
-	inst:SetAttribute("Hooked", true)
+	hooked[inst] = true
 	available[inst] = true
 	local handler = if isPod then onPodTriggered else onShardTriggered
 	prompt.Triggered:Connect(function(player)
@@ -316,7 +317,9 @@ end
 function ResourceService.Init()
 	remotes = ReplicatedStorage.Remotes
 
-	resourceFolder = Instance.new("Folder")
+	-- A saved place may already hold the resources (built in Studio or baked by tools/bake.luau).
+	local prebuilt = workspace:FindFirstChild("Resources")
+	resourceFolder = prebuilt or Instance.new("Folder")
 	resourceFolder.Name = "Resources"
 	resourceFolder.Parent = workspace
 
@@ -332,7 +335,9 @@ function ResourceService.Init()
 		end
 	end
 
-	spawnFromConfig()
+	if not prebuilt then
+		spawnFromConfig()
+	end
 
 	Players.PlayerRemoving:Connect(function(player)
 		lastShard[player] = nil

@@ -653,14 +653,24 @@ else
 	}
 end
 
-Engine.boot("EmberHatch.rbxlx")
+Engine.boot(process.args[3] or "EmberHatch.rbxlx")
 game = Engine.game
 CollectionService = game:GetService("CollectionService")
 PPS = game:GetService("ProximityPromptService")
 if MODE == "studio" then
 	Engine.setRaw(game:GetService("UserInputService"), "TouchEnabled", true)
 end
+local prebuiltShards = #CollectionService:GetTagged("EmberShard")
+local prebuilt = Engine.workspace:FindFirstChild("EmberHollow") ~= nil
+	and Engine.workspace:FindFirstChild("SunkenGrove") ~= nil
+	and prebuiltShards == 28
 Engine.runServerScripts()
+table.insert(results, 1, {
+	section = "World",
+	name = "The place file already holds the whole world (opens complete in Studio)",
+	ok = prebuilt,
+	detail = prebuiltShards .. " shards before any script ran",
+})
 
 Engine.play(if MODE == "studio" then studioRun else liveRun)
 
