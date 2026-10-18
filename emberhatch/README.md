@@ -43,12 +43,21 @@ All rewards and progress are decided on the server. Clients can't send any gamep
 
 ## Moving this into your existing place
 
-Your current scripts weren't in this repository, so this file is a complete, working Milestone A on its own. To bring it into the place you've been building:
+This build is matched to your Forgekin Milestone 1 project and the Milestone A repair pass:
 
-1. **Delete the old mining scripts and objects**: OreService, PickaxeService, MiningHUD, StaminaService, any ore nodes (and their tag), pickaxe tools in StarterPack or ServerStorage, and the mining remotes (RequestMine, RequestSwing, OreHit, OreBroken, OreCrack, OreRespawn, StaminaUpdated).
-2. **Copy in** `ReplicatedStorage.Shared`, `ServerScriptService.Server` and `StarterPlayer.StarterPlayerScripts.Client` from `EmberHatch.rbxlx`. They replace your old DataService, HubBuilder, HubConfig, ZoneConfig, PortalService, PortalPanel and HUD scripts.
-3. **Keep your old saves:** in `Server/DataService`, set `STORE_NAME` and `KEY_PREFIX` to the ones your old DataService used. On load, coins, gems, XP, level and settings carry over, and every field from the removed systems is dropped.
-4. **Your own Forgekin models:** put them in `ReplicatedStorage.Assets.Forgekin` (for example `Stoneback`). Without them, a stone-and-brass placeholder follows you.
+- **Saves carry over.** It uses your existing DataStore (`FORGEKIN_PLAYERDATA_V1`, keys `u_<UserId>`). Coins, gems, level, XP, settings, hatched Forgekin and equipped Forgekin are kept. Ores, pickaxes, stamina, carry capacity and the old mining quests are dropped from each save the next time it's written.
+- **Forgekin data is the same.** Hatched Forgekin are stored as `{ uid, species, rarity, level, xp }`, and up to 3 equipped ones follow you. Players who already hatched Stoneback keep it and can't hatch the starter egg again.
+- **The hub NPCs from the repair pass are still here**: four Forgekin wander Ember Hollow, rest between walks and stay away from the Forge.
+
+To switch your place over, in this order:
+
+1. **Back up your place** (File → Save to File As…).
+2. **Delete the old scripts.** In `ServerScriptService`: RemotesSetup, DataService, InventoryService, StaminaService, OreService, PickaxeService, ForgekinService, ZoneService, QuestService, PlayerStatsService, HubBuilder, HubNPCService, PortalService, HubInteractionService and Main. In `StarterPlayerScripts`: HUDRoot, HUDController, HUDInit, MiningController, MiningHUD, NotificationOverlay, ForgekinPanel, InventoryPanel, QuestTracker, HubMinimap and PortalPanel. In `ReplicatedStorage.Shared`: GameConfig, OreConfig, ForgekinConfig, HubConfig, ZoneConfig and Theme.
+3. **Delete the old world pieces:** `Workspace.ForgeHollow` (the hub is now built as `EmberHollow`), `Workspace.Hub` and its SpawnLocation, and every part tagged `OreNode`. Delete `Workspace.SunkenQuarry` too, or rename it to `SunkenGrove` and tag one part in it `ZoneEntry_SunkenGrove` (that's where players land).
+4. **Copy in** `ReplicatedStorage.Shared`, `ServerScriptService.Server` and `StarterPlayer.StarterPlayerScripts.Client` from `EmberHatch.rbxlx`.
+5. **Keep** `ReplicatedStorage.Assets.Forgekin` (your Stoneback model). Without it, a stone-and-brass placeholder is used.
+
+Settings, sound, loading screen and mobile controls weren't in the files you sent, so they aren't in this build. To keep your Settings panel: leave SettingsService, SettingsPanel and their RemoteEvents in place, move `UILibrary` into the new `ReplicatedStorage.Shared`, and add `require(Server.SettingsService).Init()` to `Server/Main`. The new Theme still has every key the old UILibrary uses.
 
 ### Placing shards and pods by hand
 

@@ -8,10 +8,11 @@ local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
--- Point STORE_NAME / KEY_PREFIX at your existing store to keep old saves.
--- Old saves are cleaned on load: only the fields in TEMPLATE are kept.
-local STORE_NAME = "EmberHatch_v1"
-local KEY_PREFIX = "Player_"
+-- Same store and keys as the Forgekin Milestone 1 DataService, so existing players
+-- keep their coins, gems, level, XP and Forgekin. Old saves are cleaned on load:
+-- only the fields in TEMPLATE are kept.
+local STORE_NAME = "FORGEKIN_PLAYERDATA_V1"
+local KEY_PREFIX = "u_"
 local AUTOSAVE_SECONDS = 60
 local LOCK_STALE_SECONDS = AUTOSAVE_SECONDS * 2 + 30
 local LOCK_RETRIES = 5
@@ -25,8 +26,10 @@ local TEMPLATE = {
 	level = 1,
 	emberShards = 0,
 	crystalCores = 0,
-	forgekin = {}, -- list of { id = "Stoneback" }
-	activeForgekin = "",
+	forgekin = {}, -- list of { uid, species, rarity, level, xp }
+	equippedForgekin = {}, -- uids; these follow the player
+	flags = { starterEggClaimed = false },
+	discoveredEggs = {},
 	quests = {}, -- [questId] = { progress = n, done = bool }
 	stats = {
 		shardsCollected = 0,
@@ -79,11 +82,12 @@ local function reconcile(stored)
 			profile[key] = deepCopy(value)
 		end
 	end
+	local storedStats = profile.stats
+	profile.stats = {}
 	for key, default in pairs(TEMPLATE.stats) do
-		if type(profile.stats[key]) ~= "number" then
-			profile.stats[key] = default
-		end
+		profile.stats[key] = if type(storedStats[key]) == "number" then storedStats[key] else default
 	end
+	profile.flags.starterEggClaimed = profile.flags.starterEggClaimed == true or #profile.forgekin > 0
 	for field in pairs(CURRENCIES) do
 		profile[field] = math.max(0, math.floor(profile[field]))
 	end
@@ -123,7 +127,6 @@ local function syncAttributes(player, profile)
 	player:SetAttribute("Level", profile.level)
 	player:SetAttribute("XP", profile.xp)
 	player:SetAttribute("XPNext", DataService.XPForLevel(profile.level))
-	player:SetAttribute("ActiveForgekin", profile.activeForgekin)
 end
 
 -- Returns profile, status ("ok" | "offline" | "locked" | "error").
@@ -290,14 +293,6 @@ function DataService.AddXP(player, amount)
 		for _, callback in ipairs(levelCallbacks) do
 			task.spawn(callback, player, profile.level)
 		end
-	end
-end
-
-function DataService.SetActiveForgekin(player, id)
-	local profile = profiles[player]
-	if profile then
-		profile.activeForgekin = id
-		player:SetAttribute("ActiveForgekin", id)
 	end
 end
 

@@ -249,6 +249,39 @@ Theme.Radius = {
 	Large = UDim.new(0, 14),
 }
 
+-- Keys the Forgekin Milestone 1 UILibrary and panels read, so kept panels
+-- (Settings, for example) still work next to the new HUD.
+for name, color in pairs({
+	StoneLight = Color3.fromRGB(58, 52, 46),
+	StoneHairline = Color3.fromRGB(74, 66, 58),
+	BrassDeep = Color3.fromRGB(82, 60, 32),
+	AmberSoft = Color3.fromRGB(216, 158, 80),
+	AmberGlow = Color3.fromRGB(255, 208, 128),
+	Danger = Color3.fromRGB(200, 86, 62),
+	DangerBright = Color3.fromRGB(240, 118, 88),
+	Frost = Color3.fromRGB(126, 200, 220),
+	Gold = Color3.fromRGB(230, 195, 118),
+	Shadow = Color3.fromRGB(0, 0, 0),
+	Glow = Color3.fromRGB(255, 190, 120),
+}) do
+	Theme.Color[name] = color
+end
+Theme.Font.Medium = Enum.Font.Nunito
+Theme.Font.Mono = Enum.Font.Code
+Theme.Font.Serif = Enum.Font.Merriweather
+Theme.Radius.XL = UDim.new(0, 20)
+Theme.Radius.Pill = UDim.new(1, 0)
+Theme.TextSize = { Tiny = 10, Small = 11, Body = 13, Label = 14, Subhead = 16, Header = 20, Title = 26, Hero = 34 }
+Theme.Spacing = { XS = 4, S = 8, M = 12, L = 16, XL = 24, XXL = 32 }
+Theme.Stroke = { Hairline = 1, Default = 1.5, Bold = 2 }
+Theme.Anim = {
+	Fast = TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+	Default = TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+	Slow = TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+	Spring = TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+	Snap = TweenInfo.new(0.1, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+}
+
 Theme.Game = {
 	Title = "EMBERHATCH",
 	Subtitle = "HATCH · FORGE · EXPLORE",
@@ -327,10 +360,11 @@ local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
--- Point STORE_NAME / KEY_PREFIX at your existing store to keep old saves.
--- Old saves are cleaned on load: only the fields in TEMPLATE are kept.
-local STORE_NAME = "EmberHatch_v1"
-local KEY_PREFIX = "Player_"
+-- Same store and keys as the Forgekin Milestone 1 DataService, so existing players
+-- keep their coins, gems, level, XP and Forgekin. Old saves are cleaned on load:
+-- only the fields in TEMPLATE are kept.
+local STORE_NAME = "FORGEKIN_PLAYERDATA_V1"
+local KEY_PREFIX = "u_"
 local AUTOSAVE_SECONDS = 60
 local LOCK_STALE_SECONDS = AUTOSAVE_SECONDS * 2 + 30
 local LOCK_RETRIES = 5
@@ -344,8 +378,10 @@ local TEMPLATE = {
 	level = 1,
 	emberShards = 0,
 	crystalCores = 0,
-	forgekin = {}, -- list of { id = "Stoneback" }
-	activeForgekin = "",
+	forgekin = {}, -- list of { uid, species, rarity, level, xp }
+	equippedForgekin = {}, -- uids; these follow the player
+	flags = { starterEggClaimed = false },
+	discoveredEggs = {},
 	quests = {}, -- [questId] = { progress = n, done = bool }
 	stats = {
 		shardsCollected = 0,
@@ -398,11 +434,12 @@ local function reconcile(stored)
 			profile[key] = deepCopy(value)
 		end
 	end
+	local storedStats = profile.stats
+	profile.stats = {}
 	for key, default in pairs(TEMPLATE.stats) do
-		if type(profile.stats[key]) ~= "number" then
-			profile.stats[key] = default
-		end
+		profile.stats[key] = if type(storedStats[key]) == "number" then storedStats[key] else default
 	end
+	profile.flags.starterEggClaimed = profile.flags.starterEggClaimed == true or #profile.forgekin > 0
 	for field in pairs(CURRENCIES) do
 		profile[field] = math.max(0, math.floor(profile[field]))
 	end
@@ -442,7 +479,6 @@ local function syncAttributes(player, profile)
 	player:SetAttribute("Level", profile.level)
 	player:SetAttribute("XP", profile.xp)
 	player:SetAttribute("XPNext", DataService.XPForLevel(profile.level))
-	player:SetAttribute("ActiveForgekin", profile.activeForgekin)
 end
 
 -- Returns profile, status ("ok" | "offline" | "locked" | "error").
@@ -612,14 +648,6 @@ function DataService.AddXP(player, amount)
 	end
 end
 
-function DataService.SetActiveForgekin(player, id)
-	local profile = profiles[player]
-	if profile then
-		profile.activeForgekin = id
-		player:SetAttribute("ActiveForgekin", id)
-	end
-end
-
 function DataService.Init()
 	local ok, result = pcall(function()
 		return DataStoreService:GetDataStore(STORE_NAME)
@@ -682,9 +710,11 @@ return DataService
       <Item class="ModuleScript" referent="10">
         <Properties>
           <string name="Name">ForgekinService</string>
-          <string name="Source"><![CDATA[-- ForgekinService: the starter egg in the Nursery and the Forgekin that follows you.
--- Uses ReplicatedStorage.Assets.Forgekin.<Name> if that model exists,
--- otherwise a simple stone-and-brass placeholder.
+          <string name="Source"><![CDATA[-- ForgekinService: the starter egg in the Nursery and the Forgekin that follow you.
+-- Data format matches Forgekin Milestone 1: profile.forgekin holds
+-- { uid, species, rarity, level, xp }, profile.equippedForgekin holds up to 3 uids.
+-- Models come from ReplicatedStorage.Assets.Forgekin.<Species> when present,
+-- otherwise a simple stone-and-brass placeholder is used.
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
@@ -695,13 +725,13 @@ local Theme = require(ReplicatedStorage.Shared.Theme)
 local DataService = require(script.Parent.DataService)
 local QuestService = require(script.Parent.QuestService)
 
-local STARTER_FORGEKIN = "Stoneback"
-local FOLLOW_OFFSET = CFrame.new(2.8, 0, 3.2) -- behind and to the right of the player
+local STARTER_SPECIES = "Stoneback"
+local MAX_EQUIPPED = 3
 
 local ForgekinService = {}
 
 local remotes
-local followers = {} -- [Player] = { model = Model, phase = number }
+local followers = {} -- [Player] = { { model = Model, phase = number }, ... }
 local hatching = {} -- [Player] = true while a hatch is playing
 
 local function makePlaceholder(name)
@@ -739,11 +769,12 @@ local function makePlaceholder(name)
 	return model
 end
 
-local function buildModel(id)
+-- A decorative, non-colliding model of a species. Anchored; move it with PivotTo.
+function ForgekinService.BuildModel(species)
 	local assets = ReplicatedStorage:FindFirstChild("Assets")
 	local folder = assets and assets:FindFirstChild("Forgekin")
-	local prefab = folder and folder:FindFirstChild(id)
-	local model = if prefab and prefab:IsA("Model") then prefab:Clone() else makePlaceholder(id)
+	local prefab = folder and folder:FindFirstChild(species)
+	local model = if prefab and prefab:IsA("Model") then prefab:Clone() else makePlaceholder(species)
 	if not model.PrimaryPart then
 		model.PrimaryPart = model:FindFirstChildWhichIsA("BasePart", true)
 	end
@@ -759,44 +790,66 @@ local function buildModel(id)
 	return model
 end
 
-local function removeFollower(player)
-	local follower = followers[player]
-	if follower then
-		follower.model:Destroy()
-		followers[player] = nil
+local function equippedSpecies(profile)
+	local list = {}
+	for _, uid in ipairs(profile.equippedForgekin) do
+		for _, fk in ipairs(profile.forgekin) do
+			if type(fk) == "table" and fk.uid == uid and type(fk.species) == "string" then
+				table.insert(list, fk.species)
+				break
+			end
+		end
+		if #list >= MAX_EQUIPPED then
+			break
+		end
 	end
+	return list
 end
 
-local function spawnFollower(player)
-	removeFollower(player)
+local function removeFollowers(player)
+	for _, follower in ipairs(followers[player] or {}) do
+		follower.model:Destroy()
+	end
+	followers[player] = nil
+end
+
+local function spawnFollowers(player)
+	removeFollowers(player)
 	local profile = DataService.Get(player)
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if not profile or profile.activeForgekin == "" or not root then
+	if not profile or not root then
 		return
 	end
-	local model = buildModel(profile.activeForgekin)
-	if not model.PrimaryPart then
-		model:Destroy()
-		return
+	local list = {}
+	for _, species in ipairs(equippedSpecies(profile)) do
+		local model = ForgekinService.BuildModel(species)
+		if model.PrimaryPart then
+			model.Name = player.Name .. "_" .. species
+			model:PivotTo(root.CFrame * CFrame.new(0, 0, 3.5))
+			model.Parent = workspace
+			table.insert(list, { model = model, phase = math.random() * math.pi * 2 })
+		else
+			model:Destroy()
+		end
 	end
-	model.Name = player.Name .. "_Forgekin"
-	model:PivotTo(root.CFrame * FOLLOW_OFFSET)
-	model.Parent = workspace
-	followers[player] = { model = model, phase = math.random() * math.pi * 2 }
+	followers[player] = list
 end
 
 -- chisle: server-side follow is simplest; move it to the client if many players lag.
 local function updateFollowers(dt)
 	local alpha = 1 - math.exp(-dt * 6)
 	local t = os.clock()
-	for player, follower in pairs(followers) do
+	for player, list in pairs(followers) do
 		local character = player.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		if root then
-			local bob = math.sin(t * 3 + follower.phase) * 0.25
-			local goal = root.CFrame * FOLLOW_OFFSET * CFrame.new(0, bob - 1, 0)
-			follower.model:PivotTo(follower.model:GetPivot():Lerp(goal, alpha))
+			for i, follower in ipairs(list) do
+				-- Spread out in a row behind the player.
+				local bob = math.sin(t * 3 + follower.phase) * 0.25
+				local goal = root.CFrame * CFrame.new((i - (#list + 1) / 2) * 2.8, bob - 1, 3.5)
+				follower.model:PivotTo(follower.model:GetPivot():Lerp(goal, alpha))
+			end
 		end
 	end
 end
@@ -811,24 +864,34 @@ local function onStarterEgg(pedestal, prompt, player)
 	if (root.Position - pedestal.Position).Magnitude > prompt.MaxActivationDistance + 5 then
 		return
 	end
-	if #profile.forgekin > 0 then
+	if profile.flags.starterEggClaimed then
 		remotes.Notify:FireClient(player, "You already hatched your starter Forgekin.", "info")
 		return
 	end
 
 	hatching[player] = true
-	table.insert(profile.forgekin, { id = STARTER_FORGEKIN })
+	local fk = {
+		uid = ("%d_%d_%d"):format(player.UserId, os.time(), math.random(1000, 9999)),
+		species = STARTER_SPECIES,
+		rarity = "Common",
+		level = 1,
+		xp = 0,
+	}
+	table.insert(profile.forgekin, fk)
+	if #profile.equippedForgekin < MAX_EQUIPPED then
+		table.insert(profile.equippedForgekin, fk.uid)
+	end
+	profile.flags.starterEggClaimed = true
 	profile.stats.hatched += 1
-	DataService.SetActiveForgekin(player, STARTER_FORGEKIN)
 
 	local display = pedestal.Parent:FindFirstChild("StarterEggDisplay")
-	remotes.EggHatched:FireClient(player, display or pedestal, STARTER_FORGEKIN)
+	remotes.EggHatched:FireClient(player, display or pedestal, STARTER_SPECIES)
 	QuestService.Progress(player, "ForgekinHatched", 1)
 
 	task.delay(1.3, function() -- let the egg wobble and burst first
 		hatching[player] = nil
 		if player.Parent then
-			spawnFollower(player)
+			spawnFollowers(player)
 		end
 	end)
 end
@@ -852,7 +915,7 @@ function ForgekinService.Init()
 	local function watchCharacter(player)
 		player.CharacterAdded:Connect(function(character)
 			character:WaitForChild("HumanoidRootPart", 10)
-			spawnFollower(player)
+			spawnFollowers(player)
 		end)
 	end
 	Players.PlayerAdded:Connect(watchCharacter)
@@ -862,12 +925,12 @@ function ForgekinService.Init()
 
 	DataService.OnLoaded(function(player)
 		if player.Character then
-			spawnFollower(player)
+			spawnFollowers(player)
 		end
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)
-		removeFollower(player)
+		removeFollowers(player)
 		hatching[player] = nil
 	end)
 
@@ -2041,7 +2104,117 @@ return HubBuilder
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="13">
+      <Item class="ModuleScript" referent="13">
+        <Properties>
+          <string name="Name">HubNPCService</string>
+          <string name="Source"><![CDATA[-- HubNPCService: a few Forgekin wander around Ember Hollow so the town feels alive.
+-- Decoration only: they don't collide, can't be clicked, and never leave the hub.
+-- Each one walks to a random spot near its home, rests 2–4 seconds, and repeats.
+
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local HubConfig = require(ReplicatedStorage.Shared.HubConfig)
+local ForgekinService = require(script.Parent.ForgekinService)
+
+local HUB_RADIUS = 95
+local FORGE_RADIUS = 18 -- stay clear of the Forge building
+local PLAZA_RADIUS = 30 -- the plaza floor is raised 0.4 studs
+local WANDER_RADIUS = 14
+local SPEED = 6
+
+local HOMES = {
+	HubConfig.Landmarks.Spawn + Vector3.new(-14, 0, -10),
+	HubConfig.Landmarks.Forge + Vector3.new(26, 0, 10),
+	HubConfig.Landmarks.Nursery + Vector3.new(0, 0, 26), -- south of the nest, clear of the eggs
+	HubConfig.Landmarks.PortalPlaza + Vector3.new(0, 0, 16),
+}
+
+local HubNPCService = {}
+
+local rng = Random.new()
+local npcs = {}
+
+local function flat(v)
+	return Vector3.new(v.X, 0, v.Z)
+end
+
+-- True if walking from a to b would cut through the Forge.
+local function crossesForge(a, b)
+	local forge = flat(HubConfig.Landmarks.Forge)
+	local ab = b - a
+	local t = math.clamp((forge - a):Dot(ab) / math.max(ab:Dot(ab), 1e-6), 0, 1)
+	return (a + ab * t - forge).Magnitude < FORGE_RADIUS
+end
+
+local function pickTarget(npc)
+	for _ = 1, 8 do
+		local angle = rng:NextNumber(0, math.pi * 2)
+		local candidate = npc.home + Vector3.new(math.cos(angle), 0, math.sin(angle)) * rng:NextNumber(3, WANDER_RADIUS)
+		if candidate.Magnitude < HUB_RADIUS and not crossesForge(npc.position, candidate) then
+			return candidate
+		end
+	end
+	return npc.home
+end
+
+local function step(dt)
+	local now = os.clock()
+	for _, npc in ipairs(npcs) do
+		if now >= npc.restUntil then
+			local offset = npc.target - npc.position
+			if offset.Magnitude < 0.5 then
+				npc.restUntil = now + rng:NextNumber(2, 4)
+				npc.target = pickTarget(npc)
+			else
+				npc.facing = offset.Unit
+				npc.position += npc.facing * math.min(offset.Magnitude, SPEED * dt)
+			end
+		end
+		local floor = if npc.position.Magnitude < PLAZA_RADIUS then 0.4 else 0
+		local bob = math.sin(now * 1.5 + npc.phase) * 0.2
+		local at = npc.position + Vector3.new(0, floor + 1.3 + bob, 0)
+		npc.model:PivotTo(CFrame.lookAt(at, at + npc.facing))
+	end
+end
+
+function HubNPCService.Init()
+	local hub = workspace:FindFirstChild("EmberHollow")
+	if not hub then
+		return
+	end
+	local folder = Instance.new("Folder")
+	folder.Name = "NPCs"
+	folder.Parent = hub
+
+	for i, home in ipairs(HOMES) do
+		local model = ForgekinService.BuildModel("Stoneback")
+		if not model.PrimaryPart then
+			model:Destroy()
+			continue
+		end
+		model.Name = "HubNPC" .. i
+		model.Parent = folder
+		local npc = {
+			model = model,
+			home = flat(home),
+			position = flat(home),
+			facing = Vector3.new(0, 0, 1),
+			phase = rng:NextNumber(0, math.pi * 2),
+			restUntil = os.clock() + rng:NextNumber(0, 3),
+		}
+		npc.target = pickTarget(npc)
+		table.insert(npcs, npc)
+	end
+
+	RunService.Heartbeat:Connect(step)
+end
+
+return HubNPCService
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="14">
         <Properties>
           <string name="Name">Main</string>
           <token name="RunContext">0</token>
@@ -2066,6 +2239,7 @@ local DataService = require(Server.DataService)
 local QuestService = require(Server.QuestService)
 local ResourceService = require(Server.ResourceService)
 local ForgekinService = require(Server.ForgekinService)
+local HubNPCService = require(Server.HubNPCService)
 local PortalService = require(Server.PortalService)
 
 require(Server.HubBuilder).Build()
@@ -2075,6 +2249,7 @@ DataService.Init()
 QuestService.Init()
 ResourceService.Init()
 ForgekinService.Init()
+HubNPCService.Init()
 PortalService.Init()
 
 -- Hub stations that open in later milestones.
@@ -2102,7 +2277,7 @@ DataService.Start()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="14">
+      <Item class="ModuleScript" referent="15">
         <Properties>
           <string name="Name">PortalService</string>
           <string name="Source"><![CDATA[-- PortalService: gates in the Portal Plaza and the way back to the hub.
@@ -2216,7 +2391,7 @@ return PortalService
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="15">
+      <Item class="ModuleScript" referent="16">
         <Properties>
           <string name="Name">QuestService</string>
           <string name="Source"><![CDATA[-- QuestService: starter quests. Other services report events with
@@ -2333,7 +2508,7 @@ return QuestService
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="16">
+      <Item class="ModuleScript" referent="17">
         <Properties>
           <string name="Name">ResourceService</string>
           <string name="Source"><![CDATA[-- ResourceService: Ember Shard pickups and Ember Crystal Pods.
@@ -2684,19 +2859,19 @@ return ResourceService
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="17">
+  <Item class="StarterPlayer" referent="18">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="18">
+    <Item class="StarterPlayerScripts" referent="19">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="19">
+      <Item class="Folder" referent="20">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="ModuleScript" referent="20">
+        <Item class="ModuleScript" referent="21">
           <Properties>
             <string name="Name">CollectVFX</string>
             <string name="Source"><![CDATA[-- CollectVFX: everything players see when they collect. Purely visual and local;
@@ -3018,7 +3193,7 @@ return CollectVFX
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="21">
+        <Item class="ModuleScript" referent="22">
           <Properties>
             <string name="Name">HUD</string>
             <string name="Source"><![CDATA[-- HUD: stone panels with brass borders, kept to the screen edges.
@@ -3672,7 +3847,7 @@ return HUD
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="22">
+        <Item class="LocalScript" referent="23">
           <Properties>
             <string name="Name">Main</string>
             <string name="Source"><![CDATA[-- EMBERHATCH client entry point: HUD, collection effects, portal gate styling.

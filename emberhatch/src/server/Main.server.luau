@@ -19,6 +19,7 @@ local DataService = require(Server.DataService)
 local QuestService = require(Server.QuestService)
 local ResourceService = require(Server.ResourceService)
 local ForgekinService = require(Server.ForgekinService)
+local HubNPCService = require(Server.HubNPCService)
 local PortalService = require(Server.PortalService)
 
 require(Server.HubBuilder).Build()
@@ -28,6 +29,7 @@ DataService.Init()
 QuestService.Init()
 ResourceService.Init()
 ForgekinService.Init()
+HubNPCService.Init()
 PortalService.Init()
 
 -- Hub stations that open in later milestones.
