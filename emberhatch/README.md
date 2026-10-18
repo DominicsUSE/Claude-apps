@@ -86,6 +86,16 @@ Rebuild the game file after editing:
 rojo build default.project.json -o EmberHatch.rbxlx
 ```
 
+Playtest the built file without Studio (needs [Lune](https://lune-org.github.io/docs), e.g. `cargo install lune`):
+
+```
+lune run playtest/run.luau live
+lune run playtest/run.luau studio
+python3 playtest/map.py playtest/out/world-live.json playtest/map.png
+```
+
+Each run prints its result and writes a report to `playtest/out/`. The latest results are in `playtest/REPORT.md`.
+
 Check that no removed-system words came back into any script:
 
 ```

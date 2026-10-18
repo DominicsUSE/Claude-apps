@@ -98,6 +98,10 @@ function QuestService.Init()
 	notify = ReplicatedStorage.Remotes.Notify
 
 	DataService.OnLoaded(function(player, profile)
+		-- Players from older saves may already own Forgekin or have the level.
+		if #profile.forgekin > 0 then
+			QuestService.Progress(player, "ForgekinHatched", #profile.forgekin)
+		end
 		QuestService.Progress(player, "LevelReached", profile.level)
 		QuestService.Sync(player)
 	end)

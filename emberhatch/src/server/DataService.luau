@@ -71,6 +71,10 @@ end
 
 -- Builds a clean profile from whatever was stored. Unknown fields are dropped,
 -- so data from removed systems disappears on the player's next save.
+local function xpForLevel(level)
+	return 40 + (level - 1) * 30
+end
+
 local function reconcile(stored)
 	local profile = deepCopy(TEMPLATE)
 	if type(stored) ~= "table" then
@@ -93,6 +97,11 @@ local function reconcile(stored)
 	end
 	profile.level = math.clamp(math.floor(profile.level), 1, MAX_LEVEL)
 	profile.xp = math.max(0, math.floor(profile.xp))
+	-- Saves from the old level curve can hold more XP than the new curve allows.
+	while profile.level < MAX_LEVEL and profile.xp >= xpForLevel(profile.level) do
+		profile.xp -= xpForLevel(profile.level)
+		profile.level += 1
+	end
 	profile.version = TEMPLATE.version
 	return profile
 end
@@ -116,9 +125,7 @@ local function withRetry(attempts, fn)
 	return false, lastError
 end
 
-function DataService.XPForLevel(level)
-	return 40 + (level - 1) * 30
-end
+DataService.XPForLevel = xpForLevel
 
 local function syncAttributes(player, profile)
 	for field, attribute in pairs(CURRENCIES) do
