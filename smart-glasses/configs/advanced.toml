@@ -1,0 +1,45 @@
+# ADVANCED build (~€530). Copy to ./config.toml.
+# Pi AI Camera (on-sensor detection), InfiRay P2 Pro 256x192 thermal, TF-Luna,
+# BME680, LD2450 tracking radar, RTL-SDR, Waveshare UPS HAT (C), wall probe.
+
+[camera]
+driver = "imx500"
+ir_led_pin = -1         # the AI Camera has an IR-cut filter: thermal is the night vision
+
+[detector]
+driver = "imx500"       # detections come from the camera at full frame rate
+
+[thermal]
+driver = "p2pro"
+device = 1              # find it with `v4l2-ctl --list-devices`; a /dev/v4l/by-id path is safest
+
+[distance]
+driver = "tfluna"
+
+[environment]
+driver = "bme680"
+address = 0x77
+
+[radar]
+driver = "ld2450"
+
+[rf]
+sdr = true
+sdr_range = "430M:440M:25k"
+
+[battery]
+address = 0x43          # INA219 on the Waveshare UPS HAT (C)
+mode = "lipo"
+capacity_mah = 1000
+shunt_ohms = 0.1        # check the shunt marking on your HAT
+
+[wallprobe]
+driver = "udp"
+
+[hud]
+driver = "ssd1351"
+width = 128
+height = 128
+
+[voice]
+tts = "piper"           # pip install piper-tts; scripts/download_models.sh --piper

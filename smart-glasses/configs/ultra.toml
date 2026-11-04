@@ -1,0 +1,16 @@
+# ULTRA-BUDGET build (~€97). The defaults in glasses/default_config.toml already
+# match this build, so this file only holds the values you are most likely to tune.
+# Copy to ./config.toml (scripts/install.sh does this) and edit.
+
+[thermal]
+flip_h = false          # set true if hot objects appear on the wrong side
+
+[hud]
+mirror = true           # false if you look at the OLED directly (no beam splitter)
+rotate = 0
+
+[battery]
+capacity_mah = 5000     # printed on your power bank
+
+[alerts]
+obstacle_m = 0.6

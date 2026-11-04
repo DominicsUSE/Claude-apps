@@ -1,0 +1,16 @@
+# Raspberry Pi: install into a venv created with --system-site-packages, because
+# picamera2, OpenCV, NumPy, Pillow and gpiozero come from apt (scripts/install.sh).
+adafruit-blinka
+adafruit-circuitpython-amg88xx
+adafruit-circuitpython-mlx90640
+adafruit-circuitpython-vl53l0x
+adafruit-circuitpython-vl53l1x
+adafruit-circuitpython-bme280
+adafruit-circuitpython-bme680
+adafruit-circuitpython-ina219
+luma.oled
+luma.lcd
+pyserial
+bleak
+vosk
+anthropic

@@ -1,0 +1,33 @@
+# MID-RANGE build (~€195). Copy to ./config.toml.
+# Camera Module 3 NoIR, MLX90640 thermal, VL53L1X, BME280, LD2410C radar,
+# 1.5" colour OLED HUD, 2000 mAh LiPo with INA219, ESP32 wall probe.
+
+[camera]
+driver = "picamera2"
+
+[thermal]
+driver = "mlx90640"
+mlx_refresh_hz = 4      # 8 Hz needs dtparam=i2c_arm_baudrate=1000000 and short wires
+flip_h = true           # check: wave a hand on the left, the heat should appear left
+
+[distance]
+driver = "vl53l1x"
+
+[environment]
+driver = "bme280"
+address = 0x76
+
+[radar]
+driver = "ld2410"
+
+[battery]
+mode = "lipo"
+capacity_mah = 2000
+
+[wallprobe]
+driver = "udp"
+
+[hud]
+driver = "ssd1351"
+width = 128
+height = 128

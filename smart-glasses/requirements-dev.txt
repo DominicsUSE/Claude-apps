@@ -1,0 +1,6 @@
+# Laptop/desktop: run the full system in simulation (`python -m glasses --sim`) and the tests.
+numpy
+opencv-python-headless
+pillow
+anthropic
+pytest

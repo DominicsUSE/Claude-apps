@@ -1,0 +1,16 @@
+[Unit]
+Description=AI smart glasses
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+User=@USER@
+WorkingDirectory=@DIR@
+# Holds ANTHROPIC_API_KEY (optional). Keep it chmod 600 and out of git.
+EnvironmentFile=-@DIR@/.env
+ExecStart=@DIR@/.venv/bin/python -m glasses
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
