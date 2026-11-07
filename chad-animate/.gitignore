@@ -1,0 +1,7 @@
+tests/.cache/
+__pycache__/
+preview/*.gif
+!preview/walk.gif
+!preview/run.gif
+!preview/stairs.gif
+!preview/jump.gif
