@@ -153,6 +153,20 @@ def main():
         for w in sorted(warnings):
             print(f"  warn  {w}")
 
+    place = ROOT / "dist" / "ChadBaseplate.rbxlx"
+    if place.exists():
+        sys.path.insert(0, str(ROOT / "tools"))
+        from build_place import validate
+
+        problems, count = validate(place)
+        print(f"place file: {count} items")
+        for problem in problems:
+            print(f"  FAIL  {problem}")
+        if not problems:
+            print("  ok    ChadBaseplate.rbxlx: well-formed, refs resolve, scripts match src/, dummy rigged")
+        failed += 1 if problems else 0
+        total += 1
+
     if "--preview" in sys.argv:
         from render_preview import render_all, render_map
 

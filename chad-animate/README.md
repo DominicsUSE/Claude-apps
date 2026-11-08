@@ -28,6 +28,15 @@ install. It also deletes the V4 `ChadAnimate` script from
 StarterCharacterScripts. Like V4's WorldSetup, it removes the root
 `Baseplate` and any root `SpawnLocation`.
 
+### Ready-made place: Baseplate + dummy
+
+Download [`dist/ChadBaseplate.rbxlx`](dist/ChadBaseplate.rbxlx) and
+double-click it (or use **File > Open from File** in Studio), then press
+**Play**. It holds only a Baseplate, a spawn, the animator, and a gray R15
+dummy that every player spawns as. It's the same result as the installer
+below. `tools/build_place.py` generates it by running that installer in the
+mock engine and saving the result.
+
 ### Just the animations on a Baseplate, as a dummy
 
 To get only the walk/run animator, with no world or NPCs, paste
@@ -138,7 +147,12 @@ python3 tests/run_tests.py --preview
    test downloads to `tests/.cache/`. It also checks that NPCs spawn, move,
    sit and sprint, and that Shift raises WalkSpeed.
 
-Rebuild the installer after editing `src/` with `python3 tools/build_installer.py`.
+After editing `src/`, rebuild the installers and the place file:
+
+```bash
+python3 tools/build_installer.py
+python3 tools/build_place.py
+```
 
 ## Known limits
 
