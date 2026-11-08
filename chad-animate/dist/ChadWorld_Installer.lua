@@ -18,11 +18,12 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local StarterPlayer = game:GetService("StarterPlayer")
+local Workspace = game:GetService("Workspace")
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local StarterPlayerScripts = StarterPlayer:FindFirstChildOfClass("StarterPlayerScripts")
 local StarterCharacterScripts = StarterPlayer:FindFirstChildOfClass("StarterCharacterScripts")
 
-local recording = ChangeHistoryService:TryBeginRecording("Install ChadWorld")
+local recording = ChangeHistoryService:TryBeginRecording("Install Chad Animate")
 
 local function install(className, parent, name, source)
 	local old = parent:FindFirstChild(name)

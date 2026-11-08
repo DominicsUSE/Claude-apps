@@ -97,20 +97,32 @@ def load_api():
     return {"classes": classes, "enums": enums, "enumFirst": first, "enumLegacy": legacy}
 
 
-def run_smoke(lua, math_lib):
-    installer = ROOT / "dist" / "ChadWorld_Installer.lua"
+def run_smoke(test_file, installer_name):
+    """Run one smoke test in a fresh Lua VM with a fresh mock engine."""
+    lua, math_lib = new_runtime()
+    installer = ROOT / "dist" / installer_name
     api = lua.table_from(load_api(), recursive=True)
     mock = load_chunk(lua, TESTS / "mock_roblox.lua", math_lib, api)
-    return load_chunk(lua, TESTS / "smoke_test.lua", math_lib, mock, installer.read_text())
+    return load_chunk(lua, TESTS / test_file, math_lib, mock, installer.read_text())
+
+
+def report(title, checks):
+    """Print a Lua list of checks; return the number that failed."""
+    print(title)
+    failed = 0
+    for i in range(1, len(checks) + 1):
+        c = checks[i]
+        if not c.ok:
+            failed += 1
+        detail = f"  ({c.detail})" if c.detail else ""
+        print(f"  {'ok  ' if c.ok else 'FAIL'}  {c.name}{detail}")
+    return failed
 
 
 def main():
     lua, math_lib = new_runtime()
 
-    sources = sorted((ROOT / "src").rglob("*.luau"))
-    installer = ROOT / "dist" / "ChadWorld_Installer.lua"
-    if installer.exists():
-        sources.append(installer)
+    sources = sorted((ROOT / "src").rglob("*.luau")) + sorted((ROOT / "dist").glob("*.lua"))
     syntax_errors = parse_check(lua, sources)
 
     rig = load_chunk(lua, ROOT / "src" / "client" / "Rig.luau")
@@ -118,47 +130,36 @@ def main():
     build = load_chunk(lua, TESTS / "fixture.lua", math_lib)
     results = load_chunk(lua, TESTS / "gait_test.lua", math_lib, rig, gait, build)
 
-    failed = 0
+    failed = len(syntax_errors)
     print(f"syntax: {len(sources)} files parsed")
     for err in syntax_errors:
-        failed += 1
         print(f"  FAIL  {err}")
-    for i in range(1, len(results.checks) + 1):
-        c = results.checks[i]
-        mark = "ok  " if c.ok else "FAIL"
-        if not c.ok:
-            failed += 1
-        detail = f"  ({c.detail})" if c.detail else ""
-        print(f"  {mark}  {c.name}{detail}")
+    failed += report("animation:", results.checks)
+    total = len(results.checks) + len(syntax_errors)
 
+    smoke = None
     if "--no-smoke" not in sys.argv:
-        lua2, math2 = new_runtime()
-        smoke = run_smoke(lua2, math2)
-        print(f"smoke (mock engine checked against the Roblox API dump, {smoke.worldObjects} world objects):")
-        n = 0
-        for i in range(1, len(smoke) + 1):
-            c = smoke[i]
-            n += 1
-            mark = "ok  " if c.ok else "FAIL"
-            if not c.ok:
-                failed += 1
-            detail = f"  ({c.detail})" if c.detail else ""
-            print(f"  {mark}  {c.name}{detail}")
-        warnings = [smoke.warnings[i] for i in range(1, len(smoke.warnings) + 1)]
-        for w in sorted(set(warnings)):
+        warnings = set()
+        for test_file, installer, label in (
+            ("smoke_test.lua", "ChadWorld_Installer.lua", "full world"),
+            ("smoke_baseplate.lua", "ChadBaseplate_Installer.lua", "baseplate + dummy"),
+        ):
+            res = run_smoke(test_file, installer)
+            failed += report(f"smoke, {label} (mock engine checked against the Roblox API dump):", res)
+            total += len(res)
+            warnings |= {res.warnings[i] for i in range(1, len(res.warnings) + 1)}
+            if test_file == "smoke_test.lua":
+                smoke = res
+        for w in sorted(warnings):
             print(f"  warn  {w}")
-        extra_checks = n
-    else:
-        extra_checks = 0
 
     if "--preview" in sys.argv:
         from render_preview import render_all, render_map
 
         render_all(results, ROOT / "preview")
-        if extra_checks:
+        if smoke is not None:
             render_map(smoke.parts, ROOT / "preview" / "world-map.png")
 
-    total = len(results.checks) + len(syntax_errors) + extra_checks
     print(f"\n{total - failed}/{total} passed")
     return 1 if failed else 0
 

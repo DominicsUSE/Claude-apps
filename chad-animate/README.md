@@ -28,6 +28,17 @@ install. It also deletes the V4 `ChadAnimate` script from
 StarterCharacterScripts. Like V4's WorldSetup, it removes the root
 `Baseplate` and any root `SpawnLocation`.
 
+### Just the animations on a Baseplate, as a dummy
+
+To get only the walk/run animator, with no world or NPCs, paste
+[`dist/ChadBaseplate_Installer.lua`](dist/ChadBaseplate_Installer.lua) in
+step 2 instead. It keeps Roblox's Baseplate and spawn, and installs
+`ChadConfig`, `ChadAnimate` and the empty `Animate`. It also adds a gray R15
+dummy as `StarterPlayer.StarterCharacter`, so every player spawns as the
+dummy, and turns off `LoadCharacterAppearance` so no clothes or accessories
+load. The dummy sets its own rig type, so step 3 isn't needed. If the place
+had the full world, this removes it, but it leaves Lighting alone.
+
 If you use Rojo, `src/` follows the usual layout: `shared` goes to
 ReplicatedStorage, `client` to StarterPlayerScripts, `character` to
 StarterCharacterScripts, and `server` to ServerScriptService. If the place
