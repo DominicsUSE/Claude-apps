@@ -311,7 +311,7 @@ export function Settings({ page: start = 'profile' }) {
   const [page, setPage] = useState(start);
   const V = VIEWS[page];
   return html`<${Layer} title="Settings" icon=${html`<${Icon} name="sliders" />`} pages=${PAGES} page=${page} setPage=${setPage}
-    foot=${html`<${Nook} size=${16} /><span>Snug 0.2</span>`}>
+    foot=${html`<${Nook} size=${16} /><span>Snug 0.3</span>`}>
     <${V} />
   <//>`;
 }
