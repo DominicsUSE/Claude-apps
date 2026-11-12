@@ -4,7 +4,7 @@
 import { createServer } from 'node:http';
 import { writeFile, mkdir, stat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
-import { join, normalize, extname } from 'node:path';
+import { join, normalize, extname, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './db.js';
 import { createModel, newId } from './model.js';
@@ -115,7 +115,8 @@ export async function startServer({
 
   async function staticFile(res, path) {
     // /join/<code> and every other app path load the app itself.
-    let rel = path === '/' || path.startsWith('/join/') ? 'index.html' : normalize(path).replace(/^[/\\]+/, '');
+    // Web addresses always use forward slashes, whatever this machine's file paths look like.
+    let rel = path === '/' || path.startsWith('/join/') ? 'index.html' : posix.normalize(path.replace(/\\/g, '/')).replace(/^\/+/, '');
     if (rel.includes('..') || !PUBLIC.some((p) => (p.endsWith('/') ? rel.startsWith(p) : rel === p))) {
       if (extname(rel)) return error(res, 404, 'Not found');
       rel = 'index.html';

@@ -24,10 +24,11 @@ const launch = async (userData = dir) => {
   page.setDefaultTimeout(15000);
   return { app, page };
 };
-test.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+test.after(() => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }));
 
-test("first run: choose to run Snug on this computer, create an account, send a message", async () => {
+test("first run: choose to run Snug on this computer, create an account, send a message", async (t) => {
   const { app, page } = await launch();
+  t.after(() => app.close().catch(() => {}));
   await page.waitForSelector("#setup");
   assert.equal(await page.locator("h1").textContent(), "Where should Snug run?");
   if (shots) await page.screenshot({ path: path.join(shots, "desktop-setup.png") });
@@ -57,8 +58,9 @@ test("first run: choose to run Snug on this computer, create an account, send a 
   await app.close();
 });
 
-test("reopening goes straight in, still signed in, with the message still there", async () => {
+test("reopening goes straight in, still signed in, with the message still there", async (t) => {
   const { app, page } = await launch();
+  t.after(() => app.close().catch(() => {}));
   await page.waitForSelector(".nav");
   await page.click('.nav .row:has-text("Lounge")');
   await page.locator('.main .msg:has-text("First message from the desktop app")').waitFor();
@@ -66,9 +68,10 @@ test("reopening goes straight in, still signed in, with the message still there"
   await app.close();
 });
 
-test("joining an address that does not answer returns to setup with the reason", async () => {
+test("joining an address that does not answer returns to setup with the reason", async (t) => {
   const other = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-join-"));
   const { app, page } = await launch(other);
+  t.after(() => app.close().catch(() => {}));
   await page.waitForSelector("#setup");
   await page.click("#pick-join");
   await page.click("#go");
@@ -80,5 +83,5 @@ test("joining an address that does not answer returns to setup with the reason",
   await page.click("#go");
   await page.locator('#error:has-text("Couldn’t reach http://127.0.0.1:9")').waitFor();
   await app.close();
-  fs.rmSync(other, { recursive: true, force: true });
+  fs.rmSync(other, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
 });

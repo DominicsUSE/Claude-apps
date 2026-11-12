@@ -94,6 +94,24 @@ test('accounts: register, sign in, wrong password, taken name, weak input', asyn
   assert.equal(stored.includes('a long password'), false);
 });
 
+test('the app\u2019s own files are served; nothing else on disk is', async () => {
+  const get = (path) => fetch(base + path);
+  for (const [path, type] of [['/', 'text/html'], ['/js/app.js', 'text/javascript'], ['/css/tokens.css', 'text/css'], ['/js/views/auth.js', 'text/javascript'], ['/fonts/ahn-latin.woff2', 'font/woff2'], ['/vendor/preact-htm.js', 'text/javascript']]) {
+    const res = await get(path);
+    assert.equal(res.status, 200, path);
+    assert.match(res.headers.get('content-type'), new RegExp(type), path);
+    await res.arrayBuffer();
+  }
+  assert.match((await get('/')).headers.get('content-security-policy'), /script-src 'self'/);
+  assert.match(await (await get('/join/abcdef123')).text(), /<div id="app">/, 'invitation links open the app');
+  for (const path of ['/server/db.js', '/package.json', '/data/snug.db', '/js/../server/auth.js', '/js/..%2f..%2fserver/auth.js', '/css/missing.css', '/%2e%2e/%2e%2e/etc/passwd']) {
+    const res = await get(path);
+    const body = await res.text();
+    assert.ok(res.status === 404 || /<div id="app">/.test(body), `${path} must not leak a file (got ${res.status})`);
+    assert.equal(/scryptSync|DatabaseSync|"dependencies"/.test(body), false, path);
+  }
+});
+
 test('sockets need a session and the right origin', async () => {
   const tryOpen = (headers) => new Promise((resolve) => {
     const ws = new WebSocket(`ws://127.0.0.1:${srv.port}/ws`, { headers });
