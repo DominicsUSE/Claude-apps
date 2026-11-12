@@ -1,189 +1,345 @@
-// Drives the real app in Chromium: sending, offline and failure states,
-// drafts, scroll memory, keyboard paths and notification levels.
+// Drives the real app in Chromium against the real server, with separate
+// people in separate browser sessions: live sync, persistence, reconnection,
+// permissions, notifications, search and voice.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { startServer } from '../server/index.js';
+import { openDb } from '../server/db.js';
+import { seedDatabase } from '../server/seed.js';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
-const root = fileURLToPath(new URL('..', import.meta.url));
-const PORT = 8790 + Math.floor(Math.random() * 100);
-
-let server, browser, page;
+const PASSWORD = 'snug-demo-1';
+const dir = mkdtempSync(join(tmpdir(), 'snug-e2e-'));
+let srv, browser, url, port;
 const errors = [];
 
-test.before(async () => {
-  server = spawn('python3', ['-m', 'http.server', String(PORT)], { cwd: root, stdio: 'ignore' });
-  await new Promise((r) => setTimeout(r, 700));
-  browser = await chromium.launch();
-});
-test.after(async () => { await browser?.close(); server?.kill(); });
-
-async function open(viewport = { width: 1280, height: 800 }) {
-  page = await browser.newPage({ viewport });
-  page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto(`http://localhost:${PORT}/`);
-  await page.waitForSelector(viewport.width < 760 ? '.tabs' : '.msgs[role="log"]');
+async function boot(p = 0) {
+  srv = await startServer({ port: p, dataDir: dir, quiet: true });
+  port = srv.port;
+  url = `http://127.0.0.1:${port}`;
 }
-const go = (name) => page.click(`.nav .row:has-text("${name}")`);
-const box = () => page.locator('.main .composer textarea');
-const state = (fn) => page.evaluate(fn);
-// Every message I wrote has been confirmed, failed or deleted: nothing in flight.
-const settled = () => page.waitForFunction(() => Object.values(window.snug.S.msgs).flat().every((m) => m.state !== 'sending' && m.state !== 'queued'));
 
-test('a sent message shows at once, then is confirmed', async () => {
-  await open();
-  await go('Glaze lab');
-  await box().fill('Testing the calcined swap on Thursday.');
-  await box().press('Enter');
-  const mine = page.locator('.main .msg', { hasText: 'Testing the calcined swap' });
-  await mine.waitFor();
-  assert.equal(await mine.evaluate((el) => el.classList.contains('pending')), true, 'shown before the server confirms');
-  await settled();
-  assert.equal(await mine.evaluate((el) => el.classList.contains('pending')), false);
-  assert.equal(await box().inputValue(), '');
-  assert.deepEqual(errors, []);
+test.before(async () => {
+  const db = openDb(join(dir, 'snug.db'));
+  seedDatabase(db, join(dir, 'files'), { password: PASSWORD });
+  db.close();
+  await boot();
+  // Fake microphone, so voice can be tested end to end without hardware.
+  browser = await chromium.launch({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
+});
+test.after(async () => { await browser?.close(); await srv.close(); rmSync(dir, { recursive: true, force: true }); });
+test.beforeEach(() => srv.hub.resetLimits());
+
+// One person in their own browser session.
+async function person(handle, { viewport = { width: 1280, height: 800 }, path = '/' } = {}) {
+  const ctx = await browser.newContext({ viewport, permissions: ['microphone'] });
+  const page = await ctx.newPage();
+  page.setDefaultTimeout(10000);
+  page.on('pageerror', (e) => errors.push(`${handle}: ${e.message}`));
+  await page.goto(url + path);
+  await page.waitForSelector('.auth-form');
+  if (handle) await signIn(page, handle);
+  return page;
+}
+async function signIn(page, handle, password = PASSWORD) {
+  await page.fill('#auth-handle', handle);
+  await page.fill('#auth-pass', password);
+  await page.click('.auth-form button[type=submit]');
+  await page.waitForSelector(page.viewportSize().width < 760 ? '.tabs' : '.nav');
+  await page.waitForFunction(() => window.snug.S.conn.socket === 'open');
+}
+const go = (page, name) => page.click(`.nav .row:has-text("${name}")`);
+const box = (page) => page.locator('.main .composer textarea');
+const say = async (page, text) => { await box(page).fill(text); await box(page).press('Enter'); };
+const settled = (page) => page.waitForFunction(() => Object.values(window.snug.S.msgs).flat().every((m) => !m.state));
+const msg = (page, text) => page.locator('.main .msg', { hasText: text });
+
+let robin, ines;
+
+test('sign in: a wrong password is refused with a reason; the right one opens the app', async () => {
+  robin = await person(null);
+  await robin.fill('#auth-handle', 'robin');
+  await robin.fill('#auth-pass', 'not-the-password');
+  await robin.click('.auth-form button[type=submit]');
+  await robin.locator('.auth-form .err:has-text("don’t match")').waitFor();
+  await signIn(robin, 'robin');
+  assert.equal(await robin.locator('.self-name').textContent(), 'Robin Hale');
+  ines = await person('ines');
 });
 
-test('offline messages wait, then send by themselves', async () => {
-  await state(() => { window.snug.S.conn.simOffline = true; window.snug.emit(); });
-  await page.locator('.banner:has-text("You’re offline")').waitFor();
-  await box().fill('Sent from the tunnel');
-  await box().press('Enter');
-  await page.locator('.msg-state:has-text("Waiting for a connection")').waitFor();
-  await page.click('.self');
-  await page.keyboard.press('Escape');
-  await page.evaluate(() => import('./js/server.js').then((m) => m.setSimOffline(false)));
-  await settled();
-  assert.equal(await page.locator('.main .msg', { hasText: 'Sent from the tunnel' }).count(), 1);
-  assert.equal(await page.locator('.msg-state').count(), 0);
+test('a message appears for the other person without a refresh, and survives one', async () => {
+  await go(robin, 'Glaze lab');
+  await go(ines, 'Glaze lab');
+  await say(robin, 'Testing the calcined swap on Thursday.');
+  await msg(ines, 'Testing the calcined swap').waitFor();
+  await settled(robin);
+  assert.equal(await msg(robin, 'Testing the calcined swap').count(), 1, 'the sender sees it once');
+  await ines.reload();
+  await ines.waitForSelector('.nav');
+  await msg(ines, 'Testing the calcined swap').waitFor();
 });
 
-test('a failed send says so and can be retried', async () => {
-  await page.evaluate(() => import('./js/server.js').then((m) => m.setSimFail(true)));
-  await box().fill('This one will fail');
-  await box().press('Enter');
-  await page.locator('.msg-state.failed').waitFor();
-  await page.evaluate(() => import('./js/server.js').then((m) => m.setSimFail(false)));
-  await page.click('.msg-state.failed >> text=Try again');
-  await settled();
-  assert.equal(await page.locator('.msg-state').count(), 0);
+test('typing shows to the other person; reactions sync both ways', async () => {
+  await box(robin).fill('thinking about');
+  await ines.locator('.foot:has-text("Robin is typing")').waitFor();
+  await box(robin).fill('');
+  const theirs = msg(ines, 'Testing the calcined swap');
+  await theirs.hover();
+  await theirs.locator('[aria-label="Add a reaction"]').first().click();
+  await ines.locator('.picker-grid button').first().click();
+  const chip = msg(robin, 'Testing the calcined swap').locator('.rx:not(.add)');
+  await chip.waitFor();
+  assert.equal((await chip.textContent()).replace(/\D/g, ''), '1');
+  await chip.click();
+  await msg(ines, 'Testing the calcined swap').locator('.rx.mine:has-text("2")').waitFor();
 });
 
-test('drafts survive switching rooms', async () => {
-  await go('Firing schedule');
-  await box().fill('Half a thought about shelf 3');
-  await go('Show & tell');
-  assert.equal(await box().inputValue(), '');
-  await go('Firing schedule');
-  assert.equal(await box().inputValue(), 'Half a thought about shelf 3');
-  await box().fill('');
+test('an attached picture uploads and shows for the other person', async () => {
+  await go(robin, 'Glaze lab');
+  await go(ines, 'Glaze lab');
+  // A real 2x1 PNG, made in the page so the test needs no fixture file.
+  const png = await robin.evaluate(() => new Promise((r) => {
+    const c = document.createElement('canvas'); c.width = 200; c.height = 100;
+    const g = c.getContext('2d'); g.fillStyle = '#7f9d97'; g.fillRect(0, 0, 200, 100);
+    c.toBlob(async (b) => r([...new Uint8Array(await b.arrayBuffer())]), 'image/png');
+  }));
+  await robin.locator('.main .composer input[type=file]').setInputFiles({ name: 'glaze-test.png', mimeType: 'image/png', buffer: Buffer.from(png) });
+  await robin.locator('.pending-file:has-text("glaze-test.png") .pending-state:not(:has-text("Uploading"))').waitFor();
+  await say(robin, 'Tile from this morning');
+  const theirs = msg(ines, 'Tile from this morning').locator('.img img');
+  await theirs.waitFor();
+  await ines.waitForFunction(() => [...document.querySelectorAll('.main .msg .img img')].pop()?.naturalWidth === 200);
+  assert.match(await theirs.getAttribute('src'), /^\/api\/files\/f_/);
+  // Someone who is not signed in cannot fetch it.
+  const src = await theirs.getAttribute('src');
+  assert.equal((await fetch(url + src)).status, 401);
 });
 
-test('coming back to a room keeps your place', async () => {
-  await go('The floor');
-  const scroller = page.locator('.main .scroller');
+test('presence is real: people show online only while connected', async () => {
+  await robin.click('[aria-label*="people here"]');
+  const row = robin.locator('.person:has-text("Ines Carvalho")');
+  await row.locator('.pres.open').waitFor();
+  assert.equal(await robin.locator('.person:has-text("Tomasz") .pres.offline').count(), 1, 'nobody is signed in as Tomasz');
+  await ines.context().close();
+  await row.locator('.pres.offline').waitFor({ timeout: 9000 });
+  ines = await person('ines');
+  await row.locator('.pres.open').waitFor();
+  await robin.keyboard.press('Escape');
+});
+
+test('a mention elsewhere raises a note and a number; opening it clears both', async () => {
+  await go(robin, 'Classes');
+  await go(ines, 'Show & tell');
+  await say(ines, '@robin your bowls are out of the kiln.');
+  await robin.locator('.toast.note:has-text("your bowls are out")').waitFor();
+  const badge = robin.locator('.nav .row:has-text("Show & tell") .badge');
+  assert.equal(await badge.textContent(), '1');
+  await robin.click('.toast.note');
+  await robin.locator('.main .msg.mention:has-text("your bowls are out")').waitFor();
+  await badge.waitFor({ state: 'detached' });
+  // Read state is on the server: a fresh session agrees.
+  const again = await person('robin');
+  assert.equal(await again.locator('.nav .row:has-text("Show & tell") .badge').count(), 0);
+  await again.context().close();
+});
+
+test('the server going away: messages wait, then send by themselves when it is back', async () => {
+  await go(robin, 'Glaze lab');
+  await go(ines, 'Glaze lab');
+  await srv.close();
+  await robin.locator('.banner:has-text("You’re offline")').waitFor();
+  await say(robin, 'Written while the server was down');
+  await robin.locator('.msg-state:has-text("Waiting for a connection")').waitFor();
+  await boot(port);
+  await robin.waitForFunction(() => window.snug.S.conn.socket === 'open', null, { timeout: 25000 });
+  await settled(robin);
+  assert.equal(await robin.locator('.msg-state').count(), 0);
+  assert.equal(await msg(robin, 'Written while the server was down').count(), 1, 'sent once, not twice');
+  await ines.waitForFunction(() => window.snug.S.conn.socket === 'open', null, { timeout: 25000 });
+  await msg(ines, 'Written while the server was down').waitFor();
+});
+
+test('a refused message says why and can be tried again', async () => {
+  await go(robin, 'Marketplace');
+  for (let i = 0; i < 20; i++) await say(robin, `burst ${i}`);
+  const failed = robin.locator('.msg-state.failed');
+  await failed.first().waitFor();
+  assert.match(await failed.first().textContent(), /little fast/);
+  // Let every send finish, one way or the other, before counting.
+  await robin.waitForFunction(() => Object.values(window.snug.S.msgs).flat().every((m) => m.state !== 'sending'));
+  srv.hub.resetLimits();
+  const before = await failed.count();
+  await failed.first().locator('text=Try again').click();
+  await robin.waitForFunction((n) => document.querySelectorAll('.msg-state.failed').length === n - 1, before);
+  for (let i = await failed.count(); i > 0; i--) await failed.first().locator('text=Delete').click();
+});
+
+test('permissions: a member cannot post notices; the server agrees', async () => {
+  const priya = await person('priya');
+  await go(priya, 'Front desk');
+  await priya.locator('.composer-locked:has-text("Only Studio lead and Technician")').waitFor();
+  const refused = await priya.evaluate(() => import('./js/server.js').then((m) => m.call('msg.send', { conv: 'k_desk', id: 'm_forced0000000001', text: 'forced' }).then(() => 'sent', (e) => e.message)));
+  assert.match(refused, /Only Studio lead and Technician/);
+  await priya.click('.nav .house-row:has-text("Kiln & Co.")', { button: 'right' });
+  await priya.locator('.menu-item:has-text("Browse rooms")').waitFor();
+  assert.equal(await priya.locator('.menu-item:has-text("House settings")').count(), 0);
+  await priya.keyboard.press('Escape');
+  await priya.context().close();
+});
+
+test('drafts survive switching rooms; coming back keeps your place', async () => {
+  await go(robin, 'Firing schedule');
+  await box(robin).fill('Half a thought about shelf 3');
+  await go(robin, 'The floor');
+  assert.equal(await box(robin).inputValue(), '');
+  const scroller = robin.locator('.main .scroller');
   await scroller.evaluate((el) => { el.scrollTop = 120; el.dispatchEvent(new Event('scroll')); });
-  await go('Classes');
-  await go('The floor');
-  await page.waitForTimeout(100);
+  await go(robin, 'Firing schedule');
+  assert.equal(await box(robin).inputValue(), 'Half a thought about shelf 3');
+  await box(robin).fill('');
+  await go(robin, 'The floor');
+  await robin.waitForTimeout(100);
   assert.equal(await scroller.evaluate((el) => Math.round(el.scrollTop)), 120);
 });
 
-test('keyboard: reply with R, thread with T, Escape closes in order', async () => {
-  await go('Glaze lab');
-  await box().focus();
-  await page.keyboard.press('Shift+Tab');
-  const focused = () => page.evaluate(() => document.activeElement.classList.contains('msg'));
-  assert.equal(await focused(), true, 'Shift+Tab from an empty box goes into the messages');
-  await page.keyboard.press('ArrowUp');
-  await page.keyboard.press('r');
-  await page.locator('.composer-banner:has-text("Replying to")').waitFor();
-  await page.keyboard.press('Escape');
-  assert.equal(await page.locator('.composer-banner').count(), 0);
-  await page.keyboard.press('Shift+Tab');
-  await page.keyboard.press('t');
-  await page.locator('.pane[aria-label="Thread"]').waitFor();
-  await page.keyboard.press('Control+k');
-  await page.locator('.quick').waitFor();
-  await page.keyboard.press('Escape');
-  assert.equal(await page.locator('.quick').count(), 0);
-  assert.equal(await page.locator('.pane').count(), 1, 'first Escape closes only the top layer');
-  await page.keyboard.press('Escape');
-  assert.equal(await page.locator('.pane').count(), 0);
+test('keyboard: reply with R, thread with T, Escape closes in order; a thread reply reaches the other person', async () => {
+  await go(robin, 'Glaze lab');
+  await box(robin).focus();
+  await robin.keyboard.press('Shift+Tab');
+  assert.equal(await robin.evaluate(() => document.activeElement.classList.contains('msg')), true);
+  await robin.keyboard.press('r');
+  await robin.locator('.composer-banner:has-text("Replying to")').waitFor();
+  await robin.keyboard.press('Escape');
+  assert.equal(await robin.locator('.composer-banner').count(), 0);
+  await robin.keyboard.press('Shift+Tab');
+  await robin.keyboard.press('t');
+  await robin.locator('.pane[aria-label="Thread"]').waitFor();
+  await robin.locator('.pane .composer textarea').fill('Starting a thread from the keyboard');
+  await robin.locator('.pane .composer textarea').press('Enter');
+  await ines.locator('.main .stub:has-text("1 reply")').last().waitFor();
+  await robin.keyboard.press('Control+k');
+  await robin.locator('.quick').waitFor();
+  await robin.keyboard.press('Escape');
+  assert.equal(await robin.locator('.quick').count(), 0);
+  assert.equal(await robin.locator('.pane').count(), 1, 'first Escape closes only the top layer');
+  await robin.keyboard.press('Escape');
+  assert.equal(await robin.locator('.pane').count(), 0);
 });
 
-test('quick jump goes to a room by a few letters', async () => {
-  await page.keyboard.press('Control+k');
-  await page.keyboard.type('ride');
-  await page.keyboard.press('Enter');
-  await page.locator('.main .bar-title:has-text("Ride plans")').waitFor();
+test('search runs on the server over stored messages', async () => {
+  await robin.keyboard.press('Control+Shift+F');
+  await robin.keyboard.type('calcined swap');
+  await robin.locator('.item:has-text("Testing the calcined swap")').waitFor();
+  await robin.locator('.search-input input').fill('from:kwame debounce');
+  await robin.locator('.empty:has-text("No messages match")').waitFor();
+  await robin.locator('.search-input input').fill('is:saved kaolin');
+  await robin.locator('.item:has-text("calcined kaolin")').waitFor();
+  await robin.click('.item:has-text("calcined kaolin") .item-main');
+  await robin.locator('.main .msg.flash:has-text("calcined kaolin")').waitFor();
 });
 
-test('muting a house removes its numbers and dots', async () => {
-  await page.click('.nav .house-row:has-text("Kiln & Co.")', { button: 'right' });
-  await page.click('.menu-item:has-text("Nothing")');
-  const marks = await page.locator('.nav .row:has-text("Glaze lab") .row-end > *').count();
-  assert.equal(marks, 0);
-  const level = await state(() => window.snug.S.houses.kiln.notify);
-  assert.equal(level, 'muted');
-  await page.click('.nav .house-row:has-text("Kiln & Co.")', { button: 'right' });
-  await page.click('.menu-item:has-text("Everything")');
-});
-
-test('saving a message and finding it with is:saved', async () => {
-  await go('Ride plans');
-  const msg = page.locator('.main .msg', { hasText: 'Overshoes weather' });
-  await msg.hover();
-  await msg.locator('[aria-label="Save"]').click();
-  await page.keyboard.press('Control+Shift+F');
-  await page.keyboard.type('is:saved overshoes');
-  await page.locator('.item:has-text("Overshoes weather")').waitFor();
-  await page.click('.item:has-text("Overshoes weather") .item-main');
-  await page.locator('.main .msg.flash:has-text("Overshoes weather")').waitFor();
-  assert.deepEqual(errors, []);
-});
-
-test('catch up: J moves, E marks done, Undo brings it back', async () => {
-  await page.click('.nav >> text=Catch up');
-  const items = page.locator('.item[data-triage]');
+test('catch up: J moves, E marks done, and it stays done after a reload', async () => {
+  await robin.click('.nav >> text=Catch up');
+  const items = robin.locator('.item[data-triage]');
   const before = await items.count();
+  assert.ok(before >= 2, `expected at least two items, got ${before}`);
   await items.first().focus();
-  await page.keyboard.press('j');
+  await robin.keyboard.press('j');
   assert.equal(await items.nth(1).evaluate((el) => el === document.activeElement), true);
-  await page.keyboard.press('e');
-  await page.waitForFunction((n) => document.querySelectorAll('.item[data-triage]').length === n - 1, before);
-  assert.equal(await page.evaluate(() => document.activeElement.matches('.item[data-triage]')), true, 'focus stays in the list');
-  await page.click('.toast >> text=Undo');
-  await page.waitForFunction((n) => document.querySelectorAll('.item[data-triage]').length === n, before);
+  await robin.keyboard.press('e');
+  await robin.waitForFunction((n) => document.querySelectorAll('.item[data-triage]').length === n - 1, before);
+  await robin.waitForTimeout(300);
+  await robin.reload();
+  await robin.waitForSelector('.nav');
+  await robin.waitForFunction(() => window.snug.S.conn.socket === 'open');
+  await robin.click('.nav >> text=Catch up');
+  assert.equal(await robin.locator('.item[data-triage]').count(), before - 1);
 });
 
-test('high contrast darkens faint text', async () => {
-  const faint = () => page.evaluate(() => getComputedStyle(document.querySelector('.item-meta')).color);
-  const standard = await faint();
-  await page.evaluate(() => import('./js/store.js').then((s) => s.setPref('contrast', 'high')));
-  assert.notEqual(await faint(), standard);
-  await page.evaluate(() => import('./js/store.js').then((s) => s.setPref('contrast', 'system')));
+test('a new account joins by link as a newcomer, and the house opens after a first message', async () => {
+  await robin.click('.nav .house-row:has-text("Kiln & Co.")', { button: 'right' });
+  await robin.click('.menu-item:has-text("Invite people")');
+  await robin.waitForFunction(() => /\/join\//.test(document.querySelector('.copy-row input')?.value || ''));
+  const link = await robin.locator('.copy-row input').first().inputValue();
+  await robin.keyboard.press('Escape');
+
+  const dana = await person(null, { path: new URL(link).pathname });
+  await dana.locator('.auth-invite:has-text("invited you to Kiln & Co.")').waitFor();
+  await dana.fill('#auth-handle', 'dana');
+  await dana.fill('#auth-name', 'Dana Whitfield');
+  await dana.fill('#auth-pass', 'a brand new password');
+  await dana.click('.auth-form button[type=submit]');
+  await dana.locator('.modal:has-text("Kiln & Co.")').waitFor();
+  await dana.click('.modal >> text=Join Kiln & Co.');
+  await dana.locator('.welcome:has-text("Welcome to Kiln & Co.")').waitFor();
+  assert.equal(await dana.locator('.nav .row:has-text("Glaze lab")').count(), 0, 'only starter rooms at first');
+  await go(dana, 'The floor');
+  await say(dana, 'Hello, I just joined.');
+  await dana.locator('.toast:has-text("rooms in Kiln & Co. are open")').waitFor();
+  await dana.locator('.nav .row:has-text("Glaze lab")').waitFor();
+  await go(robin, 'The floor');
+  await msg(robin, 'Hello, I just joined.').waitFor();
+  await dana.context().close();
 });
 
-test('phone: tabs, a room pushed on top, back returns', async () => {
-  await page.close();
-  await open({ width: 390, height: 844 });
-  await page.locator('.tab[aria-selected="true"]:has-text("Catch up")').waitFor();
-  await page.click('.tab:has-text("Houses")');
-  await page.click('.row:has-text("Glaze lab")');
-  await page.locator('.screen.push .composer textarea').waitFor();
-  await page.click('.screen.push [aria-label="Back"]');
-  assert.equal(await page.locator('.screen.push').count(), 0);
-  // The system back gesture closes the room instead of leaving the app.
-  await page.click('.row:has-text("Ride plans")');
-  await page.locator('.screen.push .composer textarea').waitFor();
-  await page.goBack();
-  await page.waitForFunction(() => !document.querySelector('.screen.push'));
-  assert.match(page.url(), new RegExp(`localhost:${PORT}`));
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
-  assert.equal(overflow, false, 'no horizontal scroll at phone width');
+test('voice: two people in a room are really connected and audio flows', async () => {
+  await go(robin, 'Wheel room');
+  await go(ines, 'Wheel room');
+  await robin.click('.stage .btn.primary');
+  await robin.locator('.stage-person:has-text("You")').waitFor();
+  await ines.locator('.stage-person:has-text("Robin")').waitFor();
+  await ines.click('.stage .btn.primary');
+  const connected = (page) => page.waitForFunction(async () => {
+    const s = await window.snug.voiceStats();
+    const peers = Object.values(s);
+    return peers.length === 1 && peers[0].state === 'connected' && peers[0].bytes > 2000;
+  }, null, { timeout: 20000, polling: 300 });
+  await connected(robin);
+  await connected(ines);
+  // The "Connecting" note clears once the connection event reaches the page.
+  await robin.waitForFunction(() => !document.querySelector('.stage-note'));
+  await ines.waitForFunction(() => !document.querySelector('.stage-note'));
+  await robin.locator('.dock').waitFor();
+  // Mute is real: it reaches the other person.
+  await robin.click('.stage [aria-label="Mute"]');
+  await ines.locator('.stage-person:has-text("Robin") .muted-ic').waitFor();
+  await ines.click('.stage [aria-label="Leave voice"]');
+  await robin.waitForFunction(async () => Object.keys(await window.snug.voiceStats()).length === 0);
+  await robin.click('.stage [aria-label="Leave voice"]');
+  assert.equal(await robin.locator('.dock').count(), 0);
+});
+
+test('signing out returns to sign-in and clears this device', async () => {
+  await ines.click('.self');
+  await ines.click('.me-pop >> text=Settings');
+  await ines.click('.layer-nav >> text=Account');
+  await ines.click('.layer-body button:text-is("Sign out")');
+  await ines.waitForSelector('.auth-form');
+  assert.equal(await ines.evaluate(() => localStorage.getItem('snug.cache')), null);
+  await ines.reload();
+  await ines.waitForSelector('.auth-form');
+  await ines.context().close();
+});
+
+test('phone: tabs, a room pushed on top, back button and back gesture return', async () => {
+  const phone = await person('robin', { viewport: { width: 390, height: 844 } });
+  await phone.locator('.tab[aria-selected="true"]:has-text("Catch up")').waitFor();
+  await phone.click('.tab:has-text("Houses")');
+  await phone.click('.row:has-text("Glaze lab")');
+  await phone.locator('.screen.push .composer textarea').waitFor();
+  await phone.click('.screen.push [aria-label="Back"]');
+  assert.equal(await phone.locator('.screen.push').count(), 0);
+  await phone.click('.row:has-text("Ride plans")');
+  await phone.locator('.screen.push .composer textarea').waitFor();
+  await phone.goBack();
+  await phone.waitForFunction(() => !document.querySelector('.screen.push'));
+  assert.match(phone.url(), new RegExp(`127.0.0.1:${port}`));
+  assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'no horizontal scroll');
+  await phone.context().close();
   assert.deepEqual(errors, []);
 });

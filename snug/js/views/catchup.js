@@ -2,8 +2,8 @@
 // badges everywhere. Saved: the messages you chose to keep.
 import { html, useRef } from '../../vendor/preact-htm.js';
 import {
-  S, back, me, convMeta, findMsg, jumpToMsg, openConv, openModal, openQuick, declineInvite, markAllRead,
-  markConvRead, markManyRead, toggleSave, setSavedNote, setPresence, emit, toast,
+  S, person, back, me, convMeta, findMsg, jumpToMsg, openConv, openModal, openQuick, declineInvite, markAllRead,
+  markConvRead, markManyRead, toggleSave, setSavedNote, setPresence, setRead, toast,
 } from '../store.js';
 import { needsMe, levelOf, threadsOf, roomIds, isThread } from '../lib/attention.js';
 import { mentions } from '../lib/format.js';
@@ -54,10 +54,9 @@ function why(conv, m) {
 }
 
 function done(conv, m) {
-  const before = S.read[conv];
-  S.read[conv] = Math.max(before || 0, m.ts);
-  emit();
-  toast('Marked as done', { undo: () => { S.read[conv] = before; emit(); } });
+  const before = S.read[conv] || 0;
+  setRead(conv, Math.max(before, m.ts));
+  toast('Marked as done', { undo: () => setRead(conv, before) });
 }
 
 // Triage: move with J and K (or the arrows), E marks done, Enter opens.
@@ -109,9 +108,9 @@ function TriageItem({ conv, m }) {
   return html`<div class="swipe" onPointerDown=${down} onPointerMove=${moving} onPointerUp=${up} onPointerCancel=${up}>
     <span class="swipe-under" aria-hidden="true"><${Icon} name="check" size=${18} />Done</span>
     <div class="item" ref=${ref} data-triage tabindex="0">
-      <${Avatar} user=${S.users[m.author]} />
+      <${Avatar} user=${person(m.author)} />
       <button class="item-main" tabindex="-1" onClick=${() => jumpToMsg(conv, m.id)}>
-        <span class="item-meta"><b>${S.users[m.author].name}</b><span class="where">${why(conv, m)}</span><span class="num">${fmtWhen(m.ts)}</span></span>
+        <span class="item-meta"><b>${person(m.author).name}</b><span class="where">${why(conv, m)}</span><span class="num">${fmtWhen(m.ts)}</span></span>
         <span class="item-text"><${Rich} m=${m} /></span>
       </button>
       <div class="item-acts float">
@@ -147,7 +146,7 @@ export function CatchUp() {
             return html`<div class="invite" key=${inv.house}>
               <${Tile} house=${h} />
               <div>
-                <div class="item-meta"><b>${S.users[inv.from].name}</b><span class="where">invited you to ${h.name}</span><span class="num">${fmtWhen(inv.ts)}</span></div>
+                <div class="item-meta"><b>${person(inv.from).name}</b><span class="where">invited you to ${h.name}</span><span class="num">${fmtWhen(inv.ts)}</span></div>
                 <div class="item-text">${h.about}</div>
                 <div class="item-row-acts">
                   <button class="btn primary" onClick=${() => openModal(JoinPreview, { house: inv.house })}>Take a look</button>
@@ -170,8 +169,8 @@ export function CatchUp() {
                 <span class="news-ic"><${RoomIcon} kind=${room.kind} /></span>
                 <button class="news-main" onClick=${() => openConv(conv)}>
                   <span class="news-name">${room.name}</span>
-                  <span class="news-sum">${plural(count, 'new message')} from ${nameList(people.map((p) => S.users[p].name.split(' ')[0]))}</span>
-                  <span class="news-top"><b>${S.users[top.author].name.split(' ')[0]}</b> <${Rich} m=${top} /></span>
+                  <span class="news-sum">${plural(count, 'new message')} from ${nameList(people.map((p) => person(p).name.split(' ')[0]))}</span>
+                  <span class="news-top"><b>${person(top.author).name.split(' ')[0]}</b> <${Rich} m=${top} /></span>
                 </button>
                 <span class="news-acts"><button class="ib" aria-label=${`Mark ${room.name} as read`} data-tip="Mark read" onClick=${() => markConvRead(conv)}><${Icon} name="check" size=${18} /></button></span>
               </div>`;
@@ -195,10 +194,10 @@ export function Saved() {
         ? html`<${Empty} icon="save" title="Nothing saved yet" text="Good answers scroll away. Save one and it stays here, with a note if you like. Hover a message and choose Save, or press S." />`
         : html`<div class="col">
           ${rows.map(({ s, m, meta }) => html`<div class="item" key=${s.id}>
-            <${Avatar} user=${S.users[m.author]} />
+            <${Avatar} user=${person(m.author)} />
             <div class="item-main">
               <button class="item-main" onClick=${() => jumpToMsg(s.conv, s.id)}>
-                <span class="item-meta"><b>${S.users[m.author].name}</b><span class="where">${isThread(s.conv) ? `thread in ${meta.where}` : meta.title}</span><span class="num">${fmtWhen(m.ts)}</span></span>
+                <span class="item-meta"><b>${person(m.author).name}</b><span class="where">${isThread(s.conv) ? `thread in ${meta.where}` : meta.title}</span><span class="num">${fmtWhen(m.ts)}</span></span>
                 <span class="item-text"><${Rich} m=${m} /></span>
               </button>
               <label class="item-note">

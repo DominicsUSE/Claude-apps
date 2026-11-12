@@ -1,12 +1,13 @@
 // Dialogs. Each one asks for a single decision and has one main button.
-import { html, useState } from '../../vendor/preact-htm.js';
+import { html, useEffect, useState } from '../../vendor/preact-htm.js';
 import {
-  S, closeModal, createRoom, updateRoom, createHouse, joinHouse, startDm, openConv, openModal,
+  S, closeModal, createRoom, updateRoom, createHouse, joinHouse, joinByCode, startDm, openConv, openModal, toast,
 } from '../store.js';
 import { roomIds } from '../lib/attention.js';
 import { fuzzy, plural } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Tile, RoomIcon, Seg, copyText } from '../ui/kit.js';
+import { call, api } from '../server.js';
 
 export const HUES = [15, 35, 60, 95, 130, 165, 190, 215, 250, 290, 310, 350];
 
@@ -35,15 +36,17 @@ export function RoomForm({ house, group, room }) {
   const [kind, setKind] = useState(existing?.kind || 'text');
   const [topic, setTopic] = useState(existing?.topic || '');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
 
   const submit = (e) => {
     e.preventDefault();
     const clean = name.trim();
     if (!clean) return setError('Give the room a name.');
     const clash = roomIds(S, houseId).some((id) => id !== room && S.rooms[id].name.toLowerCase() === clean.toLowerCase());
-    if (clash) return setError(`There’s already a room called ${clean} in this house.`);
-    if (existing) updateRoom(room, { name: clean, topic: topic.trim() });
-    else createRoom(houseId, group, { name: clean, kind, topic: topic.trim() });
+    if (clash) return setError(`There\u2019s already a room called ${clean} in this house.`);
+    setBusy(true);
+    const done = existing ? updateRoom(room, { name: clean, topic: topic.trim() }) : createRoom(houseId, group, { name: clean, kind, topic: topic.trim() });
+    done.catch((err) => { setBusy(false); setError(err.offline ? 'You\u2019re offline. Try again when you\u2019re back.' : err.message); });
     return undefined;
   };
 
@@ -69,28 +72,84 @@ export function RoomForm({ house, group, room }) {
     </div>
     <div class="modal-foot">
       <button type="button" class="btn" onClick=${closeModal}>Cancel</button>
-      <button type="submit" class="btn primary">${existing ? 'Save changes' : 'Create room'}</button>
+      <button type="submit" class="btn primary" disabled=${busy}>${existing ? 'Save changes' : 'Create room'}</button>
     </div>
   </form>`;
 }
 
 export function Invite({ house }) {
   const h = S.houses[house];
-  const link = `https://snug.example/join/${h.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-7f3k`;
+  const [link, setLink] = useState('');
+  const [linkError, setLinkError] = useState('');
+  const [handle, setHandle] = useState('');
+  const [sent, setSent] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    call('invite.create', { house }).then((r) => setLink(`${location.origin}/join/${r.code}`), (e) => setLinkError(e.offline ? 'You\u2019re offline, so a link can\u2019t be made right now.' : e.message));
+  }, []);
+  const byName = (e) => {
+    e.preventDefault();
+    if (!handle.trim()) return setError('Type a username.');
+    setError(''); setSent('');
+    call('invite.user', { house, handle: handle.trim() }).then((r) => { setSent(`${r.name} is invited. They\u2019ll find it in Catch up.`); setHandle(''); }, (err) => setError(err.offline ? 'You\u2019re offline. Try again when you\u2019re back.' : err.message));
+    return undefined;
+  };
   return html`
     <h2>Invite people to ${h.name}</h2>
-    <p class="modal-lead">Anyone with this link can join as ${h.roles.find((r) => r.id === h.joinRole)?.name || 'a member'}. They start with ${plural(h.starter.length, 'room')} and one first step, and the rest opens up once they take part.</p>
+    <p class="modal-lead">Anyone with this link can join as ${h.roles.find((r) => r.id === h.joinRole)?.name || 'a member'} for the next 14 days. They start with ${plural(h.starter.length, 'room')} and one first step, and the rest opens up once they take part.</p>
     <div class="copy-row">
-      <input class="field" readonly value=${link} aria-label="Invitation link" onFocus=${(e) => e.target.select()} />
-      <button class="btn primary" data-autofocus onClick=${() => copyText(link)}><${Icon} name="copy" size=${16} />Copy link</button>
+      <input class="field" readonly value=${link || (linkError ? '' : 'Making a link\u2026')} aria-label="Invitation link" onFocus=${(e) => e.target.select()} />
+      <button class="btn primary" data-autofocus disabled=${!link} onClick=${() => copyText(link)}><${Icon} name="copy" size=${16} />Copy link</button>
     </div>
+    ${linkError && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${linkError}</div>`}
+    <form class="form" style="margin-top:24px" onSubmit=${byName} novalidate>
+      <div>
+        <label class="label" for="invite-handle">Or invite someone already on Snug</label>
+        <div class="copy-row">
+          <input id="invite-handle" class=${`field${error ? ' bad' : ''}`} placeholder="username" value=${handle} autocomplete="off" onInput=${(e) => { setHandle(e.target.value); setError(''); }} />
+          <button class="btn" type="submit">Invite</button>
+        </div>
+        ${error ? html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${error}</div>` : sent ? html`<div class="hint" role="status">${sent}</div>` : null}
+      </div>
+    </form>
     <div class="modal-foot"><button class="btn" onClick=${closeModal}>Done</button></div>`;
+}
+
+// Arriving from an invitation link. The preview is public, so it works before joining.
+export function JoinByLink({ code }) {
+  const [info, setInfo] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api(`/api/invite/${encodeURIComponent(code)}`).then(setInfo, (e) => setError(e.message)); }, []);
+  const go = () => {
+    setBusy(true);
+    joinByCode(code).catch((e) => { setBusy(false); setError(e.offline ? 'You\u2019re offline. Try again when you\u2019re back.' : e.message); });
+  };
+  if (error && !info) {
+    return html`<h2>That invitation doesn\u2019t work</h2><p class="modal-lead">${error}</p>
+      <div class="modal-foot"><button class="btn" data-autofocus onClick=${() => { S.ui.joinCode = null; closeModal(); }}>Close</button></div>`;
+  }
+  if (!info) return html`<div class="skel" style="height:120px"></div>`;
+  const h = info.house;
+  const already = S.houseOrder.some((id) => S.houses[id]?.name === h.name && S.houses[id]?.joined);
+  return html`<div class="join-card">
+    <div class="join-head">
+      <span class="tile lg" style=${`--hue:${h.hue}`}>${h.mark}</span>
+      <div><h2 style="margin:0">${h.name}</h2><div class="faint">${plural(h.members, 'member')}${info.by ? `. ${info.by} invited you` : ''}</div></div>
+    </div>
+    ${h.about && html`<p>${h.about}</p>`}
+    ${error && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${error}</div>`}
+    <div class="modal-foot" style="margin-top:0">
+      <button class="btn" onClick=${() => { S.ui.joinCode = null; closeModal(); }}>Not now</button>
+      <button class="btn primary" data-autofocus disabled=${busy} onClick=${go}>${already ? 'Open' : `Join ${h.name}`}</button>
+    </div>
+  </div>`;
 }
 
 // What a house looks like from the doorstep, before you join.
 export function JoinPreview({ house }) {
   const h = S.houses[house];
-  const members = Object.keys(h.members).map((id) => S.users[id]);
+  const members = Object.keys(h.members).map((id) => S.users[id]).filter(Boolean);
   const here = members.filter((u) => u.presence !== 'offline').length;
   return html`<div class="join-card">
     <div class="join-head">
@@ -107,7 +166,7 @@ export function JoinPreview({ house }) {
     </div>
     <div class="modal-foot" style="margin-top:0">
       <button class="btn" onClick=${closeModal}>Not now</button>
-      <button class="btn primary" data-autofocus onClick=${() => joinHouse(house)}>Join ${h.name}</button>
+      <button class="btn primary" data-autofocus onClick=${() => joinHouse(house).catch((e) => toast(e.offline ? 'You\u2019re offline. Try again when you\u2019re back.' : e.message))}>Join ${h.name}</button>
     </div>
   </div>`;
 }
@@ -116,10 +175,12 @@ export function AddHouse() {
   const [name, setName] = useState('');
   const [hue, setHue] = useState(165);
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
   const submit = (e) => {
     e.preventDefault();
     if (!name.trim()) return setError('Give the house a name.');
-    createHouse({ name: name.trim(), hue });
+    setBusy(true);
+    createHouse({ name: name.trim(), hue }).catch((err) => { setBusy(false); setError(err.offline ? 'You\u2019re offline. Try again when you\u2019re back.' : err.message); });
     return undefined;
   };
   return html`<form class="form" onSubmit=${submit} novalidate>
@@ -127,7 +188,7 @@ export function AddHouse() {
     ${S.invites.length > 0 && html`<div>
       <span class="label">Or accept an invitation</span>
       ${S.invites.map((inv) => html`<button type="button" key=${inv.house} class="menu-item" style="min-height:44px" onClick=${() => openModal(JoinPreview, { house: inv.house })}>
-        <${Tile} house=${S.houses[inv.house]} /><span class="grow trunc">${S.houses[inv.house].name}</span><span class="end">from ${S.users[inv.from].name.split(' ')[0]}</span>
+        <${Tile} house=${S.houses[inv.house]} /><span class="grow trunc">${S.houses[inv.house].name}</span><span class="end">from ${(S.users[inv.from]?.name || 'someone').split(' ')[0]}</span>
       </button>`)}
     </div>`}
     <div>
@@ -145,7 +206,7 @@ export function AddHouse() {
     </div>
     <div class="modal-foot">
       <button type="button" class="btn" onClick=${closeModal}>Cancel</button>
-      <button type="submit" class="btn primary">Create house</button>
+      <button type="submit" class="btn primary" disabled=${busy}>Create house</button>
     </div>
   </form>`;
 }

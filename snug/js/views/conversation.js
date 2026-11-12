@@ -2,7 +2,7 @@
 // panes that belong to it: a thread, and the room's details.
 import { html } from '../../vendor/preact-htm.js';
 import {
-  S, convMeta, membersOf, togglePane, closePane, back, go, joinVoice, leaveVoice, toggleMute, toggleDeaf,
+  S, person, convMeta, membersOf, togglePane, closePane, back, go,
   toggleFollow, setNotify, openModal, jumpToMsg, findMsg, openConv, setReply,
 } from '../store.js';
 import { levelOf, LEVELS, LEVEL_LABEL } from '../lib/attention.js';
@@ -12,6 +12,7 @@ import { plain } from '../lib/format.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Stack, Tile, RoomIcon, Seg, Pres, presenceLabel } from '../ui/kit.js';
 import { Stream, Message, focusComposer } from './stream.js';
+import { joinVoice, leaveVoice, toggleMute, toggleDeaf } from '../voice.js';
 import { RoomForm, RoomBrowser } from './modals.js';
 import { showProfile } from './people.js';
 
@@ -26,27 +27,43 @@ export function VoiceControls({ compact }) {
     <button class="ib danger" aria-label="Leave voice" data-tip="Leave" onClick=${leaveVoice}><${Icon} name="leave" size=${size} /></button>`;
 }
 
+// Each person's line says what is really happening with their audio.
+function peerNote(id, inCall) {
+  if (!inCall || id === S.me) return null;
+  const st = S.peers[id];
+  if (st === 'connected') return null;
+  if (st === 'failed') return 'Can\u2019t connect';
+  if (st === 'disconnected') return 'Reconnecting';
+  return 'Connecting';
+}
+
 function Stage({ roomId }) {
-  const ids = S.voice[roomId] || [];
+  const ids = (S.voice[roomId] || []).filter((id) => S.users[id]);
   const inCall = S.call?.room === roomId;
+  const starting = inCall && S.call.status !== 'live';
   return html`<div class="stage">
     ${ids.length
       ? html`<div class="stage-people">
           ${ids.map((id) => {
             const u = S.users[id];
-            const quiet = id === S.me && S.call?.muted;
+            const st = S.voiceState[roomId]?.[id] || {};
+            const quiet = id === S.me ? S.call?.muted : st.muted;
+            const note = peerNote(id, inCall);
             return html`<div class="stage-person" key=${id}>
               <span style="position:relative">
-                <${Avatar} user=${u} speaking=${!!S.speaking[id]} />
-                ${quiet && html`<span class="muted-ic"><${Icon} name="mic-off" size=${12} /></span>`}
+                <${Avatar} user=${u} speaking=${!!S.speaking[id] && !quiet} dim=${!!note} />
+                ${quiet && html`<span class="muted-ic" aria-label="Muted"><${Icon} name=${st.deaf || (id === S.me && S.call?.deaf) ? 'ear-off' : 'mic-off'} size=${12} /></span>`}
               </span>
               <span class="trunc">${id === S.me ? 'You' : u.name.split(' ')[0]}</span>
+              ${note && html`<span class="stage-note">${note}</span>`}
             </div>`;
           })}
         </div>`
-      : html`<p class="stage-empty">Nobody’s in here yet. Join, and the room shows as live to everyone.</p>`}
+      : html`<p class="stage-empty">${starting ? 'Starting your microphone\u2026' : 'Nobody\u2019s in here yet. Join, and the room shows as live to everyone.'}</p>`}
     <div class="stage-acts">
-      ${inCall ? html`<${VoiceControls} />` : html`<button class="btn primary" onClick=${() => joinVoice(roomId)}><${Icon} name="voice" size=${16} />Join</button>`}
+      ${inCall && !starting
+        ? html`<${VoiceControls} />`
+        : html`<button class="btn primary" disabled=${starting} onClick=${() => joinVoice(roomId)}><${Icon} name="voice" size=${16} />${starting ? 'Joining\u2026' : 'Join'}</button>`}
     </div>
   </div>`;
 }
@@ -199,7 +216,7 @@ export function DetailsPane({ conv }) {
         <h3>Highlights</h3>
         ${highlights.length
           ? highlights.map((m) => html`<button class="hl" key=${m.id} onClick=${() => jumpToMsg(conv, m.id)}>
-              <span class="hl-meta">${S.users[m.author].name}, ${fmtWhen(m.ts)}</span>
+              <span class="hl-meta">${person(m.author).name}, ${fmtWhen(m.ts)}</span>
               <span class="hl-text">${plain(m.text)}</span>
             </button>`)
           : html`<p class="sub">Nothing highlighted yet. ${can(S, room.house, 'highlight') ? 'Open a message’s menu and choose Add to room highlights.' : 'People who look after this room can pin the messages worth keeping.'}</p>`}
@@ -209,7 +226,7 @@ export function DetailsPane({ conv }) {
         ${files.length
           ? files.map(({ f, m }, i) => html`<button class="hl" key=${i} onClick=${() => jumpToMsg(conv, m.id)}>
               <span style="display:flex;gap:8px;align-items:center"><${Icon} name=${f.kind === 'image' ? 'image' : 'file'} size=${16} /><span class="trunc">${f.name}</span></span>
-              <span class="hl-meta">${S.users[m.author].name}, ${fmtWhen(m.ts)}</span>
+              <span class="hl-meta">${person(m.author).name}, ${fmtWhen(m.ts)}</span>
             </button>`)
           : html`<p class="sub">No files have been shared here.</p>`}
       </div>

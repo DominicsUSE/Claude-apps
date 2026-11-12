@@ -1,12 +1,19 @@
 {
   "name": "snug",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "A calm place for your people: houses, rooms, threads and voice.",
   "scripts": {
-    "start": "python3 -m http.server 8765",
-    "test": "node --test tests/logic.test.js",
-    "test:e2e": "node --test tests/e2e.test.js"
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "seed": "node --disable-warning=ExperimentalWarning server/seed.js",
+    "test": "node --disable-warning=ExperimentalWarning --test tests/logic.test.js tests/server.test.js",
+    "test:e2e": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e.test.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "engines": {
+    "node": ">=22.13"
   }
 }

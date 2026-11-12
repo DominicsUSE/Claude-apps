@@ -4,7 +4,7 @@
 import { html } from '../../vendor/preact-htm.js';
 import {
   S, me, go, openConv, openThread, openPop, openMenu, openModal, openQuick, openLayer, toggleHouse, toggleGroup,
-  setNotify, markConvRead, markHouseRead, joinVoice, leaveHouse, deleteRoom, convMeta, isOnline,
+  setNotify, markConvRead, markHouseRead, leaveHouse, deleteRoom, convMeta, isOnline, toast,
 } from '../store.js';
 import { attention, houseAttention, levelOf, unreadOf, threadsOf, totalNeeds, roomIds, LEVELS, LEVEL_LABEL } from '../lib/attention.js';
 import { can } from '../lib/perms.js';
@@ -15,6 +15,7 @@ import { MePop } from './people.js';
 import { RoomForm, Confirm, Invite, AddHouse, NewMessage, RoomBrowser } from './modals.js';
 import { HouseSettings } from './settings.js';
 import { VoiceControls } from './conversation.js';
+import { joinVoice } from '../voice.js';
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
@@ -100,7 +101,7 @@ export function houseMenu(id, pos) {
         onSelect: () => openModal(Confirm, {
           title: `Leave ${h.name}?`, danger: true, action: 'Leave house',
           text: 'Its rooms leave your sidebar. You’ll need a new invitation to come back.',
-          onConfirm: () => leaveHouse(id),
+          onConfirm: () => leaveHouse(id).catch((e) => toast(e.offline ? 'You\u2019re offline. Try again when you\u2019re back.' : e.message)),
         }),
       },
     ],
@@ -242,7 +243,7 @@ export function Nav() {
       <${NavDirect} />
       <${NavHouses} />
     </div>
-    ${!isOnline() && html`<div class="conn" role="status"><${Icon} name="offline" size=${16} />Offline. Reconnecting when the network is back.</div>`}
+    ${!isOnline() && html`<div class="conn" role="status"><${Icon} name="offline" size=${16} />Can\u2019t reach Snug. Trying again\u2026</div>`}
     <${LiveDock} />
   </nav>`;
 }

@@ -1,11 +1,12 @@
 // The root. Picks the desktop frame or the phone product, mounts the floating
 // layers, and owns the global keyboard map.
-import { html, render, useLayoutEffect } from '../vendor/preact-htm.js';
+import { html, render, useEffect, useLayoutEffect } from '../vendor/preact-htm.js';
 import {
   S, emit, useStore, me, go, openConv, back, setTab, closePane, closeMenu, closePop, closeModal, closeLayer,
-  closeQuick, closeLightbox, openQuick, openLayer, openModal, openPop, markAllRead, applyPrefs, convMeta, isOnline,
+  closeQuick, closeLightbox, openQuick, openLayer, openModal, openPop, markAllRead, applyPrefs, convMeta, isOnline, loadCache,
 } from './store.js';
-import { startServer } from './server.js';
+import { api, startTransport } from './server.js';
+import { voiceStats } from './voice.js';
 import { attention, totalNeeds, roomIds } from './lib/attention.js';
 import { Icon } from './ui/icons.js';
 import { Avatar, Pres, PRESENCE, presenceLabel } from './ui/kit.js';
@@ -16,7 +17,8 @@ import { PeoplePane, MePop } from './views/people.js';
 import { CatchUp, Saved } from './views/catchup.js';
 import { Search, QuickJump } from './views/search.js';
 import { Settings } from './views/settings.js';
-import { NewMessage } from './views/modals.js';
+import { NewMessage, JoinByLink } from './views/modals.js';
+import { Auth, Splash } from './views/auth.js';
 
 function MainView() {
   const v = S.ui.view;
@@ -102,7 +104,7 @@ function Phone() {
   return html`<div class="phone">
     <div class="screen root" aria-hidden=${S.ui.depth > 0 ? 'true' : undefined}>
       <div class="tab-body">${body}</div>
-      ${!isOnline() && html`<div class="conn" role="status"><${Icon} name="offline" size=${16} />Offline. Messages wait and send when you’re back.</div>`}
+      ${!isOnline() && html`<div class="conn" role="status"><${Icon} name="offline" size=${16} />Can\u2019t reach Snug. Messages wait and send when it\u2019s back.</div>`}
       <${LiveDock} />
       <nav class="tabs" role="tablist" aria-label="Sections">
         ${TABS.map((t) => html`<button key=${t.id} class="tab" role="tab" aria-selected=${String(tab === t.id)} onClick=${() => setTab(t.id)}>
@@ -154,6 +156,16 @@ addEventListener('popstate', (e) => {
 function App() {
   useStore();
   useLayoutEffect(syncHistory);
+  const inside = S.auth === 'in' && S.ready;
+  // Arrived by an invitation link: offer to join once signed in.
+  useEffect(() => {
+    if (inside && S.ui.joinCode && !S.ui.modal) openModal(JoinByLink, { code: S.ui.joinCode });
+  }, [inside, S.ui.joinCode]);
+  if (!inside) {
+    document.title = 'Snug';
+    if (S.auth === 'out') return html`<${Auth} /><${Toasts} />`;
+    return html`<${Splash} unreachable=${S.auth === 'unreachable'} onRetry=${boot} />`;
+  }
   const needs = totalNeeds(S);
   document.title = needs ? `(${needs}) Snug` : 'Snug';
   return html`${S.ui.phone ? html`<${Phone} />` : html`<${Desktop} />`}<${Overlays} />`;
@@ -196,6 +208,7 @@ function closeTop() {
 }
 
 function onKey(e) {
+  if (S.auth !== 'in' || !S.ready) return undefined;
   const mod = e.metaKey || e.ctrlKey;
   const k = e.key;
   if (mod && !e.shiftKey && k.toLowerCase() === 'k') { e.preventDefault(); return S.ui.quick ? closeQuick() : openQuick(); }
@@ -234,6 +247,28 @@ applyPrefs();
 document.addEventListener('keydown', onKey);
 initTooltips();
 render(html`<${App} />`, document.getElementById('app'));
-startServer();
+
+// Who is this? A valid session opens the app (from the device copy first, so
+// it is instant), no session shows sign-in, and no network opens the device
+// copy if there is one.
+async function boot() {
+  const link = /^\/join\/([\w-]{6,40})$/.exec(location.pathname);
+  if (link) { S.ui.joinCode = link[1]; history.replaceState(history.state, '', '/'); }
+  S.auth = 'checking';
+  emit();
+  try {
+    const r = await api('/api/me');
+    S.me = r.user.id;
+    S.ice = r.ice;
+    S.auth = 'in';
+    loadCache(r.user.id);
+    startTransport();
+  } catch (e) {
+    if (e.status === 401) S.auth = 'out';
+    else if (loadCache()) { S.auth = 'in'; startTransport(); } else S.auth = 'unreachable';
+  }
+  emit();
+}
+boot();
 // Exposed for the end-to-end checks and for poking at state in the console.
-window.snug = { S, emit };
+window.snug = { S, emit, voiceStats };

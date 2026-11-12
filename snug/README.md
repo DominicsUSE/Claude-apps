@@ -3,26 +3,124 @@
 A calm place for your people. Houses (communities) hold rooms, rooms hold
 conversations, and any message can grow a thread. Direct messages, groups,
 voice rooms, roles, search, saved messages and a single place to catch up.
+Real accounts, a real database, live delivery between people.
 
 ![Snug on desktop: a room with a thread open beside it](docs/preview.png)
 
 ## Run it
 
-No build step and no dependencies. Serve the folder and open it:
+Snug is a real multi-user app: a Node server, a SQLite database and a
+WebSocket connection per open tab. It needs Node 22.13 or newer.
 
 ```bash
-cd snug && python3 -m http.server 8765
+cd snug
+npm install
+npm start
 ```
 
-Then open http://localhost:8765. Everything you change is kept in this
-browser. **Settings > Connection > Start over** puts the sample data back.
+Then open http://127.0.0.1:8787 and create an account. A new account starts
+empty: create a house, then invite people with a link.
+
+To start with the sample houses and people instead:
+
+```bash
+npm run seed
+npm start
+```
+
+Sign in as `robin` (or `ines`, `tomasz`, `priya`, `jonas`, `bex` and others)
+with the password `snug-demo-1`. Open a second browser profile or a private
+window and sign in as someone else to talk to yourself. `npm run seed --
+--force` wipes the database and loads the sample data again.
 
 Tests:
 
 ```bash
-npm test            # rules: parsing, grouping, unread, search, permissions
-npm run test:e2e    # drives the real app in Chromium (needs Playwright)
+npm test            # rules (10) and the server with real sockets (21)
+npm run test:e2e    # separate people in separate browsers (17), needs Playwright
 ```
+
+## What is real, and what is not yet
+
+Real, and covered by tests with separate users:
+
+- Accounts, sign-in, sign-out, sign out everywhere, password change.
+- Houses, rooms, roles and permissions, invitations by link and by username,
+  member removal, newcomer onboarding.
+- Messages, replies, threads, edits, deletes with undo, reactions, file and
+  picture uploads. All stored in the database and delivered live.
+- Direct messages and groups.
+- Presence from real connections, typing notices, unread state and saved
+  messages synced across a person's devices.
+- Search over every stored message a person may read.
+- In-app notes and desktop notifications while a tab is open.
+- Voice rooms: real audio between people over WebRTC. The server only
+  introduces them to each other.
+- Offline: the app opens from a copy on the device, what you write waits,
+  and it sends once when the connection is back.
+
+Not built yet, on purpose, because each needs outside infrastructure:
+
+- **Email.** No address verification and no "forgot password". Until then an
+  owner of the server resets a password in the database.
+- **Push notifications when Snug is closed.** Needs a service worker and Web
+  Push keys. Today notifications arrive only while a tab is open.
+- **A TURN relay for voice.** Voice connects directly between people. People
+  behind strict company or mobile networks need a relay; set the `SNUG_TURN_*`
+  variables below once you run one (coturn is the usual choice). Only direct
+  connections have been tested.
+- **More than one server process.** Presence, voice membership and rate
+  limits live in memory, so Snug runs as a single process. That is fine for
+  communities in the thousands; beyond that it needs a shared message bus.
+- **Voice rooms above 12 people.** Audio is a full mesh; larger rooms need a
+  media server.
+
+## Putting it online
+
+Voice and desktop notifications need HTTPS (browsers only allow the
+microphone on secure pages; `localhost` is the one exception). Run Snug
+behind a reverse proxy that terminates TLS and passes WebSocket upgrades on
+`/ws`, and set:
+
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `PORT`, `HOST` | Where to listen | `8787`, `127.0.0.1` |
+| `SNUG_DATA` | Folder for the database and uploaded files | `./data` |
+| `SNUG_SECURE=1` | Mark the session cookie `Secure` (set this behind HTTPS) | off |
+| `SNUG_TRUST_PROXY=1` | Read the client address and scheme from `X-Forwarded-*` | off |
+| `SNUG_ORIGINS` | Extra allowed page origins, comma separated | none |
+| `SNUG_STUN` | STUN servers for voice | Google's public server |
+| `SNUG_TURN_URL`, `SNUG_TURN_USER`, `SNUG_TURN_PASS` | TURN relay for voice | none |
+| `SNUG_DEMO_PASSWORD` | Password for the sample accounts when seeding | `snug-demo-1` |
+
+Back up the `data` folder; it is the whole state. Change the sample password
+before seeding anything that faces the internet, or better, do not seed there.
+
+## Security
+
+- **Passwords**: scrypt with a per-user salt. Sign-in is limited to 10
+  attempts per 15 minutes per address and per username, and takes the same
+  time whether or not the account exists.
+- **Sessions**: a random 256-bit token in an `HttpOnly`, `SameSite=Lax`
+  cookie. The database keeps only its hash. Changing a password or signing
+  out everywhere ends every session and closes its live connections.
+- **Authorization is on the server.** Every action is checked against the
+  database: membership for reading, role permissions for acting. The same
+  permission rules file (`js/lib/perms.js`) runs in the browser to decide
+  what to show and on the server to decide what to allow.
+- **Cross-site requests**: WebSocket upgrades and state-changing requests are
+  refused unless they come from Snug's own origin.
+- **Input**: every field is type- and length-checked. SQL only ever runs as
+  prepared statements with bound values.
+- **Rendering**: message text becomes a token tree and then elements, never
+  HTML. A strict Content-Security-Policy allows scripts only from Snug itself.
+- **Uploads**: 10 MB limit, fetched only by people who can read the
+  conversation, served with `nosniff` and a sandboxing policy. Anything that
+  is not a known image type downloads instead of opening.
+- **Rate limits**: per person for messages, typing, search and general
+  actions; per address for sign-in and registration.
+- **Voice signalling** is relayed only between people in the same voice
+  room, and only members of the house can join it.
 
 ## What makes it different
 
@@ -92,26 +190,43 @@ All tokens are in `css/tokens.css`. The rules, briefly:
 
 ## How it is built
 
-Plain ES modules, Preact with htm (vendored in `vendor/`, no build), one
-state object.
-
 ```
+server/
+  index.js          HTTP: static files, accounts, uploads, security headers
+  hub.js            WebSocket connections, presence, who gets which event, voice rooms
+  ops.js            every action a client can ask for: validate, authorize, write, notify
+  model.js          what a person may see, shaped for the client
+  auth.js           password hashing, sessions, rate limiters
+  db.js             SQLite schema and prepared statements
+  seed.js           loads the sample data as real accounts
 js/
-  app.js            root, desktop vs phone, overlays, keyboard map
-  store.js          state, persistence and every action that changes state
-  server.js         the transport: sending, queueing, failures, other people
-  seed.js           sample houses, people and conversations
+  app.js            root: sign-in or app, desktop or phone, overlays, keyboard map
+  store.js          state and every action; updates the screen at once, then tells the server
+  server.js         the transport: WebSocket with reconnect, the offline send queue, live events
+  voice.js          WebRTC voice: microphone, peer connections, who is speaking
   lib/              pure rules with tests: format, group, attention, search, perms
   ui/               icons, shared pieces (avatar, presence, rich text), overlays
-  views/            nav, stream (messages and composer), conversation, catch up,
+  views/            auth, nav, stream (messages and composer), conversation, catch up,
                     search and quick jump, people, settings, dialogs
 css/                tokens, base components, shell, conversation, other views
+tests/              logic, server integration (real sockets), browser end-to-end
 ```
 
-There is no backend yet. `js/server.js` is the only module that would talk
-to one: it fakes latency, delivery, failures and the other people in the
-sample houses. Replace it with a WebSocket client that keeps the same
-exports and the rest of the app does not change.
+The browser needs no build step: plain ES modules and Preact with htm,
+vendored in `vendor/`. The server has one dependency, `ws`. The database is
+SQLite through Node's built-in `node:sqlite`.
+
+**How a message travels.** The composer shows your message at once and gives
+it an id. The transport sends it; the server checks you may post, stores it
+with the next sequence number, and delivers it to everyone who can read that
+conversation, including your other devices. If the connection is down the
+message waits on screen and is sent when the connection returns. Because the
+id travels with it, a second copy of the same message is ignored, so a
+retry can never post twice. Order everywhere is the server's sequence.
+
+**Reconnecting.** The connection retries with growing pauses (1s up to 15s)
+and immediately when the network or the tab comes back. Every connect
+begins with a full picture from the server, so nothing is missed.
 
 ## Keyboard
 

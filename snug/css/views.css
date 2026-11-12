@@ -98,7 +98,7 @@ button.op:hover { background: var(--chat-hover); }
 .set-row:last-child { border-bottom: 0; }
 .set-label { flex: 1; min-width: 0; }
 .set-label b { font-weight: 500; font-size: var(--t-16); display: block; }
-.set-label span { color: var(--ink-2); display: block; margin-top: 2px; max-width: 52ch; }
+.set-label > span { color: var(--ink-2); display: block; margin-top: 2px; max-width: 52ch; }
 .set-ctl { flex: none; display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; justify-content: flex-end; max-width: 60%; }
 .set-sub { padding: var(--s-2) 0 var(--s-2) var(--s-6); display: flex; align-items: center; gap: var(--s-3); color: var(--ink-2); }
 .set-sub .seg { margin-left: auto; }
@@ -161,7 +161,29 @@ select.field { width: auto; padding-right: var(--s-6); }
 .join-rooms div { display: flex; gap: var(--s-2); align-items: center; }
 .logo { display: inline-flex; align-items: center; gap: var(--s-2); font-weight: 700; font-size: var(--t-16); letter-spacing: -0.01em; }
 
+/* Signing in: the same frame as the app. */
+.auth { height: 100%; display: grid; grid-template-columns: minmax(280px, 2fr) 3fr; }
+.auth-side { background: var(--frame); padding: var(--s-12) var(--s-8); display: flex; flex-direction: column; gap: var(--s-4); }
+.auth-side .logo { font-size: var(--t-24); }
+.auth-side p { color: var(--ink-2); font-size: var(--t-16); max-width: 34ch; line-height: 1.5; }
+.auth-main { background: var(--chat); padding: var(--s-12) var(--s-8); overflow-y: auto; }
+.auth-form { max-width: 360px; }
+.auth-form h1 { font-size: var(--t-20); }
+.auth-form .seg { justify-self: start; }
+.auth-form .btn.primary { justify-self: start; min-width: 140px; }
+.auth-invite { display: flex; gap: var(--s-3); align-items: center; padding-bottom: var(--s-4); border-bottom: 1px solid var(--line); }
+.auth-invite b { display: block; font-weight: 500; }
+.auth-invite span:not(.tile) { color: var(--ink-2); }
+.splash { height: 100%; display: grid; place-content: center; justify-items: center; gap: var(--s-3); background: var(--chat); }
+.splash .logo { font-size: var(--t-24); }
+
 @media (max-width: 759px) {
+  .auth { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .auth-side { padding: var(--s-6) var(--s-4) var(--s-4); }
+  .auth-side p { display: none; }
+  .auth-main { padding: var(--s-6) var(--s-4); }
+  .auth-form { max-width: none; }
+  .auth-form .btn.primary { justify-self: stretch; }
   .col { padding-top: var(--s-2); }
   .item, .news, .invite { padding-left: var(--s-3); padding-right: var(--s-3); }
   .item-acts { display: none !important; }

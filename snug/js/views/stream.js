@@ -2,11 +2,11 @@
 // messages and threads are all the same component.
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import {
-  S, emit, persist, PAGE, scrollPos, convMeta, findMsg, isSaved, isOnline, membersOf, markRead, markUnreadFrom,
+  S, person, emit, persist, PAGE, scrollPos, convMeta, findMsg, isSaved, isOnline, membersOf, markRead, markUnreadFrom,
   openThread, openMenu, openPop, closePop, react, toggleSave, toggleHighlight, deleteMsg, editMsg, setReply,
   setEditing, openLightbox, toast, setPresence, setStatus,
 } from '../store.js';
-import { sendMessage, retry } from '../server.js';
+import { sendMessage, retry, sendTyping, uploadFile, loadHistory } from '../server.js';
 import { buildItems } from '../lib/group.js';
 import { unreadOf, isThread } from '../lib/attention.js';
 import { can, canPost, roleOf } from '../lib/perms.js';
@@ -14,7 +14,6 @@ import { fmtTime, fmtDay, fmtFull, fmtWhen, plural, fileSize, fuzzy, nameList } 
 import { plain, isJumbo, mentions } from '../lib/format.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Rich, Stack, PRESENCE, copyText } from '../ui/kit.js';
-import { ART } from '../seed-art.js';
 import { showProfile } from './people.js';
 import { EmojiPicker, EMOJI, QUICK } from './emoji.js';
 
@@ -91,23 +90,25 @@ function EditBox({ conv, m }) {
 function Files({ files }) {
   return html`<div class="files">
     ${files.map((f, i) => {
-      const src = f.art ? ART[f.art] : f.src;
+      const url = f.id ? `/api/files/${f.id}` : null;
+      const src = f.src || url;
       if (f.kind === 'image' && src) {
         return html`<button key=${i} class="img" style=${`aspect-ratio:${f.w}/${f.h};width:${Math.min(420, f.w)}px`}
           aria-label=${`Open image ${f.name}`} onClick=${() => openLightbox(src, f.name)}>
           <img src=${src} alt=${f.name} />
         </button>`;
       }
-      return html`<div key=${i} class="file">
-        <${Icon} name=${f.kind === 'image' ? 'image' : 'file'} />
-        <span class="trunc"><span class="file-name trunc" style="display:block">${f.name}</span><span class="file-size">${f.size ? fileSize(f.size) : 'Image not kept on this device'}</span></span>
-      </div>`;
+      const body = html`<${Icon} name=${f.kind === 'image' ? 'image' : 'file'} />
+        <span class="trunc"><span class="file-name trunc" style="display:block">${f.name}</span><span class="file-size">${fileSize(f.size || 0)}${url ? ', download' : ''}</span></span>`;
+      return url
+        ? html`<a key=${i} class="file" href=${url} download=${f.name}>${body}</a>`
+        : html`<div key=${i} class="file">${body}</div>`;
     })}
   </div>`;
 }
 
 export function Message({ conv, m, grouped, inThread, tab }) {
-  const u = S.users[m.author];
+  const u = person(m.author);
   const meta = convMeta(conv);
   const role = meta?.house ? roleOf(S, meta.house, m.author) : null;
   const pending = m.state === 'sending' || m.state === 'queued';
@@ -134,13 +135,13 @@ export function Message({ conv, m, grouped, inThread, tab }) {
   const cls = `msg${grouped ? ' grouped' : ''}${forMe ? ' mention' : ''}${pending ? ' pending' : ''}${quoted ? ' has-ref' : ''}${S.ui.menu?.owner === m.id ? ' menu-open' : ''}`;
   const reactions = Object.entries(m.reactions || {});
   const threadUnread = replies.length ? unreadOf(S, `t:${m.id}`).count : 0;
-  const authors = [...new Set(replies.map((r) => r.author))].map((id) => S.users[id]);
+  const authors = [...new Set(replies.map((r) => r.author))].map((id) => person(id));
 
   return html`<div class=${cls} data-id=${m.id} data-conv=${conv} tabindex=${tab ? 0 : -1}
     onContextMenu=${onContext} onPointerDown=${onDown} onPointerUp=${cancel} onPointerMove=${cancel} onPointerCancel=${cancel}>
     ${quoted && html`<button class="reply-ref" onClick=${() => { S.ui.jump = { conv, id: quoted.id, n: (S.ui.jump?.n || 0) + 1 }; emit(); }}>
-      <${Avatar} user=${S.users[quoted.author]} />
-      <b>${S.users[quoted.author].name}</b>
+      <${Avatar} user=${person(quoted.author)} />
+      <b>${person(quoted.author).name}</b>
       <span class="trunc">${plain(quoted.text) || 'Attachment'}</span>
     </button>`}
     <div class="msg-gutter">
@@ -162,7 +163,7 @@ export function Message({ conv, m, grouped, inThread, tab }) {
       ${m.files?.length > 0 && html`<${Files} files=${m.files} />`}
       ${reactions.length > 0 && html`<div class="reactions">
         ${reactions.map(([e, who]) => {
-          const names = nameList(who.map((id) => (id === S.me ? 'You' : S.users[id].name.split(' ')[0])));
+          const names = nameList(who.map((id) => (id === S.me ? 'You' : person(id).name.split(' ')[0])));
           return html`<button key=${e} class=${`rx${who.includes(S.me) ? ' mine' : ''}`} aria-pressed=${String(who.includes(S.me))}
             aria-label=${`${e}, ${plural(who.length, 'reaction')}: ${names}`} data-tip=${names} onClick=${() => react(conv, m.id, e)}>
             <span>${e}</span><span>${who.length}</span>
@@ -177,7 +178,7 @@ export function Message({ conv, m, grouped, inThread, tab }) {
       </button></div>`}
       ${m.state === 'queued' && html`<div class="msg-state"><${Icon} name="offline" size=${14} />Waiting for a connection. It will send by itself.</div>`}
       ${m.state === 'failed' && html`<div class="msg-state failed" role="alert">
-        <${Icon} name="alert" size=${14} />Not sent.
+        <${Icon} name="alert" size=${14} />Not sent. ${m.error || ''}
         <button onClick=${() => retry(conv, m)}>Try again</button>
         <button onClick=${() => deleteMsg(conv, m.id)}>Delete</button>
       </div>`}
@@ -234,18 +235,21 @@ function suggest(value, caret, conv) {
 
 const MAX_FILE = 10 * 1024 * 1024;
 
+// Photos are scaled down to 1600px and re-encoded before upload: smaller to
+// send, and it strips location and camera data. GIFs keep their animation.
 function readImage(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
-      const k = Math.min(1, 1280 / Math.max(img.width, img.height));
+      if (file.type === 'image/gif') { resolve({ blob: file, w: img.naturalWidth, h: img.naturalHeight, src: url }); return; }
+      const k = Math.min(1, 1600 / Math.max(img.width, img.height));
       const c = document.createElement('canvas');
       c.width = Math.round(img.width * k);
       c.height = Math.round(img.height * k);
       c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-      URL.revokeObjectURL(url);
-      resolve({ kind: 'image', name: file.name, w: c.width, h: c.height, src: c.toDataURL('image/jpeg', 0.82) });
+      const type = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+      c.toBlob((blob) => (blob ? resolve({ blob, w: c.width, h: c.height, src: url }) : reject(new Error('unreadable'))), type, 0.85);
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('unreadable')); };
     img.src = url;
@@ -272,6 +276,7 @@ export function Composer({ conv, placeholder }) {
   };
   const onInput = (e) => {
     update(e.target.value);
+    if (e.target.value.trim() && !e.target.value.startsWith('/')) sendTyping(conv);
     setAc(suggest(e.target.value, e.target.selectionStart, conv));
   };
   const insert = (str, from, to) => {
@@ -288,10 +293,14 @@ export function Composer({ conv, placeholder }) {
     else if (ac.kind === 'emoji') insert(`${item[0]} `, ac.from, to);
     else insert(`/${item.name} `, 0, to);
   };
+  const uploading = files.some((f) => f.status === 'uploading');
   const submit = () => {
     const body = text.trim();
-    if (!body && !files.length) return;
-    if (!(body.startsWith('/') && runCommand(conv, body))) sendMessage(conv, body, { replyTo: replyTo?.id, files });
+    const ready = files.filter((f) => f.status === 'ready');
+    if (uploading || (!body && !ready.length)) return;
+    if (files.some((f) => f.status === 'error')) { toast('Remove the attachment that didn\u2019t upload, or attach it again.'); return; }
+    const out = ready.map(({ id, kind, name, size, w, h, src }) => ({ id, kind, name, size, w, h, src }));
+    if (!(body.startsWith('/') && runCommand(conv, body))) sendMessage(conv, body, { replyTo: replyTo?.id, files: out });
     update('');
     setFiles([]);
     setAc(null);
@@ -310,15 +319,23 @@ export function Composer({ conv, placeholder }) {
       if (mine) { e.preventDefault(); setEditing(mine.id); }
     } else if (e.key === 'Escape' && replyTo) { e.preventDefault(); e.stopPropagation(); setReply(conv, null); }
   };
+  // Each file uploads as soon as it is attached, so Send is instant.
+  const patch = (key, d) => setFiles((cur) => cur.map((x) => (x.key === key ? { ...x, ...d } : x)));
   const addFiles = async (list) => {
-    const out = [];
-    for (const f of list) {
-      if (f.size > MAX_FILE) { toast(`${f.name} is ${fileSize(f.size)}. The limit is 10 MB.`); continue; }
-      if (f.type.startsWith('image/')) {
-        try { out.push(await readImage(f)); } catch { toast(`Couldn’t read ${f.name}. Try a JPG or PNG.`); }
-      } else out.push({ kind: 'file', name: f.name, size: f.size });
+    for (const f of list.slice(0, 6 - files.length)) {
+      if (f.size > MAX_FILE) { toast(`${f.name} is ${fileSize(f.size)}. Files can be up to 10 MB.`); continue; }
+      const key = Math.random().toString(36).slice(2);
+      const image = /^image\/(png|jpeg|gif|webp)$/.test(f.type);
+      setFiles((cur) => [...cur, { key, kind: image ? 'image' : 'file', name: f.name, size: f.size, status: 'uploading' }]);
+      try {
+        let blob = f, extra = {};
+        if (image) { const r = await readImage(f); blob = r.blob; extra = { w: r.w, h: r.h, src: r.src }; patch(key, { src: r.src }); }
+        const up = await uploadFile(conv, blob, f.name);
+        patch(key, { ...extra, id: up.id, size: up.size, status: 'ready' });
+      } catch (err) {
+        patch(key, { status: 'error', error: err.message === 'unreadable' ? `Couldn\u2019t read ${f.name}.` : err.message });
+      }
     }
-    if (out.length) setFiles((cur) => [...cur, ...out].slice(0, 6));
   };
   const onPaste = (e) => {
     const list = [...(e.clipboardData?.files || [])];
@@ -328,7 +345,7 @@ export function Composer({ conv, placeholder }) {
   if (!gate.ok) {
     return html`<div class="composer"><div class="composer-locked"><${Icon} name="news" /><span>${gate.why}</span></div></div>`;
   }
-  const canSend = text.trim() || files.length;
+  const canSend = !uploading && (text.trim() || files.some((f) => f.status === 'ready'));
   return html`<div class="composer" data-composer=${conv}
     onDragOver=${(e) => e.preventDefault()} onDrop=${(e) => { e.preventDefault(); addFiles([...e.dataTransfer.files]); }}>
     ${ac && html`<div class="ac float" role="listbox" aria-label="Suggestions">
@@ -342,14 +359,15 @@ export function Composer({ conv, placeholder }) {
     <div class="composer-box">
       ${replyTo && html`<div class="composer-banner">
         <${Icon} name="reply" size=${16} />
-        <span class="trunc grow">Replying to <b>${S.users[replyTo.author].name}</b> ${plain(replyTo.text)}</span>
+        <span class="trunc grow">Replying to <b>${person(replyTo.author).name}</b> ${plain(replyTo.text)}</span>
         <button class="ib sm" aria-label="Cancel reply" data-tip="Cancel reply" data-key="Esc" onClick=${() => setReply(conv, null)}><${Icon} name="x" size=${16} /></button>
       </div>`}
       ${files.length > 0 && html`<div class="composer-files">
         ${files.map((f, i) => html`<div class="pending-file" key=${i}>
-          ${f.kind === 'image' ? html`<img src=${f.src} alt="" />` : html`<${Icon} name="file" />`}
-          <span class="trunc">${f.name}</span>
-          <button class="ib sm" aria-label=${`Remove ${f.name}`} onClick=${() => setFiles(files.filter((_, j) => j !== i))}><${Icon} name="x" size=${16} /></button>
+          ${f.kind === 'image' && f.src ? html`<img src=${f.src} alt="" />` : html`<${Icon} name=${f.status === 'error' ? 'alert' : 'file'} />`}
+          <span class="pending-name"><span class="trunc">${f.name}</span>
+            <span class=${`pending-state${f.status === 'error' ? ' bad' : ''}`}>${f.status === 'uploading' ? 'Uploading\u2026' : f.status === 'error' ? f.error : fileSize(f.size)}</span></span>
+          <button class="ib sm" aria-label=${`Remove ${f.name}`} onClick=${() => setFiles(files.filter((x) => x.key !== f.key))}><${Icon} name="x" size=${16} /></button>
         </div>`)}
       </div>`}
       <div class="composer-row">
@@ -366,7 +384,7 @@ export function Composer({ conv, placeholder }) {
 }
 
 function Foot({ conv }) {
-  const who = (S.typing[conv] || []).map((id) => S.users[id].name.split(' ')[0]);
+  const who = (S.typing[conv] || []).filter((id) => id !== S.me).map((id) => person(id).name.split(' ')[0]);
   return html`<div class="foot" aria-live="polite">
     ${who.length > 0 && html`<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span><b>${nameList(who)}</b> ${who.length > 1 ? 'are' : 'is'} typing</span>`}
   </div>`;
@@ -389,14 +407,8 @@ export function Stream({ conv, intro, placeholder }) {
   const [below, setBelow] = useState(0);
   const [far, setFar] = useState(false);
   const [older, setOlder] = useState(null);
-  const [ready, setReady] = useState(!!S.ui.loaded[conv]);
+  const ready = true;
 
-  // First visit this session: a short fetch, shown as the shape of what is coming.
-  useEffect(() => {
-    if (ready) return undefined;
-    const t = setTimeout(() => { S.ui.loaded[conv] = true; setReady(true); }, 220);
-    return () => clearTimeout(t);
-  }, []);
 
   // Arriving: where you left off if you were here this session, else the
   // first unread with some context above it, else the latest.
@@ -460,15 +472,15 @@ export function Stream({ conv, intro, placeholder }) {
     return () => window.removeEventListener('focus', f);
   }, []);
 
+  // Older messages: first from what is already on the device, then from the server.
   const loadOlder = () => {
+    if (scroller.current) prepend.current = scroller.current.scrollHeight;
+    S.ui.win[conv] = (S.ui.win[conv] || PAGE) + PAGE;
+    if (start > 0) { emit(); return; }
+    if (!S.more[conv] || older === 'loading') return;
     setOlder('loading');
-    setTimeout(() => {
-      if (!isOnline()) return setOlder('error');
-      if (scroller.current) prepend.current = scroller.current.scrollHeight;
-      S.ui.win[conv] = (S.ui.win[conv] || PAGE) + PAGE;
-      setOlder(null);
-      emit();
-    }, 500);
+    const first = all.find((m) => m.seq != null);
+    loadHistory(conv, { before: first?.seq }).then(() => setOlder(null), (e) => { prepend.current = null; setOlder(e.offline ? 'error' : 'fail'); });
   };
 
   const onScroll = () => {
@@ -481,7 +493,7 @@ export function Stream({ conv, intro, placeholder }) {
       if (below) setBelow(0);
       markRead(conv);
     } else scrollPos.set(conv, el.scrollTop);
-    if (el.scrollTop < 120 && start > 0 && !older) loadOlder();
+    if (el.scrollTop < 120 && (start > 0 || S.more[conv]) && !older) loadOlder();
   };
   const toBottom = () => {
     const el = scroller.current;
@@ -523,9 +535,9 @@ export function Stream({ conv, intro, placeholder }) {
       ${!ready
         ? html`<div class="msgs"><${Skeleton} rows=${[72, 48, 64, 40, 56]} /></div>`
         : html`<div class="msgs" ref=${inner} role="log" aria-label="Messages">
-          ${start > 0
-            ? (older === 'error'
-              ? html`<div class="older-msg">Earlier messages can’t load while you’re offline. <button class="btn quiet" onClick=${loadOlder}>Try again</button></div>`
+          ${start > 0 || S.more[conv]
+            ? (older === 'error' || older === 'fail'
+              ? html`<div class="older-msg">${older === 'error' ? 'Earlier messages can\u2019t load while you\u2019re offline.' : 'Earlier messages didn\u2019t load.'} <button class="btn quiet" onClick=${() => { setOlder(null); loadOlder(); }}>Try again</button></div>`
               : html`<${Skeleton} rows=${[56, 40]} />`)
             : intro}
           ${items.map((it) => {

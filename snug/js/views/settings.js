@@ -2,10 +2,11 @@
 // house's settings in another. Every change applies at once; nothing to save.
 import { html, useState } from '../../vendor/preact-htm.js';
 import {
-  S, me, closeLayer, setPref, updateMe, setNotify, openModal, resetAll, updateHouse, addRole, removeRole,
-  updateRole, setRolePerm, setMemberRole, leaveHouse,
+  S, me, closeLayer, setPref, updateMe, setNotify, openModal, updateHouse, addRole, removeRole,
+  updateRole, setRolePerm, setMemberRole, leaveHouse, removeMember, signedOut, toast,
 } from '../store.js';
-import { setSimOffline, setSimFail } from '../server.js';
+import { api, stopTransport } from '../server.js';
+import { leaveVoice } from '../voice.js';
 import { LEVEL_LABEL, levelOf, roomIds } from '../lib/attention.js';
 import { PERMS, can } from '../lib/perms.js';
 import { fuzzy } from '../lib/util.js';
@@ -47,7 +48,7 @@ const PAGES = [
   { id: 'notify', label: 'Notifications', icon: 'bell', words: 'mute quiet alerts pop-ups focus' },
   { id: 'look', label: 'Appearance', icon: 'eye', words: 'theme dark light density compact text size motion animation contrast accessibility' },
   { id: 'keys', label: 'Keyboard', icon: 'keys', words: 'shortcuts keys hotkeys' },
-  { id: 'conn', label: 'Connection', icon: 'offline', words: 'offline network test failure reset demo' },
+  { id: 'account', label: 'Account', icon: 'shield', words: 'account password sign out log out devices sessions connection' },
 ];
 
 const PREVIEW = [
@@ -84,6 +85,9 @@ function Notify() {
     <p class="lead">One setting per place, three choices. Rooms follow their house unless you change one from its menu.</p>
     <${Row} label="Pop-ups" hint="A small note at the top when something needs you and you’re looking elsewhere.">
       <${Switch} on=${S.prefs.toasts} label="Pop-ups" onChange=${(v) => setPref('toasts', v)} />
+    <//>
+    <${Row} label="Desktop notifications" hint=${desktopHint()}>
+      <${Switch} on=${S.prefs.desktop && typeof Notification !== 'undefined' && Notification.permission === 'granted'} label="Desktop notifications" onChange=${setDesktop} />
     <//>
     <${Row} label="While you’re Focused" hint=${`Nothing pops up. Everything collects in Catch up. ${me().presence === 'focus' ? 'You’re focused now.' : 'Set it from your name at the top of the sidebar.'}`}>
       <span class="sub" style="display:flex;gap:8px;align-items:center"><i class="pres inline focus"></i>${PRESENCE.focus.label}</span>
@@ -153,33 +157,89 @@ function Keys() {
     </div>`;
 }
 
-function Conn() {
+// Desktop notifications appear while Snug is open in a background tab.
+const desktopHint = () => {
+  if (typeof Notification === 'undefined') return 'This browser doesn\u2019t support them.';
+  if (Notification.permission === 'denied') return 'Your browser is blocking them for Snug. Allow notifications in its site settings.';
+  return 'When Snug is open in another tab and something needs you. Only on this device.';
+};
+async function setDesktop(on) {
+  if (!on) return setPref('desktop', false);
+  if (typeof Notification === 'undefined') return undefined;
+  const p = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+  setPref('desktop', p === 'granted');
+  if (p !== 'granted') toast('Notifications are blocked. Allow them in your browser\u2019s site settings.');
+  return undefined;
+}
+
+const CONN_TEXT = {
+  open: 'Connected. Messages arrive as they are sent.',
+  connecting: 'Connecting\u2026',
+  reconnecting: 'Can\u2019t reach Snug. Trying again; what you write waits and sends when it\u2019s back.',
+  closed: 'Can\u2019t reach Snug. Trying again; what you write waits and sends when it\u2019s back.',
+  idle: 'Not connected.',
+};
+
+function PasswordForm() {
+  const [cur, setCur] = useState('');
+  const [next, setNext] = useState('');
+  const [msg, setMsg] = useState(null);
+  const submit = async (e) => {
+    e.preventDefault();
+    if (next.length < 8) return setMsg({ bad: true, text: 'Passwords need at least 8 characters.' });
+    try {
+      await api('/api/password', { current: cur, next });
+      setCur(''); setNext('');
+      setMsg({ text: 'Password changed. Other devices have been signed out.' });
+    } catch (err) { setMsg({ bad: true, text: err.message }); }
+    return undefined;
+  };
+  return html`<form class="form" style="max-width:320px" onSubmit=${submit} novalidate>
+    <div><label class="label" for="pw-cur">Current password</label><input id="pw-cur" class="field" type="password" autocomplete="current-password" value=${cur} onInput=${(e) => setCur(e.target.value)} /></div>
+    <div><label class="label" for="pw-next">New password</label><input id="pw-next" class="field" type="password" autocomplete="new-password" value=${next} onInput=${(e) => setNext(e.target.value)} /><div class="hint">At least 8 characters.</div></div>
+    ${msg && html`<div class=${msg.bad ? 'err' : 'hint'} role=${msg.bad ? 'alert' : 'status'}>${msg.text}</div>`}
+    <div><button class="btn" type="submit" disabled=${!cur || !next}>Change password</button></div>
+  </form>`;
+}
+
+async function signOut(everywhere) {
+  leaveVoice();
+  try { await api(everywhere ? '/api/logout-all' : '/api/logout', {}); } catch { /* signing out locally anyway */ }
+  stopTransport();
+  closeLayer();
+  signedOut();
+}
+
+function Account() {
+  const u = me();
   return html`
-    <h1>Connection</h1>
-    <p class="lead">Snug keeps working when the network doesn’t. These switches let you see how.</p>
-    <${Row} label="Pretend to be offline" hint="Messages you send wait in place and go out by themselves when you switch this off.">
-      <${Switch} on=${S.conn.simOffline} label="Pretend to be offline" onChange=${setSimOffline} />
+    <h1>Account</h1>
+    <p class="lead">Signed in as <b style="font-weight:500">${u.name}</b> (@${u.handle}).</p>
+    <${Row} label="Connection" hint=${CONN_TEXT[S.conn.socket]}>
+      <span class="sub" style="display:flex;gap:8px;align-items:center"><i class=${`pres inline ${S.conn.socket === 'open' ? 'open' : 'offline'}`}></i>${S.conn.socket === 'open' ? 'Online' : 'Offline'}</span>
     <//>
-    <${Row} label="Make sending fail" hint="Each new message fails, so you can see how retry works.">
-      <${Switch} on=${S.conn.simFail} label="Make sending fail" onChange=${setSimFail} />
+    <div class="set-head">Password</div>
+    <div style="padding:16px 0"><${PasswordForm} /></div>
+    <div class="set-head">Sign out</div>
+    <${Row} label="Sign out on this device" hint="Your houses and messages stay on the server.">
+      <button class="btn" onClick=${() => signOut(false)}>Sign out</button>
     <//>
-    <div class="set-head">Sample data</div>
-    <${Row} label="Start over" hint="Puts back the sample houses and conversations, and clears your drafts, saved messages and settings on this device.">
+    <${Row} label="Sign out everywhere" hint="Ends every session on every device, including this one.">
       <button class="btn danger" onClick=${() => openModal(Confirm, {
-        title: 'Start over?', danger: true, action: 'Start over',
-        text: 'Everything you’ve written and changed on this device goes. The sample data comes back.',
-        onConfirm: resetAll,
-      })}>Start over</button>
+        title: 'Sign out everywhere?', danger: true, action: 'Sign out everywhere',
+        text: 'Every device signed in as you will need your password again.',
+        onConfirm: () => signOut(true),
+      })}>Sign out everywhere</button>
     <//>`;
 }
 
-const VIEWS = { profile: Profile, notify: Notify, look: Look, keys: Keys, conn: Conn };
+const VIEWS = { profile: Profile, notify: Notify, look: Look, keys: Keys, account: Account };
 
 export function Settings({ page: start = 'profile' }) {
   const [page, setPage] = useState(start);
   const V = VIEWS[page];
   return html`<${Layer} title="Settings" icon=${html`<${Icon} name="sliders" />`} pages=${PAGES} page=${page} setPage=${setPage}
-    foot=${html`<${Mark} size=${16} /><span>Snug 0.1</span>`}>
+    foot=${html`<${Mark} size=${16} /><span>Snug 0.2</span>`}>
     <${V} />
   <//>`;
 }
@@ -209,7 +269,7 @@ function HouseAbout({ house }) {
     <//>
     <div class="set-head">Leave</div>
     <${Row} label=${`Leave ${h.name}`} hint="Its rooms leave your sidebar. You’ll need a new invitation to come back.">
-      <button class="btn danger" onClick=${() => openModal(Confirm, { title: `Leave ${h.name}?`, danger: true, action: 'Leave house', text: 'You’ll need a new invitation to come back.', onConfirm: () => leaveHouse(house) })}>Leave house</button>
+      <button class="btn danger" onClick=${() => openModal(Confirm, { title: `Leave ${h.name}?`, danger: true, action: 'Leave house', text: 'You’ll need a new invitation to come back.', onConfirm: () => leaveHouse(house).catch((e) => toast(e.message)) })}>Leave house</button>
     <//>`;
 }
 
@@ -228,7 +288,7 @@ function HouseRoles({ house }) {
           <span class="row-ic"><i class=${`hue-dot${r.hue == null ? ' none' : ''}`} style=${r.hue != null ? `--hue:${r.hue}` : ''}></i></span>
           <span class="grow trunc">${r.name}</span><span class="row-end faint num">${count(r.id)}</span>
         </button>`)}
-        <button class="row" onClick=${() => setSel(addRole(house))}><span class="row-ic"><${Icon} name="plus" size=${16} /></span><span class="grow">New role</span></button>
+        <button class="row" onClick=${() => addRole(house).then((rid) => rid && setSel(rid))}><span class="row-ic"><${Icon} name="plus" size=${16} /></span><span class="grow">New role</span></button>
       </div>
       <div>
         <${Row} label="Name"><input class="field" style="width:200px" key=${role.id} value=${role.name} maxlength="24" aria-label="Role name" onChange=${(e) => e.target.value.trim() && updateRole(house, role.id, { name: e.target.value.trim() })} /><//>
@@ -255,7 +315,7 @@ function HouseRoles({ house }) {
 function HouseMembers({ house }) {
   const h = S.houses[house];
   const [q, setQ] = useState('');
-  const ids = Object.keys(h.members).filter((id) => fuzzy(q, S.users[id].name) >= 0).sort((a, b) => S.users[a].name.localeCompare(S.users[b].name));
+  const ids = Object.keys(h.members).filter((id) => S.users[id] && fuzzy(q, S.users[id].name) >= 0).sort((a, b) => S.users[a].name.localeCompare(S.users[b].name));
   return html`
     <h1>Members</h1>
     <p class="lead">${Object.keys(h.members).length} people. Change someone’s role here.</p>
@@ -266,6 +326,11 @@ function HouseMembers({ house }) {
       <select class="field" aria-label=${`Role for ${S.users[id].name}`} value=${h.members[id]} disabled=${id === S.me} onChange=${(e) => setMemberRole(house, id, e.target.value)}>
         ${h.roles.map((r) => html`<option value=${r.id}>${r.name}</option>`)}
       </select>
+      ${id !== S.me && html`<button class="ib danger" aria-label=${`Remove ${S.users[id].name} from ${h.name}`} data-tip="Remove from house" onClick=${() => openModal(Confirm, {
+        title: `Remove ${S.users[id].name}?`, danger: true, action: 'Remove',
+        text: `${S.users[id].name} leaves ${h.name} and its rooms. They can come back with a new invitation.`,
+        onConfirm: () => removeMember(house, id),
+      })}><${Icon} name="leave" size=${18} /></button>`}
     </div>`)}`;
 }
 

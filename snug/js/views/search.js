@@ -10,22 +10,44 @@ import { fmtWhen, plural, fuzzy } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Tile, RoomIcon, Rich, Empty } from '../ui/kit.js';
 import { Settings } from './settings.js';
+import { searchMessages } from '../server.js';
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 
-const EXAMPLES = [
-  ['kaolin', 'Any message containing a word'],
-  ['from:sunniva kaolin', 'Only what one person wrote'],
-  ['in:"glaze lab" has:image', 'Pictures shared in one room'],
-  ['has:file', 'Messages with a file attached'],
-  ['is:saved', 'Only messages you saved'],
-];
+// Examples use a real person and room of yours, so they work when clicked.
+function examples() {
+  const someone = Object.values(S.users).find((u) => u.id !== S.me)?.handle || 'name';
+  const room = S.houseOrder.flatMap((h) => roomIds(S, h)).map((id) => S.rooms[id]).find((r) => r?.kind === 'text')?.name.toLowerCase() || 'room name';
+  return [
+    [`from:${someone}`, 'Only what one person wrote'],
+    [`in:"${room}" has:image`, 'Pictures shared in one room'],
+    ['has:file', 'Messages with a file attached'],
+    ['has:link', 'Messages with a link'],
+    ['is:saved', 'Only messages you saved'],
+  ];
+}
 
 export function Search() {
   const q = S.ui.view.q || '';
   const input = useRef();
   const p = parseQuery(q);
-  const hits = runSearch(S, p);
+  // Results come from the server, which searches every stored message you can
+  // read. Offline, search covers the messages already on this device.
+  const [res, setRes] = useState({ q: null, hits: [], local: false });
+  const empty = isEmptyQuery(p);
+  useEffect(() => {
+    if (empty) { setRes({ q, hits: [], local: false }); return undefined; }
+    let live = true;
+    const t = setTimeout(() => {
+      searchMessages(q).then(
+        (hits) => live && setRes({ q, hits, local: false }),
+        (e) => live && (e.offline ? setRes({ q, hits: runSearch(S, p), local: true }) : setRes({ q, hits: [], error: e.message })),
+      );
+    }, 220);
+    return () => { live = false; clearTimeout(t); };
+  }, [q, S.conn.socket === 'open']);
+  const loading = !empty && res.q !== q;
+  const hits = res.hits;
   const set = (next) => { S.ui.view = { type: 'search', q: next }; emit(); };
   useEffect(() => {
     const el = input.current;
@@ -65,24 +87,30 @@ export function Search() {
       </div>
     </div>
     <div class="view-body">
-      ${isEmptyQuery(p)
+      ${empty
         ? html`<div class="ops">
             <p class="sub">Type a word, or narrow it down. The filters above write these for you.</p>
             <h3>Examples</h3>
-            ${EXAMPLES.map(([ex, what]) => html`<button class="op" key=${ex} onClick=${() => { set(ex); input.current.focus(); }}><code>${ex}</code><span>${what}</span></button>`)}
+            ${examples().map(([ex, what]) => html`<button class="op" key=${ex} onClick=${() => { set(ex); input.current.focus(); }}><code>${ex}</code><span>${what}</span></button>`)}
           </div>`
+        : loading && !hits.length
+          ? html`<div class="col" aria-busy="true"><div class="older">${[64, 48, 72].map((w) => html`<div class="older-row"><div class="skel"></div><div class="skel" style=${`width:${w}%`}></div></div>`)}</div></div>`
+        : res.error
+          ? html`<${Empty} icon="alert" title="Search didn\u2019t work" text=${res.error} />`
         : !hits.length
           ? html`<${Empty} icon="search" title="No messages match" text=${filtered ? 'A filter may be hiding it. Try with fewer filters, or a shorter word.' : 'Try a shorter word, or part of one. Search looks inside every room and conversation you can open.'}>
               ${filtered && html`<button class="btn" onClick=${() => set(p.terms.join(' '))}>Clear filters</button>`}
             <//>`
           : html`<div class="col">
-              <div class="view-note">${hits.length === 80 ? 'First 80 messages' : plural(hits.length, 'message')}, newest first</div>
+              <div class="view-note">${hits.length === 80 ? 'First 80 messages' : plural(hits.length, 'message')}, newest first${res.local ? '. You\u2019re offline, so this only covers messages already on this device.' : ''}</div>
               ${hits.map(({ conv, m }) => {
                 const meta = convMeta(conv);
+                const who = S.users[m.author];
+                if (!meta || !who) return null;
                 return html`<div class="item" key=${m.id}>
-                  <${Avatar} user=${S.users[m.author]} />
+                  <${Avatar} user=${who} />
                   <button class="item-main" onClick=${() => jumpToMsg(conv, m.id)}>
-                    <span class="item-meta"><b>${S.users[m.author].name}</b><span class="where">${isThread(conv) ? `thread in ${meta.where}` : meta.title}</span><span class="num">${fmtWhen(m.ts)}</span></span>
+                    <span class="item-meta"><b>${who.name}</b><span class="where">${isThread(conv) ? `thread in ${meta.where}` : meta.title}</span><span class="num">${fmtWhen(m.ts)}</span></span>
                     <span class="item-text"><${Rich} m=${m} hl=${p.terms} /></span>
                     ${m.files?.length > 0 && html`<span class="item-meta"><${Icon} name="clip" size=${14} />${m.files.map((f) => f.name).join(', ')}</span>`}
                   </button>
