@@ -5,7 +5,7 @@ import {
   S, person, convMeta, membersOf, togglePane, closePane, back, go,
   toggleFollow, setNotify, openModal, jumpToMsg, findMsg, openConv, setReply,
 } from '../store.js';
-import { levelOf, LEVELS, LEVEL_LABEL } from '../lib/attention.js';
+import { levelOf, levelsFor, LEVEL_LABEL } from '../lib/attention.js';
 import { can } from '../lib/perms.js';
 import { fmtWhen, plural } from '../lib/util.js';
 import { plain } from '../lib/format.js';
@@ -177,7 +177,7 @@ const LEVEL_HINT = {
 };
 
 export function NotifyControl({ kind, id, level }) {
-  const options = (kind === 'dm' ? ['all', 'muted'] : LEVELS).map((l) => [l, LEVEL_LABEL[l]]);
+  const options = levelsFor(S, kind, id).map((l) => [l, LEVEL_LABEL[l]]);
   return html`<${Seg} label="Notify me about" value=${level} options=${options} onChange=${(l) => setNotify(kind, id, l)} />`;
 }
 

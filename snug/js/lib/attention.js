@@ -8,6 +8,13 @@ export const LEVEL_LABEL = { all: 'Everything', mentions: 'Only what needs me', 
 
 export const isThread = (conv) => conv.startsWith('t:');
 
+// A group is a direct conversation with more than one other person.
+export const isGroup = (S, conv) => (S.dms[conv]?.members.length || 0) > 2;
+
+// Which levels a place offers. A one-to-one conversation is always for you,
+// so its only choice is whether to hear about it.
+export const levelsFor = (S, kind, id) => (kind === 'dm' && !isGroup(S, id) ? ['all', 'muted'] : LEVELS);
+
 // Thread -> its room; room or direct conversation -> itself.
 export const parentOf = (S, conv) => (isThread(conv) ? S.threads[conv]?.conv : conv);
 
@@ -19,17 +26,26 @@ export function levelOf(S, conv) {
   return S.dms[id]?.notify || 'all';
 }
 
-// Does this one message need me personally?
-// Direct messages, mentions, replies to my messages, and replies in threads I follow.
-// Everything else is "new activity": worth a dot, never a number.
-export function needsMe(S, conv, m) {
+// Is this message addressed to me: does it mention me, or reply to something I wrote?
+// The message list highlights exactly these, so what is counted and what is shown agree.
+export function forMe(S, conv, m) {
   if (m.author === S.me || m.sys) return false;
-  if (S.dms[conv]) return true;
-  if (mentions(m.text, S.users[S.me].handle)) return true;
+  if (mentions(m.text, S.users[S.me]?.handle)) return true;
   if (m.replyTo) {
     const target = (S.msgs[conv] || []).find((x) => x.id === m.replyTo);
     if (target && target.author === S.me) return true;
   }
+  return false;
+}
+
+// Does this one message need me personally?
+// Direct messages (in a group set to "Only what needs me", only mentions and
+// replies), mentions, replies to my messages, and replies in threads I follow.
+// Everything else is "new activity": worth a dot, never a number.
+export function needsMe(S, conv, m) {
+  if (m.author === S.me || m.sys) return false;
+  if (S.dms[conv] && !(isGroup(S, conv) && S.dms[conv].notify === 'mentions')) return true;
+  if (forMe(S, conv, m)) return true;
   if (isThread(conv) && S.followed[conv]) return true;
   return false;
 }

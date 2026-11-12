@@ -3,11 +3,11 @@
 import { html, render, useEffect, useLayoutEffect } from '../vendor/preact-htm.js';
 import {
   S, emit, useStore, me, go, openConv, back, setTab, closePane, closeMenu, closePop, closeModal, closeLayer,
-  closeQuick, closeLightbox, openQuick, openLayer, openModal, openPop, markAllRead, applyPrefs, convMeta, isOnline, loadCache,
+  closeQuick, closeLightbox, openQuick, openLayer, openModal, openPop, markHouseRead, markConvRead, applyPrefs, convMeta, isOnline, loadCache,
 } from './store.js';
 import { api, startTransport } from './server.js';
 import { voiceStats } from './voice.js';
-import { attention, totalNeeds, roomIds } from './lib/attention.js';
+import { attention, houseAttention, totalNeeds, roomIds } from './lib/attention.js';
 import { Icon } from './ui/icons.js';
 import { Avatar, Pres, PRESENCE, presenceLabel } from './ui/kit.js';
 import { Menu, Pop, ModalFrame, Toasts, Lightbox, initTooltips } from './ui/overlays.js';
@@ -213,9 +213,17 @@ function onKey(e) {
   const k = e.key;
   if (mod && !e.shiftKey && k.toLowerCase() === 'k') { e.preventDefault(); return S.ui.quick ? closeQuick() : openQuick(); }
   if (mod && e.shiftKey && k.toLowerCase() === 'f') { e.preventDefault(); return go({ type: 'search', q: '' }); }
+  // Esc closes the top layer; with nothing to close it marks the open place read,
+  // as people expect from other chat apps. Shift+Esc marks the whole house read.
+  // Marking everything read is a button in Catch up, never a stray key.
   if (k === 'Escape') {
-    if (e.shiftKey) { e.preventDefault(); return markAllRead(); }
-    if (closeTop() !== false) e.preventDefault();
+    if (!e.shiftKey && closeTop() !== false) { e.preventDefault(); return undefined; }
+    const conv = S.ui.view.type === 'conv' ? S.ui.view.id : null;
+    if (!conv || S.ui.modal || S.ui.layer || S.ui.quick || S.ui.menu || S.ui.pop) return undefined;
+    const house = S.rooms[conv]?.house;
+    if (e.shiftKey && house) {
+      if (houseAttention(S, house).soft || houseAttention(S, house).needs) { e.preventDefault(); markHouseRead(house); }
+    } else if (attention(S, conv).soft || attention(S, conv).needs) { e.preventDefault(); markConvRead(conv); }
     return undefined;
   }
   if (S.ui.modal || S.ui.layer || S.ui.quick || S.ui.menu || S.ui.pop) return undefined;

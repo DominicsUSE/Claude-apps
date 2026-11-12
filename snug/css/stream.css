@@ -43,7 +43,7 @@
 /* A mention of you is highlighted. A mention of someone else is just a name. */
 .at { font-weight: 500; border-radius: 2px; padding: 0 2px; background: var(--hover); cursor: pointer; }
 .at.at-you { background: var(--mark); color: var(--on-mark); }
-mark.hit { background: var(--mark); color: var(--on-mark); border-radius: 2px; padding: 0 1px; }
+mark.hit { background: none; color: inherit; font-weight: 700; text-decoration: underline 2px var(--ink-3); text-underline-offset: 3px; }
 
 /* Reply reference: an elbow from the margin up to the quoted line. */
 .reply-ref { grid-column: 2; display: flex; align-items: center; gap: var(--s-1); min-width: 0; max-width: 46rem; margin-bottom: 2px; font-size: var(--t-14); color: var(--ink-2); position: relative; border-radius: var(--r-ctl); text-align: left; }
@@ -71,7 +71,7 @@ mark.hit { background: var(--mark); color: var(--on-mark); border-radius: 2px; p
 .stub:hover { background: var(--hover); color: var(--ink); }
 .stub .avatar { --sz: 18px; }
 .stub b { font-weight: 500; color: var(--ink); }
-.stub.unread b::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--mark); margin-left: var(--s-2); vertical-align: middle; box-shadow: 0 0 0 1px var(--on-mark); }
+.stub.unread b::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); margin-left: var(--s-2); vertical-align: middle; }
 
 /* Attachments are separate objects, so they are the one place a card is right. */
 .files { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-1); }
@@ -96,8 +96,8 @@ mark.hit { background: var(--mark); color: var(--on-mark); border-radius: 2px; p
 .thread-count { padding: var(--s-3) var(--s-4) 0; padding-left: calc(var(--s-4) + var(--avatar) + var(--s-3)); font-size: var(--t-12); font-weight: 500; color: var(--ink-3); }
 .thread-count + .day { margin-top: var(--s-3); }
 .newline { display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-4); margin-top: var(--s-3); height: 16px; }
-.newline::before { content: ""; flex: 1; height: 1.5px; background: color-mix(in oklch, var(--mark) 75%, var(--on-mark)); }
-.newline span { background: var(--mark); color: var(--on-mark); font-size: var(--t-12); font-weight: 700; padding: 0 var(--s-2); border-radius: var(--r-full); line-height: 16px; }
+.newline::before { content: ""; flex: 1; height: 1px; background: var(--ink-3); }
+.newline span { color: var(--ink); border: 1px solid var(--ink-3); background: var(--chat); font-size: var(--t-12); font-weight: 700; padding: 0 var(--s-2); border-radius: var(--r-full); line-height: 14px; }
 .newline + .msg { margin-top: var(--s-2); }
 .older { padding: var(--s-4); display: grid; gap: var(--s-3); }
 .older-row { display: grid; grid-template-columns: var(--avatar) 1fr; gap: var(--s-3); }

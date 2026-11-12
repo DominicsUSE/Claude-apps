@@ -5,6 +5,7 @@ import { roleOf } from '../lib/perms.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Pres, PRESENCE, presenceLabel } from '../ui/kit.js';
 import { Settings } from './settings.js';
+import { hueOf } from '../lib/util.js';
 
 export function showProfile(user, anchor, house) {
   openPop({ anchor, label: `${user.name}, profile`, C: ProfileCard, props: { id: user.id, house } });
@@ -25,7 +26,7 @@ function ProfileCard({ id, house }) {
     <div class="profile-line"><${Pres} user=${u} inline /><span>${presenceLabel(u)}${u.status ? `. ${u.status}` : ''}</span></div>
     ${u.about && html`<p>${u.about}</p>`}
     ${role && html`<div class="profile-roles">
-      <span class="role-tag"><i class=${`hue-dot${role.hue == null ? ' none' : ''}`} style=${role.hue != null ? `--hue:${role.hue}` : ''}></i>${role.name} in ${S.houses[house].name}</span>
+      <span class="role-tag"><i class=${`hue-dot${role.hue == null ? ' none' : ''}`} style=${role.hue != null ? `--hue:${hueOf(role.hue)}` : ''}></i>${role.name} in ${S.houses[house].name}</span>
     </div>`}
     <div class="profile-acts">
       ${id === S.me
@@ -67,7 +68,7 @@ function PersonRow({ u, house }) {
   return html`<button class="person" onClick=${(e) => showProfile(u, e.currentTarget.getBoundingClientRect(), house)}>
     <${Avatar} user=${u} presence dim=${u.presence === 'offline'} speaking=${!!S.speaking[u.id]} />
     <span class="grow">
-      <span class=${`person-name trunc${role?.hue != null ? ' role-name' : ''}`} style=${`display:block${role?.hue != null ? `;--hue:${role.hue}` : ''}`}>${u.name}${u.id === S.me ? ' (you)' : ''}</span>
+      <span class=${`person-name trunc${role?.hue != null ? ' role-name' : ''}`} style=${`display:block${role?.hue != null ? `;--hue:${hueOf(role.hue)}` : ''}`}>${u.name}${u.id === S.me ? ' (you)' : ''}</span>
       <span class=${`person-sub trunc${live ? ' is-live' : ''}`} style="display:block">${live ? `In ${S.rooms[live].name}` : u.status || PRESENCE[u.presence].label}</span>
     </span>
   </button>`;

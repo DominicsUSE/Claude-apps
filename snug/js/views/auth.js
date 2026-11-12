@@ -5,6 +5,7 @@ import { S, emit, loadCache } from '../store.js';
 import { api, startTransport } from '../server.js';
 import { Icon, Mark } from '../ui/icons.js';
 import { Seg } from '../ui/kit.js';
+import { hueOf } from '../lib/util.js';
 
 function entered(user) {
   S.me = user.id;
@@ -53,7 +54,7 @@ export function Auth() {
     <main class="auth-main">
       <form class="form auth-form" onSubmit=${submit} novalidate>
         ${invite && html`<div class="auth-invite">
-          <span class="tile lg" style=${`--hue:${invite.house.hue}`}>${invite.house.mark}</span>
+          <span class="tile lg" style=${`--hue:${hueOf(invite.house.hue)}`}>${invite.house.mark}</span>
           <div><b>${invite.by ? `${invite.by} invited you to ${invite.house.name}` : `You’re invited to ${invite.house.name}`}</b>
           <span>${mode === 'new' ? 'Create an account to join.' : 'Sign in to join.'}</span></div>
         </div>`}

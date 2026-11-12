@@ -36,7 +36,7 @@ window and sign in as someone else to talk to yourself. `npm run seed --
 Tests:
 
 ```bash
-npm test            # rules (10) and the server with real sockets (21)
+npm test            # rules (13) and the server with real sockets (22)
 npm run test:e2e    # separate people in separate browsers (17), needs Playwright
 ```
 
@@ -166,11 +166,14 @@ existing chat apps:
    me?" first (mentions, replies to you, direct messages, followed threads,
    invitations), then summarises what happened in each room: how many
    messages, from whom, and the one message people reacted to most.
-   It works as a triage list: `J`/`K` to move, `E` when done, `Enter` to
-   open; on a phone, swipe an item left. Done items can be undone.
+   Each conversation is one item however many messages it holds, so a busy
+   group is one line to deal with. It works as a triage list: `J`/`K` to
+   move, `E` to mark read, `Enter` to open; on a phone, swipe an item left.
+   Marking read can be undone.
    Notification settings are one control per place with three choices:
    *Everything*, *Only what needs me*, *Nothing*. Rooms inherit from their
-   house. The whole policy lives in `js/lib/attention.js`.
+   house; groups can choose *Only what needs me* too (mentions and replies).
+   A message counts as yours exactly when it is highlighted as yours. The whole policy lives in `js/lib/attention.js`.
 2. **Threads with a real place in the layout.** A thread opens in the side
    pane next to the conversation it came from, and an elbow line visibly
    branches it from its message. Threads you follow appear under their room
@@ -179,7 +182,9 @@ existing chat apps:
 3. **Presence that says what someone is open to.** *Open to talk*, *Around*,
    *Focused* (holds pop-ups, everything waits in Catch up), *Away*, and
    *In a voice room*, which wins because it is the most useful thing to know.
-   Each state has its own shape, not only its own colour.
+   Each state has its own shape, not only its own colour: a filled dot, a
+   ring around a dot, a dot with a bar, a half dot, and an empty ring for
+   offline.
 
 Also: the back button and the phone's back gesture close the open room,
 pane or dialog one layer at a time instead of leaving the app. A High
@@ -206,16 +211,20 @@ All tokens are in `css/tokens.css`. The rules, briefly:
 - **Colour.** One green-grey hue for every neutral; depth comes from shade
   steps, never shadows. Only floating layers cast the single shadow. Amber is
   a highlighter: always a fill behind ink, never text, and it means one
-  thing, *this is addressed to you*. Green means live or open to talk. Red
-  means destructive or failed. The main button is ink, not a brand colour.
-  People, roles and houses choose a hue only; the theme owns lightness and
-  chroma, so every chosen colour stays readable in light and dark.
+  thing, *this is addressed to you*: new-message lines, thread dots and
+  search hits use ink, an outline or an underline instead. Green means live
+  or open to talk. Red means destructive or failed. A filled ink button is
+  the main action; selected and switched-on controls use the quieter
+  selection shade, so the main button stands out by being the only one.
+  People, roles and houses choose a named hue only; the theme owns lightness
+  and chroma, and the offered hues stay clear of red, amber and green, so a
+  chosen colour never reads as a warning, a highlight or a presence.
 - **Type.** Atkinson Hyperlegible Next (bundled, OFL) for everything,
   Atkinson Hyperlegible Mono for code. Five sizes (12, 14, 16, 20, 24) and
   three weights (400 reading, 500 names and selection, 700 headings).
   Messages are 16px with a 46rem line cap.
 - **Space.** 4px base: 4, 8, 12, 16, 24, 32, 48. Tight inside a message
-  group, 16px between groups. Three densities: Snug, Regular, Roomy.
+  group, 16px between groups. Three densities: Compact, Regular, Roomy.
 - **Radius.** 4px for controls, 8px for panels, media and floating layers,
   round for people. Houses are square, people are round.
 - **Motion.** 120ms for hover and press, 180ms for things that enter.
@@ -269,4 +278,5 @@ begins with a full picture from the server, so nothing is missed.
 `Alt Shift ↓` next place with news. `Shift Tab` from an empty message box
 moves into the messages, then `↑/↓` to move, `R` reply, `T` thread, `S`
 save, `E` edit, `Enter` all actions. In Catch up, `J`/`K` move and `E`
-marks done. `Esc` closes the top layer. `?` shows the full list.
+marks read. `Esc` closes the top layer; with nothing open it marks the open
+place read, and `Shift Esc` marks the whole house read. `?` shows the full list.

@@ -4,12 +4,11 @@ import {
   S, closeModal, createRoom, updateRoom, createHouse, joinHouse, joinByCode, startDm, openConv, openModal, toast,
 } from '../store.js';
 import { roomIds } from '../lib/attention.js';
-import { fuzzy, plural } from '../lib/util.js';
+import { fuzzy, plural, HUES, hueOf } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Tile, RoomIcon, Seg, copyText } from '../ui/kit.js';
 import { call, api } from '../server.js';
 
-export const HUES = [15, 35, 60, 95, 130, 165, 190, 215, 250, 290, 310, 350];
 
 export function Confirm({ title, text, action, danger, onConfirm }) {
   return html`
@@ -134,7 +133,7 @@ export function JoinByLink({ code }) {
   const already = S.houseOrder.some((id) => S.houses[id]?.name === h.name && S.houses[id]?.joined);
   return html`<div class="join-card">
     <div class="join-head">
-      <span class="tile lg" style=${`--hue:${h.hue}`}>${h.mark}</span>
+      <span class="tile lg" style=${`--hue:${hueOf(h.hue)}`}>${h.mark}</span>
       <div><h2 style="margin:0">${h.name}</h2><div class="faint">${plural(h.members, 'member')}${info.by ? `. ${info.by} invited you` : ''}</div></div>
     </div>
     ${h.about && html`<p>${h.about}</p>`}
@@ -173,7 +172,7 @@ export function JoinPreview({ house }) {
 
 export function AddHouse() {
   const [name, setName] = useState('');
-  const [hue, setHue] = useState(165);
+  const [hue, setHue] = useState(HUES[5][0]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const submit = (e) => {
@@ -201,7 +200,7 @@ export function AddHouse() {
     <div>
       <span class="label">Colour</span>
       <div class="swatches" role="group" aria-label="House colour">
-        ${HUES.map((v) => html`<button type="button" key=${v} class="swatch strong" style=${`--hue:${v}`} aria-pressed=${String(hue === v)} aria-label=${`Hue ${v}`} onClick=${() => setHue(v)}></button>`)}
+        ${HUES.map(([v, name]) => html`<button type="button" key=${v} class="swatch strong" style=${`--hue:${v}`} aria-pressed=${String(hue === v)} aria-label=${name} onClick=${() => setHue(v)}></button>`)}
       </div>
     </div>
     <div class="modal-foot">

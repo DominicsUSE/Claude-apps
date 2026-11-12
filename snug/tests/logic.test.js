@@ -4,11 +4,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parse, isJumbo, plain, mentions } from '../js/lib/format.js';
 import { buildItems } from '../js/lib/group.js';
-import { needsMe, attention, levelOf, unreadOf, totalNeeds } from '../js/lib/attention.js';
+import { needsMe, forMe, attention, levelOf, levelsFor, unreadOf, totalNeeds } from '../js/lib/attention.js';
 import { parseQuery, runSearch, setOp } from '../js/lib/search.js';
 import { can, canPost } from '../js/lib/perms.js';
 import { seed } from '../js/seed.js';
-import { MIN, DAY } from '../js/lib/util.js';
+import { MIN, DAY, HUES, hueOf } from '../js/lib/util.js';
 
 const NOW = new Date(2026, 10, 12, 15, 0).getTime();
 const fresh = () => seed(NOW);
@@ -67,6 +67,43 @@ test('needs me: direct messages, mentions, replies to me, followed threads', () 
   assert.equal(needsMe(S, 't:m_layer', m('more')), true);
   assert.equal(needsMe(S, 't:m_buff', m('more')), false);
   assert.equal(needsMe(S, 'd_ines', { ...m('x'), author: 'robin' }), false);
+});
+
+test('what is highlighted as for me is what counts as for me', () => {
+  const S = fresh();
+  const m = (text, extra = {}) => ({ id: 'z', author: 'malik', ts: NOW, text, ...extra });
+  const mine = S.msgs.k_glaze.find((x) => x.author === 'robin');
+  const reply = m('agreed', { replyTo: mine.id });
+  assert.equal(forMe(S, 'k_glaze', reply), true);
+  assert.equal(needsMe(S, 'k_glaze', reply), forMe(S, 'k_glaze', reply));
+  assert.equal(forMe(S, 'k_floor', m('@robin look')), true);
+  assert.equal(forMe(S, 'k_floor', m('hi all')), false);
+  assert.equal(forMe(S, 'k_floor', { ...m('@robin me'), author: 'robin' }), false);
+});
+
+test('a group can narrow to what needs me; a one-to-one conversation cannot', () => {
+  const S = fresh();
+  const m = (text) => ({ id: 'z', author: 'malik', ts: NOW, text });
+  assert.deepEqual(levelsFor(S, 'dm', 'd_ines'), ['all', 'muted']);
+  assert.deepEqual(levelsFor(S, 'dm', 'g_sat'), ['all', 'mentions', 'muted']);
+  assert.equal(needsMe(S, 'g_sat', m('who is in?')), true);
+  S.dms.g_sat.notify = 'mentions';
+  assert.equal(needsMe(S, 'g_sat', m('who is in?')), false);
+  assert.equal(needsMe(S, 'g_sat', m('@robin are you in?')), true);
+  S.dms.d_ines.notify = 'mentions';
+  assert.equal(needsMe(S, 'd_ines', m('hi')), true);
+});
+
+test('chosen colours stay clear of the colours that carry meaning', () => {
+  const reserved = [27, 90, 150, 165];
+  const gap = (a, b) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
+  for (const [h, name] of HUES) {
+    assert.ok(name && !/^Hue/.test(name));
+    for (const r of reserved) assert.ok(gap(h, r) >= 25, `${name} (${h}) is too close to ${r}`);
+  }
+  for (let h = 0; h < 360; h += 5) assert.ok(HUES.some(([v]) => v === hueOf(h)));
+  assert.equal(hueOf(165), 195);
+  assert.equal(hueOf(null), null);
 });
 
 test('notification levels: everything, only what needs me, nothing', () => {

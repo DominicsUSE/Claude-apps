@@ -28,6 +28,7 @@
 .item-meta b { font-size: var(--t-14); font-weight: 500; color: var(--ink); }
 .item-meta .where { color: var(--ink-2); }
 .item-text { font-size: var(--t-16); line-height: var(--lh); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.item-more { display: block; font-size: var(--t-12); color: var(--ink-3); margin-top: var(--s-1); }
 .item-acts { position: absolute; right: var(--s-4); top: var(--s-1); display: none; padding: 2px; }
 .item:hover .item-acts, .item:focus-within .item-acts { display: flex; }
 .item-acts .ib { width: 28px; height: 28px; }
@@ -130,7 +131,7 @@ select.field { width: auto; padding-right: var(--s-6); }
 .profile-head { display: flex; gap: var(--s-3); align-items: center; }
 .profile-head .avatar { --sz: 56px; }
 .profile-head .pres { width: 14px; height: 14px; right: 0; bottom: 0; }
-.profile-head .pres.around { border-width: 3.5px; }
+.profile-head .pres.around { border-width: 2px; }
 .profile-head .pres.focus::after { left: 3px; right: 3px; top: 6px; }
 .profile-name { font-size: var(--t-16); font-weight: 700; line-height: 1.25; }
 .profile-line { display: flex; align-items: center; gap: var(--s-2); color: var(--ink-2); }

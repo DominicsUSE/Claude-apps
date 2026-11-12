@@ -294,7 +294,9 @@ export function createOps({ db, M, hub }) {
     'notify.set'(c, d) {
       const kind = oneOf(d.kind, ['house', 'room', 'dm'], 'Where');
       const place = id(d.id, kind);
-      const level = oneOf(d.level, kind === 'dm' ? ['all', 'muted'] : LEVELS, 'That level');
+      // A one-to-one conversation is always for you; a group can narrow to mentions and replies.
+      const group = kind === 'dm' && db.get('SELECT COUNT(*) AS n FROM dm_members WHERE dm = ?', place).n > 2;
+      const level = oneOf(d.level, kind === 'dm' && !group ? ['all', 'muted'] : LEVELS, 'That level');
       const put = (p, l) => db.run('INSERT INTO notify (user, place, level) VALUES (?, ?, ?) ON CONFLICT (user, place) DO UPDATE SET level = excluded.level', c.user, p, l);
       const drop = (p) => db.run('DELETE FROM notify WHERE user = ? AND place = ?', c.user, p);
       if (kind === 'house') {
@@ -464,7 +466,7 @@ export function createOps({ db, M, hub }) {
       if (db.get('SELECT COUNT(*) n FROM roles WHERE house = ?', houseId).n >= 20) fail('A house can have up to 20 roles.');
       const rid = newId('role');
       const pos = db.get('SELECT MAX(pos) p FROM roles WHERE house = ?', houseId).p + 1;
-      db.run('INSERT INTO roles (id, house, name, hue, perms, pos) VALUES (?, ?, ?, ?, ?, ?)', rid, houseId, 'New role', 180, JSON.stringify(['post']), pos);
+      db.run('INSERT INTO roles (id, house, name, hue, perms, pos) VALUES (?, ?, ?, ?, ?, ?)', rid, houseId, 'New role', 235, JSON.stringify(['post']), pos);
       hub.houseChanged(houseId);
       return { id: rid };
     },

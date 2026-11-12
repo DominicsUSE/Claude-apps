@@ -73,3 +73,20 @@ export function fuzzy(query, text) {
 }
 
 export const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+
+// The colours people, roles and houses can choose: hues only, named for screen
+// readers, and kept clear of the hues that carry meaning (danger red near 27,
+// amber near 90, live green near 150, the neutral grey-green near 165).
+export const HUES = [[55, 'Orange'], [115, 'Lime'], [195, 'Teal'], [215, 'Cyan'], [235, 'Sky'], [255, 'Blue'], [280, 'Indigo'], [305, 'Violet'], [330, 'Plum'], [350, 'Pink']];
+
+// Any stored hue, shown as the nearest choosable one, so older choices never
+// read as a warning, a highlight or a presence colour.
+export function hueOf(h) {
+  if (h == null) return h;
+  let best = HUES[0][0], gap = 360;
+  for (const [v] of HUES) {
+    const d = Math.min(Math.abs(v - h), 360 - Math.abs(v - h));
+    if (d < gap) { gap = d; best = v; }
+  }
+  return best;
+}

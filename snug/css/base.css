@@ -96,7 +96,7 @@ textarea.field { height: auto; padding: var(--s-2); resize: vertical; line-heigh
   transition: background var(--m-fast), color var(--m-fast);
 }
 .seg button:hover { background: var(--hover); color: var(--ink); }
-.seg button[aria-pressed="true"] { background: var(--ink); color: var(--chat); font-weight: 500; }
+.seg button[aria-pressed="true"] { background: var(--frame-sel); color: var(--ink); font-weight: 500; }
 
 /* Switch: on or off, takes effect at once. */
 .switch {
@@ -109,7 +109,7 @@ textarea.field { height: auto; padding: var(--s-2); resize: vertical; line-heigh
   border-radius: 50%; background: var(--chat);
   transition: transform var(--m-fast) var(--ease);
 }
-.switch[aria-checked="true"] { background: var(--ink); }
+.switch[aria-checked="true"] { background: var(--ink-2); }
 .switch[aria-checked="true"]::after { transform: translateX(16px); }
 
 /* Counts and dots: two levels of unread. */
@@ -147,7 +147,7 @@ button.avatar { cursor: pointer; }
 }
 .pres.inline { position: relative; right: auto; bottom: auto; box-shadow: none; flex: none; }
 .pres.open { background: var(--live); }
-.pres.around { border: 2.5px solid var(--live); }
+.pres.around { border: 1.5px solid var(--live); background: radial-gradient(circle closest-side, var(--live) 0 52%, var(--bg) 60%); }
 .pres.focus { background: var(--ink-2); }
 .pres.focus::after { content: ""; position: absolute; left: 2px; right: 2px; top: 4px; height: 2px; border-radius: 1px; background: var(--bg); }
 .pres.away { border: 1.5px solid var(--ink-3); background: linear-gradient(90deg, var(--ink-3) 50%, var(--bg) 50%); }

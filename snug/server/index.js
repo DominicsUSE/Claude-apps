@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from './db.js';
 import { createModel, newId } from './model.js';
 import { createHub } from './hub.js';
+import { HUES } from '../js/lib/util.js';
 import {
   hashPassword, checkPassword, burnPasswordCheck, createSession, sessionUser, endSession, endAllSessions,
   readCookie, sessionCookie, COOKIE, limiter,
@@ -151,7 +152,7 @@ export async function startServer({
       if (password.length < 8 || password.length > 200) return error(res, 400, 'Passwords need at least 8 characters.');
       if (db.get('SELECT 1 FROM users WHERE handle = ?', handleV)) return error(res, 409, `@${handleV} is taken. Try another username.`);
       const id = newId('u');
-      const hue = [15, 35, 60, 95, 130, 165, 190, 215, 250, 290, 310, 350][Math.floor(Math.random() * 12)];
+      const hue = HUES[Math.floor(Math.random() * HUES.length)][0];
       db.run('INSERT INTO users (id, handle, name, pass, hue, created) VALUES (?, ?, ?, ?, ?, ?)', id, handleV, name, hashPassword(password), hue, Date.now());
       const token = createSession(db, id);
       log('register', handleV);

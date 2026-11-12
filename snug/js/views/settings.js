@@ -9,11 +9,11 @@ import { api, stopTransport } from '../server.js';
 import { leaveVoice } from '../voice.js';
 import { LEVEL_LABEL, levelOf, roomIds } from '../lib/attention.js';
 import { PERMS, can } from '../lib/perms.js';
-import { fuzzy } from '../lib/util.js';
+import { fuzzy, HUES, hueOf } from '../lib/util.js';
 import { Icon, Mark } from '../ui/icons.js';
 import { Avatar, Tile, Seg, Switch, PRESENCE } from '../ui/kit.js';
 import { Message } from './stream.js';
-import { Confirm, HUES } from './modals.js';
+import { Confirm } from './modals.js';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
 const MOD = isMac ? '⌘' : 'Ctrl';
@@ -73,7 +73,7 @@ function Profile() {
     <//>
     <${Row} label="Colour" hint="Behind your initials. Every colour stays readable in both themes." top>
       <div class="swatches" role="group" aria-label="Avatar colour">
-        ${HUES.map((v) => html`<button key=${v} class="swatch" style=${`--hue:${v}`} aria-pressed=${String(u.hue === v)} aria-label=${`Hue ${v}`} onClick=${() => updateMe({ hue: v })}></button>`)}
+        ${HUES.map(([v, name]) => html`<button key=${v} class="swatch" style=${`--hue:${v}`} aria-pressed=${String(hueOf(u.hue) === v)} aria-label=${name} onClick=${() => updateMe({ hue: v })}></button>`)}
       </div>
     <//>`;
 }
@@ -118,7 +118,7 @@ function Look() {
     <h1>Appearance</h1>
     <p class="lead">Changes apply as you make them.</p>
     <${Row} label="Theme"><${Seg} label="Theme" value=${p.theme} options=${[['system', 'Match device'], ['light', 'Light'], ['dark', 'Dark']]} onChange=${(v) => setPref('theme', v)} /><//>
-    <${Row} label="Density" hint="How tightly messages sit. Snug fits the most on screen."><${Seg} label="Density" value=${p.density} options=${[['snug', 'Snug'], ['regular', 'Regular'], ['roomy', 'Roomy']]} onChange=${(v) => setPref('density', v)} /><//>
+    <${Row} label="Density" hint="How tightly messages sit. Compact fits the most on screen."><${Seg} label="Density" value=${p.density} options=${[['snug', 'Compact'], ['regular', 'Regular'], ['roomy', 'Roomy']]} onChange=${(v) => setPref('density', v)} /><//>
     <${Row} label="Text size"><${Seg} label="Text size" value=${p.text} options=${[['s', 'Small'], ['m', 'Medium'], ['l', 'Large']]} onChange=${(v) => setPref('text', v)} /><//>
     <${Row} label="Contrast" hint="High makes secondary text, times and outlines darker and the focus ring thicker."><${Seg} label="Contrast" value=${p.contrast || 'system'} options=${[['system', 'Match device'], ['standard', 'Standard'], ['high', 'High']]} onChange=${(v) => setPref('contrast', v)} /><//>
     <div class="preview" aria-hidden="true">
@@ -133,8 +133,8 @@ const KEYS = [
   [['Alt', '↑'], 'Previous room or conversation'],
   [['Alt', '↓'], 'Next room or conversation'],
   [['Alt', 'Shift', '↓'], 'Next place with something new'],
-  [['Esc'], 'Close the top layer, then the side pane'],
-  [['Shift', 'Esc'], 'Mark everything as read'],
+  [['Esc'], 'Close the top layer, then the side pane. With nothing open, mark this place read'],
+  [['Shift', 'Esc'], 'Mark this whole house read'],
   [['↑'], 'In an empty message box: edit your last message'],
   [['Shift', 'Tab'], 'From the message box: go up into the messages'],
   [['↑', '↓'], 'On a message: move between messages'],
@@ -264,7 +264,7 @@ function HouseAbout({ house }) {
     <//>
     <${Row} label="Colour" top>
       <div class="swatches" role="group" aria-label="House colour">
-        ${HUES.map((v) => html`<button key=${v} class="swatch strong" style=${`--hue:${v}`} aria-pressed=${String(h.hue === v)} aria-label=${`Hue ${v}`} onClick=${() => updateHouse(house, { hue: v })}></button>`)}
+        ${HUES.map(([v, name]) => html`<button key=${v} class="swatch strong" style=${`--hue:${v}`} aria-pressed=${String(hueOf(h.hue) === v)} aria-label=${name} onClick=${() => updateHouse(house, { hue: v })}></button>`)}
       </div>
     <//>
     <div class="set-head">Leave</div>
@@ -285,7 +285,7 @@ function HouseRoles({ house }) {
     <div class="role-list">
       <div class="role-pick">
         ${h.roles.map((r) => html`<button key=${r.id} class=${`row${r.id === role.id ? ' sel' : ''}`} onClick=${() => setSel(r.id)}>
-          <span class="row-ic"><i class=${`hue-dot${r.hue == null ? ' none' : ''}`} style=${r.hue != null ? `--hue:${r.hue}` : ''}></i></span>
+          <span class="row-ic"><i class=${`hue-dot${r.hue == null ? ' none' : ''}`} style=${r.hue != null ? `--hue:${hueOf(r.hue)}` : ''}></i></span>
           <span class="grow trunc">${r.name}</span><span class="row-end faint num">${count(r.id)}</span>
         </button>`)}
         <button class="row" onClick=${() => addRole(house).then((rid) => rid && setSel(rid))}><span class="row-ic"><${Icon} name="plus" size=${16} /></span><span class="grow">New role</span></button>
@@ -295,7 +295,7 @@ function HouseRoles({ house }) {
         <${Row} label="Name colour" hint="People with this role show their name in it." top>
           <div class="swatches" role="group" aria-label="Role colour">
             <button class="swatch" style="--hue:165;--tile-c:0" aria-pressed=${String(role.hue == null)} aria-label="No colour" onClick=${() => updateRole(house, role.id, { hue: null })}></button>
-            ${HUES.map((v) => html`<button key=${v} class="swatch strong" style=${`--hue:${v}`} aria-pressed=${String(role.hue === v)} aria-label=${`Hue ${v}`} onClick=${() => updateRole(house, role.id, { hue: v })}></button>`)}
+            ${HUES.map(([v, name]) => html`<button key=${v} class="swatch strong" style=${`--hue:${v}`} aria-pressed=${String(role.hue != null && hueOf(role.hue) === v)} aria-label=${name} onClick=${() => updateRole(house, role.id, { hue: v })}></button>`)}
           </div>
         <//>
         <div class="set-head">What ${role.name} can do</div>

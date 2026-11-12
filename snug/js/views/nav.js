@@ -6,7 +6,7 @@ import {
   S, me, go, openConv, openThread, openPop, openMenu, openModal, openQuick, openLayer, toggleHouse, toggleGroup,
   setNotify, markConvRead, markHouseRead, leaveHouse, deleteRoom, convMeta, isOnline, toast,
 } from '../store.js';
-import { attention, houseAttention, levelOf, unreadOf, threadsOf, totalNeeds, roomIds, LEVELS, LEVEL_LABEL } from '../lib/attention.js';
+import { attention, houseAttention, levelOf, unreadOf, threadsOf, totalNeeds, roomIds, levelsFor, LEVEL_LABEL } from '../lib/attention.js';
 import { can } from '../lib/perms.js';
 import { plural } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
@@ -40,7 +40,7 @@ function Row({ icon, label, sel, attn, muted, sub, live, end, onClick, onMenu })
 const current = () => (S.ui.view.type === 'conv' ? S.ui.view.id : null);
 
 function notifyItems(kind, id, level) {
-  const levels = kind === 'dm' ? ['all', 'muted'] : LEVELS;
+  const levels = levelsFor(S, kind, id);
   return [
     { heading: 'Notify me about' },
     ...levels.map((l) => ({ label: LEVEL_LABEL[l], checked: level === l, onSelect: () => setNotify(kind, id, l) })),
@@ -54,7 +54,7 @@ function roomMenu(id, pos) {
   openMenu({
     ...pos,
     items: [
-      { label: 'Mark as read', icon: 'check', disabled: !a.soft && !a.needs, onSelect: () => markConvRead(id) },
+      { label: 'Mark read', icon: 'check', disabled: !a.soft && !a.needs, onSelect: () => markConvRead(id) },
       ...notifyItems('room', id, levelOf(S, id)),
       manage && { sep: true },
       manage && { label: 'Edit room', icon: 'edit', onSelect: () => openModal(RoomForm, { room: id }) },
@@ -75,7 +75,7 @@ function dmMenu(id, pos) {
   openMenu({
     ...pos,
     items: [
-      { label: 'Mark as read', icon: 'check', disabled: !a.soft && !a.needs, onSelect: () => markConvRead(id) },
+      { label: 'Mark read', icon: 'check', disabled: !a.soft && !a.needs, onSelect: () => markConvRead(id) },
       ...notifyItems('dm', id, levelOf(S, id)),
     ],
   });

@@ -8,10 +8,10 @@ import {
 } from '../store.js';
 import { sendMessage, retry, sendTyping, uploadFile, loadHistory } from '../server.js';
 import { buildItems } from '../lib/group.js';
-import { unreadOf, isThread } from '../lib/attention.js';
+import { unreadOf, isThread, forMe } from '../lib/attention.js';
 import { can, canPost, roleOf } from '../lib/perms.js';
-import { fmtTime, fmtDay, fmtFull, fmtWhen, plural, fileSize, fuzzy, nameList } from '../lib/util.js';
-import { plain, isJumbo, mentions } from '../lib/format.js';
+import { fmtTime, fmtDay, fmtFull, fmtWhen, plural, fileSize, fuzzy, nameList, hueOf } from '../lib/util.js';
+import { plain, isJumbo } from '../lib/format.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Rich, Stack, PRESENCE, copyText } from '../ui/kit.js';
 import { showProfile } from './people.js';
@@ -112,7 +112,7 @@ export function Message({ conv, m, grouped, inThread, tab }) {
   const meta = convMeta(conv);
   const role = meta?.house ? roleOf(S, meta.house, m.author) : null;
   const pending = m.state === 'sending' || m.state === 'queued';
-  const forMe = m.author !== S.me && mentions(m.text, S.users[S.me].handle);
+  const toMe = forMe(S, conv, m);
   const replies = isThread(conv) ? [] : S.msgs[`t:${m.id}`] || [];
   const quoted = m.replyTo ? findMsg(conv, m.replyTo) : null;
   const saved = isSaved(m.id);
@@ -132,7 +132,7 @@ export function Message({ conv, m, grouped, inThread, tab }) {
   };
   const cancel = () => clearTimeout(press.current);
 
-  const cls = `msg${grouped ? ' grouped' : ''}${forMe ? ' mention' : ''}${pending ? ' pending' : ''}${quoted ? ' has-ref' : ''}${S.ui.menu?.owner === m.id ? ' menu-open' : ''}`;
+  const cls = `msg${grouped ? ' grouped' : ''}${toMe ? ' mention' : ''}${pending ? ' pending' : ''}${quoted ? ' has-ref' : ''}${S.ui.menu?.owner === m.id ? ' menu-open' : ''}`;
   const reactions = Object.entries(m.reactions || {});
   const threadUnread = replies.length ? unreadOf(S, `t:${m.id}`).count : 0;
   const authors = [...new Set(replies.map((r) => r.author))].map((id) => person(id));
@@ -151,7 +151,7 @@ export function Message({ conv, m, grouped, inThread, tab }) {
     </div>
     <div class="msg-body">
       ${!grouped && html`<div class="msg-head">
-        <button class=${`msg-name${role?.hue != null ? ' hued' : ''}`} style=${role?.hue != null ? `--hue:${role.hue}` : ''} onClick=${profile(u)}>${u.name}</button>
+        <button class=${`msg-name${role?.hue != null ? ' hued' : ''}`} style=${role?.hue != null ? `--hue:${hueOf(role.hue)}` : ''} onClick=${profile(u)}>${u.name}</button>
         <time class="msg-time" datetime=${new Date(m.ts).toISOString()} data-tip=${fmtFull(m.ts)}>${fmtTime(m.ts)}</time>
       </div>`}
       ${S.ui.editing === m.id

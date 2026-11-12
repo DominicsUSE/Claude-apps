@@ -15,8 +15,10 @@ import { JoinPreview } from './modals.js';
 const Back = () => S.ui.phone && S.ui.depth > 0 && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
 
 // Everything unread, split by the one question that matters: is it for me?
+// What needs you is one item per conversation (its latest message, plus how many
+// more), so a lively group is one line to deal with, not one line per message.
 export function gather() {
-  const needs = [];
+  const byConv = new Map();
   const news = [];
   const convs = [...S.dmOrder, ...S.houseOrder.flatMap((h) => roomIds(S, h))];
   for (const conv of convs) {
@@ -28,7 +30,11 @@ export function gather() {
       const since = S.read[c] || 0;
       for (const m of S.msgs[c] || []) {
         if (m.ts <= since || m.author === S.me || m.sys) continue;
-        if (needsMe(S, c, m)) needs.push({ conv: c, m });
+        if (needsMe(S, c, m)) {
+          const it = byConv.get(c);
+          if (!it) byConv.set(c, { conv: c, m, count: 1 });
+          else { it.count++; if (m.ts >= it.m.ts) it.m = m; }
+        }
         else if (c === conv) {
           count++;
           people.add(m.author);
@@ -39,7 +45,7 @@ export function gather() {
     }
     if (count && level === 'all') news.push({ conv, count, people: [...people], top: top.m });
   }
-  needs.sort((a, b) => b.m.ts - a.m.ts);
+  const needs = [...byConv.values()].sort((a, b) => b.m.ts - a.m.ts);
   return { needs, news };
 }
 
@@ -53,14 +59,16 @@ function why(conv, m) {
   return `replied to you in ${where}`;
 }
 
+// Marks the conversation read up to this item's latest message, which is
+// everything the item stands for.
 function done(conv, m) {
   const before = S.read[conv] || 0;
   setRead(conv, Math.max(before, m.ts));
-  toast('Marked as done', { undo: () => setRead(conv, before) });
+  toast(`${convMeta(conv).title} marked as read`, { undo: () => setRead(conv, before) });
 }
 
-// Triage: move with J and K (or the arrows), E marks done, Enter opens.
-// On a phone, swipe an item to the left to mark it done.
+// Triage: move with J and K (or the arrows), E marks read, Enter opens.
+// On a phone, swipe an item to the left to mark it read.
 function focusItem(i) {
   requestAnimationFrame(() => {
     const list = [...document.querySelectorAll('.item[data-triage]')];
@@ -82,7 +90,7 @@ function onTriageKey(e) {
   e.preventDefault();
 }
 
-function TriageItem({ conv, m }) {
+function TriageItem({ conv, m, count }) {
   const ref = useRef();
   const drag = useRef(null);
   const move = (x) => { ref.current.style.transform = x ? `translateX(${x}px)` : ''; };
@@ -106,15 +114,16 @@ function TriageItem({ conv, m }) {
     else move(0);
   };
   return html`<div class="swipe" onPointerDown=${down} onPointerMove=${moving} onPointerUp=${up} onPointerCancel=${up}>
-    <span class="swipe-under" aria-hidden="true"><${Icon} name="check" size=${18} />Done</span>
+    <span class="swipe-under" aria-hidden="true"><${Icon} name="check" size=${18} />Mark read</span>
     <div class="item" ref=${ref} data-triage tabindex="0">
       <${Avatar} user=${person(m.author)} />
       <button class="item-main" tabindex="-1" onClick=${() => jumpToMsg(conv, m.id)}>
         <span class="item-meta"><b>${person(m.author).name}</b><span class="where">${why(conv, m)}</span><span class="num">${fmtWhen(m.ts)}</span></span>
         <span class="item-text"><${Rich} m=${m} /></span>
+        ${count > 1 && html`<span class="item-more">${plural(count - 1, 'earlier message')} for you here</span>`}
       </button>
       <div class="item-acts float">
-        <button class="ib" data-done aria-label="Mark as done" data-tip="Done" data-key="E" onClick=${() => done(conv, m)}><${Icon} name="check" size=${18} /></button>
+        <button class="ib" data-done aria-label=${`Mark ${convMeta(conv).title} read`} data-tip="Mark read" data-key="E" onClick=${() => done(conv, m)}><${Icon} name="check" size=${18} /></button>
       </div>
     </div>
   </div>`;
@@ -122,6 +131,7 @@ function TriageItem({ conv, m }) {
 
 export function CatchUp() {
   const { needs, news } = gather();
+  const forYou = needs.reduce((n, it) => n + it.count, 0) + S.invites.length;
   const focused = me().presence === 'focus';
   const nothing = !needs.length && !news.length && !S.invites.length;
   const byHouse = S.houseOrder.map((h) => ({ h, rows: news.filter((n) => S.rooms[n.conv]?.house === h) })).filter((g) => g.rows.length);
@@ -129,7 +139,7 @@ export function CatchUp() {
     <header class="bar">
       <${Back} />
       <h1 class="bar-title"><${Icon} name="tray" />Catch up</h1>
-      ${!nothing && html`<span class="bar-sub trunc">${needs.length + S.invites.length} for you, ${plural(news.length, 'room')} with news</span>`}
+      ${!nothing && html`<span class="bar-sub trunc">${forYou} for you, ${plural(news.length, 'room')} with news</span>`}
       <div class="bar-end">${(needs.length > 0 || news.length > 0) && html`<button class="btn quiet" onClick=${markAllRead}><${Icon} name="check" size=${16} />Mark all read</button>`}</div>
     </header>
     <div class="view-body">
@@ -140,7 +150,7 @@ export function CatchUp() {
             <button class="btn" onClick=${() => openQuick()}>Jump to a room</button>
           <//>`
         : html`<div class="col">
-          ${(needs.length > 0 || S.invites.length > 0) && html`<div class="view-sect">For you <span class="count num">${needs.length + S.invites.length}</span></div>`}
+          ${(needs.length > 0 || S.invites.length > 0) && html`<div class="view-sect">For you <span class="count num">${forYou}</span></div>`}
           ${S.invites.map((inv) => {
             const h = S.houses[inv.house];
             return html`<div class="invite" key=${inv.house}>
@@ -156,9 +166,9 @@ export function CatchUp() {
             </div>`;
           })}
           <div onKeyDown=${onTriageKey}>
-            ${needs.map(({ conv, m }) => html`<${TriageItem} key=${m.id} conv=${conv} m=${m} />`)}
+            ${needs.map(({ conv, m, count }) => html`<${TriageItem} key=${conv} conv=${conv} m=${m} count=${count} />`)}
           </div>
-          ${needs.length > 1 && html`<div class="view-note triage-hint">${S.ui.phone ? 'Swipe left on an item when you\u2019re done with it.' : html`<span class="kbd">J</span> <span class="kbd">K</span> to move, <span class="kbd">E</span> when done, <span class="kbd">Enter</span> to open.`}</div>`}
+          ${needs.length > 1 && html`<div class="view-note triage-hint">${S.ui.phone ? 'Swipe an item left to mark it read.' : html`<span class="kbd">J</span> <span class="kbd">K</span> to move, <span class="kbd">E</span> to mark read, <span class="kbd">Enter</span> to open.`}</div>`}
           ${byHouse.map(({ h, rows }) => html`<div key=${h}>
             <div class="view-sect">${S.houses[h].name}
               <button class="btn quiet" onClick=${() => markManyRead(rows.map((r) => r.conv), `${S.houses[h].name} news marked as read`)}>Mark read</button>

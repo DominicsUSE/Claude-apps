@@ -263,6 +263,17 @@ test('direct messages: private, and only between people who share a house', asyn
   await cy.none('msg');
   assert.match(await cy.refused('history', { conv: dm }), /access/);
   assert.match(await cy.refused('msg.send', { conv: dm, id: mid(), text: 'hello?' }), /access/);
+  // A one-to-one conversation is always for you: it can be muted, not narrowed.
+  assert.match(await ada.refused('notify.set', { kind: 'dm', id: dm, level: 'mentions' }), /level/i);
+  await ada.ok('notify.set', { kind: 'dm', id: dm, level: 'muted' });
+  // A group can narrow to mentions and replies.
+  const dee = await Client.make('dee', 'Dee Okafor');
+  const { code } = await ada.ok('invite.create', { house });
+  await dee.ok('invite.accept', { code });
+  const { id: group } = await ada.ok('dm.open', { users: [bo.id, dee.id] });
+  await ada.ok('notify.set', { kind: 'dm', id: group, level: 'mentions' });
+  assert.equal((await ada.next('dm', (d) => d.dm.id === group && d.dm.notify === 'mentions')).dm.notify, 'mentions');
+  dee.close();
 });
 
 test('presence follows real connections; typing reaches the room', async () => {

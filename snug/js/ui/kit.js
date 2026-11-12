@@ -2,7 +2,7 @@
 // text look and behave the same wherever they appear.
 import { html } from '../../vendor/preact-htm.js';
 import { S, voiceRoomOf, toast } from '../store.js';
-import { initials } from '../lib/util.js';
+import { initials, hueOf } from '../lib/util.js';
 import { parse } from '../lib/format.js';
 import { Icon } from './icons.js';
 
@@ -27,7 +27,7 @@ export function Pres({ user, inline }) {
 
 export function Avatar({ user, size, presence, speaking, dim, onClick }) {
   const cls = `avatar${speaking ? ' speaking' : ''}${dim ? ' dim' : ''}`;
-  const style = `--hue:${user.hue}${size ? `;--sz:${size}px` : ''}`;
+  const style = `--hue:${hueOf(user.hue)}${size ? `;--sz:${size}px` : ''}`;
   const face = user.img ? html`<img src=${user.img} alt="" />`
     : user.emoji ? html`<span class="emo">${user.emoji}</span>`
       : html`<span class="ini">${initials(user.name)[0]}<span class="ini2">${initials(user.name).slice(1)}</span></span>`;
@@ -41,7 +41,7 @@ export function Stack({ users, max = 3, size }) {
   return html`<span class="stack">${shown.map((u) => html`<${Avatar} key=${u.id} user=${u} size=${size} speaking=${!!S.speaking[u.id]} />`)}</span>`;
 }
 
-export const Tile = ({ house, lg }) => html`<span class=${`tile${lg ? ' lg' : ''}`} style=${`--hue:${house.hue}`}>${house.mark}</span>`;
+export const Tile = ({ house, lg }) => html`<span class=${`tile${lg ? ' lg' : ''}`} style=${`--hue:${hueOf(house.hue)}`}>${house.mark}</span>`;
 
 const KIND_ICON = { text: 'room', voice: 'voice', news: 'news', thread: 'thread' };
 export const RoomIcon = ({ kind, size }) => html`<${Icon} name=${KIND_ICON[kind] || 'room'} size=${size} />`;
