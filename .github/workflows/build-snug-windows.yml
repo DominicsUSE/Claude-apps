@@ -1,6 +1,6 @@
 # Builds the Snug Windows app on a real Windows machine: an installer and a portable exe.
-# Before publishing it runs Snug's own tests on Windows and then drives the packaged app
-# (first run, account, message, reopen). Every build attaches both files to the run
+# It runs Snug's own tests on Windows, builds, uploads the files, then drives the packaged
+# app (first run, account, message, reopen) before publishing a release. Every build attaches both files to the run
 # (Actions > Snug Windows app > Artifacts). On the default branch it also publishes them
 # as a release, so there is a stable download link.
 name: Snug Windows app
@@ -38,12 +38,6 @@ jobs:
           npm ci --no-audit --no-fund
           node build.js
 
-      - name: Test the packaged app
-        working-directory: snug/desktop
-        env:
-          SNUG_BIN: dist/win-unpacked/Snug.exe
-        run: node --test test.js
-
       - uses: actions/upload-artifact@v4
         with:
           name: Snug-Windows-Installer
@@ -57,6 +51,14 @@ jobs:
           path: snug/desktop/dist/Snug-*-portable.exe
           compression-level: 0
           if-no-files-found: error
+
+      # After the upload, so a problem here never hides the files. A failure still fails the run.
+      - name: Test the packaged app
+        working-directory: snug/desktop
+        timeout-minutes: 6
+        env:
+          SNUG_BIN: dist/win-unpacked/Snug.exe
+        run: node --test --test-timeout=120000 --test-force-exit test.js
 
       - name: Publish a release (default branch only)
         if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
