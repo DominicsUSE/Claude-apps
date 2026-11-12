@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { can, canPost } from '../js/lib/perms.js';
 import { fold } from '../js/lib/util.js';
 import { parseQuery } from '../js/lib/search.js';
+import { EVENT_LENGTH } from '../js/lib/social.js';
 
 export const PAGE = 60;
 const ALPHA = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -28,6 +29,7 @@ export function createModel(db) {
   M.userView = (row, presence) => row && ({
     id: row.id, handle: row.handle, name: row.name, hue: row.hue, emoji: row.emoji || undefined,
     about: row.about, status: row.status, presence,
+    interests: json(row.interests, []), links: json(row.links, []), since: row.created,
   });
 
   // Conversations
@@ -65,10 +67,47 @@ export function createModel(db) {
     return db.all('SELECT user FROM dm_members WHERE dm = ?', w.dm).map((r) => r.user);
   };
 
-  // Everyone who shares a house or a direct conversation with this person.
+  // Everyone who shares a house or a direct conversation with this person,
+  // plus their friends and the people they sent a request to: the people who
+  // see this person's presence and profile changes. Sending someone a request
+  // does not let you see them; only their saying yes (or asking you) does.
   M.contacts = (user) => db.all(`
     SELECT DISTINCT m2.user AS id FROM members m1 JOIN members m2 ON m1.house = m2.house WHERE m1.user = ?
-    UNION SELECT DISTINCT d2.user FROM dm_members d1 JOIN dm_members d2 ON d1.dm = d2.dm WHERE d1.user = ?`, user, user).map((r) => r.id);
+    UNION SELECT DISTINCT d2.user FROM dm_members d1 JOIN dm_members d2 ON d1.dm = d2.dm WHERE d1.user = ?
+    UNION SELECT other FROM friends WHERE user = ? AND state IN ('friends', 'outgoing')`, user, user, user).map((r) => r.id);
+  // Whether "viewer" may see "user"'s presence and status (the mirror of contacts).
+  M.sees = (viewer, user) => viewer === user || !!db.get(`
+    SELECT 1 FROM members m1 JOIN members m2 ON m1.house = m2.house WHERE m1.user = ? AND m2.user = ?
+    UNION SELECT 1 FROM dm_members d1 JOIN dm_members d2 ON d1.dm = d2.dm WHERE d1.user = ? AND d2.user = ?
+    UNION SELECT 1 FROM friends WHERE user = ? AND other = ? AND state IN ('friends', 'incoming')
+    LIMIT 1`, viewer, user, viewer, user, viewer, user);
+  // How someone looks to a person not allowed to see them: no presence, no status.
+  M.hiddenView = (row) => row && { ...M.userView(row, 'offline'), status: '' };
+  // The people this person may start a conversation with: shared houses and
+  // conversations, and accepted friends (a pending request is not enough).
+  M.dmPeers = (user) => new Set(db.all(`
+    SELECT DISTINCT m2.user AS id FROM members m1 JOIN members m2 ON m1.house = m2.house WHERE m1.user = ?
+    UNION SELECT DISTINCT d2.user FROM dm_members d1 JOIN dm_members d2 ON d1.dm = d2.dm WHERE d1.user = ?
+    UNION SELECT other FROM friends WHERE user = ? AND state = 'friends'`, user, user, user).map((r) => r.id));
+
+  // Friends, from one person's side. Favourites are private to that person.
+  M.friendView = (row) => row && { state: row.state, favorite: !!row.favorite, since: row.since };
+  M.friendRow = (user, other) => db.get('SELECT * FROM friends WHERE user = ? AND other = ?', user, other);
+  M.friendsOf = (user) => Object.fromEntries(db.all('SELECT * FROM friends WHERE user = ?', user).map((r) => [r.other, M.friendView(r)]));
+  M.areFriends = (a, b) => M.friendRow(a, b)?.state === 'friends';
+
+  // Events
+  M.eventRow = (id) => db.get('SELECT * FROM events WHERE id = ?', id);
+  M.eventView = (row) => row && {
+    id: row.id, house: row.house, room: row.room || null, title: row.title, about: row.about,
+    starts: row.starts, ends: row.ends ?? null, by: row.by, created: row.created,
+    going: db.all('SELECT user FROM event_rsvps WHERE event = ? ORDER BY ts', row.id).map((r) => r.user),
+  };
+  // Events in the houses this person has joined that are not long over.
+  M.eventsFor = (user, at = Date.now()) => db.all(`
+    SELECT e.* FROM events e JOIN members m ON m.house = e.house AND m.user = ?
+    WHERE COALESCE(e.ends, e.starts + ?) > ? ORDER BY e.starts LIMIT 500`, user, EVENT_LENGTH, at - 86_400_000)
+    .map(M.eventView);
 
   // The client's permission rules, fed with this house's real roles and members.
   M.permState = (houseId, user) => {
@@ -158,6 +197,7 @@ export function createModel(db) {
     return {
       house: {
         id, name: h.name, mark: h.mark, hue: h.hue, about: h.about, joined: !!mine, newcomer: !!mine?.newcomer,
+        public: !!h.public, topic: h.topic || null, rules: h.rules || '', created: h.created,
         notify: (mine && M.notifyOf(viewer, id)) || 'all', roles, joinRole: h.join_role,
         members: Object.fromEntries(mem.map((m) => [m.user, m.role])),
         groups: groups.map((g) => ({ id: g.id, name: g.name, rooms: roomRows.filter((r) => r.grp === g.id).map((r) => r.id) })),
@@ -206,6 +246,9 @@ export function createModel(db) {
       v.userIds.forEach((u) => users.add(u));
     }
     invites.forEach((i) => users.add(i.from));
+    const friends = M.friendsOf(user);
+    Object.keys(friends).forEach((u) => users.add(u));
+    const events = Object.fromEntries(M.eventsFor(user).map((e) => [e.id, e]));
     const dmOrder = M.dmIdsOf(user);
     for (const id of dmOrder) {
       dms[id] = M.dmView(id, user);
@@ -221,6 +264,8 @@ export function createModel(db) {
     for (const t of db.all(`SELECT * FROM threads WHERE id IN (${convs.map(() => '?').join(',') || "''"})`, ...convs)) {
       threads[t.id] = { conv: t.conv, root: t.root };
     }
+    // People you have only asked, with no place in common, stay offline to you until they say yes.
+    const hidden = new Set(Object.entries(friends).filter(([u, f]) => f.state === 'outgoing' && !M.sees(user, u)).map(([u]) => u));
     const read = Object.fromEntries(db.all('SELECT conv, ts FROM reads WHERE user = ?', user).map((r) => [r.conv, r.ts]));
     const followed = Object.fromEntries(db.all('SELECT thread FROM follows WHERE user = ?', user).map((r) => [r.thread, true]));
     const saved = db.all('SELECT msg AS id, conv, at, note FROM saved WHERE user = ? ORDER BY at DESC', user)
@@ -234,9 +279,9 @@ export function createModel(db) {
     for (const [room, state] of Object.entries(voice)) if (roomIds.has(room)) voiceState[room] = state;
     return {
       me: user,
-      users: Object.fromEntries([...users].map((id) => [id, M.userView(M.userRow(id), presenceOf(id))]).filter(([, u]) => u)),
+      users: Object.fromEntries([...users].map((id) => [id, hidden.has(id) ? M.hiddenView(M.userRow(id)) : M.userView(M.userRow(id), presenceOf(id))]).filter(([, u]) => u)),
       houses, rooms, houseOrder, dms, dmOrder, msgs, more, threads, read, followed, saved, cache,
-      invites, voice: voiceState,
+      invites, voice: voiceState, friends, events,
     };
   };
 

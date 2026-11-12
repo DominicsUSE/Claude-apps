@@ -29,15 +29,17 @@ npm start
 ```
 
 Sign in as `robin` (or `ines`, `tomasz`, `priya`, `jonas`, `bex` and others)
-with the password `snug-demo-1`. Open a second browser profile or a private
+with the password `snug-demo-1`. Robin has friends (one request waiting each
+way), two public houses to find in Discover and three events: one on now, one
+tonight and one next week, all timed from when you seed. Open a second browser profile or a private
 window and sign in as someone else to talk to yourself. `npm run seed --
 --force` wipes the database and loads the sample data again.
 
 Tests:
 
 ```bash
-npm test            # rules (13) and the server with real sockets (22)
-npm run test:e2e    # separate people in separate browsers (17), needs Playwright
+npm test            # rules (18) and the server with real sockets (36)
+npm run test:e2e    # separate people in separate browsers (23), needs Playwright
 ```
 
 ## The desktop app
@@ -84,7 +86,13 @@ Real, and covered by tests with separate users:
   member removal, newcomer onboarding.
 - Messages, replies, threads, edits, deletes with undo, reactions, file and
   picture uploads. All stored in the database and delivered live.
-- Direct messages and groups.
+- Direct messages and groups, with friends or people you share a house with.
+- Friends: requests by username, accept, decline, remove, private favourites.
+  Friends see each other's presence without sharing a house.
+- Discovery of public houses (by topic or name) and of people you are
+  connected to through a house or a mutual friend; joining a public house
+  without an invitation.
+- Events in houses, with who is going, live to everyone in the house.
 - Presence from real connections, typing notices, unread state and saved
   messages synced across a person's devices.
 - Search over every stored message a person may read.
@@ -152,8 +160,14 @@ before seeding anything that faces the internet, or better, do not seed there.
 - **Uploads**: 10 MB limit, fetched only by people who can read the
   conversation, served with `nosniff` and a sandboxing policy. Anything that
   is not a known image type downloads instead of opening.
-- **Rate limits**: per person for messages, typing, search and general
-  actions; per address for sign-in and registration.
+- **Rate limits**: per person for messages, typing, search, friend requests
+  (10 at once, then one every 10 seconds; at most 50 waiting), discovery and
+  general actions; per address for sign-in and registration.
+- **Discovery** lists only public houses, as counts and room names without
+  member lists, and only people who already share a house or a friend with
+  you, never anyone else. Presence shows only for people who share a place
+  with you or are your friends. Favourites are visible only to you. Profile
+  links must be `https://` addresses.
 - **Voice signalling** is relayed only between people in the same voice
   room, and only members of the house can join it.
 
@@ -198,40 +212,41 @@ the filter chips write those words for you. No promotions anywhere.
 
 ## Design system
 
-All tokens are in `css/tokens.css`. The rules, briefly:
+The idea is *a place with someone in it*. The symbol, the Nook, is a
+doorway with a person (the presence dot) inside it; the brand sheet is in
+`docs/brand/BRAND.md`. All tokens are in `css/tokens.css`. The rules, briefly:
 
-- **Layout.** One navigation column reads big to small from top to bottom:
-  you, Catch up and Saved, direct conversations, then each house with its
-  rooms. The conversation is the widest and lightest surface. People,
-  details and threads appear in a context pane only when asked for. Below
-  1180px the pane lies over the conversation instead of squeezing it.
+- **Layout.** Three levels, always visible: the rail (Home, Messages,
+  Discover, then your communities), the context column for the place you
+  are in (Home's Catch up, Friends and Saved; your conversations; Discover's
+  sections; a community's rooms and events), then the content. Your own
+  panel sits at the bottom of the column. People, details and threads open
+  in a side pane only when asked for. Below 1180px the pane lies over the
+  conversation instead of squeezing it.
 - **Phone.** Its own product, not a squeezed desktop: tabs at the bottom
-  (Catch up, Houses, Direct, You), one screen at a time pushed from the
-  right, menus and dialogs as bottom sheets, long-press for message actions,
-  44px targets.
-- **Colour.** One green-grey hue for every neutral; depth comes from shade
-  steps, never shadows. Only floating layers cast the single shadow. Amber is
-  a highlighter: always a fill behind ink, never text, and it means one
-  thing, *this is addressed to you*: new-message lines, thread dots and
-  search hits use ink, an outline or an underline instead. Green means live
-  or open to talk. Red means destructive or failed. A filled ink button is
-  the main action; selected and switched-on controls use the quieter
-  selection shade, so the main button stands out by being the only one.
-  People, roles and houses choose a named hue only; the theme owns lightness
-  and chroma, and the offered hues stay clear of red, amber and green, so a
-  chosen colour never reads as a warning, a highlight or a presence.
-- **Type.** Atkinson Hyperlegible Next (bundled, OFL) for everything,
-  Atkinson Hyperlegible Mono for code. Five sizes (12, 14, 16, 20, 24) and
-  three weights (400 reading, 500 names and selection, 700 headings).
-  Messages are 16px with a 46rem line cap.
-- **Space.** 4px base: 4, 8, 12, 16, 24, 32, 48. Tight inside a message
-  group, 16px between groups. Three densities: Compact, Regular, Roomy.
-- **Radius.** 4px for controls, 8px for panels, media and floating layers,
-  round for people. Houses are square, people are round.
-- **Motion.** 120ms for hover and press, 180ms for things that enter.
-  Position and opacity only. Off when the system asks for reduced motion.
-- **Cards.** Only for things that are separate objects: attachments and
-  floating layers. Never in the conversation or the sidebar.
+  (Home, Messages, Discover, Catch up, You), communities reached from Home
+  and Discover, one screen at a time pushed from the right, menus and
+  dialogs as bottom sheets, long-press for message actions, 44px targets.
+- **Shape.** Places are arches, people are circles, controls are
+  rectangles. Buttons and inputs 6px, menus 8px, dialogs 12px.
+- **Colour.** Dark is the default, warm paper is the light theme; depth
+  comes from five surface steps, and only floating layers cast the single
+  shadow. Coral is the brand and means *for you*: the main button, the
+  selected place's bar, count badges, the New line, mentions. Mint means
+  online or connected, amber idle or happening soon, cyan links, rose your
+  own reactions, red destructive or failed. People, roles and houses choose
+  a hue only; the theme owns lightness and chroma, and the offered hues stay
+  clear of the semantic ones. No gradients.
+- **Type.** Inter (bundled, OFL) for everything, Atkinson Hyperlegible Mono
+  for code. Weights 400 reading, 500 names, 600 emphasis. Messages are
+  16px (14px in Compact) with a line cap.
+- **Space.** 4px base: 4, 8, 12, 16, 20, 24, 32, 40, 48, 64, 80. Three
+  densities: Compact, Regular, Roomy.
+- **Motion.** 100ms for hover and press, 160 to 240ms for things that
+  enter. Position and opacity only. Off when the system asks for reduced
+  motion.
+- **Cards.** Only for things that are separate objects: attachments, events
+  you can act on, community previews and floating layers. Lists are rows.
 
 ## How it is built
 
@@ -242,14 +257,16 @@ server/
   ops.js            every action a client can ask for: validate, authorize, write, notify
   model.js          what a person may see, shaped for the client
   auth.js           password hashing, sessions, rate limiters
-  db.js             SQLite schema and prepared statements
+  db.js             SQLite schema, prepared statements, and the column
+                    migrations that bring an older database up to date
   seed.js           loads the sample data as real accounts
 js/
   app.js            root: sign-in or app, desktop or phone, overlays, keyboard map
   store.js          state and every action; updates the screen at once, then tells the server
   server.js         the transport: WebSocket with reconnect, the offline send queue, live events
   voice.js          WebRTC voice: microphone, peer connections, who is speaking
-  lib/              pure rules with tests: format, group, attention, search, perms
+  lib/              pure rules with tests: format, group, attention, search, perms,
+                    social (friends, happening now, events, topics)
   ui/               icons, shared pieces (avatar, presence, rich text), overlays
   views/            auth, nav, stream (messages and composer), conversation, catch up,
                     search and quick jump, people, settings, dialogs
@@ -275,8 +292,9 @@ begins with a full picture from the server, so nothing is missed.
 
 ## Keyboard
 
-`Ctrl/Cmd K` jump anywhere or search. `Alt ↑/↓` previous or next place,
-`Alt Shift ↓` next place with news. `Shift Tab` from an empty message box
+`Ctrl/Cmd K` jump anywhere or search. `Alt ↑/↓` previous or next place in
+the column, `Alt Shift ↓` next place with news, `Alt ←` (`Cmd [` on a Mac)
+back. `Shift Tab` from an empty message box
 moves into the messages, then `↑/↓` to move, `R` reply, `T` thread, `S`
 save, `E` edit, `Enter` all actions. In Catch up, `J`/`K` move and `E`
 marks read. `Esc` closes the top layer; with nothing open it marks the open

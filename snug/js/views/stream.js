@@ -107,7 +107,7 @@ function Files({ files }) {
   </div>`;
 }
 
-export function Message({ conv, m, grouped, inThread, tab }) {
+export function Message({ conv, m, grouped, inThread, tab, lit }) {
   const u = person(m.author);
   const meta = convMeta(conv);
   const role = meta?.house ? roleOf(S, meta.house, m.author) : null;
@@ -132,7 +132,7 @@ export function Message({ conv, m, grouped, inThread, tab }) {
   };
   const cancel = () => clearTimeout(press.current);
 
-  const cls = `msg${grouped ? ' grouped' : ''}${toMe ? ' mention' : ''}${pending ? ' pending' : ''}${quoted ? ' has-ref' : ''}${S.ui.menu?.owner === m.id ? ' menu-open' : ''}`;
+  const cls = `msg${grouped ? ' grouped' : ''}${toMe ? ' mention' : lit ? ' mention lit' : ''}${pending ? ' pending' : ''}${quoted ? ' has-ref' : ''}${S.ui.menu?.owner === m.id ? ' menu-open' : ''}`;
   const reactions = Object.entries(m.reactions || {});
   const threadUnread = replies.length ? unreadOf(S, `t:${m.id}`).count : 0;
   const authors = [...new Set(replies.map((r) => r.author))].map((id) => person(id));
@@ -540,11 +540,19 @@ export function Stream({ conv, intro, placeholder }) {
               ? html`<div class="older-msg">${older === 'error' ? 'Earlier messages can\u2019t load while you\u2019re offline.' : 'Earlier messages didn\u2019t load.'} <button class="btn quiet" onClick=${() => { setOlder(null); loadOlder(); }}>Try again</button></div>`
               : html`<${Skeleton} rows=${[56, 40]} />`)
             : intro}
-          ${items.map((it) => {
-            if (it.type === 'day') return html`<div class="day" key=${it.key}>${fmtDay(it.ts)}</div>`;
-            if (it.type === 'new') return html`<div class="newline" key="new" role="separator" aria-label="New messages"><span>New</span></div>`;
-            return html`<${Message} key=${it.key} conv=${conv} m=${it.m} grouped=${it.grouped} tab=${it.m.id === lastId} />`;
-          })}
+          ${(() => {
+            // A mention of you lights up the whole run of that person's
+            // messages, not only the line that named you.
+            let lit = false;
+            return items.map((it) => {
+              if (it.type === 'day') { lit = false; return html`<div class="day" key=${it.key}>${fmtDay(it.ts)}</div>`; }
+              if (it.type === 'new') { lit = false; return html`<div class="newline" key="new" role="separator" aria-label="New messages"><span>New</span></div>`; }
+              const toMe = forMe(S, conv, it.m);
+              const cont = !toMe && it.grouped && lit;
+              lit = toMe || cont;
+              return html`<${Message} key=${it.key} conv=${conv} m=${it.m} grouped=${it.grouped} lit=${cont} tab=${it.m.id === lastId} />`;
+            });
+          })()}
         </div>`}
     </div>
     <div class="jump-wrap">

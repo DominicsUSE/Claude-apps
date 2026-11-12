@@ -19,12 +19,14 @@ export function seedDatabase(db, filesDir, { password = 'snug-demo-1', now = Dat
 
   db.tx(() => {
     for (const u of Object.values(S.users)) {
-      db.run('INSERT INTO users (id, handle, name, pass, hue, emoji, about, status, presence, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        u.id, u.handle, u.name, pass, u.hue, u.emoji || null, u.about, u.status, u.presence, now - 60 * 86_400_000);
+      db.run('INSERT INTO users (id, handle, name, pass, hue, emoji, about, status, presence, created, interests, links) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        u.id, u.handle, u.name, pass, u.hue, u.emoji || null, u.about, u.status, u.presence, u.since ?? now - 60 * 86_400_000,
+        JSON.stringify(u.interests || []), JSON.stringify(u.links || []));
     }
     for (const h of Object.values(S.houses)) {
-      db.run('INSERT INTO houses (id, name, mark, hue, about, join_role, starter, first_step, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        h.id, h.name, h.mark, h.hue, h.about, h.joinRole, JSON.stringify(h.starter), h.firstStep ? JSON.stringify(h.firstStep) : null, now - 50 * 86_400_000);
+      db.run('INSERT INTO houses (id, name, mark, hue, about, join_role, starter, first_step, created, public, topic, rules) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        h.id, h.name, h.mark, h.hue, h.about, h.joinRole, JSON.stringify(h.starter), h.firstStep ? JSON.stringify(h.firstStep) : null,
+        h.created ?? now - 50 * 86_400_000, h.public ? 1 : 0, h.topic || null, h.rules || '');
       h.roles.forEach((r, i) => db.run('INSERT INTO roles (id, house, name, hue, perms, pos) VALUES (?, ?, ?, ?, ?, ?)',
         `${h.id}_${r.id}`, h.id, r.name, r.hue, JSON.stringify(r.perms), i));
       let order = 0;
@@ -79,8 +81,20 @@ export function seedDatabase(db, filesDir, { password = 'snug-demo-1', now = Dat
     for (const t of Object.keys(S.followed)) db.run('INSERT INTO follows (user, thread) VALUES (?, ?)', S.me, t);
     for (const s of S.saved) db.run('INSERT INTO saved (user, msg, conv, at, note) VALUES (?, ?, ?, ?, ?)', S.me, s.id, s.conv, s.at, s.note);
     for (const i of S.invites) db.run('INSERT INTO personal_invites (house, user, by, ts) VALUES (?, ?, ?, ?)', i.house, S.me, i.from, i.ts);
+
+    // Friends: two rows per pair, one from each side.
+    for (const f of S.friendships) {
+      const [sa, sb] = f.state === 'friends' ? ['friends', 'friends'] : ['outgoing', 'incoming'];
+      db.run('INSERT INTO friends (user, other, state, favorite, since) VALUES (?, ?, ?, ?, ?)', f.a, f.b, sa, f.fav.includes(f.a) ? 1 : 0, f.since);
+      db.run('INSERT INTO friends (user, other, state, favorite, since) VALUES (?, ?, ?, ?, ?)', f.b, f.a, sb, f.fav.includes(f.b) ? 1 : 0, f.since);
+    }
+    for (const e of Object.values(S.events)) {
+      db.run('INSERT INTO events (id, house, room, title, about, starts, ends, by, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        e.id, e.house, e.room, e.title, e.about, e.starts, e.ends, e.by, e.created);
+      e.going.forEach((u, i) => db.run('INSERT INTO event_rsvps (event, user, ts) VALUES (?, ?, ?)', e.id, u, e.created + i * 60_000));
+    }
   });
-  return { users: Object.keys(S.users).length, messages: Object.values(S.msgs).flat().length };
+  return { users: Object.keys(S.users).length, messages: Object.values(S.msgs).flat().length, events: Object.keys(S.events).length };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

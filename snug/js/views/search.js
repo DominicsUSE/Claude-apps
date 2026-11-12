@@ -11,6 +11,7 @@ import { Icon } from '../ui/icons.js';
 import { Avatar, Tile, RoomIcon, Rich, Empty } from '../ui/kit.js';
 import { Settings } from './settings.js';
 import { searchMessages } from '../server.js';
+import { openHouse } from './nav.js';
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 
@@ -49,7 +50,9 @@ export function Search() {
   const loading = !empty && res.q !== q;
   const hits = res.hits;
   const set = (next) => { S.ui.view = { type: 'search', q: next }; emit(); };
-  useEffect(() => {
+  // Before the first paint, so keys typed right after Ctrl+Shift+F land here
+  // instead of being lost while a busy page paints.
+  useLayoutEffect(() => {
     const el = input.current;
     el.focus();
     el.setSelectionRange(el.value.length, el.value.length);
@@ -101,7 +104,7 @@ export function Search() {
           ? html`<${Empty} icon="search" title="No messages match" text=${filtered ? 'A filter may be hiding it. Try with fewer filters, or a shorter word.' : 'Try a shorter word, or part of one. Search looks inside every room and conversation you can open.'}>
               ${filtered && html`<button class="btn" onClick=${() => set(p.terms.join(' '))}>Clear filters</button>`}
             <//>`
-          : html`<div class="col">
+          : html`<div class="col search-results">
               <div class="view-note">${hits.length === 80 ? 'First 80 messages' : plural(hits.length, 'message')}, newest first${res.local ? '. You\u2019re offline, so this only covers messages already on this device.' : ''}</div>
               ${hits.map(({ conv, m }) => {
                 const meta = convMeta(conv);
@@ -122,6 +125,9 @@ export function Search() {
 }
 
 const ACTIONS = [
+  { label: 'Home', icon: 'house', words: 'home start overview happening', run: () => go({ type: 'home' }) },
+  { label: 'Friends', icon: 'people', words: 'friends requests add people', run: () => go({ type: 'friends' }) },
+  { label: 'Discover communities', icon: 'compass', words: 'discover explore find communities houses public', run: () => go({ type: 'discover' }) },
   { label: 'Catch up', icon: 'tray', words: 'catch up inbox unread', run: () => go({ type: 'catchup' }) },
   { label: 'Saved messages', icon: 'save', words: 'saved bookmarks kept', run: () => go({ type: 'saved' }) },
   { label: 'Settings', icon: 'sliders', words: 'settings preferences options', run: () => openLayer({ C: Settings, props: {} }) },
@@ -156,7 +162,7 @@ function candidates(q) {
       if (u.id === S.me || direct.has(u.id)) continue;
       add(Math.max(fuzzy(q, u.name), fuzzy(q, u.handle)) - 1, { key: `u${u.id}`, label: u.name, hint: 'Start a conversation', icon: html`<${Avatar} user=${u} presence />`, run: () => startDm([u.id]) });
     }
-    for (const h of S.houseOrder) add(fuzzy(q, S.houses[h].name) - 2, { key: `h${h}`, label: S.houses[h].name, hint: 'House', icon: html`<${Tile} house=${S.houses[h]} />`, run: () => openConv(S.houses[h].starter[0] || roomIds(S, h)[0]) });
+    for (const h of S.houseOrder) add(fuzzy(q, S.houses[h].name) - 2, { key: `h${h}`, label: S.houses[h].name, hint: 'Community', icon: html`<${Tile} house=${S.houses[h]} />`, run: () => openHouse(h) });
     for (const a of ACTIONS) add(Math.max(fuzzy(q, a.label), ...a.words.split(' ').map((w) => (w.startsWith(q.toLowerCase()) ? 50 : -1))) - 3, { key: a.label, label: a.label, hint: 'Action', icon: html`<${Icon} name=${a.icon} />`, run: a.run });
   }
   out.sort((a, b) => b.score - a.score);

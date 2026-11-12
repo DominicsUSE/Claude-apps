@@ -52,6 +52,14 @@ const P = {
   shield: 'M10 3l5.500 2v4.500c0 3.500-2.300 6.200-5.500 7.500-3.200-1.300-5.500-4-5.500-7.500V5z',
   house: 'M3.500 9.500L10 4l6.500 5.500|M5 8.500V16h10V8.500|M8.500 16v-4h3v4',
   link: 'M8.500 11.500a3 3 0 0 0 4.200 0l2.600-2.600a3 3 0 0 0-4.200-4.200l-.9.9|M11.500 8.500a3 3 0 0 0-4.200 0l-2.600 2.600a3 3 0 0 0 4.200 4.200l.9-.9',
+  // Added for people views (friends, discover, profiles).
+  star: 'M10 3.200l2 4.100 4.500.6-3.300 3.100.8 4.500L10 13.400l-4 2.100.8-4.500-3.300-3.100 4.500-.6z',
+  starred: 'f:M10 3.200l2 4.100 4.500.6-3.300 3.100.8 4.500L10 13.400l-4 2.100.8-4.500-3.300-3.100 4.500-.6z|M10 3.200l2 4.100 4.500.6-3.300 3.100.8 4.500L10 13.400l-4 2.100.8-4.500-3.300-3.100 4.500-.6z',
+  'user-plus': 'M8.500 9.500a3.200 3.200 0 1 0 0-6.400 3.200 3.200 0 0 0 0 6.400Z|M2.500 17a6 6 0 0 1 9.500-4.900|M15.500 11.500v5|M13 14h5',
+  'user-check': 'M8.500 9.500a3.200 3.200 0 1 0 0-6.400 3.200 3.200 0 0 0 0 6.400Z|M2.500 17a6 6 0 0 1 9.500-4.900|M12.500 14.300l2 2 3.500-4',
+  compass: 'M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14Z|M12.800 7.200l-1.600 4-4 1.600 1.600-4z',
+  calendar: 'M4.500 5h11a1 1 0 0 1 1 1v9.500a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z|M3.500 8.500h13|M7 3.500v3|M13 3.500v3',
+  external: 'M11.500 4H16v4.500|M16 4l-6.500 6.500|M14 11.500V15a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3.500',
 };
 
 export function Icon({ name, size = 20 }) {
@@ -60,13 +68,5 @@ export function Icon({ name, size = 20 }) {
     ${parts.map((d) => (d.startsWith('f:')
       ? html`<path d=${d.slice(2)} fill="currentColor" stroke="none" />`
       : html`<path d=${d} />`))}
-  </svg>`;
-}
-
-// The Snug mark: a corner to sit in, and someone in it.
-export function Mark({ size = 20 }) {
-  return html`<svg class="ic" width=${size} height=${size} viewBox="0 0 20 20" aria-hidden="true">
-    <path d="M3.5 16.500V7a3.500 3.500 0 0 1 3.500-3.500h9.500" fill="none" stroke="currentColor" stroke-width="2.500" stroke-linecap="round" />
-    <circle cx="11.500" cy="11.500" r="3.300" fill="var(--mark)" stroke="var(--on-mark)" stroke-width="0.800" />
   </svg>`;
 }

@@ -178,6 +178,12 @@ export function initTooltips() {
     if (el.dataset.key) { const k = document.createElement('kbd'); k.textContent = el.dataset.key; tip.append(k); }
     document.body.append(tip);
     const r = el.getBoundingClientRect(), t = tip.getBoundingClientRect();
+    // data-tip-side="right" (the rail): beside the item instead of above it.
+    if (el.dataset.tipSide === 'right') {
+      tip.style.left = `${r.right + 8}px`;
+      tip.style.top = `${clamp(r.top + r.height / 2 - t.height / 2, EDGE, innerHeight - t.height - EDGE)}px`;
+      return;
+    }
     let top = r.top - t.height - 6;
     if (top < EDGE) top = r.bottom + 6;
     tip.style.left = `${clamp(r.left + r.width / 2 - t.width / 2, EDGE, innerWidth - t.width - EDGE)}px`;

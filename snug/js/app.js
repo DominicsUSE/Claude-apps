@@ -8,10 +8,11 @@ import {
 import { api, startTransport } from './server.js';
 import { voiceStats } from './voice.js';
 import { attention, houseAttention, totalNeeds, roomIds } from './lib/attention.js';
+import { friendRequests } from './lib/social.js';
 import { Icon } from './ui/icons.js';
-import { Avatar, Pres, PRESENCE, presenceLabel } from './ui/kit.js';
+import { Avatar, Pres, Tile, Empty, presenceLabel } from './ui/kit.js';
 import { Menu, Pop, ModalFrame, Toasts, Lightbox, initTooltips } from './ui/overlays.js';
-import { Nav, NavDirect, NavHouses, LiveDock, MOD } from './views/nav.js';
+import { Nav, NavDirect, HouseRooms, LiveDock, houseMenu, syncSpace, goBack, contextPlaces, dmAttention, homeNeeds } from './views/nav.js';
 import { Conversation, ThreadPane, DetailsPane } from './views/conversation.js';
 import { PeoplePane, MePop } from './views/people.js';
 import { CatchUp, Saved } from './views/catchup.js';
@@ -19,13 +20,57 @@ import { Search, QuickJump } from './views/search.js';
 import { Settings } from './views/settings.js';
 import { NewMessage, JoinByLink } from './views/modals.js';
 import { Auth, Splash } from './views/auth.js';
+import { Home } from './views/home.js';
+import { Friends } from './views/friends.js';
+import { Discover } from './views/discover.js';
+import { PersonPage } from './views/person.js';
+import { HousePage } from './views/house.js';
+
+const rectOf = (e) => e.currentTarget.getBoundingClientRect();
+
+// Desktop Messages with no conversation open (there are none yet).
+function MessagesEmpty() {
+  return html`<section class="main view" aria-label="Messages">
+    <header class="bar"><h1 class="bar-title"><${Icon} name="room" />Messages</h1></header>
+    <div class="view-body">
+      <${Empty} icon="room" title="No conversations yet" text="Write to a friend, or to someone you met in one of your communities. Groups start the same way.">
+        <button class="btn primary" onClick=${() => openModal(NewMessage)}><${Icon} name="compose" size=${16} />New message</button>
+      <//>
+    </div>
+  </section>`;
+}
+
+// A community on a phone: its rooms first, its front page one tap away.
+function PhoneHouse({ id }) {
+  const h = S.houses[id];
+  if (!h?.joined) return html`<${HousePage} id=${id} />`;
+  return html`<section class="main view phone-house" aria-label=${h.name}>
+    <header class="bar">
+      <button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>
+      <h1 class="bar-title"><${Tile} house=${h} /><span class="trunc">${h.name}</span></h1>
+      <div class="bar-end">
+        <button class="ib" aria-label=${`${h.name} menu`} onClick=${(e) => houseMenu(id, { anchor: rectOf(e) })}><${Icon} name="more" /></button>
+      </div>
+    </header>
+    <div class="nav-scroll"><${HouseRooms} id=${id} /></div>
+  </section>`;
+}
 
 function MainView() {
   const v = S.ui.view;
-  if (v.type === 'conv' && convMeta(v.id)) return html`<${Conversation} key=${v.id} conv=${v.id} />`;
-  if (v.type === 'saved') return html`<${Saved} />`;
-  if (v.type === 'search') return html`<${Search} />`;
-  return html`<${CatchUp} />`;
+  switch (v.type) {
+    case 'conv': if (convMeta(v.id)) return html`<${Conversation} key=${v.id} conv=${v.id} />`; break;
+    case 'catchup': return html`<${CatchUp} />`;
+    case 'saved': return html`<${Saved} />`;
+    case 'search': return html`<${Search} />`;
+    case 'friends': return html`<${Friends} />`;
+    case 'discover': return html`<${Discover} />`;
+    case 'person': return html`<${PersonPage} key=${v.id} id=${v.id} />`;
+    case 'house': return S.ui.phone && !v.about ? html`<${PhoneHouse} key=${v.id} id=${v.id} />` : html`<${HousePage} key=${v.id} id=${v.id} />`;
+    case 'messages': return S.dmOrder.length ? html`<${Home} />` : html`<${MessagesEmpty} />`;
+    default: break;
+  }
+  return html`<${Home} />`;
 }
 
 function PaneView() {
@@ -50,9 +95,10 @@ function Desktop() {
 
 // The phone is its own product: one screen at a time, tabs where thumbs are.
 const TABS = [
-  { id: 'home', label: 'Catch up', icon: 'tray' },
-  { id: 'rooms', label: 'Houses', icon: 'house' },
-  { id: 'direct', label: 'Direct', icon: 'room' },
+  { id: 'home', label: 'Home', icon: 'house' },
+  { id: 'messages', label: 'Messages', icon: 'room' },
+  { id: 'discover', label: 'Discover', icon: 'compass' },
+  { id: 'catchup', label: 'Catch up', icon: 'tray' },
   { id: 'you', label: 'You', icon: 'user' },
 ];
 
@@ -61,18 +107,22 @@ function TabHead({ title, children }) {
 }
 
 function YouTab() {
-  const u = me();
-  const row = (icon, label, run, end) => html`<button class="row" onClick=${run}><span class="row-ic"><${Icon} name=${icon} /></span><span class="grow">${label}</span>${end && html`<span class="row-end faint">${end}</span>`}</button>`;
+  const u = isOnline() ? me() : { ...me(), presence: 'offline' };
+  const requests = friendRequests(S, 'incoming').length;
+  const row = (icon, label, run, end) => html`<button class="row" onClick=${run}><span class="row-ic"><${Icon} name=${icon} /></span><span class="grow">${label}</span>${end && html`<span class="row-end">${end}</span>`}</button>`;
   return html`<div class="you-tab">
-    <div class="you-card">
+    <button class="you-card" onClick=${() => go({ type: 'person', id: S.me })} aria-label=${`${u.name}, open your profile`}>
       <${Avatar} user=${u} presence />
-      <div class="grow"><div class="profile-name">${u.name}</div><div class="faint">@${u.handle}</div></div>
-    </div>
-    <button class="btn block" style="justify-content:flex-start" onClick=${(e) => openPop({ anchor: e.currentTarget.getBoundingClientRect(), label: 'Presence and status', C: MePop, props: {} })}>
+      <span class="grow"><span class="profile-name" style="display:block">${u.name}</span><span class="faint">@${u.handle}</span></span>
+      <${Icon} name="chev-r" size=${16} />
+    </button>
+    <button class="btn block you-status" onClick=${(e) => openPop({ anchor: e.currentTarget.getBoundingClientRect(), label: 'Presence and status', C: MePop, props: {} })}>
       <${Pres} user=${u} inline /><span class="grow trunc" style="text-align:left">${presenceLabel(u)}${u.status ? `. ${u.status}` : ''}</span><${Icon} name="chev-d" size=${16} />
     </button>
+    <${LiveDock} />
     <div class="you-list">
-      ${row('save', 'Saved messages', () => go({ type: 'saved' }), S.saved.length || '')}
+      ${row('people', 'Friends', () => go({ type: 'friends' }), requests ? html`<span class="badge">${requests}</span>` : '')}
+      ${row('save', 'Saved messages', () => go({ type: 'saved' }), S.saved.length ? html`<span class="faint num">${S.saved.length}</span>` : '')}
       ${row('search', 'Search messages', () => go({ type: 'search', q: '' }))}
       ${row('bell', 'Notifications', () => openLayer({ C: Settings, props: { page: 'notify' } }))}
       ${row('eye', 'Appearance', () => openLayer({ C: Settings, props: { page: 'look' } }))}
@@ -82,38 +132,34 @@ function YouTab() {
 }
 
 function Phone() {
-  const tab = S.ui.tab === 'rooms' || S.ui.tab === 'direct' || S.ui.tab === 'you' ? S.ui.tab : 'home';
-  const needs = totalNeeds(S);
-  const directNeeds = S.dmOrder.reduce((n, d) => n + attention(S, d).needs, 0);
-  const houseNeeds = needs - directNeeds - S.invites.length;
-  const counts = { home: needs, rooms: houseNeeds, direct: directNeeds, you: 0 };
+  const tab = TABS.some((t) => t.id === S.ui.tab) ? S.ui.tab : 'home';
+  const counts = { home: homeNeeds(), messages: dmAttention().needs, discover: 0, catchup: totalNeeds(S), you: 0 };
   const v = S.ui.view;
   const pane = PaneView();
   let body;
-  if (tab === 'home') body = html`<${CatchUp} />`;
-  else if (tab === 'rooms') {
-    body = html`<${TabHead} title="Houses">
+  if (tab === 'home') body = html`<${Home} />`;
+  else if (tab === 'messages') {
+    body = html`<${TabHead} title="Messages">
       <button class="ib" aria-label="Jump to or search" onClick=${() => openQuick()}><${Icon} name="search" /></button>
-    <//><div class="nav-scroll"><${NavHouses} /></div>`;
-  } else if (tab === 'direct') {
-    body = html`<${TabHead} title="Direct">
       <button class="ib" aria-label="New message" onClick=${() => openModal(NewMessage)}><${Icon} name="compose" /></button>
     <//><div class="nav-scroll"><${NavDirect} /></div>`;
-  } else body = html`<${TabHead} title="You" /><${YouTab} />`;
+  } else if (tab === 'discover') body = html`<${Discover} />`;
+  else if (tab === 'catchup') body = html`<${CatchUp} />`;
+  else body = html`<${TabHead} title="You" /><${YouTab} />`;
 
   return html`<div class="phone">
     <div class="screen root" aria-hidden=${S.ui.depth > 0 ? 'true' : undefined}>
       <div class="tab-body">${body}</div>
       ${!isOnline() && html`<div class="conn" role="status"><${Icon} name="offline" size=${16} />Can\u2019t reach Snug. Messages wait and send when it\u2019s back.</div>`}
-      <${LiveDock} />
+      ${tab !== 'you' && html`<${LiveDock} />`}
       <nav class="tabs" role="tablist" aria-label="Sections">
         ${TABS.map((t) => html`<button key=${t.id} class="tab" role="tab" aria-selected=${String(tab === t.id)} onClick=${() => setTab(t.id)}>
           <${Icon} name=${t.icon} size=${22} />${t.label}
-          ${counts[t.id] > 0 && html`<span class="badge">${counts[t.id]}</span>`}
+          ${counts[t.id] > 0 && html`<span class="badge" aria-label=${`${counts[t.id]} for you`}>${counts[t.id] > 99 ? '99+' : counts[t.id]}</span>`}
         </button>`)}
       </nav>
     </div>
-    ${S.ui.depth > 0 && html`<div class="screen push" key=${v.type === 'conv' ? v.id : v.type}><${MainView} /></div>`}
+    ${S.ui.depth > 0 && html`<div class="screen push" key=${v.type === 'conv' || v.type === 'house' || v.type === 'person' ? `${v.type}${v.id}` : v.type}><${MainView} /></div>`}
     ${pane && html`<div class="screen push" key=${`${S.ui.pane.type}${S.ui.pane.id || ''}`}>${pane}</div>`}
   </div>`;
 }
@@ -153,9 +199,19 @@ addEventListener('popstate', (e) => {
   for (let i = 0; i < 4 && layers() > pushed; i++) closeTop();
 });
 
+// Desktop has no pushed screens, so a Back button (store back()) dropping the
+// depth to 0 means "the view before this one".
+let lastDepth = 0;
+function desktopBack() {
+  const was = lastDepth;
+  lastDepth = S.ui.depth;
+  if (!S.ui.phone && S.auth === 'in' && S.ready && was > 0 && S.ui.depth === 0) goBack();
+}
+
 function App() {
   useStore();
   useLayoutEffect(syncHistory);
+  useLayoutEffect(desktopBack);
   const inside = S.auth === 'in' && S.ready;
   // Arrived by an invitation link: offer to join once signed in.
   useEffect(() => {
@@ -166,6 +222,7 @@ function App() {
     if (S.auth === 'out') return html`<${Auth} /><${Toasts} />`;
     return html`<${Splash} unreachable=${S.auth === 'unreachable'} onRetry=${boot} />`;
   }
+  syncSpace();
   const needs = totalNeeds(S);
   document.title = needs ? `(${needs}) Snug` : 'Snug';
   return html`${S.ui.phone ? html`<${Phone} />` : html`<${Desktop} />`}<${Overlays} />`;
@@ -174,6 +231,7 @@ function App() {
 // Keyboard
 const typing = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
 
+// Every conversation, in the order the places come in the rail.
 function navOrder() {
   const out = [...S.dmOrder];
   for (const h of S.houseOrder) {
@@ -183,13 +241,22 @@ function navOrder() {
   return out;
 }
 
+// Alt+Up/Down: the next place in the context column. Alt+Shift+Up/Down: the
+// next conversation with something unread, wherever it is.
 function step(dir, unreadOnly) {
+  if (!unreadOnly) {
+    const list = contextPlaces();
+    if (!list.length) return undefined;
+    const cur = list.findIndex((p) => p.sel);
+    const next = cur < 0 ? (dir > 0 ? 0 : list.length - 1) : (cur + dir + list.length) % list.length;
+    return list[next].run();
+  }
   const list = navOrder();
   const cur = S.ui.view.type === 'conv' ? list.indexOf(S.ui.view.id) : -1;
   for (let i = 1; i <= list.length; i++) {
     const id = list[(cur + dir * i + list.length * 2) % list.length];
     const a = attention(S, id);
-    if (!unreadOnly || a.needs || a.soft) return openConv(id);
+    if (a.needs || a.soft) return openConv(id);
   }
   return undefined;
 }
@@ -231,6 +298,13 @@ function onKey(e) {
   }
   if (S.ui.modal || S.ui.layer || S.ui.quick || S.ui.menu || S.ui.pop) return undefined;
   if (e.altKey && (k === 'ArrowUp' || k === 'ArrowDown')) { e.preventDefault(); return step(k === 'ArrowUp' ? -1 : 1, e.shiftKey); }
+  // Back to the previous view: Alt+Left, or Cmd+[ on a Mac. Not while writing,
+  // where those keys move the caret.
+  if (!S.ui.phone && !typing(e.target) && ((e.altKey && !mod && k === 'ArrowLeft') || (e.metaKey && k === '['))) {
+    e.preventDefault();
+    goBack();
+    return undefined;
+  }
 
   const t = e.target;
   // Shift+Tab from the message box goes up into the messages, newest first.
@@ -250,6 +324,8 @@ function onKey(e) {
 }
 
 // Boot
+// Home is where Snug opens, unless you were somewhere else last time.
+try { if (!localStorage.getItem('snug.last')) S.ui.view = { type: 'home' }; } catch { S.ui.view = { type: 'home' }; }
 const phoneQuery = matchMedia('(max-width: 759px)');
 S.ui.phone = phoneQuery.matches;
 phoneQuery.addEventListener('change', (e) => { S.ui.phone = e.matches; emit(); });

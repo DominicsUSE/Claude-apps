@@ -23,11 +23,13 @@ const DEFAULT_PREFS = {
 };
 
 // Everything that comes from the server.
-const DATA = ['me', 'users', 'houses', 'rooms', 'houseOrder', 'dms', 'dmOrder', 'msgs', 'more', 'threads', 'read', 'followed', 'saved', 'cache', 'invites', 'voice', 'voiceState'];
+const DATA = ['me', 'users', 'houses', 'rooms', 'houseOrder', 'dms', 'dmOrder', 'msgs', 'more', 'threads', 'read', 'followed', 'saved', 'cache', 'invites', 'voice', 'voiceState', 'friends', 'events'];
 function blank() {
   return {
     me: null, users: {}, houses: {}, rooms: {}, houseOrder: [], dms: {}, dmOrder: [], msgs: {}, more: {}, threads: {},
     read: {}, followed: {}, saved: [], cache: {}, invites: [], voice: {}, voiceState: {},
+    friends: {},   // { [userId]: { state: 'friends'|'incoming'|'outgoing', favorite, since } }
+    events: {},    // { [eventId]: { id, house, room, title, about, starts, ends, by, going: [userId], created } }
   };
 }
 
@@ -71,6 +73,32 @@ function save(op, d) {
   return call(op, d).catch((e) => {
     toast(e.offline ? 'You’re offline, so that change wasn’t saved.' : e.message);
     if (!e.offline) transport.resync();
+  });
+}
+
+// Background bookkeeping (read markers): nothing to tell the person while
+// offline. What was read offline is kept and sent after the next snapshot.
+const offlineReads = {};
+function saveQuiet(op, d) {
+  return call(op, d).catch((e) => {
+    if (!e.offline) { transport.resync(); return; }
+    for (const { conv, ts } of d.items || [d]) offlineReads[conv] = ts;
+  });
+}
+function flushOfflineReads() {
+  const items = [];
+  for (const [conv, ts] of Object.entries(offlineReads)) {
+    delete offlineReads[conv];
+    if (ts > (S.read[conv] || 0)) { S.read[conv] = ts; items.push({ conv, ts }); }
+  }
+  if (items.length) saveQuiet('read.many', { items });
+}
+
+// Ask for something without changing anything: say why if it fails, resolve with null.
+function ask(op, d) {
+  return call(op, d).catch((e) => {
+    toast(e.offline ? 'You’re offline. Try again once you’re back.' : e.message);
+    return null;
   });
 }
 
@@ -152,6 +180,7 @@ export function applySnapshot(d) {
     for (const m of list) if (!have.has(m.id)) S.msgs[conv].push(m);
   }
   S.ready = true;
+  flushOfflineReads();
   checkView();
   const v = S.ui.view;
   if (first && v.type === 'conv') S.ui.marker[v.id] = unreadOf(S, v.id).firstTs;
@@ -164,7 +193,10 @@ export function signedOut() {
   S.ready = false;
   S.auth = 'out';
   S.call = null;
+  local.del(KEYS.last);
   S.ui = freshUi();
+  // The next person to sign in starts at home, not on the last person's page.
+  S.ui.view = { type: 'home' };
   emit();
 }
 
@@ -306,7 +338,7 @@ export function setRead(conv, ts) {
   if (S.read[conv] === ts) return;
   S.read[conv] = ts;
   emit();
-  save('read.set', { conv, ts });
+  saveQuiet('read.set', { conv, ts });
 }
 
 export function markRead(conv) {
@@ -344,7 +376,7 @@ export function markManyRead(convs, label) {
     items.push({ conv: c, ts });
   }
   emit();
-  if (items.length) save('read.many', { items });
+  if (items.length) saveQuiet('read.many', { items });
   toast(label, {
     undo: () => {
       for (const c of Object.keys(before)) S.read[c] = before[c];
@@ -567,6 +599,92 @@ export function removeMember(houseId, userId) {
   const name = S.users[userId]?.name;
   const house = S.houses[houseId]?.name;
   return call('member.remove', { house: houseId, user: userId }).then(() => toast(`${name} was removed from ${house}`), (e) => toast(e.message));
+}
+
+// Friends. Each resolves with the server's answer, or with nothing if it was
+// refused (the reason is shown as a toast and the state is fetched again).
+export function sendFriendRequest(handleOrUserId) {
+  const v = String(handleOrUserId || '').trim();
+  const d = S.users[v] && v !== S.me ? { user: v } : { handle: v.replace(/^@/, '') };
+  return save('friend.request', d).then((r) => {
+    if (!r) return r;
+    if (r.state === 'friends') toast(`You and ${S.users[r.user]?.name || 'they'} are friends now`);
+    else toast(`Friend request sent to ${S.users[r.user]?.name || `@${d.handle || v}`}`);
+    return r;
+  });
+}
+function setFriend(id, friend) {
+  if (friend) S.friends[id] = friend; else delete S.friends[id];
+  emit();
+}
+export function acceptFriend(userId) {
+  const f = S.friends[userId];
+  if (f) setFriend(userId, { ...f, state: 'friends', since: Date.now() });
+  return save('friend.accept', { user: userId });
+}
+export function declineFriend(userId) {
+  setFriend(userId, null);
+  return save('friend.decline', { user: userId });
+}
+// Unfriend, or take back a request you sent.
+export function removeFriend(userId) {
+  const was = S.friends[userId]?.state;
+  setFriend(userId, null);
+  return save('friend.remove', { user: userId }).then((r) => {
+    if (r && was === 'friends') toast(`${S.users[userId]?.name || 'They'} isn’t on your friends list any more`);
+    return r;
+  });
+}
+export function setFavoriteFriend(userId, on) {
+  const f = S.friends[userId];
+  if (f) setFriend(userId, { ...f, favorite: !!on });
+  return save('friend.favorite', { user: userId, on: !!on });
+}
+
+// Discovery. Resolves with { houses, people }, or null if it could not load.
+export function discover({ q = '', topic = null } = {}) {
+  return ask('discover', { q, topic }).then((r) => {
+    if (!r) return null;
+    // People you might know become openable profiles; keep what is already known.
+    for (const p of r.people) if (!S.users[p.user.id]) S.users[p.user.id] = p.user;
+    return r;
+  });
+}
+// A public house as a visitor sees it, with its rules and upcoming events. Null if it could not load.
+export const previewHouse = (houseId) => ask('house.preview', { house: houseId });
+export function joinPublicHouse(houseId) {
+  // A community you found yourself opens on its own page (welcome, rules,
+  // what is happening), not straight in a room.
+  return save('house.joinPublic', { house: houseId }).then((r) => {
+    if (r) {
+      S.ui.modal = null;
+      if (S.houses[r.house || houseId]?.joined) go({ type: 'house', id: r.house || houseId, about: true });
+      else joined(r);
+    }
+    return r;
+  });
+}
+
+// Events
+export function createEvent(houseId, { title, about = '', starts, ends = null, room = null }) {
+  return save('event.create', { house: houseId, title, about, starts, ends, room }).then((r) => {
+    if (r?.event) { S.events[r.id] = r.event; S.ui.modal = null; emit(); }
+    return r;
+  });
+}
+export function rsvpEvent(eventId, going) {
+  const e = S.events[eventId];
+  if (e) {
+    e.going = going ? [...new Set([...e.going, S.me])] : e.going.filter((u) => u !== S.me);
+    emit();
+  }
+  return save('event.rsvp', { event: eventId, going: !!going });
+}
+export function deleteEvent(eventId) {
+  const title = S.events[eventId]?.title;
+  delete S.events[eventId];
+  emit();
+  return save('event.delete', { event: eventId }).then((r) => { if (r && title) toast(`${title} cancelled`); return r; });
 }
 
 export function startDm(userIds) {

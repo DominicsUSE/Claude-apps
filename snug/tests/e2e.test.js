@@ -34,6 +34,8 @@ test.before(async () => {
 });
 test.after(async () => { await browser?.close(); await srv.close(); rmSync(dir, { recursive: true, force: true }); });
 test.beforeEach(() => srv.hub.resetLimits());
+// No test may leave an error in any page behind it.
+test.afterEach(() => { const seen = errors.splice(0); assert.deepEqual(seen, [], 'page errors'); });
 
 // One person in their own browser session.
 async function person(handle, { viewport = { width: 1280, height: 800 }, path = '/' } = {}) {
@@ -41,6 +43,11 @@ async function person(handle, { viewport = { width: 1280, height: 800 }, path = 
   const page = await ctx.newPage();
   page.setDefaultTimeout(10000);
   page.on('pageerror', (e) => errors.push(`${handle}: ${e.message}`));
+  // Console errors count too, except the browser's own network notes: the
+  // tests refuse passwords and stop the server on purpose.
+  page.on('console', (m) => {
+    if (m.type() === 'error' && !/Failed to load resource|WebSocket connection|ERR_CONNECTION_REFUSED/.test(m.text())) errors.push(`${handle} console: ${m.text()}`);
+  });
   await page.goto(url + path);
   await page.waitForSelector('.auth-form');
   if (handle) await signIn(page, handle);
@@ -53,7 +60,22 @@ async function signIn(page, handle, password = PASSWORD) {
   await page.waitForSelector(page.viewportSize().width < 760 ? '.tabs' : '.nav');
   await page.waitForFunction(() => window.snug.S.conn.socket === 'open');
 }
-const go = (page, name) => page.click(`.nav .row:has-text("${name}")`);
+// Rooms live in their community's column: open the community from the rail
+// first, unless it is already the place you are in.
+const HOUSE_OF = {
+  'Front desk': 'Kiln & Co.', 'The floor': 'Kiln & Co.', 'Glaze lab': 'Kiln & Co.', 'Firing schedule': 'Kiln & Co.',
+  'Show & tell': 'Kiln & Co.', Marketplace: 'Kiln & Co.', Classes: 'Kiln & Co.', 'Wheel room': 'Kiln & Co.',
+  'Ride plans': 'Ridgeline Riders',
+};
+async function openPlace(page, house) {
+  if (await page.locator(`.rail-house[aria-current="page"]:has-text("${house}")`).count()) return;
+  await page.click(`.rail-house:has-text("${house}")`);
+  await page.locator(`.nav .ctx-house:has-text("${house}")`).waitFor();
+}
+async function go(page, name) {
+  if (HOUSE_OF[name]) await openPlace(page, HOUSE_OF[name]);
+  await page.click(`.nav .row:has-text("${name}")`);
+}
 const box = (page) => page.locator('.main .composer textarea');
 const say = async (page, text) => { await box(page).fill(text); await box(page).press('Enter'); };
 const settled = (page) => page.waitForFunction(() => Object.values(window.snug.S.msgs).flat().every((m) => !m.state));
@@ -121,7 +143,7 @@ test('an attached picture uploads and shows for the other person', async () => {
 });
 
 test('presence is real: people show online only while connected', async () => {
-  await robin.click('[aria-label*="people here"]');
+  await robin.click('.main .bar button[aria-label^="People,"]');
   const row = robin.locator('.person:has-text("Ines Carvalho")');
   await row.locator('.pres.open').waitFor();
   assert.equal(await robin.locator('.person:has-text("Tomasz") .pres.offline').count(), 1, 'nobody is signed in as Tomasz');
@@ -144,6 +166,8 @@ test('a mention elsewhere raises a note and a number; opening it clears both', a
   await badge.waitFor({ state: 'detached' });
   // Read state is on the server: a fresh session agrees.
   const again = await person('robin');
+  await openPlace(again, 'Kiln & Co.');
+  await again.locator('.nav .row:has-text("Show & tell")').waitFor();
   assert.equal(await again.locator('.nav .row:has-text("Show & tell") .badge').count(), 0);
   await again.context().close();
 });
@@ -185,7 +209,7 @@ test('permissions: a member cannot post notices; the server agrees', async () =>
   await priya.locator('.composer-locked:has-text("Only Studio lead and Technician")').waitFor();
   const refused = await priya.evaluate(() => import('./js/server.js').then((m) => m.call('msg.send', { conv: 'k_desk', id: 'm_forced0000000001', text: 'forced' }).then(() => 'sent', (e) => e.message)));
   assert.match(refused, /Only Studio lead and Technician/);
-  await priya.click('.nav .house-row:has-text("Kiln & Co.")', { button: 'right' });
+  await priya.click('.rail-house:has-text("Kiln & Co.")', { button: 'right' });
   await priya.locator('.menu-item:has-text("Browse rooms")').waitFor();
   assert.equal(await priya.locator('.menu-item:has-text("House settings")').count(), 0);
   await priya.keyboard.press('Escape');
@@ -244,7 +268,8 @@ test('search runs on the server over stored messages', async () => {
 });
 
 test('catch up: J moves, E marks done, and it stays done after a reload', async () => {
-  await robin.click('.nav >> text=Catch up');
+  await robin.click('.rail-btn:has-text("Home")');
+  await robin.click('.nav .row:has-text("Catch up")');
   const items = robin.locator('.item[data-triage]');
   const before = await items.count();
   assert.ok(before >= 2, `expected at least two items, got ${before}`);
@@ -257,12 +282,13 @@ test('catch up: J moves, E marks done, and it stays done after a reload', async 
   await robin.reload();
   await robin.waitForSelector('.nav');
   await robin.waitForFunction(() => window.snug.S.conn.socket === 'open');
-  await robin.click('.nav >> text=Catch up');
+  await robin.click('.rail-btn:has-text("Home")');
+  await robin.click('.nav .row:has-text("Catch up")');
   assert.equal(await robin.locator('.item[data-triage]').count(), before - 1);
 });
 
 test('a new account joins by link as a newcomer, and the house opens after a first message', async () => {
-  await robin.click('.nav .house-row:has-text("Kiln & Co.")', { button: 'right' });
+  await robin.click('.rail-house:has-text("Kiln & Co.")', { button: 'right' });
   await robin.click('.menu-item:has-text("Invite people")');
   await robin.waitForFunction(() => /\/join\//.test(document.querySelector('.copy-row input')?.value || ''));
   const link = await robin.locator('.copy-row input').first().inputValue();
@@ -277,6 +303,9 @@ test('a new account joins by link as a newcomer, and the house opens after a fir
   await dana.locator('.modal:has-text("Kiln & Co.")').waitFor();
   await dana.click('.modal >> text=Join Kiln & Co.');
   await dana.locator('.welcome:has-text("Welcome to Kiln & Co.")').waitFor();
+  // Joining puts you in the community's column, with only its starter rooms.
+  await dana.locator('.rail-house[aria-current="page"]:has-text("Kiln & Co.")').waitFor();
+  await dana.locator('.nav .row:has-text("The floor")').waitFor();
   assert.equal(await dana.locator('.nav .row:has-text("Glaze lab")').count(), 0, 'only starter rooms at first');
   await go(dana, 'The floor');
   await say(dana, 'Hello, I just joined.');
@@ -328,13 +357,14 @@ test('signing out returns to sign-in and clears this device', async () => {
 
 test('phone: tabs, a room pushed on top, back button and back gesture return', async () => {
   const phone = await person('robin', { viewport: { width: 390, height: 844 } });
-  await phone.locator('.tab[aria-selected="true"]:has-text("Catch up")').waitFor();
-  await phone.click('.tab:has-text("Houses")');
-  await phone.click('.row:has-text("Glaze lab")');
+  await phone.locator('.tab[aria-selected="true"]:has-text("Home")').waitFor();
+  await phone.click('.home-house:has-text("Kiln & Co.")');
+  await phone.click('.screen.push .row:has-text("Glaze lab")');
   await phone.locator('.screen.push .composer textarea').waitFor();
   await phone.click('.screen.push [aria-label="Back"]');
   assert.equal(await phone.locator('.screen.push').count(), 0);
-  await phone.click('.row:has-text("Ride plans")');
+  await phone.click('.home-house:has-text("Ridgeline Riders")');
+  await phone.click('.screen.push .row:has-text("Ride plans")');
   await phone.locator('.screen.push .composer textarea').waitFor();
   await phone.goBack();
   await phone.waitForFunction(() => !document.querySelector('.screen.push'));
@@ -342,4 +372,174 @@ test('phone: tabs, a room pushed on top, back button and back gesture return', a
   assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'no horizontal scroll');
   await phone.context().close();
   assert.deepEqual(errors, []);
+});
+
+// ---------- The redesigned product: places, friends, discovery, events ----------
+
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// Home from the rail reopens where you were in Home; its first row is the Home page.
+const home = async (page) => {
+  await page.click('.rail-btn:has-text("Home")');
+  await page.locator('.nav .ctx .row', { hasText: /^Home$/ }).click();
+  await page.locator('.main.home').waitFor();
+};
+
+test('the rail and the context column switch places, and Alt+Down walks the column', async () => {
+  await robin.click('.rail-btn:has-text("Messages")');
+  await robin.locator('.rail-btn[aria-current="page"]:has-text("Messages")').waitFor();
+  await robin.locator('.nav .ctx[aria-label="Messages"] .sect:has-text("Direct messages")').waitFor();
+  assert.ok(await robin.locator('.nav .ctx .row').count() >= 1, 'direct messages are listed');
+  assert.equal(await robin.locator('.main .composer textarea').count(), 1, 'Messages opens the latest conversation');
+
+  await robin.click('.rail-btn:has-text("Discover")');
+  await robin.locator('.nav .ctx[aria-label="Discover"] .row:has-text("Communities")').waitFor();
+  await robin.locator('.nav .ctx .row:has-text("Music")').waitFor();
+
+  await robin.click('.rail-house:has-text("Ridgeline Riders")');
+  await robin.locator('.nav .ctx-house:has-text("Ridgeline Riders")').waitFor();
+  await robin.locator('.nav .row:has-text("Ride plans")').waitFor();
+  assert.equal(await robin.locator('.nav .row:has-text("Glaze lab")').count(), 0, 'only this community’s rooms');
+
+  await home(robin);
+  await robin.locator('.rail-btn[aria-current="page"]:has-text("Home")').waitFor();
+  await robin.locator('.nav .row[aria-current="page"]:has-text("Home")').waitFor();
+  await robin.locator('.main').click({ position: { x: 5, y: 5 } });
+  await robin.keyboard.press('Alt+ArrowDown');
+  await robin.locator('.nav .row[aria-current="page"]:has-text("Catch up")').waitFor();
+  assert.equal(await robin.evaluate(() => window.snug.S.ui.view.type), 'catchup');
+  // Choosing a community again reopens where you were in it.
+  await robin.click('.rail-house:has-text("Ridgeline Riders")');
+  await robin.locator('.nav .ctx-house:has-text("Ridgeline Riders")').waitFor();
+});
+
+test('home shows friends who are around and conversations going, live', async () => {
+  await home(robin);
+  const ines2 = await person('ines');
+  const friend = robin.locator('.home-sect[aria-labelledby="home-friends"] .home-friend:has-text("Ines")');
+  await friend.waitFor();
+  await go(ines2, 'Glaze lab');
+  await say(ines2, 'Kiln is unloaded, come and look.');
+  const row = robin.locator('.home-sect[aria-labelledby="home-active"] .home-row:has-text("Glaze lab")');
+  await row.locator('text=Kiln is unloaded').waitFor();
+  assert.match(await row.textContent(), /talking/);
+  await ines2.context().close();
+  await friend.waitFor({ state: 'detached', timeout: 9000 });
+  // Offline now, but she just wrote: she moves to "Recently here" instead of vanishing.
+  await robin.locator('.home-sect[aria-labelledby="home-recent"] .home-friend:has-text("Ines")').waitFor();
+  // A conversation row opens the conversation.
+  await row.click();
+  await msg(robin, 'Kiln is unloaded').waitFor();
+});
+
+test('a friend request reaches the other person live, and accepting makes both friends', async () => {
+  const tomasz = await person('tomasz');
+  await home(tomasz);
+  await tomasz.click('.nav .row:has-text("Friends")');
+  await tomasz.click('.f-tab:has-text("Requests")');
+  assert.equal(await tomasz.locator('.f-row:has-text("Robin Hale")').count(), 0);
+
+  await home(robin);
+  await robin.click('.nav .row:has-text("Friends")');
+  await robin.click('.f-tab:has-text("Add friend")');
+  await robin.fill('#f-add-handle', 'nobody-by-this-name');
+  await robin.click('.f-add-form button[type=submit]');
+  await robin.locator('#f-add-handle[aria-invalid="true"]').waitFor();
+  await robin.fill('#f-add-handle', 'tomasz');
+  await robin.click('.f-add-form button[type=submit]');
+  await robin.locator('.ok-line:has-text("Request sent")').waitFor();
+
+  // Tomasz sees it arrive without a refresh, with a number on Friends.
+  const req = tomasz.locator('.f-row:has-text("Robin Hale")');
+  await req.waitFor();
+  assert.equal(await tomasz.locator('.nav .row:has-text("Friends") .badge').textContent(), '1');
+  await req.locator('button:has-text("Accept")').click();
+  await tomasz.locator('.nav .row:has-text("Friends") .badge').waitFor({ state: 'detached' });
+
+  // Both are friends now, on both screens, without a refresh.
+  await robin.click('.f-tab:has-text("All")');
+  await robin.locator('.f-row:has-text("Tomasz")').waitFor();
+  await tomasz.click('.f-tab:has-text("All")');
+  await tomasz.locator('.f-row:has-text("Robin Hale")').waitFor();
+  // The server agrees: a fresh session sees the friendship.
+  await tomasz.reload();
+  await tomasz.waitForFunction(() => window.snug.S.ready && window.snug.S.conn.socket === 'open');
+  assert.equal(await tomasz.evaluate(() => window.snug.S.friends.robin?.state), 'friends');
+  await tomasz.context().close();
+});
+
+test('discover lists a public community; preview, join, and its page opens', async () => {
+  await robin.click('.rail-btn:has-text("Discover")');
+  await robin.click('.nav .ctx .row:has-text("Communities")');
+  const card = robin.locator('.d-house:has-text("The Listening Room")');
+  await card.waitFor();
+  assert.equal(await robin.locator('.d-house:has-text("Kiln & Co.")').count(), 0, 'communities you are in are not suggested');
+  await card.locator('.d-house-main').click();
+  await robin.locator('.hp #hp-title:has-text("The Listening Room")').waitFor();
+  await robin.click('.hp-foot .btn.primary:has-text("Join")');
+  await robin.locator('.main.pl-page[aria-label="The Listening Room"]').waitFor();
+  assert.equal(await robin.locator('.modal').count(), 0, 'the preview closes');
+  await robin.locator('.rail-house[aria-current="page"]:has-text("The Listening Room")').waitFor();
+  await robin.locator('.nav .ctx-house:has-text("The Listening Room")').waitFor();
+  assert.equal(await robin.evaluate(() => Object.values(window.snug.S.houses).find((h) => h.name === 'The Listening Room').newcomer), true, 'joins as a newcomer');
+});
+
+test('an event planned by one person appears for another, who says they are going', async () => {
+  const priya = await person('priya');
+  for (const p of [robin, priya]) {
+    await openPlace(p, 'Kiln & Co.');
+    await p.click('.nav .row:has-text("Events")');
+    await p.locator('.main.pl-page[aria-label="Events in Kiln & Co."]').waitFor();
+  }
+  assert.equal(await priya.locator('.ev-list button:has-text("Create event")').count(), 0, 'a member cannot plan events');
+  await robin.click('.ev-list button:has-text("Create event")');
+  await robin.fill('#ev-title', 'Glaze night');
+  await robin.fill('#ev-about', 'Test tiles and shared buckets.');
+  await robin.fill('#ev-when', ymd(new Date(Date.now() + 3 * 86_400_000)));
+  await robin.fill('.ev-form input[aria-label="Starts at"]', '19:00');
+  await robin.click('.ev-form button[type=submit]');
+  const mine = robin.locator('.ev-row:has-text("Glaze night")');
+  await mine.waitFor();
+  const theirs = priya.locator('.ev-row:has-text("Glaze night")');
+  await theirs.waitFor();
+  assert.match(await theirs.textContent(), /1 going/);
+  await theirs.locator('.ev-rsvp').click();
+  await theirs.locator('.ev-rsvp.on').waitFor();
+  await mine.locator('text=2 going').waitFor();
+  // The server agrees.
+  const going = await priya.evaluate(() => import('./js/server.js').then((m) => m.call('sync')).then((d) => Object.values(d.events).find((e) => e.title === 'Glaze night').going));
+  assert.deepEqual([...going].sort(), ['priya', 'robin']);
+  await priya.context().close();
+});
+
+test('phone: Home, Messages, Discover, Catch up and You tabs each show their screen', async () => {
+  const phone = await person('robin', { viewport: { width: 390, height: 844 } });
+  const tab = async (name) => {
+    await phone.click(`.tab:has-text("${name}")`);
+    await phone.locator(`.tab[aria-selected="true"]:has-text("${name}")`).waitFor();
+  };
+  await phone.locator('.tab[aria-selected="true"]:has-text("Home")').waitFor();
+  await phone.locator('.tab-body .home .home-greet:has-text("Robin")').waitFor();
+  assert.ok(Number(await phone.locator('.tab:has-text("Home") .badge').textContent()) >= 1, 'the waiting friend request counts on Home');
+  await tab('Messages');
+  await phone.locator('.tab-body .sect:has-text("Direct messages")').waitFor();
+  await phone.click('.tab-body .row >> nth=0');
+  await phone.locator('.screen.push .composer textarea').waitFor();
+  await phone.goBack();
+  await phone.waitForFunction(() => !document.querySelector('.screen.push'));
+  await tab('Discover');
+  await phone.locator('.tab-body .d-house, .tab-body .d-feature').first().waitFor();
+  await tab('Catch up');
+  await phone.locator('.tab-body .item[data-triage]').first().waitFor();
+  await tab('You');
+  await phone.locator('.you-card:has-text("Robin Hale")').waitFor();
+  await phone.click('.you-list .row:has-text("Friends")');
+  await phone.locator('.screen.push .friends-view').waitFor();
+  await phone.click('.screen.push [aria-label="Back"]');
+  await phone.waitForFunction(() => !document.querySelector('.screen.push'));
+  for (const name of ['Home', 'Messages', 'Discover', 'Catch up', 'You']) {
+    const h = await phone.locator(`.tab:has-text("${name}")`).boundingBox();
+    assert.ok(h.height >= 44, `${name} tab is a 44px target`);
+  }
+  assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'no horizontal scroll');
+  await phone.context().close();
 });

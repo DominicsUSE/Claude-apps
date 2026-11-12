@@ -161,7 +161,65 @@ CREATE TABLE IF NOT EXISTS files (
   size INTEGER NOT NULL,
   created INTEGER NOT NULL
 );
+
+-- Friends: two rows per pair, one from each person's side. "state" is how
+-- the pair looks to "user" ('friends', 'outgoing' or 'incoming'), and
+-- "favorite" is that person's private star. Both rows change together.
+CREATE TABLE IF NOT EXISTS friends (
+  user TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  other TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  state TEXT NOT NULL,
+  favorite INTEGER NOT NULL DEFAULT 0,
+  since INTEGER NOT NULL,
+  PRIMARY KEY (user, other)
+);
+CREATE INDEX IF NOT EXISTS friends_other ON friends(other);
+-- After a request is declined or taken back, "user" may not ask "other"
+-- again until a day after "ts", so a request can't be used to nag.
+CREATE TABLE IF NOT EXISTS friend_cooldown (
+  user TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  other TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  ts INTEGER NOT NULL,
+  PRIMARY KEY (user, other)
+);
+
+CREATE TABLE IF NOT EXISTS events (
+  id TEXT PRIMARY KEY,
+  house TEXT NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+  room TEXT,
+  title TEXT NOT NULL,
+  about TEXT NOT NULL DEFAULT '',
+  starts INTEGER NOT NULL,
+  ends INTEGER,
+  by TEXT NOT NULL,
+  created INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS events_house ON events(house, starts);
+CREATE TABLE IF NOT EXISTS event_rsvps (
+  event TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  user TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  ts INTEGER NOT NULL,
+  PRIMARY KEY (event, user)
+);
 `;
+
+// Columns added after the first release. CREATE TABLE IF NOT EXISTS leaves an
+// existing table alone, so each one is added here if the table lacks it.
+const COLUMNS = [
+  ['users', 'interests', "TEXT NOT NULL DEFAULT '[]'"],
+  ['users', 'links', "TEXT NOT NULL DEFAULT '[]'"],
+  ['houses', 'public', 'INTEGER NOT NULL DEFAULT 0'],
+  ['houses', 'topic', 'TEXT'],
+  ['houses', 'rules', "TEXT NOT NULL DEFAULT ''"],
+];
+
+export function migrate(db) {
+  for (const [table, column, type] of COLUMNS) {
+    const have = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+    // Names and types come from the list above, never from input.
+    if (!have) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+}
 
 export function openDb(path) {
   if (path !== ':memory:') {
@@ -170,6 +228,7 @@ export function openDb(path) {
   const fresh = path === ':memory:' || !existsSync(path);
   const db = new DatabaseSync(path);
   db.exec(SCHEMA);
+  migrate(db);
   // The database file holds password hashes and private messages: owner only.
   if (path !== ':memory:' && fresh) { try { chmodSync(path, 0o600); } catch { /* not supported */ } }
 

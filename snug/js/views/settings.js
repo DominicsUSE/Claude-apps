@@ -10,7 +10,9 @@ import { leaveVoice } from '../voice.js';
 import { LEVEL_LABEL, levelOf, roomIds } from '../lib/attention.js';
 import { PERMS, can } from '../lib/perms.js';
 import { fuzzy, HUES, hueOf } from '../lib/util.js';
-import { Icon, Mark } from '../ui/icons.js';
+import { LIMITS, cleanInterests, safeLink } from '../lib/social.js';
+import { Icon } from '../ui/icons.js';
+import { Nook } from '../ui/brand.js';
 import { Avatar, Tile, Seg, Switch, PRESENCE } from '../ui/kit.js';
 import { Message } from './stream.js';
 import { Confirm } from './modals.js';
@@ -71,11 +73,80 @@ function Profile() {
       <input class="field" style="width:72px;text-align:center" maxlength="4" placeholder="Emoji" aria-label="Emoji picture" value=${u.emoji || ''}
         onInput=${(e) => updateMe({ emoji: e.target.value.trim() || undefined })} />
     <//>
-    <${Row} label="Colour" hint="Behind your initials. Every colour stays readable in both themes." top>
+    <${Row} label="Colour" hint="Behind your initials, wherever you appear. Every colour stays readable in both themes." top>
       <div class="swatches" role="group" aria-label="Avatar colour">
         ${HUES.map(([v, name]) => html`<button key=${v} class="swatch" style=${`--hue:${v}`} aria-pressed=${String(hueOf(u.hue) === v)} aria-label=${name} onClick=${() => updateMe({ hue: v })}></button>`)}
       </div>
+    <//>
+    <${Row} label="Interests" hint=${`Up to ${LIMITS.interests}. They show on your profile and help people who like the same things find you.`} top>
+      <${InterestsEditor} list=${u.interests || []} />
+    <//>
+    <${Row} label="Links" hint=${`Up to ${LIMITS.links}. Full https:// addresses; they open in a new tab.`} top>
+      <${LinksEditor} list=${u.links || []} />
     <//>`;
+}
+
+// Interests: chips you can remove, one field to add more.
+function InterestsEditor({ list }) {
+  const [text, setText] = useState('');
+  const [err, setErr] = useState('');
+  const full = list.length >= LIMITS.interests;
+  const add = () => {
+    const v = text.replace(/\s+/g, ' ').trim().replace(/,$/, '');
+    if (!v) return;
+    if (v.length > LIMITS.interest) return setErr(`Keep each one to ${LIMITS.interest} characters.`);
+    if (list.some((x) => x.toLowerCase() === v.toLowerCase())) return setErr(`“${v}” is already there.`);
+    if (full) return setErr(`That’s ${LIMITS.interests}, the most you can list.`);
+    updateMe({ interests: cleanInterests([...list, v]) });
+    setText('');
+    setErr('');
+    return undefined;
+  };
+  return html`<div class="ed-int">
+    ${list.length > 0 && html`<ul class="ed-chips" aria-label="Your interests">
+      ${list.map((i) => html`<li key=${i} class="ed-chip">${i}
+        <button class="ed-chip-x" aria-label=${`Remove ${i}`} onClick=${() => updateMe({ interests: list.filter((x) => x !== i) })}><${Icon} name="x" size=${12} /></button>
+      </li>`)}
+    </ul>`}
+    <div class="ed-add">
+      <input class="field" placeholder=${full ? 'That’s the most you can list' : 'Add an interest, then Enter'} maxlength=${LIMITS.interest} value=${text} disabled=${full}
+        aria-label="Add an interest" aria-invalid=${err ? 'true' : undefined} aria-describedby="ed-int-msg"
+        onInput=${(e) => { setText(e.target.value); if (err) setErr(''); }}
+        onKeyDown=${(e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); add(); } }} />
+      <button class="btn" disabled=${full || !text.trim()} onClick=${add}>Add</button>
+    </div>
+    <div id="ed-int-msg" class=${err ? 'err' : 'hint'} role=${err ? 'alert' : undefined}>${err || `${list.length} of ${LIMITS.interests}`}</div>
+  </div>`;
+}
+
+// Links: a label and an https address each. Saved when every filled row is valid.
+function LinksEditor({ list }) {
+  const [rows, setRows] = useState(() => (list.length ? list.map((l) => ({ ...l })) : []));
+  const [bad, setBad] = useState({});
+  const check = (r) => (!r.url.trim() ? '' : safeLink(r.url) ? '' : 'Use a full address that starts with https://');
+  const commit = (next) => {
+    const errs = {};
+    next.forEach((r, i) => { const m = check(r); if (m) errs[i] = m; });
+    setBad(errs);
+    if (Object.keys(errs).length) return;
+    const clean = next.filter((r) => r.url.trim()).map((r) => ({ label: r.label.trim().slice(0, LIMITS.linkLabel), url: safeLink(r.url) }));
+    if (JSON.stringify(clean) !== JSON.stringify(list)) updateMe({ links: clean });
+  };
+  const set = (i, patch) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const remove = (i) => { const next = rows.filter((_, j) => j !== i); setRows(next); commit(next); };
+  return html`<div class="ed-links">
+    ${rows.map((r, i) => html`<div class="ed-link" key=${i}>
+      <input class="field ed-link-label" placeholder="Label" maxlength=${LIMITS.linkLabel} aria-label=${`Link ${i + 1} label`} value=${r.label}
+        onInput=${(e) => set(i, { label: e.target.value })} onBlur=${() => commit(rows)} />
+      <input class="field ed-link-url" type="url" inputmode="url" placeholder="https://" maxlength=${LIMITS.linkUrl} aria-label=${`Link ${i + 1} address`} value=${r.url}
+        aria-invalid=${bad[i] ? 'true' : undefined} aria-describedby=${bad[i] ? `ed-link-err-${i}` : undefined}
+        onInput=${(e) => { set(i, { url: e.target.value }); if (bad[i]) setBad({ ...bad, [i]: '' }); }} onBlur=${() => commit(rows)} />
+      <button class="ib" aria-label=${`Remove link ${i + 1}`} data-tip="Remove" onClick=${() => remove(i)}><${Icon} name="trash" size=${18} /></button>
+      ${bad[i] && html`<div class="err ed-link-err" id=${`ed-link-err-${i}`} role="alert">${bad[i]}</div>`}
+    </div>`)}
+    ${rows.length < LIMITS.links && html`<button class="btn quiet ed-link-add" onClick=${() => setRows([...rows, { label: '', url: '' }])}><${Icon} name="plus" size=${16} />Add a link</button>`}
+    ${rows.length >= LIMITS.links && html`<div class="hint">${LIMITS.links} of ${LIMITS.links}. Remove one to add another.</div>`}
+  </div>`;
 }
 
 function Notify() {
@@ -130,9 +201,10 @@ function Look() {
 const KEYS = [
   [[MOD, 'K'], 'Jump to a room or person, or search'],
   [[MOD, 'Shift', 'F'], 'Search messages'],
-  [['Alt', '↑'], 'Previous room or conversation'],
-  [['Alt', '↓'], 'Next room or conversation'],
-  [['Alt', 'Shift', '↓'], 'Next place with something new'],
+  [['Alt', '↑'], 'Previous place in the column'],
+  [['Alt', '↓'], 'Next place in the column'],
+  [['Alt', 'Shift', '↓'], 'Next conversation with something new, anywhere'],
+  [MOD === '⌘' ? ['⌘', '['] : ['Alt', '←'], 'Back to where you were'],
   [['Esc'], 'Close the top layer, then the side pane. With nothing open, mark this place read'],
   [['Shift', 'Esc'], 'Mark this whole house read'],
   [['↑'], 'In an empty message box: edit your last message'],
@@ -239,7 +311,7 @@ export function Settings({ page: start = 'profile' }) {
   const [page, setPage] = useState(start);
   const V = VIEWS[page];
   return html`<${Layer} title="Settings" icon=${html`<${Icon} name="sliders" />`} pages=${PAGES} page=${page} setPage=${setPage}
-    foot=${html`<${Mark} size=${16} /><span>Snug 0.2</span>`}>
+    foot=${html`<${Nook} size=${16} /><span>Snug 0.2</span>`}>
     <${V} />
   <//>`;
 }
@@ -294,7 +366,7 @@ function HouseRoles({ house }) {
         <${Row} label="Name"><input class="field" style="width:200px" key=${role.id} value=${role.name} maxlength="24" aria-label="Role name" onChange=${(e) => e.target.value.trim() && updateRole(house, role.id, { name: e.target.value.trim() })} /><//>
         <${Row} label="Name colour" hint="People with this role show their name in it." top>
           <div class="swatches" role="group" aria-label="Role colour">
-            <button class="swatch" style="--hue:165;--tile-c:0" aria-pressed=${String(role.hue == null)} aria-label="No colour" onClick=${() => updateRole(house, role.id, { hue: null })}></button>
+            <button class="swatch" style="--hue:0;--tile-c:0" aria-pressed=${String(role.hue == null)} aria-label="No colour" onClick=${() => updateRole(house, role.id, { hue: null })}></button>
             ${HUES.map(([v, name]) => html`<button key=${v} class="swatch strong" style=${`--hue:${v}`} aria-pressed=${String(role.hue != null && hueOf(role.hue) === v)} aria-label=${name} onClick=${() => updateRole(house, role.id, { hue: v })}></button>`)}
           </div>
         <//>

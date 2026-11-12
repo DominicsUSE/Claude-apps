@@ -4,6 +4,8 @@
 import { randomBytes } from 'node:crypto';
 import { PERMS } from '../js/lib/perms.js';
 import { newId, now } from './model.js';
+import { TOPICS, LIMITS, EVENT_LENGTH, eventEnd, eventState, cleanInterests, safeLink } from '../js/lib/social.js';
+import { fold } from '../js/lib/util.js';
 
 export class UserError extends Error {}
 const fail = (msg) => { throw new UserError(msg); };
@@ -29,6 +31,28 @@ const LEVELS = ['all', 'mentions', 'muted'];
 const KINDS = ['text', 'voice', 'news'];
 const PERM_IDS = PERMS.map((p) => p.id);
 const json = (s, f) => { try { return s == null ? f : JSON.parse(s); } catch { return f; } };
+const MIN = 60_000, DAY = 86_400_000;
+const MAX_PENDING = 50;
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+function interestsOf(v) {
+  if (!Array.isArray(v)) fail('Interests are missing.');
+  const list = cleanInterests(v.map((x) => (typeof x === 'string' ? str(x, { max: LIMITS.interest, name: 'An interest' }) : fail('Interests are words.'))));
+  if (list.length > LIMITS.interests) fail(`You can list up to ${LIMITS.interests} interests.`);
+  return list;
+}
+function linksOf(v) {
+  if (!Array.isArray(v)) fail('Links are missing.');
+  if (v.length > LIMITS.links) fail(`You can add up to ${LIMITS.links} links.`);
+  return v.map((l) => {
+    if (!l || typeof l !== 'object') fail('That link isn’t valid.');
+    const raw = str(l.url, { min: 1, max: LIMITS.linkUrl, name: 'A link' });
+    const url = safeLink(raw) || fail('Links need to be full https:// addresses.');
+    if (url.length > LIMITS.linkUrl) fail(`A link can be at most ${LIMITS.linkUrl} characters.`);
+    const label = str(l.label ?? '', { max: LIMITS.linkLabel, name: 'A link’s label' }) || new URL(url).hostname.replace(/^www\./, '');
+    return { label, url };
+  });
+}
 
 export function createOps({ db, M, hub }) {
   const member = (user, house) => (M.isMember(house, user) ? true : fail('You’re not a member of that house.'));
@@ -81,7 +105,10 @@ export function createOps({ db, M, hub }) {
   }
 
   function removeMember(houseId, target) {
+    const rsvps = db.all('SELECT r.event FROM event_rsvps r JOIN events e ON e.id = r.event WHERE e.house = ? AND r.user = ?', houseId, target).map((r) => r.event);
+    db.run('DELETE FROM event_rsvps WHERE user = ? AND event IN (SELECT id FROM events WHERE house = ?)', target, houseId);
     db.run('DELETE FROM members WHERE house = ? AND user = ?', houseId, target);
+    for (const e of rsvps) hub.eventChanged(e);
     db.run('DELETE FROM notify WHERE user = ? AND place IN (SELECT id FROM rooms WHERE house = ?)', target, houseId);
     hub.leaveVoiceInHouse(target, houseId);
     hub.toUser(target, 'house.gone', { id: houseId });
@@ -97,6 +124,83 @@ export function createOps({ db, M, hub }) {
       });
     } else hub.houseChanged(houseId);
   }
+
+  // A house as someone outside it may see it: no messages, no member list,
+  // only counts, its rooms' names, and which of your friends are there.
+  function houseCard(h, viewer) {
+    const users = db.all('SELECT user FROM members WHERE house = ?', h.id).map((r) => r.user);
+    const rooms = db.all('SELECT id, name, kind FROM rooms WHERE house = ? ORDER BY pos', h.id);
+    const ids = rooms.map((r) => r.id);
+    const talking = ids.length
+      ? db.get(`SELECT COUNT(DISTINCT author) n FROM messages WHERE conv IN (${ids.map(() => '?').join(',')}) AND deleted IS NULL AND ts > ?`, ...ids, Date.now() - 15 * MIN).n
+      : 0;
+    return {
+      id: h.id, name: h.name, mark: h.mark, hue: h.hue, about: h.about, topic: h.topic || null,
+      members: users.length, online: users.filter(hub.isOnline).length, inVoice: hub.inVoice(ids), talking,
+      created: h.created, rooms: rooms.map((r) => ({ name: r.name, kind: r.kind })),
+      friends: db.all(`SELECT m.user FROM members m JOIN friends f ON f.user = ? AND f.other = m.user AND f.state = 'friends'
+        WHERE m.house = ?`, viewer, h.id).map((r) => r.user),
+    };
+  }
+
+  // Public houses, the houses you are in, and those you hold an invitation to.
+  function visible(user, houseId) {
+    const h = db.get('SELECT * FROM houses WHERE id = ?', houseId);
+    const invited = h && db.get('SELECT 1 FROM personal_invites WHERE house = ? AND user = ?', houseId, user);
+    if (!h || !(h.public || invited || M.isMember(houseId, user))) fail('That house doesn’t exist, or it’s private.');
+    return h;
+  }
+
+  // People you might know: in a house with you, or friends of your friends.
+  // Never people you have no connection with, and never existing friends or requests.
+  function people(user, q, topic) {
+    const skip = new Set([user, ...db.all('SELECT other FROM friends WHERE user = ?', user).map((r) => r.other)]);
+    const found = new Map();
+    const entry = (u) => { if (!found.has(u)) found.set(u, { houses: [], friends: [] }); return found.get(u); };
+    const mine = M.houseIdsOf(user);
+    if (mine.length) {
+      for (const r of db.all(`SELECT house, user FROM members WHERE house IN (${mine.map(() => '?').join(',')})`, ...mine)) {
+        if (!skip.has(r.user)) entry(r.user).houses.push(r.house);
+      }
+    }
+    for (const r of db.all(`SELECT f1.other AS via, f2.other AS id FROM friends f1 JOIN friends f2 ON f2.user = f1.other
+      WHERE f1.user = ? AND f1.state = 'friends' AND f2.state = 'friends'`, user)) {
+      if (!skip.has(r.id)) entry(r.id).friends.push(r.via);
+    }
+    const houseRows = Object.fromEntries(mine.map((h) => [h, db.get('SELECT name, topic FROM houses WHERE id = ?', h)]));
+    // One query per 400 people, not one per person: big open houses have many.
+    const rows = new Map();
+    const cand = [...found.keys()];
+    for (let i = 0; i < cand.length; i += 400) {
+      const chunk = cand.slice(i, i + 400);
+      for (const r of db.all(`SELECT * FROM users WHERE id IN (${chunk.map(() => '?').join(',')})`, ...chunk)) rows.set(r.id, r);
+    }
+    const out = [];
+    for (const [u, f] of found) {
+      const row = rows.get(u);
+      if (!row) continue;
+      const interests = json(row.interests, []);
+      if (q && !fold(`${row.name} ${row.handle} ${interests.join(' ')}`).includes(q)) continue;
+      if (topic && !interests.some((i) => fold(i) === fold(topic)) && !f.houses.some((h) => houseRows[h]?.topic === topic)) continue;
+      // Presence is for the people who share a place with you.
+      const view = f.houses.length ? M.userView(row, hub.isOnline(u) ? row.presence : 'offline') : M.hiddenView(row);
+      const names = f.houses.map((h) => houseRows[h]?.name).filter(Boolean);
+      const friendName = f.friends.length === 1 ? M.userRow(f.friends[0])?.name : null;
+      const why = [];
+      if (f.friends.length) why.push(friendName ? `Friends with ${friendName}` : `${plural(f.friends.length, 'mutual friend')}`);
+      if (names.length) why.push(names.length === 1 ? `In ${names[0]}` : `In ${names[0]} and ${plural(names.length - 1, 'other house')}`);
+      out.push({ user: view, mutualHouses: f.houses, mutualFriends: f.friends.length, reason: why.join(' · ') });
+    }
+    const on = (p) => (p.user.presence === 'offline' ? 1 : 0);
+    return out
+      .sort((a, b) => (b.mutualFriends - a.mutualFriends) || (b.mutualHouses.length - a.mutualHouses.length) || (on(a) - on(b)) || a.user.name.localeCompare(b.user.name))
+      .slice(0, 30);
+  }
+
+  // "user" may not send "other" a new friend request for a day.
+  const cooldown = (user, other) => db.run(
+    'INSERT INTO friend_cooldown (user, other, ts) VALUES (?, ?, ?) ON CONFLICT (user, other) DO UPDATE SET ts = excluded.ts',
+    user, other, Date.now());
 
   const ops = {
     sync: (c) => hub.snapshotFor(c.user),
@@ -329,9 +433,11 @@ export function createOps({ db, M, hub }) {
         presence: d.presence !== undefined ? oneOf(d.presence, PRESENCE, 'Presence') : u.presence,
         hue: d.hue !== undefined ? hue(d.hue) : u.hue,
         emoji: d.emoji === undefined ? u.emoji : (d.emoji === null || d.emoji === '' ? null : (typeof d.emoji === 'string' && d.emoji.length <= 16 && EMOJI.test(d.emoji) ? d.emoji : fail('Your picture can be one emoji.'))),
+        interests: d.interests !== undefined ? JSON.stringify(interestsOf(d.interests)) : u.interests,
+        links: d.links !== undefined ? JSON.stringify(linksOf(d.links)) : u.links,
       };
-      db.run('UPDATE users SET name = ?, about = ?, status = ?, presence = ?, hue = ?, emoji = ? WHERE id = ?',
-        next.name, next.about, next.status, next.presence, next.hue, next.emoji, c.user);
+      db.run('UPDATE users SET name = ?, about = ?, status = ?, presence = ?, hue = ?, emoji = ?, interests = ?, links = ? WHERE id = ?',
+        next.name, next.about, next.status, next.presence, next.hue, next.emoji, next.interests, next.links, c.user);
       hub.userChanged(c.user);
       return {};
     },
@@ -372,8 +478,11 @@ export function createOps({ db, M, hub }) {
         ? (Array.isArray(d.starter) ? [...new Set(d.starter)].filter((r) => roomIds.includes(r)).slice(0, 12) : fail('Starter rooms are missing.'))
         : json(h.starter, []);
       const joinRole = d.joinRole !== undefined ? oneOf(d.joinRole, roleIds.slice(1), 'That role') : h.join_role;
-      db.run('UPDATE houses SET name = ?, mark = ?, about = ?, hue = ?, starter = ?, join_role = ? WHERE id = ?',
-        name, [...name][0].toUpperCase(), about, hueV, JSON.stringify(starter), joinRole, houseId);
+      const isPublic = d.public !== undefined ? (typeof d.public === 'boolean' ? d.public : fail('Public is yes or no.')) : !!h.public;
+      const topic = d.topic !== undefined ? (d.topic === null || d.topic === '' ? null : oneOf(d.topic, TOPICS, 'That topic')) : h.topic;
+      const rules = d.rules !== undefined ? str(d.rules, { max: LIMITS.rules, name: 'The house rules' }) : h.rules;
+      db.run('UPDATE houses SET name = ?, mark = ?, about = ?, hue = ?, starter = ?, join_role = ?, public = ?, topic = ?, rules = ? WHERE id = ?',
+        name, [...name][0].toUpperCase(), about, hueV, JSON.stringify(starter), joinRole, isPublic ? 1 : 0, topic, rules, houseId);
       hub.houseChanged(houseId);
       return {};
     },
@@ -446,16 +555,19 @@ export function createOps({ db, M, hub }) {
     'room.delete'(c, d) {
       const room = M.room(id(d.room, 'room')) || fail('That room doesn’t exist.');
       need(c.user, room.house, 'rooms', 'delete rooms');
+      const moved = db.all('SELECT id FROM events WHERE room = ?', room.id).map((r) => r.id);
       hub.closeVoiceRoom(room.id);
       db.tx(() => {
         db.run('DELETE FROM messages WHERE conv = ? OR conv IN (SELECT id FROM threads WHERE conv = ?)', room.id, room.id);
         db.run('DELETE FROM threads WHERE conv = ?', room.id);
         db.run('DELETE FROM notify WHERE place = ?', room.id);
         db.run('DELETE FROM rooms WHERE id = ?', room.id);
+        db.run('UPDATE events SET room = NULL WHERE room = ?', room.id);
         const h = houseOf(room.house);
         db.run('UPDATE houses SET starter = ? WHERE id = ?', JSON.stringify(json(h.starter, []).filter((r) => r !== room.id)), room.house);
       });
       hub.houseChanged(room.house);
+      for (const e of moved) hub.eventChanged(e);
       return {};
     },
 
@@ -546,8 +658,8 @@ export function createOps({ db, M, hub }) {
     'dm.open'(c, d) {
       const others = [...new Set(Array.isArray(d.users) ? d.users : [])].filter((u) => u !== c.user);
       if (!others.length || others.length > 9) fail('Pick between one and nine people.');
-      const contacts = new Set(M.contacts(c.user));
-      for (const u of others) if (!contacts.has(id(u, 'person'))) fail('You can only message people you share a house with.');
+      const peers = M.dmPeers(c.user);
+      for (const u of others) if (!peers.has(id(u, 'person'))) fail('You can only message friends and people you share a house with.');
       const want = [c.user, ...others].sort();
       const existing = db.all('SELECT dm FROM dm_members WHERE user = ?', c.user).map((r) => r.dm)
         .find((dm) => db.all('SELECT user FROM dm_members WHERE dm = ? ORDER BY user', dm).map((r) => r.user).join() === want.join());
@@ -559,6 +671,187 @@ export function createOps({ db, M, hub }) {
       });
       for (const u of want) hub.sendDm(u, dmId);
       return { id: dmId };
+    },
+
+    // Friends. A request can go to anyone, by username or id; it becomes a
+    // friendship only when the other person accepts.
+    'friend.request'(c, d) {
+      let target;
+      if (d.user !== undefined) {
+        target = M.userRow(id(d.user, 'person')) || fail('That person doesn’t exist.');
+      } else {
+        const handle = str(d.handle, { min: 1, max: 30, name: 'The username' }).replace(/^@/, '').toLowerCase();
+        target = db.get('SELECT * FROM users WHERE handle = ?', handle) || fail(`Nobody is called @${handle}.`);
+      }
+      if (target.id === c.user) fail('That’s you. Try someone else’s username.');
+      const row = M.friendRow(c.user, target.id);
+      if (row?.state === 'friends') fail(`You and ${target.name} are already friends.`);
+      if (row?.state === 'outgoing') return { state: 'outgoing', user: target.id };
+      const t = Date.now();
+      if (row?.state === 'incoming') {
+        // They asked first: asking back is saying yes.
+        db.run("UPDATE friends SET state = 'friends', since = ? WHERE (user = ? AND other = ?) OR (user = ? AND other = ?)", t, c.user, target.id, target.id, c.user);
+        hub.friendChanged(c.user, target.id);
+        return { state: 'friends', user: target.id };
+      }
+      const cool = db.get('SELECT ts FROM friend_cooldown WHERE user = ? AND other = ?', c.user, target.id);
+      if (cool && cool.ts > t - DAY) fail(`You asked ${target.name} recently. You can ask again tomorrow.`);
+      const pending = db.get("SELECT COUNT(*) n FROM friends WHERE user = ? AND state = 'outgoing'", c.user).n;
+      if (pending >= MAX_PENDING) fail(`You have ${MAX_PENDING} requests waiting for an answer. Cancel some before sending more.`);
+      db.tx(() => {
+        db.run("INSERT INTO friends (user, other, state, favorite, since) VALUES (?, ?, 'outgoing', 0, ?)", c.user, target.id, t);
+        db.run("INSERT INTO friends (user, other, state, favorite, since) VALUES (?, ?, 'incoming', 0, ?)", target.id, c.user, t);
+      });
+      hub.friendChanged(c.user, target.id);
+      return { state: 'outgoing', user: target.id };
+    },
+    'friend.accept'(c, d) {
+      const other = id(d.user, 'person');
+      const row = M.friendRow(c.user, other);
+      if (row?.state === 'friends') return { state: 'friends' };
+      if (row?.state !== 'incoming') fail('That request isn’t open any more.');
+      db.run("UPDATE friends SET state = 'friends', since = ? WHERE (user = ? AND other = ?) OR (user = ? AND other = ?)", Date.now(), c.user, other, other, c.user);
+      hub.friendChanged(c.user, other);
+      return { state: 'friends' };
+    },
+    'friend.decline'(c, d) {
+      const other = id(d.user, 'person');
+      if (M.friendRow(c.user, other)?.state !== 'incoming') return {};
+      db.tx(() => {
+        db.run('DELETE FROM friends WHERE (user = ? AND other = ?) OR (user = ? AND other = ?)', c.user, other, other, c.user);
+        cooldown(other, c.user);
+      });
+      hub.friendChanged(c.user, other);
+      return {};
+    },
+    // Unfriend, or take back a request you sent.
+    'friend.remove'(c, d) {
+      const other = id(d.user, 'person');
+      const row = M.friendRow(c.user, other);
+      if (!row) return {};
+      db.tx(() => {
+        db.run('DELETE FROM friends WHERE (user = ? AND other = ?) OR (user = ? AND other = ?)', c.user, other, other, c.user);
+        // Taking back a request you sent starts the same wait as being declined.
+        if (row.state === 'outgoing') cooldown(c.user, other);
+      });
+      hub.friendChanged(c.user, other);
+      return {};
+    },
+    // A private star: only your own devices hear about it.
+    'friend.favorite'(c, d) {
+      const other = id(d.user, 'person');
+      if (M.friendRow(c.user, other)?.state !== 'friends') fail('You can only star people who are your friends.');
+      db.run('UPDATE friends SET favorite = ? WHERE user = ? AND other = ?', bool(d.on) ? 1 : 0, c.user, other);
+      hub.sendFriend(c.user, other);
+      return {};
+    },
+
+    // Discovery: public houses you are not in, and people you are already
+    // connected to through a house or a friend. Never anyone else.
+    discover(c, d) {
+      const q = fold(str(d.q ?? '', { max: 80, name: 'The search' }));
+      const topic = d.topic == null || d.topic === '' ? null : oneOf(d.topic, TOPICS, 'That topic');
+      const found = db.all('SELECT * FROM houses WHERE public = 1 AND id NOT IN (SELECT house FROM members WHERE user = ?) ORDER BY created DESC LIMIT 500', c.user)
+        .filter((h) => (!topic || h.topic === topic) && (!q || fold(`${h.name} ${h.about} ${h.topic || ''}`).includes(q)));
+      // Rank on what is cheap to know (voice, who is on, size) in two queries,
+      // and build full cards only for the best few.
+      const ids = found.map((h) => h.id);
+      const memberOf = {}, roomsOf = {};
+      for (let i = 0; i < ids.length; i += 400) {
+        const chunk = ids.slice(i, i + 400), marks = chunk.map(() => '?').join(',');
+        for (const r of db.all(`SELECT house, user FROM members WHERE house IN (${marks})`, ...chunk)) (memberOf[r.house] ||= []).push(r.user);
+        for (const r of db.all(`SELECT house, id FROM rooms WHERE house IN (${marks})`, ...chunk)) (roomsOf[r.house] ||= []).push(r.id);
+      }
+      const cheap = (h) => {
+        const users = memberOf[h.id] || [];
+        return [hub.inVoice(roomsOf[h.id] || []), users.filter(hub.isOnline).length, users.length];
+      };
+      const rank = new Map(found.map((h) => [h.id, cheap(h)]));
+      const byRank = (a, b) => { const x = rank.get(a.id), y = rank.get(b.id); return (y[0] - x[0]) || (y[1] - x[1]) || (y[2] - x[2]); };
+      const houses = found.sort(byRank).slice(0, 80)
+        .map((h) => houseCard(h, c.user))
+        .sort((a, b) => (b.inVoice - a.inVoice) || (b.talking - a.talking) || (b.online - a.online) || (b.members - a.members))
+        .slice(0, 40);
+      return { houses, people: people(c.user, q, topic) };
+    },
+    'house.preview'(c, d) {
+      const houseId = id(d.house, 'house');
+      const h = visible(c.user, houseId);
+      const t = Date.now();
+      const rooms = Object.fromEntries(db.all('SELECT id, name FROM rooms WHERE house = ?', houseId).map((r) => [r.id, r.name]));
+      const events = db.all('SELECT * FROM events WHERE house = ? AND starts <= ? AND COALESCE(ends, starts + ?) > ? ORDER BY starts LIMIT 20',
+        houseId, t + 60 * DAY, EVENT_LENGTH, t)
+        .map((e) => {
+          const going = db.all('SELECT user FROM event_rsvps WHERE event = ? ORDER BY ts', e.id).map((r) => r.user);
+          return {
+            id: e.id, house: e.house, room: e.room || null, roomName: rooms[e.room] || null, title: e.title, about: e.about,
+            starts: e.starts, ends: e.ends ?? null, created: e.created,
+            goingCount: going.length, friendsGoing: going.filter((u) => M.areFriends(c.user, u)),
+          };
+        });
+      return { ...houseCard(h, c.user), rules: h.rules || '', joined: M.isMember(houseId, c.user), events };
+    },
+    'house.joinPublic'(c, d) {
+      const houseId = id(d.house, 'house');
+      const h = db.get('SELECT * FROM houses WHERE id = ?', houseId);
+      if (h && M.isMember(houseId, c.user)) return { house: houseId, starter: json(h.starter, []) };
+      if (!h?.public) fail('That house isn’t open to everyone. Ask someone in it for an invitation.');
+      return join(c.user, houseId);
+    },
+
+    // Events: planned by people who may post notices or manage rooms;
+    // anyone in the house can say they are going.
+    'event.create'(c, d) {
+      const houseId = id(d.house, 'house');
+      houseOf(houseId);
+      member(c.user, houseId);
+      if (!M.can(c.user, houseId, 'announce') && !M.can(c.user, houseId, 'rooms')) fail('Your role can’t plan events in this house.');
+      const title = str(d.title, { min: 1, max: LIMITS.eventTitle, name: 'The title' });
+      const about = str(d.about ?? '', { max: LIMITS.eventAbout, name: 'The description' });
+      const t = Date.now();
+      const starts = Number.isSafeInteger(d.starts) ? d.starts : fail('Pick when it starts.');
+      if (starts < t - 60 * MIN) fail('That time has already passed.');
+      if (starts > t + 366 * DAY) fail('Events can be planned up to a year ahead.');
+      let ends = null;
+      if (d.ends != null) {
+        ends = Number.isSafeInteger(d.ends) ? d.ends : fail('That end time isn’t valid.');
+        if (ends <= starts) fail('It has to end after it starts.');
+        if (ends - starts > 7 * DAY) fail('An event can last up to a week.');
+      }
+      let room = null;
+      if (d.room != null) {
+        const r = M.room(id(d.room, 'room'));
+        if (!r || r.house !== houseId) fail('That room isn’t in this house.');
+        room = r.id;
+      }
+      const live = db.all('SELECT starts, ends FROM events WHERE house = ? AND starts > ?', houseId, t - 8 * DAY).filter((e) => eventEnd(e) > t).length;
+      if (live >= 100) fail('This house already has 100 upcoming events.');
+      const eid = newId('e');
+      db.tx(() => {
+        db.run('INSERT INTO events (id, house, room, title, about, starts, ends, by, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', eid, houseId, room, title, about, starts, ends, c.user, t);
+        // Whoever plans it is going.
+        db.run('INSERT INTO event_rsvps (event, user, ts) VALUES (?, ?, ?)', eid, c.user, t);
+      });
+      hub.eventChanged(eid);
+      return { id: eid, event: M.eventView(M.eventRow(eid)) };
+    },
+    'event.rsvp'(c, d) {
+      const e = M.eventRow(id(d.event, 'event')) || fail('That event was cancelled.');
+      member(c.user, e.house);
+      if (eventState(e, Date.now()) === 'past') fail('That event is over.');
+      if (bool(d.going)) db.run('INSERT OR IGNORE INTO event_rsvps (event, user, ts) VALUES (?, ?, ?)', e.id, c.user, Date.now());
+      else db.run('DELETE FROM event_rsvps WHERE event = ? AND user = ?', e.id, c.user);
+      hub.eventChanged(e.id);
+      return {};
+    },
+    'event.delete'(c, d) {
+      const e = M.eventRow(id(d.event, 'event'));
+      if (!e) return {};
+      member(c.user, e.house);
+      if (e.by !== c.user && !M.can(c.user, e.house, 'announce') && !M.can(c.user, e.house, 'rooms')) fail('Your role can’t cancel events in this house.');
+      db.run('DELETE FROM events WHERE id = ?', e.id);
+      hub.eventGone(e.house, e.id);
+      return {};
     },
 
     search(c, d) {

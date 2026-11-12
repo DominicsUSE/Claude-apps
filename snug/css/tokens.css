@@ -1,36 +1,54 @@
 /*
-  Snug design tokens.
-  Layout: one navigation column that reads big to small from top to bottom
-  (you, houses, rooms, threads); the conversation is the widest and brightest
-  surface; a context pane (thread, people, details) appears on demand.
+  Snug design tokens. Source of truth: the redesign contract.
+
+  Idea: a place with someone in it. Places are arches, people are circles,
+  controls are rectangles.
 
   Colour rules
-  - Neutrals are one green-grey hue. Depth is a shade step, never a shadow.
-    Only floating layers (menus, popovers, dialogs) cast the single shadow.
-  - Amber (--mark) is a highlighter: always a fill behind ink text, never text.
-    It means one thing: this is addressed to you.
-  - Green (--live) means a person is open to talk or live in a voice room.
-  - Red (--danger) means destructive or failed. Nothing else is red.
+  - Charcoal depth by surface steps, never by shadow:
+      bg-0 shell and rail, bg-1 conversation and main content, bg-2 context
+      column, panes, menus, message hover, bg-3 hover and inputs, bg-4 strong
+      (selected nav row, popovers, secondary button).
+  - One shadow family, only on floating layers (menus, popovers, dialogs).
+  - Coral (--brand) is the brand and "for you": primary button, the 3px
+    active indicator, count badges, the "New" separator, the edge of a
+    mention. Never a large coral background behind text.
+  - Mint online/success/speaking. Amber idle/warning/events. Cyan info and
+    links. Rose reactions you added. Error red destructive/failed only.
   - People, roles and houses choose a hue only. Lightness and chroma belong to
-    the theme, so every chosen colour stays readable in light and dark.
+    the theme (--name-*, --tile-*, --house-*), so every chosen colour stays
+    readable in light and dark.
+
+  Themes: dark is the default (bare :root). Light follows the device unless
+  the person picks one (data-theme="light" | "dark" on <html>, set by
+  js/boot.js before first paint and by applyPrefs() in js/store.js).
 */
 
+/* Inter 4 (variable: wght 100-900, opsz 14-32), subset to latin + latin-ext
+   from the full upstream file so the stylistic sets survive. OFL: fonts/OFL-Inter.txt */
 @font-face {
-  font-family: "Atkinson Hyperlegible Next";
-  src: url(../fonts/ahn-latin.woff2) format("woff2");
-  font-weight: 200 800; font-style: normal; font-display: swap;
+  font-family: "Inter";
+  src: url(../fonts/inter-latin.woff2) format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
-  font-family: "Atkinson Hyperlegible Next";
-  src: url(../fonts/ahn-latin-ext.woff2) format("woff2");
-  font-weight: 200 800; font-style: normal; font-display: swap;
+  font-family: "Inter";
+  src: url(../fonts/inter-latin-ext.woff2) format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 @font-face {
-  font-family: "Atkinson Hyperlegible Next";
-  src: url(../fonts/ahn-latin-italic.woff2) format("woff2");
-  font-weight: 200 800; font-style: italic; font-display: swap;
+  font-family: "Inter";
+  src: url(../fonts/inter-latin-italic.woff2) format("woff2");
+  font-weight: 100 900; font-style: italic; font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Inter";
+  src: url(../fonts/inter-latin-ext-italic.woff2) format("woff2");
+  font-weight: 100 900; font-style: italic; font-display: swap;
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 @font-face {
   font-family: "Atkinson Hyperlegible Mono";
@@ -39,162 +57,214 @@
 }
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 
-  /* Type: one family, five sizes, three weights (400 read, 500 name, 700 head). */
-  --font: "Atkinson Hyperlegible Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* ---------- Type ---------- */
+  --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: "Atkinson Hyperlegible Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  --t-12: 0.75rem;
-  --t-14: 0.875rem;
-  --t-16: 1rem;
-  --t-20: 1.25rem;
+  /* Inter features, all present in the vendored files (checked with fontTools):
+     cv11 single-storey a: rounder, more handwritten, the main source of warmth.
+     cv05 lowercase l with a tail: l, I and 1 never look alike in names,
+          handles and invite codes (the italic has its own l, so cv05 is enough).
+     ss03 round quotes and commas: softer punctuation in a text-heavy app.
+     Contextual alternates (calt) stay on by default. Not used: ss01 open
+     digits (breaks the tabular rhythm of times), cv08 serif I (too bookish). */
+  --font-features: "cv11", "cv05", "ss03";
+  /* Sizes (rem, so the Text size setting scales them): 32 24 20 16 14 13 12 11. */
+  --t-32: 2rem;
   --t-24: 1.5rem;
+  --t-20: 1.25rem;
+  --t-16: 1rem;
+  --t-14: 0.875rem;
+  --t-13: 0.8125rem;
+  --t-12: 0.75rem;
+  --t-11: 0.6875rem;
+  --t-msg: var(--t-16);            /* message text; 14px in Compact */
+  --w-regular: 400; --w-medium: 500; --w-semibold: 600; --w-bold: 700;
+  --lh-display: 1.15; --lh-heading: 1.25; --lh-body: 1.45; --lh-ui: 1.3;
 
-  /* Space: 4px base. Nothing outside this list. */
-  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-6: 24px; --s-8: 32px; --s-12: 48px;
+  /* ---------- Space (4px base; named by multiple of 4) ----------
+     4 8 12 16 20 24 32 40 48 64 80. Nothing outside this list
+     (exceptions: 1px borders, 2px hairline gaps, the 6px message row). */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
+  --s-8: 32px; --s-10: 40px; --s-12: 48px; --s-16: 64px; --s-20: 80px;
 
-  /* Radius: 4 for controls, 8 for panels and media, round for people and counts. */
-  --r-ctl: 4px; --r-panel: 8px; --r-full: 999px;
+  /* ---------- Radius by role ---------- */
+  --r-xs: 4px;                     /* tiny marks, arch foot */
+  --r-sm: 6px;                     /* controls: buttons, inputs, rows */
+  --r-md: 8px;                     /* menus, tooltips, attachments */
+  --r-lg: 12px;                    /* modals and the few real cards */
+  --r-xl: 16px;                    /* large media, profile headers */
+  --r-full: 9999px;                /* people, badges, presence, chips */
+  --r-arch: 50% 50% var(--r-xs) var(--r-xs) / 42% 42% var(--r-xs) var(--r-xs); /* houses */
 
-  /* Motion: fast for hover and press, panel for things that enter. */
-  --m-fast: 120ms; --m-panel: 180ms;
-  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* ---------- Sizes ---------- */
+  --h-sm: 32px; --h-md: 40px; --h-lg: 48px; --touch: 44px;
+  --ic-xs: 12px; --ic-sm: 16px; --ic-md: 20px; --ic-lg: 24px; --ic-xl: 32px;
+  --av-xs: 24px; --av-sm: 32px; --av-md: 40px; --av-lg: 48px; --av-xl: 64px; --av-2xl: 96px;
+  --pres: 8px;                     /* presence dot (6px on 24px avatars) */
 
-  /* Frame */
+  /* ---------- Motion ---------- */
+  --m-fast: 100ms; --m-standard: 160ms; --m-smooth: 240ms; --m-slow: 320ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);       /* things entering */
+  --ease-in-out: cubic-bezier(0.45, 0, 0.25, 1);    /* state changes */
+
+  /* ---------- Frame ---------- */
+  --rail-w: 64px; --ctx-w: 264px;  /* new rail + context column (css/nav.css) */
   --nav-w: 280px; --pane-w: 384px; --bar-h: 48px; --row-h: 32px;
 
-  /* Density (Regular). Tight inside a group, wide between groups. */
-  --avatar: 36px; --group-gap: 16px; --line-gap: 2px; --lh: 1.45;
+  /* ---------- Density (Regular) ---------- */
+  --avatar: var(--av-md); --group-gap: 10px; --msg-py: 6px; --line-gap: 2px; --lh: var(--lh-body);
 
-  /* Surfaces: chat is the lightest, the frame sits one step back. */
-  --chat: oklch(0.988 0.004 150);
-  --chat-hover: oklch(0.966 0.008 160);
-  --frame: oklch(0.955 0.010 160);
-  --frame-hover: oklch(0.928 0.013 160);
-  --frame-sel: oklch(0.895 0.018 160);
-  --raised: oklch(1 0 0);
-  --raised-hover: oklch(0.955 0.010 160);
-  --line: oklch(0.905 0.010 160);
-  --line-strong: oklch(0.80 0.014 160);
+  /* ---------- Colour: dark (default) ---------- */
+  --bg-0: #0E0F10;
+  --bg-1: #141516;
+  --bg-2: #1A1C1D;
+  --bg-3: #212324;
+  --bg-4: #292B2D;
+  --text-1: #F4F1ED;
+  --text-2: #B8B4AE;
+  --text-3: #8F8C88;            /* nudged from #85827E: 4.5:1 on bg-2 and bg-3 */
+  --text-disabled: #5C5A57;
+  --text-inverse: #111211;
+  --line: #292B2D;
+  --line-strong: #393B3D;
+  --line-subtle: #202223;
 
-  /* Ink: main, secondary, faint. All pass 4.5:1 on chat and frame. */
-  --ink: oklch(0.24 0.02 165);
-  --ink-2: oklch(0.42 0.02 165);
-  --ink-3: oklch(0.51 0.018 165);
+  --brand: #F05A47;
+  --brand-hover: #FF6B57;
+  --brand-press: #DD4E3C;        /* nudged from #D94A39: on-brand text passes 4.5:1 */
+  --brand-soft: #3A211E;
+  --brand-ink: #FF7A68;            /* coral as text, on bg-1/2 and brand-soft */
+  --on-brand: #111211;             /* text on a coral fill */
 
-  /* Meaning */
-  --mark: oklch(0.87 0.15 90);
-  --mark-wash: oklch(0.955 0.065 95);
-  --on-mark: oklch(0.26 0.04 85);
-  --live: oklch(0.56 0.14 150);
-  --danger: oklch(0.50 0.18 27);
-  --danger-wash: oklch(0.95 0.03 27);
+  --mint: #58C7A5;  --mint-soft: #18332B;
+  --amber: #E8B65A; --amber-soft: #332A19;
+  --mint-ink: var(--mint); --amber-ink: var(--amber);   /* mint and amber as text */
+  --cyan: #62B8D8;  --cyan-soft: #192D34;
+  --rose: #D98598;  --rose-soft: #321F26;
+  --success: var(--mint); --warning: var(--amber); --error: #E05A5A; --info: var(--cyan);
+  --error-soft: #3A1F1F;
+  --link: var(--cyan);
+  --online: var(--mint); --idle: var(--amber); --busy: var(--error); --offline: #686663;
 
-  /* Chosen hues: the theme owns lightness and chroma. */
-  --name-l: 0.47; --name-c: 0.13;
-  --tile-l: 0.89; --tile-c: 0.055; --tile-ink-l: 0.34; --tile-ink-c: 0.08;
-  --house-l: 0.50; --house-c: 0.105; --house-ink: oklch(0.985 0.01 150);
+  --btn2: var(--bg-4); --btn2-hover: #343638; --btn2-press: #3B3D3F;
+  --hover: rgb(244 241 237 / 0.05);   /* state layer for controls on any surface */
+  --press: rgb(244 241 237 / 0.09);
+  --scrim: rgb(0 0 0 / 0.56);
+  --selection: rgb(240 90 71 / 0.32);
+
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.18);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.24);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.32);
+
+  /* Chosen hues (people, roles, houses): the theme owns lightness/chroma. */
+  --name-l: 0.80; --name-c: 0.10;
+  --tile-l: 0.40; --tile-c: 0.065; --tile-ink-l: 0.93; --tile-ink-c: 0.045;
+  --house-l: 0.64; --house-c: 0.10; --house-ink: #111211;
 
   --focus-w: 2px;
-  --hover: oklch(0.24 0.02 165 / 0.07);
-  --press: oklch(0.24 0.02 165 / 0.13);
-  --scrim: oklch(0.24 0.02 165 / 0.38);
-  --shadow: 0 0 0 1px oklch(0.24 0.02 165 / 0.10), 0 12px 32px oklch(0.24 0.02 165 / 0.16);
+  --focus: var(--text-1);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --chat: oklch(0.25 0.016 165);
-    --chat-hover: oklch(0.275 0.017 165);
-    --frame: oklch(0.205 0.016 165);
-    --frame-hover: oklch(0.245 0.018 165);
-    --frame-sel: oklch(0.29 0.022 165);
-    --raised: oklch(0.30 0.018 165);
-    --raised-hover: oklch(0.35 0.02 165);
-    --line: oklch(0.32 0.016 165);
-    --line-strong: oklch(0.44 0.018 165);
-    --ink: oklch(0.93 0.012 150);
-    --ink-2: oklch(0.78 0.014 155);
-    --ink-3: oklch(0.68 0.014 155);
-    --mark: oklch(0.83 0.15 90);
-    --mark-wash: oklch(0.34 0.05 92);
-    --on-mark: oklch(0.22 0.04 85);
-    --live: oklch(0.76 0.16 150);
-    --danger: oklch(0.74 0.15 25);
-    --danger-wash: oklch(0.31 0.05 25);
-    --name-l: 0.82; --name-c: 0.11;
-    --tile-l: 0.40; --tile-c: 0.06; --tile-ink-l: 0.93; --tile-ink-c: 0.04;
-    --house-l: 0.66; --house-c: 0.11; --house-ink: oklch(0.2 0.02 165);
-    --hover: oklch(0.93 0.012 150 / 0.07);
-    --press: oklch(0.93 0.012 150 / 0.13);
-    --scrim: oklch(0.12 0.01 165 / 0.6);
-    --shadow: 0 0 0 1px oklch(0.93 0.012 150 / 0.10), 0 12px 32px oklch(0.1 0.01 165 / 0.5);
+/* ---------- Light: warm paper, same roles ---------- */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg-0: #E9E6E1; --bg-1: #FBFAF8; --bg-2: #F3F1ED; --bg-3: #ECE9E4; --bg-4: #E2DED8;
+    --text-1: #1A1817; --text-2: #57534E; --text-3: #6F6A64; --text-disabled: #A39E97; --text-inverse: #FBFAF8;
+    --line: #E2DED8; --line-strong: #CFCAC3; --line-subtle: #ECE9E4;
+    --brand: #E04B38; --brand-hover: #EC5A46; --brand-press: #C93F2E; --brand-soft: #FBE3DE; --brand-ink: #B5402F; --on-brand: #111211;
+    --mint: #1F8F6E; --mint-soft: color-mix(in srgb, #1F8F6E 12%, #FBFAF8);
+    --amber: #A86F0D; --amber-soft: color-mix(in srgb, #A86F0D 12%, #FBFAF8);
+    --mint-ink: #156E54; --amber-ink: #8C5C08;
+    --cyan: #1F7EA3; --cyan-soft: color-mix(in srgb, #1F7EA3 12%, #FBFAF8);
+    --rose: #B24E66; --rose-soft: color-mix(in srgb, #B24E66 12%, #FBFAF8);
+    --error: #C93838; --error-soft: color-mix(in srgb, #C93838 12%, #FBFAF8);
+    --link: #1C7397;
+    --offline: #8C8781;
+    --btn2-hover: #D9D5CE; --btn2-press: #D0CBC4;
+    --hover: rgb(26 24 23 / 0.05); --press: rgb(26 24 23 / 0.09);
+    --scrim: rgb(26 24 23 / 0.36);
+    --selection: rgb(224 75 56 / 0.22);
+    --shadow-sm: 0 2px 8px rgba(26, 24, 23, 0.08);
+    --shadow-md: 0 8px 24px rgba(26, 24, 23, 0.12);
+    --shadow-lg: 0 16px 48px rgba(26, 24, 23, 0.18);
+    --name-l: 0.47; --name-c: 0.12;
+    --tile-l: 0.88; --tile-c: 0.05; --tile-ink-l: 0.36; --tile-ink-c: 0.08;
+    --house-l: 0.56; --house-c: 0.11; --house-ink: #FBFAF8;
   }
 }
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --chat: oklch(0.25 0.016 165);
-  --chat-hover: oklch(0.275 0.017 165);
-  --frame: oklch(0.205 0.016 165);
-  --frame-hover: oklch(0.245 0.018 165);
-  --frame-sel: oklch(0.29 0.022 165);
-  --raised: oklch(0.30 0.018 165);
-  --raised-hover: oklch(0.35 0.02 165);
-  --line: oklch(0.32 0.016 165);
-  --line-strong: oklch(0.44 0.018 165);
-  --ink: oklch(0.93 0.012 150);
-  --ink-2: oklch(0.78 0.014 155);
-  --ink-3: oklch(0.68 0.014 155);
-  --mark: oklch(0.83 0.15 90);
-  --mark-wash: oklch(0.34 0.05 92);
-  --on-mark: oklch(0.22 0.04 85);
-  --live: oklch(0.76 0.16 150);
-  --danger: oklch(0.74 0.15 25);
-  --danger-wash: oklch(0.31 0.05 25);
-  --name-l: 0.82; --name-c: 0.11;
-  --tile-l: 0.40; --tile-c: 0.06; --tile-ink-l: 0.93; --tile-ink-c: 0.04;
-  --house-l: 0.66; --house-c: 0.11; --house-ink: oklch(0.2 0.02 165);
-  --hover: oklch(0.93 0.012 150 / 0.07);
-  --press: oklch(0.93 0.012 150 / 0.13);
-  --scrim: oklch(0.12 0.01 165 / 0.6);
-  --shadow: 0 0 0 1px oklch(0.93 0.012 150 / 0.10), 0 12px 32px oklch(0.1 0.01 165 / 0.5);
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg-0: #E9E6E1; --bg-1: #FBFAF8; --bg-2: #F3F1ED; --bg-3: #ECE9E4; --bg-4: #E2DED8;
+  --text-1: #1A1817; --text-2: #57534E; --text-3: #6F6A64; --text-disabled: #A39E97; --text-inverse: #FBFAF8;
+  --line: #E2DED8; --line-strong: #CFCAC3; --line-subtle: #ECE9E4;
+  --brand: #E04B38; --brand-hover: #EC5A46; --brand-press: #C93F2E; --brand-soft: #FBE3DE; --brand-ink: #B5402F; --on-brand: #111211;
+  --mint: #1F8F6E; --mint-soft: color-mix(in srgb, #1F8F6E 12%, #FBFAF8);
+  --amber: #A86F0D; --amber-soft: color-mix(in srgb, #A86F0D 12%, #FBFAF8);
+    --mint-ink: #156E54; --amber-ink: #8C5C08;
+  --cyan: #1F7EA3; --cyan-soft: color-mix(in srgb, #1F7EA3 12%, #FBFAF8);
+  --rose: #B24E66; --rose-soft: color-mix(in srgb, #B24E66 12%, #FBFAF8);
+  --error: #C93838; --error-soft: color-mix(in srgb, #C93838 12%, #FBFAF8);
+  --link: #1C7397;
+  --offline: #8C8781;
+  --btn2-hover: #D9D5CE; --btn2-press: #D0CBC4;
+  --hover: rgb(26 24 23 / 0.05); --press: rgb(26 24 23 / 0.09);
+  --scrim: rgb(26 24 23 / 0.36);
+  --selection: rgb(224 75 56 / 0.22);
+  --shadow-sm: 0 2px 8px rgba(26, 24, 23, 0.08);
+  --shadow-md: 0 8px 24px rgba(26, 24, 23, 0.12);
+  --shadow-lg: 0 16px 48px rgba(26, 24, 23, 0.18);
+  --name-l: 0.47; --name-c: 0.12;
+  --tile-l: 0.88; --tile-c: 0.05; --tile-ink-l: 0.36; --tile-ink-c: 0.08;
+  --house-l: 0.56; --house-c: 0.11; --house-ink: #FBFAF8;
 }
+/* Explicit dark: the values are the :root defaults; this only pins the scheme
+   when the device is light. */
+:root[data-theme="dark"] { color-scheme: dark; }
 
-/* Higher contrast: secondary and faint text move toward the main ink and lines
-   get firmer. Mixed from the theme's own ink and surface, so it works in both
-   themes. Follows the system setting unless the person picks one. */
+/* ---------- Higher contrast ----------
+   Secondary and faint text move toward the main text, lines get firmer, the
+   focus ring gets thicker. Mixed from the theme's own values, so it works in
+   both themes. Follows the device unless the person picks one
+   (data-contrast="standard" | "high"). */
 @media (prefers-contrast: more) {
   :root:not([data-contrast="standard"]) {
-  --ink-2: color-mix(in oklch, var(--ink) 82%, var(--chat));
-  --ink-3: color-mix(in oklch, var(--ink) 70%, var(--chat));
-  --line: color-mix(in oklch, var(--ink) 24%, var(--chat));
-  --line-strong: color-mix(in oklch, var(--ink) 50%, var(--chat));
-  --focus-w: 3px;
+    --text-2: color-mix(in srgb, var(--text-1) 86%, var(--bg-1));
+    --text-3: color-mix(in srgb, var(--text-1) 74%, var(--bg-1));
+    --text-disabled: color-mix(in srgb, var(--text-1) 52%, var(--bg-1));
+    --line: color-mix(in srgb, var(--text-1) 26%, var(--bg-1));
+    --line-strong: color-mix(in srgb, var(--text-1) 48%, var(--bg-1));
+    --line-subtle: color-mix(in srgb, var(--text-1) 18%, var(--bg-1));
+    --focus-w: 3px;
   }
 }
 :root[data-contrast="high"] {
-  --ink-2: color-mix(in oklch, var(--ink) 82%, var(--chat));
-  --ink-3: color-mix(in oklch, var(--ink) 70%, var(--chat));
-  --line: color-mix(in oklch, var(--ink) 24%, var(--chat));
-  --line-strong: color-mix(in oklch, var(--ink) 50%, var(--chat));
+  --text-2: color-mix(in srgb, var(--text-1) 86%, var(--bg-1));
+  --text-3: color-mix(in srgb, var(--text-1) 74%, var(--bg-1));
+  --text-disabled: color-mix(in srgb, var(--text-1) 52%, var(--bg-1));
+  --line: color-mix(in srgb, var(--text-1) 26%, var(--bg-1));
+  --line-strong: color-mix(in srgb, var(--text-1) 48%, var(--bg-1));
+  --line-subtle: color-mix(in srgb, var(--text-1) 18%, var(--bg-1));
   --focus-w: 3px;
 }
 
-/* Density: three settings from day one. */
-:root[data-density="snug"] { --avatar: 28px; --group-gap: 8px; --line-gap: 0px; --lh: 1.35; }
-:root[data-density="roomy"] { --avatar: 40px; --group-gap: 24px; --line-gap: 4px; --lh: 1.55; }
+/* ---------- Density: Compact ("snug"), Regular, Roomy ---------- */
+:root[data-density="snug"] { --avatar: var(--av-sm); --group-gap: 4px; --msg-py: 4px; --line-gap: 1px; --lh: 1.35; --t-msg: var(--t-14); }
+:root[data-density="roomy"] { --avatar: var(--av-md); --group-gap: 16px; --msg-py: 8px; --line-gap: 4px; --lh: 1.55; }
 
 /* Text size scales every rem-based size without touching the layout grid. */
 :root[data-text="s"] { font-size: 14px; }
 :root[data-text="l"] { font-size: 18px; }
 
+/* ---------- Reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {
-  :root:not([data-motion="full"]) { --m-fast: 0ms; --m-panel: 0ms; }
+  :root:not([data-motion="full"]) { --m-fast: 0ms; --m-standard: 0ms; --m-smooth: 0ms; --m-slow: 0ms; }
 }
-:root[data-motion="off"] { --m-fast: 0ms; --m-panel: 0ms; }
+:root[data-motion="off"] { --m-fast: 0ms; --m-standard: 0ms; --m-smooth: 0ms; --m-slow: 0ms; }
 
 /* Touch: bigger targets where fingers do the pointing. */
 @media (pointer: coarse) {
-  :root { --row-h: 44px; }
+  :root { --row-h: var(--touch); }
 }

@@ -15,13 +15,15 @@ const APP = path.join(ROOT, "snug");
 function copyApp() {
   fs.rmSync(APP, { recursive: true, force: true });
   fs.mkdirSync(APP, { recursive: true });
-  for (const name of ["index.html", "css", "js", "fonts", "vendor", "server"]) {
+  for (const name of ["index.html", "brand", "css", "js", "fonts", "vendor", "server"]) {
     fs.cpSync(path.join(SNUG, name), path.join(APP, name), { recursive: true });
   }
   // The server and page are ES modules; this marks the folder as such.
   fs.writeFileSync(path.join(APP, "package.json"), JSON.stringify({ type: "module", private: true }) + "\n");
   fs.mkdirSync(path.join(ROOT, "build"), { recursive: true });
   fs.copyFileSync(path.join(ROOT, "icon.png"), path.join(ROOT, "build", "icon.png"));
+  // Windows wants a multi-size .ico so the 16-32px entries use the small-size drawing.
+  fs.copyFileSync(path.join(ROOT, "icon.ico"), path.join(ROOT, "build", "icon.ico"));
   fs.copyFileSync(path.join(ROOT, "icon.png"), path.join(APP, "icon.png"));
 }
 

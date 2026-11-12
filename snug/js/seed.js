@@ -1,32 +1,37 @@
-// Demo data: two houses you belong to, one you are invited to, and a few
-// direct conversations. Times are relative to "now" so the app always opens
+// Demo data: two houses you belong to, one you are invited to, two public
+// ones you could discover, a few direct conversations, friends and events. Times are relative to "now" so the app always opens
 // with fresh activity. Nothing here is fetched; a real backend would replace it.
 import { DAY, MIN } from './lib/util.js';
 
 const ALL = ['post', 'announce', 'highlight', 'moderate', 'rooms', 'invite', 'roles'];
 
-const person = (name, hue, presence, extra = {}) => ({ name, hue, presence, status: '', about: '', ...extra });
+const person = (name, hue, presence, extra = {}) => ({ name, hue, presence, status: '', about: '', interests: [], links: [], ...extra });
+const link = (label, url) => ({ label, url });
 
 const USERS = {
-  robin: person('Robin Hale', 165, 'around', { about: 'Mostly bowls. Sundays on the bike.' }),
-  ines: person('Ines Carvalho', 35, 'open', { status: 'On the studio floor from 4', about: 'Runs Kiln & Co. Ask me about classes.' }),
+  robin: person('Robin Hale', 165, 'around', { about: 'Mostly bowls. Sundays on the bike.', interests: ['Pottery', 'Cycling', 'Glaze chemistry'], links: [link('Bowls', 'https://example.org/robin/bowls')] }),
+  ines: person('Ines Carvalho', 35, 'open', { status: 'On the studio floor from 4', about: 'Runs Kiln & Co. Ask me about classes.', interests: ['Pottery', 'Teaching', 'Jazz'], links: [link('Kiln & Co.', 'https://example.org/kiln'), link('Classes', 'https://example.org/kiln/classes')] }),
   tomasz: person('Tomasz Wójcik', 215, 'focus', { status: 'Loading the kiln', about: 'Kiln technician. If it is hot, do not touch it.' }),
-  priya: person('Priya Raman', 300, 'around', { about: 'Glaze tests, mostly failed ones.' }),
-  malik: person('Malik Osei', 60, 'open', { emoji: '🦊', about: 'Mug number 40 and counting.' }),
-  sunniva: person('Sunniva Berg', 130, 'around', { status: 'Mixing glazes', emoji: '🌿', about: 'Glaze chemistry, sieves, patience.' }),
+  priya: person('Priya Raman', 300, 'around', { about: 'Glaze tests, mostly failed ones.', interests: ['Glaze chemistry', 'Board games'] }),
+  malik: person('Malik Osei', 60, 'open', { emoji: '🦊', about: 'Mug number 40 and counting.', interests: ['Mugs', 'Gardening', 'Biscuits'] }),
+  sunniva: person('Sunniva Berg', 130, 'around', { status: 'Mixing glazes', emoji: '🌿', about: 'Glaze chemistry, sieves, patience.', interests: ['Glaze chemistry', 'Foraging'] }),
   hyunwoo: person('Hyun-woo Park', 250, 'away', { about: 'Shino and large jars.' }),
   dara: person('Dara Okonkwo', 15, 'open', { about: 'Handbuilder. Moon jars this year.' }),
   lea: person('Léa Fontaine', 330, 'around', { about: 'New here. Thursday beginners.' }),
   farid: person('Farid Haddad', 95, 'offline', { about: 'Learning to read cones.' }),
-  jonas: person('Jonas Lindqvist', 230, 'open', { status: 'Route planning', about: 'Ride captain. Brings the alignment tool.' }),
+  jonas: person('Jonas Lindqvist', 230, 'open', { status: 'Route planning', about: 'Ride captain. Brings the alignment tool.', interests: ['Cycling', 'Maps'], links: [link('Routes', 'https://example.org/routes')] }),
   aiko: person('Aiko Tanaka', 0, 'around', { emoji: '🚲', about: 'Climbs under protest.' }),
   noor: person('Noor Aziz', 190, 'away', { status: 'On a ride', about: 'Leads the short loop.' }),
   callum: person('Callum Reid', 75, 'offline', { about: 'Here for the cake.' }),
   mateo: person('Mateo Ruiz', 280, 'around', { about: 'Gravel when it is dry, road when it is not.' }),
-  bex: person('Bex Morrow', 310, 'open', { about: 'Hosts Small Hours. Deletes more code than she writes.' }),
-  kwame: person('Kwame Mensah', 110, 'around', { about: 'Building a synth in the browser.' }),
-  yuki: person('Yuki Sato', 350, 'offline', { about: 'Zines about transit maps.' }),
+  bex: person('Bex Morrow', 310, 'open', { about: 'Hosts Small Hours. Deletes more code than she writes.', interests: ['Tech', 'Cycling'], links: [link('Blog', 'https://example.org/bex')] }),
+  kwame: person('Kwame Mensah', 110, 'around', { about: 'Building a synth in the browser.', interests: ['Music', 'Synths', 'Tech'] }),
+  yuki: person('Yuki Sato', 350, 'around', { about: 'Zines about transit maps.', interests: ['Zines', 'Transit maps', 'Music'] }),
   odile: person('Odile Brandt', 265, 'focus', { status: 'Writing', about: 'Interactive fiction, reluctant CSS.' }),
+  mira: person('Mira Castell', 200, 'open', { status: 'Spinning side B', about: 'Hosts The Listening Room. Mostly jazz, some dub.', interests: ['Jazz', 'Vinyl', 'Film & TV'], links: [link('Mixes', 'https://example.org/mira/mixes')] }),
+  sol: person('Sol Adeyemi', 140, 'around', { about: 'Drummer. Will talk about snare tuning for hours.', interests: ['Drums', 'Jazz'] }),
+  gwen: person('Gwen Pryce', 120, 'open', { status: 'On the plot', about: 'Plot 9. Too many courgettes.', interests: ['Gardening', 'Local'] }),
+  otto: person('Otto Lind', 260, 'away', { about: 'Compost, mostly. Ask me about worms.', interests: ['Gardening'] }),
 };
 
 const room = (house, name, kind, topic) => ({ house, name, kind, topic, notify: null, highlights: [] });
@@ -56,12 +61,22 @@ const ROOMS = {
   s_off: room('small', 'Off topic', 'text', 'Everything else'),
   s_jobs: room('small', 'Jobs', 'text', 'Paid work and collaborators'),
   s_pair: room('small', 'Pairing', 'voice', 'Work alongside someone'),
+  l_now: room('listen', 'Now spinning', 'news', 'What is on the turntable'),
+  l_lounge: room('listen', 'Lounge', 'text', 'Talk about what you are hearing'),
+  l_crate: room('listen', 'Crate digging', 'text', 'Finds, reissues and bargains'),
+  l_live: room('listen', 'Listening party', 'voice', 'One record, start to finish'),
+  p_gate: room('plot', 'Gate notices', 'news', 'Water, keys and deliveries'),
+  p_plot: room('plot', 'The plot', 'text', 'What is growing and what is not'),
+  p_swap: room('plot', 'Seed swap', 'text', 'Seeds, cuttings, surplus courgettes'),
+  p_shed: room('plot', 'The shed', 'voice', 'Tea and talk'),
 };
 
 const HOUSES = {
   kiln: {
     name: 'Kiln & Co.', mark: 'K', hue: 35, joined: true, newcomer: false, notify: 'all',
     about: 'A shared pottery studio. Twelve wheels, two kilns, one kettle.',
+    public: true, topic: 'Art & making', created: -50,
+    rules: 'Wipe your foot rings.\nCone 6 only in the shared loads.\nClean your wheel and the wedging table before you go.\nAsk before you borrow tools.',
     roles: [
       { id: 'lead', name: 'Studio lead', hue: 35, perms: ALL },
       { id: 'tech', name: 'Technician', hue: 215, perms: ['post', 'announce', 'highlight', 'moderate', 'rooms'] },
@@ -80,6 +95,8 @@ const HOUSES = {
   riders: {
     name: 'Ridgeline Riders', mark: 'R', hue: 250, joined: true, newcomer: false, notify: 'all',
     about: 'Sunday club rides in the Chilterns. No-drop, cake mandatory.',
+    public: false, topic: 'Sports', created: -48,
+    rules: 'No-drop means no-drop.\nLights on from October.\nCake is not optional.',
     roles: [
       { id: 'captain', name: 'Ride captain', hue: 300, perms: ALL },
       { id: 'member', name: 'Rider', hue: null, perms: ['post', 'invite'] },
@@ -95,6 +112,8 @@ const HOUSES = {
   small: {
     name: 'Small Hours', mark: 'S', hue: 290, joined: false, newcomer: false, notify: 'all',
     about: 'People who make things after everyone else has gone to bed.',
+    public: false, topic: 'Tech', created: -45,
+    rules: 'Be kind about first drafts.\nShare what you shipped, however small.',
     roles: [
       { id: 'host', name: 'Host', hue: 290, perms: ALL },
       { id: 'regular', name: 'Regular', hue: 200, perms: ['post', 'invite', 'highlight'] },
@@ -109,6 +128,41 @@ const HOUSES = {
     ],
     starter: ['s_start', 's_intro', 's_ship'],
     firstStep: { room: 's_intro', label: 'Introduce yourself', draft: 'Hi, I’m Robin. ' },
+  },
+  // Public houses Robin is not in, to find in Discover.
+  listen: {
+    name: 'The Listening Room', mark: 'L', hue: 200, joined: false, newcomer: false, notify: 'all',
+    about: 'One record a night, start to finish, together. Jazz, dub, whatever someone brings.',
+    public: true, topic: 'Music', created: -30,
+    rules: 'No skipping tracks during a listening party.\nSay what you are playing.\nBe generous about other people’s taste.',
+    roles: [
+      { id: 'host', name: 'Host', hue: 200, perms: ALL },
+      { id: 'member', name: 'Listener', hue: null, perms: ['post', 'invite'] },
+    ],
+    joinRole: 'member',
+    members: { mira: 'host', sol: 'member', yuki: 'member', kwame: 'member', ines: 'member' },
+    groups: [
+      { id: 'lg1', name: 'Records', rooms: ['l_now', 'l_lounge', 'l_crate'] },
+      { id: 'lg2', name: 'Live', rooms: ['l_live'] },
+    ],
+    starter: ['l_now', 'l_lounge'],
+  },
+  plot: {
+    name: 'Allotment 9', mark: 'A', hue: 115, joined: false, newcomer: false, notify: 'all',
+    about: 'The plot-holders at Elm Lane allotments. Swaps, rotas and a lot of courgettes.',
+    public: true, topic: 'Local', created: -20,
+    rules: 'Close the gate behind you.\nWater butts are shared, so leave some.\nTake courgettes. Please.',
+    roles: [
+      { id: 'warden', name: 'Warden', hue: 115, perms: ALL },
+      { id: 'holder', name: 'Plot-holder', hue: null, perms: ['post', 'invite'] },
+    ],
+    joinRole: 'holder',
+    members: { gwen: 'warden', otto: 'holder', callum: 'holder', malik: 'holder' },
+    groups: [
+      { id: 'pg1', name: 'The site', rooms: ['p_gate', 'p_plot', 'p_swap'] },
+      { id: 'pg2', name: 'Live', rooms: ['p_shed'] },
+    ],
+    starter: ['p_gate', 'p_plot'],
   },
 };
 
@@ -291,6 +345,30 @@ export function seed(now) {
   put('s_jobs', [[at(6, '20:15'), 'bex', 'A friend’s studio needs a freelance illustrator for a two-week job in January. Message me for details.']]);
   put('s_pair', []);
 
+  // The Listening Room (public, Robin is not in it)
+  put('l_now', [
+    [at(2, '20:00'), 'mira', '**This week**\nThursday: Kind of Blue, side A and B, no talking during So What.'],
+  ]);
+  put('l_lounge', [
+    [at(1, '21:40'), 'sol', 'The drum sound on that last one. Brushes on a calfskin head, has to be.'],
+    [at(1, '21:44'), 'yuki', 'I had to stop drawing and just listen.'],
+    [ago(9), 'mira', 'Side B starts in five. Get a drink.'],
+    [ago(6), 'kwame', 'Ready. Headphones on.'],
+    [ago(4), 'sol', 'Turning the lights down.'],
+  ]);
+  put('l_crate', [[at(3, '12:30'), 'kwame', 'Found a dub reissue for €6 at the market. Sleeve is rough, vinyl is perfect.']]);
+  put('l_live', []);
+
+  // Allotment 9 (public, Robin is not in it)
+  put('p_gate', [[at(4, '08:00'), 'gwen', '**Water is back on**\nThe trough by plot 3 is fixed. Taps off when you leave.']]);
+  put('p_plot', [
+    [at(1, '17:10'), 'otto', 'Turned the compost. It is warm in the middle, which is the good kind of warm.'],
+    [ago(140), 'gwen', 'Courgettes on the bench by the gate. Take three. Take five.'],
+    [ago(120), 'malik', 'Took four. Making soup.'],
+  ]);
+  put('p_swap', [[at(2, '10:15'), 'callum', 'Swapping broad bean seeds for anything that is not a courgette.']]);
+  put('p_shed', []);
+
   // Direct conversations
   put('d_ines', [
     [at(1, '12:02'), 'ines', 'Could you cover Saturday morning open studio? I’ve got a delivery at 9.'],
@@ -334,6 +412,46 @@ export function seed(now) {
   const read = {};
   for (const conv of Object.keys(msgs)) read[conv] = ago(240);
   read.g_sat = now;
+  for (const id of Object.keys(users)) users[id].since = now - 60 * DAY;
+  for (const h of Object.values(houses)) h.created = now + h.created * DAY;
+
+  // Friendships between everyone, as pairs. 'pending' means a asked b.
+  const friendships = [
+    { a: 'robin', b: 'ines', state: 'friends', since: at(40, '10:00'), fav: ['robin', 'ines'] },
+    { a: 'jonas', b: 'robin', state: 'friends', since: at(35, '18:00'), fav: ['robin'] },
+    { a: 'robin', b: 'priya', state: 'friends', since: at(30, '12:00'), fav: [] },
+    { a: 'malik', b: 'robin', state: 'friends', since: at(28, '09:00'), fav: [] },
+    { a: 'mira', b: 'robin', state: 'friends', since: at(12, '22:00'), fav: [] },
+    { a: 'bex', b: 'robin', state: 'pending', since: ago(180), fav: [] },
+    { a: 'robin', b: 'yuki', state: 'pending', since: at(1, '20:00'), fav: [] },
+    { a: 'ines', b: 'priya', state: 'friends', since: at(38, '10:00'), fav: [] },
+    { a: 'ines', b: 'tomasz', state: 'friends', since: at(38, '11:00'), fav: [] },
+    { a: 'mira', b: 'sol', state: 'friends', since: at(25, '21:00'), fav: ['mira'] },
+    { a: 'mira', b: 'yuki', state: 'friends', since: at(20, '21:00'), fav: [] },
+    { a: 'malik', b: 'gwen', state: 'friends', since: at(15, '17:00'), fav: [] },
+    { a: 'jonas', b: 'noor', state: 'friends', since: at(36, '08:00'), fav: [] },
+  ];
+  // Robin's side of it.
+  const friends = {};
+  for (const f of friendships) {
+    if (f.a !== 'robin' && f.b !== 'robin') continue;
+    const other = f.a === 'robin' ? f.b : f.a;
+    const state = f.state === 'friends' ? 'friends' : f.a === 'robin' ? 'outgoing' : 'incoming';
+    friends[other] = { state, favorite: f.fav.includes('robin'), since: f.since };
+  }
+
+  // One happening now, one tonight, one next week, and one in a public house.
+  const quarter = 15 * MIN;
+  const tonight = new Date(now);
+  tonight.setHours(19, 30, 0, 0);
+  const swapAt = tonight.getTime() >= now + 60 * MIN ? tonight.getTime() : Math.ceil((now + 2 * 60 * MIN) / quarter) * quarter;
+  const ev = (id, house, room, title, about, starts, ends, by, going) => ({ id, house, room, title, about, starts, ends, by, going, created: Math.min(now, starts) - 3 * DAY });
+  const events = {
+    e_open: ev('e_open', 'kiln', 'k_floor', 'Open studio', 'Wheels free, kettle on. Ines is on the floor from 4.', ago(60), now + 3 * 60 * MIN, 'ines', ['ines', 'priya', 'lea']),
+    e_swap: ev('e_swap', 'riders', 'r_coffee', 'Winter kit swap', 'Bring the overshoes you never wear. Take someone else’s.', swapAt, swapAt + 90 * MIN, 'noor', ['noor', 'callum', 'robin']),
+    e_ride: ev('e_ride', 'riders', null, 'Chiltern hundred', '100 km, three climbs, one long café stop. No-drop as always.', at(-7, '08:30'), at(-7, '14:00'), 'jonas', ['jonas', 'noor', 'aiko']),
+    e_party: ev('e_party', 'listen', 'l_live', 'Listening party: Kind of Blue', 'Both sides, no skipping. Bring something to drink.', at(-2, '21:00'), at(-2, '22:30'), 'mira', ['mira', 'sol', 'yuki']),
+  };
 
   return {
     v: 1,
@@ -349,6 +467,7 @@ export function seed(now) {
     },
     dmOrder: ['d_ines', 'g_sat', 'd_tomasz', 'd_priya', 'd_jonas'],
     msgs, threads, read,
+    friends, friendships, events,
     followed: { 't:m_layer': true },
     saved: [
       { id: 'm_fix', conv: 'k_glaze', at: at(2, '18:35'), note: 'Fix for the crawling copper green' },
@@ -356,7 +475,7 @@ export function seed(now) {
       { id: 'm_short', conv: 'r_plans', at: at(1, '19:45'), note: 'Short loop option' },
     ],
     drafts: {},
-    voice: { k_wheel: ['malik', 'priya', 'dara'], k_watch: [], r_coffee: ['jonas', 'aiko'], s_pair: ['kwame', 'odile'] },
+    voice: { k_wheel: ['malik', 'priya', 'dara'], k_watch: [], r_coffee: ['jonas', 'aiko'], s_pair: ['kwame', 'odile'], l_live: ['mira', 'sol', 'yuki'] },
     call: null,
     invites: [{ house: 'small', from: 'bex', ts: ago(300) }],
     prefs: { theme: 'system', density: 'regular', text: 'm', motion: 'system', toasts: true, houseShut: {}, groupShut: {} },

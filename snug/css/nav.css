@@ -1,0 +1,201 @@
+/* Navigation: rail -> context column -> content, your panel at the bottom of
+   the column, the Home view, and the nav agent's touches to Catch up and
+   Search. Tokens only (1px lines excepted).
+   Places are arches, people are circles, controls are rectangles. */
+
+/* ---------- Frame ----------
+   The navigation column of shell.css becomes rail + context column. Every
+   shell rule that measures --nav-w (pane overlay at medium widths) follows. */
+.app { --nav-w: calc(var(--rail-w) + var(--ctx-w)); }
+.app > .nav { flex-direction: row; background: var(--bg-0); --bg: var(--bg-0); border-right: 0; }
+
+/* ---------- Rail ---------- */
+.rail { width: var(--rail-w); flex: none; min-height: 0; display: flex; flex-direction: column; background: var(--bg-0); --bg: var(--bg-0); }
+.rail-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; padding: var(--s-3) 0 var(--s-4); display: flex; flex-direction: column; align-items: center; gap: var(--s-2); }
+.rail-scroll::-webkit-scrollbar { display: none; }
+.rail-item { position: relative; width: 100%; display: flex; justify-content: center; flex: none; }
+
+/* The left edge says what an item is to you: a coral bar where you are, a
+   small light dot where something is new, a hint of it on hover. */
+.rail-item::before {
+  /* Full height once, scaled per state: transform animates without layout work. */
+  content: ""; position: absolute; left: 0; top: 50%; width: 3px; height: var(--s-6); margin-top: calc(var(--s-6) / -2);
+  border-radius: 0 var(--r-full) var(--r-full) 0; background: var(--text-1);
+  transform: scaleY(0);
+  transition: transform var(--m-standard) var(--ease-out), background var(--m-standard) var(--ease-in-out);
+}
+.rail-item.unread::before { transform: scaleY(0.34); }
+.rail-item:hover::before { transform: scaleY(0.67); background: var(--text-3); }
+.rail-item.unread:hover::before { background: var(--text-1); }
+.rail-item.sel::before { transform: scaleY(1); background: var(--brand); }
+
+.rail-btn {
+  position: relative; width: var(--av-md); height: var(--av-md);
+  display: grid; place-items: center; border-radius: var(--r-sm); color: var(--text-2);
+  transition: transform var(--m-fast) var(--ease-in-out), opacity var(--m-fast) var(--ease-in-out);
+}
+.rail-btn:active { transform: translateY(1px); }
+.rail-btn:focus-visible { outline-offset: 3px; border-radius: var(--r-md); }
+.rail-face { width: 100%; height: 100%; display: grid; place-items: center; border-radius: inherit; transition: background var(--m-fast) var(--ease-in-out), color var(--m-fast) var(--ease-in-out); }
+
+/* Messages, Discover, Create or join: controls, so rectangles on a quiet step. */
+.rail-item:not(:has(.rail-home, .rail-house)) .rail-face { background: var(--bg-2); color: var(--text-2); }
+.rail-item:not(:has(.rail-home, .rail-house)) .rail-btn:hover .rail-face { background: var(--bg-3); color: var(--text-1); }
+.rail-item:not(:has(.rail-home, .rail-house)) .rail-btn:active .rail-face { background: var(--bg-4); }
+.rail-item.sel:not(:has(.rail-home, .rail-house)) .rail-face { background: var(--bg-3); color: var(--text-1); }
+.rail-add .rail-face { border: 1px dashed var(--line-strong); background: transparent !important; }
+.rail-add:hover .rail-face { border-color: var(--text-3); }
+
+/* Home is the Nook itself. */
+.rail-home .nook { transition: transform var(--m-standard) var(--ease-out); }
+.rail-home:hover .nook { transform: translateY(-1px); }
+
+/* Communities are arches; the one you are in is at full strength. */
+.rail .tile { --sz: var(--av-md); font-size: var(--t-16); }
+.rail-house .rail-face { opacity: 0.8; transition: opacity var(--m-fast) var(--ease-in-out); }
+.rail-house:hover .rail-face, .rail-item.sel .rail-house .rail-face, .rail-item.unread .rail-house .rail-face { opacity: 1; }
+.rail-house:focus-visible { border-radius: var(--r-md); }
+
+.rail-badge { position: absolute; right: calc(var(--s-1) * -1.5); top: calc(var(--s-1) * -1); box-shadow: 0 0 0 3px var(--bg-0); pointer-events: none; }
+.rail-sep { width: var(--s-8); height: 1px; flex: none; background: var(--line); margin: var(--s-1) 0; }
+
+/* ---------- Context column ---------- */
+.ctx { width: var(--ctx-w); flex: none; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg-2); --bg: var(--bg-2); border-right: 1px solid var(--line-subtle); border-radius: var(--r-md) 0 0 0; }
+.ctx-head { height: var(--bar-h); flex: none; display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-2); border-bottom: 1px solid var(--line-subtle); }
+.ctx-head .jump-btn { background: var(--bg-0); border-color: transparent; }
+.ctx-head .jump-btn:hover { border-color: var(--line-strong); }
+.ctx-head .jump-btn .kbd { white-space: nowrap; flex: none; }
+.ctx-title { padding: 0 var(--s-4); }
+.ctx-title .ctx-name { font-size: var(--t-16); font-weight: var(--w-semibold); letter-spacing: -0.01em; }
+.ctx-house-head { padding: 0 var(--s-1); }
+.ctx-house { width: 100%; height: var(--h-md); padding: 0 var(--s-2); display: flex; align-items: center; gap: var(--s-2); border-radius: var(--r-sm); text-align: left; transition: background var(--m-fast) var(--ease-in-out); }
+.ctx-house:hover { background: var(--bg-3); --bg: var(--bg-3); }
+.ctx-house:active { background: var(--bg-4); --bg: var(--bg-4); }
+.ctx-house .tile { --sz: 28px; }
+.ctx-house > .ic { color: var(--text-3); }
+.ctx-house .ctx-name { display: block; font-size: var(--t-14); font-weight: var(--w-semibold); line-height: var(--lh-ui); color: var(--text-1); }
+.ctx-meta { display: flex; gap: var(--s-2); font-size: var(--t-12); font-weight: var(--w-regular); color: var(--text-3); line-height: var(--lh-ui); }
+.ctx-online { display: inline-flex; align-items: center; gap: var(--s-1); }
+.ctx-online .pres, .home-online .pres { width: 6px; height: 6px; }
+.ctx .nav-scroll { padding-top: var(--s-2); }
+.ctx .nav-group { margin-top: var(--s-3); }
+.ctx .nav-group:first-child { margin-top: 0; }
+.row-hint { margin-left: var(--s-2); font-size: var(--t-12); font-weight: var(--w-regular); color: var(--text-3); }
+.row.sel .row-hint { color: var(--text-2); }
+.topic-mark { font-size: var(--t-14); font-weight: var(--w-semibold); color: var(--text-3); line-height: 1; }
+.ctx-note { padding: var(--s-1) var(--s-2); font-size: var(--t-13); color: var(--text-3); line-height: var(--lh-body); }
+.ev-live { font-size: var(--t-11); font-weight: var(--w-semibold); color: var(--brand-ink); }
+
+/* ---------- Your panel ---------- */
+.me-panel { flex: none; background: var(--bg-1); --bg: var(--bg-1); border-top: 1px solid var(--line-subtle); }
+.me-panel .dock { margin: var(--s-2) var(--s-2) 0; background: var(--bg-2); --bg: var(--bg-2); }
+.me-row { display: flex; align-items: center; gap: var(--s-1); padding: var(--s-2); }
+.me-row .self { flex: 1; min-width: 0; width: auto; padding: 0 var(--s-1); }
+.self-text { display: grid; text-align: left; }
+.self-text .self-name, .self-text .self-status { display: block; }
+
+/* ---------- Home ---------- */
+.home-col { width: 100%; max-width: 72rem; padding: var(--s-6) var(--s-8) var(--s-12); container-type: inline-size; }
+.home-hello { margin-bottom: var(--s-6); }
+.home-greet { font-size: var(--t-24); font-weight: var(--w-semibold); line-height: var(--lh-heading); letter-spacing: -0.015em; }
+.home-summary { margin-top: var(--s-2); display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-3); color: var(--text-2); font-size: var(--t-14); line-height: var(--lh-ui); }
+.home-foryou { display: inline-flex; align-items: center; gap: var(--s-2); height: var(--av-xs); padding: 0 var(--s-2) 0 var(--s-1); margin-left: calc(var(--s-1) * -1); border-radius: var(--r-sm); color: var(--text-1); font-weight: var(--w-medium); transition: background var(--m-fast) var(--ease-in-out); }
+.home-foryou:hover { background: var(--hover); }
+.home-foryou:active { background: var(--press); }
+
+.home-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-8); align-items: start; }
+@container (min-width: 880px) {
+  .home-grid { grid-template-columns: minmax(0, 1fr) 18.5rem; gap: var(--s-10); }
+}
+.home-main, .home-side { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-8); align-content: start; }
+.home-sect { min-width: 0; }
+
+.home-h { display: flex; align-items: baseline; gap: var(--s-2); padding-bottom: var(--s-2); margin-bottom: var(--s-2); border-bottom: 1px solid var(--line-subtle); }
+.home-h h3 { font-size: var(--t-14); font-weight: var(--w-semibold); color: var(--text-1); }
+.home-count { font-size: var(--t-13); color: var(--text-3); }
+.home-more { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; font-size: var(--t-13); color: var(--text-2); border-radius: var(--r-xs); padding: 0 var(--s-1); transition: color var(--m-fast) var(--ease-in-out); }
+.home-more:hover { color: var(--text-1); }
+.home-more:active { color: var(--text-3); }
+
+/* Friends online: a row of people, each saying what they are doing. */
+.home-friends { list-style: none; margin: 0 calc(var(--s-2) * -1); padding: 0; display: flex; gap: var(--s-1); overflow-x: auto; scrollbar-width: none; }
+.home-friends::-webkit-scrollbar { display: none; }
+.home-friends li { flex: none; }
+.home-friend { width: 96px; padding: var(--s-2) var(--s-1); display: grid; justify-items: center; gap: 2px; border-radius: var(--r-md); text-align: center; transition: background var(--m-fast) var(--ease-in-out); }
+.home-friend:hover { background: var(--bg-2); --bg: var(--bg-2); }
+.home-friend:active { background: var(--bg-3); --bg: var(--bg-3); }
+.home-friend .avatar { margin-bottom: var(--s-1); }
+.home-friend-name { max-width: 100%; font-size: var(--t-13); font-weight: var(--w-semibold); color: var(--text-1); }
+.home-friend-doing { font-size: var(--t-12); color: var(--text-3); line-height: var(--lh-ui); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.is-live { color: var(--brand-ink); }
+.is-typing { font-style: italic; color: var(--text-2); }
+
+/* Rows: icon, what and where, how alive, who. */
+.home-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.home-row {
+  width: calc(100% + var(--s-4)); margin: 0 calc(var(--s-2) * -1); padding: var(--s-2);
+  display: flex; align-items: center; gap: var(--s-3); text-align: left; border-radius: var(--r-sm);
+  transition: background var(--m-fast) var(--ease-in-out);
+}
+button.home-row:hover, .home-voice:hover { background: var(--bg-2); --bg: var(--bg-2); }
+button.home-row:active { background: var(--bg-3); --bg: var(--bg-3); }
+.home-row-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--s-3); text-align: left; border-radius: var(--r-sm); }
+.home-row-ic { width: var(--av-sm); height: var(--av-sm); flex: none; display: grid; place-items: center; border-radius: var(--r-sm); background: var(--bg-2); color: var(--text-2); }
+.home-row-ic:has(> .avatar, > .tile) { background: none; }
+button.home-row:hover .home-row-ic:not(:has(> .avatar, > .tile)) { background: var(--bg-3); }
+.home-row-ic.is-live { background: var(--brand-soft); color: var(--brand-ink); }
+.home-row-ic .tile { --sz: var(--av-sm); }
+.home-row-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.home-row-title { display: flex; align-items: baseline; gap: var(--s-2); min-width: 0; font-size: var(--t-14); font-weight: var(--w-semibold); color: var(--text-1); line-height: var(--lh-ui); }
+.home-row-where { flex: none; max-width: 50%; font-size: var(--t-12); font-weight: var(--w-regular); color: var(--text-3); }
+.home-row-sub { display: flex; align-items: center; gap: var(--s-1); font-size: var(--t-12); color: var(--text-2); line-height: var(--lh-ui); }
+.home-row-sub .sep { color: var(--text-3); }
+.home-row-quote { font-size: var(--t-13); color: var(--text-2); line-height: var(--lh-ui); }
+.home-row-quote b { font-weight: var(--w-medium); color: var(--text-1); }
+.home-row-end { flex: none; display: flex; align-items: center; gap: var(--s-2); }
+.home-new { font-size: var(--t-12); font-weight: var(--w-semibold); color: var(--text-1); }
+.home-online { display: inline-flex; align-items: center; gap: var(--s-1); }
+.home-voice { padding-right: var(--s-2); }
+.home-voice .btn { flex: none; }
+.home-pick-about { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.home-skel-ic { width: var(--av-sm); height: var(--av-sm); flex: none; border-radius: var(--r-sm); }
+.home-skel .home-row-text { gap: var(--s-2); }
+
+.home-empty { color: var(--text-2); font-size: var(--t-14); line-height: var(--lh-body); padding: var(--s-1) 0; }
+.home-quiet { color: var(--text-3); }
+.home-link { color: var(--text-1); font-weight: var(--w-medium); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; border-radius: var(--r-xs); }
+.home-link:hover { text-decoration-color: currentColor; }
+
+/* A brand-new account: one warm sentence, two ways in. */
+.home-start { padding: var(--s-6) 0 var(--s-10); display: grid; gap: var(--s-3); justify-items: start; max-width: 34rem; }
+.home-start h3 { font-size: var(--t-20); font-weight: var(--w-semibold); line-height: var(--lh-heading); letter-spacing: -0.01em; margin-top: var(--s-2); }
+.home-start p { color: var(--text-2); font-size: var(--t-16); line-height: var(--lh-body); }
+.home-start-acts { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-2); }
+.home-fresh-picks { max-width: 34rem; }
+
+/* ---------- Phone ---------- */
+.phone .home-col { padding: var(--s-4) var(--s-4) var(--s-8); }
+.phone .home-greet { font-size: var(--t-20); }
+.phone .home-friends { margin: 0 calc(var(--s-4) * -1); padding: 0 var(--s-3); }
+.phone .home-row { min-height: var(--touch); }
+.phone .home .bar-end .btn { padding: 0 var(--s-2); }
+.phone .tab { min-width: 0; }
+.you-card { width: 100%; padding: var(--s-2); margin: calc(var(--s-2) * -1); width: calc(100% + var(--s-4)); border-radius: var(--r-md); text-align: left; transition: background var(--m-fast) var(--ease-in-out); }
+.you-card:hover { background: var(--bg-2); --bg: var(--bg-2); }
+.you-card:active { background: var(--bg-3); --bg: var(--bg-3); }
+.you-card > .ic { color: var(--text-3); }
+.you-status { justify-content: flex-start; }
+.you-tab .dock { margin: 0; }
+.phone-house .bar-title .tile { --sz: 28px; }
+.phone-house .nav-scroll { padding-top: var(--s-2); }
+
+/* ---------- Catch up and Search (views owned by the nav agent) ----------
+   Rows with quiet separators; coral marks what is for you. */
+.catchup .view-sect, .saved .view-sect { gap: var(--s-2); }
+.catchup .col > div + div > .view-sect, .catchup .col > .view-sect:not(:first-child) { border-top: 1px solid var(--line-subtle); margin-top: var(--s-4); padding-top: var(--s-4); }
+.catchup .view-sect .tile { --sz: 20px; }
+.catchup .view-sect.for-you .badge { margin-left: 0; }
+.catchup .item[data-triage]::before { content: ""; position: absolute; left: 0; top: var(--s-2); bottom: var(--s-2); width: 2px; border-radius: 0 var(--r-full) var(--r-full) 0; background: var(--line-strong); }
+.catchup .swipe + .swipe .item, .catchup .news + .news, .saved .item + .item, .search-results .item + .item { box-shadow: inset 0 1px 0 var(--line-subtle); }
+.catchup .swipe + .swipe .item:hover, .catchup .news + .news:hover, .saved .item + .item:hover, .search-results .item + .item:hover { box-shadow: none; }
+.catchup .invite { box-shadow: inset 2px 0 0 var(--brand); }

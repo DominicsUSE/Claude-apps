@@ -74,10 +74,14 @@ export function fuzzy(query, text) {
 
 export const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
-// The colours people, roles and houses can choose: hues only, named for screen
-// readers, and kept clear of the hues that carry meaning (danger red near 27,
-// amber near 90, live green near 150, the neutral grey-green near 165).
-export const HUES = [[55, 'Orange'], [115, 'Lime'], [195, 'Teal'], [215, 'Cyan'], [235, 'Sky'], [255, 'Blue'], [280, 'Indigo'], [305, 'Violet'], [330, 'Plum'], [350, 'Pink']];
+// The colours people, roles and houses can choose: OKLCH hues only, named for
+// screen readers. The theme sets lightness and chroma. Kept at least 25 degrees
+// clear of the hues that carry meaning: error red (23 to 25), brand coral (30),
+// amber (73 to 81) and mint (168 to 170). Nothing warm sits between coral and
+// amber, so no chosen colour can pass for the brand, a warning or a presence.
+// Only two cool blues and one plum, so a screen of people and houses stays warm
+// and never reads purple or blue.
+export const HUES = [[106, 'Olive'], [142, 'Green'], [200, 'Teal'], [228, 'Sky'], [255, 'Blue'], [318, 'Plum'], [335, 'Clay rose'], [350, 'Pink']];
 
 // Any stored hue, shown as the nearest choosable one, so older choices never
 // read as a warning, a highlight or a presence colour.

@@ -16,10 +16,11 @@ import {
 } from './auth.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const PUBLIC = ['index.html', 'css/', 'js/', 'fonts/', 'vendor/', 'docs/'];
+const PUBLIC = ['index.html', 'css/', 'js/', 'fonts/', 'vendor/', 'docs/', 'brand/'];
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.txt': 'text/plain; charset=utf-8', '.json': 'application/json',
+  '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json',
 };
 // Uploaded images shown inline. Anything else downloads.
 const INLINE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml']);
@@ -259,6 +260,8 @@ export async function startServer({
   log(`Snug is running at http://${address.address}:${address.port}`);
   return {
     port: address.port, db, M, hub, server,
+    // For tests: forget every rate limit, the socket ones and the sign-in ones.
+    resetLimits: () => { hub.resetLimits(); authLimit.reset(); uploadLimit.reset(); },
     close: () => new Promise((r) => { clearInterval(sweep); hub.close(); server.close(() => { db.close(); r(); }); server.closeAllConnections?.(); }),
   };
 }

@@ -136,7 +136,7 @@ export function CatchUp() {
   const focused = me().presence === 'focus';
   const nothing = !needs.length && !news.length && !S.invites.length;
   const byHouse = S.houseOrder.map((h) => ({ h, rows: news.filter((n) => S.rooms[n.conv]?.house === h) })).filter((g) => g.rows.length);
-  return html`<section class="main view" aria-label="Catch up">
+  return html`<section class="main view catchup" aria-label="Catch up">
     <header class="bar">
       <${Back} />
       <h1 class="bar-title"><${Icon} name="tray" />Catch up</h1>
@@ -151,7 +151,7 @@ export function CatchUp() {
             <button class="btn" onClick=${() => openQuick()}>Jump to a room</button>
           <//>`
         : html`<div class="col">
-          ${(needs.length > 0 || S.invites.length > 0) && html`<div class="view-sect">For you <span class="count num">${forYou}</span></div>`}
+          ${(needs.length > 0 || S.invites.length > 0) && html`<div class="view-sect for-you">For you <span class="badge" aria-label=${`${forYou} for you`}>${forYou}</span></div>`}
           ${S.invites.map((inv) => {
             const h = S.houses[inv.house];
             return html`<div class="invite" key=${inv.house}>
@@ -171,7 +171,7 @@ export function CatchUp() {
           </div>
           ${needs.length > 1 && html`<div class="view-note triage-hint">${S.ui.phone ? 'Swipe an item left to mark it read.' : html`<span class="kbd">J</span> <span class="kbd">K</span> to move, <span class="kbd">E</span> to mark read, <span class="kbd">Enter</span> to open.`}</div>`}
           ${byHouse.map(({ h, rows }) => html`<div key=${h}>
-            <div class="view-sect">${S.houses[h].name}
+            <div class="view-sect"><${Tile} house=${S.houses[h]} />${S.houses[h].name}
               <button class="btn quiet" onClick=${() => markManyRead(rows.map((r) => r.conv), `${S.houses[h].name} news marked as read`)}>Mark read</button>
             </div>
             ${rows.map(({ conv, count, people, top }) => {
@@ -194,7 +194,7 @@ export function CatchUp() {
 
 export function Saved() {
   const rows = S.saved.map((s) => ({ s, m: findMsg(s.conv, s.id), meta: convMeta(s.conv) })).filter((r) => r.m && r.meta);
-  return html`<section class="main view" aria-label="Saved">
+  return html`<section class="main view saved" aria-label="Saved">
     <header class="bar">
       <${Back} />
       <h1 class="bar-title"><${Icon} name="save" />Saved</h1>

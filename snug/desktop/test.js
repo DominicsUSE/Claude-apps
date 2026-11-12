@@ -38,7 +38,7 @@ test("first run: choose to run Snug on this computer, create an account, send a 
   assert.match(page.url(), /^http:\/\/127\.0\.0\.1:\d+\//);
   assert.equal(await page.evaluate(() => typeof window.snugDesktop), "undefined", "the Snug page gets no desktop bridge");
   assert.equal(await page.evaluate(() => typeof window.require), "undefined");
-  await page.click('.seg button:has-text("Create account")');
+  await page.click('.auth-link:has-text("Create an account")');
   await page.fill("#auth-handle", "ada");
   await page.fill("#auth-name", "Ada Okafor");
   await page.fill("#auth-pass", "a long password");
@@ -46,7 +46,7 @@ test("first run: choose to run Snug on this computer, create an account, send a 
   await page.waitForSelector(".nav");
   await page.waitForFunction(() => window.snug.S.conn.socket === "open");
 
-  await page.click('.nav .row:has-text("Add a house")');
+  await page.click('.rail-add');
   await page.fill("#house-name", "Kiln & Co.");
   await page.click('.modal button[type=submit]');
   await page.waitForSelector('.main .bar-title:has-text("Lounge")');
@@ -62,6 +62,8 @@ test("reopening goes straight in, still signed in, with the message still there"
   const { app, page } = await launch();
   t.after(() => app.close().catch(() => {}));
   await page.waitForSelector(".nav");
+  // Rooms are in their community's column; open it from the rail unless it is where you were.
+  if (!(await page.locator('.rail-house[aria-current="page"]:has-text("Kiln & Co.")').count())) await page.click('.rail-house:has-text("Kiln & Co.")');
   await page.click('.nav .row:has-text("Lounge")');
   await page.locator('.main .msg:has-text("First message from the desktop app")').waitFor();
   assert.equal(await page.locator(".self-name").textContent(), "Ada Okafor");

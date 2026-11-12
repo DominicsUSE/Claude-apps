@@ -19,6 +19,12 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {} }) 
     'msg.send': limiter({ capacity: 15, perSecond: 1 }),
     typing: limiter({ capacity: 3, perSecond: 0.5 }),
     search: limiter({ capacity: 8, perSecond: 1 }),
+    // Friend requests go to anyone, so they are kept slow: 10 at once, then one every 10 seconds.
+    'friend.request': limiter({ capacity: 10, perSecond: 0.1 }),
+    discover: limiter({ capacity: 10, perSecond: 0.5 }),
+    // Taking back requests, and joining open houses, both notify other people.
+    'friend.remove': limiter({ capacity: 10, perSecond: 0.2 }),
+    'house.joinPublic': limiter({ capacity: 5, perSecond: 0.1 }),
     rtc: limiter({ capacity: 400, perSecond: 80 }),
   };
 
@@ -47,6 +53,28 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {} }) 
     hub.toUser(u, 'user', { user: selfView(u) });
   };
 
+  // Friends: each side sees the pair from their own side, on every device.
+  // Someone you have only asked (or just unfriended, with no place in common)
+  // shows as offline with no status, and stops getting updates.
+  hub.sendFriend = (u, other) => {
+    const user = M.sees(u, other) ? hub.userView(other) : M.hiddenView(M.userRow(other));
+    hub.toUser(u, 'friend', { id: other, user, friend: M.friendView(M.friendRow(u, other)) || null });
+  };
+  hub.friendChanged = (a, b) => { hub.sendFriend(a, b); hub.sendFriend(b, a); };
+
+  // Events reach everyone in the house.
+  hub.eventChanged = (eventId) => {
+    const e = M.eventView(M.eventRow(eventId));
+    if (e) hub.toUsers(db.all('SELECT user FROM members WHERE house = ?', e.house).map((r) => r.user), 'event', { event: e });
+  };
+  hub.eventGone = (houseId, eventId, extra = []) => {
+    hub.toUsers([...db.all('SELECT user FROM members WHERE house = ?', houseId).map((r) => r.user), ...extra], 'event.gone', { id: eventId, house: houseId });
+  };
+
+  // Liveness, for discovery: who is connected, and how many people are in these voice rooms.
+  hub.isOnline = (u) => presenceOf(u) !== 'offline';
+  hub.inVoice = (rooms) => rooms.reduce((n, r) => n + (voiceRooms.get(r)?.size || 0), 0);
+
   hub.sendHouse = (u, houseId) => {
     const v = M.houseView(houseId, u);
     if (v) hub.toUser(u, 'house', { house: v.house, rooms: v.rooms, users: hub.usersFor(v.userIds) });
@@ -72,6 +100,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {} }) 
       threads: Object.fromEntries(threads.map((t) => [t.id, { conv: t.conv, root: t.root }])),
       users: hub.usersFor(Object.values(msgs).flat().map((m) => m.author)),
       voice: Object.fromEntries(rooms.filter((r) => voiceRooms.has(r)).map((r) => [r, voiceView(r)])),
+      events: Object.fromEntries(M.eventsFor(u).filter((e) => e.house === houseId).map((e) => [e.id, e])),
     });
   };
   hub.sendDm = (u, dmId) => {

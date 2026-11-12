@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40">
+  <title>Community</title>
+  <!-- The house tile (token r-arch: 50%/42% top, 4px foot) with an open,
+       empty doorway: a place nobody has decorated yet. -->
+  <path fill="#292B2D" d="M0 16.8A20 16.8 0 0 1 40 16.8V36a4 4 0 0 1-4 4H4a4 4 0 0 1-4-4Z"/>
+  <path fill="#141516" d="M14 32V19a6 6 0 0 1 12 0v13Z"/>
+</svg>

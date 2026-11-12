@@ -3,17 +3,21 @@
 // rules that keep people out of places they don't belong.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
 import { startServer } from '../server/index.js';
+import { openDb } from '../server/db.js';
+import { seedDatabase } from '../server/seed.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'snug-test-'));
 let srv, base;
 const boot = async () => { srv = await startServer({ port: 0, dataDir: dir, quiet: true }); base = `http://127.0.0.1:${srv.port}`; };
 test.before(boot);
-test.beforeEach(() => srv.hub.resetLimits());
+test.beforeEach(() => srv.resetLimits());
 test.after(async () => { await srv.close(); rmSync(dir, { recursive: true, force: true }); });
 
 const post = (path, body, cookie, origin = base) => fetch(base + path, {
@@ -96,7 +100,7 @@ test('accounts: register, sign in, wrong password, taken name, weak input', asyn
 
 test('the app\u2019s own files are served; nothing else on disk is', async () => {
   const get = (path) => fetch(base + path);
-  for (const [path, type] of [['/', 'text/html'], ['/js/app.js', 'text/javascript'], ['/css/tokens.css', 'text/css'], ['/js/views/auth.js', 'text/javascript'], ['/fonts/ahn-latin.woff2', 'font/woff2'], ['/vendor/preact-htm.js', 'text/javascript']]) {
+  for (const [path, type] of [['/', 'text/html'], ['/js/app.js', 'text/javascript'], ['/css/tokens.css', 'text/css'], ['/js/views/auth.js', 'text/javascript'], ['/fonts/inter-latin.woff2', 'font/woff2'], ['/vendor/preact-htm.js', 'text/javascript']]) {
     const res = await get(path);
     assert.equal(res.status, 200, path);
     assert.match(res.headers.get('content-type'), new RegExp(type), path);
@@ -418,4 +422,386 @@ test('sign-in attempts are limited', async () => {
   let limited = 0;
   for (let i = 0; i < 14; i++) if ((await post('/api/login', { handle: 'cy', password: 'wrong wrong' })).status === 429) limited++;
   assert.ok(limited >= 3, `expected throttling, got ${limited}`);
+});
+
+// Friends, discovery and events. Every person below is a separate real account.
+
+test('an older database gains the new columns and tables without losing anything', () => {
+  const path = join(dir, 'old.db');
+  const old = new DatabaseSync(path);
+  old.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, handle TEXT NOT NULL UNIQUE COLLATE NOCASE, name TEXT NOT NULL, pass TEXT NOT NULL,
+      hue INTEGER NOT NULL DEFAULT 165, emoji TEXT, about TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '', presence TEXT NOT NULL DEFAULT 'around', created INTEGER NOT NULL);
+    CREATE TABLE houses (id TEXT PRIMARY KEY, name TEXT NOT NULL, mark TEXT NOT NULL, hue INTEGER NOT NULL, about TEXT NOT NULL DEFAULT '',
+      join_role TEXT, starter TEXT NOT NULL DEFAULT '[]', first_step TEXT, created INTEGER NOT NULL);
+    INSERT INTO users (id, handle, name, pass, created) VALUES ('u_old', 'old', 'Old Timer', 'x', 1);
+    INSERT INTO houses (id, name, mark, hue, created) VALUES ('h_old', 'Old House', 'O', 200, 1);`);
+  old.close();
+  for (let i = 0; i < 2; i++) {  // twice: opening an up-to-date database changes nothing
+    const db = openDb(path);
+    assert.deepEqual({ ...db.get('SELECT interests, links FROM users WHERE id = ?', 'u_old') }, { interests: '[]', links: '[]' });
+    assert.deepEqual({ ...db.get('SELECT public, topic, rules FROM houses WHERE id = ?', 'h_old') }, { public: 0, topic: null, rules: '' });
+    assert.equal(db.get('SELECT COUNT(*) n FROM friends').n, 0);
+    assert.equal(db.get('SELECT COUNT(*) n FROM events').n, 0);
+    db.close();
+  }
+});
+
+test('brand files are served from /brand/', async () => {
+  const exists = existsSync(fileURLToPath(new URL('../brand/favicon.svg', import.meta.url)));
+  const res = await fetch(`${base}/brand/favicon.svg`);
+  await res.arrayBuffer();
+  assert.equal(res.status, exists ? 200 : 404);
+  if (exists) assert.match(res.headers.get('content-type'), /image\/svg\+xml/);
+  assert.equal((await fetch(`${base}/brand/missing.svg`)).status, 404);
+});
+
+let fern, gus, hal;
+const friendEv = (c, other, pred = () => true) => c.next('friend', (d) => d.id === other && pred(d.friend));
+
+test('friends: request by username or id, accept, decline; both people and all their devices hear', async () => {
+  fern = await Client.make('fern', 'Fern Ashby');
+  gus = await Client.make('gus', 'Gus Moreau');
+  hal = await Client.make('hal', 'Hal Ito');
+  const gusPhone = new Client(); gusPhone.cookie = gus.cookie; gusPhone.id = gus.id; await gusPhone.connect();
+
+  assert.deepEqual(await fern.ok('friend.request', { handle: '@GUS' }), { state: 'outgoing', user: gus.id });
+  assert.equal((await friendEv(fern, gus.id)).friend.state, 'outgoing');
+  for (const device of [gus, gusPhone]) {
+    const ev = await friendEv(device, fern.id);
+    assert.equal(ev.friend.state, 'incoming');
+    assert.equal(ev.user.name, 'Fern Ashby', 'the request carries who it is from');
+  }
+  assert.equal((await fern.ok('friend.request', { user: gus.id })).state, 'outgoing', 'asking twice is harmless');
+  assert.equal(srv.db.get('SELECT COUNT(*) n FROM friends WHERE user IN (?, ?)', fern.id, gus.id).n, 2);
+
+  assert.match(await fern.refused('friend.request', { user: fern.id }), /That’s you/);
+  assert.match(await fern.refused('friend.request', { handle: 'fern' }), /That’s you/);
+  assert.match(await fern.refused('friend.request', { handle: 'nobody-at-all' }), /Nobody is called @nobody-at-all/);
+  assert.match(await fern.refused('friend.request', { user: 'u_does_not_exist' }), /doesn’t exist/);
+  assert.match(await fern.refused('friend.request', { user: '<script>' }), /isn’t valid/);
+  assert.match(await fern.refused('friend.request', {}), /missing/);
+  assert.match(await fern.refused('friend.accept', { user: gus.id }), /isn’t open/, 'you cannot accept your own request');
+
+  // Hal asks Gus, Gus says no: it is gone for both.
+  await hal.ok('friend.request', { user: gus.id });
+  await friendEv(gus, hal.id, (f) => f?.state === 'incoming');
+  await gus.ok('friend.decline', { user: hal.id });
+  assert.equal((await friendEv(hal, gus.id, (f) => f === null)).friend, null);
+  assert.equal(srv.db.get('SELECT COUNT(*) n FROM friends WHERE user = ? OR other = ?', hal.id, hal.id).n, 0);
+
+  await gus.ok('friend.accept', { user: fern.id });
+  assert.equal((await friendEv(fern, gus.id, (f) => f?.state === 'friends')).friend.state, 'friends');
+  await friendEv(gusPhone, fern.id, (f) => f?.state === 'friends');
+
+  // A star is private: only Fern's own devices hear about it.
+  gus.events.length = 0;
+  await fern.ok('friend.favorite', { user: gus.id, on: true });
+  assert.equal((await friendEv(fern, gus.id, (f) => f?.favorite)).friend.favorite, true);
+  await gus.none('friend', (d) => d.id === fern.id);
+  assert.match(await gus.refused('friend.favorite', { user: hal.id, on: true }), /only star/);
+
+  // Friends without a shared house still arrive in each other's snapshot.
+  const again = await fern.ok('sync');
+  assert.deepEqual(again.friends[gus.id], { state: 'friends', favorite: true, since: again.friends[gus.id].since });
+  assert.equal(again.users[gus.id].name, 'Gus Moreau');
+  assert.equal((await gus.ok('sync')).friends[fern.id].favorite, false, 'each side has its own star');
+
+  await gus.ok('friend.remove', { user: fern.id });
+  await friendEv(fern, gus.id, (f) => f === null);
+  await friendEv(gusPhone, fern.id, (f) => f === null);
+  assert.deepEqual((await fern.ok('sync')).friends, {});
+
+  // Asking someone who already asked you is saying yes.
+  await hal.ok('friend.request', { user: fern.id });
+  assert.equal((await fern.ok('friend.request', { handle: 'hal' })).state, 'friends');
+  await friendEv(hal, fern.id, (f) => f?.state === 'friends');
+  assert.match(await fern.refused('friend.request', { user: hal.id }), /already friends/);
+  await gusPhone.close();
+});
+
+test('friends see each other’s presence and profile without sharing a house; strangers do not', async () => {
+  // Ivy has an account but is not connected yet.
+  const res = await post('/api/register', { handle: 'ivy', name: 'Ivy Brenner', password: 'a long password' });
+  const ivy = new Client(); ivy.cookie = cookieOf(res); ivy.id = (await res.json()).user.id;
+  await fern.ok('friend.request', { handle: 'ivy' });
+  assert.equal((await friendEv(fern, ivy.id)).user.presence, 'offline');
+  // Sending a request is not enough to watch someone: Ivy hasn't said yes.
+  await ivy.connect();
+  await ivy.ok('me.update', { status: 'Busy today' });
+  await fern.none('presence', (d) => d.user === ivy.id);
+  await fern.none('user', (d) => d.user.id === ivy.id);
+  const asked = (await fern.ok('sync')).users[ivy.id];
+  assert.equal(asked.presence, 'offline', 'someone you only asked looks offline to you');
+  assert.equal(asked.status, '', 'and shows no status');
+  // The person asked does see who asked them.
+  assert.equal((await ivy.ok('sync')).users[fern.id].presence, 'around');
+  await gus.none('presence', (d) => d.user === ivy.id);
+  await ivy.ok('friend.accept', { user: fern.id });
+  const yes = await friendEv(fern, ivy.id, (f) => f?.state === 'friends');
+  assert.equal(yes.user.presence, 'around', 'saying yes lets them see you');
+  assert.equal(yes.user.status, 'Busy today');
+  await ivy.ok('me.update', { status: 'Out walking', presence: 'away' });
+  const u = await fern.next('user', (d) => d.user.id === ivy.id && d.user.status === 'Out walking');
+  assert.equal(u.user.presence, 'away');
+  await gus.none('user', (d) => d.user.id === ivy.id);
+
+  // Friends can start a conversation; a pending request cannot.
+  await ivy.ok('dm.open', { users: [fern.id] });
+  await hal.ok('friend.request', { user: ivy.id });
+  assert.match(await hal.refused('dm.open', { users: [ivy.id] }), /share a house/);
+
+  // Declined or taken back, a request can't be sent again for a day.
+  await ivy.ok('friend.decline', { user: hal.id });
+  assert.match(await hal.refused('friend.request', { user: ivy.id }), /ask again tomorrow/);
+  const cancelled = await Client.make('jo', 'Jo Park');
+  await cancelled.ok('friend.request', { user: ivy.id });
+  await cancelled.ok('friend.remove', { user: ivy.id });
+  assert.match(await cancelled.refused('friend.request', { user: ivy.id }), /ask again tomorrow/);
+  // The other way round is still open: Ivy can ask Jo.
+  assert.equal((await ivy.ok('friend.request', { user: cancelled.id })).state, 'outgoing');
+  srv.db.run('UPDATE friend_cooldown SET ts = ts - ? WHERE user = ?', 86_400_001, hal.id);
+  assert.equal((await hal.ok('friend.request', { user: ivy.id })).state, 'outgoing', 'after a day you can ask again');
+
+  // Unfriended with no place in common: they go offline to each other.
+  await cancelled.ok('friend.accept', { user: ivy.id });
+  assert.equal((await friendEv(cancelled, ivy.id, (f) => f?.state === 'friends')).user.presence, 'away');
+  await cancelled.ok('friend.remove', { user: ivy.id });
+  assert.equal((await friendEv(cancelled, ivy.id, (f) => f === null)).user.presence, 'offline');
+  assert.equal((await friendEv(ivy, cancelled.id, (f) => f === null)).user.presence, 'offline');
+  // Fern and Ivy still share a conversation, so they still see each other.
+  await fern.ok('friend.remove', { user: ivy.id });
+  assert.equal((await friendEv(fern, ivy.id, (f) => f === null)).user.presence, 'away');
+  await ivy.close();
+  await cancelled.close();
+});
+
+test('profiles: interests and links are checked, and reach friends', async () => {
+  assert.match(await fern.refused('me.update', { interests: Array.from({ length: 9 }, (_, i) => `thing ${i}`) }), /up to 8/);
+  assert.match(await fern.refused('me.update', { interests: ['x'.repeat(25)] }), /at most 24/);
+  assert.match(await fern.refused('me.update', { interests: 'jazz' }), /missing/);
+  assert.match(await fern.refused('me.update', { links: [{ label: 'Site', url: 'http://example.org' }] }), /https/);
+  assert.match(await fern.refused('me.update', { links: [{ label: 'Hi', url: 'javascript:alert(1)' }] }), /https/);
+  assert.match(await fern.refused('me.update', { links: [{ url: `https://example.org/${'a'.repeat(200)}` }] }), /at most 200/);
+  assert.match(await fern.refused('me.update', { links: Array.from({ length: 4 }, () => ({ url: 'https://example.org' })) }), /up to 3/);
+  assert.match(await fern.refused('me.update', { links: [{ label: 'x'.repeat(41), url: 'https://example.org' }] }), /at most 40/);
+  await fern.ok('me.update', { interests: [' Jazz ', 'jazz', 'Ceramics'], links: [{ url: 'https://www.example.org/fern' }, { label: 'Shop', url: 'https://shop.example.org' }] });
+  const u = await hal.next('user', (d) => d.user.id === fern.id && d.user.links.length);
+  assert.deepEqual(u.user.interests, ['Jazz', 'Ceramics']);
+  assert.deepEqual(u.user.links, [{ label: 'example.org', url: 'https://www.example.org/fern' }, { label: 'Shop', url: 'https://shop.example.org/' }]);
+  assert.ok(u.user.since > 0);
+});
+
+let kay, lou, max, kitchen, kitchenLounge, lab, labRoom;
+
+test('house settings: public, topic and rules, for people allowed to change them', async () => {
+  kay = await Client.make('kay', 'Kay Obi');
+  lou = await Client.make('lou', 'Lou Ferrante');
+  max = await Client.make('max', 'Max Stern');
+  ({ house: kitchen, room: kitchenLounge } = await kay.ok('house.create', { name: 'Open Kitchen', hue: 200 }));
+  ({ house: lab, room: labRoom } = await kay.ok('house.create', { name: 'Secret Lab', hue: 250 }));
+  assert.match(await kay.refused('house.update', { house: kitchen, topic: 'Cooking' }), /choices/);
+  assert.match(await kay.refused('house.update', { house: kitchen, rules: 'x'.repeat(2001) }), /at most 2000/);
+  assert.match(await kay.refused('house.update', { house: kitchen, public: 'yes' }), /yes or no/);
+  assert.match(await lou.refused('house.update', { house: kitchen, public: true }), /not a member/);
+  await kay.ok('house.update', { house: kitchen, public: true, topic: 'Local', rules: 'Wash up.\nLabel your jars.' });
+  const h = await kay.next('house', (d) => d.house.id === kitchen && d.house.public);
+  assert.deepEqual([h.house.public, h.house.topic, h.house.rules], [true, 'Local', 'Wash up.\nLabel your jars.']);
+  assert.ok(h.house.created > 0);
+  await kay.ok('house.update', { house: lab, topic: 'Tech' });
+  assert.equal((await kay.ok('sync')).houses[lab].public, false, 'houses start private');
+});
+
+test('discover: only public houses, never private ones, whatever the search', async () => {
+  const d = await lou.ok('discover', {});
+  const card = d.houses.find((x) => x.id === kitchen);
+  assert.ok(card, 'the public house is listed');
+  assert.equal(d.houses.some((x) => x.id === lab), false, 'the private house is not');
+  assert.deepEqual(Object.keys(card).sort(), ['about', 'created', 'friends', 'hue', 'id', 'inVoice', 'mark', 'members', 'name', 'online', 'rooms', 'talking', 'topic'].sort());
+  assert.equal(card.members, 1);
+  assert.equal(card.online, 1);
+  assert.deepEqual(card.rooms.map((r) => r.kind), ['news', 'text', 'text', 'voice']);
+  assert.equal(JSON.stringify(d).includes(kay.id), false, 'no member ids for strangers');
+  assert.equal((await lou.ok('discover', { q: 'secret' })).houses.length, 0, 'searching a private house by name finds nothing');
+  assert.equal((await lou.ok('discover', { q: 'lab', topic: 'Tech' })).houses.length, 0);
+  assert.equal((await lou.ok('discover', { q: 'KITCHEN', topic: 'Local' })).houses.length, 1);
+  assert.equal((await lou.ok('discover', { topic: 'Music' })).houses.some((x) => x.id === kitchen), false);
+  assert.match(await lou.refused('discover', { topic: 'Cooking' }), /choices/);
+  assert.equal((await kay.ok('discover', {})).houses.some((x) => x.id === kitchen), false, 'houses you are in are not suggested');
+
+  assert.match(await lou.refused('house.preview', { house: lab }), /private/);
+  assert.match(await lou.refused('house.preview', { house: 'h_nope' }), /private/, 'missing and private look the same');
+  const p = await lou.ok('house.preview', { house: kitchen });
+  assert.equal(p.rules, 'Wash up.\nLabel your jars.');
+  assert.equal(p.joined, false);
+  assert.deepEqual(p.events, []);
+  assert.match(await lou.refused('house.joinPublic', { house: lab }), /isn’t open/);
+  assert.match(await lou.refused('msg.send', { conv: labRoom, id: mid(), text: 'in?' }), /access/);
+});
+
+test('joining a public house needs no invitation and starts as a newcomer', async () => {
+  const r = await lou.ok('house.joinPublic', { house: kitchen });
+  assert.equal(r.house, kitchen);
+  const h = await lou.next('house', (d) => d.house.id === kitchen);
+  assert.equal(h.house.joined, true);
+  assert.equal(h.house.newcomer, true);
+  await kay.next('house', (d) => d.house.members[lou.id]);
+  assert.deepEqual(await lou.ok('house.joinPublic', { house: kitchen }), { house: kitchen, starter: r.starter }, 'joining twice is harmless');
+  assert.equal((await lou.ok('house.preview', { house: kitchen })).joined, true);
+});
+
+test('discover: people only through a shared house or a mutual friend', async () => {
+  const nia = await Client.make('nia', 'Nia Kowalczyk');
+  let people = (await lou.ok('discover', {})).people;
+  const k = people.find((p) => p.user.id === kay.id);
+  assert.deepEqual(k.mutualHouses, [kitchen]);
+  assert.equal(k.reason, 'In Open Kitchen');
+  assert.equal(k.user.presence, 'around', 'people in your houses show their presence');
+  assert.equal(people.some((p) => p.user.id === max.id || p.user.id === nia.id), false, 'strangers are never suggested');
+  assert.equal((await lou.ok('discover', { q: 'max' })).people.length, 0, 'not even by name');
+  assert.equal((await lou.ok('discover', { q: 'stern' })).people.length, 0);
+
+  // Lou and Kay become friends; Kay is friends with Nia, who shares nothing with Lou.
+  await lou.ok('friend.request', { user: kay.id });
+  await kay.ok('friend.accept', { user: lou.id });
+  await kay.ok('friend.request', { handle: 'nia' });
+  await nia.ok('friend.accept', { user: kay.id });
+  people = (await lou.ok('discover', {})).people;
+  assert.equal(people.some((p) => p.user.id === kay.id), false, 'friends are not suggested');
+  const n = people.find((p) => p.user.id === nia.id);
+  assert.deepEqual([n.mutualFriends, n.mutualHouses, n.reason], [1, [], 'Friends with Kay Obi']);
+  assert.equal(n.user.presence, 'offline', 'presence is only for people who share a place with you');
+  assert.equal((await lou.ok('discover', { q: 'kowal' })).people.length, 1);
+  assert.equal((await max.ok('discover', {})).people.length, 0, 'someone with no connections gets no people');
+  const card = (await max.ok('discover', {})).houses.find((x) => x.id === kitchen);
+  assert.deepEqual([card.members, card.friends], [2, []]);
+  assert.deepEqual((await nia.ok('discover', {})).houses.find((x) => x.id === kitchen).friends, [kay.id], 'friends inside a house are named');
+  nia.close();
+});
+
+test('rate limits: discovery and friend requests are slowed down', async () => {
+  const d = await Promise.all(Array.from({ length: 16 }, () => max.op('discover', {})));
+  assert.ok(d.filter((r) => !r.ok).length >= 4);
+  assert.match(d.find((r) => !r.ok).error, /little fast/);
+  const f = await Promise.all(Array.from({ length: 16 }, (_, i) => max.op('friend.request', { handle: `ghost${i}` })));
+  assert.ok(f.filter((r) => !r.ok && /little fast/.test(r.error)).length >= 4);
+});
+
+test('friend requests: at most 50 waiting at once', async () => {
+  const t = Date.now();
+  srv.db.tx(() => {
+    for (let i = 0; i < 50; i++) {
+      srv.db.run('INSERT INTO users (id, handle, name, pass, created) VALUES (?, ?, ?, ?, ?)', `u_bulk${i}`, `bulk${i}`, `Bulk ${i}`, 'x', t);
+      srv.db.run("INSERT INTO friends (user, other, state, favorite, since) VALUES (?, ?, 'outgoing', 0, ?), (?, ?, 'incoming', 0, ?)", max.id, `u_bulk${i}`, t, `u_bulk${i}`, max.id, t);
+    }
+  });
+  assert.match(await max.refused('friend.request', { user: fern.id }), /50 requests/);
+  await max.ok('friend.remove', { user: 'u_bulk0' });
+  await max.ok('friend.request', { user: fern.id });
+});
+
+let party;
+test('events: planned by the right roles, answered by members, live to the whole house', async () => {
+  const soon = Date.now() + 60 * 60_000;
+  assert.match(await lou.refused('event.create', { house: kitchen, title: 'Bake-off', starts: soon }), /can’t plan events/);
+  assert.match(await max.refused('event.create', { house: kitchen, title: 'Bake-off', starts: soon }), /not a member/);
+  assert.match(await kay.refused('event.create', { house: kitchen, title: '', starts: soon }), /empty/);
+  assert.match(await kay.refused('event.create', { house: kitchen, title: 'x'.repeat(81), starts: soon }), /at most 80/);
+  assert.match(await kay.refused('event.create', { house: kitchen, title: 'Bake-off', about: 'x'.repeat(501), starts: soon }), /at most 500/);
+  assert.match(await kay.refused('event.create', { house: kitchen, title: 'Bake-off' }), /when it starts/);
+  assert.match(await kay.refused('event.create', { house: kitchen, title: 'Bake-off', starts: 'tomorrow' }), /when it starts/);
+  assert.match(await kay.refused('event.create', { house: kitchen, title: 'Bake-off', starts: Date.now() - 3 * 3_600_000 }), /already passed/);
+  assert.match(await kay.refused('event.create', { house: kitchen, title: 'Bake-off', starts: Date.now() + 400 * 86_400_000 }), /a year/);
+  assert.match(await kay.refused('event.create', { house: kitchen, title: 'Bake-off', starts: soon, ends: soon - 1 }), /end after/);
+  assert.match(await kay.refused('event.create', { house: kitchen, title: 'Bake-off', starts: soon, ends: soon + 8 * 86_400_000 }), /up to a week/);
+  assert.match(await kay.refused('event.create', { house: kitchen, title: 'Bake-off', starts: soon, room: labRoom }), /isn’t in this house/);
+
+  const made = await kay.ok('event.create', { house: kitchen, title: 'Bake-off', about: 'Bring a loaf.', starts: soon, room: kitchenLounge });
+  party = made.id;
+  assert.deepEqual([made.event.title, made.event.room, made.event.going, made.event.ends], ['Bake-off', kitchenLounge, [kay.id], null]);
+  assert.equal((await lou.next('event', (d) => d.event.id === party)).event.about, 'Bring a loaf.');
+  await max.none('event');
+  assert.ok((await lou.ok('sync')).events[party], 'in the snapshot');
+  assert.equal((await max.ok('sync')).events[party], undefined);
+  assert.equal((await max.ok('house.preview', { house: kitchen })).events[0].goingCount, 1, 'visitors see the plan, not the people');
+
+  await lou.ok('event.rsvp', { event: party, going: true });
+  assert.deepEqual((await kay.next('event', (d) => d.event.going.length === 2)).event.going, [kay.id, lou.id]);
+  assert.match(await max.refused('event.rsvp', { event: party, going: true }), /not a member/);
+  assert.match(await lou.refused('event.delete', { event: party }), /can’t cancel/);
+  assert.match(await lou.refused('event.rsvp', { event: 'e_missing', going: true }), /cancelled/);
+
+  // Someone who joins later gets the house's events with its content.
+  const oz = await Client.make('oz', 'Oz Hartley');
+  await oz.ok('house.joinPublic', { house: kitchen });
+  assert.ok((await oz.next('content')).events[party]);
+  // Leaving a house takes back your answers.
+  await oz.ok('event.rsvp', { event: party, going: true });
+  await kay.next('event', (d) => d.event.going.includes(oz.id));
+  kay.events.length = 0;
+  await oz.ok('house.leave', { house: kitchen });
+  assert.deepEqual((await kay.next('event', (d) => d.event.id === party && !d.event.going.includes(oz.id))).event.going, [kay.id, lou.id]);
+  oz.close();
+
+  await kay.ok('event.delete', { event: party });
+  assert.equal((await lou.next('event.gone', (d) => d.id === party)).house, kitchen);
+  assert.equal(srv.db.get('SELECT COUNT(*) n FROM event_rsvps WHERE event = ?', party).n, 0);
+});
+
+test('events: a role with the rooms permission can plan; a finished event takes no answers', async () => {
+  const h = (await kay.ok('sync')).houses[kitchen];
+  const { id: role } = await kay.ok('role.create', { house: kitchen });
+  await kay.ok('role.update', { house: kitchen, role, perms: ['post', 'rooms'] });
+  await kay.ok('member.role', { house: kitchen, user: lou.id, role });
+  const { id: chat } = await lou.ok('event.create', { house: kitchen, title: 'Tasting', starts: Date.now() + 86_400_000 });
+  await kay.ok('event.delete', { event: chat });
+  await kay.ok('member.role', { house: kitchen, user: lou.id, role: h.joinRole });
+  // An event that already happened, written straight to the database.
+  srv.db.run('INSERT INTO events (id, house, room, title, about, starts, ends, by, created) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)',
+    'e_done', kitchen, 'Last week', '', Date.now() - 8 * 86_400_000, Date.now() - 8 * 86_400_000 + 3_600_000, kay.id, Date.now() - 9 * 86_400_000);
+  assert.match(await lou.refused('event.rsvp', { event: 'e_done', going: true }), /over/);
+  assert.equal((await lou.ok('sync')).events.e_done, undefined, 'long-finished events stay out of the snapshot');
+});
+
+test('the sample data opens alive: friends both ways, two houses to discover, three events', async () => {
+  const seeded = join(dir, 'seeded');
+  const db = openDb(join(seeded, 'snug.db'));
+  seedDatabase(db, join(seeded, 'files'), { password: 'snug-demo-1' });
+  db.close();
+  const other = await startServer({ port: 0, dataDir: seeded, quiet: true });
+  try {
+    const origin = `http://127.0.0.1:${other.port}`;
+    const login = async (handle) => {
+      const res = await fetch(`${origin}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json', origin }, body: JSON.stringify({ handle, password: 'snug-demo-1' }) });
+      assert.equal(res.status, 200);
+      const ws = new WebSocket(`ws://127.0.0.1:${other.port}/ws`, { headers: { cookie: cookieOf(res), origin } });
+      const acks = new Map();
+      let n = 0;
+      const hello = await new Promise((resolve) => ws.on('message', (b) => {
+        const m = JSON.parse(b);
+        if (m.t === 'hello') resolve(m.d); else if (m.t === 'ack') acks.get(m.id)?.(m);
+      }));
+      const op = (o, d) => { const id = ++n; ws.send(JSON.stringify({ t: 'op', id, op: o, d })); return new Promise((r) => acks.set(id, r)); };
+      return { hello, op, ws };
+    };
+    const robin = await login('robin');
+    const f = robin.hello.friends;
+    assert.equal(f.bex.state, 'incoming');
+    assert.equal(f.yuki.state, 'outgoing');
+    assert.equal(f.ines.favorite, true);
+    assert.equal(f.mira.state, 'friends');
+    assert.ok(robin.hello.users.mira, 'a friend with no shared house is in the snapshot');
+    assert.deepEqual(Object.keys(robin.hello.events).sort(), ['e_open', 'e_ride', 'e_swap']);
+    assert.ok(Object.values(robin.hello.houses).every((h) => h.topic));
+    assert.deepEqual(robin.hello.users.ines.links.map((l) => l.label), ['Kiln & Co.', 'Classes']);
+    const d = (await robin.op('discover', {})).d;
+    assert.deepEqual(d.houses.map((h) => h.id).sort(), ['listen', 'plot']);
+    assert.deepEqual(d.houses.find((h) => h.id === 'listen').friends.sort(), ['ines', 'mira']);
+    assert.ok(d.people.some((p) => p.user.id === 'sol' && p.reason === 'Friends with Mira Castell'));
+    const p = (await robin.op('house.preview', { house: 'listen' })).d;
+    assert.equal(p.events[0].id, 'e_party');
+    assert.deepEqual(p.events[0].friendsGoing, ['mira']);
+    robin.ws.close();
+  } finally {
+    await other.close();
+  }
 });

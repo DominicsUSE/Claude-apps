@@ -22,9 +22,9 @@ export function VoiceControls({ compact }) {
   const c = S.call;
   const size = compact ? 18 : 20;
   return html`
-    <button class=${`ib${c.muted ? ' on' : ''}`} aria-pressed=${String(c.muted)} aria-label=${c.muted ? 'Unmute' : 'Mute'} data-tip=${c.muted ? 'Unmute' : 'Mute'} onClick=${toggleMute}><${Icon} name=${c.muted ? 'mic-off' : 'mic'} size=${size} /></button>
-    <button class=${`ib${c.deaf ? ' on' : ''}`} aria-pressed=${String(c.deaf)} aria-label=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} data-tip=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} onClick=${toggleDeaf}><${Icon} name=${c.deaf ? 'ear-off' : 'ear'} size=${size} /></button>
-    <button class="ib danger" aria-label="Leave voice" data-tip="Leave" onClick=${leaveVoice}><${Icon} name="leave" size=${size} /></button>`;
+    <button class=${`ib vc${c.muted ? ' on' : ''}`} aria-pressed=${String(c.muted)} aria-label=${c.muted ? 'Unmute' : 'Mute'} data-tip=${c.muted ? 'Unmute' : 'Mute'} onClick=${toggleMute}><${Icon} name=${c.muted ? 'mic-off' : 'mic'} size=${size} /></button>
+    <button class=${`ib vc${c.deaf ? ' on' : ''}`} aria-pressed=${String(c.deaf)} aria-label=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} data-tip=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} onClick=${toggleDeaf}><${Icon} name=${c.deaf ? 'ear-off' : 'ear'} size=${size} /></button>
+    <button class="ib vc danger leave" aria-label="Leave voice" data-tip="Leave" onClick=${leaveVoice}><${Icon} name="leave" size=${size} /></button>`;
 }
 
 // Each person's line says what is really happening with their audio.
@@ -37,24 +37,48 @@ function peerNote(id, inCall) {
   return 'Connecting';
 }
 
+// How the line to each person is doing, from the live connection state.
+// Only shown once you are in the room: before that there is no connection.
+function Quality({ id, inCall }) {
+  if (!inCall || id === S.me) return null;
+  const st = S.peers[id];
+  const q = st === 'connected' ? 'good' : st === 'disconnected' ? 'weak' : st === 'failed' ? 'bad' : 'wait';
+  const label = { good: 'Connected', weak: 'Connection is weak, reconnecting', bad: 'Can\u2019t connect', wait: 'Connecting' }[q];
+  return html`<span class=${`stage-q ${q}`} role="img" aria-label=${label} data-tip=${label}><i></i><i></i><i></i></span>`;
+}
+
+// Faces get smaller as the room fills, so everyone fits without scrolling.
+const faceSize = (n) => (n <= 2 ? 96 : n <= 6 ? 64 : 48);
+
 function Stage({ roomId }) {
   const ids = (S.voice[roomId] || []).filter((id) => S.users[id]);
   const inCall = S.call?.room === roomId;
   const starting = inCall && S.call.status !== 'live';
-  return html`<div class="stage">
+  const size = faceSize(ids.length);
+  const status = !inCall ? null : starting
+    ? html`<span class="stage-conn wait" role="status">${S.call.status === 'mic' ? 'Waiting for your microphone\u2026' : 'Joining\u2026'}</span>`
+    : html`<span class="stage-conn ok" role="status"><i aria-hidden="true"></i>Connected</span>`;
+  return html`<div class=${`stage${inCall ? ' in' : ''}${ids.length ? '' : ' empty'}`} data-size=${size} aria-label="Voice">
+    <div class="stage-top">
+      <span class="stage-count"><${Icon} name="voice" size=${16} />${ids.length ? `${ids.length} in voice` : 'Voice'}</span>
+      ${status}
+    </div>
     ${ids.length
-      ? html`<div class="stage-people">
+      ? html`<div class="stage-people" style=${`--face:${size}px`}>
           ${ids.map((id) => {
             const u = S.users[id];
             const st = S.voiceState[roomId]?.[id] || {};
-            const quiet = id === S.me ? S.call?.muted : st.muted;
+            const mine = id === S.me;
+            const quiet = mine ? S.call?.muted : st.muted;
+            const deaf = mine ? S.call?.deaf : st.deaf;
             const note = peerNote(id, inCall);
-            return html`<div class="stage-person" key=${id}>
-              <span style="position:relative">
-                <${Avatar} user=${u} speaking=${!!S.speaking[id] && !quiet} dim=${!!note} />
-                ${quiet && html`<span class="muted-ic" aria-label="Muted"><${Icon} name=${st.deaf || (id === S.me && S.call?.deaf) ? 'ear-off' : 'mic-off'} size=${12} /></span>`}
+            const talking = !!S.speaking[id] && !quiet;
+            return html`<div class=${`stage-person${talking ? ' talking' : ''}`} key=${id}>
+              <span class="stage-face">
+                <${Avatar} user=${u} size=${size} speaking=${talking} dim=${!!note} />
+                ${quiet && html`<span class="muted-ic" role="img" aria-label=${deaf ? 'Not listening' : 'Muted'}><${Icon} name=${deaf ? 'ear-off' : 'mic-off'} size=${size >= 64 ? 16 : 12} /></span>`}
               </span>
-              <span class="trunc">${id === S.me ? 'You' : u.name.split(' ')[0]}</span>
+              <span class="stage-name"><span class="trunc">${mine ? 'You' : u.name.split(' ')[0]}</span><${Quality} id=${id} inCall=${inCall && !starting} /></span>
               ${note && html`<span class="stage-note">${note}</span>`}
             </div>`;
           })}
@@ -63,12 +87,12 @@ function Stage({ roomId }) {
     <div class="stage-acts">
       ${inCall && !starting
         ? html`<${VoiceControls} />`
-        : html`<button class="btn primary" disabled=${starting} onClick=${() => joinVoice(roomId)}><${Icon} name="voice" size=${16} />${starting ? 'Joining\u2026' : 'Join'}</button>`}
+        : html`<button class="btn primary" disabled=${starting} aria-busy=${String(!!starting)} onClick=${() => joinVoice(roomId)}><${Icon} name="voice" size=${16} />${starting ? 'Joining\u2026' : 'Join voice'}</button>`}
     </div>
   </div>`;
 }
 
-function Welcome({ house }) {
+export function Welcome({ house, inPage }) {
   const h = S.houses[house];
   const step = h.firstStep || { room: h.starter[1] || h.starter[0], label: 'Say hello', draft: '' };
   const start = () => {
@@ -77,17 +101,19 @@ function Welcome({ house }) {
     focusComposer(step.room);
   };
   return html`<div class="welcome">
-    <div class="welcome-head"><${Tile} house=${h} lg /><div><h2>Welcome to ${h.name}</h2><div class="faint">${h.about}</div></div></div>
+    ${inPage
+      ? html`<div class="welcome-head"><div><span class="welcome-kicker">You’re new here</span><h2>Welcome to ${h.name}. Start with hello.</h2></div></div>`
+      : html`<div class="welcome-head"><${Tile} house=${h} lg /><div><span class="welcome-kicker">You’re new here</span><h2>Welcome to ${h.name}</h2><div class="faint">${h.about}</div></div></div>`}
     <p>You start with ${plural(h.starter.length, 'room')}. The rest of the house opens once you’ve posted your first message.</p>
     <div class="welcome-rooms">
       ${h.starter.map((id) => html`<button class="welcome-room" key=${id} onClick=${() => openConv(id)}>
         <${RoomIcon} kind=${S.rooms[id].kind} /><span><b>${S.rooms[id].name}</b> <span>${S.rooms[id].topic}</span></span>
       </button>`)}
     </div>
-    <div class="start" style="padding:0"><div class="acts" style="margin:0">
+    <div class="welcome-acts">
       <button class="btn primary" onClick=${start}>${step.label}</button>
       <button class="btn" onClick=${() => openModal(RoomBrowser, { house })}>Look around first</button>
-    </div></div>
+    </div>
   </div>`;
 }
 
@@ -119,7 +145,8 @@ export function Conversation({ conv }) {
   const members = membersOf(conv).map((id) => S.users[id]);
   const here = members.filter((u) => u.presence !== 'offline' && u.id !== S.me);
   const first = meta.user?.name.split(' ')[0];
-  return html`<section class="main" aria-label=${meta.title}>
+  const inVoice = meta.room ? (S.voice[conv] || []).length : 0;
+  return html`<section class=${`main conv kind-${meta.kind}`} aria-label=${meta.title}>
     <header class="bar">
       <${Back} />
       <h1 class="bar-title trunc">
@@ -129,12 +156,14 @@ export function Conversation({ conv }) {
       ${meta.topic && html`<span class="bar-sub trunc">${meta.topic}</span>`}
       ${meta.user && html`<span class="bar-sub trunc">${presenceLabel(meta.user)}${meta.user.status ? `. ${meta.user.status}` : ''}</span>`}
       <div class="bar-end">
-        ${!meta.user && html`<button class=${`here${pane === 'people' ? ' on' : ''}`} aria-pressed=${String(pane === 'people')} aria-label=${`${here.length} people here. Show people`}
-          data-tip="People" onClick=${() => togglePane('people')}>
-          ${!S.ui.phone && here.length > 0 && html`<${Stack} users=${here} max=${3} />`}
-          <span class="num">${here.length} here</span>
-        </button>`}
+        ${!meta.user && html`<span class="bar-live" role="status" aria-label=${`${here.length ? `${plural(here.length, 'other person', 'other people')} here` : 'Just you here'}${inVoice ? `, ${inVoice} in voice` : ''}`}>
+          ${here.length > 0 && html`<${Stack} users=${here} max=${3} size=${20} />`}
+          ${here.length > 0 ? html`<span><i class="pres inline open" aria-hidden="true"></i><span class="num">${here.length}</span> here</span>` : html`<span>Just you</span>`}
+          ${inVoice > 0 && html`<span class="bar-voice"><${Icon} name="voice" size=${16} /><span class="num">${inVoice}</span> in voice</span>`}
+        </span>`}
         <button class="ib" aria-label=${`Search in ${meta.title}`} data-tip="Search here" onClick=${() => go({ type: 'search', q: `in:"${meta.title.toLowerCase()}" ` })}><${Icon} name="search" /></button>
+        ${!meta.user && html`<button class=${`ib${pane === 'people' ? ' on' : ''}`} aria-pressed=${String(pane === 'people')} aria-label=${`People, ${here.length} here`}
+          data-tip="People" onClick=${() => togglePane('people')}><${Icon} name="people" /></button>`}
         <button class=${`ib${pane === 'details' ? ' on' : ''}`} aria-pressed=${String(pane === 'details')} aria-label="Details" data-tip="Details and notifications" onClick=${() => togglePane('details')}><${Icon} name="info" /></button>
       </div>
     </header>

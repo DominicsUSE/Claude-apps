@@ -252,6 +252,7 @@ function dropHouse(id) {
     delete S.msgs[r];
     for (const t of Object.keys(S.threads)) if (S.threads[t].conv === r) { delete S.threads[t]; delete S.msgs[t]; }
   }
+  for (const e of Object.keys(S.events)) if (S.events[e].house === id) delete S.events[e];
   delete S.houses[id];
   S.houseOrder = S.houseOrder.filter((h) => h !== id);
   checkView();
@@ -305,11 +306,17 @@ const EVENTS = {
   },
   'house.gone'({ id }) {
     const name = S.houses[id]?.name;
-    const wasViewing = S.ui.view.type === 'conv' && S.rooms[S.ui.view.id]?.house === id;
+    const v = S.ui.view;
+    const onPage = v.type === 'house' && v.id === id;
+    const wasViewing = onPage || (v.type === 'conv' && S.rooms[v.id]?.house === id);
     dropHouse(id);
+    // A house page would fall back to the visitor preview, which a private
+    // house refuses; go home instead of showing an error.
+    if (onPage) S.ui.view = { type: 'home' };
     if (wasViewing && name) toast(`You’re no longer in ${name}.`);
   },
-  content({ msgs, more, read, threads, users, voice }) {
+  content({ msgs, more, read, threads, users, voice, events }) {
+    Object.assign(S.events, events || {});
     Object.assign(S.users, users);
     Object.assign(S.threads, threads);
     for (const [conv, list] of Object.entries(msgs)) {
@@ -338,6 +345,22 @@ const EVENTS = {
       }
       S.invites = d.invites;
     }
+  },
+  // A friendship, a request either way, or (friend: null) the end of one.
+  friend({ id, user, friend }) {
+    if (user) S.users[id] = { ...S.users[id], ...user };
+    const before = S.friends[id]?.state;
+    if (friend) S.friends[id] = friend; else delete S.friends[id];
+    const name = S.users[id]?.name || 'Someone';
+    // Only the other person's actions are news; your own devices already know.
+    if (S.prefs.toasts && friend?.state === 'incoming' && before !== 'incoming') toast(`${name} sent you a friend request`);
+    if (S.prefs.toasts && friend?.state === 'friends' && before === 'outgoing') toast(`${name} accepted your friend request`);
+  },
+  event({ event }) {
+    S.events[event.id] = event;
+  },
+  'event.gone'({ id }) {
+    delete S.events[id];
   },
   voice({ room, users, state }) {
     if (users.length) { S.voice[room] = users; S.voiceState[room] = state; } else { delete S.voice[room]; delete S.voiceState[room]; }

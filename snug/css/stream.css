@@ -1,4 +1,6 @@
-/* The conversation: dense where people read. */
+/* The conversation: one continuous stream, dense where people read.
+   Rows are transparent; hover lifts one step (bg-2); a mention of you is
+   brand-soft with a 2px coral edge; the selected message is bg-4. */
 
 .stream { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .scroller { flex: 1; min-height: 0; overflow-y: auto; overflow-anchor: none; position: relative; display: flex; flex-direction: column; }
@@ -8,174 +10,196 @@
 .msg {
   --indent: calc(var(--avatar) + var(--s-3));
   position: relative; display: grid; grid-template-columns: var(--avatar) minmax(0, 1fr); column-gap: var(--s-3);
-  padding: var(--line-gap) var(--s-4); margin-top: var(--group-gap);
+  padding: var(--msg-py) var(--s-4); margin-top: var(--group-gap);
+  background: transparent;
+  transition: background var(--m-fast) var(--ease-in-out);
 }
-.msg.grouped { margin-top: 0; }
-.msg:hover, .msg:focus-within, .msg.menu-open { background: var(--chat-hover); --bg: var(--chat-hover); }
-.msg:focus-visible { outline-offset: -2px; }
-.msg.mention { background: var(--mark-wash); --bg: var(--mark-wash); }
-.msg.flash { animation: flash 1.6s ease-out; }
-@keyframes flash { 0%, 40% { background: var(--press); } }
+.msg.grouped { margin-top: 0; padding-top: var(--line-gap); padding-bottom: var(--line-gap); }
+.msg:hover, .msg:focus-within { background: var(--bg-2); --bg: var(--bg-2); }
+.msg:focus-visible { outline-offset: -2px; border-radius: 0; }
+.msg.mention { background: var(--brand-soft); --bg: var(--brand-soft); box-shadow: inset 2px 0 0 var(--brand); }
+.msg.mention:hover, .msg.mention:focus-within { background: color-mix(in srgb, var(--brand-soft) 94%, var(--text-1)); }
+.msg.menu-open, .msg.sel { background: var(--bg-4); --bg: var(--bg-4); }
+.msg.flash { animation: flash 1.6s var(--ease-out); }
+@keyframes flash { 0%, 40% { background: var(--bg-4); } }
 .msg.pending .msg-text, .msg.pending .files { opacity: 0.55; }
 
 .msg-gutter { grid-row: 1 / span 4; display: flex; justify-content: center; }
 .msg-gutter .avatar { margin-top: 2px; }
-.msg-gutter .time { display: none; font-size: var(--t-12); color: var(--ink-3); line-height: calc(var(--t-16) * var(--lh)); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.msg-gutter .time { display: none; font-size: var(--t-11); color: var(--text-3); line-height: calc(var(--t-msg) * var(--lh)); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .msg.grouped:hover .time, .msg.grouped:focus-within .time { display: block; }
 .msg-body { grid-column: 2; min-width: 0; max-width: 46rem; }
 
-.msg-head { display: flex; align-items: baseline; gap: var(--s-2); line-height: 1.3; }
-.msg-name { font-size: var(--t-16); font-weight: 500; color: var(--ink); border-radius: var(--r-ctl); }
+.msg-head { display: flex; align-items: baseline; gap: var(--s-2); line-height: var(--lh-ui); }
+.msg-name { font-size: var(--t-msg); font-weight: var(--w-semibold); color: var(--text-1); border-radius: var(--r-xs); letter-spacing: -0.005em; }
 .msg-name.hued { color: oklch(var(--name-l) var(--name-c) var(--hue)); }
 .msg-name:hover { text-decoration: underline; text-underline-offset: 3px; }
-.msg-role { font-size: var(--t-12); color: var(--ink-3); }
-.msg-time { font-size: var(--t-12); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.msg-role { font-size: var(--t-12); color: var(--text-3); }
+.msg-time { font-size: var(--t-12); color: var(--text-3); font-variant-numeric: tabular-nums; }
 
-.msg-text { font-size: var(--t-16); line-height: var(--lh); white-space: pre-wrap; overflow-wrap: anywhere; }
-.msg-text.jumbo { font-size: 2rem; line-height: 1.25; }
-.msg-text code { font: 400 0.875em/1.4 var(--mono); background: var(--hover); padding: 1px var(--s-1); border-radius: var(--r-ctl); }
-.msg-text pre { margin: var(--s-1) 0; padding: var(--s-3); background: var(--hover); border-radius: var(--r-ctl); overflow-x: auto; white-space: pre; }
+.msg-text { font-size: var(--t-msg); line-height: var(--lh); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-1); }
+.msg-text.jumbo { font-size: var(--t-32); line-height: var(--lh-heading); }
+.msg-text code { font: 400 0.875em/1.4 var(--mono); background: var(--bg-3); padding: 1px var(--s-1); border-radius: var(--r-xs); }
+.msg-text pre { margin: var(--s-1) 0; padding: var(--s-3); background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-md); overflow-x: auto; white-space: pre; }
+.msg:hover .msg-text pre { background: var(--bg-1); }
 .msg-text pre code { background: none; padding: 0; font-size: var(--t-14); }
-.msg-text s { color: var(--ink-3); }
-.edited { font-size: var(--t-12); color: var(--ink-3); margin-left: var(--s-1); }
-.sys { color: var(--ink-2); font-style: italic; }
+.msg-text s { color: var(--text-3); }
+.edited { font-size: var(--t-11); color: var(--text-3); margin-left: var(--s-1); }
+.sys { color: var(--text-2); font-style: italic; }
 
-/* A mention of you is highlighted. A mention of someone else is just a name. */
-.at { font-weight: 500; border-radius: 2px; padding: 0 2px; background: var(--hover); cursor: pointer; }
-.at.at-you { background: var(--mark); color: var(--on-mark); }
-mark.hit { background: none; color: inherit; font-weight: 700; text-decoration: underline 2px var(--ink-3); text-underline-offset: 3px; }
+/* A mention of you is coral. A mention of someone else is a quiet chip. */
+.at { font-weight: var(--w-medium); border-radius: var(--r-xs); padding: 0 3px; background: var(--bg-3); color: var(--text-1); cursor: pointer; transition: background var(--m-fast) var(--ease-in-out); }
+.at:hover { background: var(--bg-4); }
+.at.at-you { background: var(--brand-soft); color: var(--brand-ink); font-weight: var(--w-semibold); }
+.at.at-you:hover { background: color-mix(in srgb, var(--brand) 28%, var(--bg-1)); }
+.msg.mention .at.at-you { background: color-mix(in srgb, var(--brand) 22%, var(--bg-1)); }
+mark.hit { background: none; color: inherit; font-weight: var(--w-bold); text-decoration: underline 2px var(--brand); text-underline-offset: 3px; }
 
-/* Reply reference: an elbow from the margin up to the quoted line. */
-.reply-ref { grid-column: 2; display: flex; align-items: center; gap: var(--s-1); min-width: 0; max-width: 46rem; margin-bottom: 2px; font-size: var(--t-14); color: var(--ink-2); position: relative; border-radius: var(--r-ctl); text-align: left; }
-.reply-ref::before { content: ""; position: absolute; right: calc(100% + var(--s-1)); top: 50%; width: calc(var(--avatar) / 2 + var(--s-2)); height: calc(50% + 4px); border-left: 1.5px solid var(--line-strong); border-top: 1.5px solid var(--line-strong); border-top-left-radius: var(--r-panel); }
-.reply-ref:hover { color: var(--ink); }
+/* Reply reference: an elbow (the reply spine) from the margin up to the quoted line. */
+.reply-ref { grid-column: 2; display: flex; align-items: center; gap: var(--s-1); min-width: 0; max-width: 46rem; margin-bottom: 2px; font-size: var(--t-13); color: var(--text-2); position: relative; border-radius: var(--r-xs); text-align: left; transition: color var(--m-fast) var(--ease-in-out); }
+.reply-ref::before { content: ""; position: absolute; right: calc(100% + var(--s-1)); top: 50%; width: calc(var(--avatar) / 2 + var(--s-2)); height: calc(50% + 4px); border-left: 2px solid var(--line-strong); border-top: 2px solid var(--line-strong); border-top-left-radius: var(--r-md); }
+.reply-ref:hover { color: var(--text-1); }
 .reply-ref .avatar { --sz: 16px; }
-.reply-ref b { font-weight: 500; flex: none; }
+.reply-ref b { font-weight: var(--w-semibold); flex: none; color: var(--text-1); }
 .msg.has-ref .msg-gutter { grid-row: 2 / span 4; }
 
 /* Hover actions sit on the message they act on, top right. */
-.msg-actions { position: absolute; right: var(--s-4); top: -14px; display: none; padding: 2px; gap: 0; z-index: 2; }
+.msg-actions { position: absolute; right: var(--s-4); top: -16px; display: none; padding: 2px; gap: 0; z-index: 2; box-shadow: var(--shadow-sm); }
 .msg:hover .msg-actions, .msg:focus-within .msg-actions, .msg.menu-open .msg-actions { display: flex; }
-.msg-actions .ib { width: 28px; height: 28px; }
+.msg-actions .ib { width: 30px; height: 30px; border-radius: var(--r-sm); }
+.msg-actions .ib:hover { background: var(--bg-3); }
 
-/* Reactions are controls, so they get the control radius. Yours are outlined in ink. */
+/* Reactions are chips. Yours are rose: warm, and clearly yours. */
 .reactions { display: flex; flex-wrap: wrap; gap: var(--s-1); margin-top: var(--s-1); }
-.rx { height: 24px; padding: 0 var(--s-2); display: inline-flex; align-items: center; gap: var(--s-1); border: 1px solid var(--line); border-radius: var(--r-ctl); font-size: var(--t-14); color: var(--ink-2); font-variant-numeric: tabular-nums; transition: background var(--m-fast), border-color var(--m-fast); }
-.rx:hover { border-color: var(--ink-3); background: var(--hover); }
-.rx.mine { border-color: var(--ink); color: var(--ink); font-weight: 500; }
-.rx.add { padding: 0 var(--s-1); color: var(--ink-3); }
+.rx { height: 26px; padding: 0 var(--s-2); display: inline-flex; align-items: center; gap: 6px; background: var(--bg-3); border: 1px solid transparent; border-radius: var(--r-full); font-size: var(--t-13); font-weight: var(--w-medium); color: var(--text-2); font-variant-numeric: tabular-nums; transition: background var(--m-fast) var(--ease-in-out), border-color var(--m-fast) var(--ease-in-out); }
+.rx:hover { border-color: var(--line-strong); background: var(--bg-4); color: var(--text-1); }
+.rx:active { background: var(--btn2-press); }
+.rx.mine { background: var(--rose-soft); border-color: var(--rose); color: var(--text-1); }
+.rx.mine:hover { background: color-mix(in srgb, var(--rose) 22%, var(--bg-1)); }
+.rx.add { padding: 0 6px; color: var(--text-3); background: transparent; border-color: var(--line); }
+.rx.add:hover { color: var(--text-1); }
+.msg:not(:hover):not(:focus-within) .rx.add { opacity: 0; }
+@media (hover: none) { .msg .rx.add { opacity: 1 !important; } }
 
 /* Thread stub: the conversation visibly branches from its message. */
-.stub { margin-top: var(--s-1); height: 28px; padding: 0 var(--s-2) 0 var(--s-1); display: inline-flex; align-items: center; gap: var(--s-2); border-radius: var(--r-ctl); font-size: var(--t-14); color: var(--ink-2); position: relative; max-width: 100%; }
-.stub::before { content: ""; position: absolute; right: calc(100% + var(--s-2)); bottom: 50%; width: calc(var(--avatar) / 2 + var(--s-1)); height: 20px; border-left: 1.5px solid var(--line-strong); border-bottom: 1.5px solid var(--line-strong); border-bottom-left-radius: var(--r-panel); }
-.stub:hover { background: var(--hover); color: var(--ink); }
+.stub { margin-top: var(--s-1); height: 30px; padding: 0 var(--s-2) 0 var(--s-1); display: inline-flex; align-items: center; gap: var(--s-2); border-radius: var(--r-sm); font-size: var(--t-13); color: var(--text-2); position: relative; max-width: 100%; transition: background var(--m-fast) var(--ease-in-out), color var(--m-fast) var(--ease-in-out); }
+.stub::before { content: ""; position: absolute; right: calc(100% + var(--s-2)); bottom: 50%; width: calc(var(--avatar) / 2 + var(--s-1)); height: 20px; border-left: 2px solid var(--line-strong); border-bottom: 2px solid var(--line-strong); border-bottom-left-radius: var(--r-md); }
+.stub:hover { background: var(--bg-3); color: var(--text-1); }
 .stub .avatar { --sz: 18px; }
-.stub b { font-weight: 500; color: var(--ink); }
-.stub.unread b::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); margin-left: var(--s-2); vertical-align: middle; }
+.stub b { font-weight: var(--w-semibold); color: var(--link); }
+.stub.unread b::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--text-1); margin-left: var(--s-2); vertical-align: middle; }
 
 /* Attachments are separate objects, so they are the one place a card is right. */
 .files { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-1); }
-.img { display: block; max-width: min(100%, 420px); border-radius: var(--r-panel); overflow: hidden; background: var(--hover); cursor: zoom-in; }
+.img { display: block; max-width: min(100%, 420px); border-radius: var(--r-md); overflow: hidden; background: var(--bg-3); cursor: zoom-in; }
 .img img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.file { height: 48px; padding: 0 var(--s-3) 0 var(--s-2); display: inline-flex; align-items: center; gap: var(--s-2); border: 1px solid var(--line); border-radius: var(--r-panel); max-width: 100%; text-align: left; }
-.file .ic { color: var(--ink-2); }
-.file-name { font-weight: 500; line-height: 1.25; }
-.file-size { font-size: var(--t-12); color: var(--ink-3); line-height: 1.3; }
+.file { height: var(--h-lg); padding: 0 var(--s-3) 0 var(--s-2); display: inline-flex; align-items: center; gap: var(--s-2); background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-md); max-width: 100%; text-align: left; transition: border-color var(--m-fast) var(--ease-in-out); }
+.file .ic { color: var(--text-2); }
+.file-name { font-weight: var(--w-medium); line-height: var(--lh-heading); }
+.file-size { font-size: var(--t-12); color: var(--text-3); line-height: var(--lh-ui); }
 
-.msg-state { margin-top: 2px; font-size: var(--t-12); color: var(--ink-3); display: flex; align-items: center; gap: var(--s-2); }
-.msg-state.failed { color: var(--danger); }
-.msg-state button { text-decoration: underline; text-underline-offset: 3px; color: var(--ink); font-weight: 500; border-radius: var(--r-ctl); }
+.msg-state { margin-top: 2px; font-size: var(--t-12); color: var(--text-3); display: flex; align-items: center; gap: var(--s-2); }
+.msg-state.failed { color: var(--error); }
+.msg-state button { text-decoration: underline; text-underline-offset: 3px; color: var(--text-1); font-weight: var(--w-medium); border-radius: var(--r-xs); }
 
 .msg-edit { margin: var(--s-1) 0; }
-.msg-edit textarea { font-size: var(--t-16); }
+.msg-edit textarea { font-size: var(--t-msg); }
 
 /* Dividers */
-.day { display: flex; align-items: center; gap: var(--s-3); padding: 0 var(--s-4); margin-top: var(--s-6); font-size: var(--t-12); font-weight: 500; color: var(--ink-3); }
+.day { display: flex; align-items: center; gap: var(--s-3); padding: 0 var(--s-4); margin-top: var(--s-6); font-size: var(--t-12); font-weight: var(--w-semibold); color: var(--text-3); }
 .day::before, .day::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .day + .msg { margin-top: var(--s-3); }
-.thread-count { padding: var(--s-3) var(--s-4) 0; padding-left: calc(var(--s-4) + var(--avatar) + var(--s-3)); font-size: var(--t-12); font-weight: 500; color: var(--ink-3); }
+.thread-count { padding: var(--s-3) var(--s-4) 0; padding-left: calc(var(--s-4) + var(--avatar) + var(--s-3)); font-size: var(--t-12); font-weight: var(--w-semibold); color: var(--text-3); }
 .thread-count + .day { margin-top: var(--s-3); }
-.newline { display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-4); margin-top: var(--s-3); height: 16px; }
-.newline::before { content: ""; flex: 1; height: 1px; background: var(--ink-3); }
-.newline span { color: var(--ink); border: 1px solid var(--ink-3); background: var(--chat); font-size: var(--t-12); font-weight: 700; padding: 0 var(--s-2); border-radius: var(--r-full); line-height: 14px; }
+/* Unread separator: a coral line and a small "New" label at its end. */
+.newline { display: flex; align-items: center; gap: 0; padding: 0 var(--s-4); margin-top: var(--s-3); height: 16px; }
+.newline::before { content: ""; flex: 1; height: 1px; background: var(--brand); }
+.newline span { color: var(--on-brand); background: var(--brand); font-size: var(--t-11); font-weight: var(--w-bold); letter-spacing: 0.02em; padding: 0 6px; border-radius: 0 var(--r-xs) var(--r-xs) 0; line-height: 16px; }
 .newline + .msg { margin-top: var(--s-2); }
-.older { padding: var(--s-4); display: grid; gap: var(--s-3); }
+.older { padding: var(--s-4); display: grid; gap: var(--s-4); }
 .older-row { display: grid; grid-template-columns: var(--avatar) 1fr; gap: var(--s-3); }
 .older-row .skel:first-child { height: var(--avatar); border-radius: 50%; }
-.older-row .skel:last-child { height: 14px; margin-top: 4px; }
-.older-msg { padding: var(--s-3) var(--s-4); font-size: var(--t-12); color: var(--ink-3); text-align: center; }
+.older-row .skel:last-child { height: 14px; margin-top: 4px; max-width: 60%; }
+.older-row:nth-child(2n) .skel:last-child { max-width: 82%; }
+.older-msg { padding: var(--s-3) var(--s-4); font-size: var(--t-12); color: var(--text-3); text-align: center; }
 .start { padding: var(--s-8) var(--s-4) var(--s-2); display: grid; gap: var(--s-2); max-width: 46rem; }
-.start h2 { display: flex; align-items: center; gap: var(--s-2); }
-.start p { color: var(--ink-2); font-size: var(--t-16); }
+.start h2 { display: flex; align-items: center; gap: var(--s-2); font-size: var(--t-24); }
+.start p { color: var(--text-2); font-size: var(--t-16); line-height: var(--lh-body); }
 .start .acts { display: flex; gap: var(--s-2); margin-top: var(--s-2); flex-wrap: wrap; }
 
-.jump { position: absolute; left: 50%; transform: translateX(-50%); bottom: var(--s-3); z-index: 3; height: 32px; padding: 0 var(--s-3); display: flex; align-items: center; gap: var(--s-2); background: var(--raised); color: var(--ink); box-shadow: var(--shadow); border-radius: var(--r-full); font-size: var(--t-14); font-weight: 500; animation: rise-in var(--m-panel) var(--ease); }
+.jump { position: absolute; left: 50%; transform: translateX(-50%); bottom: var(--s-3); z-index: 3; height: var(--h-sm); padding: 0 var(--s-3); display: flex; align-items: center; gap: var(--s-2); background: var(--bg-4); color: var(--text-1); border: 1px solid var(--line-strong); box-shadow: var(--shadow-md); border-radius: var(--r-md); font-size: var(--t-13); font-weight: var(--w-semibold); animation: rise-in var(--m-smooth) var(--ease-out); transition: background var(--m-fast) var(--ease-in-out); }
+.jump:hover { background: var(--btn2-hover); }
 .jump-wrap { position: relative; height: 0; }
 
-/* Composer: always at the bottom, grows with the text. */
+/* Composer: always at the bottom, grows with the text. It is always focused
+   while you write, so focus firms the line instead of lighting it coral. */
 .composer { flex: none; padding: 0 var(--s-4); position: relative; }
-.composer-box { border: 1px solid var(--line-strong); border-radius: var(--r-panel); background: var(--chat); transition: border-color var(--m-fast); }
-.composer-box:focus-within { border-color: var(--ink); }
+.composer-box { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg-2); --bg: var(--bg-2); transition: border-color var(--m-fast) var(--ease-in-out); }
+.composer-box:hover { border-color: var(--line-strong); }
+.composer-box:focus-within { border-color: var(--text-3); }
 .composer-row { display: flex; align-items: flex-end; gap: 0; padding: var(--s-1); }
-.composer textarea { flex: 1; min-width: 0; border: 0; background: none; resize: none; padding: 6px var(--s-2); font-size: var(--t-16); line-height: 1.4; max-height: 40vh; outline: none; display: block; }
-.composer textarea::placeholder { color: var(--ink-3); }
-.composer .send { background: var(--ink); color: var(--chat); }
-.composer .send:hover { background: color-mix(in oklch, var(--ink) 86%, var(--chat)); color: var(--chat); }
-.composer .send[disabled] { background: none; color: var(--ink-3); opacity: 1; }
-.composer-banner { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-1) var(--s-1) var(--s-1) var(--s-3); border-bottom: 1px solid var(--line); font-size: var(--t-14); color: var(--ink-2); min-width: 0; }
-.composer-banner b { font-weight: 500; color: var(--ink); }
+.composer textarea { flex: 1; min-width: 0; border: 0; background: none; resize: none; padding: 6px var(--s-2); font-size: var(--t-msg); line-height: var(--lh-body); max-height: 40vh; outline: none; display: block; color: var(--text-1); }
+.composer textarea::placeholder { color: var(--text-3); }
+.composer .send { background: var(--brand); color: var(--on-brand); }
+.composer .send:hover { background: var(--brand-hover); color: var(--on-brand); }
+.composer .send:active { background: var(--brand-press); }
+.composer .send[disabled] { background: none; color: var(--text-disabled); opacity: 1; }
+.composer-banner { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-1) var(--s-1) var(--s-1) var(--s-3); border-bottom: 1px solid var(--line); font-size: var(--t-13); color: var(--text-2); min-width: 0; }
+.composer-banner b { font-weight: var(--w-semibold); color: var(--text-1); }
 .composer-files { display: flex; gap: var(--s-2); padding: var(--s-2) var(--s-2) 0; flex-wrap: wrap; }
-.pending-file { position: relative; height: 56px; border: 1px solid var(--line); border-radius: var(--r-ctl); display: flex; align-items: center; gap: var(--s-2); padding-right: var(--s-6); overflow: hidden; max-width: 220px; }
+.pending-file { position: relative; height: 56px; background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-md); display: flex; align-items: center; gap: var(--s-2); padding-right: var(--s-6); overflow: hidden; max-width: 220px; }
 .pending-file img { height: 56px; width: 56px; object-fit: cover; }
-.pending-file .ic { margin-left: var(--s-2); color: var(--ink-2); }
+.pending-file .ic { margin-left: var(--s-2); color: var(--text-2); }
 .pending-file .ib { position: absolute; right: 2px; top: 2px; }
-.pending-name { display: grid; min-width: 0; line-height: 1.3; }
-.pending-state { font-size: var(--t-12); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pending-state.bad { color: var(--danger); }
+.pending-name { display: grid; min-width: 0; line-height: var(--lh-ui); }
+.pending-state { font-size: var(--t-12); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pending-state.bad { color: var(--error); }
 a.file { text-decoration: none; color: inherit; }
-a.file:hover { border-color: var(--ink-3); }
-.composer-locked { border: 1px dashed var(--line-strong); border-radius: var(--r-panel); padding: var(--s-3); color: var(--ink-2); display: flex; gap: var(--s-2); align-items: center; }
-.foot { height: 24px; padding: 0 var(--s-4); display: flex; align-items: center; gap: var(--s-2); font-size: var(--t-12); color: var(--ink-3); flex: none; }
-.foot b { font-weight: 500; color: var(--ink-2); }
+a.file:hover { border-color: var(--line-strong); }
+.composer-locked { border: 1px dashed var(--line-strong); border-radius: var(--r-md); padding: var(--s-3); color: var(--text-2); display: flex; gap: var(--s-2); align-items: center; }
+/* Typing: three dots that breathe, then who. */
+.foot { height: var(--av-xs); padding: 0 var(--s-4); display: flex; align-items: center; gap: var(--s-2); font-size: var(--t-12); color: var(--text-3); flex: none; }
+.foot b { font-weight: var(--w-semibold); color: var(--text-2); }
 .dots { display: inline-flex; gap: 3px; }
-.dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--ink-3); animation: dot 1.2s infinite; }
+.dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--text-2); animation: dot 1.2s infinite; }
 .dots i:nth-child(2) { animation-delay: 0.15s; }
 .dots i:nth-child(3) { animation-delay: 0.3s; }
-@keyframes dot { 0%, 60%, 100% { opacity: 0.3; } 30% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .dots i { animation: none; } }
+@keyframes dot { 0%, 60%, 100% { opacity: 0.3; transform: none; } 30% { opacity: 1; transform: translateY(-1px); } }
+@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .dots i { animation: none; opacity: 0.7; } }
+:root[data-motion="off"] .dots i { animation: none; opacity: 0.7; }
 
 /* Autocomplete rises from the composer. */
 .ac { position: absolute; left: var(--s-4); right: var(--s-4); bottom: calc(100% + var(--s-1)); max-width: 360px; padding: var(--s-1); z-index: 6; max-height: 280px; overflow: auto; }
 .ac .menu-item .avatar { --sz: 20px; }
 .ac .menu-item .emo { font-size: var(--t-16); width: 20px; text-align: center; }
 
-.banner { flex: none; padding: var(--s-2) var(--s-4); background: var(--frame); color: var(--ink-2); font-size: var(--t-14); display: flex; align-items: center; gap: var(--s-2); border-bottom: 1px solid var(--line); }
-.banner b { color: var(--ink); font-weight: 500; }
+.banner { flex: none; padding: var(--s-2) var(--s-4); background: var(--bg-2); color: var(--text-2); font-size: var(--t-13); display: flex; align-items: center; gap: var(--s-2); border-bottom: 1px solid var(--line-subtle); }
+.banner b { color: var(--text-1); font-weight: var(--w-semibold); }
 
 /* Voice: who is in the room, before you join. */
-.stage { flex: none; padding: var(--s-4); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: var(--s-4); flex-wrap: wrap; }
+.stage { flex: none; padding: var(--s-4); border-bottom: 1px solid var(--line-subtle); display: flex; align-items: center; gap: var(--s-4); flex-wrap: wrap; }
 .stage-people { display: flex; gap: var(--s-4); flex-wrap: wrap; flex: 1; min-width: 0; }
 .stage-person { display: grid; justify-items: center; gap: var(--s-2); width: 72px; }
-.stage-person .avatar { --sz: 48px; transition: box-shadow var(--m-fast); }
-.stage-person span { font-size: var(--t-12); color: var(--ink-2); max-width: 100%; }
-.stage-person .muted-ic { position: absolute; right: -4px; bottom: -4px; width: 18px; height: 18px; border-radius: 50%; background: var(--bg); display: grid; place-items: center; color: var(--ink-2); }
-.stage-empty { color: var(--ink-2); flex: 1; }
-.stage-note { font-size: var(--t-12); color: var(--ink-3); margin-top: calc(var(--s-1) * -1); }
+.stage-person .avatar { --sz: var(--av-lg); transition: box-shadow var(--m-fast) var(--ease-in-out); }
+.stage-person span { font-size: var(--t-12); color: var(--text-2); max-width: 100%; }
+.stage-person .muted-ic { position: absolute; right: -4px; bottom: -4px; width: 18px; height: 18px; border-radius: 50%; background: var(--bg, var(--bg-1)); display: grid; place-items: center; color: var(--text-2); }
+.stage-empty { color: var(--text-2); flex: 1; }
+.stage-note { font-size: var(--t-12); color: var(--text-3); margin-top: calc(var(--s-1) * -1); }
 .stage-acts { display: flex; gap: var(--s-2); align-items: center; }
 
 /* Welcome block for a newcomer: three rooms and one first step. */
 .welcome { margin: var(--s-6) var(--s-4) 0; padding-bottom: var(--s-6); border-bottom: 1px solid var(--line); display: grid; gap: var(--s-4); max-width: 46rem; }
 .welcome-head { display: flex; gap: var(--s-3); align-items: center; }
-.welcome p { color: var(--ink-2); font-size: var(--t-16); }
+.welcome p { color: var(--text-2); font-size: var(--t-16); line-height: var(--lh-body); }
 .welcome-rooms { display: grid; gap: var(--s-1); }
-.welcome-room { display: flex; gap: var(--s-3); align-items: center; padding: var(--s-2); margin: 0 calc(var(--s-2) * -1); border-radius: var(--r-ctl); text-align: left; }
-.welcome-room:hover { background: var(--chat-hover); }
-.welcome-room .ic { color: var(--ink-2); }
-.welcome-room b { font-weight: 500; }
-.welcome-room span { color: var(--ink-2); }
+.welcome-room { display: flex; gap: var(--s-3); align-items: center; padding: var(--s-2); margin: 0 calc(var(--s-2) * -1); border-radius: var(--r-sm); text-align: left; transition: background var(--m-fast) var(--ease-in-out); }
+.welcome-room:hover { background: var(--bg-2); }
+.welcome-room .ic { color: var(--text-2); }
+.welcome-room b { font-weight: var(--w-semibold); }
+.welcome-room span { color: var(--text-2); }
 
-.lightbox { position: fixed; inset: 0; z-index: 65; background: var(--scrim); display: grid; place-items: center; padding: var(--s-8); cursor: zoom-out; animation: fade-in var(--m-panel); }
-.lightbox img { max-width: 100%; max-height: 100%; border-radius: var(--r-panel); background: var(--chat); }
+.lightbox { position: fixed; inset: 0; z-index: 65; background: var(--scrim); display: grid; place-items: center; padding: var(--s-8); cursor: zoom-out; animation: fade-in var(--m-smooth); }
+.lightbox img { max-width: 100%; max-height: 100%; border-radius: var(--r-xl); background: var(--bg-1); box-shadow: var(--shadow-lg); }
 
 @media (max-width: 759px) {
   .msg { padding-left: var(--s-3); padding-right: var(--s-3); }
@@ -186,4 +210,5 @@ a.file:hover { border-color: var(--ink-3); }
   .day, .newline { padding: 0 var(--s-3); }
   .ac { left: var(--s-2); right: var(--s-2); max-width: none; }
   .lightbox { padding: var(--s-2); }
+  .rx { height: 32px; padding: 0 var(--s-3); }
 }

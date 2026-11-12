@@ -1,0 +1,98 @@
+/*
+  Brand: the Nook, the wordmark and lockup, the loading mark, and the two
+  screens the brand owns outright (sign in, splash). Geometry lives in
+  js/ui/brand.js and brand/*.svg; docs/brand/BRAND.md explains it.
+  Rule: places are arches, people are circles, controls are rectangles.
+*/
+
+.nook, .lockup, .wordmark { display: block; flex: none; }
+
+/* Loading: the person settles into the doorway. One 240ms move inside a
+   1.2s cycle reads as "arriving", not as a spinner. */
+.loading { display: inline-flex; flex-direction: column; align-items: center; gap: var(--s-3); color: var(--text-3); font-size: var(--t-13); line-height: var(--lh-ui); }
+.loading.quiet .loading-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.loading-dot { animation: nook-settle 1200ms var(--ease-out) infinite; }
+@keyframes nook-settle {
+  0% { transform: translateY(-14px); opacity: 0; }
+  20% { transform: translateY(0); opacity: 1; }
+  80% { transform: translateY(0); opacity: 1; }
+  100% { transform: translateY(0); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .loading-dot { animation: none; }
+}
+:root[data-motion="off"] .loading-dot { animation: none; }
+
+/* Sign in / create account.
+   Desktop: the deepest surface on the left holds the lockup and one line;
+   the form sits on the primary surface. Phone: one column, top to bottom. */
+.auth { height: 100%; display: grid; grid-template-columns: minmax(320px, 5fr) 7fr; grid-template-rows: none; background: var(--bg-1); color: var(--text-1); }
+.auth-side {
+  background: var(--bg-0); border-right: 1px solid var(--line-subtle);
+  padding: var(--s-10); display: flex; flex-direction: column; justify-content: space-between; gap: var(--s-8);
+}
+.auth-side .auth-line {
+  display: block; margin: 0; max-width: 12ch; text-wrap: balance;
+  font-size: var(--t-32); font-weight: var(--w-semibold); line-height: var(--lh-display); letter-spacing: -0.02em;
+  color: var(--text-1);
+}
+/* The scene fills the panel's middle: the Nook large, people around it. */
+.auth-scene { flex: 1; position: relative; display: grid; place-items: center; min-height: 0; }
+.auth-scene .auth-nook { width: min(70%, 260px); height: auto; }
+.auth-person {
+  position: absolute; width: var(--d); height: var(--d); border-radius: 50%; transform: translate(-50%, -50%);
+  background: oklch(var(--tile-l) var(--tile-c) var(--hue)); --ring: var(--bg-0);
+}
+.auth-person .pres { position: absolute; right: -1px; bottom: -1px; }
+.auth-main { background: var(--bg-1); display: grid; place-items: center; padding: var(--s-10) var(--s-6); overflow-y: auto; }
+.auth-panel { width: 100%; max-width: 360px; display: grid; gap: var(--s-6); }
+.auth-panel h1 { margin: 0; font-size: var(--t-24); font-weight: var(--w-semibold); line-height: var(--lh-heading); letter-spacing: -0.01em; color: var(--text-1); }
+
+.auth-form { max-width: none; gap: var(--s-4); }
+.auth-form .label { font-size: var(--t-13); margin-bottom: var(--s-1); }
+.auth-form .field { height: var(--h-md); border-radius: var(--r-sm); }
+.auth-form .hint { font-size: var(--t-12); }
+.auth-form .err { font-size: var(--t-13); line-height: var(--lh-ui); margin-top: var(--s-2); align-items: flex-start; gap: var(--s-2); color: var(--error); }
+.auth-form .err .ic { flex: none; }
+.auth-form .err + .hint { display: none; } /* the error replaces the hint while it stands */
+#auth-form-err { margin-top: 0; padding: var(--s-2) var(--s-3); background: var(--error-soft); border-radius: var(--r-sm); color: var(--text-1); }
+#auth-form-err .ic { color: var(--error); }
+
+.auth-form .auth-submit { justify-self: stretch; width: 100%; min-width: 0; height: var(--h-md); margin-top: var(--s-2); border-radius: var(--r-sm); font-size: var(--t-14); }
+/* Busy keeps its colour (it is working, not unavailable). */
+.auth-form .auth-submit[aria-busy="true"] { background: var(--brand); color: var(--on-brand); opacity: 0.72; cursor: progress; }
+
+.auth-swap { margin: 0; font-size: var(--t-14); color: var(--text-2); }
+.auth-link {
+  margin-left: var(--s-1); padding: var(--s-1) 0; color: var(--text-1); font-weight: var(--w-medium);
+  text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px;
+  border-radius: var(--r-xs); transition: text-decoration-color var(--m-fast) var(--ease-in-out);
+}
+.auth-link:hover { text-decoration-color: currentColor; }
+.auth-link:active { color: var(--text-2); }
+.auth-link:focus-visible { outline: var(--focus-w) solid var(--focus); outline-offset: 2px; }
+
+/* An invitation is a separate object (a place you are asked into). */
+.auth-invite { display: flex; gap: var(--s-3); align-items: center; padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg-2); }
+.auth-invite b { display: block; font-weight: var(--w-semibold); }
+.auth-invite span:not(.tile) { color: var(--text-2); font-size: var(--t-13); }
+
+@media (max-width: 720px) {
+  .auth { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .auth-side { background: var(--bg-1); border-right: 0; padding: var(--s-6) var(--s-4) var(--s-2); justify-content: flex-start; gap: var(--s-6); }
+  .auth-side .auth-line { display: block; font-size: var(--t-24); max-width: none; }
+  .auth-scene { display: none; }
+  /* The brand line leads on phone; the form heading steps down beneath it. */
+  .auth-main { place-items: start stretch; padding: var(--s-6) var(--s-4) var(--s-8); }
+  .auth-panel { max-width: none; gap: var(--s-5); }
+  .auth-panel h1 { font-size: var(--t-16); color: var(--text-2); }
+}
+@media (pointer: coarse) {
+  .auth-form .field, .auth-form .auth-submit { height: var(--touch); }
+  .auth-link { padding: var(--s-3) 0; }
+}
+
+/* Splash: the lockup on the deepest surface while Snug opens. */
+.splash { height: 100%; display: grid; place-content: center; justify-items: center; gap: var(--s-8); background: var(--bg-0); color: var(--text-1); }
+.splash-down { display: grid; justify-items: center; gap: var(--s-3); text-align: center; }
+.splash-down p { margin: 0; color: var(--text-2); font-size: var(--t-14); max-width: 32ch; }

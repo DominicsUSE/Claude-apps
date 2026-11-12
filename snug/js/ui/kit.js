@@ -48,12 +48,12 @@ export const RoomIcon = ({ kind, size }) => html`<${Icon} name=${KIND_ICON[kind]
 
 export function Seg({ value, options, onChange, label }) {
   return html`<div class="seg" role="group" aria-label=${label}>
-    ${options.map(([v, text]) => html`<button key=${v} aria-pressed=${String(value === v)} onClick=${() => onChange(v)}>${text}</button>`)}
+    ${options.map(([v, text]) => html`<button key=${v} type="button" aria-pressed=${String(value === v)} onClick=${() => onChange(v)}>${text}</button>`)}
   </div>`;
 }
 
 export const Switch = ({ on, onChange, label }) =>
-  html`<button class="switch" role="switch" aria-checked=${String(!!on)} aria-label=${label} onClick=${() => onChange(!on)}></button>`;
+  html`<button type="button" class="switch" role="switch" aria-checked=${String(!!on)} aria-label=${label} onClick=${() => onChange(!on)}></button>`;
 
 export function Empty({ icon, title, text, children }) {
   return html`<div class="empty">

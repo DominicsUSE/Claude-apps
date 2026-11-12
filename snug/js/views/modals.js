@@ -7,8 +7,8 @@ import { roomIds } from '../lib/attention.js';
 import { fuzzy, plural, HUES, hueOf } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Tile, RoomIcon, Seg, copyText } from '../ui/kit.js';
+import { TOPICS } from '../lib/social.js';
 import { call, api } from '../server.js';
-
 
 export function Confirm({ title, text, action, danger, onConfirm }) {
   return html`
@@ -101,7 +101,7 @@ export function Invite({ house }) {
       <button class="btn primary" data-autofocus disabled=${!link} onClick=${() => copyText(link)}><${Icon} name="copy" size=${16} />Copy link</button>
     </div>
     ${linkError && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${linkError}</div>`}
-    <form class="form" style="margin-top:24px" onSubmit=${byName} novalidate>
+    <form class="form invite-by-name" onSubmit=${byName} novalidate>
       <div>
         <label class="label" for="invite-handle">Or invite someone already on Snug</label>
         <div class="copy-row">
@@ -128,15 +128,19 @@ export function JoinByLink({ code }) {
     return html`<h2>That invitation doesn\u2019t work</h2><p class="modal-lead">${error}</p>
       <div class="modal-foot"><button class="btn" data-autofocus onClick=${() => { S.ui.joinCode = null; closeModal(); }}>Close</button></div>`;
   }
-  if (!info) return html`<div class="skel" style="height:120px"></div>`;
+  if (!info) return html`<div class="join-card" aria-busy="true"><div class="join-head"><span class="skel join-skel-tile"></span><div class="join-id"><span class="skel join-skel-line"></span><span class="skel join-skel-line short"></span></div></div></div>`;
   const h = info.house;
   const already = S.houseOrder.some((id) => S.houses[id]?.name === h.name && S.houses[id]?.joined);
   return html`<div class="join-card">
-    <div class="join-head">
-      <span class="tile lg" style=${`--hue:${hueOf(h.hue)}`}>${h.mark}</span>
-      <div><h2 style="margin:0">${h.name}</h2><div class="faint">${plural(h.members, 'member')}${info.by ? `. ${info.by} invited you` : ''}</div></div>
+    <div class="join-head" style=${`--hue:${hueOf(h.hue)}`}>
+      <span class="tile xl">${h.mark}</span>
+      <div class="join-id">
+        ${info.by && html`<span class="join-kicker">${info.by} invited you</span>`}
+        <h2>${h.name}</h2>
+        <div class="join-meta num">${plural(h.members, 'member')}</div>
+      </div>
     </div>
-    ${h.about && html`<p>${h.about}</p>`}
+    ${h.about && html`<p class="join-about">${h.about}</p>`}
     ${error && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${error}</div>`}
     <div class="modal-foot" style="margin-top:0">
       <button class="btn" onClick=${() => { S.ui.joinCode = null; closeModal(); }}>Not now</button>
@@ -150,16 +154,21 @@ export function JoinPreview({ house }) {
   const h = S.houses[house];
   const members = Object.keys(h.members).map((id) => S.users[id]).filter(Boolean);
   const here = members.filter((u) => u.presence !== 'offline').length;
+  const inv = S.invites.find((i) => i.house === house);
   return html`<div class="join-card">
-    <div class="join-head">
-      <${Tile} house=${h} lg />
-      <div><h2 style="margin:0">${h.name}</h2><div class="faint">${plural(members.length, 'member')}, ${here} here now</div></div>
+    <div class="join-head" style=${`--hue:${hueOf(h.hue)}`}>
+      <span class="tile xl">${h.mark}</span>
+      <div class="join-id">
+        ${inv && html`<span class="join-kicker">${(S.users[inv.from]?.name || 'Someone').split(' ')[0]} invited you</span>`}
+        <h2>${h.name}</h2>
+        <div class="join-meta"><span class="num">${plural(members.length, 'member')}</span><span><i class="pres inline open" aria-hidden="true"></i><span class="num">${here}</span> here now</span></div>
+      </div>
     </div>
-    <p>${h.about}</p>
+    ${h.about && html`<p class="join-about">${h.about}</p>`}
     <div>
       <div class="label">You’ll start with ${plural(h.starter.length, 'room')}</div>
       <div class="join-rooms">
-        ${h.starter.map((id) => html`<div key=${id}><${RoomIcon} kind=${S.rooms[id].kind} size=${16} /><span><b style="font-weight:500;color:var(--ink)">${S.rooms[id].name}</b> ${S.rooms[id].topic}</span></div>`)}
+        ${h.starter.map((id) => html`<div key=${id}><${RoomIcon} kind=${S.rooms[id].kind} size=${16} /><span class="trunc"><b>${S.rooms[id].name}</b> ${S.rooms[id].topic}</span></div>`)}
       </div>
       <div class="hint">The other ${plural(roomIds(S, house).length - h.starter.length, 'room')} appear once you’ve said hello.</div>
     </div>
@@ -173,39 +182,69 @@ export function JoinPreview({ house }) {
 export function AddHouse() {
   const [name, setName] = useState('');
   const [hue, setHue] = useState(HUES[5][0]);
+  const [topic, setTopic] = useState(null);
+  const [open, setOpen] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const submit = (e) => {
     e.preventDefault();
-    if (!name.trim()) return setError('Give the house a name.');
+    const clean = name.trim();
+    if (!clean) { setError('Give the house a name.'); document.getElementById('house-name')?.focus(); return undefined; }
     setBusy(true);
-    createHouse({ name: name.trim(), hue }).catch((err) => { setBusy(false); setError(err.offline ? 'You\u2019re offline. Try again when you\u2019re back.' : err.message); });
+    // house.create takes a name and a colour; being public and a topic are
+    // house settings, saved straight after.
+    createHouse({ name: clean, hue }).then((id) => {
+      if (id && (open || topic)) {
+        call('house.update', { house: id, public: open, topic: topic || null })
+          .catch((err) => toast(err.offline ? 'Your house is ready, but being public wasn\u2019t saved. Change it in House settings.' : err.message));
+      }
+    }, (err) => { setBusy(false); setError(err.offline ? 'You\u2019re offline. Try again when you\u2019re back.' : err.message); });
     return undefined;
   };
+  const mark = [...name.trim()][0]?.toUpperCase() || '?';
   return html`<form class="form" onSubmit=${submit} novalidate>
-    <h2>Start a house</h2>
+    <div>
+      <h2>Start a house</h2>
+      <p class="modal-lead" style="margin:0">A place for your people. It starts with three rooms and a voice room.</p>
+    </div>
     ${S.invites.length > 0 && html`<div>
       <span class="label">Or accept an invitation</span>
-      ${S.invites.map((inv) => html`<button type="button" key=${inv.house} class="menu-item" style="min-height:44px" onClick=${() => openModal(JoinPreview, { house: inv.house })}>
+      ${S.invites.map((inv) => html`<button type="button" key=${inv.house} class="menu-item invite-pick" onClick=${() => openModal(JoinPreview, { house: inv.house })}>
         <${Tile} house=${S.houses[inv.house]} /><span class="grow trunc">${S.houses[inv.house].name}</span><span class="end">from ${(S.users[inv.from]?.name || 'someone').split(' ')[0]}</span>
       </button>`)}
     </div>`}
-    <div>
-      <label class="label" for="house-name">Name</label>
-      <input id="house-name" class=${`field${error ? ' bad' : ''}`} data-autofocus maxlength="40" placeholder="Night shift bakers" value=${name}
-        aria-invalid=${String(!!error)} onInput=${(e) => { setName(e.target.value); setError(''); }} />
-      ${error ? html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${error}</div>`
-        : html`<div class="hint">It starts with three rooms and a voice room. Rename or add more any time.</div>`}
-    </div>
-    <div>
-      <span class="label">Colour</span>
-      <div class="swatches" role="group" aria-label="House colour">
-        ${HUES.map(([v, name]) => html`<button type="button" key=${v} class="swatch strong" style=${`--hue:${v}`} aria-pressed=${String(hue === v)} aria-label=${name} onClick=${() => setHue(v)}></button>`)}
+    <div class="house-name-row">
+      <span class="tile lg" style=${`--hue:${hue}`} aria-hidden="true">${mark}</span>
+      <div class="grow">
+        <label class="label" for="house-name">Name</label>
+        <input id="house-name" class="field" data-autofocus maxlength="40" placeholder="Night shift bakers" value=${name}
+          aria-invalid=${String(!!error)} aria-describedby="house-name-msg" onInput=${(e) => { setName(e.target.value); setError(''); }} />
+        ${error ? html`<div class="err" id="house-name-msg" role="alert"><${Icon} name="alert" size=${14} />${error}</div>`
+          : html`<div class="hint" id="house-name-msg">Rename it or add rooms any time.</div>`}
       </div>
     </div>
-    <div class="modal-foot">
+    <div>
+      <span class="label" id="house-hue">Colour</span>
+      <div class="swatches" role="group" aria-labelledby="house-hue">
+        ${HUES.map(([v, label]) => html`<button type="button" key=${v} class="swatch strong" style=${`--hue:${v}`} aria-pressed=${String(hue === v)} aria-label=${label} onClick=${() => setHue(v)}></button>`)}
+      </div>
+    </div>
+    <div>
+      <span class="label" id="house-topic">What it’s about <span class="faint">(optional)</span></span>
+      <div class="topic-chips" role="group" aria-labelledby="house-topic">
+        ${TOPICS.map((t) => html`<button type="button" key=${t} class="chip" aria-pressed=${String(topic === t)} onClick=${() => setTopic(topic === t ? null : t)}>${t}</button>`)}
+      </div>
+    </div>
+    <div class="set-inline">
+      <div class="grow">
+        <b id="house-public">Open to everyone</b>
+        <span>${open ? 'It shows in Discover, and anyone can join as a newcomer.' : 'Only people you invite can join. You can open it later.'}</span>
+      </div>
+      <button type="button" class="switch" role="switch" aria-checked=${String(open)} aria-labelledby="house-public" onClick=${() => setOpen(!open)}></button>
+    </div>
+    <div class="modal-foot" style="margin-top:0">
       <button type="button" class="btn" onClick=${closeModal}>Cancel</button>
-      <button type="submit" class="btn primary" disabled=${busy}>Create house</button>
+      <button type="submit" class="btn primary" disabled=${busy} aria-busy=${String(busy)}>${busy ? 'Creating\u2026' : 'Create house'}</button>
     </div>
   </form>`;
 }
@@ -222,7 +261,7 @@ export function NewMessage() {
     <p class="modal-lead">Pick one person, or several for a group.</p>
     <input class="field" data-autofocus placeholder="Find someone" aria-label="Find someone" value=${q} onInput=${(e) => setQ(e.target.value)}
       onKeyDown=${(e) => { if (e.key === 'Enter' && people[0] && q) { e.preventDefault(); toggle(people[0].id); setQ(''); } }} />
-    <div class="picked" style="margin-top:8px">
+    <div class="picked">
       ${picked.map((id) => html`<button key=${id} class="chip on" onClick=${() => toggle(id)} aria-label=${`Remove ${S.users[id].name}`}>${S.users[id].name}<${Icon} name="x" size=${14} /></button>`)}
     </div>
     <div class="pick-list" role="listbox" aria-multiselectable="true">
@@ -246,9 +285,11 @@ export function RoomBrowser({ house }) {
     <div class="pick-list">
       ${roomIds(S, house).map((id) => {
         const r = S.rooms[id];
-        return html`<button key=${id} class="menu-item" style="min-height:48px" onClick=${() => { closeModal(); openConv(id); }}>
+        const voice = (S.voice[id] || []).length;
+        return html`<button key=${id} class="menu-item room-pick" onClick=${() => { closeModal(); openConv(id); }}>
           <${RoomIcon} kind=${r.kind} />
-          <span class="grow"><span style="display:block;font-weight:500">${r.name}</span><span class="faint trunc" style="display:block;font-size:var(--t-12)">${r.topic}</span></span>
+          <span class="grow"><span class="room-pick-name">${r.name}</span><span class="room-pick-topic trunc">${r.topic}</span></span>
+          ${voice > 0 && html`<span class="end live">${voice} in voice</span>`}
         </button>`;
       })}
     </div>
