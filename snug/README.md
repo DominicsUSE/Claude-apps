@@ -4,6 +4,8 @@ A calm place for your people. Houses (communities) hold rooms, rooms hold
 conversations, and any message can grow a thread. Direct messages, groups,
 voice rooms, roles, search, saved messages and a single place to catch up.
 
+![Snug on desktop: a room with a thread open beside it](docs/preview.png)
+
 ## Run it
 
 No build step and no dependencies. Serve the folder and open it:
