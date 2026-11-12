@@ -19,7 +19,7 @@ export function buildItems(list, { marker = null, me = null } = {}) {
       marked = true;
       broke = true;
     }
-    const grouped = !broke && prev && prev.author === m.author && !m.replyTo && !m.sys && !prev.sys
+    const grouped = !broke && prev && prev.author === m.author && !m.replyTo && !m.sys && !prev.sys && !m.call && !prev.call
       && m.ts - prev.ts < GROUP_WINDOW;
     items.push({ type: 'msg', m, grouped: !!grouped, key: m.id });
     prev = m;

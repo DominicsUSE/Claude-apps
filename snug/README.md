@@ -38,14 +38,15 @@ window and sign in as someone else to talk to yourself. `npm run seed --
 Tests:
 
 ```bash
-npm test            # rules (18) and the server with real sockets (44)
-npm run test:e2e    # separate people in separate browsers (43), needs Playwright
+npm test            # rules (19) and the server with real sockets (53)
+npm run test:e2e    # separate people in separate browsers (49), needs Playwright
 ```
 
 `test:e2e` runs every `tests/e2e*.test.js` one file at a time: the core
-flows (23), camera and screen sharing (9), voice messages, pins and GIFs (4),
-custom emoji (3) and notifications when Snug is closed (4). Each also runs
-alone: `npm run test:e2e:video`, `test:e2e:messages`, `test:e2e:emoji`,
+flows (23), calls in direct messages and groups (6), camera and screen
+sharing (9), voice messages, pins and GIFs (4), custom emoji (3) and
+notifications when Snug is closed (4). Each also runs alone: `npm run
+test:e2e:calls`, `test:e2e:video`, `test:e2e:messages`, `test:e2e:emoji`,
 `test:e2e:notify`. The notifications file uses Playwright's newer headless
 Chromium (`channel: 'chromium'`).
 
@@ -87,6 +88,12 @@ the conversation. Tested under Xvfb on Linux (the window hides, the server
 keeps answering, a message from a second person notifies and the click
 opens it, tray Quit exits); the tray icon itself and the system's
 notification banner were not looked at on a real Windows or Mac desktop.
+An incoming call brings the window up, from the tray too, without taking
+the focus from whatever you are typing in, flashes it in the taskbar and
+shows a system notification ("Lou Brandt is calling") that closes when the
+ring stops; the window then shows the incoming-call screen. Tested under Xvfb (the hidden
+window comes back, the notification is recorded, the screen shows and goes
+when the caller gives up); the banner itself was not seen.
 
 To work on the app:
 
@@ -148,8 +155,52 @@ Real, and covered by tests with separate users:
   picker, full screen actually filling the screen (only the button is
   checked), and the desktop video test on the Windows build machines. Video
   rides the same mesh as audio, with bitrate capped as the room grows, so more
-  than a few cameras at once will strain it. Direct messages and groups have
-  no calls yet.
+  than a few cameras at once will strain it.
+- Calls in direct messages and groups: the phone and camera buttons in a
+  conversation's header start a voice or video call, on the same WebRTC
+  code as voice rooms (a call is a voice place keyed by the conversation),
+  with the same stage: tiles, camera, screen share, mute, deafen, hang up.
+  Starting one rings everyone else in the conversation on every device they
+  have open: an incoming-call screen with the caller's circle, name, *Voice
+  call* or *Video call*, **Accept** (mint), **Accept with video** and
+  **Decline**, a ringtone made with WebAudio (no sound files) that stops on
+  any outcome, Enter to accept and Esc to decline (outside text fields: a
+  ring never takes the focus from the composer, so a message being typed
+  keeps its Enter and Esc), announced to screen readers, a bottom sheet on
+  a phone. If the microphone can't start, nothing is sent and the call
+  keeps ringing, so the incoming screen comes back. Picking up on one device stops the
+  ring on the others ("You answered on another device"). A ring lasts 30
+  seconds. In a one-to-one call, Decline or no answer ends it for the caller
+  with *Declined* or *No answer* and Call again; in a group the others keep
+  ringing until their own timeout and the call goes on while anyone is in
+  it, with a *Call in progress* strip and Join for anyone not in it. Someone
+  already in a call (or a voice room) still sees the ring, and accepting
+  moves them: one live call per person. Calling, joining or joining a voice
+  room from inside a call asks first, saying whether the call ends (one to
+  one) or goes on without you (a group). A conversation set to Nothing, or
+  being Focused, shows the call without a ringtone. The conversation gets
+  records written by the server: *Missed call*, *Declined call* or *Call ·
+  4m 12s* with who started it, shown as system lines that nobody can edit,
+  delete, react to, pin or thread off. A missed call counts as needing you
+  (even in a group set to Only what needs me, on the badge and in push);
+  calls you took part in or declined are history, shown as quiet lines and
+  never counted. A record doesn't move anyone's read marker, so messages
+  sent before or during the call stay unread. Conversations with a live call carry a mint phone mark in
+  the lists, and the dock at the bottom of the column shows the call and
+  takes you back to it. With Snug closed, the callee's devices get a push,
+  "Name is calling", that opens the conversation and stays on screen until
+  the ring stops; then it is replaced by a quiet note (*Missed call*, *You
+  answered on another device*) and the missed call record, if any. Up to 12 people in a call (a group holds at most
+  10). Starting calls is limited to four at once, then one every 15
+  seconds. Tested with real sockets (`npm test`) and in Chromium with its
+  fake microphone and camera (`npm run test:e2e:calls`, with the ring
+  shortened to 5 seconds by `SNUG_RING_MS`, which only the test runner
+  honours). Not tested: the ringtone actually being heard (the test checks
+  it starts and stops), a browser notification for a ring in a background
+  tab, a ring push arriving through a real push service (only the mock), a
+  12-person call, and calls on real phones and networks. Snug has no way to
+  block a person yet, so there is nothing for calls to respect beyond
+  muting and Focused.
 - Offline: the app opens from a copy on the device, what you write waits,
   and it sends once when the connection is back.
 - Voice messages: hold the microphone to record (or tap to start and tap
@@ -195,9 +246,6 @@ Not built yet, on purpose, because each needs outside infrastructure:
 - **Voice rooms above 12 people.** Audio is a full mesh; larger rooms need a
   media server. The same media server would let more than a few cameras run
   at once.
-- **Calls in direct messages and groups.** Voice, camera and screen sharing
-  live in voice rooms only. Calling a person needs ringing and an
-  incoming-call screen.
 
 Built, but not seen end to end from the test machine:
 
@@ -264,7 +312,9 @@ before seeding anything that faces the internet, or better, do not seed there.
   with you or are your friends. Favourites are visible only to you. Profile
   links must be `https://` addresses.
 - **Voice signalling** is relayed only between people in the same voice
-  room, and only members of the house can join it.
+  room or call. Only members of the house can join a voice room; only the
+  people in a conversation can start, join, decline or see its call, and
+  its ringing and call state go to them alone.
 
 ## What makes it different
 
@@ -349,6 +399,7 @@ doorway with a person (the presence dot) inside it; the brand sheet is in
 server/
   index.js          HTTP: static files, accounts, uploads, security headers
   hub.js            WebSocket connections, presence, who gets which event, voice rooms
+                    and calls (ringing, timeouts, call records)
   ops.js            every action a client can ask for: validate, authorize, write, notify
   model.js          what a person may see, shaped for the client
   auth.js           password hashing, sessions, rate limiters
@@ -359,13 +410,15 @@ js/
   app.js            root: sign-in or app, desktop or phone, overlays, keyboard map
   store.js          state and every action; updates the screen at once, then tells the server
   server.js         the transport: WebSocket with reconnect, the offline send queue, live events
-  voice.js          WebRTC voice: microphone, camera, screen share, peer connections
-                    (perfect negotiation), who is speaking
+  voice.js          WebRTC voice for voice rooms and calls: microphone, camera, screen
+                    share, peer connections (perfect negotiation), who is speaking
+  calls.js          calls in direct messages and groups: start, accept, decline,
+                    the WebAudio ringtone, notifications for a ring
   lib/              pure rules with tests: format, group, attention, search, perms,
                     social (friends, happening now, events, topics)
   ui/               icons, shared pieces (avatar, presence, rich text), overlays
   views/            auth, nav, stream (messages and composer), conversation, catch up,
-                    search and quick jump, people, settings, dialogs
+                    search and quick jump, people, settings, dialogs, calls
 css/                tokens, base components, shell, conversation, other views
 tests/              logic, server integration (real sockets), browser end-to-end
 ```

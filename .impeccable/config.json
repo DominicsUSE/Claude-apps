@@ -35,6 +35,33 @@
         ],
         "createdAt": "2026-11-12T15:45:15.584Z",
         "reason": "Saved-note quote on a profile: 2px coral edge is the contract's single 'for you' marker shared with mentions, not a card accent"
+      },
+      {
+        "rule": "pulsing-dot",
+        "value": "*",
+        "files": [
+          "snug/css/media.css"
+        ],
+        "createdAt": "2026-11-12T20:56:58.367Z",
+        "reason": "Recording indicator: blinks only while the microphone is recording a voice message, tied to live state"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "snug/css/nav.css"
+        ],
+        "createdAt": "2026-11-12T20:56:58.376Z",
+        "reason": "Catch-up invite: 2px coral inset is the contract's single for-you marker, same as mentions; not a card"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "snug/css/views.css"
+        ],
+        "createdAt": "2026-11-12T20:56:58.385Z",
+        "reason": "News excerpt: 2px neutral quote rule before quoted message text; not a card accent"
       }
     ]
   }

@@ -299,3 +299,90 @@ test("tray: closing hides the window, notifications still arrive and open the co
   await assert.rejects(fetch(`${origin}/api/me`), "the server is gone");
   assert.equal(fs.existsSync(path.join(userData, "data", "snug.db-wal")), false, "the database was closed cleanly");
 });
+
+// ---------- Calls (calls agent) ----------
+// Someone calls while the window is hidden in the tray: the app brings the
+// window back, shows a system notification ("Lou Brandt is calling"), and the
+// page shows the incoming-call screen. The caller hanging up takes it away.
+test("incoming call: the hidden window comes back from the tray with a notification and the incoming-call screen", async (t) => {
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-call-"));
+  const WebSocket = require("ws");
+  const bin = process.env.SNUG_BIN && path.resolve(process.env.SNUG_BIN);
+  const app = await electron.launch({ executablePath: bin || require("electron"), args: [...(bin ? [] : [__dirname]), "--no-sandbox", `--user-data-dir=${userData}`], cwd: __dirname });
+  let other = null;
+  t.after(async () => {
+    other?.terminate();
+    await app.close().catch(() => {});
+    fs.rmSync(userData, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  });
+  const page = await app.firstWindow();
+  page.setDefaultTimeout(15000);
+  await page.waitForSelector("#setup");
+  await page.click("#go");
+  await page.waitForSelector(".auth-form");
+  const origin = new URL(page.url()).origin;
+  await page.click('.auth-link:has-text("Create an account")');
+  await page.fill("#auth-handle", "kim");
+  await page.fill("#auth-name", "Kim Sato");
+  await page.fill("#auth-pass", "a long password");
+  await page.click(".auth-form button[type=submit]");
+  await page.waitForSelector(".nav");
+  await page.waitForFunction(() => window.snug.S.conn.socket === "open");
+  assert.equal(await page.evaluate(() => typeof window.snugApp.incomingCall), "function");
+
+  // A second person on this server, in a house with Kim and a conversation with her.
+  await page.click(".rail-add");
+  await page.fill("#house-name", "Kiln & Co.");
+  await page.click(".modal button[type=submit]");
+  await page.waitForSelector('.main .bar-title:has-text("Lounge")');
+  const reg = await fetch(`${origin}/api/register`, {
+    method: "POST", headers: { "content-type": "application/json", origin }, body: JSON.stringify({ handle: "lou", name: "Lou Brandt", password: "a long password" }),
+  });
+  assert.equal(reg.status, 201);
+  const cookie = reg.headers.get("set-cookie").split(";")[0];
+  other = new WebSocket(`${origin.replace("http", "ws")}/ws`, { headers: { cookie, origin } });
+  let seq = 0;
+  const acks = new Map();
+  await new Promise((resolve, reject) => {
+    other.on("error", reject);
+    other.on("message", (buf) => { const m = JSON.parse(buf); if (m.t === "hello") resolve(); else if (m.t === "ack") acks.get(m.id)?.(m); });
+  });
+  const op = (name, d) => new Promise((resolve, reject) => {
+    const id = ++seq;
+    acks.set(id, (m) => (m.ok ? resolve(m.d) : reject(new Error(m.error))));
+    other.send(JSON.stringify({ t: "op", id, op: name, d }));
+  });
+  const house = await page.evaluate(() => window.snug.S.houseOrder[0]);
+  const { code } = await page.evaluate((h) => new Promise((r) => {
+    const ws = new WebSocket(`${location.origin.replace("http", "ws")}/ws`);
+    ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.t === "hello") ws.send(JSON.stringify({ t: "op", id: 1, op: "invite.create", d: { house: h } })); if (m.t === "ack") { ws.close(); r(m.d); } };
+  }), house);
+  await op("invite.accept", { code });
+  const kimId = await page.evaluate(() => window.snug.S.me);
+  const { id: dm } = await op("dm.open", { users: [kimId] });
+  await page.waitForFunction((d) => !!window.snug.S.dms[d], dm);
+
+  // Hide the window in the tray.
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+  await page.waitForFunction(() => window.snugApp.hidden());
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()), false);
+
+  // Lou calls: the window comes back with a notification and the incoming screen.
+  await op("call.start", { dm, video: true });
+  await page.waitForFunction(() => !window.snugApp.hidden());
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()), true, "the window is up again");
+  assert.deepEqual(await app.evaluate(() => globalThis.snugCallNotes), [{ title: "Lou Brandt is calling", body: "Video call" }]);
+  const notesSupported = await app.evaluate(({ Notification }) => Notification.isSupported());
+  assert.equal(await app.evaluate(() => globalThis.snugCallNotesOpen()), notesSupported ? 1 : 0);
+  const card = page.locator(".incoming");
+  await card.waitFor();
+  assert.equal(await card.locator(".inc-name").textContent(), "Lou Brandt");
+  if (shots) await page.screenshot({ path: path.join(shots, "desktop-incoming-call.png") });
+  // Lou gives up: the screen goes, and Kim's conversation has the missed call.
+  await op("voice.leave", {});
+  await card.waitFor({ state: "detached" });
+  await page.waitForFunction((d) => (window.snug.S.msgs[d] || []).some((m) => m.call?.outcome === "missed"), dm);
+  // The ring is over, so its notification is gone too.
+  for (let i = 0; i < 50 && await app.evaluate(() => globalThis.snugCallNotesOpen()); i++) await new Promise((r) => setTimeout(r, 100));
+  assert.equal(await app.evaluate(() => globalThis.snugCallNotesOpen()), 0, "the ring's notification closed");
+});

@@ -98,6 +98,31 @@ test('a group can narrow to what needs me; a one-to-one conversation cannot', ()
   assert.equal(needsMe(S, 'd_ines', m('hi')), true);
 });
 
+test('calls: a missed call needs me, even in a quiet group; a call I took part in or declined is history', () => {
+  const S = fresh();
+  const rec = (author, call) => ({ id: `m_call${Math.random().toString(36).slice(2, 10)}`, author, ts: NOW + 1, text: 'Missed call', call });
+  const missed = rec('ines', { id: 'call_a', by: 'ines', outcome: 'missed', joined: ['ines'], declined: [] });
+  const took = rec('ines', { id: 'call_b', by: 'ines', outcome: 'answered', dur: 4000, joined: ['ines', 'robin'], declined: [] });
+  const declined = rec('ines', { id: 'call_c', by: 'ines', outcome: 'declined', joined: ['ines'], declined: ['robin'] });
+  const mine = rec('robin', { id: 'call_d', by: 'robin', outcome: 'missed', joined: ['robin'], declined: [] });
+  assert.equal(needsMe(S, 'd_ines', missed), true);
+  assert.equal(forMe(S, 'd_ines', missed), true, 'shown as for me too');
+  for (const m of [took, declined, mine]) assert.equal(needsMe(S, 'd_ines', m), false);
+  // In a group set to "Only what needs me", a group call I missed still does.
+  S.dms.g_sat.notify = 'mentions';
+  const groupMissed = rec('malik', { id: 'call_e', by: 'malik', outcome: 'answered', dur: 9000, joined: ['malik', 'ines'], declined: [] });
+  assert.equal(needsMe(S, 'g_sat', groupMissed), true);
+  // Unread counts only the ones I missed.
+  S.read.d_ines = NOW;
+  S.msgs.d_ines = [...S.msgs.d_ines, took, declined];
+  assert.equal(unreadOf(S, 'd_ines').count, 0);
+  S.msgs.d_ines.push(missed);
+  assert.deepEqual([unreadOf(S, 'd_ines').count, unreadOf(S, 'd_ines').needs], [1, 1]);
+  // A call record never groups with the messages around it.
+  const items = buildItems([{ id: 'a', author: 'ines', ts: NOW, text: 'hi' }, missed, { id: 'b', author: 'ines', ts: NOW + 2, text: 'call me' }]);
+  assert.deepEqual(items.filter((i) => i.type === 'msg').map((i) => i.grouped), [false, false, false]);
+});
+
 test('chosen colours stay clear of the colours that carry meaning', () => {
   // OKLCH hues of the semantic colours, dark and light themes: error #E05A5A 23 /
   // #C93838 25, brand coral #F05A47 30, amber #A86F0D 73 / #E8B65A 81,

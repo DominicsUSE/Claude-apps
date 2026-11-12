@@ -7,28 +7,31 @@ import {
 } from '../store.js';
 import { levelOf, levelsFor, LEVEL_LABEL } from '../lib/attention.js';
 import { can } from '../lib/perms.js';
-import { fmtWhen, plural } from '../lib/util.js';
+import { fmtWhen, plural, nameList } from '../lib/util.js';
 import { plain } from '../lib/format.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Stack, Tile, RoomIcon, Seg, Pres, presenceLabel } from '../ui/kit.js';
 import { Stream, Message, focusComposer } from './stream.js';
 import { joinVoice, leaveVoice, toggleMute, toggleDeaf } from '../voice.js';
+import { leavingCall } from '../calls.js';
 import { toggleCamera, toggleScreen, mediaOf, canShareScreen } from '../voice.js';
 import { emit, toast } from '../store.js';
 import { RoomForm, RoomBrowser } from './modals.js';
 import { showProfile } from './people.js';
 import { PinsButton } from './media.js'; // pinned messages
+import { CallButtons, CallStrip, CallEndNote } from './calls.js'; // calls in direct conversations and groups
 
 const Back = () => S.ui.phone && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
 
 export function VoiceControls({ compact }) {
   const c = S.call;
   const size = compact ? 18 : 20;
+  const leave = c.dm ? 'Leave call' : 'Leave voice';
   return html`
     <button class=${`ib vc${c.muted ? ' on' : ''}`} aria-pressed=${String(c.muted)} aria-label=${c.muted ? 'Unmute' : 'Mute'} data-tip=${c.muted ? 'Unmute' : 'Mute'} onClick=${toggleMute}><${Icon} name=${c.muted ? 'mic-off' : 'mic'} size=${size} /></button>
     <button class=${`ib vc${c.deaf ? ' on' : ''}`} aria-pressed=${String(c.deaf)} aria-label=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} data-tip=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} onClick=${toggleDeaf}><${Icon} name=${c.deaf ? 'ear-off' : 'ear'} size=${size} /></button>
     <${MediaControls} c=${c} size=${size} compact=${compact} />
-    <button class="ib vc danger leave" aria-label="Leave voice" data-tip="Leave" onClick=${leaveVoice}><${Icon} name="leave" size=${size} /></button>`;
+    <button class="ib vc danger leave" aria-label=${leave} data-tip=${c.dm ? 'Hang up' : 'Leave'} onClick=${leaveVoice}><${Icon} name="leave" size=${size} /></button>`;
 }
 
 // Each person's line says what is really happening with their audio.
@@ -162,20 +165,31 @@ function MediaStage({ tiles, roomId }) {
 }
 // ---------- end camera and screen sharing ----------
 
-function Stage({ roomId }) {
+// The voice stage, for a voice room or a call in a direct conversation (dm):
+// the same faces, tiles, camera, screen share and controls.
+function Stage({ roomId, dm }) {
   const ids = (S.voice[roomId] || []).filter((id) => S.users[id]);
   const inCall = S.call?.room === roomId;
   const starting = inCall && S.call.status !== 'live';
-  const size = faceSize(ids.length);
+  // A call that is still ringing people shows them, waiting, beside the people in it.
+  const meta = dm ? S.calls[roomId] : null;
+  const ringingIds = inCall && !starting && meta ? meta.ringing.filter((id) => S.users[id] && !ids.includes(id)) : [];
+  const alone = dm && inCall && !starting && ids.length <= 1 && !ringingIds.length;
+  const size = faceSize(ids.length + ringingIds.length);
+  const ringNames = nameList(ringingIds.map((id) => S.users[id].name.split(' ')[0]));
   const status = !inCall ? null : starting
-    ? html`<span class="stage-conn wait" role="status">${S.call.status === 'mic' ? 'Waiting for your microphone\u2026' : 'Joining\u2026'}</span>`
-    : html`<span class="stage-conn ok" role="status"><i aria-hidden="true"></i>Connected</span>`;
+    ? html`<span class="stage-conn wait" role="status">${S.call.status === 'mic' ? 'Waiting for your microphone\u2026' : dm ? 'Calling\u2026' : 'Joining\u2026'}</span>`
+    : ringingIds.length && ids.length <= 1
+      ? html`<span class="stage-conn ring" role="status"><i aria-hidden="true"></i>Ringing ${ringNames}\u2026</span>`
+      : alone
+        ? html`<span class="stage-conn wait" role="status">${meta?.answered ? 'Everyone else left' : 'Nobody has picked up yet'}</span>`
+        : html`<span class="stage-conn ok" role="status"><i aria-hidden="true"></i>Connected</span>`;
   // Once someone in the call shows a camera or a screen, the stage becomes tiles.
   const tiles = inCall && !starting ? mediaTiles(ids, roomId) : [];
   const media = tiles.some((t) => t.kind !== 'face');
-  return html`<div class=${`stage${inCall ? ' in' : ''}${ids.length ? '' : ' empty'}${media ? ' media' : ''}`} data-size=${size} aria-label="Voice">
+  return html`<div class=${`stage${inCall ? ' in' : ''}${ids.length ? '' : ' empty'}${media ? ' media' : ''}${dm ? ' call' : ''}`} data-size=${size} role="region" aria-label=${dm ? 'Call' : 'Voice'}>
     <div class="stage-top">
-      <span class="stage-count"><${Icon} name="voice" size=${16} />${ids.length ? `${ids.length} in voice` : 'Voice'}</span>
+      <span class="stage-count"><${Icon} name=${dm ? 'phone' : 'voice'} size=${16} />${ids.length ? `${ids.length} in ${dm ? 'the call' : 'voice'}` : dm ? 'Call' : 'Voice'}</span>
       ${status}
     </div>
     ${media ? html`<${MediaStage} tiles=${tiles} roomId=${roomId} />` : ids.length
@@ -197,12 +211,19 @@ function Stage({ roomId }) {
               ${note && html`<span class="stage-note">${note}</span>`}
             </div>`;
           })}
+          ${ringingIds.map((id) => html`<div class="stage-person ringing" key=${id}>
+            <span class="stage-face"><${Avatar} user=${S.users[id]} size=${size} dim /></span>
+            <span class="stage-name"><span class="trunc">${S.users[id].name.split(' ')[0]}</span></span>
+            <span class="stage-note">Ringing\u2026</span>
+          </div>`)}
         </div>`
       : html`<p class="stage-empty">${starting ? 'Starting your microphone\u2026' : 'Nobody\u2019s in here yet. Join, and the room shows as live to everyone.'}</p>`}
     <div class="stage-acts">
       ${inCall && !starting
         ? html`<${VoiceControls} />`
-        : html`<button class="btn primary" disabled=${starting} aria-busy=${String(!!starting)} onClick=${() => joinVoice(roomId)}><${Icon} name="voice" size=${16} />${starting ? 'Joining\u2026' : 'Join voice'}</button>`}
+        : dm
+          ? html`<button class="btn live" disabled aria-busy="true"><${Icon} name="phone" size=${16} />${S.call?.status === 'mic' ? 'Starting your microphone\u2026' : 'Calling\u2026'}</button>`
+          : html`<button class="btn primary" disabled=${starting} aria-busy=${String(!!starting)} onClick=${() => leavingCall(roomId, () => joinVoice(roomId))}><${Icon} name="voice" size=${16} />${starting ? 'Joining\u2026' : 'Join voice'}</button>`}
     </div>
   </div>`;
 }
@@ -276,6 +297,7 @@ export function Conversation({ conv }) {
           ${here.length > 0 ? html`<span><i class="pres inline open" aria-hidden="true"></i><span class="num">${here.length}</span> here</span>` : html`<span>Just you</span>`}
           ${inVoice > 0 && html`<span class="bar-voice"><${Icon} name="voice" size=${16} /><span class="num">${inVoice}</span> in voice</span>`}
         </span>`}
+        ${meta.dm && html`<${CallButtons} conv=${conv} />`}
         <${PinsButton} conv=${conv} />
         <button class="ib" aria-label=${`Search in ${meta.title}`} data-tip="Search here" onClick=${() => go({ type: 'search', q: `in:"${meta.title.toLowerCase()}" ` })}><${Icon} name="search" /></button>
         ${!meta.user && html`<button class=${`ib${pane === 'people' ? ' on' : ''}`} aria-pressed=${String(pane === 'people')} aria-label=${`People, ${here.length} here`}
@@ -284,6 +306,9 @@ export function Conversation({ conv }) {
       </div>
     </header>
     ${meta.kind === 'voice' && html`<${Stage} roomId=${conv} />`}
+    ${meta.dm && (S.call?.room === conv
+      ? html`<${Stage} roomId=${conv} dm />`
+      : html`<${CallStrip} conv=${conv} /><${CallEndNote} conv=${conv} />`)}
     <${Stream} key=${conv} conv=${conv} intro=${html`<${Intro} conv=${conv} meta=${meta} />`}
       placeholder=${meta.user ? `Message ${first}` : `Message ${meta.title}`} />
   </section>`;

@@ -150,6 +150,7 @@ export function createModel(db) {
     if (row.reply_to) m.replyTo = row.reply_to;
     if (row.files) m.files = json(row.files, []);
     if (row.edited) m.edited = row.edited;
+    if (row.sys) m.call = json(row.sys, null); // a call record (server/hub.js)
     if (rx && Object.keys(rx).length) m.reactions = rx;
     return m;
   };

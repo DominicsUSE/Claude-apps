@@ -18,6 +18,7 @@ import { showProfile } from './people.js';
 import { EmojiPicker, EMOJI, QUICK } from './emoji.js';
 import { CustomEmoji, asTyped, customSuggest, parseKey, reactionFace, reactionLabel, resolveEmoji } from './emoji-custom.js'; // custom emoji per house
 import { mediaFile, pinMenuItem, PinnedMark, withPinLines, PinLine, VoiceButton, GifButton } from './media.js'; // voice messages, pins, GIFs
+import { CallLine } from './calls.js'; // call records, written by the server
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 const atBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 48;
@@ -541,7 +542,7 @@ export function Stream({ conv, intro, placeholder }) {
     e.stopPropagation();
   };
 
-  const lastId = all.length ? all[all.length - 1].id : null;
+  const lastId = all.filter((m) => !m.call).at(-1)?.id || null;
   return html`<div class="stream">
     ${!isOnline() && html`<div class="banner" role="status">
       <${Icon} name="offline" size=${16} /><span><b>You’re offline.</b> What you write will wait here and send when you’re back.</span>
@@ -563,6 +564,7 @@ export function Stream({ conv, intro, placeholder }) {
               if (it.type === 'day') { lit = false; return html`<div class="day" key=${it.key}>${fmtDay(it.ts)}</div>`; }
               if (it.type === 'new') { lit = false; return html`<div class="newline" key="new" role="separator" aria-label="New messages"><span>New</span></div>`; }
               if (it.type === 'pin') return html`<${PinLine} key=${it.key} conv=${conv} pin=${it.pin} />`;
+              if (it.m.call) { lit = false; return html`<${CallLine} key=${it.key} conv=${conv} m=${it.m} />`; }
               const toMe = forMe(S, conv, it.m);
               const cont = !toMe && it.grouped && lit;
               lit = toMe || cont;

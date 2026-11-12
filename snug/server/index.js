@@ -8,7 +8,7 @@ import { join, normalize, extname, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './db.js';
 import { createModel, newId } from './model.js';
-import { createHub } from './hub.js';
+import { createHub, ringMsFrom } from './hub.js';
 import { AUDIO_TYPES, uploadType, fileKind, parseRange, createMediaHttp } from './media.js'; // voice messages, GIFs
 import { createEmojiHttp, emojiReads } from './emoji.js'; // custom emoji per house
 import { createPush } from './push.js'; // notifications when Snug is closed (Web Push)
@@ -49,6 +49,8 @@ export async function startServer({
   quiet = false,
   // Tests only: let push subscriptions point at a mock push service on http://127.0.0.1.
   pushAllowLocal = process.env.SNUG_PUSH_ALLOW_LOCAL === '1',
+  // How long a call rings before it counts as missed. Tests shorten it.
+  ringMs = ringMsFrom(),
 } = {}) {
   const db = openDb(dataDir === ':memory:' ? ':memory:' : join(dataDir, 'snug.db'));
   const filesDir = join(dataDir === ':memory:' ? join(ROOT, 'data', 'test-files') : dataDir, 'files');
@@ -71,7 +73,7 @@ export async function startServer({
   };
 
   const server = createServer(handle);
-  const hub = createHub({ db, M, server, origins, ice, log });
+  const hub = createHub({ db, M, server, origins, ice, log, ringMs });
   // --- push notifications (server/push.js) ---
   // A new message that needs someone with no Snug open anywhere goes to their devices.
   const push = createPush({ db, M, hub, origins, log, allowLocal: pushAllowLocal });
@@ -82,6 +84,11 @@ export async function startServer({
     if (fresh && r?.m?.id) push.onMessage(r.m.conv || d.conv, r.m.id).catch((e) => log('push', e));
     return r;
   };
+  // Calls: someone with nothing open hears "Name is calling"; a missed call
+  // record goes out like any other message that needs them.
+  hub.hooks.ring = (user, ring) => push.onRing(user, ring).catch((e) => log('push', e));
+  hub.hooks.ringStop = (user, ring) => push.onRingStop(user, ring).catch((e) => log('push', e));
+  hub.hooks.message = (conv, id) => push.onMessage(conv, id).catch((e) => log('push', e));
   // --- end push notifications ---
 
   // Deleted messages can be restored for ten minutes; after that their content is gone for good.

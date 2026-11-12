@@ -211,6 +211,8 @@ const COLUMNS = [
   ['houses', 'public', 'INTEGER NOT NULL DEFAULT 0'],
   ['houses', 'topic', 'TEXT'],
   ['houses', 'rules', "TEXT NOT NULL DEFAULT ''"],
+  // Server-written lines in a conversation (call records), as JSON. Null for people's messages.
+  ['messages', 'sys', 'TEXT'],
 ];
 
 export function migrate(db) {

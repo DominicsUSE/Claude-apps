@@ -131,10 +131,15 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
   // level and Focused rules the client applies before notifying.
   function needs(user, conv, w, row) {
     if (row.author === user) return false;
+    // A call record needs only the people who missed it, and them even in a
+    // group set to "Only what needs me" (as needsMe says).
+    const missed = !!row.sys && missedBy(row, user);
+    if (row.sys && !missed) return false;
     const u = M.userRow(user);
     if (!u || u.presence === 'focus') return false;
     const level = levelFor(user, w);
     if (level === 'muted') return false;
+    if (missed) return true;
     const forMe = mentions(row.text, u.handle)
       || (!!row.reply_to && db.get('SELECT author FROM messages WHERE id = ?', row.reply_to)?.author === user);
     if (w.type === 'dm') {
@@ -143,6 +148,14 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
     }
     if (forMe) return true;
     return w.type === 'thread' && !!db.get('SELECT 1 FROM follows WHERE user = ? AND thread = ?', user, conv);
+  }
+
+  // A call record this person missed: someone else started it, and they
+  // neither took part nor declined (js/lib/attention.js missedCall).
+  function missedBy(row, user) {
+    let rec = null;
+    try { rec = JSON.parse(row.sys); } catch { /* not a call */ }
+    return !!rec && row.author !== user && !rec.joined?.includes(user) && !rec.declined?.includes(user);
   }
 
   function noteFor(user, conv, w, row) {
@@ -158,7 +171,9 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
     if (w.type === 'room') where = `in ${roomName(w.id)}`;
     else if (w.type === 'thread') where = `in a thread in ${w.dm ? dmTitle(w.dm) : roomName(w.parent)}`;
     else if (isGroup(w.dm)) where = `in ${dmTitle(w.dm)}`;
-    const text = plain(row.text) || 'Sent an attachment';
+    // A group call that others answered is still a missed call for this
+    // person: the note says so, as the conversation does.
+    const text = row.sys && missedBy(row, user) ? 'Missed call' : plain(row.text) || 'Sent an attachment';
     return {
       title: where ? `${who} ${where}` : who,
       body: text.length > PREVIEW ? `${text.slice(0, PREVIEW - 1)}…` : text,
@@ -214,6 +229,48 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
     return Promise.all(jobs);
   }
 
+  // Someone is calling a person with no Snug open anywhere: "Name is calling".
+  // Same quiet rules as messages (muted conversation, Focused), same rate.
+  // The note replaces any older one for that conversation. It stays on screen
+  // until dealt with, so when the ring stops (answered or declined on another
+  // device, timed out, the caller gave up) onRingStop replaces it with a quiet
+  // note that doesn't stay. Which rings were pushed, so only those get one:
+  // "user\ncall" -> true, removed when that ring stops (every ring stops).
+  const pushedRings = new Set();
+  function onRing(user, ring) {
+    if (hub.connected(user)) return Promise.resolve();
+    const u = M.userRow(user);
+    if (!u || u.presence === 'focus' || M.notifyOf(user, ring.dm) === 'muted') return Promise.resolve();
+    const subs = db.all('SELECT p.* FROM push_subs p JOIN sessions s ON s.hash = p.session AND s.expires > ? WHERE p.user = ?', Date.now(), user);
+    if (!subs.length || !rate.take(user)) return Promise.resolve();
+    const who = M.userRow(ring.from)?.name || 'Someone';
+    const d = db.get('SELECT name FROM dms WHERE id = ?', ring.dm);
+    const where = ring.group ? ` in ${d?.name || 'your group'}` : '';
+    const note = {
+      title: `${who} is calling`, body: `${ring.video ? 'Video call' : 'Voice call'}${where}`,
+      conv: ring.dm, tag: `snug:${ring.dm}`, call: true, ring: ring.call,
+    };
+    pushedRings.add(`${user}\n${ring.call}`);
+    return Promise.all(subs.map((s) => deliver(s, note)));
+  }
+
+  // That ring is over. Sent even if a socket is open now (they answered on
+  // the laptop; the phone still shows "is calling"), and outside the rate
+  // budget: there is at most one for each ring pushed, which used it. The
+  // service worker shows it only in place of that ring's own note, so it
+  // never adds a notification (sw.js).
+  const RING_OVER = { answered: 'You answered on another device', declined: 'You declined', timeout: 'Missed call', ended: 'Missed call' };
+  function onRingStop(user, ring) {
+    if (!pushedRings.delete(`${user}\n${ring.call}`)) return Promise.resolve();
+    const subs = db.all('SELECT p.* FROM push_subs p JOIN sessions s ON s.hash = p.session AND s.expires > ? WHERE p.user = ?', Date.now(), user);
+    if (!subs.length) return Promise.resolve();
+    const note = {
+      title: M.userRow(ring.from)?.name || 'Someone', body: RING_OVER[ring.reason] || 'Call ended',
+      conv: ring.dm, tag: `snug:${ring.dm}`, ringOver: ring.call,
+    };
+    return Promise.all(subs.map((s) => deliver(s, note)));
+  }
+
   // Forget devices whose sign-in has ended (signed out, signed out
   // everywhere, a new password, or expired).
   function prune() {
@@ -266,5 +323,5 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
     return true;
   }
 
-  return { http, onMessage, prune, publicKey: keys.publicKey, stats, reset: () => { rate.reset(); subsLimit.reset(); } };
+  return { http, onMessage, onRing, onRingStop, prune, publicKey: keys.publicKey, stats, reset: () => { rate.reset(); subsLimit.reset(); } };
 }

@@ -26,6 +26,8 @@ import { Friends } from './views/friends.js';
 import { Discover } from './views/discover.js';
 import { PersonPage } from './views/person.js';
 import { HousePage } from './views/house.js';
+import { IncomingCall } from './views/calls.js'; // calls in direct conversations and groups
+import { ringtonePlaying } from './calls.js';
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 
@@ -175,6 +177,7 @@ function Overlays() {
     ${u.pop && html`<${Pop} pop=${u.pop} key=${u.pop.k} />`}
     ${u.menu && html`<${Menu} menu=${u.menu} key=${u.menu.k} />`}
     <${Lightbox} />
+    <${IncomingCall} />
     <${Toasts} />`;
 }
 
@@ -360,4 +363,4 @@ async function boot() {
 }
 boot();
 // Exposed for the end-to-end checks and for poking at state in the console.
-window.snug = { S, emit, voiceStats };
+window.snug = { S, emit, voiceStats, ringtone: ringtonePlaying };

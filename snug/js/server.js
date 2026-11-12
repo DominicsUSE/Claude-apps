@@ -10,7 +10,7 @@
 // - Messages carry a client-made id; the server ignores a second copy of the
 //   same id, so a resend after a dropped connection never duplicates.
 import {
-  S, emit, toast, applySnapshot, useTransport, convMeta, jumpToMsg, signedOut, checkView, findMsg,
+  S, emit, toast, applySnapshot, useTransport, convMeta, jumpToMsg, signedOut, checkView, findMsg, localRing,
 } from './store.js';
 import { needsMe, levelOf, isThread, roomIds } from './lib/attention.js';
 import { plain } from './lib/format.js';
@@ -372,8 +372,26 @@ const EVENTS = {
   'event.gone'({ id }) {
     delete S.events[id];
   },
-  voice({ room, users, state }) {
+  voice({ room, users, state, call }) {
     if (users.length) { S.voice[room] = users; S.voiceState[room] = state; } else { delete S.voice[room]; delete S.voiceState[room]; }
+    // A call in a direct conversation carries its details (who started it, who is being rung).
+    if (call) S.calls[room] = call; else if (call === null) delete S.calls[room];
     fire('voice', { room, users, state });
+  },
+  // Calls (js/calls.js): someone is calling me, that ring stopped, a call ended.
+  'call.ring'(d) {
+    if (d.users) Object.assign(S.users, d.users);
+    S.ringing[d.dm] = localRing(d);
+    fire('call.ring', d);
+  },
+  'call.ring.stop'(d) {
+    const r = S.ringing[d.dm];
+    if (r && r.call === d.call) delete S.ringing[d.dm];
+    fire('call.ring.stop', d);
+  },
+  'call.ended'(d) {
+    if (S.ringing[d.dm]?.call === d.call) delete S.ringing[d.dm];
+    delete S.calls[d.dm];
+    fire('call.ended', d);
   },
 };

@@ -627,7 +627,6 @@ What the brief asked for, or a person would expect, that is not in 0.3.0, and wh
 - **Privacy controls.** No setting for who may send requests or direct messages. Needs preferences enforced in `friend.request` and `dm.open`.
 - **Voice device settings.** No microphone or speaker choice, level meter, push-to-talk or per-person volume. Needs `enumerateDevices`, a Voice settings page and per-peer gain.
 - **TURN relay and larger rooms.** Voice and video connect directly; strict networks need a relay (`SNUG_TURN_*` is ready). Above 12 people, or more than a few cameras at once, needs a media server (SFU).
-- **Calls in direct messages and groups.** Voice, camera and screen sharing exist only in voice rooms. A call to a person needs ringing, an incoming-call screen and a call state the server relays.
 - **Event reminders.** Saying you are going does not notify you at the start. Needs a scheduler and a rule in `attention.js` that counts a starting event you said yes to as needing you.
 - **Richer formatting.** Inline code and fenced code blocks exist; quotes, lists and spoilers do not. Needs new rules in `js/lib/format.js`.
 - **A setting for the newcomer first step.** Houses choose starter rooms, but the first step (`firstStep`) is only set by seed data; every other house falls back to "Say hello". Needs a field in `house.update` and a control on the Newcomers page.

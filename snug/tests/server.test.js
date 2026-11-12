@@ -15,7 +15,8 @@ import { seedDatabase } from '../server/seed.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'snug-test-'));
 let srv, base;
-const boot = async () => { srv = await startServer({ port: 0, dataDir: dir, quiet: true }); base = `http://127.0.0.1:${srv.port}`; };
+// Calls ring for 1.5 seconds here instead of 30 seconds (see the calls tests at the end).
+const boot = async () => { srv = await startServer({ port: 0, dataDir: dir, quiet: true, ringMs: 1500 }); base = `http://127.0.0.1:${srv.port}`; };
 test.before(boot);
 test.beforeEach(() => srv.resetLimits());
 test.after(async () => { await srv.close(); rmSync(dir, { recursive: true, force: true }); });
@@ -1637,3 +1638,417 @@ test('push: subscribe rules, encrypted delivery only while closed, muted and Foc
   } finally { await finish(); }
 });
 // --- end push notifications ---------------------------------------------------
+
+// --- calls in direct conversations and groups ---------------------------------
+// A call lives in a conversation and uses the voice machinery: only the people
+// in that conversation may start it, join it, decline it, see it or signal in
+// it. Rings go to every device; this server rings for 1500ms (boot, above)
+// instead of 30 seconds.
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+// Four people in a house: Ann and Ben share a conversation, Ann, Ben and Cal a
+// group. Dot is in the house but in neither.
+async function callPeople(tag) {
+  const a = await Client.make(`${tag}ann`, 'Ann Ash');
+  const b = await Client.make(`${tag}ben`, 'Ben Birch');
+  const c = await Client.make(`${tag}cal`, 'Cal Cedar');
+  const d = await Client.make(`${tag}dot`, 'Dot Dale');
+  const made = await a.ok('house.create', { name: `Calls ${tag}`, hue: 200 });
+  const { code } = await a.ok('invite.create', { house: made.house });
+  for (const p of [b, c, d]) await p.ok('invite.accept', { code });
+  const { id: dm } = await a.ok('dm.open', { users: [b.id] });
+  const { id: group } = await a.ok('dm.open', { users: [b.id, c.id] });
+  const hangout = srv.db.get("SELECT id FROM rooms WHERE house = ? AND kind = 'voice'", made.house).id;
+  return { a, b, c, d, dm, group, house: made.house, hangout };
+}
+// Another socket for the same person: a second device.
+const device = (p) => Object.assign(new Client(), { cookie: p.cookie, id: p.id }).connect();
+const record = (p, conv, pred = () => true) => p.next('msg', (e) => e.conv === conv && !!e.m.call && pred(e.m.call), 2500);
+
+test('calls: only the people in a conversation can start, join, decline, signal in or see its call', async () => {
+  const { a, b, c, d, dm, group } = await callPeople('cq');
+  for (const who of [c, d]) {
+    assert.match(await who.refused('call.start', { dm }), /not in that conversation/);
+    assert.match(await who.refused('call.join', { dm }), /not in that conversation/);
+    assert.match(await who.refused('call.decline', { dm }), /not in that conversation/);
+  }
+  assert.match(await d.refused('call.start', { dm: group }), /not in that conversation/);
+  assert.match(await a.refused('call.start', { dm: 'd_nothere' }), /not in that conversation/);
+  assert.match(await a.refused('call.start', { dm, video: 'yes' }), /Video is yes or no/);
+  assert.match(await a.refused('call.join', { dm }), /call has ended/, 'nothing to join yet');
+
+  const started = await a.ok('call.start', { dm, video: true });
+  assert.deepEqual(started.peers, []);
+  assert.match(started.call, /^call_/);
+  const ring = await b.next('call.ring', (r) => r.dm === dm);
+  assert.equal(ring.from, a.id);
+  assert.equal(ring.video, true);
+  assert.equal(ring.group, false);
+  assert.equal(ring.quiet, false);
+  assert.ok(ring.until > Date.now(), 'it says until when it rings');
+  assert.ok(ring.ms > 0 && ring.ms <= 1500, `and for how much longer, for devices whose clocks differ: ${ring.ms}`);
+  assert.equal(ring.users[a.id].name, 'Ann Ash');
+  const seen = await b.next('voice', (v) => v.room === dm && v.call?.ringing.includes(b.id));
+  assert.deepEqual(seen.users, [a.id]);
+  assert.equal(seen.call.by, a.id);
+  // People in the house who are not in the conversation don't find it in a
+  // fresh snapshot (nor hear about it; checked below); Ben does, ringing.
+  assert.equal((await d.ok('sync')).voice[dm], undefined);
+  assert.equal((await c.ok('sync')).voice[dm], undefined);
+  const bsnap = await b.ok('sync');
+  assert.deepEqual(bsnap.voice[dm].users, [a.id]);
+  assert.deepEqual(bsnap.ringing.map((r) => r.dm), [dm]);
+  // Signalling only between people in the same call; state only from someone in one.
+  assert.match(await a.refused('rtc', { to: b.id, data: { sdp: { type: 'offer', sdp: 'v=0' } } }), /isn’t in your voice room/);
+  assert.match(await d.refused('rtc', { to: a.id, data: { candidate: {} } }), /isn’t in your voice room/);
+  assert.match(await d.refused('voice.state', { muted: true }), /not in a call/);
+  assert.match(await c.refused('voice.state', { camera: true }), /not in a call/);
+  // Dot can't join someone else's call, even after it is answered.
+  await b.ok('call.join', { dm });
+  for (const who of [c, d]) {
+    await who.none('voice', (v) => v.room === dm);
+    await who.none('call.ring');
+    await who.none('call.ring.stop');
+  }
+  assert.match(await d.refused('call.join', { dm }), /not in that conversation/);
+  assert.match(await d.refused('rtc', { to: b.id, data: { candidate: {} } }), /isn’t in your voice room/);
+  await a.ok('rtc', { to: b.id, data: { sdp: { type: 'offer', sdp: 'v=0' } } });
+  assert.equal((await b.next('rtc')).from, a.id);
+  await b.ok('voice.state', { camera: true });
+  assert.equal((await a.next('voice', (v) => v.room === dm && v.state[b.id]?.camera)).state[b.id].camera, true);
+  await d.none('voice', (v) => v.room === dm);
+  await a.ok('voice.leave');
+  await record(b, dm);
+  for (const p of [a, b, c, d]) p.ws.close();
+});
+
+test('calls: ringing reaches every device; picking up on one stops the others; a duration record', async () => {
+  const { a, b, d, dm } = await callPeople('cr');
+  const b2 = await device(b);
+  await a.ok('call.start', { dm });
+  const r1 = await b.next('call.ring', (r) => r.dm === dm);
+  const r2 = await b2.next('call.ring', (r) => r.dm === dm);
+  assert.equal(r1.call, r2.call);
+  assert.equal(r1.video, false);
+  // Picking up on the first device.
+  assert.deepEqual((await b.ok('call.join', { dm })).peers, [a.id]);
+  assert.equal((await b2.next('call.ring.stop', (s) => s.dm === dm)).reason, 'answered');
+  assert.equal((await b.next('call.ring.stop', (s) => s.dm === dm)).reason, 'answered');
+  const live = await a.next('voice', (v) => v.room === dm && v.users.length === 2 && v.call?.answered);
+  assert.deepEqual(live.call.ringing, []);
+  await d.none('voice', (v) => v.room === dm);
+  // Ann pastes something while they talk.
+  const during = await a.ok('msg.send', { conv: dm, id: mid(), text: 'the link, for later' });
+  // Moving the call to the other device: the first is told, the call goes on.
+  assert.deepEqual((await b2.ok('call.join', { dm })).peers, [a.id]);
+  assert.equal((await b.next('voice.kicked', (k) => k.room === dm)).reason, 'elsewhere');
+  await a.none('call.ended', (e) => e.dm === dm, 150);
+  await b2.ok('rtc', { to: a.id, data: { candidate: {} } });
+  await wait(1100);
+  // Hanging up a one-to-one call ends it for both, and the record says how long it lasted.
+  await b2.ok('voice.leave');
+  assert.equal((await a.next('call.ended', (e) => e.dm === dm)).reason, 'ended');
+  const rec = await record(a, dm);
+  assert.equal(rec.m.author, a.id, 'the person who started the call');
+  assert.equal(rec.m.call.outcome, 'answered');
+  assert.ok(rec.m.call.dur >= 1000 && rec.m.call.dur < 10_000, `lasted ${rec.m.call.dur}ms`);
+  assert.deepEqual(rec.m.call.joined.sort(), [a.id, b.id].sort());
+  assert.match(rec.m.text, /^Call · \ds$/);
+  await record(b2, dm, (c) => c.outcome === 'answered');
+  // The record moves nobody's read marker (both took part, so it isn't news
+  // to either: the client and push skip it), so what Ann sent during the call
+  // is still unread for Ben.
+  assert.ok((srv.db.get('SELECT ts FROM reads WHERE user = ? AND conv = ?', b.id, dm)?.ts || 0) < during.m.ts, 'the message sent during the call is still unread');
+  await b.none('self', (d) => d.read?.[dm], 150);
+  assert.equal((await a.ok('sync')).voice[dm], undefined, 'nothing left live');
+  for (const p of [a, b, b2, d]) p.ws.close();
+});
+
+test('calls: declining a one-to-one call ends it for the caller with a declined record', async () => {
+  const { a, b, dm } = await callPeople('cd');
+  const urgent = await a.ok('msg.send', { conv: dm, id: mid(), text: 'urgent: read this first' });
+  const { call } = await a.ok('call.start', { dm });
+  await b.next('call.ring', (r) => r.dm === dm);
+  await b.ok('call.decline', { dm, call: 'call_notthisone' });
+  await a.none('call.ended', (e) => e.dm === dm, 150);
+  await b.ok('call.decline', { dm, call });
+  assert.equal((await b.next('call.ring.stop', (s) => s.dm === dm)).reason, 'declined');
+  assert.equal((await a.next('call.ended', (e) => e.dm === dm)).reason, 'declined');
+  const rec = await record(a, dm);
+  assert.equal(rec.m.call.outcome, 'declined');
+  assert.deepEqual(rec.m.call.declined, [b.id]);
+  assert.equal(rec.m.text, 'Declined call');
+  // Declining from the incoming screen doesn't read the conversation: Ann's
+  // message from before the call is still unread for Ben.
+  assert.ok((srv.db.get('SELECT ts FROM reads WHERE user = ? AND conv = ?', b.id, dm)?.ts || 0) < urgent.m.ts, 'declining marks nothing read');
+  // Declining when nothing rings changes nothing.
+  assert.deepEqual(await b.ok('call.decline', { dm }), {});
+  for (const p of [a, b]) p.ws.close();
+});
+
+test('calls: an unanswered call times out; the missed-call record is for the person who missed it and can’t be changed', async () => {
+  const { ringMsFrom, RING_MS } = await import('../server/hub.js');
+  assert.equal(RING_MS, 30_000);
+  assert.equal(ringMsFrom({}), 30_000);
+  assert.equal(ringMsFrom({ SNUG_RING_MS: '500' }), 30_000, 'outside the test runner the variable is ignored');
+  assert.equal(ringMsFrom({ SNUG_RING_MS: '500', NODE_TEST_CONTEXT: 'child-v8' }), 500);
+  assert.equal(ringMsFrom({ SNUG_RING_MS: '5', NODE_TEST_CONTEXT: 'child-v8' }), 30_000, 'not absurdly short');
+
+  const { a, b, dm } = await callPeople('ct');
+  const t0 = Date.now();
+  await a.ok('call.start', { dm });
+  await b.next('call.ring', (r) => r.dm === dm);
+  assert.equal((await b.next('call.ring.stop', (s) => s.dm === dm, 4000)).reason, 'timeout');
+  assert.ok(Date.now() - t0 >= 1400, 'rang for the whole (shortened) time');
+  assert.equal((await a.next('call.ended', (e) => e.dm === dm)).reason, 'no-answer');
+  const rec = await record(b, dm);
+  assert.equal(rec.m.call.outcome, 'missed');
+  assert.equal(rec.m.text, 'Missed call');
+  assert.equal(rec.m.author, a.id);
+  assert.deepEqual(rec.m.call.joined, [a.id]);
+  assert.ok((srv.db.get('SELECT ts FROM reads WHERE user = ? AND conv = ?', b.id, dm)?.ts || 0) < rec.m.ts, 'Ben missed it: it is unread for him');
+  // In the history and in the next snapshot, as a call.
+  assert.equal((await b.ok('history', { conv: dm })).msgs.at(-1).call.outcome, 'missed');
+  assert.equal((await b.ok('sync')).msgs[dm].at(-1).call.outcome, 'missed');
+  // Nobody can edit, delete, restore, react to, pin or thread off a call record, not even its author.
+  for (const p of [a, b]) {
+    assert.match(await p.refused('msg.edit', { conv: dm, id: rec.m.id, text: 'nope' }), /Call records/);
+    assert.match(await p.refused('msg.delete', { conv: dm, id: rec.m.id }), /Call records/);
+    assert.match(await p.refused('msg.restore', { conv: dm, id: rec.m.id }), /Call records/);
+    assert.match(await p.refused('react', { conv: dm, id: rec.m.id, emoji: '👍', on: true }), /Call records/);
+    assert.match(await p.refused('msg.pin', { conv: dm, id: rec.m.id }), /Call records/);
+    assert.match(await p.refused('msg.send', { conv: `t:${rec.m.id}`, id: mid(), text: 'a thread?' }), /don’t have threads/);
+  }
+  assert.equal(srv.db.get('SELECT deleted FROM messages WHERE id = ?', rec.m.id).deleted, null);
+  for (const p of [a, b]) p.ws.close();
+});
+
+test('calls: a group call rings the rest until each times out, goes on while anyone is in it, and a late member can join', async () => {
+  const { a, b, c, d, group } = await callPeople('cg');
+  const { call } = await a.ok('call.start', { dm: group });
+  const rb = await b.next('call.ring', (r) => r.dm === group);
+  assert.equal(rb.group, true);
+  await c.next('call.ring', (r) => r.dm === group);
+  // Ben declines: in a group that only stops his ring.
+  await b.ok('call.decline', { dm: group, call });
+  assert.equal((await b.next('call.ring.stop', (s) => s.dm === group)).reason, 'declined');
+  await a.none('call.ended', (e) => e.dm === group, 150);
+  assert.deepEqual((await a.next('voice', (v) => v.room === group && v.call?.ringing.length === 1 && !v.call.ringing.includes(b.id))).call.ringing, [c.id]);
+  // Cal's ring times out; the call stays live with Ann in it.
+  assert.equal((await c.next('call.ring.stop', (s) => s.dm === group, 4000)).reason, 'timeout');
+  await a.none('call.ended', (e) => e.dm === group, 200);
+  const after = (await c.ok('sync')).voice[group];
+  assert.deepEqual(after.users, [a.id]);
+  assert.deepEqual(after.call.ringing, []);
+  // Cal joins late, without being rung.
+  assert.deepEqual((await c.ok('call.join', { dm: group })).peers, [a.id]);
+  // Ann leaves; Cal is still in it, so it goes on.
+  await a.ok('voice.leave');
+  await a.none('call.ended', (e) => e.dm === group, 200);
+  assert.deepEqual((await b.next('voice', (v) => v.room === group && v.users.length === 1 && v.users[0] === c.id)).users, [c.id]);
+  // Ben changes his mind and joins from the strip.
+  assert.deepEqual((await b.ok('call.join', { dm: group })).peers, [c.id]);
+  await b.ok('voice.leave');
+  await c.ok('voice.leave');
+  assert.equal((await a.next('call.ended', (e) => e.dm === group)).reason, 'ended');
+  const rec = await record(a, group);
+  assert.equal(rec.m.call.outcome, 'answered');
+  assert.deepEqual(rec.m.call.joined.sort(), [a.id, b.id, c.id].sort());
+  await d.none('msg', (e) => e.conv === group);
+  for (const p of [a, b, c, d]) p.ws.close();
+});
+
+test('calls: one live call per person, across voice rooms and calls', async () => {
+  const { a, b, d, dm, hangout } = await callPeople('co');
+  await b.ok('voice.join', { room: hangout });
+  await d.next('voice', (v) => v.room === hangout && v.users.includes(b.id));
+  await a.ok('call.start', { dm });
+  // Ben is in a voice room, and still gets the call.
+  await b.next('call.ring', (r) => r.dm === dm);
+  await b.ok('call.join', { dm });
+  // Taking it moved him out of the room, which everyone in the house sees.
+  assert.deepEqual((await d.next('voice', (v) => v.room === hangout && !v.users.includes(b.id))).users, []);
+  await a.next('voice', (v) => v.room === dm && v.users.length === 2);
+  // Joining the room again hangs up the call.
+  await b.ok('voice.join', { room: hangout });
+  assert.equal((await a.next('call.ended', (e) => e.dm === dm)).reason, 'ended');
+  await record(a, dm, (c) => c.outcome === 'answered');
+  // And starting a call leaves the room.
+  await b.ok('call.start', { dm });
+  await d.next('voice', (v) => v.room === hangout && !v.users.includes(b.id));
+  await a.next('call.ring', (r) => r.dm === dm && r.from === b.id);
+  await b.ok('voice.leave');
+  assert.equal((await a.next('call.ring.stop', (s) => s.dm === dm)).reason, 'ended');
+  assert.equal((await a.next('call.ended', (e) => e.dm === dm)).reason, 'cancelled');
+  for (const p of [a, b, d]) p.ws.close();
+});
+
+test('calls: a dropped connection hangs up; the caller dropping stops the ring with a missed call', async () => {
+  const { a, b, dm } = await callPeople('cx');
+  await a.ok('call.start', { dm });
+  await b.next('call.ring', (r) => r.dm === dm);
+  await a.close();
+  assert.equal((await b.next('call.ring.stop', (s) => s.dm === dm)).reason, 'ended');
+  assert.equal((await b.next('call.ended', (e) => e.dm === dm)).reason, 'cancelled');
+  assert.equal((await record(b, dm)).m.call.outcome, 'missed');
+  await a.connect();
+  // In an answered call, the other side's connection dropping ends it.
+  await a.ok('call.start', { dm });
+  await b.ok('call.join', { dm });
+  await a.next('voice', (v) => v.room === dm && v.users.length === 2);
+  await b.close();
+  assert.equal((await a.next('call.ended', (e) => e.dm === dm)).reason, 'ended');
+  assert.equal((await record(a, dm, (c) => c.outcome === 'answered')).m.call.outcome, 'answered');
+  assert.equal(srv.hub.callOf(dm), null);
+  a.ws.close();
+});
+
+test('calls: a muted conversation rings quietly; starting calls is rate limited', async () => {
+  const { a, b, dm } = await callPeople('cl');
+  await b.ok('notify.set', { kind: 'dm', id: dm, level: 'muted' });
+  await a.ok('call.start', { dm });
+  assert.equal((await b.next('call.ring', (r) => r.dm === dm)).quiet, true, 'shown, but without a ringtone');
+  await a.ok('voice.leave');
+  srv.resetLimits();
+  for (let i = 0; i < 4; i++) { await a.ok('call.start', { dm }); await a.ok('voice.leave'); }
+  assert.match(await a.refused('call.start', { dm }), /a little fast/);
+  for (const p of [a, b]) p.ws.close();
+});
+
+test('calls: someone with Snug closed gets a "Name is calling" push that opens the conversation', async () => {
+  const { createServer } = await import('node:http');
+  const C = await import('node:crypto');
+  const pdir = mkdtempSync(join(tmpdir(), 'snug-callpush-'));
+  const ps = await startServer({ port: 0, dataDir: pdir, quiet: true, pushAllowLocal: true, ringMs: 800 });
+  const pbase = `http://127.0.0.1:${ps.port}`;
+  const got = [];
+  const mock = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const ch of req) chunks.push(ch);
+    got.push({ path: req.url, body: Buffer.concat(chunks) });
+    res.writeHead(201);
+    res.end();
+  });
+  await new Promise((r) => mock.listen(0, '127.0.0.1', r));
+  const socks = [];
+  try {
+    const ppost = (path, body, cookie) => fetch(pbase + path, { method: 'POST', headers: { 'content-type': 'application/json', origin: pbase, ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body) });
+    const sock = async (p) => {
+      await new Promise((resolve) => {
+        p.ws = new WebSocket(`ws://127.0.0.1:${ps.port}/ws`, { headers: { cookie: p.cookie, origin: pbase } });
+        socks.push(p.ws);
+        p.ws.on('message', (buf) => { const m = JSON.parse(buf); if (m.t === 'hello') resolve(); else if (m.t === 'ack') p.acks.get(m.id)?.(m); });
+      });
+      p.ok = (op, d = {}) => new Promise((resolve, reject) => {
+        const id = ++p.seq;
+        p.acks.set(id, (m) => (m.ok ? resolve(m.d) : reject(new Error(`${op}: ${m.error}`))));
+        p.ws.send(JSON.stringify({ t: 'op', id, op, d }));
+      });
+      return p;
+    };
+    const person = async (handle, name) => {
+      const res = await ppost('/api/register', { handle, name, password: 'a long password' });
+      return sock({ cookie: cookieOf(res), id: (await res.json()).user.id, seq: 0, acks: new Map() });
+    };
+    const ann = await person('pann', 'Ann Ash');
+    const ben = await person('pben', 'Ben Birch');
+    const made = await ann.ok('house.create', { name: 'Push calls', hue: 10 });
+    const { code } = await ann.ok('invite.create', { house: made.house });
+    await ben.ok('invite.accept', { code });
+    const { id: dm } = await ann.ok('dm.open', { users: [ben.id] });
+    const ua = C.createECDH('prime256v1');
+    ua.generateKeys();
+    const auth = C.randomBytes(16);
+    const sub = { endpoint: `http://127.0.0.1:${mock.address().port}/ben`, keys: { p256dh: ua.getPublicKey().toString('base64url'), auth: auth.toString('base64url') } };
+    assert.equal((await ppost('/api/push/subscribe', sub, ben.cookie)).status, 201);
+    const decrypt = (body) => {
+      const hmac = (k, x) => C.createHmac('sha256', k).update(x).digest();
+      const salt = body.subarray(0, 16);
+      const idlen = body[20];
+      const asPub = body.subarray(21, 21 + idlen);
+      const ct = body.subarray(21 + idlen);
+      const ikm = hmac(hmac(auth, ua.computeSecret(asPub)), Buffer.concat([Buffer.from('WebPush: info\0'), ua.getPublicKey(), asPub, Buffer.from([1])]));
+      const prk = hmac(salt, ikm);
+      const dec = C.createDecipheriv('aes-128-gcm', hmac(prk, Buffer.from('Content-Encoding: aes128gcm\0\x01')).subarray(0, 16), hmac(prk, Buffer.from('Content-Encoding: nonce\0\x01')).subarray(0, 12));
+      dec.setAuthTag(ct.subarray(-16));
+      const pt = Buffer.concat([dec.update(ct.subarray(0, -16)), dec.final()]);
+      let i = pt.length - 1;
+      while (pt[i] === 0) i--;
+      return JSON.parse(pt.subarray(0, i));
+    };
+    const pushes = async (n, ms = 2000) => { const end = Date.now() + ms; while (got.length < n && Date.now() < end) await wait(20); return got.splice(0); };
+    // While Ben has Snug open, the ring goes to his socket, not his phone.
+    await ann.ok('call.start', { dm });
+    assert.equal((await pushes(1, 300)).length, 0);
+    await ann.ok('voice.leave');
+    // The missed call record is not pushed either: he is connected.
+    assert.equal((await pushes(1, 300)).length, 0);
+    // Closed: "Ann Ash is calling", tagged so it replaces itself, then the missed call.
+    await new Promise((r) => { ben.ws.on('close', r); ben.ws.close(); });
+    for (let i = 0; i < 50 && ps.hub.connected(ben.id); i++) await wait(20);
+    ps.push.reset();
+    const { call: c1 } = await ann.ok('call.start', { dm, video: true });
+    const [ring] = await pushes(1);
+    const note = decrypt(ring.body);
+    assert.deepEqual({ title: note.title, body: note.body, conv: note.conv, tag: note.tag, call: note.call, ring: note.ring }, { title: 'Ann Ash is calling', body: 'Video call', conv: dm, tag: `snug:${dm}`, call: true, ring: c1 });
+    // The ring runs out: the ringing note (which stays on screen) is replaced
+    // by a quiet one, and the missed call record follows.
+    const after = (await pushes(2, 3000)).map((x) => decrypt(x.body));
+    assert.equal(after.length, 2);
+    const over = after.find((x) => x.ringOver);
+    assert.deepEqual({ title: over.title, body: over.body, tag: over.tag, ringOver: over.ringOver, call: over.call }, { title: 'Ann Ash', body: 'Missed call', tag: `snug:${dm}`, ringOver: c1, call: undefined });
+    const m = after.find((x) => !x.ringOver);
+    assert.equal(m.title, 'Ann Ash');
+    assert.equal(m.body, 'Missed call');
+    assert.equal(m.tag, `snug:${dm}`, 'the missed call replaces the ringing note');
+    await ann.ok('voice.leave').catch(() => {});
+    // Answered on another device: the phone's "is calling" note is replaced
+    // at once, though Ben now has Snug open.
+    ps.push.reset();
+    const { call: c2 } = await ann.ok('call.start', { dm });
+    assert.equal(decrypt((await pushes(1))[0].body).ring, c2);
+    const laptop = await sock({ cookie: ben.cookie, id: ben.id, seq: 0, acks: new Map() });
+    await laptop.ok('call.join', { dm });
+    const answered = decrypt((await pushes(1))[0].body);
+    assert.deepEqual({ body: answered.body, ringOver: answered.ringOver }, { body: 'You answered on another device', ringOver: c2 });
+    await ann.ok('voice.leave');
+    assert.equal((await pushes(1, 400)).length, 0, 'he took the call: no record pushed, no second ring-over');
+    await new Promise((r) => { laptop.ws.on('close', r); laptop.ws.close(); });
+    for (let i = 0; i < 50 && ps.hub.connected(ben.id); i++) await wait(20);
+    // A group Ben set to "Only what needs me": the call still rings his
+    // phone, and when Ann and Cal talk without him the record is pushed as a
+    // missed call (as the badge counts it), not "Call · 1s".
+    const cal = await person('pcal', 'Cal Cedar');
+    await cal.ok('invite.accept', { code });
+    const { id: group } = await ann.ok('dm.open', { users: [ben.id, cal.id] });
+    ps.db.run("INSERT INTO notify (user, place, level) VALUES (?, ?, 'mentions')", ben.id, group);
+    ps.push.reset();
+    ps.hub.resetLimits();
+    const { call: c3 } = await ann.ok('call.start', { dm: group });
+    assert.equal(decrypt((await pushes(1))[0].body).ring, c3);
+    await cal.ok('call.join', { dm: group });
+    const gover = decrypt((await pushes(1, 3000))[0].body);
+    assert.deepEqual({ body: gover.body, ringOver: gover.ringOver }, { body: 'Missed call', ringOver: c3 });
+    await ann.ok('voice.leave');
+    await cal.ok('voice.leave');
+    const grec = decrypt((await pushes(1, 2000))[0].body);
+    assert.equal(grec.ringOver, undefined);
+    assert.match(grec.title, /^Ann Ash in /);
+    assert.equal(grec.body, 'Missed call', 'missed, though the others talked');
+    assert.equal(grec.tag, `snug:${group}`);
+    // A plain message there, with no mention, still isn't pushed to him.
+    await cal.ok('msg.send', { conv: group, id: mid(), text: 'thanks for the chat' });
+    assert.equal((await pushes(1, 400)).length, 0);
+    // A muted conversation rings nobody's phone.
+    ps.push.reset();
+    ps.db.run("INSERT INTO notify (user, place, level) VALUES (?, ?, 'muted')", ben.id, dm);
+    await ann.ok('call.start', { dm });
+    assert.equal((await pushes(1, 400)).length, 0);
+    await ann.ok('voice.leave');
+  } finally {
+    for (const w of socks) w.terminate();
+    mock.close();
+    await ps.close();
+    rmSync(pdir, { recursive: true, force: true });
+  }
+});
+// --- end calls ----------------------------------------------------------------

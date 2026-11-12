@@ -14,6 +14,7 @@ import { Nook } from '../ui/brand.js';
 import { Avatar, Stack, Tile, RoomIcon, PRESENCE } from '../ui/kit.js';
 import { EventRow } from './events.js';
 import { joinVoice } from '../voice.js';
+import { leavingCall } from '../calls.js';
 import { openHouse, onlineIn, OnlineCount } from './nav.js';
 
 const first = (name) => (name || '').split(' ')[0];
@@ -136,7 +137,7 @@ function VoiceRow({ conv, people }) {
     </button>
     ${here
       ? html`<button class="btn quiet" onClick=${() => openConv(conv)}>You’re in</button>`
-      : html`<button class="btn" onClick=${() => { openConv(conv); joinVoice(conv); }} aria-label=${`Join ${room.name}`}><${Icon} name="voice" size=${16} />Join</button>`}
+      : html`<button class="btn" onClick=${() => leavingCall(conv, () => { openConv(conv); joinVoice(conv); })} aria-label=${`Join ${room.name}`}><${Icon} name="voice" size=${16} />Join</button>`}
   </div>`;
 }
 
@@ -149,7 +150,8 @@ function ConvRow({ conv, talking, typing, inVoice, newCount }) {
   const bits = [];
   if (talking) bits.push(html`<span>${plural(talking, 'person', 'people')} talking</span>`);
   if (typing) bits.push(html`<span class="is-typing">${typers.length === 1 ? `${typers[0]} is typing` : `${typing} typing`}</span>`);
-  if (inVoice) bits.push(html`<span class="is-live">${inVoice} in voice</span>`);
+  // A call in a direct conversation is mint, like every call mark; a voice room keeps its own.
+  if (inVoice) bits.push(meta.dm ? html`<span class="call-now">In a call</span>` : html`<span class="is-live">${inVoice} in voice</span>`);
   const a = attention(S, conv);
   const icon = meta.user ? html`<${Avatar} user=${meta.user} presence size=${32} />` : meta.dm ? html`<${Icon} name="people" size=${18} />` : html`<${RoomIcon} kind=${meta.kind} size=${18} />`;
   return html`<button class=${`home-row${newCount ? ' has-new' : ''}`} onClick=${() => openConv(conv)}>

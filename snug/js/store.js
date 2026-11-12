@@ -57,6 +57,11 @@ export const S = {
   prefs: { ...DEFAULT_PREFS, ...(local.get(KEYS.prefs) || {}) },
   drafts: local.get(KEYS.drafts) || {},
   typing: {}, speaking: {}, call: null, peers: {},
+  // Calls in direct conversations (js/calls.js): each live call's details by
+  // conversation, the calls ringing for me, and how my last call ended.
+  calls: {},       // { [dm]: { id, by, video, started, answered, group, ringing: [userId] } }
+  ringing: {},     // { [dm]: { dm, call, from, video, group, until, quiet } }
+  callEnd: null,   // { dm, reason, at }: shown for a few seconds after a call ends
   conn: { socket: 'idle' }, // 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed'
   ice: [],
   ui: freshUi(),
@@ -134,6 +139,9 @@ export function emit() {
   queueMicrotask(() => { queued = false; subs.forEach((f) => f()); });
 }
 
+// For modules that react to state rather than draw it (the ringtone).
+export function subscribe(f) { subs.add(f); return () => subs.delete(f); }
+
 export function useStore() {
   const [, set] = useState(0);
   // A layout effect, so the listener exists before anything can emit. A normal
@@ -169,6 +177,14 @@ export function loadCache(userId) {
 }
 
 // A full picture from the server. Messages still waiting to send are kept.
+// A ring as this device keeps it. The server says how long it still rings
+// (ms); `until` is counted on this device's clock from that, since the two
+// clocks need not agree.
+export function localRing(d) {
+  const ms = Number.isFinite(d.ms) ? Math.max(0, d.ms) : 30_000;
+  return { dm: d.dm, call: d.call, from: d.from, video: d.video, group: d.group, until: Date.now() + ms, quiet: d.quiet };
+}
+
 export function applySnapshot(d) {
   const pending = {};
   for (const [conv, list] of Object.entries(S.msgs)) {
@@ -179,7 +195,12 @@ export function applySnapshot(d) {
   Object.assign(S, blank(), d);
   S.voice = {};
   S.voiceState = {};
-  for (const [room, v] of Object.entries(d.voice || {})) { S.voice[room] = v.users; S.voiceState[room] = v.state; }
+  S.calls = {};
+  for (const [room, v] of Object.entries(d.voice || {})) {
+    if (v.users.length) { S.voice[room] = v.users; S.voiceState[room] = v.state; }
+    if (v.call) S.calls[room] = v.call;
+  }
+  S.ringing = Object.fromEntries((d.ringing || []).map((r) => [r.dm, localRing(r)]));
   for (const [conv, list] of Object.entries(pending)) {
     const have = new Set((S.msgs[conv] ||= []).map((m) => m.id));
     for (const m of list) if (!have.has(m.id)) S.msgs[conv].push(m);
@@ -198,6 +219,9 @@ export function signedOut() {
   S.ready = false;
   S.auth = 'out';
   S.call = null;
+  S.calls = {};
+  S.ringing = {};
+  S.callEnd = null;
   local.del(KEYS.last);
   S.ui = freshUi();
   // The next person to sign in starts at home, not on the last person's page.

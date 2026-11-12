@@ -389,6 +389,47 @@ app.on("activate", () => { if (win && !win.isVisible()) showWindow(); });
 // (a notification was clicked) and read or change the keep-running setting.
 ipcMain.on("window:show", (e) => { if (fromSnug(e.senderFrame.url)) showWindow(); });
 ipcMain.handle("keep:get", (e) => (fromSnug(e.senderFrame.url) ? trayPrefs().keepRunning : null));
+// An incoming call: bring the window up, from the tray if it is there, flash
+// it in the taskbar, and show a system notification that opens it. The page
+// shows the incoming-call screen itself (Accept, Decline). The window comes
+// up without taking the focus: a Space or Enter typed in another app must not
+// land on Accept. When the ring stops (answered, declined, missed) the page
+// says so and the notification goes. The last few are recorded in
+// globalThis.snugCallNotes for the desktop test.
+globalThis.snugCallNotes = [];
+const callNotes = new Map(); // conversation -> its ring's notification
+globalThis.snugCallNotesOpen = () => callNotes.size; // for the desktop test
+function closeCallNote(dm) {
+  const n = callNotes.get(dm);
+  callNotes.delete(dm);
+  if (n) { try { n.close(); } catch { /* already gone */ } }
+  if (!callNotes.size) { try { win?.flashFrame(false); } catch { /* not on every system */ } }
+}
+ipcMain.on("call:incoming", (e, info) => {
+  if (!fromSnug(e.senderFrame.url)) return;
+  const dm = String(info?.dm || "").slice(0, 80);
+  const title = String(info?.title || "Someone is calling").slice(0, 120);
+  const body = String(info?.body || "").slice(0, 160);
+  globalThis.snugCallNotes.push({ title, body });
+  if (globalThis.snugCallNotes.length > 20) globalThis.snugCallNotes.shift();
+  if (!win) createWindow();
+  else if (!win.isVisible()) win.showInactive();
+  try { win?.flashFrame(true); } catch { /* not on every system */ }
+  if (NativeNotification.isSupported()) {
+    closeCallNote(dm);
+    const n = new NativeNotification({ title, body, silent: true, urgency: "critical" });
+    n.on("click", () => { closeCallNote(dm); showWindow(); });
+    n.on("close", () => { if (callNotes.get(dm) === n) callNotes.delete(dm); });
+    callNotes.set(dm, n);
+    // At most a handful ring at once; never let the map grow.
+    while (callNotes.size > 8) closeCallNote(callNotes.keys().next().value);
+    n.show();
+  }
+});
+ipcMain.on("call:over", (e, info) => {
+  if (!fromSnug(e.senderFrame.url)) return;
+  closeCallNote(String(info?.dm || "").slice(0, 80));
+});
 ipcMain.handle("keep:set", (e, on) => (fromSnug(e.senderFrame.url) ? setKeepRunning(on === true) : null));
 // ---------- end running in the tray ----------
 

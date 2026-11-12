@@ -1,7 +1,9 @@
-// Voice rooms over WebRTC. Audio goes directly between people (a full mesh,
-// up to 12 in a room); the Snug server only passes the connection offers,
-// answers and network candidates between them, and only between people in
-// the same room.
+// Voice over WebRTC, for a house's voice rooms and for calls in direct
+// conversations and groups alike: both are a "voice place" (S.call.room is a
+// room id or a conversation id) with the same membership on the server.
+// Audio goes directly between people (a full mesh, up to 12 in a place); the
+// Snug server only passes the connection offers, answers and network
+// candidates between them, and only between people in the same place.
 //
 // Whoever joins calls everyone already there; the people already there answer.
 // After that, either side may renegotiate (a camera or a screen share added or
@@ -249,9 +251,27 @@ on('voice', ({ room, users }) => {
   for (const u of [...peers.keys()]) if (!users.includes(u)) dropPeer(u);
   for (const u of [...pendingKinds.keys()]) if (!users.includes(u)) pendingKinds.delete(u);
 });
-on('voice.kicked', () => { if (S.call) { stop(); toast('You were disconnected from the voice room.'); } });
+on('voice.kicked', ({ room, reason } = {}) => {
+  if (!S.call || (room && S.call.room !== room)) return;
+  const dm = S.call.dm;
+  stop();
+  if (reason === 'elsewhere') toast(dm ? 'You took this call on another device.' : 'You joined voice on another device.');
+  else toast(dm ? 'You were disconnected from the call.' : 'You were disconnected from the voice room.');
+});
+// A call ended for everyone (hung up, declined, nobody answered): close it here too.
+on('call.ended', ({ dm, reason }) => {
+  if (S.call?.room !== dm) return;
+  stop();
+  S.callEnd = { dm, reason, at: Date.now() };
+  emit();
+});
 // The server drops you from voice when the connection goes; say so instead of pretending.
-on('close', () => { if (S.call) { stop(); toast('Voice disconnected because the connection dropped. Join again when you’re back.'); } });
+on('close', () => {
+  if (!S.call) return;
+  const dm = S.call.dm;
+  stop();
+  toast(dm ? 'The call dropped because the connection did. Call again when you’re back.' : 'Voice disconnected because the connection dropped. Join again when you’re back.');
+});
 
 function stop() {
   for (const u of [...peers.keys()]) dropPeer(u);
@@ -271,12 +291,21 @@ function stop() {
   emit();
 }
 
-export async function joinVoice(room) {
-  if (S.call?.room === room) return;
+// Join a voice place. For a direct conversation or group this is a call:
+// { start: true } starts one (and rings the others) unless one is already
+// live there, in which case it joins it; { video: true } turns the camera on
+// once connected. Resolves to how it went: 'ok' (in, or already in),
+// 'mic' (no microphone: the server was told nothing), 'offline' or 'error'
+// (already said in a toast).
+export async function joinVoice(room, { start = false, video = false } = {}) {
+  if (S.call?.room === room) { if (video && !S.call.camera && S.call.status === 'live') toggleCamera(); return 'ok'; }
+  const dm = !!S.dms[room];
   if (S.call) leaveVoice();
-  if (S.conn.socket !== 'open') { toast('You’re offline, so you can’t join voice right now.'); return; }
-  if (!navigator.mediaDevices?.getUserMedia) { toast('This browser can’t use a microphone here. Voice needs a secure (https) page.'); return; }
-  S.call = { room, muted: false, deaf: false, camera: false, screen: false, status: 'mic' };
+  const what = dm ? 'call' : 'join voice';
+  if (S.conn.socket !== 'open') { toast(`You’re offline, so you can’t ${what} right now.`); return 'offline'; }
+  if (!navigator.mediaDevices?.getUserMedia) { toast(`This browser can’t use a microphone here. ${dm ? 'Calls need' : 'Voice needs'} a secure (https) page.`); return 'mic'; }
+  if (S.callEnd?.dm === room) S.callEnd = null;
+  S.call = { room, dm, muted: false, deaf: false, camera: false, screen: false, status: 'mic', video: !!video };
   // The screen's sound goes in its own stream, so adding it never restarts the picture.
   out = { camera: new MediaStream(), screen: new MediaStream(), screenAudio: new MediaStream() };
   emit();
@@ -286,20 +315,26 @@ export async function joinVoice(room) {
     S.call = null;
     emit();
     toast(errText(e));
-    return;
+    return 'mic';
   }
   stopMyLevel = watchLevel(S.me, mic);
   try {
     S.call.status = 'joining';
     emit();
-    const r = await call('voice.join', { room });
-    if (!S.call) return;
+    const r = dm
+      ? await call(start ? 'call.start' : 'call.join', { dm: room, video: !!video })
+      : await call('voice.join', { room });
+    if (S.call?.room !== room) return 'ok';
     S.call.status = 'live';
+    S.call.id = r.call || null;
     emit();
     for (const u of r.peers) peer(u, true);
+    if (video) toggleCamera();
+    return 'ok';
   } catch (e) {
     stop();
-    toast(e.offline ? 'You’re offline, so you can’t join voice right now.' : e.message);
+    toast(e.offline ? `You’re offline, so you can’t ${what} right now.` : e.message);
+    return 'error';
   }
 }
 
@@ -482,7 +517,11 @@ export async function voiceStats() {
   for (const [u, p] of peers) {
     let bytes = 0;
     (await p.pc.getStats()).forEach((r) => { if (r.type === 'inbound-rtp' && r.kind === 'audio') bytes += r.bytesReceived; });
-    out[u] = { state: p.pc.connectionState, bytes, tx: p.pc.getTransceivers().length, screenSound: !!p.screenAudio?.srcObject?.getAudioTracks().length, glare: p.glare || 0 };
+    out[u] = {
+      state: p.pc.connectionState, bytes, tx: p.pc.getTransceivers().length, screenSound: !!p.screenAudio?.srcObject?.getAudioTracks().length, glare: p.glare || 0,
+      // The remote voice really playing: its element's clock moves on.
+      audioTime: p.audio ? p.audio.currentTime : null, audioPaused: p.audio ? p.audio.paused : null,
+    };
   }
   return out;
 }

@@ -25,6 +25,7 @@ import { RoomForm, Confirm, Invite, AddHouse, NewMessage, RoomBrowser } from './
 import { Settings, HouseSettings } from './settings.js';
 import { VoiceControls } from './conversation.js';
 import { joinVoice } from '../voice.js';
+import { leavingCall } from '../calls.js';
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
@@ -317,6 +318,10 @@ function recentConvs(n = 8) {
   return [...S.dmOrder, ...rooms].filter((c) => last(c)).sort((a, b) => last(b) - last(a)).slice(0, n);
 }
 
+// A mint mark on a conversation with a call going on in it.
+const callLive = (id) => (S.voice[id] || []).length > 0;
+const CallMark = () => html`<span class="call-mark" role="img" aria-label="Call in progress" data-tip="Call in progress"><${Icon} name="phone" size=${14} /></span>`;
+
 function convIcon(id) {
   const meta = convMeta(id);
   if (meta.user) return html`<${Avatar} user=${meta.user} presence />`;
@@ -344,7 +349,7 @@ function HomeCtx() {
         ${recent.map((id) => {
           const meta = convMeta(id);
           return html`<${Row} key=${id} icon=${convIcon(id)} label=${meta.title} hint=${meta.house ? S.houses[meta.house].name : null}
-            sel=${cur === id} attn=${quietAttn(attention(S, id))} muted=${levelOf(S, id) === 'muted'}
+            sel=${cur === id} attn=${quietAttn(attention(S, id))} muted=${levelOf(S, id) === 'muted'} end=${meta.dm && callLive(id) ? html`<${CallMark} />` : null}
             onClick=${() => openConv(id)} onMenu=${(pos) => (meta.house ? roomMenu(id, pos) : dmMenu(id, pos))} />`;
         })}
       </div>`}
@@ -361,6 +366,7 @@ export function NavDirect() {
       const meta = convMeta(id);
       if (S.ui.phone) return html`<${DmRow} key=${id} id=${id} />`;
       return html`<${Row} key=${id} icon=${convIcon(id)} label=${meta.title} sel=${cur === id} attn=${attention(S, id)} muted=${levelOf(S, id) === 'muted'}
+        end=${callLive(id) ? html`<${CallMark} />` : null}
         onClick=${() => openConv(id)} onMenu=${(pos) => dmMenu(id, pos)} />`;
     })}
     ${!S.dmOrder.length && html`<p class="ctx-note">No conversations yet. Start one with the plus, or from someone’s profile.</p>`}
@@ -383,7 +389,7 @@ function DmRow({ id }) {
     <span class="row-ic">${face}</span>
     <span class="grow row-two">
       <span class="row-two-top"><span class="trunc grow">${meta.title}</span>${last && html`<span class="row-two-time num">${fmtWhen(last.ts)}</span>`}</span>
-      <span class="row-two-sub"><span class="trunc grow">${text}</span><${Marker} attn=${a} /></span>
+      <span class="row-two-sub">${callLive(id) ? html`<span class="trunc grow call-now">In a call now</span><${CallMark} />` : html`<span class="trunc grow">${text}</span>`}<${Marker} attn=${a} /></span>
     </span>
   </button>`;
 }
@@ -432,7 +438,7 @@ function RoomRow({ id }) {
   const threads = threadsOf(S, id).filter((t) => (S.followed[t] && unreadOf(S, t).count > 0) || t === pane);
   return html`
     ${voice && S.call?.room !== id
-      ? html`<div class="row-wrap">${row}<div class="row-acts"><button class="ib sm" aria-label=${`Join ${room.name}`} data-tip="Join" onClick=${() => joinVoice(id)}><${Icon} name="plus" size=${16} /></button></div></div>`
+      ? html`<div class="row-wrap">${row}<div class="row-acts"><button class="ib sm" aria-label=${`Join ${room.name}`} data-tip="Join" onClick=${() => leavingCall(id, () => joinVoice(id))}><${Icon} name="plus" size=${16} /></button></div></div>`
       : row}
     ${threads.map((t) => {
       const u = unreadOf(S, t);
@@ -501,16 +507,20 @@ function HouseCtx({ id }) {
 
 // ---------- Your panel, pinned at the bottom ----------
 
-// Appears only while you are in a voice room, wherever you go.
+// Appears only while you are in a voice room or a call, wherever you go, and
+// takes you back to it.
 export function LiveDock() {
   const c = S.call;
-  if (!c || !S.rooms[c.room]) return null;
+  if (!c) return null;
   const room = S.rooms[c.room];
+  const meta = !room && c.dm ? convMeta(c.room) : null;
+  if (!room && !meta) return null;
   const users = (S.voice[c.room] || []).map((id) => S.users[id]).filter(Boolean);
-  return html`<div class="dock" role="region" aria-label="Voice room you are in">
-    <button class="dock-head" onClick=${() => openConv(c.room)}>
-      <${Icon} name="voice" size=${16} />
-      <span class="trunc"><span class="dock-name">${room.name}</span> <span class="faint">${S.houses[room.house].name}</span></span>
+  const sub = room ? S.houses[room.house].name : c.status !== 'live' ? 'Calling\u2026' : (S.calls[c.room]?.ringing.length && users.length <= 1 ? 'Ringing\u2026' : 'Call');
+  return html`<div class=${`dock${meta ? ' call' : ''}`} role="region" aria-label=${room ? 'Voice room you are in' : 'Call you are in'}>
+    <button class="dock-head" onClick=${() => openConv(c.room)} aria-label=${room ? `Back to ${room.name}` : `Back to the call with ${meta.title}`}>
+      <${Icon} name=${room ? 'voice' : 'phone'} size=${16} />
+      <span class="trunc"><span class="dock-name">${room ? room.name : meta.title}</span> <span class="faint">${sub}</span></span>
     </button>
     <div class="dock-row"><${Stack} users=${users} max=${4} size=${24} /><${VoiceControls} compact /></div>
   </div>`;

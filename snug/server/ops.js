@@ -71,6 +71,7 @@ export function createOps({ db, M, hub }) {
     if (M.thread(conv)) return;
     const root = M.liveMsg(conv.slice(2));
     if (!root || root.conv.startsWith('t:') || !M.canRead(user, root.conv)) fail('That thread’s message no longer exists.');
+    if (root.sys) fail('Calls don’t have threads.');
     db.run('INSERT OR IGNORE INTO threads (id, conv, root) VALUES (?, ?, ?)', conv, root.conv, root.id);
   }
 
@@ -197,6 +198,13 @@ export function createOps({ db, M, hub }) {
     return out
       .sort((a, b) => (b.mutualFriends - a.mutualFriends) || (b.mutualHouses.length - a.mutualHouses.length) || (on(a) - on(b)) || a.user.name.localeCompare(b.user.name))
       .slice(0, 30);
+  }
+
+  // A direct conversation or group this person is in, or a refusal.
+  function inConversation(user, v) {
+    const dm = id(v, 'conversation');
+    if (!db.get('SELECT 1 FROM dms WHERE id = ?', dm) || !M.inDm(dm, user)) fail('You’re not in that conversation.');
+    return dm;
   }
 
   // "user" may not send "other" a new friend request for a day.
@@ -868,7 +876,7 @@ export function createOps({ db, M, hub }) {
       const room = M.room(id(d.room, 'room')) || fail('That room doesn’t exist.');
       member(c.user, room.house);
       if (room.kind !== 'voice') fail('That isn’t a voice room.');
-      return { peers: hub.voiceJoin(c, room) };
+      return { peers: hub.voiceJoin(c, room.id) };
     },
     'voice.leave': (c) => { hub.voiceLeave(c.user); return {}; },
     // Mute, deafen, camera and screen flags. Each is optional; when present it
@@ -881,7 +889,24 @@ export function createOps({ db, M, hub }) {
         if (typeof d[k] !== 'boolean') fail('That voice state isn’t valid.');
         s[k] = d[k];
       }
-      hub.voiceState(c.user, s);
+      if (!hub.voiceState(c.user, s)) fail('You’re not in a call or a voice room.');
+      return {};
+    },
+    // Calls in direct conversations and groups. Only the people in the
+    // conversation may start one, join it, decline it or see it; signalling
+    // (rtc, voice.state) then follows the same voice membership as rooms.
+    'call.start'(c, d) {
+      const dm = inConversation(c.user, d.dm);
+      if (d.video !== undefined && typeof d.video !== 'boolean') fail('Video is yes or no.');
+      return hub.callStart(c, dm, d.video === true);
+    },
+    'call.join'(c, d) {
+      const dm = inConversation(c.user, d.dm);
+      return hub.callJoin(c, dm);
+    },
+    'call.decline'(c, d) {
+      const dm = inConversation(c.user, d.dm);
+      hub.callDecline(c.user, dm, d.call === undefined ? undefined : id(d.call, 'call'));
       return {};
     },
     rtc(c, d) {
@@ -897,6 +922,16 @@ export function createOps({ db, M, hub }) {
   Object.assign(ops, createMediaOps({ db, M, hub, fail, ops }));
   // Custom emoji (server/emoji.js): emoji.* ops, and msg.send, msg.edit and react taught about <:name:id>.
   Object.assign(ops, createEmojiOps({ db, M, hub, fail, ops }));
+  // Call records are written by the server and belong to nobody: they can't
+  // be edited, deleted, restored, reacted to or pinned, whoever wrote them.
+  for (const name of ['msg.edit', 'msg.delete', 'msg.restore', 'react', 'msg.pin']) {
+    const base = ops[name];
+    if (!base) continue;
+    ops[name] = (c, d) => {
+      if (typeof d.id === 'string' && M.msg(d.id)?.sys) fail('Call records can’t be changed.');
+      return base(c, d);
+    };
+  }
 
   return ops;
 }

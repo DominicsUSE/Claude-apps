@@ -1,6 +1,6 @@
 {
   "name": "snug",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "description": "A calm place for your people: houses, rooms, threads and voice.",
@@ -9,6 +9,7 @@
     "seed": "node --disable-warning=ExperimentalWarning server/seed.js",
     "test": "node --disable-warning=ExperimentalWarning --test tests/logic.test.js tests/server.test.js",
     "test:e2e": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e*.test.js",
+    "test:e2e:calls": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-calls.test.js",
     "test:e2e:video": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-video.test.js",
     "test:e2e:emoji": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-emoji.test.js",
     "test:e2e:notify": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-notify.test.js",

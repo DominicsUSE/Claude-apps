@@ -23,5 +23,14 @@ if (location.protocol === "http:" || location.protocol === "https:") {
     show: () => ipcRenderer.send("window:show"),
     getKeepRunning: () => ipcRenderer.invoke("keep:get"),
     setKeepRunning: (on) => ipcRenderer.invoke("keep:set", on === true),
+    // Someone is calling: the app brings its window up (from the tray too) and
+    // shows a system notification. Only short text crosses.
+    incomingCall: (info) => ipcRenderer.send("call:incoming", {
+      dm: String(info?.dm || "").slice(0, 80),
+      title: String(info?.title || "").slice(0, 120),
+      body: String(info?.body || "").slice(0, 160),
+    }),
+    // That ring is over: its notification goes.
+    callOver: (info) => ipcRenderer.send("call:over", { dm: String(info?.dm || "").slice(0, 80) }),
   });
 }

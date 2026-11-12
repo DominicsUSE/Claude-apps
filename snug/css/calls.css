@@ -1,0 +1,120 @@
+/* Calls in direct conversations and groups: header buttons, the incoming-call
+   screen, the strip that offers Join, the note when a call ends, and call
+   records in the conversation. Tokens only. Mint means live and in-call, so
+   Accept and Join are mint; coral stays for what is for you (a missed call).
+   People are circles, controls are rectangles. */
+
+/* ---------- Mint controls ----------
+   mint-ink is mint in the dark theme and a deeper mint on paper, so the text
+   on it (the page colour) keeps its contrast in both. */
+.btn.live { background: var(--mint-ink); color: var(--bg-1); border-color: transparent; font-weight: var(--w-semibold); }
+.btn.live:hover { background: color-mix(in srgb, var(--mint-ink) 88%, var(--text-1)); }
+.btn.live:active { background: color-mix(in srgb, var(--mint-ink) 78%, var(--text-1)); }
+.btn.live:focus-visible { outline-color: var(--text-1); }
+.btn.live-soft { background: var(--mint-soft); color: var(--mint-ink); border-color: color-mix(in srgb, var(--mint) 40%, transparent); font-weight: var(--w-medium); }
+.btn.live-soft:hover { background: color-mix(in srgb, var(--mint) 22%, var(--bg-1)); }
+.btn.live-soft:active { background: color-mix(in srgb, var(--mint) 30%, var(--bg-1)); }
+.btn.live[disabled], .btn.live-soft[disabled] { background: var(--bg-3); color: var(--text-disabled); border-color: transparent; }
+
+/* ---------- Header buttons ---------- */
+/* Not usable right now: still hoverable, so the tooltip can say why. */
+.ib[aria-disabled="true"] { color: var(--text-disabled); cursor: not-allowed; }
+.ib[aria-disabled="true"]:hover, .ib[aria-disabled="true"]:active { background: none; color: var(--text-disabled); }
+
+/* ---------- The call mark in lists ---------- */
+.call-mark { display: inline-grid; place-items: center; width: var(--av-xs); height: 20px; border-radius: var(--r-full); background: var(--mint-soft); color: var(--mint-ink); flex: none; }
+.call-now { color: var(--mint-ink); font-weight: var(--w-medium); }
+.dock.call .dock-head .ic { color: var(--mint-ink); }
+
+/* ---------- Strip: a call is live here, or one just ended ---------- */
+.call-strip {
+  flex: none; display: flex; align-items: center; gap: var(--s-3);
+  padding: var(--s-2) var(--s-4); min-height: var(--h-lg);
+  border-bottom: 1px solid var(--line-subtle); background: var(--bg-1); --bg: var(--bg-1);
+  animation: drop-in var(--m-smooth) var(--ease-out);
+}
+.call-strip.live { background: color-mix(in srgb, var(--mint) 7%, var(--bg-1)); --bg: color-mix(in srgb, var(--mint) 7%, var(--bg-1)); }
+.call-strip-text { display: grid; min-width: 0; gap: 2px; font-size: var(--t-14); line-height: var(--lh-ui); }
+.call-strip-text b { font-weight: var(--w-semibold); }
+.call-strip-text .faint { font-size: var(--t-13); }
+.call-strip .btn { height: var(--h-sm); padding: 0 var(--s-3); gap: var(--s-2); }
+.call-dot { width: var(--pres); height: var(--pres); border-radius: 50%; background: var(--mint); flex: none; }
+.call-strip .stack .avatar { --sz: var(--av-xs); }
+.call-ic { display: inline-grid; place-items: center; width: var(--av-sm); height: var(--av-sm); border-radius: var(--r-full); background: var(--bg-3); color: var(--text-2); flex: none; }
+.call-strip.declined .call-ic, .call-strip.no-answer .call-ic { background: var(--amber-soft); color: var(--amber-ink); }
+
+/* While ringing out: a waiting status, and the people being rung as dim faces. */
+.stage-conn.ring { color: var(--text-2); font-weight: var(--w-medium); }
+.stage-conn.ring i { width: var(--pres); height: var(--pres); border-radius: 50%; background: var(--amber); animation: breathe 1.4s var(--ease-in-out) infinite; }
+.stage-person.ringing .stage-name { color: var(--text-3); }
+.stage.call .stage-count .ic { color: var(--mint-ink); }
+
+/* ---------- Incoming call ----------
+   A floating card at the top of the window (a bottom sheet on a phone): the
+   caller's circle, their name, what kind of call, and three controls. */
+.incoming {
+  position: fixed; z-index: 65; top: var(--s-4); left: 50%; transform: translateX(-50%);
+  width: min(400px, calc(100% - var(--s-8)));
+  padding: var(--s-5); display: grid; gap: var(--s-4);
+  background: var(--bg-2); --bg: var(--bg-2); color: var(--text-1);
+  border: 1px solid var(--line-strong); border-radius: var(--r-lg); box-shadow: var(--shadow-lg);
+  animation: drop-in var(--m-smooth) var(--ease-out);
+}
+.incoming:focus-within { border-color: color-mix(in srgb, var(--mint) 45%, var(--line-strong)); }
+.inc-who { display: flex; align-items: center; gap: var(--s-4); min-width: 0; }
+.inc-face { position: relative; flex: none; border-radius: var(--r-full); }
+/* A ring that breathes outward while it rings; still when motion is off. */
+.inc-face.ringing::after {
+  content: ""; position: absolute; inset: -6px; border-radius: var(--r-full);
+  box-shadow: 0 0 0 2px var(--mint); opacity: 0.6; animation: inc-ring 1.6s var(--ease-out) infinite;
+}
+@keyframes inc-ring { from { transform: scale(0.94); opacity: 0.7; } to { transform: scale(1.12); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .inc-face.ringing::after { animation: none; opacity: 0.6; } }
+:root[data-motion="off"] .inc-face.ringing::after { animation: none; opacity: 0.6; }
+.inc-text { min-width: 0; display: grid; gap: var(--s-1); }
+.inc-name { font-size: var(--t-20); font-weight: var(--w-semibold); line-height: var(--lh-heading); margin: 0; }
+.inc-kind { display: flex; align-items: center; gap: var(--s-2); color: var(--text-2); font-size: var(--t-14); margin: 0; flex-wrap: wrap; }
+.inc-kind .ic { color: var(--mint-ink); }
+.inc-note { font-size: var(--t-13); color: var(--text-3); margin: 0; }
+.incoming.quiet { border-color: var(--line); }
+.incoming.quiet .inc-kind .ic { color: var(--text-3); }
+.inc-acts { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-2); }
+.inc-acts .btn { height: var(--h-md); justify-content: center; gap: var(--s-2); }
+.inc-acts .inc-video { grid-column: 1 / -1; }
+.inc-keys { margin: 0; font-size: var(--t-12); display: flex; gap: var(--s-2); align-items: center; justify-content: center; }
+.inc-keys kbd { font: inherit; font-weight: var(--w-semibold); padding: 0 var(--s-1); border: 1px solid var(--line-strong); border-radius: var(--r-xs); color: var(--text-2); }
+
+/* ---------- Call records: system lines in the conversation ---------- */
+.callline {
+  display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap;
+  margin-top: var(--group-gap); padding: var(--s-1) var(--s-4);
+  font-size: var(--t-14); color: var(--text-2); line-height: var(--lh-ui);
+}
+.callline-ic { display: inline-grid; place-items: center; width: var(--avatar); flex: none; color: var(--text-3); }
+.callline-text { min-width: 0; }
+.callline-text b { color: var(--text-1); font-weight: var(--w-semibold); }
+.callline-sub { color: var(--text-3); }
+.callline-time { font-size: var(--t-12); color: var(--text-3); margin-left: auto; }
+.callline .btn { height: var(--h-sm); padding: 0 var(--s-3); }
+/* A call I missed is for me: coral, like a mention. */
+.callline.missed .callline-ic { color: var(--brand); }
+.callline.missed .callline-text b { color: var(--brand-ink); }
+.callline + .msg { margin-top: var(--s-2); }
+
+/* ---------- Phone ---------- */
+@media (max-width: 759px) {
+  .incoming {
+    top: auto; bottom: 0; left: 0; right: 0; transform: none; width: 100%;
+    border-radius: var(--r-lg) var(--r-lg) 0 0; border-width: 1px 0 0;
+    padding: var(--s-6) var(--s-4) calc(var(--s-6) + env(safe-area-inset-bottom, 0px));
+    animation: sheet-in var(--m-smooth) var(--ease-out);
+  }
+  .inc-who { flex-direction: column; text-align: center; }
+  .inc-kind { justify-content: center; }
+  .inc-acts .btn { height: var(--touch); font-size: var(--t-16); }
+  .inc-keys { display: none; }
+  .call-strip { padding: var(--s-2) var(--s-3); gap: var(--s-2); }
+  .call-strip .stack { display: none; }
+  .call-strip .btn { height: var(--touch); }
+  .callline { padding: var(--s-1) var(--s-3); }
+}

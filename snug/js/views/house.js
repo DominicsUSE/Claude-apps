@@ -19,6 +19,7 @@ import { HouseSettings } from './settings.js';
 import { houseMenu } from './nav.js';
 import { showProfile } from './people.js';
 import { joinVoice } from '../voice.js';
+import { leavingCall } from '../calls.js';
 import { EventList, EventRow, upcomingFor, useNow, canPlan, openCreateEvent } from './events.js';
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
@@ -108,7 +109,7 @@ function Happening({ id, now }) {
           </button>
           ${inIt
             ? html`<span class="pl-in">You’re in</span>`
-            : html`<button class="btn" onClick=${() => { openConv(room.id); joinVoice(room.id); }}><${Icon} name="voice" size=${16} />Join</button>`}
+            : html`<button class="btn" onClick=${() => leavingCall(room.id, () => { openConv(room.id); joinVoice(room.id); })}><${Icon} name="voice" size=${16} />Join</button>`}
         </div>`;
       })}
       ${live.map((e) => html`<${EventRow} key=${e.id} ev=${e} compact />`)}

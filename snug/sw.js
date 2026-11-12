@@ -10,14 +10,27 @@ self.addEventListener('push', (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data ? e.data.text() : '' }; }
   const title = typeof d.title === 'string' && d.title ? d.title : 'Snug';
+  const body = typeof d.body === 'string' ? d.body : '';
+  // One notification per conversation: a newer message replaces the older one quietly.
+  const tag = typeof d.tag === 'string' ? d.tag : 'snug';
+  const icons = { icon: '/brand/app-icon-192.png', badge: '/brand/notify-badge.png' };
+  // A ring is over (answered elsewhere, declined, missed): its "is calling"
+  // note, if it is still showing, becomes a quiet one that doesn't stay on
+  // screen. Anything else showing for that conversation is left alone.
+  if (typeof d.ringOver === 'string') {
+    e.waitUntil((async () => {
+      const open = await self.registration.getNotifications({ tag });
+      if (!open.some((n) => n.data?.ring === d.ringOver)) return;
+      await self.registration.showNotification(title, { ...icons, body, tag, silent: true, data: { conv: d.conv } });
+    })());
+    return;
+  }
   e.waitUntil(self.registration.showNotification(title, {
-    body: typeof d.body === 'string' ? d.body : '',
-    icon: '/brand/app-icon-192.png',
-    badge: '/brand/notify-badge.png',
-    // One notification per conversation: a newer message replaces the older one quietly.
-    tag: typeof d.tag === 'string' ? d.tag : 'snug',
-    renotify: false,
-    data: { conv: d.conv, msg: d.msg },
+    ...icons, body, tag,
+    renotify: d.call === true,
+    // Someone calling stays on screen until it is dealt with (or the ring ends: above).
+    requireInteraction: d.call === true,
+    data: { conv: d.conv, msg: d.msg, ring: typeof d.ring === 'string' ? d.ring : undefined },
   }));
 });
 
