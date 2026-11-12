@@ -419,7 +419,8 @@ ipcMain.on("call:incoming", (e, info) => {
     closeCallNote(dm);
     const n = new NativeNotification({ title, body, silent: true, urgency: "critical" });
     n.on("click", () => { closeCallNote(dm); showWindow(); });
-    n.on("close", () => { if (callNotes.get(dm) === n) callNotes.delete(dm); });
+    // Keep the handle when the toast leaves the screen ("close" fires then on
+    // Windows): the ring's end must still remove it from the notification centre.
     callNotes.set(dm, n);
     // At most a handful ring at once; never let the map grow.
     while (callNotes.size > 8) closeCallNote(callNotes.keys().next().value);
