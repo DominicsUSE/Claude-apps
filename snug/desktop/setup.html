@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:">
+<meta name="color-scheme" content="light dark">
+<title>Snug</title>
+<link rel="stylesheet" href="snug/css/tokens.css">
+<link rel="stylesheet" href="snug/css/base.css">
+<link rel="stylesheet" href="snug/css/views.css">
+</head>
+<body>
+<div class="auth">
+  <aside class="auth-side">
+    <div class="logo">
+      <svg class="ic" width="24" height="24" viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M3.5 16.5V7A3.5 3.5 0 0 1 7 3.5h9.5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        <circle cx="11.5" cy="11.5" r="3.3" fill="var(--mark)" stroke="var(--on-mark)" stroke-width="0.8"/>
+      </svg>
+      <span>Snug</span>
+    </div>
+    <p>A calm place for your people. Houses hold rooms, rooms hold conversations, and nothing shouts at you.</p>
+  </aside>
+  <main class="auth-main">
+    <form class="form auth-form" id="setup" novalidate>
+      <h1>Where should Snug run?</h1>
+      <div class="seg" role="group" aria-label="Where Snug runs">
+        <button type="button" id="pick-host" aria-pressed="true">On this computer</button>
+        <button type="button" id="pick-join" aria-pressed="false">Join a Snug</button>
+      </div>
+
+      <div id="host">
+        <p class="sub">Snug runs inside this app and keeps everything on this computer. Create an account on the next screen and you are in.</p>
+        <div class="set-row" style="border:0;padding-bottom:0">
+          <div class="set-label"><b id="lan-label">Let people on my network join</b>
+            <span id="lan-hint">People on the same Wi-Fi or office network can join from a browser or their own Snug app. Off, only this computer can reach it.</span></div>
+          <div class="set-ctl"><button type="button" class="switch" role="switch" id="lan" aria-checked="false" aria-labelledby="lan-label"></button></div>
+        </div>
+      </div>
+
+      <div id="join" hidden>
+        <label class="label" for="url">Address</label>
+        <input id="url" class="field" placeholder="snug.example.com" autocomplete="url" autocapitalize="none" spellcheck="false">
+        <div class="hint">The address of a Snug that someone else runs. Ask them for it.</div>
+      </div>
+
+      <div class="err" id="error" role="alert" hidden></div>
+      <button class="btn primary" type="submit" id="go">Continue</button>
+    </form>
+  </main>
+</div>
+<script src="setup.js"></script>
+</body>
+</html>

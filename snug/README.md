@@ -40,6 +40,41 @@ npm test            # rules (10) and the server with real sockets (21)
 npm run test:e2e    # separate people in separate browsers (17), needs Playwright
 ```
 
+## The desktop app
+
+Snug also ships as a Windows app (`desktop/`): one file to install or run,
+with the server inside it. Every change to `snug/` builds it on GitHub's
+Windows machines (`.github/workflows/build-snug-windows.yml`), runs Snug's
+tests there, and drives the packaged app before publishing:
+
+- Open **Actions > Snug Windows app**, pick the latest run and download
+  **Snug-Windows-Installer** (Start menu and desktop shortcuts) or
+  **Snug-Windows-Portable** (one `.exe` that runs without installing).
+- Builds on the default branch also publish both as a release (`snug-v<version>`).
+
+The app is not code-signed, so the first time Windows may show "Windows
+protected your PC": click **More info**, then **Run anyway**.
+
+On first run it asks where Snug should run:
+
+- **On this computer.** The server runs inside the app and the database
+  lives in your app-data folder (**Snug > Open the data folder**). Switch on
+  *Let people on my network join* and others on the same Wi-Fi can open the
+  address from **Snug > Copy the address for other people**, in a browser or
+  in their own Snug app. Over that plain address they can write but not use
+  voice, because browsers only allow the microphone on secure pages.
+- **Join a Snug.** Type the address of a Snug that someone else runs.
+
+**Snug > Change where Snug runs** brings the choice back. To work on the app:
+
+```bash
+cd snug/desktop && npm install && npm start
+```
+
+```bash
+npm test    # drives the real app window; on Linux run it under xvfb-run -a
+```
+
 ## What is real, and what is not yet
 
 Real, and covered by tests with separate users:

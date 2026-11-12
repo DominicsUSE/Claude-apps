@@ -1,0 +1,70 @@
+{
+  "name": "snug-desktop",
+  "productName": "Snug",
+  "version": "0.2.0",
+  "description": "A calm place for your people",
+  "author": "Snug",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "node build.js --files-only && electron .",
+    "dist": "node build.js",
+    "test": "node build.js --files-only && node --test test.js"
+  },
+  "dependencies": {
+    "ws": "8.18.3"
+  },
+  "devDependencies": {
+    "electron": "38.8.6",
+    "electron-builder": "26.15.3",
+    "playwright": "1.63.0"
+  },
+  "build": {
+    "appId": "com.snug.app",
+    "productName": "Snug",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "setup.html",
+      "setup.js",
+      "snug/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Snug",
+      "artifactName": "Snug-Setup-${version}.exe"
+    },
+    "portable": {
+      "artifactName": "Snug-${version}-portable.exe"
+    },
+    "linux": {
+      "target": "dir",
+      "icon": "build/icon.png"
+    }
+  }
+}
