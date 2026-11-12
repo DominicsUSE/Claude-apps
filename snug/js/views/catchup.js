@@ -1,0 +1,161 @@
+// Catch up: what needs you first, then what happened, in one place instead of
+// badges everywhere. Saved: the messages you chose to keep.
+import { html } from '../../vendor/preact-htm.js';
+import {
+  S, back, me, convMeta, findMsg, jumpToMsg, openConv, openModal, openQuick, declineInvite, markAllRead,
+  markConvRead, markManyRead, toggleSave, setSavedNote, setPresence, emit, toast,
+} from '../store.js';
+import { needsMe, levelOf, threadsOf, roomIds, isThread } from '../lib/attention.js';
+import { mentions } from '../lib/format.js';
+import { fmtWhen, plural, nameList } from '../lib/util.js';
+import { Icon } from '../ui/icons.js';
+import { Avatar, Tile, RoomIcon, Rich, Empty } from '../ui/kit.js';
+import { JoinPreview } from './modals.js';
+
+const Back = () => S.ui.phone && S.ui.depth > 0 && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
+
+// Everything unread, split by the one question that matters: is it for me?
+export function gather() {
+  const needs = [];
+  const news = [];
+  const convs = [...S.dmOrder, ...S.houseOrder.flatMap((h) => roomIds(S, h))];
+  for (const conv of convs) {
+    const level = levelOf(S, conv);
+    if (level === 'muted') continue;
+    let count = 0, top = null;
+    const people = new Set();
+    for (const c of [conv, ...threadsOf(S, conv).filter((t) => S.followed[t])]) {
+      const since = S.read[c] || 0;
+      for (const m of S.msgs[c] || []) {
+        if (m.ts <= since || m.author === S.me || m.sys) continue;
+        if (needsMe(S, c, m)) needs.push({ conv: c, m });
+        else if (c === conv) {
+          count++;
+          people.add(m.author);
+          const score = Object.values(m.reactions || {}).reduce((n, who) => n + who.length, 0);
+          if (!top || score > top.score) top = { m, score };
+        }
+      }
+    }
+    if (count && level === 'all') news.push({ conv, count, people: [...people], top: top.m });
+  }
+  needs.sort((a, b) => b.m.ts - a.m.ts);
+  return { needs, news };
+}
+
+function why(conv, m) {
+  const meta = convMeta(conv);
+  if (meta.kind === 'dm') return 'wrote to you';
+  if (meta.kind === 'group') return `in ${meta.title}`;
+  const where = meta.kind === 'thread' ? meta.where : meta.title;
+  if (mentions(m.text, me().handle)) return `mentioned you in ${where}`;
+  if (meta.kind === 'thread') return `replied in a thread you follow in ${where}`;
+  return `replied to you in ${where}`;
+}
+
+function done(conv, m) {
+  const before = S.read[conv];
+  S.read[conv] = Math.max(before || 0, m.ts);
+  emit();
+  toast('Marked as done', { undo: () => { S.read[conv] = before; emit(); } });
+}
+
+export function CatchUp() {
+  const { needs, news } = gather();
+  const focused = me().presence === 'focus';
+  const nothing = !needs.length && !news.length && !S.invites.length;
+  const byHouse = S.houseOrder.map((h) => ({ h, rows: news.filter((n) => S.rooms[n.conv]?.house === h) })).filter((g) => g.rows.length);
+  return html`<section class="main view" aria-label="Catch up">
+    <header class="bar">
+      <${Back} />
+      <h1 class="bar-title"><${Icon} name="tray" />Catch up</h1>
+      ${!nothing && html`<span class="bar-sub trunc">${needs.length + S.invites.length} for you, ${plural(news.length, 'room')} with news</span>`}
+      <div class="bar-end">${(needs.length > 0 || news.length > 0) && html`<button class="btn quiet" onClick=${markAllRead}><${Icon} name="check" size=${16} />Mark all read</button>`}</div>
+    </header>
+    <div class="view-body">
+      ${focused && html`<div class="banner"><i class="pres inline focus"></i><span><b>You’re focused.</b> Nothing pops up. It collects here until you’re back.</span>
+        <button class="btn quiet" style="margin-left:auto" onClick=${() => setPresence('around')}>I’m back</button></div>`}
+      ${nothing
+        ? html`<${Empty} icon="check" title="You’re all caught up" text="Mentions, replies and direct messages collect here, so the rest of the app can stay quiet.">
+            <button class="btn" onClick=${() => openQuick()}>Jump to a room</button>
+          <//>`
+        : html`<div class="col">
+          ${(needs.length > 0 || S.invites.length > 0) && html`<div class="view-sect">For you <span class="count num">${needs.length + S.invites.length}</span></div>`}
+          ${S.invites.map((inv) => {
+            const h = S.houses[inv.house];
+            return html`<div class="invite" key=${inv.house}>
+              <${Tile} house=${h} />
+              <div>
+                <div class="item-meta"><b>${S.users[inv.from].name}</b><span class="where">invited you to ${h.name}</span><span class="num">${fmtWhen(inv.ts)}</span></div>
+                <div class="item-text">${h.about}</div>
+                <div class="item-row-acts">
+                  <button class="btn primary" onClick=${() => openModal(JoinPreview, { house: inv.house })}>Take a look</button>
+                  <button class="btn" onClick=${() => declineInvite(inv.house)}>Not now</button>
+                </div>
+              </div>
+            </div>`;
+          })}
+          ${needs.map(({ conv, m }) => html`<div class="item" key=${m.id}>
+            <${Avatar} user=${S.users[m.author]} />
+            <button class="item-main" onClick=${() => jumpToMsg(conv, m.id)}>
+              <span class="item-meta"><b>${S.users[m.author].name}</b><span class="where">${why(conv, m)}</span><span class="num">${fmtWhen(m.ts)}</span></span>
+              <span class="item-text"><${Rich} m=${m} /></span>
+            </button>
+            <div class="item-acts float">
+              <button class="ib" aria-label="Mark as done" data-tip="Done" onClick=${() => done(conv, m)}><${Icon} name="check" size=${18} /></button>
+            </div>
+          </div>`)}
+          ${byHouse.map(({ h, rows }) => html`<div key=${h}>
+            <div class="view-sect">${S.houses[h].name}
+              <button class="btn quiet" onClick=${() => markManyRead(rows.map((r) => r.conv), `${S.houses[h].name} news marked as read`)}>Mark read</button>
+            </div>
+            ${rows.map(({ conv, count, people, top }) => {
+              const room = S.rooms[conv];
+              return html`<div class="news" key=${conv}>
+                <span class="news-ic"><${RoomIcon} kind=${room.kind} /></span>
+                <button class="news-main" onClick=${() => openConv(conv)}>
+                  <span class="news-name">${room.name}</span>
+                  <span class="news-sum">${plural(count, 'new message')} from ${nameList(people.map((p) => S.users[p].name.split(' ')[0]))}</span>
+                  <span class="news-top"><b>${S.users[top.author].name.split(' ')[0]}</b> <${Rich} m=${top} /></span>
+                </button>
+                <span class="news-acts"><button class="ib" aria-label=${`Mark ${room.name} as read`} data-tip="Mark read" onClick=${() => markConvRead(conv)}><${Icon} name="check" size=${18} /></button></span>
+              </div>`;
+            })}
+          </div>`)}
+        </div>`}
+    </div>
+  </section>`;
+}
+
+export function Saved() {
+  const rows = S.saved.map((s) => ({ s, m: findMsg(s.conv, s.id), meta: convMeta(s.conv) })).filter((r) => r.m && r.meta);
+  return html`<section class="main view" aria-label="Saved">
+    <header class="bar">
+      <${Back} />
+      <h1 class="bar-title"><${Icon} name="save" />Saved</h1>
+      ${rows.length > 0 && html`<span class="bar-sub">${plural(rows.length, 'message')}, newest first</span>`}
+    </header>
+    <div class="view-body">
+      ${!rows.length
+        ? html`<${Empty} icon="save" title="Nothing saved yet" text="Good answers scroll away. Save one and it stays here, with a note if you like. Hover a message and choose Save, or press S." />`
+        : html`<div class="col">
+          ${rows.map(({ s, m, meta }) => html`<div class="item" key=${s.id}>
+            <${Avatar} user=${S.users[m.author]} />
+            <div class="item-main">
+              <button class="item-main" onClick=${() => jumpToMsg(s.conv, s.id)}>
+                <span class="item-meta"><b>${S.users[m.author].name}</b><span class="where">${isThread(s.conv) ? `thread in ${meta.where}` : meta.title}</span><span class="num">${fmtWhen(m.ts)}</span></span>
+                <span class="item-text"><${Rich} m=${m} /></span>
+              </button>
+              <label class="item-note">
+                <${Icon} name="edit" size=${14} />
+                <input placeholder="Add a note so you can find it later" aria-label="Note" value=${s.note} onInput=${(e) => setSavedNote(s.id, e.target.value)} />
+              </label>
+            </div>
+            <div class="item-acts float">
+              <button class="ib on" aria-label="Remove from Saved" data-tip="Remove from Saved" onClick=${() => toggleSave(s.conv, s.id)}><${Icon} name="saved" size=${18} /></button>
+            </div>
+          </div>`)}
+        </div>`}
+    </div>
+  </section>`;
+}

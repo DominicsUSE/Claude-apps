@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f3f6f3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#151c19" media="(prefers-color-scheme: dark)">
+<title>Snug</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M3.5 16.5V7A3.5 3.5 0 0 1 7 3.5h9.5' fill='none' stroke='%23263b33' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='11.5' cy='11.5' r='3.4' fill='%23f1c84b'/%3E%3C/svg%3E">
+<link rel="preload" href="fonts/ahn-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/shell.css">
+<link rel="stylesheet" href="css/stream.css">
+<link rel="stylesheet" href="css/views.css">
+<script>
+  // Apply saved appearance before the first paint, so the theme never flashes.
+  try {
+    var p = (JSON.parse(localStorage.getItem('snug.v1')) || {}).prefs || {};
+    var r = document.documentElement;
+    if (p.theme && p.theme !== 'system') r.setAttribute('data-theme', p.theme);
+    if (p.density && p.density !== 'regular') r.setAttribute('data-density', p.density);
+    if (p.text && p.text !== 'm') r.setAttribute('data-text', p.text);
+  } catch (e) {}
+</script>
+</head>
+<body>
+<div id="app"></div>
+<noscript><p style="padding:24px;font:16px system-ui">Snug needs JavaScript to run.</p></noscript>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

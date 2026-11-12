@@ -1,0 +1,215 @@
+// The root. Picks the desktop frame or the phone product, mounts the floating
+// layers, and owns the global keyboard map.
+import { html, render } from '../vendor/preact-htm.js';
+import {
+  S, emit, useStore, me, go, openConv, back, setTab, closePane, closeMenu, closePop, closeModal, closeLayer,
+  closeQuick, closeLightbox, openQuick, openLayer, openModal, openPop, markAllRead, applyPrefs, convMeta, isOnline,
+} from './store.js';
+import { startServer } from './server.js';
+import { attention, totalNeeds, roomIds } from './lib/attention.js';
+import { Icon } from './ui/icons.js';
+import { Avatar, Pres, PRESENCE, presenceLabel } from './ui/kit.js';
+import { Menu, Pop, ModalFrame, Toasts, Lightbox, initTooltips } from './ui/overlays.js';
+import { Nav, NavDirect, NavHouses, LiveDock, MOD } from './views/nav.js';
+import { Conversation, ThreadPane, DetailsPane } from './views/conversation.js';
+import { PeoplePane, MePop } from './views/people.js';
+import { CatchUp, Saved } from './views/catchup.js';
+import { Search, QuickJump } from './views/search.js';
+import { Settings } from './views/settings.js';
+import { NewMessage } from './views/modals.js';
+
+function MainView() {
+  const v = S.ui.view;
+  if (v.type === 'conv' && convMeta(v.id)) return html`<${Conversation} key=${v.id} conv=${v.id} />`;
+  if (v.type === 'saved') return html`<${Saved} />`;
+  if (v.type === 'search') return html`<${Search} />`;
+  return html`<${CatchUp} />`;
+}
+
+function PaneView() {
+  const p = S.ui.pane;
+  const v = S.ui.view;
+  if (!p) return null;
+  if (p.type === 'thread') return html`<${ThreadPane} key=${p.id} tid=${p.id} />`;
+  if (v.type !== 'conv') return null;
+  if (p.type === 'people') return html`<${PeoplePane} conv=${v.id} />`;
+  if (p.type === 'details') return html`<${DetailsPane} conv=${v.id} />`;
+  return null;
+}
+
+function Desktop() {
+  const pane = PaneView();
+  return html`<div class=${`app${pane ? ' has-pane' : ''}`}>
+    <${Nav} />
+    <${MainView} />
+    ${pane}
+  </div>`;
+}
+
+// The phone is its own product: one screen at a time, tabs where thumbs are.
+const TABS = [
+  { id: 'home', label: 'Catch up', icon: 'tray' },
+  { id: 'rooms', label: 'Houses', icon: 'house' },
+  { id: 'direct', label: 'Direct', icon: 'room' },
+  { id: 'you', label: 'You', icon: 'user' },
+];
+
+function TabHead({ title, children }) {
+  return html`<header class="bar"><h1 class="bar-title">${title}</h1><div class="bar-end">${children}</div></header>`;
+}
+
+function YouTab() {
+  const u = me();
+  const row = (icon, label, run, end) => html`<button class="row" onClick=${run}><span class="row-ic"><${Icon} name=${icon} /></span><span class="grow">${label}</span>${end && html`<span class="row-end faint">${end}</span>`}</button>`;
+  return html`<div class="you-tab">
+    <div class="you-card">
+      <${Avatar} user=${u} presence />
+      <div class="grow"><div class="profile-name">${u.name}</div><div class="faint">@${u.handle}</div></div>
+    </div>
+    <button class="btn block" style="justify-content:flex-start" onClick=${(e) => openPop({ anchor: e.currentTarget.getBoundingClientRect(), label: 'Presence and status', C: MePop, props: {} })}>
+      <${Pres} user=${u} inline /><span class="grow trunc" style="text-align:left">${presenceLabel(u)}${u.status ? `. ${u.status}` : ''}</span><${Icon} name="chev-d" size=${16} />
+    </button>
+    <div class="you-list">
+      ${row('save', 'Saved messages', () => go({ type: 'saved' }), S.saved.length || '')}
+      ${row('search', 'Search messages', () => go({ type: 'search', q: '' }))}
+      ${row('bell', 'Notifications', () => openLayer({ C: Settings, props: { page: 'notify' } }))}
+      ${row('eye', 'Appearance', () => openLayer({ C: Settings, props: { page: 'look' } }))}
+      ${row('sliders', 'All settings', () => openLayer({ C: Settings, props: {} }))}
+    </div>
+  </div>`;
+}
+
+function Phone() {
+  const tab = S.ui.tab === 'rooms' || S.ui.tab === 'direct' || S.ui.tab === 'you' ? S.ui.tab : 'home';
+  const needs = totalNeeds(S);
+  const directNeeds = S.dmOrder.reduce((n, d) => n + attention(S, d).needs, 0);
+  const houseNeeds = needs - directNeeds - S.invites.length;
+  const counts = { home: needs, rooms: houseNeeds, direct: directNeeds, you: 0 };
+  const v = S.ui.view;
+  const pane = PaneView();
+  let body;
+  if (tab === 'home') body = html`<${CatchUp} />`;
+  else if (tab === 'rooms') {
+    body = html`<${TabHead} title="Houses">
+      <button class="ib" aria-label="Jump to or search" onClick=${() => openQuick()}><${Icon} name="search" /></button>
+    <//><div class="nav-scroll"><${NavHouses} /></div>`;
+  } else if (tab === 'direct') {
+    body = html`<${TabHead} title="Direct">
+      <button class="ib" aria-label="New message" onClick=${() => openModal(NewMessage)}><${Icon} name="compose" /></button>
+    <//><div class="nav-scroll"><${NavDirect} /></div>`;
+  } else body = html`<${TabHead} title="You" /><${YouTab} />`;
+
+  return html`<div class="phone">
+    <div class="screen root" aria-hidden=${S.ui.depth > 0 ? 'true' : undefined}>
+      <div class="tab-body">${body}</div>
+      ${!isOnline() && html`<div class="conn" role="status"><${Icon} name="offline" size=${16} />Offline. Messages wait and send when you’re back.</div>`}
+      <${LiveDock} />
+      <nav class="tabs" role="tablist" aria-label="Sections">
+        ${TABS.map((t) => html`<button key=${t.id} class="tab" role="tab" aria-selected=${String(tab === t.id)} onClick=${() => setTab(t.id)}>
+          <${Icon} name=${t.icon} size=${22} />${t.label}
+          ${counts[t.id] > 0 && html`<span class="badge">${counts[t.id]}</span>`}
+        </button>`)}
+      </nav>
+    </div>
+    ${S.ui.depth > 0 && html`<div class="screen push" key=${v.type === 'conv' ? v.id : v.type}><${MainView} /></div>`}
+    ${pane && html`<div class="screen push" key=${`${S.ui.pane.type}${S.ui.pane.id || ''}`}>${pane}</div>`}
+  </div>`;
+}
+
+function Overlays() {
+  const u = S.ui;
+  return html`
+    ${u.layer && html`<${u.layer.C} ...${u.layer.props} />`}
+    ${u.quick && html`<${QuickJump} />`}
+    ${u.modal && html`<${ModalFrame} modal=${u.modal} key=${u.modal.k} />`}
+    ${u.pop && html`<${Pop} pop=${u.pop} key=${u.pop.k} />`}
+    ${u.menu && html`<${Menu} menu=${u.menu} key=${u.menu.k} />`}
+    <${Lightbox} />
+    <${Toasts} />`;
+}
+
+function App() {
+  useStore();
+  const needs = totalNeeds(S);
+  document.title = needs ? `(${needs}) Snug` : 'Snug';
+  return html`${S.ui.phone ? html`<${Phone} />` : html`<${Desktop} />`}<${Overlays} />`;
+}
+
+// Keyboard
+const typing = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+
+function navOrder() {
+  const out = [...S.dmOrder];
+  for (const h of S.houseOrder) {
+    const house = S.houses[h];
+    out.push(...roomIds(S, h).filter((r) => !house.newcomer || house.starter.includes(r)));
+  }
+  return out;
+}
+
+function step(dir, unreadOnly) {
+  const list = navOrder();
+  const cur = S.ui.view.type === 'conv' ? list.indexOf(S.ui.view.id) : -1;
+  for (let i = 1; i <= list.length; i++) {
+    const id = list[(cur + dir * i + list.length * 2) % list.length];
+    const a = attention(S, id);
+    if (!unreadOnly || a.needs || a.soft) return openConv(id);
+  }
+  return undefined;
+}
+
+function closeTop() {
+  const u = S.ui;
+  if (u.lightbox) return closeLightbox();
+  if (u.menu) return closeMenu();
+  if (u.pop) return closePop();
+  if (u.quick) return closeQuick();
+  if (u.modal) return closeModal();
+  if (u.layer) return closeLayer();
+  if (u.pane) return closePane();
+  if (u.phone && u.depth > 0) return back();
+  return false;
+}
+
+function onKey(e) {
+  const mod = e.metaKey || e.ctrlKey;
+  const k = e.key;
+  if (mod && !e.shiftKey && k.toLowerCase() === 'k') { e.preventDefault(); return S.ui.quick ? closeQuick() : openQuick(); }
+  if (mod && e.shiftKey && k.toLowerCase() === 'f') { e.preventDefault(); return go({ type: 'search', q: '' }); }
+  if (k === 'Escape') {
+    if (e.shiftKey) { e.preventDefault(); return markAllRead(); }
+    if (closeTop() !== false) e.preventDefault();
+    return undefined;
+  }
+  if (S.ui.modal || S.ui.layer || S.ui.quick || S.ui.menu || S.ui.pop) return undefined;
+  if (e.altKey && (k === 'ArrowUp' || k === 'ArrowDown')) { e.preventDefault(); return step(k === 'ArrowUp' ? -1 : 1, e.shiftKey); }
+
+  const t = e.target;
+  // Shift+Tab from the message box goes up into the messages, newest first.
+  if (k === 'Tab' && e.shiftKey && t.matches?.('.composer textarea') && !t.value) {
+    const last = t.closest('.stream')?.querySelector('.msg[tabindex="0"]');
+    if (last) { e.preventDefault(); last.focus(); }
+    return undefined;
+  }
+  if (typing(t) || mod || e.altKey) return undefined;
+  if (k === '?') { e.preventDefault(); return openLayer({ C: Settings, props: { page: 'keys' } }); }
+  // Start typing anywhere and it goes into the message box.
+  if (k.length === 1 && !t.closest?.('.msg, [role="menu"], [role="dialog"]')) {
+    const box = document.querySelector('.main .composer textarea');
+    if (box) box.focus();
+  }
+  return undefined;
+}
+
+// Boot
+const phoneQuery = matchMedia('(max-width: 759px)');
+S.ui.phone = phoneQuery.matches;
+phoneQuery.addEventListener('change', (e) => { S.ui.phone = e.matches; emit(); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', emit);
+applyPrefs();
+document.addEventListener('keydown', onKey);
+initTooltips();
+render(html`<${App} />`, document.getElementById('app'));
+startServer();
+// Exposed for the end-to-end checks and for poking at state in the console.
+window.snug = { S, emit };

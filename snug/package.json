@@ -1,0 +1,12 @@
+{
+  "name": "snug",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A calm place for your people: houses, rooms, threads and voice.",
+  "scripts": {
+    "start": "python3 -m http.server 8765",
+    "test": "node --test tests/logic.test.js",
+    "test:e2e": "node --test tests/e2e.test.js"
+  }
+}
