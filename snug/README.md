@@ -173,7 +173,8 @@ existing chat apps:
    Notification settings are one control per place with three choices:
    *Everything*, *Only what needs me*, *Nothing*. Rooms inherit from their
    house; groups can choose *Only what needs me* too (mentions and replies).
-   A message counts as yours exactly when it is highlighted as yours. The whole policy lives in `js/lib/attention.js`.
+   Mentions and replies to you are counted and highlighted by the same rule;
+   direct messages and followed threads are counted without a highlight. The whole policy lives in `js/lib/attention.js`.
 2. **Threads with a real place in the layout.** A thread opens in the side
    pane next to the conversation it came from, and an elbow line visibly
    branches it from its message. Threads you follow appear under their room

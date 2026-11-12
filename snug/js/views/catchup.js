@@ -59,11 +59,12 @@ function why(conv, m) {
   return `replied to you in ${where}`;
 }
 
-// Marks the conversation read up to this item's latest message, which is
-// everything the item stands for.
+// Marks the whole conversation read, as the toast says, so it also leaves the
+// room news below. Undo puts the read point back.
 function done(conv, m) {
   const before = S.read[conv] || 0;
-  setRead(conv, Math.max(before, m.ts));
+  const sent = (S.msgs[conv] || []).filter((x) => !x.state);
+  setRead(conv, Math.max(before, m.ts, sent.length ? sent[sent.length - 1].ts : 0));
   toast(`${convMeta(conv).title} marked as read`, { undo: () => setRead(conv, before) });
 }
 
@@ -111,7 +112,7 @@ function TriageItem({ conv, m, count }) {
     if (!d?.on) return;
     ref.current.classList.remove('swiping');
     if (-d.dx > Math.min(120, ref.current.offsetWidth * 0.35)) done(conv, m);
-    else move(0);
+    move(0);
   };
   return html`<div class="swipe" onPointerDown=${down} onPointerMove=${moving} onPointerUp=${up} onPointerCancel=${up}>
     <span class="swipe-under" aria-hidden="true"><${Icon} name="check" size=${18} />Mark read</span>

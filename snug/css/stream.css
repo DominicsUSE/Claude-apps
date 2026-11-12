@@ -15,7 +15,7 @@
 .msg:focus-visible { outline-offset: -2px; }
 .msg.mention { background: var(--mark-wash); --bg: var(--mark-wash); }
 .msg.flash { animation: flash 1.6s ease-out; }
-@keyframes flash { 0%, 40% { background: var(--mark-wash); } }
+@keyframes flash { 0%, 40% { background: var(--press); } }
 .msg.pending .msg-text, .msg.pending .files { opacity: 0.55; }
 
 .msg-gutter { grid-row: 1 / span 4; display: flex; justify-content: center; }
@@ -109,7 +109,7 @@ mark.hit { background: none; color: inherit; font-weight: 700; text-decoration: 
 .start p { color: var(--ink-2); font-size: var(--t-16); }
 .start .acts { display: flex; gap: var(--s-2); margin-top: var(--s-2); flex-wrap: wrap; }
 
-.jump { position: absolute; left: 50%; transform: translateX(-50%); bottom: var(--s-3); z-index: 3; height: 32px; padding: 0 var(--s-3); display: flex; align-items: center; gap: var(--s-2); background: var(--ink); color: var(--chat); border-radius: var(--r-full); font-size: var(--t-14); font-weight: 500; animation: rise-in var(--m-panel) var(--ease); }
+.jump { position: absolute; left: 50%; transform: translateX(-50%); bottom: var(--s-3); z-index: 3; height: 32px; padding: 0 var(--s-3); display: flex; align-items: center; gap: var(--s-2); background: var(--raised); color: var(--ink); box-shadow: var(--shadow); border-radius: var(--r-full); font-size: var(--t-14); font-weight: 500; animation: rise-in var(--m-panel) var(--ease); }
 .jump-wrap { position: relative; height: 0; }
 
 /* Composer: always at the bottom, grows with the text. */

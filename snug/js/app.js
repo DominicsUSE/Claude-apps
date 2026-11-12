@@ -217,9 +217,12 @@ function onKey(e) {
   // as people expect from other chat apps. Shift+Esc marks the whole house read.
   // Marking everything read is a button in Catch up, never a stray key.
   if (k === 'Escape') {
+    if (e.isComposing) return undefined;
     if (!e.shiftKey && closeTop() !== false) { e.preventDefault(); return undefined; }
     const conv = S.ui.view.type === 'conv' ? S.ui.view.id : null;
-    if (!conv || S.ui.modal || S.ui.layer || S.ui.quick || S.ui.menu || S.ui.pop) return undefined;
+    if (!conv || S.ui.modal || S.ui.layer || S.ui.quick || S.ui.menu || S.ui.pop || S.ui.lightbox) return undefined;
+    // Not while writing a draft, and not over an unread mark you just set yourself.
+    if ((typing(e.target) && e.target.value) || S.ui.hold[conv]) return undefined;
     const house = S.rooms[conv]?.house;
     if (e.shiftKey && house) {
       if (houseAttention(S, house).soft || houseAttention(S, house).needs) { e.preventDefault(); markHouseRead(house); }
