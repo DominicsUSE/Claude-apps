@@ -31,7 +31,7 @@ a:hover { text-decoration-color: currentColor; }
 
 /* Focus: one ring, in ink, on everything. */
 :focus { outline: none; }
-:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: var(--r-ctl); }
+:focus-visible { outline: var(--focus-w) solid var(--ink); outline-offset: 2px; border-radius: var(--r-ctl); }
 
 /* Scrollbars stay quiet. */
 * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }

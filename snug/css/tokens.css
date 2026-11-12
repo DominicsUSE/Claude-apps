@@ -95,6 +95,7 @@
   --tile-l: 0.89; --tile-c: 0.055; --tile-ink-l: 0.34; --tile-ink-c: 0.08;
   --house-l: 0.50; --house-c: 0.105; --house-ink: oklch(0.985 0.01 150);
 
+  --focus-w: 2px;
   --hover: oklch(0.24 0.02 165 / 0.07);
   --press: oklch(0.24 0.02 165 / 0.13);
   --scrim: oklch(0.24 0.02 165 / 0.38);
@@ -158,6 +159,26 @@
   --press: oklch(0.93 0.012 150 / 0.13);
   --scrim: oklch(0.12 0.01 165 / 0.6);
   --shadow: 0 0 0 1px oklch(0.93 0.012 150 / 0.10), 0 12px 32px oklch(0.1 0.01 165 / 0.5);
+}
+
+/* Higher contrast: secondary and faint text move toward the main ink and lines
+   get firmer. Mixed from the theme's own ink and surface, so it works in both
+   themes. Follows the system setting unless the person picks one. */
+@media (prefers-contrast: more) {
+  :root:not([data-contrast="standard"]) {
+  --ink-2: color-mix(in oklch, var(--ink) 82%, var(--chat));
+  --ink-3: color-mix(in oklch, var(--ink) 70%, var(--chat));
+  --line: color-mix(in oklch, var(--ink) 24%, var(--chat));
+  --line-strong: color-mix(in oklch, var(--ink) 50%, var(--chat));
+  --focus-w: 3px;
+  }
+}
+:root[data-contrast="high"] {
+  --ink-2: color-mix(in oklch, var(--ink) 82%, var(--chat));
+  --ink-3: color-mix(in oklch, var(--ink) 70%, var(--chat));
+  --line: color-mix(in oklch, var(--ink) 24%, var(--chat));
+  --line-strong: color-mix(in oklch, var(--ink) 50%, var(--chat));
+  --focus-w: 3px;
 }
 
 /* Density: three settings from day one. */

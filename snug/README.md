@@ -33,6 +33,8 @@ existing chat apps:
    me?" first (mentions, replies to you, direct messages, followed threads,
    invitations), then summarises what happened in each room: how many
    messages, from whom, and the one message people reacted to most.
+   It works as a triage list: `J`/`K` to move, `E` when done, `Enter` to
+   open; on a phone, swipe an item left. Done items can be undone.
    Notification settings are one control per place with three choices:
    *Everything*, *Only what needs me*, *Nothing*. Rooms inherit from their
    house. The whole policy lives in `js/lib/attention.js`.
@@ -46,7 +48,11 @@ existing chat apps:
    *In a voice room*, which wins because it is the most useful thing to know.
    Each state has its own shape, not only its own colour.
 
-Also: newcomers to a house see three starter rooms and one first step, and
+Also: the back button and the phone's back gesture close the open room,
+pane or dialog one layer at a time instead of leaving the app. A High
+contrast setting (which also follows the system's contrast preference)
+darkens secondary text and outlines and thickens the focus ring.
+Newcomers to a house see three starter rooms and one first step, and
 the rest opens after their first message. Saved messages take a note.
 Search reads like a sentence (`from:sunniva in:"glaze lab" has:image`) and
 the filter chips write those words for you. No promotions anywhere.
@@ -112,5 +118,5 @@ exports and the rest of the app does not change.
 `Ctrl/Cmd K` jump anywhere or search. `Alt ↑/↓` previous or next place,
 `Alt Shift ↓` next place with news. `Shift Tab` from an empty message box
 moves into the messages, then `↑/↓` to move, `R` reply, `T` thread, `S`
-save, `E` edit, `Enter` all actions. `Esc` closes the top layer. `?` shows
-the full list.
+save, `E` edit, `Enter` all actions. In Catch up, `J`/`K` move and `E`
+marks done. `Esc` closes the top layer. `?` shows the full list.

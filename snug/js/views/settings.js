@@ -45,7 +45,7 @@ function Layer({ title, icon, pages, page, setPage, children, foot }) {
 const PAGES = [
   { id: 'profile', label: 'Profile', icon: 'user', words: 'name avatar about emoji colour' },
   { id: 'notify', label: 'Notifications', icon: 'bell', words: 'mute quiet alerts pop-ups focus' },
-  { id: 'look', label: 'Appearance', icon: 'eye', words: 'theme dark light density compact text size motion animation' },
+  { id: 'look', label: 'Appearance', icon: 'eye', words: 'theme dark light density compact text size motion animation contrast accessibility' },
   { id: 'keys', label: 'Keyboard', icon: 'keys', words: 'shortcuts keys hotkeys' },
   { id: 'conn', label: 'Connection', icon: 'offline', words: 'offline network test failure reset demo' },
 ];
@@ -116,6 +116,7 @@ function Look() {
     <${Row} label="Theme"><${Seg} label="Theme" value=${p.theme} options=${[['system', 'Match device'], ['light', 'Light'], ['dark', 'Dark']]} onChange=${(v) => setPref('theme', v)} /><//>
     <${Row} label="Density" hint="How tightly messages sit. Snug fits the most on screen."><${Seg} label="Density" value=${p.density} options=${[['snug', 'Snug'], ['regular', 'Regular'], ['roomy', 'Roomy']]} onChange=${(v) => setPref('density', v)} /><//>
     <${Row} label="Text size"><${Seg} label="Text size" value=${p.text} options=${[['s', 'Small'], ['m', 'Medium'], ['l', 'Large']]} onChange=${(v) => setPref('text', v)} /><//>
+    <${Row} label="Contrast" hint="High makes secondary text, times and outlines darker and the focus ring thicker."><${Seg} label="Contrast" value=${p.contrast || 'system'} options=${[['system', 'Match device'], ['standard', 'Standard'], ['high', 'High']]} onChange=${(v) => setPref('contrast', v)} /><//>
     <div class="preview" aria-hidden="true">
       ${PREVIEW.map((m, i) => html`<${Message} key=${m.id} conv="k_glaze" m=${m} grouped=${i === 1} />`)}
     </div>
@@ -138,6 +139,8 @@ const KEYS = [
   [['S'], 'On a message: save it'],
   [['E'], 'On your message: edit it'],
   [['Enter'], 'On a message: all actions'],
+  [['J', 'K'], 'In Catch up: move between items'],
+  [['E'], 'In Catch up: mark the item done'],
   [['?'], 'Show this list'],
 ];
 

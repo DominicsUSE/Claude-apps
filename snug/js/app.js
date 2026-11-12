@@ -1,6 +1,6 @@
 // The root. Picks the desktop frame or the phone product, mounts the floating
 // layers, and owns the global keyboard map.
-import { html, render } from '../vendor/preact-htm.js';
+import { html, render, useLayoutEffect } from '../vendor/preact-htm.js';
 import {
   S, emit, useStore, me, go, openConv, back, setTab, closePane, closeMenu, closePop, closeModal, closeLayer,
   closeQuick, closeLightbox, openQuick, openLayer, openModal, openPop, markAllRead, applyPrefs, convMeta, isOnline,
@@ -128,8 +128,32 @@ function Overlays() {
     <${Toasts} />`;
 }
 
+// The back button and the phone's back gesture close what is open, one layer
+// at a time, instead of leaving the app. Each open layer owns one history
+// entry, and each entry records how many layers were open when it was made.
+let pushed = 0;
+function layers() {
+  const u = S.ui;
+  return (u.phone && u.depth > 0 ? 1 : 0) + (u.pane ? 1 : 0)
+    + (u.lightbox || u.menu || u.pop || u.quick || u.modal || u.layer ? 1 : 0);
+}
+function syncHistory() {
+  const want = layers();
+  while (pushed < want) history.pushState({ snug: ++pushed }, '');
+  if (pushed > want) {
+    // Closed from inside the app: step back over the entries it no longer needs.
+    history.go(want - pushed);
+    pushed = want;
+  }
+}
+addEventListener('popstate', (e) => {
+  pushed = e.state?.snug || 0;
+  for (let i = 0; i < 4 && layers() > pushed; i++) closeTop();
+});
+
 function App() {
   useStore();
+  useLayoutEffect(syncHistory);
   const needs = totalNeeds(S);
   document.title = needs ? `(${needs}) Snug` : 'Snug';
   return html`${S.ui.phone ? html`<${Phone} />` : html`<${Desktop} />`}<${Overlays} />`;

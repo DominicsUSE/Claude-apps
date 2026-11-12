@@ -1,6 +1,6 @@
 // Catch up: what needs you first, then what happened, in one place instead of
 // badges everywhere. Saved: the messages you chose to keep.
-import { html } from '../../vendor/preact-htm.js';
+import { html, useRef } from '../../vendor/preact-htm.js';
 import {
   S, back, me, convMeta, findMsg, jumpToMsg, openConv, openModal, openQuick, declineInvite, markAllRead,
   markConvRead, markManyRead, toggleSave, setSavedNote, setPresence, emit, toast,
@@ -60,6 +60,67 @@ function done(conv, m) {
   toast('Marked as done', { undo: () => { S.read[conv] = before; emit(); } });
 }
 
+// Triage: move with J and K (or the arrows), E marks done, Enter opens.
+// On a phone, swipe an item to the left to mark it done.
+function focusItem(i) {
+  requestAnimationFrame(() => {
+    const list = [...document.querySelectorAll('.item[data-triage]')];
+    list[Math.min(i, list.length - 1)]?.focus();
+  });
+}
+
+function onTriageKey(e) {
+  const el = e.target.closest?.('.item[data-triage]');
+  if (!el || e.metaKey || e.ctrlKey || e.altKey) return;
+  const list = [...document.querySelectorAll('.item[data-triage]')];
+  const i = list.indexOf(el);
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (k === 'j' || k === 'ArrowDown') list[i + 1]?.focus();
+  else if (k === 'k' || k === 'ArrowUp') list[i - 1]?.focus();
+  else if (k === 'e' && e.target === el) { el.querySelector('[data-done]').click(); focusItem(i); }
+  else if (k === 'Enter' && e.target === el) el.querySelector('.item-main').click();
+  else return;
+  e.preventDefault();
+}
+
+function TriageItem({ conv, m }) {
+  const ref = useRef();
+  const drag = useRef(null);
+  const move = (x) => { ref.current.style.transform = x ? `translateX(${x}px)` : ''; };
+  const down = (e) => {
+    if (e.pointerType !== 'touch') return;
+    drag.current = { x: e.clientX, y: e.clientY, dx: 0, on: false };
+  };
+  const moving = (e) => {
+    const d = drag.current;
+    if (!d) return;
+    d.dx = Math.min(0, e.clientX - d.x);
+    if (!d.on && Math.abs(e.clientY - d.y) > Math.abs(d.dx)) { drag.current = null; return; }
+    if (d.dx < -8) { d.on = true; ref.current.classList.add('swiping'); move(d.dx); }
+  };
+  const up = () => {
+    const d = drag.current;
+    drag.current = null;
+    if (!d?.on) return;
+    ref.current.classList.remove('swiping');
+    if (-d.dx > Math.min(120, ref.current.offsetWidth * 0.35)) done(conv, m);
+    else move(0);
+  };
+  return html`<div class="swipe" onPointerDown=${down} onPointerMove=${moving} onPointerUp=${up} onPointerCancel=${up}>
+    <span class="swipe-under" aria-hidden="true"><${Icon} name="check" size=${18} />Done</span>
+    <div class="item" ref=${ref} data-triage tabindex="0">
+      <${Avatar} user=${S.users[m.author]} />
+      <button class="item-main" tabindex="-1" onClick=${() => jumpToMsg(conv, m.id)}>
+        <span class="item-meta"><b>${S.users[m.author].name}</b><span class="where">${why(conv, m)}</span><span class="num">${fmtWhen(m.ts)}</span></span>
+        <span class="item-text"><${Rich} m=${m} /></span>
+      </button>
+      <div class="item-acts float">
+        <button class="ib" data-done aria-label="Mark as done" data-tip="Done" data-key="E" onClick=${() => done(conv, m)}><${Icon} name="check" size=${18} /></button>
+      </div>
+    </div>
+  </div>`;
+}
+
 export function CatchUp() {
   const { needs, news } = gather();
   const focused = me().presence === 'focus';
@@ -95,16 +156,10 @@ export function CatchUp() {
               </div>
             </div>`;
           })}
-          ${needs.map(({ conv, m }) => html`<div class="item" key=${m.id}>
-            <${Avatar} user=${S.users[m.author]} />
-            <button class="item-main" onClick=${() => jumpToMsg(conv, m.id)}>
-              <span class="item-meta"><b>${S.users[m.author].name}</b><span class="where">${why(conv, m)}</span><span class="num">${fmtWhen(m.ts)}</span></span>
-              <span class="item-text"><${Rich} m=${m} /></span>
-            </button>
-            <div class="item-acts float">
-              <button class="ib" aria-label="Mark as done" data-tip="Done" onClick=${() => done(conv, m)}><${Icon} name="check" size=${18} /></button>
-            </div>
-          </div>`)}
+          <div onKeyDown=${onTriageKey}>
+            ${needs.map(({ conv, m }) => html`<${TriageItem} key=${m.id} conv=${conv} m=${m} />`)}
+          </div>
+          ${needs.length > 1 && html`<div class="view-note triage-hint">${S.ui.phone ? 'Swipe left on an item when you\u2019re done with it.' : html`<span class="kbd">J</span> <span class="kbd">K</span> to move, <span class="kbd">E</span> when done, <span class="kbd">Enter</span> to open.`}</div>`}
           ${byHouse.map(({ h, rows }) => html`<div key=${h}>
             <div class="view-sect">${S.houses[h].name}
               <button class="btn quiet" onClick=${() => markManyRead(rows.map((r) => r.conv), `${S.houses[h].name} news marked as read`)}>Mark read</button>

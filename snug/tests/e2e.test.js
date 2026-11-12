@@ -146,6 +146,28 @@ test('saving a message and finding it with is:saved', async () => {
   assert.deepEqual(errors, []);
 });
 
+test('catch up: J moves, E marks done, Undo brings it back', async () => {
+  await page.click('.nav >> text=Catch up');
+  const items = page.locator('.item[data-triage]');
+  const before = await items.count();
+  await items.first().focus();
+  await page.keyboard.press('j');
+  assert.equal(await items.nth(1).evaluate((el) => el === document.activeElement), true);
+  await page.keyboard.press('e');
+  await page.waitForFunction((n) => document.querySelectorAll('.item[data-triage]').length === n - 1, before);
+  assert.equal(await page.evaluate(() => document.activeElement.matches('.item[data-triage]')), true, 'focus stays in the list');
+  await page.click('.toast >> text=Undo');
+  await page.waitForFunction((n) => document.querySelectorAll('.item[data-triage]').length === n, before);
+});
+
+test('high contrast darkens faint text', async () => {
+  const faint = () => page.evaluate(() => getComputedStyle(document.querySelector('.item-meta')).color);
+  const standard = await faint();
+  await page.evaluate(() => import('./js/store.js').then((s) => s.setPref('contrast', 'high')));
+  assert.notEqual(await faint(), standard);
+  await page.evaluate(() => import('./js/store.js').then((s) => s.setPref('contrast', 'system')));
+});
+
 test('phone: tabs, a room pushed on top, back returns', async () => {
   await page.close();
   await open({ width: 390, height: 844 });
@@ -155,6 +177,12 @@ test('phone: tabs, a room pushed on top, back returns', async () => {
   await page.locator('.screen.push .composer textarea').waitFor();
   await page.click('.screen.push [aria-label="Back"]');
   assert.equal(await page.locator('.screen.push').count(), 0);
+  // The system back gesture closes the room instead of leaving the app.
+  await page.click('.row:has-text("Ride plans")');
+  await page.locator('.screen.push .composer textarea').waitFor();
+  await page.goBack();
+  await page.waitForFunction(() => !document.querySelector('.screen.push'));
+  assert.match(page.url(), new RegExp(`localhost:${PORT}`));
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
   assert.equal(overflow, false, 'no horizontal scroll at phone width');
   assert.deepEqual(errors, []);

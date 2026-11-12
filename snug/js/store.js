@@ -326,6 +326,7 @@ export function applyPrefs() {
   set(ATTR.density, p.density, 'regular');
   set(ATTR.text, p.text, 'm');
   set(ATTR.motion, p.motion === 'reduced' ? 'off' : null);
+  set('data-contrast', p.contrast, 'system');
 }
 export function setPref(key, val) { S.prefs[key] = val; applyPrefs(); emit(); }
 
