@@ -149,7 +149,7 @@ One family in `js/ui/icons.js`: line icons on a 20-unit grid, a 1.5-unit stroke,
 
 The set covers what the app does and no more (49 glyphs, from search and reply to mic, compass and calendar). A 1.5px line sits at the same weight as Inter at 14 to 16px, so an icon and its label read as one unit. Filled forms are kept for state: `saved` and `starred` fill when on, so "on" is visible without colour. Each room kind has its icon (a bubble for text, sound bars for voice, a megaphone for notices), first in its row, so the kind is known before the name is read.
 
-Some marks are deliberately not icons: topics use a plain "#", presence uses CSS shapes, communities use arch tiles. The camera and screen icons the contract asked for were not added, because those features do not exist yet.
+Some marks are deliberately not icons: topics use a plain "#", presence uses CSS shapes, communities use arch tiles. The camera and screen icons the contract asked for arrived with video in voice rooms (`camera`, `camera-off`, `screen`, `screen-off`, plus `expand` and `shrink` for focusing a tile), and voice messages and GIFs brought `play`, `pause` and `gif`.
 
 ## 6. Shape language
 
@@ -604,29 +604,33 @@ These choices cost some short-term engagement. They follow from the promise, "a 
 
 **Quality.** Finished? A carefully made 0.3. Every designed state has a token and is used, and tests cover the rules and the server with separate users. The gaps are breadth, not polish: the features below, and the few small flaws named above.
 
+## Built since this document was written
+
+Each works between separate people and has its own browser tests; the main README says what each covers and what could not be tested.
+
+- **Camera video and screen sharing in voice rooms**, on the same peer-to-peer connections as audio. Faces stay for people with the camera off; a shared screen takes the large tile with the others in a strip; any tile can be focused; the desktop app has its own picker of screens and windows. Tested with Chromium's fake devices and in the desktop app under Xvfb, not with real cameras.
+- **Voice messages**: hold or tap to record (up to 5 minutes), a compact player with a waveform, seeking and speed. Audio types are checked against the file's bytes.
+- **Pinned messages** in rooms, direct messages and groups, with a Pin messages permission, a line in the history, a marker on the message, a count in the header and a list in the side pane.
+- **GIFs**: saved GIFs on every device, GIFs posted in your places, and optional search through Tenor proxied by the server (tested against a stand-in only).
+- **Custom emoji per house**, with a Manage emoji permission, a picker section, `:name:` suggestions and a `<:name:id>` token in `js/lib/format.js`.
+- **Notifications when Snug is closed**: Web Push with a service worker, VAPID keys and a send path using `needsMe`, and the desktop app running in the tray. Real delivery through Google's push service could not be reached from the test machine, so a real browser push has not been seen end to end.
+
 ## Not built yet
 
 What the brief asked for, or a person would expect, that is not in 0.3.0, and what each would need.
 
-- **Camera video in voice rooms.** Needs video tracks in `js/voice.js`, a camera toggle and icon, a stage that mixes faces and video, and bandwidth limits. A 12-person mesh will not carry video for more than a few people, so likely a media server (SFU).
-- **Screen sharing.** Needs `getDisplayMedia`, a "who is sharing" state relayed by the server, a stage layout with one large screen, a screen icon, and an SFU for larger rooms.
-- **GIF picker.** Uploaded GIFs work and animate; there is no search. Needs a provider (API key, requests proxied through the server for privacy, a CSP change for its images) or a curated local set.
-- **Voice messages.** Needs `MediaRecorder`, upload as audio (today anything but known images downloads instead of opening), a player with a waveform, and a length limit.
-- **Pinning.** Partly there: rooms have highlights, curated by those with the permission and listed in the details pane. Missing: pins in direct messages and groups, and a pinned marker in the room header.
-- **Custom emoji.** The built-in set is small. Needs per-house uploads, storage, a permission, a picker section and a `:name:` token in `js/lib/format.js`.
 - **Social sign-in.** Username and password only. Needs OAuth per provider, callback routes, server secrets and account linking.
 - **Email.** No verification, no "forgot password". Needs an email provider and token flows.
-- **Push notifications when Snug is closed.** Only while a tab is open. Needs a service worker, Web Push keys, a subscriptions table and a server send path using `needsMe`.
 - **Photo avatars and community images.** The Avatar component can show an image, but nothing uploads one; house marks are a letter or emoji. Needs an upload op, cropping, resizing and storage rules.
 - **Blocking and reporting.** Neither exists. Needs a block table checked in contacts, direct messages, friend requests and Discover, and a report queue for moderators.
 - **Moderation beyond removal.** No bans that survive rejoining a public house, no timeouts, slow mode or audit log.
 - **Privacy controls.** No setting for who may send requests or direct messages. Needs preferences enforced in `friend.request` and `dm.open`.
 - **Voice device settings.** No microphone or speaker choice, level meter, push-to-talk or per-person volume. Needs `enumerateDevices`, a Voice settings page and per-peer gain.
-- **TURN relay and larger rooms.** Voice connects directly; strict networks need a relay (`SNUG_TURN_*` is ready). Above 12 people needs a media server.
+- **TURN relay and larger rooms.** Voice and video connect directly; strict networks need a relay (`SNUG_TURN_*` is ready). Above 12 people, or more than a few cameras at once, needs a media server (SFU).
+- **Calls in direct messages and groups.** Voice, camera and screen sharing exist only in voice rooms. A call to a person needs ringing, an incoming-call screen and a call state the server relays.
 - **Event reminders.** Saying you are going does not notify you at the start. Needs a scheduler and a rule in `attention.js` that counts a starting event you said yes to as needing you.
 - **Richer formatting.** Inline code and fenced code blocks exist; quotes, lists and spoilers do not. Needs new rules in `js/lib/format.js`.
 - **A setting for the newcomer first step.** Houses choose starter rooms, but the first step (`firstStep`) is only set by seed data; every other house falls back to "Say hello". Needs a field in `house.update` and a control on the Newcomers page.
 - **Native phone apps.** The phone product is the web app with a manifest. A Windows app exists; iOS and Android builds do not.
 - **More than one server process.** Presence, voice membership and rate limits live in memory. Scaling past a single process needs a shared message bus.
-- **Camera and screen icons**, which wait for the features above.
-- **The version label** in Settings, which should read 0.3.0 from one source (`js/views/settings.js:314`).
+- **The version label** in Settings, which should read 0.3.0 from one source (it is written by hand in `js/views/settings.js`).

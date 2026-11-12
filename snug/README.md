@@ -38,9 +38,16 @@ window and sign in as someone else to talk to yourself. `npm run seed --
 Tests:
 
 ```bash
-npm test            # rules (18) and the server with real sockets (36)
-npm run test:e2e    # separate people in separate browsers (23), needs Playwright
+npm test            # rules (18) and the server with real sockets (44)
+npm run test:e2e    # separate people in separate browsers (43), needs Playwright
 ```
+
+`test:e2e` runs every `tests/e2e*.test.js` one file at a time: the core
+flows (23), camera and screen sharing (9), voice messages, pins and GIFs (4),
+custom emoji (3) and notifications when Snug is closed (4). Each also runs
+alone: `npm run test:e2e:video`, `test:e2e:messages`, `test:e2e:emoji`,
+`test:e2e:notify`. The notifications file uses Playwright's newer headless
+Chromium (`channel: 'chromium'`).
 
 ## The desktop app
 
@@ -67,7 +74,21 @@ On first run it asks where Snug should run:
   voice, because browsers only allow the microphone on secure pages.
 - **Join a Snug.** Type the address of a Snug that someone else runs.
 
-**Snug > Change where Snug runs** brings the choice back. To work on the app:
+**Snug > Change where Snug runs** brings the choice back.
+
+Closing the window keeps Snug running in the system tray (the menu bar on a
+Mac), so its connection stays open and notifications keep arriving; the
+first close says so. The tray menu has **Open Snug** and **Quit**; Quit stops
+the server and closes the database cleanly. Turn this off with **Snug > Keep
+Snug running when the window is closed** or the same switch in Settings >
+Notifications (stored in `desktop.json`). Opening Snug again while it runs in
+the tray brings the window back. Clicking a notification shows the window on
+the conversation. Tested under Xvfb on Linux (the window hides, the server
+keeps answering, a message from a second person notifies and the click
+opens it, tray Quit exits); the tray icon itself and the system's
+notification banner were not looked at on a real Windows or Mac desktop.
+
+To work on the app:
 
 ```bash
 cd snug/desktop && npm install && npm start
@@ -97,17 +118,73 @@ Real, and covered by tests with separate users:
   messages synced across a person's devices.
 - Search over every stored message a person may read.
 - In-app notes and desktop notifications while a tab is open.
+- Notifications when Snug is closed (Settings > Notifications > *Notify me
+  when Snug is closed*): Web Push through the browser's own push service, with
+  a service worker at `/sw.js`. The server keeps one VAPID key per data
+  folder, encrypts each note to the device (RFC 8291 aes128gcm, RFC 8292
+  VAPID, node:crypto only), and sends one only for what needs you (direct
+  messages, mentions, replies, followed threads; never muted places or while
+  Focused) and only while none of your Snug tabs is connected, at most five
+  at once then one every 20 seconds. One notification per conversation;
+  clicking opens it in an open Snug tab or a new one. Signing out removes the
+  device. Tested against a local mock push service (decrypting each push and
+  checking its signature) and with Chromium's real service worker
+  (`npm run test:e2e:notify`); delivery
+  through Google's push service could not be reached from the test machine,
+  so a real Chrome or Firefox push has not been seen end to end.
 - Voice rooms: real audio between people over WebRTC. The server only
   introduces them to each other.
+- Camera and screen sharing in voice rooms, on the same peer-to-peer
+  connections: camera at 640x360 to 1280x720, screen share with its sound
+  where the browser offers it, stopped by the browser's own "Stop sharing".
+  Someone joining late gets what is already on. Screens take the large tile
+  with the rest in a strip; click any tile to make it large; full screen for
+  a shared screen. The desktop app answers a screen share with its own picker
+  of screens and windows. Tested with Chromium's fake camera and screen
+  (`npm run test:e2e:video`) and in the desktop app under Xvfb; real cameras,
+  and system sound (Windows only, in the desktop app), have not been tested
+  here. Not tested either: the browser's own "Stop sharing" bar (headless
+  Chromium has none, so the test ends the track instead), the macOS system
+  picker, full screen actually filling the screen (only the button is
+  checked), and the desktop video test on the Windows build machines. Video
+  rides the same mesh as audio, with bitrate capped as the room grows, so more
+  than a few cameras at once will strain it. Direct messages and groups have
+  no calls yet.
 - Offline: the app opens from a copy on the device, what you write waits,
   and it sends once when the connection is back.
+- Voice messages: hold the microphone to record (or tap to start and tap
+  Send), up to 5 minutes, with a live timer and level meter; Esc (or sliding
+  left on a phone) cancels. They play in a compact row with a waveform, seeking
+  and 1x, 1.5x, 2x. Audio types are checked against the file's bytes, and
+  files answer Range requests so playback can seek. Recorded and played back
+  in Chromium with its fake microphone (`npm run test:e2e:messages`); sliding
+  left to cancel on a phone and pausing when scrolled away are built but have
+  no automated test.
+- Pinned messages: up to 50 per room or conversation, pinned by roles with
+  the Pin messages or Remove messages permission (anyone in a direct
+  conversation or group), live to everyone who can read, listed from the pin
+  in the header. Someone who joins a house sees its pins from their next
+  sync, not at once.
+- GIFs: star any GIF to keep it in Your GIFs on every device, and pick from
+  GIFs posted in your places. Search is optional (see `SNUG_GIF_PROVIDER`);
+  a GIF picked from search is downloaded by the server and stored as a Snug
+  file, so no message loads from another site. Tested against a local stand-in
+  for the provider, not against Tenor itself.
+- Custom emoji per house: up to 100, added in House settings > Emoji by roles
+  with the Manage emoji permission (PNG, GIF or WebP, up to 256 KB and 256 by
+  256 pixels, checked from the file on the server). Type `:name:` (with
+  suggestions after two letters) or pick them from their house's section of
+  the emoji picker; they work in messages and reactions, live to everyone. Used
+  in a direct message, the people there see them too; a removed emoji reads as
+  its `:name:`. Images are served only to people allowed to see them.
+  `npm run test:e2e:emoji` drives it with two people in two browsers. Using
+  one in a direct message is covered by the server tests only, and the Emoji
+  settings page has not been driven on a phone (only looked at, at 390px).
 
 Not built yet, on purpose, because each needs outside infrastructure:
 
 - **Email.** No address verification and no "forgot password". Until then an
   owner of the server resets a password in the database.
-- **Push notifications when Snug is closed.** Needs a service worker and Web
-  Push keys. Today notifications arrive only while a tab is open.
 - **A TURN relay for voice.** Voice connects directly between people. People
   behind strict company or mobile networks need a relay; set the `SNUG_TURN_*`
   variables below once you run one (coturn is the usual choice). Only direct
@@ -116,12 +193,28 @@ Not built yet, on purpose, because each needs outside infrastructure:
   limits live in memory, so Snug runs as a single process. That is fine for
   communities in the thousands; beyond that it needs a shared message bus.
 - **Voice rooms above 12 people.** Audio is a full mesh; larger rooms need a
-  media server.
+  media server. The same media server would let more than a few cameras run
+  at once.
+- **Calls in direct messages and groups.** Voice, camera and screen sharing
+  live in voice rooms only. Calling a person needs ringing and an
+  incoming-call screen.
+
+Built, but not seen end to end from the test machine:
+
+- **Real push delivery.** The server's pushes were decrypted and checked
+  against a mock push service, and Chromium's service worker showed them, but
+  Google's push service (and so a real Chrome push) could not be reached from
+  here; Firefox's and Apple's were not tried. Apple's needs a real
+  `SNUG_PUSH_CONTACT`.
+- **GIF search against Tenor.** Tested against a local stand-in for its API;
+  the real service needs a key and was not reached.
+- **Real cameras and screens.** Only Chromium's fake devices and the desktop
+  app under Xvfb.
 
 ## Putting it online
 
-Voice and desktop notifications need HTTPS (browsers only allow the
-microphone on secure pages; `localhost` is the one exception). Run Snug
+Voice and notifications need HTTPS (browsers only allow the microphone,
+service workers and push on secure pages; `localhost` is the one exception). Run Snug
 behind a reverse proxy that terminates TLS and passes WebSocket upgrades on
 `/ws`, and set:
 
@@ -134,7 +227,9 @@ behind a reverse proxy that terminates TLS and passes WebSocket upgrades on
 | `SNUG_ORIGINS` | Extra allowed page origins, comma separated | none |
 | `SNUG_STUN` | STUN servers for voice | Google's public server |
 | `SNUG_TURN_URL`, `SNUG_TURN_USER`, `SNUG_TURN_PASS` | TURN relay for voice | none |
+| `SNUG_PUSH_CONTACT` | Contact the push services see in each VAPID token (`mailto:` or `https:`); Apple's requires a real one | `mailto:snug@example.invalid` |
 | `SNUG_DEMO_PASSWORD` | Password for the sample accounts when seeding | `snug-demo-1` |
+| `SNUG_GIF_PROVIDER=tenor`, `SNUG_TENOR_KEY` | Turn on GIF search through Tenor (v2 API). Searches and previews go through the server; media is fetched only from Tenor's media hosts, at most 10 MB, GIF, WebP or MP4 by content | off: no Search tab |
 
 Back up the `data` folder; it is the whole state. Change the sample password
 before seeding anything that faces the internet, or better, do not seed there.
@@ -264,7 +359,8 @@ js/
   app.js            root: sign-in or app, desktop or phone, overlays, keyboard map
   store.js          state and every action; updates the screen at once, then tells the server
   server.js         the transport: WebSocket with reconnect, the offline send queue, live events
-  voice.js          WebRTC voice: microphone, peer connections, who is speaking
+  voice.js          WebRTC voice: microphone, camera, screen share, peer connections
+                    (perfect negotiation), who is speaking
   lib/              pure rules with tests: format, group, attention, search, perms,
                     social (friends, happening now, events, topics)
   ui/               icons, shared pieces (avatar, presence, rich text), overlays

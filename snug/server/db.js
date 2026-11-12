@@ -219,7 +219,56 @@ export function migrate(db) {
     // Names and types come from the list above, never from input.
     if (!have) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
+  migrateMessagesExtras(db);
+  migrateCustomEmoji(db); // custom emoji per house (server/emoji.js)
 }
+
+// --- Custom emoji (server/emoji.js) -----------------------------------------
+// Each house's emoji, and where emoji were used outside their own house (so
+// the readers of those conversations may see the image).
+function migrateCustomEmoji(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS house_emoji (
+      id TEXT PRIMARY KEY,
+      house TEXT NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      file TEXT NOT NULL,
+      by TEXT NOT NULL,
+      created INTEGER NOT NULL,
+      UNIQUE (house, name)
+    );
+    CREATE INDEX IF NOT EXISTS house_emoji_file ON house_emoji(file);
+    CREATE TABLE IF NOT EXISTS emoji_uses (
+      emoji TEXT NOT NULL,
+      conv TEXT NOT NULL,
+      PRIMARY KEY (emoji, conv)
+    );`);
+}
+// --- end custom emoji -------------------------------------------------------
+
+// --- Messages extras (voice messages, pins, GIFs) ---------------------------
+// Pinned messages per conversation, the GIFs each person saved (references to
+// files they can read), and a details column on files (GIF flag, size).
+function migrateMessagesExtras(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pins (
+      conv TEXT NOT NULL,
+      msg TEXT NOT NULL,
+      by TEXT NOT NULL,
+      at INTEGER NOT NULL,
+      PRIMARY KEY (conv, msg)
+    );
+    CREATE TABLE IF NOT EXISTS gif_favs (
+      user TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      file TEXT NOT NULL,
+      at INTEGER NOT NULL,
+      w INTEGER,
+      h INTEGER,
+      PRIMARY KEY (user, file)
+    );`);
+  if (!db.prepare('PRAGMA table_info(files)').all().some((c) => c.name === 'meta')) db.exec('ALTER TABLE files ADD COLUMN meta TEXT');
+}
+// --- end messages extras ----------------------------------------------------
 
 export function openDb(path) {
   if (path !== ':memory:') {

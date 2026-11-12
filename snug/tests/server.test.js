@@ -805,3 +805,835 @@ test('the sample data opens alive: friends both ways, two houses to discover, th
     await other.close();
   }
 });
+
+// ---------- Camera and screen sharing (video agent) ----------
+test('voice.state: camera and screen flags are validated and reach the room', async () => {
+  const seeded = join(dir, 'seeded-video');
+  const db = openDb(join(seeded, 'snug.db'));
+  seedDatabase(db, join(seeded, 'files'), { password: 'snug-demo-1' });
+  db.close();
+  const other = await startServer({ port: 0, dataDir: seeded, quiet: true });
+  try {
+    const origin = `http://127.0.0.1:${other.port}`;
+    const login = async (handle) => {
+      const res = await fetch(`${origin}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json', origin }, body: JSON.stringify({ handle, password: 'snug-demo-1' }) });
+      assert.equal(res.status, 200);
+      const ws = new WebSocket(`ws://127.0.0.1:${other.port}/ws`, { headers: { cookie: cookieOf(res), origin } });
+      const acks = new Map();
+      const events = [];
+      let n = 0;
+      const hello = await new Promise((resolve) => ws.on('message', (b) => {
+        const m = JSON.parse(b);
+        if (m.t === 'hello') resolve(m.d); else if (m.t === 'ack') acks.get(m.id)?.(m); else if (m.t === 'ev') events.push(m);
+      }));
+      const op = (o, d) => { const id = ++n; ws.send(JSON.stringify({ t: 'op', id, op: o, d })); return new Promise((r) => acks.set(id, r)); };
+      const next = async (ev, pred) => {
+        for (let end = Date.now() + 1500; Date.now() < end;) {
+          const i = events.findIndex((e) => e.ev === ev && pred(e.d));
+          if (i >= 0) return events.splice(i, 1)[0].d;
+          await new Promise((r) => setTimeout(r, 30));
+        }
+        throw new Error(`no "${ev}" event arrived`);
+      };
+      return { hello, op, ws, next };
+    };
+    const robin = await login('robin');
+    const ines = await login('ines');
+    assert.equal((await robin.op('voice.join', { room: 'k_wheel' })).ok, true);
+    const joined = (await ines.op('voice.join', { room: 'k_wheel' })).d;
+    assert.ok(joined.peers.includes('robin'));
+    // A new person starts with camera and screen off.
+    const first = await robin.next('voice', (d) => d.users.includes('ines'));
+    assert.deepEqual(first.state.ines, { muted: false, deaf: false, camera: false, screen: false });
+
+    // Only real booleans are accepted; nothing changes on a refusal.
+    for (const bad of [{ camera: 'yes' }, { camera: 1 }, { screen: null }, { muted: 'true' }, { screen: {} }]) {
+      const a = await ines.op('voice.state', bad);
+      assert.equal(a.ok, false, JSON.stringify(bad));
+      assert.match(a.error, /voice state isn’t valid/);
+    }
+    // Turning the camera on reaches the other person, and leaves mute alone.
+    assert.equal((await ines.op('voice.state', { muted: true, deaf: false, camera: true, screen: false })).ok, true);
+    let s = (await robin.next('voice', (d) => d.state.ines?.camera)).state.ines;
+    assert.deepEqual(s, { muted: true, deaf: false, camera: true, screen: false });
+    // A partial update only touches the flags it names.
+    assert.equal((await ines.op('voice.state', { screen: true })).ok, true);
+    s = (await robin.next('voice', (d) => d.state.ines?.screen)).state.ines;
+    assert.deepEqual(s, { muted: true, deaf: false, camera: true, screen: true });
+    // Someone in the house but not in the room sees the flags too (the stage shows who has a camera on).
+    const malik = await login('malik');
+    assert.equal(malik.hello.voice.k_wheel.state.ines.camera, true);
+    // Leaving and joining again starts clean.
+    assert.equal((await ines.op('voice.leave', {})).ok, true);
+    assert.equal((await ines.op('voice.join', { room: 'k_wheel' })).ok, true);
+    s = (await robin.next('voice', (d) => d.users.includes('ines') && d.state.ines && !d.state.ines.camera)).state.ines;
+    assert.deepEqual(s, { muted: false, deaf: false, camera: false, screen: false });
+    for (const c of [robin, ines, malik]) c.ws.close();
+  } finally {
+    await other.close();
+  }
+});
+
+// --- Messages extras: voice messages, pins, GIFs ----------------------------
+// Each test makes its own people and house, so it does not depend on the ones above.
+const MX = { n: 0 };
+const mxHandle = (p) => `${p}${Date.now().toString(36).slice(-4)}${++MX.n}`;
+async function mxHouse(owner, member) {
+  const { house: h, room } = await owner.ok('house.create', { name: 'Clay & Sound', hue: 120 });
+  const { code } = await owner.ok('invite.create', { house: h });
+  await member.ok('invite.accept', { code });
+  return { house: h, room };
+}
+const upload = (cookie, conv, type, bytes, name = 'file') => fetch(`${base}/api/files?conv=${encodeURIComponent(conv)}`, {
+  method: 'POST', headers: { cookie, origin: base, 'content-type': type, 'x-file-name': name }, body: bytes,
+});
+const pad = (head, n = 64) => Buffer.concat([Buffer.from(head), Buffer.alloc(n, 7)]);
+const AUDIO_SAMPLES = {
+  'audio/webm;codecs=opus': pad([0x1a, 0x45, 0xdf, 0xa3]),
+  'audio/ogg': pad('OggS'),
+  'audio/mp4': pad(Buffer.concat([Buffer.from([0, 0, 0, 0x20]), Buffer.from('ftypM4A ')])),
+  'audio/mpeg': pad('ID3'),
+};
+const GIF_BYTES = pad('GIF89a', 200);
+
+test('voice messages: every audio type uploads and plays inline; Range seeks; length and waveform are checked', async () => {
+  const a = await Client.make(mxHandle('vox'), 'Vox A');
+  const b = await Client.make(mxHandle('vox'), 'Vox B');
+  const { room } = await mxHouse(a, b);
+  for (const [claimed, bytes] of Object.entries(AUDIO_SAMPLES)) {
+    const type = claimed.split(';')[0];
+    const up = await upload(a.cookie, room, claimed, bytes, 'Voice message');
+    assert.equal(up.status, 201, claimed);
+    const f = await up.json();
+    assert.equal(f.kind, 'audio', claimed);
+    const got = await fetch(`${base}/api/files/${f.id}`, { headers: { cookie: b.cookie } });
+    assert.equal(got.status, 200);
+    assert.equal(got.headers.get('content-type'), type);
+    assert.equal(got.headers.get('x-content-type-options'), 'nosniff');
+    assert.match(got.headers.get('content-disposition'), /^inline/);
+    assert.equal(got.headers.get('accept-ranges'), 'bytes');
+    assert.equal((await got.arrayBuffer()).byteLength, bytes.length);
+    const part = await fetch(`${base}/api/files/${f.id}`, { headers: { cookie: b.cookie, range: 'bytes=2-9' } });
+    assert.equal(part.status, 206, `${claimed} range`);
+    assert.equal(part.headers.get('content-range'), `bytes 2-9/${bytes.length}`);
+    assert.deepEqual(Buffer.from(await part.arrayBuffer()), bytes.subarray(2, 10));
+    const tail = await fetch(`${base}/api/files/${f.id}`, { headers: { cookie: b.cookie, range: 'bytes=-4' } });
+    assert.equal(tail.status, 206);
+    assert.deepEqual(Buffer.from(await tail.arrayBuffer()), bytes.subarray(bytes.length - 4));
+    const bad = await fetch(`${base}/api/files/${f.id}`, { headers: { cookie: b.cookie, range: `bytes=${bytes.length + 5}-` } });
+    assert.equal(bad.status, 416);
+    await bad.arrayBuffer();
+    // A Range header that doesn't parse, or asks for several ranges, is ignored: the whole file.
+    for (const odd of ['bytes=0-0,5-9', 'bytes=abc', 'bytes=9-2', 'items=0-3']) {
+      const whole = await fetch(`${base}/api/files/${f.id}`, { headers: { cookie: b.cookie, range: odd } });
+      assert.equal(whole.status, 200, odd);
+      assert.equal(Buffer.from(await whole.arrayBuffer()).length, bytes.length);
+    }
+  }
+  // Something that only claims to be audio downloads instead of playing.
+  const fake = await (await upload(a.cookie, room, 'audio/webm', Buffer.from('<html><script>alert(1)</script>'), 'x.webm')).json();
+  assert.equal(fake.kind, 'file');
+  const fakeGet = await fetch(`${base}/api/files/${fake.id}`, { headers: { cookie: b.cookie } });
+  assert.equal(fakeGet.headers.get('content-type'), 'application/octet-stream');
+  assert.match(fakeGet.headers.get('content-disposition'), /^attachment/);
+  await fakeGet.arrayBuffer();
+
+  // The message carries the length and waveform; the other person gets both.
+  const voice = await (await upload(a.cookie, room, 'audio/webm;codecs=opus', AUDIO_SAMPLES['audio/webm;codecs=opus'], 'Voice message.webm')).json();
+  const peaks = Array.from({ length: 48 }, (_, i) => (i * 5) % 256);
+  assert.match(await a.refused('msg.send', { conv: room, id: mid(), text: '', files: [{ id: voice.id, duration: 4.2, peaks: [...peaks.slice(0, 47), 300] }] }), /waveform/);
+  assert.match(await a.refused('msg.send', { conv: room, id: mid(), text: '', files: [{ id: voice.id, duration: 4.2, peaks: ['a'] }] }), /waveform/);
+  assert.match(await a.refused('msg.send', { conv: room, id: mid(), text: '', files: [{ id: voice.id, duration: 400, peaks }] }), /5 minutes/);
+  const id = mid();
+  await a.ok('msg.send', { conv: room, id, text: '', files: [{ id: voice.id, duration: 4.24, peaks }] });
+  const ev = await b.next('msg', (d) => d.m.id === id);
+  assert.deepEqual(ev.m.files[0], { kind: 'audio', id: voice.id, name: 'Voice message.webm', size: voice.size, duration: 4.2, peaks });
+  a.close(); b.close();
+});
+
+test('pins: live to everyone who can read, in the snapshot, limited by role in houses and to 50', async () => {
+  const a = await Client.make(mxHandle('pin'), 'Pin Owner');
+  const b = await Client.make(mxHandle('pin'), 'Pin Member');
+  const out = await Client.make(mxHandle('pin'), 'Pin Outsider');
+  const { house: h, room } = await mxHouse(a, b);
+  const id = mid();
+  await a.ok('msg.send', { conv: room, id, text: 'Kiln opens at nine.' });
+  await a.ok('msg.pin', { conv: room, id });
+  const ev = await b.next('pins', (d) => d.conv === room);
+  assert.equal(ev.on, true);
+  assert.equal(ev.by, a.id);
+  assert.deepEqual(ev.pins.map((p) => p.id), [id]);
+  assert.equal(ev.m.text, 'Kiln opens at nine.');
+  await out.none('pins');
+  // A plain member (post and invite only) can't pin or unpin in a house.
+  assert.match(await b.refused('msg.pin', { conv: room, id }), /can’t pin/);
+  assert.match(await b.refused('msg.unpin', { conv: room, id }), /can’t pin/);
+  assert.match(await out.refused('msg.pin', { conv: room, id }), /access/);
+  // Pins come back in the snapshot after a reconnect.
+  await b.close(); await b.connect();
+  assert.deepEqual(b.hello.pins[room].map((p) => p.id), [id]);
+  assert.equal(b.hello.pins[room][0].by, a.id);
+  // The new 'pin' permission, or 'moderate', is enough.
+  const view = await a.ok('sync');
+  const memberRole = view.houses[h].roles[1].id;
+  await a.ok('role.update', { house: h, role: memberRole, perms: ['post', 'pin'] });
+  await b.ok('msg.unpin', { conv: room, id });
+  assert.deepEqual((await a.next('pins', (d) => d.on === false)).pins, []);
+  await a.ok('role.update', { house: h, role: memberRole, perms: ['post', 'moderate'] });
+  await b.ok('msg.pin', { conv: room, id });
+  // Threads have no pins.
+  const reply = mid();
+  await a.ok('msg.send', { conv: `t:${id}`, id: reply, text: 'In a thread' });
+  assert.match(await a.refused('msg.pin', { conv: `t:${id}`, id: reply }), /not threads/);
+  // In a direct conversation anyone in it can pin; at most 50.
+  const { id: dm } = await a.ok('dm.open', { users: [b.id] });
+  const ids = [];
+  for (let i = 0; i < 51; i++) {
+    const m = mid();
+    srv.db.run('INSERT INTO messages (id, conv, author, ts, text, fold) VALUES (?, ?, ?, ?, ?, ?)', m, dm, a.id, Date.now() + i, `note ${i}`, `note ${i}`);
+    ids.push(m);
+  }
+  for (let i = 0; i < 50; i++) { if (i % 40 === 0) srv.resetLimits(); await b.ok('msg.pin', { conv: dm, id: ids[i] }); }
+  assert.match(await a.refused('msg.pin', { conv: dm, id: ids[50] }), /up to 50/);
+  // Older and sample messages have short ids; they pin too.
+  srv.db.run('INSERT INTO messages (id, conv, author, ts, text, fold) VALUES (?, ?, ?, ?, ?, ?)', 'm7', room, a.id, Date.now(), 'short id', 'short id');
+  await a.ok('msg.pin', { conv: room, id: 'm7' });
+  await a.ok('msg.unpin', { conv: room, id: 'm7' });
+  await a.ok('msg.unpin', { conv: dm, id: ids[0] });
+  await a.ok('msg.pin', { conv: dm, id: ids[50] });
+  // A deleted message drops out of the pins.
+  b.events.length = 0;
+  await a.ok('msg.delete', { conv: room, id });
+  assert.deepEqual((await b.next('pins', (d) => d.conv === room)).pins, [], 'everyone hears that the pin went with the message');
+  await a.ok('msg.restore', { conv: room, id });
+  assert.deepEqual((await b.next('pins', (d) => d.conv === room)).pins.map((p) => p.id), [id], 'and that it came back');
+  await a.ok('msg.delete', { conv: room, id });
+  const again = await a.ok('sync');
+  assert.equal(again.pins[room], undefined);
+  assert.equal(again.pins[dm].length, 50);
+  a.close(); b.close(); out.close();
+});
+
+test('gifs: saved GIFs sync to every device; recent GIFs come from your places only; sending one copies it', async () => {
+  const a = await Client.make(mxHandle('gif'), 'Gif A');
+  const b = await Client.make(mxHandle('gif'), 'Gif B');
+  const out = await Client.make(mxHandle('gif'), 'Gif Out');
+  const { room } = await mxHouse(a, b);
+  const up = await (await upload(a.cookie, room, 'image/gif', GIF_BYTES, 'wave.gif')).json();
+  assert.equal(up.kind, 'image');
+  const id = mid();
+  await a.ok('msg.send', { conv: room, id, text: '', files: [{ id: up.id, w: 120, h: 80 }] });
+  const ev = await b.next('msg', (d) => d.m.id === id);
+  assert.equal(ev.m.files[0].gif, true);
+  // Recent: b sees the GIF a posted; someone outside the house sees nothing.
+  const recent = await b.ok('gif.recent');
+  assert.equal(recent.gifs[0].id, up.id);
+  assert.equal(recent.gifs[0].by, a.id);
+  assert.deepEqual((await out.ok('gif.recent')).gifs, []);
+  // Favourite on one device, the other device hears it; it is in the next snapshot.
+  const b2 = new Client(); b2.cookie = b.cookie; b2.id = b.id; await b2.connect();
+  await b.ok('gif.fav', { file: up.id, on: true, w: 120, h: 80 });
+  const synced = await b2.next('gifs');
+  assert.deepEqual(synced.favs.map((g) => [g.id, g.w, g.h]), [[up.id, 120, 80]]);
+  await b2.close(); await b2.connect();
+  assert.equal(b2.hello.gifFavs[0].id, up.id);
+  assert.match(await out.refused('gif.fav', { file: up.id, on: true }), /no longer here/);
+  // Only GIFs can be saved.
+  const png = await (await upload(a.cookie, room, 'image/png', pad([0x89, 0x50, 0x4e, 0x47]), 'tile.png')).json();
+  await a.ok('msg.send', { conv: room, id: mid(), text: '', files: [{ id: png.id, w: 1, h: 1 }] });
+  assert.match(await b.refused('gif.fav', { file: png.id, on: true }), /Only GIFs/);
+  // Sending a saved GIF in a direct conversation copies the file there.
+  const { id: dm } = await b.ok('dm.open', { users: [a.id] });
+  const post = (path, body, cookie) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', origin: base, cookie }, body: JSON.stringify(body) });
+  const copy = await post('/api/gifs/use', { conv: dm, file: up.id }, b.cookie);
+  assert.equal(copy.status, 201);
+  const c = await copy.json();
+  assert.notEqual(c.id, up.id);
+  assert.equal(c.gif, true);
+  await b.ok('msg.send', { conv: dm, id: mid(), text: '', files: [{ id: c.id, w: 120, h: 80 }] });
+  assert.equal((await (await fetch(`${base}/api/files/${c.id}`, { headers: { cookie: a.cookie } })).arrayBuffer()).byteLength, GIF_BYTES.length);
+  assert.equal((await post('/api/gifs/use', { conv: dm, file: up.id }, out.cookie)).status, 403, 'an outsider can’t post there');
+  // The same GIF sent twice shows once in recent.
+  assert.equal((await a.ok('gif.recent')).gifs.filter((g) => g.name === 'wave.gif').length, 1);
+  // Unsave.
+  await b.ok('gif.fav', { file: up.id, on: false });
+  assert.deepEqual((await b2.next('gifs')).favs, []);
+  a.close(); b.close(); b2.close(); out.close();
+});
+
+test('gif search: off without a key; with one, proxied through Snug with a media allowlist', async () => {
+  // Without SNUG_TENOR_KEY the picker has no search, and the routes say so.
+  const plain = await Client.make(mxHandle('gs'), 'No Key');
+  assert.deepEqual(await (await fetch(`${base}/api/gifs/config`, { headers: { cookie: plain.cookie } })).json(), { search: false });
+  assert.equal((await fetch(`${base}/api/gifs?q=cat`, { headers: { cookie: plain.cookie } })).status, 404);
+  assert.equal((await fetch(`${base}/api/gifs/config`)).status, 401, 'signed-in people only');
+  plain.close();
+
+  // A stand-in for Tenor on this machine.
+  const { createServer } = await import('node:http');
+  const seen = [];
+  const mock = createServer((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    seen.push(u.pathname + u.search);
+    const here = `http://127.0.0.1:${mock.address().port}`;
+    const elsewhere = `http://localhost:${mock.address().port}`;
+    if (u.pathname === '/v2/search') {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ results: [
+        { id: 'g1', content_description: 'Cat waves', media_formats: { mediumgif: { url: `${here}/media/cat.gif`, dims: [220, 140] }, tinygif: { url: `${here}/media/cat-tiny.gif`, dims: [110, 70] } } },
+        { id: 'g2', content_description: 'Off-list', media_formats: { mediumgif: { url: `${elsewhere}/media/cat.gif`, dims: [1, 1] }, tinygif: { url: `${elsewhere}/media/cat.gif` } } },
+      ] }));
+    } else if (u.pathname.endsWith('.gif')) { res.setHeader('content-type', 'image/gif'); res.end(GIF_BYTES); }
+    else if (u.pathname === '/media/page') { res.setHeader('content-type', 'image/gif'); res.end('<html>not a gif</html>'); }
+    else if (u.pathname === '/media/hop') { res.writeHead(302, { location: `${elsewhere}/media/cat.gif` }); res.end(); }
+    else if (u.pathname === '/media/huge') { res.setHeader('content-type', 'image/gif'); res.end(Buffer.concat([Buffer.from('GIF89a'), Buffer.alloc(10 * 1024 * 1024 + 10)])); }
+    else { res.writeHead(404); res.end(); }
+  });
+  await new Promise((r) => mock.listen(0, '127.0.0.1', r));
+  const here = `http://127.0.0.1:${mock.address().port}`;
+  const gdir = mkdtempSync(join(tmpdir(), 'snug-gif-'));
+  Object.assign(process.env, { SNUG_GIF_PROVIDER: 'tenor', SNUG_TENOR_KEY: 'test-key', SNUG_TENOR_BASE: here });
+  let g;
+  try {
+    g = await startServer({ port: 0, dataDir: gdir, quiet: true });
+  } finally {
+    for (const k of ['SNUG_GIF_PROVIDER', 'SNUG_TENOR_KEY', 'SNUG_TENOR_BASE']) delete process.env[k];
+  }
+  const gb = `http://127.0.0.1:${g.port}`;
+  const gpost = (path, body, cookie) => fetch(gb + path, { method: 'POST', headers: { 'content-type': 'application/json', origin: gb, cookie }, body: JSON.stringify(body) });
+  try {
+    const reg = await gpost('/api/register', { handle: 'gifsearcher', name: 'Gif Searcher', password: 'a long password' });
+    const cookie = cookieOf(reg);
+    const ws = new WebSocket(`ws://127.0.0.1:${g.port}/ws`, { headers: { cookie, origin: gb } });
+    const acks = new Map(); let n2 = 0;
+    await new Promise((r) => ws.on('message', (buf) => { const m = JSON.parse(buf); if (m.t === 'hello') r(); else if (m.t === 'ack') acks.get(m.id)?.(m); }));
+    const op = (o, d) => { const i = ++n2; ws.send(JSON.stringify({ t: 'op', id: i, op: o, d })); return new Promise((r) => acks.set(i, r)); };
+    const { room } = (await op('house.create', { name: 'Gif House', hue: 30 })).d;
+    const get = (path) => fetch(gb + path, { headers: { cookie } });
+
+    assert.deepEqual(await (await get('/api/gifs/config')).json(), { search: true });
+    const found = await (await get('/api/gifs?q=cat')).json();
+    assert.equal(found.results.length, 1, 'results whose media is off the allowlist are dropped');
+    const r0 = found.results[0];
+    assert.equal(r0.title, 'Cat waves');
+    assert.equal(r0.w, 220);
+    assert.ok(seen.some((s) => s.startsWith('/v2/search?') && s.includes('key=test-key') && s.includes('q=cat')), 'the key goes to the provider, from the server');
+    // Previews come through Snug, never straight from the provider.
+    assert.match(r0.preview, /^\/api\/gifs\/media\?u=/);
+    const prev = await get(r0.preview);
+    assert.equal(prev.status, 200);
+    assert.equal(prev.headers.get('content-type'), 'image/gif');
+    await prev.arrayBuffer();
+    assert.equal((await get(`/api/gifs/media?u=${encodeURIComponent(`http://localhost:${mock.address().port}/media/cat.gif`)}`)).status, 403);
+
+    // Picking one: the server downloads it and stores a normal Snug file.
+    const imp = await gpost('/api/gifs/import', { conv: room, url: r0.url, w: r0.w, h: r0.h, title: r0.title }, cookie);
+    assert.equal(imp.status, 201);
+    const f = await imp.json();
+    assert.match(f.id, /^f_/);
+    assert.equal(f.name, 'Cat waves.gif');
+    const file = await get(`/api/files/${f.id}`);
+    assert.equal(file.headers.get('content-type'), 'image/gif');
+    assert.equal((await file.arrayBuffer()).byteLength, GIF_BYTES.length);
+    const mid2 = 'm_gifsearch000001';
+    const sent = await op('msg.send', { conv: room, id: mid2, text: '', files: [{ id: f.id, w: 220, h: 140 }] });
+    assert.equal(sent.ok, true, sent.error);
+    assert.equal(sent.d.m.files[0].gif, true);
+    assert.equal(sent.d.m.files[0].w, 220);
+
+    // Refusals: another host (even the same machine under another name), a redirect away, not a GIF, too big.
+    const refuse = async (url, status, why) => {
+      const res = await gpost('/api/gifs/import', { conv: room, url }, cookie);
+      assert.equal(res.status, status, url);
+      assert.match((await res.json()).error, why);
+    };
+    await refuse(`http://localhost:${mock.address().port}/media/cat.gif`, 403, /isn’t one Snug fetches/);
+    await refuse('https://evil.example/cat.gif', 403, /isn’t one Snug fetches/);
+    await refuse(`${here}/media/hop`, 422, /couldn’t be fetched/);
+    await refuse(`${here}/media/page`, 422, /isn’t a GIF/);
+    await refuse(`${here}/media/huge`, 422, /over 10 MB/);
+    // Someone who can't post in the conversation can't import into it.
+    const other = await gpost('/api/register', { handle: 'gifstranger', name: 'Stranger', password: 'a long password' });
+    assert.equal((await gpost('/api/gifs/import', { conv: room, url: r0.url }, cookieOf(other))).status, 403);
+    ws.close();
+  } finally {
+    await g.close();
+    await new Promise((r) => mock.close(r));
+    rmSync(gdir, { recursive: true, force: true });
+  }
+});
+// --- end messages extras ----------------------------------------------------
+
+// --- Custom emoji (server/emoji.js) -----------------------------------------
+// A real PNG, w by h pixels of one colour, made here so the tests need no fixture.
+async function emoPng(w, h) {
+  const { deflateSync, crc32 } = await import('node:zlib');
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(td) >>> 0);
+    return Buffer.concat([len, td, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(w * 3, 0x7a)]);
+  const raw = Buffer.concat(Array.from({ length: h }, () => row));
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+const emoUpload = (house, bytes, cookie, type = 'image/png', name = 'party.png') => fetch(`${base}/api/files?emoji=${encodeURIComponent(house)}`, {
+  method: 'POST', headers: { 'content-type': type, 'x-file-name': name, origin: base, cookie }, body: bytes,
+});
+const emoGet = (file, cookie) => fetch(`${base}/api/files/${file}`, { headers: { cookie } });
+let emoN = 0;
+const emoHandle = (p) => `emo-${p}${++emoN}`;
+
+test('custom emoji: permissions, names, image limits, duplicates and the house limit', async () => {
+  const own = await Client.make(emoHandle('own'), 'Emoji Owner');
+  const mem = await Client.make(emoHandle('mem'), 'Emoji Member');
+  const { house: h, room } = await own.ok('house.create', { name: 'Emoji House', hue: 30 });
+  const { code } = await own.ok('invite.create', { house: h });
+  await mem.ok('invite.accept', { code });
+  assert.deepEqual(mem.hello.emoji, {}, 'a person with no houses has no emoji');
+  const png = await emoPng(32, 32);
+
+  // A member without the permission can neither upload nor add.
+  const refusedUp = await emoUpload(h, png, mem.cookie);
+  assert.equal(refusedUp.status, 403);
+  assert.match((await refusedUp.json()).error, /can’t manage emoji/);
+  // Image limits, checked from the file itself.
+  const big = await emoUpload(h, Buffer.concat([png, Buffer.alloc(256 * 1024)]), own.cookie);
+  assert.equal(big.status, 413);
+  const huge = await emoUpload(h, await emoPng(300, 200), own.cookie);
+  assert.equal(huge.status, 422);
+  assert.match((await huge.json()).error, /300 by 200 pixels/);
+  const wide = await emoUpload(h, await emoPng(257, 10), own.cookie);
+  assert.equal(wide.status, 422, 'one side over 256 is enough to refuse');
+  const text = await emoUpload(h, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>'), own.cookie, 'image/png', 'x.png');
+  assert.equal(text.status, 415, 'the type the browser claims is not trusted');
+  const jpeg = await emoUpload(h, Buffer.from([0xff, 0xd8, 0xff, 0xe0, ...Buffer.alloc(40)]), own.cookie, 'image/jpeg', 'x.jpg');
+  assert.equal(jpeg.status, 415);
+  assert.equal((await emoUpload('h_nothere', png, own.cookie)).status, 404);
+  // GIF and WebP headers are read too.
+  const gif = Buffer.concat([Buffer.from('GIF89a'), Buffer.from([16, 0, 16, 0]), Buffer.alloc(20)]);
+  assert.equal((await emoUpload(h, gif, own.cookie, 'image/gif', 'g.gif')).status, 201);
+  const webp = Buffer.from('RIFF\0\0\0\0WEBPVP8X\x0a\0\0\0\0\0\0\0\x2b\x01\0\x0f\0\0\0\0', 'latin1');
+  const webpRes = await emoUpload(h, webp, own.cookie, 'image/webp', 'w.webp');
+  assert.equal(webpRes.status, 422, 'a 300 by 16 WebP is too wide');
+
+  const up = await emoUpload(h, png, own.cookie);
+  assert.equal(up.status, 201);
+  const file = await up.json();
+  assert.equal(file.w, 32);
+  assert.equal(await mem.refused('emoji.add', { house: h, name: 'party', file: file.id }), 'Your role can’t manage emoji in this house.');
+  // Bad names.
+  for (const [name, why] of [['p', /at least 2/], ['Party', /lowercase/], ['has-dash', /lowercase/], ['has space', /lowercase/], ['x'.repeat(33), /at most 32/], ['', /Give the emoji a name/], ['ünï', /lowercase/]]) {
+    assert.match(await own.refused('emoji.add', { house: h, name, file: file.id }), why, `"${name}"`);
+  }
+  assert.match(await own.refused('emoji.add', { house: h, name: 'party', file: 'f_madeupfile0001' }), /didn’t finish uploading/);
+  // Someone else's upload can't be claimed.
+  const { emoji } = await own.ok('emoji.add', { house: h, name: 'party', file: file.id });
+  assert.equal(emoji.name, 'party');
+  assert.match(emoji.id, /^em_/);
+  const live = await mem.next('emoji', (d) => d.house === h && d.list.length > 0);
+  assert.deepEqual(live.list.map((e) => e.name), ['party'], 'members hear about it at once');
+  assert.match(await own.refused('emoji.add', { house: h, name: 'party2', file: file.id }), /already an emoji/, 'one image, one emoji');
+  // Duplicates.
+  const up2 = await (await emoUpload(h, png, own.cookie)).json();
+  assert.match(await own.refused('emoji.add', { house: h, name: 'party', file: up2.id }), /already an emoji called :party:/);
+  assert.match(await own.refused('emoji.add', { house: h, name: ':party:', file: up2.id }), /already an emoji called :party:/, 'colons around a name are ignored');
+  const { emoji: cake } = await own.ok('emoji.add', { house: h, name: 'cake', file: up2.id });
+  assert.match(await own.refused('emoji.rename', { id: cake.id, name: 'party' }), /already an emoji called :party:/);
+  assert.match(await mem.refused('emoji.rename', { id: cake.id, name: 'pie' }), /can’t manage emoji/);
+  assert.match(await mem.refused('emoji.remove', { id: cake.id }), /can’t manage emoji/);
+
+  // Giving a role the permission lets its people manage emoji.
+  const memberRole = srv.db.get('SELECT role FROM members WHERE house = ? AND user = ?', h, mem.id).role;
+  const role = srv.db.get('SELECT perms FROM roles WHERE id = ?', memberRole);
+  await own.ok('role.update', { house: h, role: memberRole, perms: [...JSON.parse(role.perms), 'emoji'] });
+  await mem.ok('emoji.rename', { id: cake.id, name: 'pie' });
+  assert.equal(srv.db.get('SELECT name FROM house_emoji WHERE id = ?', cake.id).name, 'pie');
+
+  // At most 100 per house.
+  for (let i = srv.db.get('SELECT COUNT(*) n FROM house_emoji WHERE house = ?', h).n; i < 100; i++) {
+    srv.db.run('INSERT INTO house_emoji (id, house, name, file, by, created) VALUES (?, ?, ?, ?, ?, ?)', `em_filler${String(i).padStart(6, '0')}`, h, `filler_${i}`, `f_filler${i}`, own.id, Date.now());
+  }
+  const up3 = await (await emoUpload(h, png, own.cookie)).json();
+  assert.match(await own.refused('emoji.add', { house: h, name: 'onemore', file: up3.id }), /up to 100 emoji/);
+  srv.db.run("DELETE FROM house_emoji WHERE id LIKE 'em_filler%'");
+
+  // The snapshot carries each house's emoji.
+  await mem.close();
+  await mem.connect();
+  assert.deepEqual(mem.hello.emoji[h].map((e) => e.name), ['party', 'pie']);
+  assert.ok(room);
+  own.close(); mem.close();
+});
+
+test('custom emoji: in messages and reactions, who may see the image, rename and removal', async () => {
+  const own = await Client.make(emoHandle('own'), 'Emoji Owner');
+  const mem = await Client.make(emoHandle('mem'), 'Emoji Member');
+  const out = await Client.make(emoHandle('out'), 'Emoji Outsider');
+  const { house: h, room } = await own.ok('house.create', { name: 'Party House', hue: 60 });
+  await mem.ok('invite.accept', { code: (await own.ok('invite.create', { house: h })).code });
+  const file = await (await emoUpload(h, await emoPng(24, 24), own.cookie)).json();
+  // Before it is added, only the uploader can see the image.
+  assert.equal((await emoGet(file.id, own.cookie)).status, 200);
+  assert.equal((await emoGet(file.id, mem.cookie)).status, 404);
+  const { emoji: e } = await own.ok('emoji.add', { house: h, name: 'party', file: file.id });
+  const token = `<:party:${e.id}>`;
+
+  // Members may fetch the image; people outside the house may not.
+  const img = await emoGet(e.file, mem.cookie);
+  assert.equal(img.status, 200);
+  assert.equal(img.headers.get('content-type'), 'image/png');
+  assert.match(img.headers.get('content-security-policy'), /sandbox/);
+  await img.arrayBuffer();
+  assert.equal((await emoGet(e.file, out.cookie)).status, 404, 'non-members can’t fetch emoji images');
+  assert.equal((await fetch(`${base}/api/files/${e.file}`)).status, 401);
+
+  // In the house: the message carries the emoji's metadata.
+  const sent = await mem.ok('msg.send', { conv: room, id: mid(), text: `so good ${token}` });
+  assert.deepEqual(sent.m.emoji, { [e.id]: { name: 'party', file: e.file, house: h } });
+  const seen = await own.next('msg', (d) => d.m.id === sent.m.id);
+  assert.equal(seen.m.emoji[e.id].name, 'party');
+
+  // An outsider crafting the token in their own house gets no metadata, and still can't fetch it.
+  const { room: theirs } = await out.ok('house.create', { name: 'Elsewhere', hue: 90 });
+  const crafted = await out.ok('msg.send', { conv: theirs, id: mid(), text: token });
+  assert.equal(crafted.m.emoji, undefined);
+  assert.equal((await emoGet(e.file, out.cookie)).status, 404);
+  assert.match(await out.refused('react', { conv: theirs, id: crafted.m.id, emoji: token, on: true }), /your own houses/);
+
+  // A member uses it in a direct conversation: its reader there may see it.
+  await mem.ok('friend.request', { user: out.id });
+  await out.ok('friend.accept', { user: mem.id });
+  const { id: dm } = await mem.ok('dm.open', { users: [out.id] });
+  const inDm = await mem.ok('msg.send', { conv: dm, id: mid(), text: token });
+  const got = await out.next('msg', (d) => d.m.id === inDm.m.id);
+  assert.equal(got.m.emoji[e.id].file, e.file);
+  assert.equal((await emoGet(e.file, out.cookie)).status, 200, 'readers of a message with the emoji may fetch it');
+  // ...and can react with it there, because it already appears there.
+  await out.ok('react', { conv: dm, id: inDm.m.id, emoji: token, on: true });
+  const rx = await mem.next('react', (d) => d.id === inDm.m.id);
+  assert.deepEqual(rx.reactions[token], [out.id]);
+  assert.equal(rx.emoji[e.id].name, 'party');
+
+  // Reactions in the house, and bad keys.
+  await own.ok('react', { conv: room, id: sent.m.id, emoji: token, on: true });
+  const rx2 = await mem.next('react', (d) => d.id === sent.m.id);
+  assert.deepEqual(rx2.reactions[token], [own.id]);
+  assert.match(await own.refused('react', { conv: room, id: sent.m.id, emoji: '<:party:em_nothere00000>', on: true }), /removed/);
+  assert.match(await own.refused('react', { conv: room, id: sent.m.id, emoji: '<:Bad Name:x>', on: true }), /emoji only/);
+  // A history page carries the metadata for the reaction too.
+  const page = await mem.ok('history', { conv: room });
+  assert.equal(page.msgs.find((m) => m.id === sent.m.id).emoji[e.id].name, 'party');
+
+  // Rename: reactions follow, old message tokens still find it by id.
+  await own.ok('emoji.rename', { id: e.id, name: 'fiesta' });
+  const renamed = await mem.next('emoji', (d) => d.house === h && d.list[0]?.name === 'fiesta');
+  assert.equal(renamed.list.length, 1);
+  const after = (await mem.ok('history', { conv: room })).msgs.find((m) => m.id === sent.m.id);
+  assert.deepEqual(Object.keys(after.reactions), [`<:fiesta:${e.id}>`]);
+  assert.equal(after.emoji[e.id].name, 'fiesta');
+  // Taking a reaction back works with the old key.
+  await own.ok('react', { conv: room, id: sent.m.id, emoji: token, on: false });
+  assert.equal((await mem.next('react', (d) => d.id === sent.m.id)).reactions[`<:fiesta:${e.id}>`], undefined);
+
+  // Removal: everyone who could see it hears, the image goes, messages fall back to text.
+  await own.ok('emoji.remove', { id: e.id });
+  await mem.next('emoji.gone', (d) => d.id === e.id);
+  await out.next('emoji.gone', (d) => d.id === e.id);
+  assert.equal((await emoGet(e.file, mem.cookie)).status, 404);
+  assert.equal((await emoGet(e.file, out.cookie)).status, 404);
+  const gone = (await mem.ok('history', { conv: room })).msgs.find((m) => m.id === sent.m.id);
+  assert.equal(gone.emoji, undefined);
+  assert.equal(gone.text, `so good ${token}`, 'the text keeps the token; the browser shows :party:');
+  assert.match(await own.refused('react', { conv: room, id: sent.m.id, emoji: token, on: true }), /removed/);
+  own.close(); mem.close(); out.close();
+});
+// --- end custom emoji -------------------------------------------------------
+
+// --- push notifications (notifications agent) --------------------------------
+// A second server of its own, allowed to push to a mock push service on
+// 127.0.0.1. The test decrypts each push with the subscription's own keys
+// (RFC 8291, written out here with plain HMAC rather than the server's code)
+// and checks the VAPID token (RFC 8292).
+test('push: subscribe rules, encrypted delivery only while closed, muted and Focused stay quiet, 410 forgets', async () => {
+  const { createServer } = await import('node:http');
+  const C = await import('node:crypto');
+  const { checkEndpoint } = await import('../server/push.js');
+  const pdir = mkdtempSync(join(tmpdir(), 'snug-push-'));
+  const ps = await startServer({ port: 0, dataDir: pdir, quiet: true, pushAllowLocal: true });
+  const pbase = `http://127.0.0.1:${ps.port}`;
+  const got = [];
+  const mock = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    got.push({ path: req.url, method: req.method, headers: req.headers, body: Buffer.concat(chunks) });
+    res.writeHead(req.url.startsWith('/gone') ? 410 : 201);
+    res.end();
+  });
+  await new Promise((r) => mock.listen(0, '127.0.0.1', r));
+  const push = `http://127.0.0.1:${mock.address().port}`;
+  const socks = [];
+  const finish = async () => { for (const w of socks) w.terminate(); mock.close(); await ps.close(); rmSync(pdir, { recursive: true, force: true }); };
+  try {
+    const ppost = (path, body, cookie, origin = pbase) => fetch(pbase + path, {
+      method: 'POST', headers: { 'content-type': 'application/json', ...(origin ? { origin } : {}), ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body),
+    });
+    // A person on this server: an account, and a socket that can be closed and reopened.
+    const person = async (handle, name) => {
+      const res = await ppost('/api/register', { handle, name, password: 'a long password' });
+      assert.equal(res.status, 201);
+      const p = { cookie: cookieOf(res), id: (await res.json()).user.id, seq: 0, acks: new Map() };
+      p.open = () => new Promise((resolve, reject) => {
+        p.ws = new WebSocket(`ws://127.0.0.1:${ps.port}/ws`, { headers: { cookie: p.cookie, origin: pbase } });
+        socks.push(p.ws);
+        p.ws.on('error', reject);
+        p.ws.on('message', (buf) => { const m = JSON.parse(buf); if (m.t === 'hello') resolve(); else if (m.t === 'ack') p.acks.get(m.id)?.(m); });
+      });
+      p.ok = (op, d = {}) => new Promise((resolve, reject) => {
+        const id = ++p.seq;
+        p.acks.set(id, (m) => (m.ok ? resolve(m.d) : reject(new Error(`${op}: ${m.error}`))));
+        p.ws.send(JSON.stringify({ t: 'op', id, op, d }));
+      });
+      p.shut = async () => {
+        await new Promise((r) => { p.ws.on('close', r); p.ws.close(); });
+        for (let i = 0; i < 50 && ps.hub.connected(p.id); i++) await new Promise((r) => setTimeout(r, 20));
+        assert.equal(ps.hub.connected(p.id), false);
+      };
+      await p.open();
+      return p;
+    };
+    const ada = await person('ada', 'Ada Okafor');
+    const bo = await person('bo', 'Bo Lindqvist');
+    const made = await ada.ok('house.create', { name: 'Kiln & Co.', hue: 35 });
+    const { code } = await ada.ok('invite.create', { house: made.house });
+    await bo.ok('invite.accept', { code });
+    const { id: dm } = await ada.ok('dm.open', { users: [bo.id] });
+
+    // The key: one per data folder, kept across restarts, behind a session.
+    assert.equal((await fetch(`${pbase}/api/push/key`)).status, 401);
+    const { key } = await (await fetch(`${pbase}/api/push/key`, { headers: { cookie: bo.cookie } })).json();
+    assert.equal(Buffer.from(key, 'base64url').length, 65);
+    assert.equal(ps.push.publicKey, key);
+
+    // Subscribing: origin checked, endpoint and keys validated.
+    const ua = C.createECDH('prime256v1');
+    ua.generateKeys();
+    const auth = C.randomBytes(16);
+    const sub = (path) => ({ endpoint: `${push}${path}`, keys: { p256dh: ua.getPublicKey().toString('base64url'), auth: auth.toString('base64url') } });
+    assert.equal((await ppost('/api/push/subscribe', sub('/bo'), bo.cookie, null)).status, 403, 'no origin, no change');
+    assert.equal((await ppost('/api/push/subscribe', sub('/bo'), bo.cookie, 'https://evil.example')).status, 403);
+    assert.equal((await ppost('/api/push/subscribe', sub('/bo'))).status, 401);
+    assert.equal((await ppost('/api/push/subscribe', { ...sub('/bo'), endpoint: 'ftp://127.0.0.1/x' }, bo.cookie)).status, 400);
+    assert.equal((await ppost('/api/push/subscribe', { ...sub('/bo'), keys: { p256dh: 'AAAA', auth: 'AAAA' } }, bo.cookie)).status, 400);
+    const badPoint = Buffer.alloc(65, 7); badPoint[0] = 4;
+    assert.equal((await ppost('/api/push/subscribe', { ...sub('/bo'), keys: { p256dh: badPoint.toString('base64url'), auth: auth.toString('base64url') } }, bo.cookie)).status, 400, 'a point not on the curve');
+    assert.equal((await ppost('/api/push/subscribe', sub('/bo'), bo.cookie)).status, 201);
+    // In production (no test flag) only https on a named host will do.
+    assert.equal(checkEndpoint('http://127.0.0.1:9/x', false), null);
+    assert.equal(checkEndpoint('https://10.0.0.1/x', false), null);
+    assert.equal(checkEndpoint('https://localhost/x', false), null);
+    assert.equal(checkEndpoint('https://[::1]/x', false), null);
+    assert.equal(checkEndpoint('http://fcm.googleapis.com/fcm/send/abc', false), null);
+    assert.equal(checkEndpoint('https://fcm.googleapis.com/fcm/send/abc', false), 'https://fcm.googleapis.com/fcm/send/abc');
+    assert.equal(checkEndpoint('http://10.0.0.1/x', true), null, 'the test flag allows this machine only');
+    // Only the browsers' own push services, on 443: never a name that points at
+    // this machine or a private network.
+    for (const bad of ['https://127.0.0.1.nip.io/', 'https://169.254.169.254.nip.io/', 'https://metadata.google.internal./',
+      'https://localhost./x', 'https://foo.localhost./', 'https://fcm.googleapis.com./x', 'https://fcm.googleapis.com:8443/x',
+      'https://evil.example/x', 'https://fcm.googleapis.com.evil.example/x', 'https://push.apple.com.evil.example/x']) {
+      assert.equal(checkEndpoint(bad, false), null, bad);
+    }
+    for (const good of ['https://updates.push.services.mozilla.com/wpush/v2/abc', 'https://web.push.apple.com/QAbc',
+      'https://wns2-by3p.notify.windows.com/w/?token=abc', 'https://fcm.googleapis.com:443/fcm/send/abc']) {
+      assert.ok(checkEndpoint(good, false), good);
+    }
+    const shared = await post('/api/register', { handle: 'pushprod', name: 'P', password: 'a long password' });
+    assert.equal((await post('/api/push/subscribe', sub('/x'), cookieOf(shared))).status, 400, 'the default server refuses http endpoints');
+
+    const decrypt = (body) => {
+      const hmac = (k, d) => C.createHmac('sha256', k).update(d).digest();
+      const salt = body.subarray(0, 16);
+      assert.equal(body.readUInt32BE(16), 4096);
+      const idlen = body[20];
+      const asPub = body.subarray(21, 21 + idlen);
+      const ct = body.subarray(21 + idlen);
+      const secret = ua.computeSecret(asPub);
+      const ikm = hmac(hmac(auth, secret), Buffer.concat([Buffer.from('WebPush: info\0'), ua.getPublicKey(), asPub, Buffer.from([1])]));
+      const prk = hmac(salt, ikm);
+      const cek = hmac(prk, Buffer.from('Content-Encoding: aes128gcm\0\x01')).subarray(0, 16);
+      const nonce = hmac(prk, Buffer.from('Content-Encoding: nonce\0\x01')).subarray(0, 12);
+      const d = C.createDecipheriv('aes-128-gcm', cek, nonce);
+      d.setAuthTag(ct.subarray(-16));
+      const pt = Buffer.concat([d.update(ct.subarray(0, -16)), d.final()]);
+      let i = pt.length - 1;
+      while (pt[i] === 0) i--;
+      assert.equal(pt[i], 2, 'the last record ends with 0x02');
+      return JSON.parse(pt.subarray(0, i));
+    };
+    const checkVapid = (h) => {
+      const m = /^vapid t=([\w-]+\.[\w-]+\.[\w-]+), k=([\w-]+)$/.exec(h.authorization);
+      assert.ok(m, h.authorization);
+      assert.equal(m[2], key);
+      const [hd, pl, sg] = m[1].split('.');
+      assert.deepEqual(JSON.parse(Buffer.from(hd, 'base64url')), { typ: 'JWT', alg: 'ES256' });
+      const claims = JSON.parse(Buffer.from(pl, 'base64url'));
+      assert.equal(claims.aud, push, 'the audience is the push service origin');
+      assert.ok(claims.exp > Date.now() / 1000 && claims.exp <= Date.now() / 1000 + 24 * 3600);
+      assert.match(claims.sub, /^(mailto:|https:)/);
+      const raw = Buffer.from(m[2], 'base64url');
+      const pub = C.createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: raw.subarray(1, 33).toString('base64url'), y: raw.subarray(33).toString('base64url') }, format: 'jwk' });
+      assert.equal(C.verify('sha256', Buffer.from(`${hd}.${pl}`), { key: pub, dsaEncoding: 'ieee-p1363' }, Buffer.from(sg, 'base64url')), true, 'the signature verifies');
+    };
+    const pushes = async (n, ms = 1500) => {
+      const end = Date.now() + ms;
+      while (got.length < n && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 150)); // and nothing more arrives
+      return got.splice(0);
+    };
+    const send = (conv, text, extra = {}) => { const id = mid(); return ada.ok('msg.send', { conv, id, text, ...extra }).then((r) => r.m); };
+
+    // Bo is connected: the open app notifies by itself, so nothing is pushed.
+    await send(dm, 'Are you around?');
+    assert.equal((await pushes(1, 400)).length, 0, 'no push while Bo has a live socket');
+
+    // Bo closes every tab: a direct message is pushed, encrypted, signed.
+    await bo.shut();
+    const long = `Could you cover **Saturday**? ${'The kiln needs watching. '.repeat(20)}`;
+    const m1 = await send(dm, long);
+    let [p] = await pushes(1);
+    assert.ok(p, 'a push arrived');
+    assert.equal(p.method, 'POST');
+    assert.equal(p.path, '/bo');
+    assert.equal(p.headers['content-encoding'], 'aes128gcm');
+    assert.equal(p.headers['content-type'], 'application/octet-stream');
+    assert.ok(Number(p.headers.ttl) > 0);
+    checkVapid(p.headers);
+    let note = decrypt(p.body);
+    assert.equal(note.title, 'Ada Okafor');
+    assert.equal(note.conv, dm);
+    assert.equal(note.msg, m1.id);
+    assert.equal(note.tag, `snug:${dm}`);
+    assert.ok(note.body.startsWith('Could you cover Saturday? The kiln'), 'plain text, no markdown');
+    assert.ok(note.body.length <= 180 && note.body.endsWith('…'), 'the preview is cut short');
+    // A resend of the same message id (a retry) pushes nothing new.
+    await ada.ok('msg.send', { conv: dm, id: m1.id, text: long });
+    assert.equal((await pushes(1, 300)).length, 0);
+
+    // Rooms: only what needs Bo. A plain message does not; a mention and a reply do.
+    await send(made.room, 'Kiln is hot, everyone.');
+    assert.equal((await pushes(1, 400)).length, 0, 'plain room chatter is not pushed');
+    await send(made.room, 'Glaze run at 6, @bo are you in?');
+    [p] = await pushes(1);
+    note = decrypt(p.body);
+    assert.equal(note.title, 'Ada Okafor in Lounge');
+    assert.equal(note.body, 'Glaze run at 6, @bo are you in?');
+
+    // Muted: the house, then the direct conversation. Nothing at all.
+    await bo.open();
+    await bo.ok('notify.set', { kind: 'house', id: made.house, level: 'muted' });
+    await bo.ok('notify.set', { kind: 'dm', id: dm, level: 'muted' });
+    await bo.shut();
+    await send(made.room, '@bo the muted house');
+    await send(dm, 'the muted conversation');
+    assert.equal((await pushes(1, 500)).length, 0, 'muted places send nothing');
+    await bo.open();
+    await bo.ok('notify.set', { kind: 'house', id: made.house, level: 'all' });
+    await bo.ok('notify.set', { kind: 'dm', id: dm, level: 'all' });
+    // Focused: nothing either.
+    await bo.ok('me.update', { presence: 'focus' });
+    await bo.shut();
+    await send(dm, 'while focused');
+    assert.equal((await pushes(1, 400)).length, 0, 'Focused sends nothing');
+    await bo.open();
+    await bo.ok('me.update', { presence: 'around' });
+    const mine = (await bo.ok('msg.send', { conv: made.room, id: mid(), text: 'I made the tiles.' })).m;
+    await bo.shut();
+    await send(made.room, 'They look great', { replyTo: mine.id });
+    [p] = await pushes(1);
+    assert.equal(decrypt(p.body).body, 'They look great', 'a reply to Bo is pushed');
+    // A thread Bo follows: replies in it are pushed; one Bo does not follow is not.
+    ps.hub.resetLimits(); // sending limits, not push ones
+    const root = await send(made.room, 'Thread about the glaze order');
+    const other = await send(made.room, 'Thread nobody follows');
+    await bo.open();
+    await bo.ok('follow.set', { thread: `t:${root.id}`, on: true });
+    await bo.shut();
+    await send(`t:${other.id}`, 'just us here');
+    assert.equal((await pushes(1, 400)).length, 0);
+    await send(`t:${root.id}`, 'Ordered 10 kg');
+    [p] = await pushes(1);
+    assert.equal(decrypt(p.body).title, 'Ada Okafor in a thread in Lounge');
+
+    // Rate limited per person: a burst sends at most five.
+    ps.hub.resetLimits();
+    ps.push.reset();
+    for (let i = 0; i < 8; i++) await send(dm, `burst ${i}`);
+    const burst = await pushes(8, 800);
+    assert.equal(burst.length, 5, 'five at once, then the limit');
+    ps.push.reset();
+
+    // A subscription the push service says is gone (410) is forgotten.
+    await bo.open();
+    assert.equal((await ppost('/api/push/subscribe', sub('/gone/1'), bo.cookie)).status, 201);
+    await bo.shut();
+    await send(dm, 'one for each device');
+    const both = await pushes(2);
+    assert.deepEqual(both.map((x) => x.path).sort(), ['/bo', '/gone/1']);
+    for (let i = 0; i < 50 && ps.db.get('SELECT 1 FROM push_subs WHERE endpoint = ?', `${push}/gone/1`); i++) await new Promise((r) => setTimeout(r, 20));
+    assert.equal(ps.db.get('SELECT 1 FROM push_subs WHERE endpoint = ?', `${push}/gone/1`), undefined, '410 removes the subscription');
+    assert.ok(ps.db.get('SELECT 1 FROM push_subs WHERE endpoint = ?', `${push}/bo`));
+
+    // At most ten devices per person: the oldest go.
+    for (let i = 0; i < 12; i++) { ps.push.reset(); assert.equal((await ppost('/api/push/subscribe', sub(`/dev/${i}`), ada.cookie)).status, 201); }
+    const ends = ps.db.all('SELECT endpoint FROM push_subs WHERE user = ?', ada.id).map((r) => r.endpoint);
+    assert.equal(ends.length, 10);
+    assert.equal(ends.includes(`${push}/dev/0`), false);
+    assert.equal(ends.includes(`${push}/dev/11`), true);
+    // Unsubscribing removes only your own.
+    assert.equal((await ppost('/api/push/unsubscribe', { endpoint: `${push}/bo` }, ada.cookie)).status, 200);
+    assert.ok(ps.db.get('SELECT 1 FROM push_subs WHERE endpoint = ?', `${push}/bo`), 'someone else cannot drop Bo’s device');
+    assert.equal((await ppost('/api/push/unsubscribe', { endpoint: `${push}/bo` }, bo.cookie)).status, 200);
+    assert.equal(ps.db.get('SELECT 1 FROM push_subs WHERE endpoint = ?', `${push}/bo`), undefined);
+    await send(dm, 'nobody is listening');
+    assert.equal((await pushes(1, 300)).length, 0);
+
+    // Knowing someone's push address is not enough to take it: the same device
+    // (same keys) may move to another person, other keys may not.
+    ps.push.reset();
+    assert.equal((await ppost('/api/push/subscribe', sub('/bo2'), bo.cookie)).status, 201);
+    const ua2 = C.createECDH('prime256v1'); ua2.generateKeys();
+    const stolen = { endpoint: `${push}/bo2`, keys: { p256dh: ua2.getPublicKey().toString('base64url'), auth: C.randomBytes(16).toString('base64url') } };
+    assert.equal((await ppost('/api/push/subscribe', stolen, ada.cookie)).status, 409);
+    assert.equal(ps.db.get('SELECT user FROM push_subs WHERE endpoint = ?', `${push}/bo2`).user, bo.id);
+    assert.equal((await ppost('/api/push/subscribe', stolen, bo.cookie)).status, 201, 'your own device may change its keys');
+    assert.equal((await ppost('/api/push/subscribe', sub('/bo2'), bo.cookie)).status, 201);
+    assert.equal((await ppost('/api/push/subscribe', sub('/bo2'), ada.cookie)).status, 201, 'the same device signing in as Ada moves to her');
+    assert.equal(ps.db.get('SELECT user FROM push_subs WHERE endpoint = ?', `${push}/bo2`).user, ada.id);
+    await ppost('/api/push/unsubscribe', { endpoint: `${push}/bo2` }, ada.cookie);
+
+    // Signing out everywhere, or a new password, stops every device's notifications.
+    ps.push.reset();
+    ps.hub.resetLimits();
+    const bo2 = await ppost('/api/login', { handle: 'bo', password: 'a long password' });
+    const boCookie2 = cookieOf(bo2);
+    assert.equal((await ppost('/api/push/subscribe', sub('/bo-phone'), boCookie2)).status, 201);
+    assert.equal((await ppost('/api/push/subscribe', sub('/bo-laptop'), bo.cookie)).status, 201);
+    await send(dm, 'to both devices');
+    assert.deepEqual((await pushes(2)).map((x) => x.path).sort(), ['/bo-laptop', '/bo-phone']);
+    assert.equal((await ppost('/api/logout', {}, boCookie2)).status, 200);
+    assert.equal(ps.db.get('SELECT 1 FROM push_subs WHERE endpoint = ?', `${push}/bo-phone`), undefined, 'signing out forgets that device');
+    assert.ok(ps.db.get('SELECT 1 FROM push_subs WHERE endpoint = ?', `${push}/bo-laptop`));
+    assert.equal((await ppost('/api/logout-all', {}, bo.cookie)).status, 200);
+    assert.equal(ps.db.get('SELECT 1 FROM push_subs WHERE user = ?', bo.id), undefined, 'signing out everywhere forgets every device');
+    await send(dm, 'after signing out everywhere');
+    assert.equal((await pushes(1, 300)).length, 0);
+    const bo3 = cookieOf(await ppost('/api/login', { handle: 'bo', password: 'a long password' }));
+    assert.equal((await ppost('/api/push/subscribe', sub('/bo-phone'), bo3)).status, 201);
+    assert.equal((await ppost('/api/password', { current: 'a long password', next: 'another long password' }, bo3)).status, 200);
+    assert.equal(ps.db.get('SELECT 1 FROM push_subs WHERE user = ?', bo.id), undefined, 'a new password forgets every device');
+  } finally { await finish(); }
+});
+// --- end push notifications ---------------------------------------------------

@@ -13,8 +13,11 @@ import { Icon } from '../ui/icons.js';
 import { Avatar, Stack, Tile, RoomIcon, Seg, Pres, presenceLabel } from '../ui/kit.js';
 import { Stream, Message, focusComposer } from './stream.js';
 import { joinVoice, leaveVoice, toggleMute, toggleDeaf } from '../voice.js';
+import { toggleCamera, toggleScreen, mediaOf, canShareScreen } from '../voice.js';
+import { emit, toast } from '../store.js';
 import { RoomForm, RoomBrowser } from './modals.js';
 import { showProfile } from './people.js';
+import { PinsButton } from './media.js'; // pinned messages
 
 const Back = () => S.ui.phone && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
 
@@ -24,6 +27,7 @@ export function VoiceControls({ compact }) {
   return html`
     <button class=${`ib vc${c.muted ? ' on' : ''}`} aria-pressed=${String(c.muted)} aria-label=${c.muted ? 'Unmute' : 'Mute'} data-tip=${c.muted ? 'Unmute' : 'Mute'} onClick=${toggleMute}><${Icon} name=${c.muted ? 'mic-off' : 'mic'} size=${size} /></button>
     <button class=${`ib vc${c.deaf ? ' on' : ''}`} aria-pressed=${String(c.deaf)} aria-label=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} data-tip=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} onClick=${toggleDeaf}><${Icon} name=${c.deaf ? 'ear-off' : 'ear'} size=${size} /></button>
+    <${MediaControls} c=${c} size=${size} compact=${compact} />
     <button class="ib vc danger leave" aria-label="Leave voice" data-tip="Leave" onClick=${leaveVoice}><${Icon} name="leave" size=${size} /></button>`;
 }
 
@@ -50,6 +54,114 @@ function Quality({ id, inCall }) {
 // Faces get smaller as the room fills, so everyone fits without scrolling.
 const faceSize = (n) => (n <= 2 ? 96 : n <= 6 ? 64 : 48);
 
+// ---------- Camera and screen sharing (video agent) ----------
+// Controls: camera and screen sit between deafen and leave. In the compact
+// dock they only appear while on, so you can stop them from anywhere.
+function MediaControls({ c, size, compact }) {
+  const camLabel = c.cameraBusy ? 'Starting your camera…' : c.camera ? 'Turn camera off' : 'Turn camera on';
+  const canShare = canShareScreen();
+  const scrLabel = !canShare ? 'This browser can’t share a screen' : c.screenBusy ? 'Choosing what to share…' : c.screen ? 'Stop sharing your screen' : 'Share your screen';
+  return html`
+    ${(!compact || c.camera) && html`<button class=${`ib vc cam${c.camera ? ' live' : ''}`} aria-pressed=${String(!!c.camera)} aria-busy=${String(!!c.cameraBusy)} aria-label=${camLabel} data-tip=${camLabel} onClick=${toggleCamera}><${Icon} name=${c.camera ? 'camera' : 'camera-off'} size=${size} /></button>`}
+    ${(!compact || c.screen) && html`<button class=${`ib vc scr${c.screen ? ' live' : ''}${canShare ? '' : ' unavailable'}`} aria-pressed=${String(!!c.screen)} aria-busy=${String(!!c.screenBusy)} aria-disabled=${canShare ? null : 'true'} aria-label=${scrLabel} data-tip=${scrLabel} onClick=${canShare ? toggleScreen : null}><${Icon} name=${c.screen ? 'screen-off' : 'screen'} size=${size} /></button>`}`;
+}
+
+// Small marks beside a name for people watching from outside the call.
+function MediaMarks({ st }) {
+  return html`
+    ${st.screen && html`<span class="stage-media" role="img" aria-label="Sharing their screen" data-tip="Sharing their screen"><${Icon} name="screen" size=${12} /></span>`}
+    ${st.camera && html`<span class="stage-media" role="img" aria-label="Camera on" data-tip="Camera on"><${Icon} name="camera" size=${12} /></span>`}`;
+}
+
+// One tile per screen share, and one per person (a camera, or their face).
+function mediaTiles(ids, roomId) {
+  const tiles = [];
+  for (const id of ids) {
+    const st = id === S.me ? S.call : (S.voiceState[roomId]?.[id] || {});
+    const m = mediaOf(id);
+    if (st.screen) tiles.push({ key: `${id}:screen`, id, kind: 'screen', stream: m.screen });
+    tiles.push(st.camera ? { key: `${id}:camera`, id, kind: 'camera', stream: m.camera } : { key: `${id}:face`, id, kind: 'face', stream: null });
+  }
+  return tiles;
+}
+
+// The focused tile: the one you clicked, else the first screen share.
+function focusOf(tiles) {
+  const f = S.call?.focus;
+  if (f === 'grid') return null;
+  if (f && tiles.some((t) => t.key === f)) return f;
+  return tiles.find((t) => t.kind === 'screen')?.key || null;
+}
+function setFocus(key, focused) {
+  if (!S.call) return;
+  S.call.focus = focused ? 'grid' : key;
+  emit();
+}
+
+let watchingFullscreen = false;
+function toggleFullscreen(e) {
+  const tile = e.currentTarget.closest('.vt');
+  if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return; }
+  if (!tile?.requestFullscreen) { toast('Full screen isn’t available here.'); return; }
+  tile.requestFullscreen().catch(() => toast('Full screen isn’t available here.'));
+}
+
+// A video element bound to a stream. Always muted: sound plays separately.
+function Video({ stream, mirror, contain, label }) {
+  const attach = (el) => {
+    if (!el || el.srcObject === stream) return;
+    el.srcObject = stream;
+    el.play?.()?.catch(() => {});
+  };
+  return html`<video class=${`vt-video${mirror ? ' mirror' : ''}${contain ? ' contain' : ''}`} ref=${attach} autoplay playsinline muted aria-label=${label}></video>`;
+}
+
+function MediaTile({ t, roomId, focused, small }) {
+  const u = S.users[t.id];
+  const mine = t.id === S.me;
+  const st = S.voiceState[roomId]?.[t.id] || {};
+  const quiet = mine ? S.call?.muted : st.muted;
+  const deaf = mine ? S.call?.deaf : st.deaf;
+  const screenTile = t.kind === 'screen';
+  const talking = !screenTile && !!S.speaking[t.id] && !quiet;
+  const first = mine ? 'You' : u.name.split(' ')[0];
+  const what = screenTile ? (mine ? 'Your screen' : `${first}’s screen`) : mine ? 'You' : u.name;
+  const note = t.kind !== 'face' && !t.stream ? (screenTile ? 'Screen starting…' : 'Camera starting…') : peerNote(t.id, true);
+  const full = document.fullscreenElement?.dataset?.tile === t.key;
+  const videoLabel = screenTile ? what : `${mine ? 'Your' : `${first}’s`} camera`;
+  return html`<div class=${`vt vt-${t.kind}${talking ? ' talking' : ''}${focused ? ' focused' : ''}${small ? ' small' : ''}`} data-tile=${t.key} data-user=${t.id} role="group" aria-label=${what}>
+    ${t.stream
+      ? html`<${Video} stream=${t.stream} mirror=${mine && t.kind === 'camera'} contain=${screenTile} label=${videoLabel} />`
+      : html`<span class="vt-face"><${Avatar} user=${u} size=${small ? 40 : 64} speaking=${talking} dim=${!!note} /></span>`}
+    <button class="vt-hit" aria-pressed=${String(!!focused)} aria-label=${focused ? `Show everyone again` : `Make ${what} large`} onClick=${() => setFocus(t.key, focused)}></button>
+    <span class="vt-label">
+      ${!screenTile && quiet && html`<span class="vt-muted" role="img" aria-label=${deaf ? 'Not listening' : 'Muted'}><${Icon} name=${deaf ? 'ear-off' : 'mic-off'} size=${14} /></span>`}
+      ${screenTile && html`<${Icon} name="screen" size=${14} />`}
+      <span class="trunc">${screenTile ? what : first}</span>
+      ${!screenTile && html`<${Quality} id=${t.id} inCall=${true} />`}
+    </span>
+    ${note && html`<span class="vt-note" role="status">${note}</span>`}
+    ${screenTile && t.stream && html`<button class="ib vt-full" aria-label=${full ? 'Exit full screen' : 'Show full screen'} data-tip=${full ? 'Exit full screen' : 'Show full screen'} onClick=${toggleFullscreen}><${Icon} name=${full ? 'shrink' : 'expand'} size=${18} /></button>`}
+  </div>`;
+}
+
+function MediaStage({ tiles, roomId }) {
+  if (!watchingFullscreen) { watchingFullscreen = true; document.addEventListener('fullscreenchange', () => emit()); }
+  const fk = focusOf(tiles);
+  if (!fk) {
+    return html`<div class="vt-grid" data-n=${Math.min(tiles.length, 4)}>
+      ${tiles.map((t) => html`<${MediaTile} key=${t.key} t=${t} roomId=${roomId} />`)}
+    </div>`;
+  }
+  const big = tiles.find((t) => t.key === fk);
+  const rest = tiles.filter((t) => t !== big);
+  return html`<div class="vt-focus">
+    <div class="vt-main"><${MediaTile} key=${big.key} t=${big} roomId=${roomId} focused=${true} /></div>
+    ${rest.length > 0 && html`<div class="vt-strip">${rest.map((t) => html`<${MediaTile} key=${t.key} t=${t} roomId=${roomId} small=${true} />`)}</div>`}
+  </div>`;
+}
+// ---------- end camera and screen sharing ----------
+
 function Stage({ roomId }) {
   const ids = (S.voice[roomId] || []).filter((id) => S.users[id]);
   const inCall = S.call?.room === roomId;
@@ -58,12 +170,15 @@ function Stage({ roomId }) {
   const status = !inCall ? null : starting
     ? html`<span class="stage-conn wait" role="status">${S.call.status === 'mic' ? 'Waiting for your microphone\u2026' : 'Joining\u2026'}</span>`
     : html`<span class="stage-conn ok" role="status"><i aria-hidden="true"></i>Connected</span>`;
-  return html`<div class=${`stage${inCall ? ' in' : ''}${ids.length ? '' : ' empty'}`} data-size=${size} aria-label="Voice">
+  // Once someone in the call shows a camera or a screen, the stage becomes tiles.
+  const tiles = inCall && !starting ? mediaTiles(ids, roomId) : [];
+  const media = tiles.some((t) => t.kind !== 'face');
+  return html`<div class=${`stage${inCall ? ' in' : ''}${ids.length ? '' : ' empty'}${media ? ' media' : ''}`} data-size=${size} aria-label="Voice">
     <div class="stage-top">
       <span class="stage-count"><${Icon} name="voice" size=${16} />${ids.length ? `${ids.length} in voice` : 'Voice'}</span>
       ${status}
     </div>
-    ${ids.length
+    ${media ? html`<${MediaStage} tiles=${tiles} roomId=${roomId} />` : ids.length
       ? html`<div class="stage-people" style=${`--face:${size}px`}>
           ${ids.map((id) => {
             const u = S.users[id];
@@ -78,7 +193,7 @@ function Stage({ roomId }) {
                 <${Avatar} user=${u} size=${size} speaking=${talking} dim=${!!note} />
                 ${quiet && html`<span class="muted-ic" role="img" aria-label=${deaf ? 'Not listening' : 'Muted'}><${Icon} name=${deaf ? 'ear-off' : 'mic-off'} size=${size >= 64 ? 16 : 12} /></span>`}
               </span>
-              <span class="stage-name"><span class="trunc">${mine ? 'You' : u.name.split(' ')[0]}</span><${Quality} id=${id} inCall=${inCall && !starting} /></span>
+              <span class="stage-name"><span class="trunc">${mine ? 'You' : u.name.split(' ')[0]}</span><${MediaMarks} st=${st} /><${Quality} id=${id} inCall=${inCall && !starting} /></span>
               ${note && html`<span class="stage-note">${note}</span>`}
             </div>`;
           })}
@@ -161,6 +276,7 @@ export function Conversation({ conv }) {
           ${here.length > 0 ? html`<span><i class="pres inline open" aria-hidden="true"></i><span class="num">${here.length}</span> here</span>` : html`<span>Just you</span>`}
           ${inVoice > 0 && html`<span class="bar-voice"><${Icon} name="voice" size=${16} /><span class="num">${inVoice}</span> in voice</span>`}
         </span>`}
+        <${PinsButton} conv=${conv} />
         <button class="ib" aria-label=${`Search in ${meta.title}`} data-tip="Search here" onClick=${() => go({ type: 'search', q: `in:"${meta.title.toLowerCase()}" ` })}><${Icon} name="search" /></button>
         ${!meta.user && html`<button class=${`ib${pane === 'people' ? ' on' : ''}`} aria-pressed=${String(pane === 'people')} aria-label=${`People, ${here.length} here`}
           data-tip="People" onClick=${() => togglePane('people')}><${Icon} name="people" /></button>`}

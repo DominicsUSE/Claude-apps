@@ -6,6 +6,8 @@ import { PERMS } from '../js/lib/perms.js';
 import { newId, now } from './model.js';
 import { TOPICS, LIMITS, EVENT_LENGTH, eventEnd, eventState, cleanInterests, safeLink } from '../js/lib/social.js';
 import { fold } from '../js/lib/util.js';
+import { decorateFile, createMediaOps } from './media.js'; // voice messages, pins, GIFs
+import { createEmojiOps } from './emoji.js'; // custom emoji per house
 
 export class UserError extends Error {}
 const fail = (msg) => { throw new UserError(msg); };
@@ -225,6 +227,7 @@ export function createOps({ db, M, hub }) {
         if (!row) fail('One of the attachments didn’t finish uploading. Remove it and attach it again.');
         const out = { kind: row.type.startsWith('image/') ? 'image' : 'file', id: row.id, name: row.name, size: row.size };
         if (out.kind === 'image' && Number.isInteger(f.w) && Number.isInteger(f.h)) { out.w = Math.min(8000, Math.max(1, f.w)); out.h = Math.min(8000, Math.max(1, f.h)); }
+        decorateFile(out, row, f, fail); // voice length and waveform, GIF flag
         files.push(out);
       }
       if (!text.trim() && !files.length) fail('Write something first.');
@@ -868,7 +871,19 @@ export function createOps({ db, M, hub }) {
       return { peers: hub.voiceJoin(c, room) };
     },
     'voice.leave': (c) => { hub.voiceLeave(c.user); return {}; },
-    'voice.state'(c, d) { hub.voiceState(c.user, { muted: bool(d.muted), deaf: bool(d.deaf) }); return {}; },
+    // Mute, deafen, camera and screen flags. Each is optional; when present it
+    // must be a real true or false. Camera and screen only reach the people
+    // who can see the room, the same as mute.
+    'voice.state'(c, d) {
+      const s = {};
+      for (const k of ['muted', 'deaf', 'camera', 'screen']) {
+        if (d[k] === undefined) continue;
+        if (typeof d[k] !== 'boolean') fail('That voice state isn’t valid.');
+        s[k] = d[k];
+      }
+      hub.voiceState(c.user, s);
+      return {};
+    },
     rtc(c, d) {
       const to = id(d.to, 'person');
       const data = d.data;
@@ -877,6 +892,11 @@ export function createOps({ db, M, hub }) {
       return {};
     },
   };
+
+  // Pins and GIFs (server/media.js).
+  Object.assign(ops, createMediaOps({ db, M, hub, fail, ops }));
+  // Custom emoji (server/emoji.js): emoji.* ops, and msg.send, msg.edit and react taught about <:name:id>.
+  Object.assign(ops, createEmojiOps({ db, M, hub, fail, ops }));
 
   return ops;
 }

@@ -5,6 +5,7 @@ import { S, voiceRoomOf, toast } from '../store.js';
 import { initials, hueOf } from '../lib/util.js';
 import { parse } from '../lib/format.js';
 import { Icon } from './icons.js';
+import { CustomEmoji } from '../views/emoji-custom.js'; // custom emoji per house
 
 export const PRESENCE = {
   open: { label: 'Open to talk', hint: 'Happy to be called or pulled into a room.' },
@@ -86,6 +87,7 @@ function render(tokens, ctx) {
         if (!u) return `@${t.v}`;
         return html`<span class=${`at${u.id === S.me ? ' at-you' : ''}`} onClick=${(e) => ctx.onMention?.(u, e)}>@${u.name}</span>`;
       }
+      case 'emoji': return html`<${CustomEmoji} id=${t.id} name=${t.v} m=${ctx.m} />`; // <:name:id>
       default: return null;
     }
   });
@@ -100,7 +102,7 @@ export function Rich({ m, text, hl, onMention }) {
     if (hit && hit.src === src) tokens = hit.tokens;
     else { tokens = parse(src || ''); cache.set(m, { src, tokens }); }
   } else tokens = parse(src || '');
-  return html`<span class="rich">${render(tokens, { hl, onMention })}</span>`;
+  return html`<span class="rich">${render(tokens, { hl, onMention, m })}</span>`;
 }
 
 export function copyText(text) {

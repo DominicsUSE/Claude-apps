@@ -24,12 +24,17 @@ const DEFAULT_PREFS = {
 
 // Everything that comes from the server.
 const DATA = ['me', 'users', 'houses', 'rooms', 'houseOrder', 'dms', 'dmOrder', 'msgs', 'more', 'threads', 'read', 'followed', 'saved', 'cache', 'invites', 'voice', 'voiceState', 'friends', 'events'];
+DATA.push('pins', 'gifFavs'); // pinned messages and saved GIFs (js/views/media.js)
+DATA.push('emoji'); // each joined house's custom emoji (js/views/emoji-custom.js)
 function blank() {
   return {
     me: null, users: {}, houses: {}, rooms: {}, houseOrder: [], dms: {}, dmOrder: [], msgs: {}, more: {}, threads: {},
     read: {}, followed: {}, saved: [], cache: {}, invites: [], voice: {}, voiceState: {},
     friends: {},   // { [userId]: { state: 'friends'|'incoming'|'outgoing', favorite, since } }
     events: {},    // { [eventId]: { id, house, room, title, about, starts, ends, by, going: [userId], created } }
+    pins: {},      // { [conv]: [{ id, by, at }] }, newest first
+    gifFavs: [],   // [{ id, name, size, w, h, kind, at }]: GIFs this person saved
+    emoji: {},     // { [houseId]: [{ id, house, name, file, by, created }] }: custom emoji
   };
 }
 

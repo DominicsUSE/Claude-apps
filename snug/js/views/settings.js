@@ -16,6 +16,9 @@ import { Nook } from '../ui/brand.js';
 import { Avatar, Tile, Seg, Switch, PRESENCE } from '../ui/kit.js';
 import { Message } from './stream.js';
 import { Confirm } from './modals.js';
+import { PushSetting } from './push-setting.js'; // notifications when Snug is closed
+import { pushSignOut } from '../push.js';
+import { HouseEmoji } from './emoji-settings.js'; // House settings > Emoji
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
 const MOD = isMac ? '⌘' : 'Ctrl';
@@ -160,6 +163,7 @@ function Notify() {
     <${Row} label="Desktop notifications" hint=${desktopHint()}>
       <${Switch} on=${S.prefs.desktop && typeof Notification !== 'undefined' && Notification.permission === 'granted'} label="Desktop notifications" onChange=${setDesktop} />
     <//>
+    <${PushSetting} />
     <${Row} label="While you’re Focused" hint=${`Nothing pops up. Everything collects in Catch up. ${me().presence === 'focus' ? 'You’re focused now.' : 'Set it from your name at the top of the sidebar.'}`}>
       <span class="sub" style="display:flex;gap:8px;align-items:center"><i class="pres inline focus"></i>${PRESENCE.focus.label}</span>
     <//>
@@ -276,6 +280,7 @@ function PasswordForm() {
 
 async function signOut(everywhere) {
   leaveVoice();
+  await pushSignOut(); // this device stops getting this person's notifications
   try { await api(everywhere ? '/api/logout-all' : '/api/logout', {}); } catch { /* signing out locally anyway */ }
   stopTransport();
   closeLayer();
@@ -311,7 +316,7 @@ export function Settings({ page: start = 'profile' }) {
   const [page, setPage] = useState(start);
   const V = VIEWS[page];
   return html`<${Layer} title="Settings" icon=${html`<${Icon} name="sliders" />`} pages=${PAGES} page=${page} setPage=${setPage}
-    foot=${html`<${Nook} size=${16} /><span>Snug 0.3</span>`}>
+    foot=${html`<${Nook} size=${16} /><span>Snug 0.4</span>`}>
     <${V} />
   <//>`;
 }
@@ -323,6 +328,8 @@ const HOUSE_PAGES = [
   { id: 'members', label: 'Members', icon: 'people', words: 'members people role assign' },
   { id: 'welcome', label: 'Newcomers', icon: 'user', words: 'onboarding welcome starter rooms first step' },
 ];
+// Custom emoji (js/views/emoji-settings.js). Roles with only Manage emoji see just this page.
+HOUSE_PAGES.push({ id: 'emoji', label: 'Emoji', icon: 'smile', words: 'emoji custom upload images reactions stickers' });
 
 function HouseAbout({ house }) {
   const h = S.houses[house];
@@ -425,13 +432,16 @@ function HouseWelcome({ house }) {
 }
 
 const HOUSE_VIEWS = { about: HouseAbout, roles: HouseRoles, members: HouseMembers, welcome: HouseWelcome };
+HOUSE_VIEWS.emoji = HouseEmoji; // custom emoji
 
 export function HouseSettings({ house, page: start = 'about' }) {
   const [page, setPage] = useState(start);
   const h = S.houses[house];
-  if (!h || !can(S, house, 'roles')) return null;
-  const V = HOUSE_VIEWS[page];
-  return html`<${Layer} title=${h.name} icon=${html`<${Tile} house=${h} />`} pages=${HOUSE_PAGES} page=${page} setPage=${setPage}>
+  // Custom emoji: a role with Manage emoji but not Manage roles gets the Emoji page alone.
+  const emojiOnly = !!h && !can(S, house, 'roles') && can(S, house, 'emoji');
+  if (!h || (!can(S, house, 'roles') && !emojiOnly)) return null;
+  const V = HOUSE_VIEWS[emojiOnly ? 'emoji' : page];
+  return html`<${Layer} title=${h.name} icon=${html`<${Tile} house=${h} />`} pages=${emojiOnly ? HOUSE_PAGES.filter((p) => p.id === 'emoji') : HOUSE_PAGES} page=${emojiOnly ? 'emoji' : page} setPage=${setPage}>
     <${V} house=${house} />
   <//>`;
 }

@@ -154,11 +154,16 @@ function send(conv, m) {
   m.state = 'sending';
   delete m.error;
   emit();
-  const files = (m.files || []).map((f) => ({ id: f.id, w: f.w, h: f.h }));
+  // Voice messages also carry their length and waveform.
+  const files = (m.files || []).map((f) => ({ id: f.id, w: f.w, h: f.h, duration: f.duration, peaks: f.peaks }));
   call('msg.send', { conv, id: m.id, text: m.text, replyTo: m.replyTo, files }).then((r) => {
     place(conv, { ...r.m, files: r.m.files });
     if (isThread(conv)) S.followed[conv] = true;
     emit();
+    // The server's copy plays and shows from /api/files now; free the local
+    // copies (a voice message's recording, a photo's preview) once it has drawn.
+    const local = (m.files || []).map((f) => f.src).filter((u) => typeof u === 'string' && u.startsWith('blob:'));
+    if (local.length) setTimeout(() => local.forEach((u) => URL.revokeObjectURL(u)), 1000);
   }, (e) => {
     if (e.offline) m.state = 'queued';
     else { m.state = 'failed'; m.error = e.message; }
@@ -220,8 +225,11 @@ export function resyncNow() {
 useTransport({ call, resync: resyncNow, history: loadHistory });
 
 // Notifications for things that need you, when you are looking elsewhere.
+// The desktop app's window can be hidden in the tray while the page still
+// reports itself visible (seen on Linux), so it also asks the app (snugApp.hidden).
+const shown = () => document.visibilityState === 'visible' && !window.snugApp?.hidden?.();
 function looking(conv) {
-  if (document.visibilityState !== 'visible') return false;
+  if (!shown()) return false;
   const v = S.ui.view;
   return (v.type === 'conv' && v.id === conv) || S.ui.pane?.id === conv;
 }
@@ -233,11 +241,12 @@ function notify(conv, m) {
   const who = S.users[m.author]?.name || 'Someone';
   const where = meta.kind === 'dm' ? '' : meta.kind === 'thread' ? `in a thread in ${meta.where}` : `in ${meta.title}`;
   const text = plain(m.text) || 'Sent an attachment';
-  if (document.visibilityState === 'visible') {
+  if (shown()) {
     if (S.prefs.toasts) toast(text, { note: { user: m.author, where }, run: () => jumpToMsg(conv, m.id) });
   } else if (S.prefs.desktop && 'Notification' in window && Notification.permission === 'granted') {
     const n = new Notification(where ? `${who} ${where}` : who, { body: text.slice(0, 180), tag: m.id, silent: false });
-    n.onclick = () => { window.focus(); jumpToMsg(conv, m.id); n.close(); };
+    // In the desktop app the window may be hidden in the tray: snugApp.show() brings it back.
+    n.onclick = () => { window.snugApp?.show?.(); window.focus(); jumpToMsg(conv, m.id); n.close(); };
   }
 }
 
@@ -277,9 +286,10 @@ const EVENTS = {
     if (S.msgs[conv]) S.msgs[conv] = S.msgs[conv].filter((m) => m.id !== id);
     delete S.cache[id];
   },
-  react({ conv, id, reactions }) {
+  react({ conv, id, reactions, emoji }) {
     const m = findMsg(conv, id);
     if (m) m.reactions = reactions;
+    if (m && emoji) m.emoji = { ...m.emoji, ...emoji }; // custom emoji used in reactions (js/views/emoji-custom.js)
   },
   typing({ conv, user }) {
     S.typing[conv] = [...new Set([...(S.typing[conv] || []), user])];

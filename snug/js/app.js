@@ -14,6 +14,7 @@ import { Avatar, Pres, Tile, Empty, presenceLabel } from './ui/kit.js';
 import { Menu, Pop, ModalFrame, Toasts, Lightbox, initTooltips } from './ui/overlays.js';
 import { Nav, NavDirect, HouseRooms, LiveDock, houseMenu, syncSpace, goBack, contextPlaces, dmAttention, homeNeeds } from './views/nav.js';
 import { Conversation, ThreadPane, DetailsPane } from './views/conversation.js';
+import { PinsPane } from './views/media.js'; // pinned messages
 import { PeoplePane, MePop } from './views/people.js';
 import { CatchUp, Saved } from './views/catchup.js';
 import { Search, QuickJump } from './views/search.js';
@@ -81,6 +82,7 @@ function PaneView() {
   if (v.type !== 'conv') return null;
   if (p.type === 'people') return html`<${PeoplePane} conv=${v.id} />`;
   if (p.type === 'details') return html`<${DetailsPane} conv=${v.id} />`;
+  if (p.type === 'pins') return html`<${PinsPane} conv=${v.id} />`;
   return null;
 }
 

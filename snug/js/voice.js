@@ -4,12 +4,28 @@
 // the same room.
 //
 // Whoever joins calls everyone already there; the people already there answer.
-// That one rule means two people never offer to each other at the same time.
+// After that, either side may renegotiate (a camera or a screen share added or
+// taken away). Offers can then cross, so each pair follows the "perfect
+// negotiation" pattern: the person with the larger id is polite and gives way
+// when two offers collide, the other one ignores the colliding offer.
+//
+// Camera and screen go on the same connections as the voice. Each kind of
+// media travels in its own stream, and each person tells the others which
+// stream id is their microphone, camera and screen, so a tile can show the
+// right picture.
 import { S, emit, toast } from './store.js';
 import { call, on } from './server.js';
 
-const peers = new Map();   // user -> { pc, audio, queue: [], stopLevel }
+// user -> { pc, audio, screenAudio, queue, stopLevel, polite, makingOffer,
+//           ignoreOffer, settingAnswer, chain, kinds, video, tx }
+const peers = new Map();
+const pendingKinds = new Map(); // user -> what their streams are, heard before the connection
 let mic = null;
+let cam = null;      // my camera stream, while it is on
+let screen = null;   // my screen stream, while I share
+// What the others receive: one stream per kind for the whole call, so its id
+// (which tells them camera from screen) stays the same when a camera goes off and on.
+let out = null;
 let ctx = null;
 let stopMyLevel = null;
 
@@ -55,35 +71,116 @@ function watchLevel(user, stream) {
 
 function signal(to, data) { call('rtc', { to, data }).catch(() => {}); }
 
+// Which of my streams is which. Sent before any track is added, so it reaches
+// the other person before the offer that carries the track.
+const myKinds = () => ({
+  mic: mic?.id || null,
+  camera: cam && out ? out.camera.id : null,
+  screen: screen && out ? out.screen.id : null,
+  screenAudio: screen && out ? out.screenAudio.id : null,
+});
+const tellKinds = (user) => signal(user, { kinds: myKinds() });
+
+// Bitrate ceilings, lower as the mesh grows, so twelve cameras still fit.
+function capBitrate(p) {
+  const many = peers.size > 3;
+  for (const [slot, max] of [['camera', many ? 450_000 : 900_000], ['screen', many ? 900_000 : 1_800_000]]) {
+    const s = p.tx[slot]?.sender;
+    if (!s?.track) continue;
+    try {
+      const prm = s.getParameters();
+      if (!prm.encodings?.length) continue;
+      if (prm.encodings[0].maxBitrate === max) continue;
+      prm.encodings[0].maxBitrate = max;
+      s.setParameters(prm).catch(() => {});
+    } catch { /* not supported here: the browser picks */ }
+  }
+}
+
+// Start sending a track in one of the slots (camera, screen, screenAudio).
+// A slot keeps its transceiver for the life of the connection: turning the
+// camera off and on again reuses it instead of adding a new media section each time.
+function sendOn(p, slot, track, stream) {
+  const t = p.tx[slot];
+  if (t && !t.stopped && t.currentDirection !== 'stopped') {
+    t.sender.replaceTrack(track).catch(() => {});
+    try { t.sender.setStreams?.(stream); } catch { /* older browsers keep the first stream */ }
+    t.direction = 'sendrecv';
+    return;
+  }
+  const sender = p.pc.addTrack(track, stream);
+  p.tx[slot] = p.pc.getTransceivers().find((x) => x.sender === sender) || null;
+}
+function stopOn(p, slot) {
+  const t = p.tx[slot];
+  if (!t || t.stopped || t.currentDirection === 'stopped') return;
+  t.sender.replaceTrack(null).catch(() => {});
+  t.direction = 'recvonly';
+}
+
+// A remote video stream arrived, or lost its track.
+function addRemoteVideo(p, stream) {
+  p.video[stream.id] = stream;
+  stream.onremovetrack = () => {
+    if (!stream.getVideoTracks().length) delete p.video[stream.id];
+    emit();
+  };
+  emit();
+}
+
 function peer(user, offering) {
   let p = peers.get(user);
   if (p) return p;
   const pc = new RTCPeerConnection({ iceServers: S.ice });
-  p = { pc, audio: null, queue: [], stopLevel: null };
+  p = {
+    pc, audio: null, screenAudio: null, queue: [], stopLevel: null,
+    polite: String(S.me) > String(user), makingOffer: false, ignoreOffer: false, settingAnswer: false,
+    chain: Promise.resolve(), kinds: pendingKinds.get(user) || {}, video: {}, tx: {},
+  };
+  pendingKinds.delete(user);
   peers.set(user, p);
+  pc.onnegotiationneeded = async () => {
+    try {
+      p.makingOffer = true;
+      await pc.setLocalDescription();
+      signal(user, { sdp: pc.localDescription });
+    } catch { /* a newer negotiation replaced this one */ } finally { p.makingOffer = false; }
+  };
+  tellKinds(user);
   mic.getTracks().forEach((t) => pc.addTrack(t, mic));
+  // Late joiners get whatever I am already showing.
+  if (cam) sendOn(p, 'camera', cam.getVideoTracks()[0], out.camera);
+  if (screen) {
+    sendOn(p, 'screen', screen.getVideoTracks()[0], out.screen);
+    if (screen.getAudioTracks()[0]) sendOn(p, 'screenAudio', screen.getAudioTracks()[0], out.screenAudio);
+  }
   pc.onicecandidate = (e) => { if (e.candidate) signal(user, { candidate: e.candidate.toJSON() }); };
   pc.ontrack = (e) => {
-    if (p.audio) return;
+    const stream = e.streams[0] || new MediaStream([e.track]);
+    if (e.track.kind === 'video') {
+      addRemoteVideo(p, stream);
+      e.track.onunmute = () => emit();
+      return;
+    }
+    // Audio: the microphone, or the sound of a shared screen.
+    const isScreen = p.kinds.screenAudio === stream.id || (p.audio && p.audio.srcObject !== stream && p.kinds.mic !== stream.id);
+    if (!isScreen && p.audio) return;
+    if (isScreen && p.screenAudio?.srcObject === stream) return;
     const audio = new Audio();
-    audio.srcObject = e.streams[0];
+    audio.srcObject = stream;
     audio.autoplay = true;
     audio.muted = !!S.call?.deaf;
     audio.play().catch(() => {});
+    if (isScreen) { if (p.screenAudio) p.screenAudio.srcObject = null; p.screenAudio = audio; return; }
     p.audio = audio;
-    p.stopLevel = watchLevel(user, e.streams[0]);
+    p.stopLevel = watchLevel(user, stream);
   };
   pc.onconnectionstatechange = () => {
     setPeerState(user, pc.connectionState);
+    if (pc.connectionState === 'connected') capBitrate(p);
     if (pc.connectionState === 'failed' && offering) pc.restartIce?.();
   };
   setPeerState(user, 'connecting');
-  if (offering) {
-    pc.createOffer()
-      .then((o) => pc.setLocalDescription(o))
-      .then(() => signal(user, { sdp: pc.localDescription }))
-      .catch(() => setPeerState(user, 'failed'));
-  }
   return p;
 }
 
@@ -93,6 +190,7 @@ function dropPeer(user) {
   peers.delete(user);
   p.stopLevel?.();
   if (p.audio) { p.audio.srcObject = null; }
+  if (p.screenAudio) { p.screenAudio.srcObject = null; }
   p.pc.close();
   const next = { ...S.peers };
   delete next[user];
@@ -101,29 +199,55 @@ function dropPeer(user) {
   emit();
 }
 
-on('rtc', async ({ from, data }) => {
-  if (!S.call || !mic) return;
-  const p = peer(from, false);
+// Signals from one person are handled one at a time, in the order they came.
+async function handleSignal(from, p, data) {
   const { pc } = p;
+  if (peers.get(from) !== p) return; // they left while this waited
   try {
     if (data.sdp) {
-      await pc.setRemoteDescription(data.sdp);
+      const desc = data.sdp;
+      const ready = !p.makingOffer && (pc.signalingState === 'stable' || p.settingAnswer);
+      const collision = desc.type === 'offer' && !ready;
+      if (collision) p.glare = (p.glare || 0) + 1;
+      p.ignoreOffer = !p.polite && collision;
+      if (p.ignoreOffer) return;
+      p.settingAnswer = desc.type === 'answer';
+      await pc.setRemoteDescription(desc); // a polite peer rolls its own offer back here
+      p.settingAnswer = false;
       for (const c of p.queue.splice(0)) await pc.addIceCandidate(c).catch(() => {});
-      if (data.sdp.type === 'offer') {
-        await pc.setLocalDescription(await pc.createAnswer());
+      if (desc.type === 'offer') {
+        await pc.setLocalDescription();
         signal(from, { sdp: pc.localDescription });
       }
+      capBitrate(p);
     } else if (data.candidate) {
       if (pc.remoteDescription) await pc.addIceCandidate(data.candidate).catch(() => {});
       else p.queue.push(data.candidate);
     }
-  } catch { setPeerState(from, 'failed'); }
+  } catch {
+    p.settingAnswer = false;
+    if (peers.get(from) === p && pc.connectionState !== 'connected') setPeerState(from, 'failed');
+  }
+}
+
+on('rtc', ({ from, data }) => {
+  if (!S.call || !mic || !data || typeof data !== 'object') return;
+  if (data.kinds) {
+    const k = { mic: data.kinds.mic || null, camera: data.kinds.camera || null, screen: data.kinds.screen || null, screenAudio: data.kinds.screenAudio || null };
+    const p = peers.get(from);
+    if (p) { p.kinds = k; emit(); } else pendingKinds.set(from, k);
+    return;
+  }
+  if (!data.sdp && !data.candidate) return;
+  const p = peer(from, false);
+  p.chain = p.chain.then(() => handleSignal(from, p, data));
 });
 
 // Someone left the room: close their connection.
 on('voice', ({ room, users }) => {
   if (S.call?.room !== room) return;
   for (const u of [...peers.keys()]) if (!users.includes(u)) dropPeer(u);
+  for (const u of [...pendingKinds.keys()]) if (!users.includes(u)) pendingKinds.delete(u);
 });
 on('voice.kicked', () => { if (S.call) { stop(); toast('You were disconnected from the voice room.'); } });
 // The server drops you from voice when the connection goes; say so instead of pretending.
@@ -135,6 +259,12 @@ function stop() {
   stopMyLevel = null;
   mic?.getTracks().forEach((t) => t.stop());
   mic = null;
+  cam?.getTracks().forEach((t) => t.stop());
+  cam = null;
+  screen?.getTracks().forEach((t) => t.stop());
+  screen = null;
+  pendingKinds.clear();
+  out = null;
   S.call = null;
   S.peers = {};
   S.speaking = {};
@@ -146,7 +276,9 @@ export async function joinVoice(room) {
   if (S.call) leaveVoice();
   if (S.conn.socket !== 'open') { toast('You’re offline, so you can’t join voice right now.'); return; }
   if (!navigator.mediaDevices?.getUserMedia) { toast('This browser can’t use a microphone here. Voice needs a secure (https) page.'); return; }
-  S.call = { room, muted: false, deaf: false, status: 'mic' };
+  S.call = { room, muted: false, deaf: false, camera: false, screen: false, status: 'mic' };
+  // The screen's sound goes in its own stream, so adding it never restarts the picture.
+  out = { camera: new MediaStream(), screen: new MediaStream(), screenAudio: new MediaStream() };
   emit();
   try {
     mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
@@ -177,14 +309,20 @@ export function leaveVoice() {
   stop();
 }
 
-function pushState() { call('voice.state', { muted: S.call.muted, deaf: S.call.deaf }).catch(() => {}); }
+function pushState() {
+  if (!S.call) return;
+  call('voice.state', { muted: S.call.muted, deaf: S.call.deaf, camera: !!S.call.camera, screen: !!S.call.screen }).catch(() => {});
+}
 
 export function toggleMute() {
   if (!S.call) return;
   S.call.muted = !S.call.muted;
   if (!S.call.muted) S.call.deaf = false;
   mic?.getAudioTracks().forEach((t) => { t.enabled = !S.call.muted; });
-  for (const p of peers.values()) if (p.audio) p.audio.muted = S.call.deaf;
+  for (const p of peers.values()) {
+    if (p.audio) p.audio.muted = S.call.deaf;
+    if (p.screenAudio) p.screenAudio.muted = S.call.deaf;
+  }
   emit();
   pushState();
 }
@@ -194,9 +332,148 @@ export function toggleDeaf() {
   S.call.deaf = !S.call.deaf;
   if (S.call.deaf) S.call.muted = true;
   mic?.getAudioTracks().forEach((t) => { t.enabled = !S.call.muted; });
-  for (const p of peers.values()) if (p.audio) p.audio.muted = S.call.deaf;
+  for (const p of peers.values()) {
+    if (p.audio) p.audio.muted = S.call.deaf;
+    if (p.screenAudio) p.screenAudio.muted = S.call.deaf;
+  }
   emit();
   pushState();
+}
+
+// ---------- Camera and screen ----------
+
+const camErrText = (e) => ({
+  NotAllowedError: 'Snug needs your camera for that. Allow it in your browser’s site settings, then try again.',
+  SecurityError: 'Snug needs your camera for that. Allow it in your browser’s site settings, then try again.',
+  NotFoundError: 'No camera found. Connect one and try again.',
+  NotReadableError: 'Another app is using your camera. Close it and try again.',
+}[e?.name] || 'Couldn’t start your camera.');
+
+const CAMERA = {
+  width: { min: 640, ideal: 1280, max: 1280 },
+  height: { min: 360, ideal: 720, max: 720 },
+  frameRate: { ideal: 24, max: 30 },
+};
+
+// Put a captured track into the stream the others receive for that kind.
+function fill(stream, tracks) {
+  for (const t of stream.getTracks()) stream.removeTrack(t);
+  for (const t of tracks) stream.addTrack(t);
+}
+
+// Tell everyone which stream is which, then start (or stop) sending the slot.
+function shareSlot(slot, track, stream) {
+  for (const [u, p] of peers) {
+    tellKinds(u);
+    if (track) sendOn(p, slot, track, stream); else stopOn(p, slot);
+  }
+}
+
+export const canShareScreen = () => !!navigator.mediaDevices?.getDisplayMedia;
+
+export async function toggleCamera() {
+  const c = S.call;
+  if (!c || c.status !== 'live' || c.cameraBusy) return;
+  if (c.camera) { stopCamera(); return; }
+  if (!navigator.mediaDevices?.getUserMedia) { toast('This browser can’t use a camera here.'); return; }
+  c.cameraBusy = true;
+  emit();
+  let stream = null;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: CAMERA });
+  } catch (e) {
+    // A camera that can't do 640x360 still beats no camera.
+    if (e?.name === 'OverconstrainedError') {
+      stream = await navigator.mediaDevices.getUserMedia({ video: true }).catch((e2) => { toast(camErrText(e2)); return null; });
+    } else toast(camErrText(e));
+  }
+  c.cameraBusy = false;
+  if (!stream || S.call !== c) { stream?.getTracks().forEach((t) => t.stop()); emit(); return; }
+  cam = stream;
+  const track = stream.getVideoTracks()[0];
+  try { track.contentHint = 'motion'; } catch { /* hint only */ }
+  track.onended = () => { if (cam === stream) { stopCamera(); toast('Your camera stopped.'); } };
+  c.camera = true;
+  fill(out.camera, [track]);
+  shareSlot('camera', track, out.camera);
+  emit();
+  pushState();
+}
+
+function stopCamera() {
+  if (!cam) return;
+  const was = cam;
+  cam = null;
+  shareSlot('camera', null);
+  if (out) fill(out.camera, []);
+  was.getTracks().forEach((t) => t.stop());
+  if (S.call) { S.call.camera = false; if (S.call.focus === `${S.me}:camera`) S.call.focus = null; }
+  emit();
+  pushState();
+}
+
+export async function toggleScreen() {
+  const c = S.call;
+  if (!c || c.status !== 'live' || c.screenBusy) return;
+  if (c.screen) { stopScreen(); return; }
+  if (!canShareScreen()) { toast('This browser can’t share a screen.'); return; }
+  c.screenBusy = true;
+  emit();
+  let stream = null;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: { ideal: 15, max: 30 }, width: { max: 1920 }, height: { max: 1080 } },
+      audio: true, // the system or tab sound, where the browser offers it
+      systemAudio: 'include',
+      surfaceSwitching: 'include',
+    });
+  } catch (e) {
+    // Closing the picker is a choice, not an error. A refusal from the system is.
+    if (e?.name === 'NotAllowedError' && /system/i.test(e.message || '')) toast('Your computer isn’t letting the browser share the screen. Allow screen recording for it in your system settings.');
+    else if (e?.name !== 'NotAllowedError' && e?.name !== 'AbortError') toast('Couldn’t share your screen.');
+  }
+  c.screenBusy = false;
+  if (!stream || S.call !== c) { stream?.getTracks().forEach((t) => t.stop()); emit(); return; }
+  screen = stream;
+  const track = stream.getVideoTracks()[0];
+  try { track.contentHint = 'detail'; } catch { /* hint only */ }
+  // The browser's own "Stop sharing" ends the track.
+  track.onended = () => { if (screen === stream) stopScreen(); };
+  c.screen = true;
+  const sound = stream.getAudioTracks()[0];
+  fill(out.screen, [track]);
+  fill(out.screenAudio, sound ? [sound] : []);
+  shareSlot('screen', track, out.screen);
+  if (sound) for (const p of peers.values()) sendOn(p, 'screenAudio', sound, out.screenAudio);
+  emit();
+  pushState();
+}
+
+function stopScreen() {
+  if (!screen) return;
+  const was = screen;
+  screen = null;
+  shareSlot('screen', null);
+  if (out) { fill(out.screen, []); fill(out.screenAudio, []); }
+  for (const p of peers.values()) stopOn(p, 'screenAudio');
+  was.getTracks().forEach((t) => t.stop());
+  if (S.call) { S.call.screen = false; if (S.call.focus === `${S.me}:screen`) S.call.focus = null; }
+  emit();
+  pushState();
+}
+
+// What to show for a person: their camera and screen streams, when they are
+// really arriving (or, for me, when they are on).
+export function mediaOf(user) {
+  if (!S.call) return { camera: null, screen: null };
+  if (user === S.me) return { camera: cam, screen };
+  const p = peers.get(user);
+  if (!p) return { camera: null, screen: null };
+  const pick = (id) => {
+    const s = id && p.video[id];
+    return s && s.getVideoTracks().some((t) => t.readyState === 'live') ? s : null;
+  };
+  return { camera: pick(p.kinds.camera), screen: pick(p.kinds.screen) };
 }
 
 // For the end-to-end checks: the live connection states and audio bytes received.
@@ -205,7 +482,7 @@ export async function voiceStats() {
   for (const [u, p] of peers) {
     let bytes = 0;
     (await p.pc.getStats()).forEach((r) => { if (r.type === 'inbound-rtp' && r.kind === 'audio') bytes += r.bytesReceived; });
-    out[u] = { state: p.pc.connectionState, bytes };
+    out[u] = { state: p.pc.connectionState, bytes, tx: p.pc.getTransceivers().length, screenSound: !!p.screenAudio?.srcObject?.getAudioTracks().length, glare: p.glare || 0 };
   }
   return out;
 }

@@ -9,6 +9,9 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from './db.js';
 import { createModel, newId } from './model.js';
 import { createHub } from './hub.js';
+import { AUDIO_TYPES, uploadType, fileKind, parseRange, createMediaHttp } from './media.js'; // voice messages, GIFs
+import { createEmojiHttp, emojiReads } from './emoji.js'; // custom emoji per house
+import { createPush } from './push.js'; // notifications when Snug is closed (Web Push)
 import { HUES } from '../js/lib/util.js';
 import {
   hashPassword, checkPassword, burnPasswordCheck, createSession, sessionUser, endSession, endAllSessions,
@@ -16,7 +19,7 @@ import {
 } from './auth.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const PUBLIC = ['index.html', 'css/', 'js/', 'fonts/', 'vendor/', 'docs/', 'brand/'];
+const PUBLIC = ['index.html', 'css/', 'js/', 'fonts/', 'vendor/', 'docs/', 'brand/', 'sw.js'];
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.txt': 'text/plain; charset=utf-8', '.json': 'application/json',
@@ -24,6 +27,9 @@ const TYPES = {
 };
 // Uploaded images shown inline. Anything else downloads.
 const INLINE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml']);
+// Voice messages play inline too (their type is checked against the bytes at upload),
+// and so do GIFs the server fetched as video.
+for (const t of [...AUDIO_TYPES, 'video/mp4']) INLINE.add(t);
 const MAX_FILE = 10 * 1024 * 1024;
 const HANDLE = /^[a-z0-9](?:[a-z0-9_.-]{0,22}[a-z0-9])?$/;
 
@@ -41,6 +47,8 @@ export async function startServer({
   trustProxy = process.env.SNUG_TRUST_PROXY === '1',
   extraOrigins = (process.env.SNUG_ORIGINS || '').split(',').filter(Boolean),
   quiet = false,
+  // Tests only: let push subscriptions point at a mock push service on http://127.0.0.1.
+  pushAllowLocal = process.env.SNUG_PUSH_ALLOW_LOCAL === '1',
 } = {}) {
   const db = openDb(dataDir === ':memory:' ? ':memory:' : join(dataDir, 'snug.db'));
   const filesDir = join(dataDir === ':memory:' ? join(ROOT, 'data', 'test-files') : dataDir, 'files');
@@ -64,18 +72,31 @@ export async function startServer({
 
   const server = createServer(handle);
   const hub = createHub({ db, M, server, origins, ice, log });
+  // --- push notifications (server/push.js) ---
+  // A new message that needs someone with no Snug open anywhere goes to their devices.
+  const push = createPush({ db, M, hub, origins, log, allowLocal: pushAllowLocal });
+  const pushBaseSend = hub.ops['msg.send'];
+  hub.ops['msg.send'] = (c, d) => {
+    const fresh = typeof d.id === 'string' && !M.msg(d.id);
+    const r = pushBaseSend(c, d);
+    if (fresh && r?.m?.id) push.onMessage(r.m.conv || d.conv, r.m.id).catch((e) => log('push', e));
+    return r;
+  };
+  // --- end push notifications ---
 
   // Deleted messages can be restored for ten minutes; after that their content is gone for good.
   const sweep = setInterval(() => {
     db.run("UPDATE messages SET text = '', fold = '', files = NULL WHERE deleted IS NOT NULL AND deleted < ? AND text != ''", Date.now() - 11 * 60_000);
     db.run('DELETE FROM sessions WHERE expires < ?', Date.now());
+    push.prune(); // devices whose sign-in expired stop getting notifications
   }, 60_000);
 
   function headers(res, extra = {}) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-    res.setHeader('Permissions-Policy', 'microphone=(self), camera=(), geolocation=()');
+    // Camera and screen capture for video in voice rooms; same origin only.
+    res.setHeader('Permissions-Policy', 'microphone=(self), camera=(self), display-capture=(self), fullscreen=(self), geolocation=()');
     for (const [k, v] of Object.entries(extra)) res.setHeader(k, v);
   }
   function sendJson(res, status, body, extra = {}) {
@@ -100,6 +121,11 @@ export async function startServer({
     try { return JSON.parse(await body(req)); } catch (e) { if (e.status) throw e; throw Object.assign(new Error('bad json'), { status: 400 }); }
   }
   const userOf = (req) => sessionUser(db, readCookie(req.headers.cookie, COOKIE));
+  // GIF routes (/api/gifs...): picker lists, the optional search provider, and copies.
+  const mediaHttp = createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, headers });
+  // Custom emoji: uploads at POST /api/files?emoji=<house>, and who may fetch an emoji image.
+  const emojiHttp = createEmojiHttp({ db, M, filesDir, sendJson, error, body, uploadLimit });
+  const emojiR = emojiReads(db, M);
 
   async function handle(req, res) {
     const url = new URL(req.url, 'http://x');
@@ -131,6 +157,7 @@ export async function startServer({
       'Content-Type': TYPES[extname(file)] || 'application/octet-stream',
       'Cache-Control': 'no-cache',
       ...(rel === 'index.html' ? { 'Content-Security-Policy': CSP, 'X-Frame-Options': 'DENY' } : {}),
+      ...(rel === 'sw.js' ? { 'Service-Worker-Allowed': '/' } : {}), // push notifications
     });
     res.writeHead(200);
     createReadStream(file).pipe(res);
@@ -174,6 +201,7 @@ export async function startServer({
 
     if (post && path === '/api/logout') {
       endSession(db, readCookie(req.headers.cookie, COOKIE));
+      push.prune();
       return sendJson(res, 200, {}, { 'Set-Cookie': sessionCookie('', { secure, clear: true }) });
     }
 
@@ -199,6 +227,7 @@ export async function startServer({
       const token = readCookie(req.headers.cookie, COOKIE);
       endAllSessions(db, user);
       hub.endSessions(user);
+      push.prune(); // a lost phone stops getting notifications too
       return sendJson(res, 200, {}, { 'Set-Cookie': sessionCookie(token, { secure, clear: true }) });
     }
     if (post && path === '/api/password') {
@@ -212,10 +241,12 @@ export async function startServer({
       // Every other device has to sign in again with the new password.
       endAllSessions(db, user);
       hub.endSessions(user);
+      push.prune(); // this device re-sends its subscription when it reconnects
       const fresh = createSession(db, user);
       return sendJson(res, 200, {}, { 'Set-Cookie': sessionCookie(fresh, { secure }) });
     }
 
+    if (await emojiHttp(req, res, path, url, user)) return undefined; // POST /api/files?emoji=<house>
     if (post && path === '/api/files') {
       if (!uploadLimit.take(user)) return error(res, 429, 'Too many uploads at once. Wait a moment.');
       const conv = url.searchParams.get('conv') || '';
@@ -224,12 +255,13 @@ export async function startServer({
       const size = Number(req.headers['content-length']);
       if (!size || size > MAX_FILE) return error(res, 413, 'Files can be up to 10 MB.');
       const name = (decodeURIComponent(String(req.headers['x-file-name'] || 'file')).replace(/[\u0000-\u001f\u007f/\\]/g, '').trim() || 'file').slice(0, 120);
-      const type = /^[\w.+-]+\/[\w.+-]+$/.test(req.headers['content-type'] || '') ? req.headers['content-type'].toLowerCase() : 'application/octet-stream';
       const data = await body(req, MAX_FILE);
+      // Codec parameters are dropped; audio and video keep their type only if the bytes agree.
+      const type = uploadType(req.headers['content-type'], data);
       const id = newId('f');
       await writeFile(join(filesDir, id), data, { mode: 0o600 });
       db.run('INSERT INTO files (id, owner, conv, name, type, size, created) VALUES (?, ?, ?, ?, ?, ?, ?)', id, user, conv, name, type, data.length, Date.now());
-      return sendJson(res, 201, { id, name, size: data.length, kind: type.startsWith('image/') ? 'image' : 'file' });
+      return sendJson(res, 201, { id, name, size: data.length, kind: fileKind(type) });
     }
 
     const file = /^\/api\/files\/(f_[a-z0-9]{8,40})$/.exec(path);
@@ -237,20 +269,29 @@ export async function startServer({
       const row = db.get('SELECT * FROM files WHERE id = ?', file[1]);
       // You can fetch a file only if you can read the conversation it was shared in.
       const conv = row && (row.conv.startsWith('t:') && !M.thread(row.conv) ? M.liveMsg(row.conv.slice(2))?.conv : row.conv);
-      if (!row || !conv || !M.canRead(user, conv)) return error(res, 404, 'Not found');
+      // Custom emoji images: their house, and readers of conversations they were used in (server/emoji.js).
+      if (!row || (!(conv && M.canRead(user, conv)) && !emojiR.fileReadable(user, row))) return error(res, 404, 'Not found');
       const inline = INLINE.has(row.type);
+      // Range requests (206), so a voice message can seek.
+      const range = parseRange(req.headers.range, row.size);
+      if (range === 'bad') { headers(res, { 'Content-Range': `bytes */${row.size}` }); res.writeHead(416); res.end(); return undefined; }
       headers(res, {
         'Content-Type': inline ? row.type : 'application/octet-stream',
-        'Content-Length': String(row.size),
+        'Content-Length': String(range ? range.end - range.start + 1 : row.size),
+        'Accept-Ranges': 'bytes',
+        ...(range ? { 'Content-Range': `bytes ${range.start}-${range.end}/${row.size}` } : {}),
         'Cache-Control': 'private, max-age=86400',
         // Even an image opened on its own can never run script.
         'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
         'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(row.name)}`,
       });
-      res.writeHead(200);
-      createReadStream(join(filesDir, row.id)).pipe(res);
+      res.writeHead(range ? 206 : 200);
+      createReadStream(join(filesDir, row.id), range || {}).pipe(res);
       return undefined;
     }
+
+    if (await mediaHttp(req, res, path, url, user)) return undefined;
+    if (await push.http(req, res, path, user, { sendJson, error, jsonBody })) return undefined; // /api/push/*
 
     return error(res, 404, 'Not found');
   }
@@ -260,8 +301,9 @@ export async function startServer({
   log(`Snug is running at http://${address.address}:${address.port}`);
   return {
     port: address.port, db, M, hub, server,
+    push, // push notifications: tests read push.stats and push.publicKey
     // For tests: forget every rate limit, the socket ones and the sign-in ones.
-    resetLimits: () => { hub.resetLimits(); authLimit.reset(); uploadLimit.reset(); },
+    resetLimits: () => { hub.resetLimits(); authLimit.reset(); uploadLimit.reset(); mediaHttp.reset(); },
     close: () => new Promise((r) => { clearInterval(sweep); hub.close(); server.close(() => { db.close(); r(); }); server.closeAllConnections?.(); }),
   };
 }

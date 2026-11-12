@@ -212,6 +212,8 @@ export function houseMenu(id, pos) {
       { label: 'Browse rooms', icon: 'room', onSelect: () => openModal(RoomBrowser, { house: id }) },
       can(S, id, 'rooms') && { label: 'New room', icon: 'plus', onSelect: () => openModal(RoomForm, { house: id, group: h.groups[0].id }) },
       settings && { label: 'House settings', icon: 'sliders', onSelect: () => openLayer({ C: HouseSettings, props: { house: id } }) },
+      // Custom emoji: roles that may manage emoji but not the house reach the Emoji page from here.
+      !settings && can(S, id, 'emoji') && { label: 'Custom emoji', icon: 'smile', onSelect: () => openLayer({ C: HouseSettings, props: { house: id, page: 'emoji' } }) },
       { sep: true },
       {
         label: 'Leave house', icon: 'leave', danger: true,

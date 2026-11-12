@@ -3,6 +3,8 @@
 import { WebSocketServer } from 'ws';
 import { readCookie, sessionUser, COOKIE, limiter } from './auth.js';
 import { createOps, UserError } from './ops.js';
+import { addMediaSnapshot } from './media.js'; // pins and saved GIFs in every snapshot
+import { addEmojiSnapshot } from './emoji.js'; // each house's custom emoji in every snapshot
 
 const OFFLINE_GRACE = 5000;
 
@@ -74,6 +76,8 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {} }) 
   // Liveness, for discovery: who is connected, and how many people are in these voice rooms.
   hub.isOnline = (u) => presenceOf(u) !== 'offline';
   hub.inVoice = (rooms) => rooms.reduce((n, r) => n + (voiceRooms.get(r)?.size || 0), 0);
+  // Push notifications (server/push.js): does this person have any socket open right now?
+  hub.connected = (u) => (socks.get(u)?.size || 0) > 0;
 
   hub.sendHouse = (u, houseId) => {
     const v = M.houseView(houseId, u);
@@ -116,6 +120,8 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {} }) 
   hub.snapshotFor = (u) => {
     const voice = Object.fromEntries([...voiceRooms.keys()].map((r) => [r, voiceView(r)]));
     const snap = M.snapshot(u, presenceOf, voice);
+    addMediaSnapshot(db, M, u, snap);
+    addEmojiSnapshot(db, M, u, snap);
     snap.users[u] = selfView(u);
     return snap;
   };
@@ -130,7 +136,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {} }) 
   function voiceView(room) {
     const m = voiceRooms.get(room);
     if (!m) return { users: [], state: {} };
-    return { users: [...m.keys()], state: Object.fromEntries([...m].map(([u, s]) => [u, { muted: s.muted, deaf: s.deaf }])) };
+    return { users: [...m.keys()], state: Object.fromEntries([...m].map(([u, s]) => [u, { muted: s.muted, deaf: s.deaf, camera: !!s.camera, screen: !!s.screen }])) };
   }
   function voiceChanged(room) {
     const r = M.room(room);
@@ -144,7 +150,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {} }) 
     const m = voiceRooms.get(room.id);
     if (m.size >= 12) throw new UserError('This voice room is full. It holds up to 12 people.');
     const peers = [...m.keys()];
-    m.set(c.user, { ws: c.ws, muted: false, deaf: false });
+    m.set(c.user, { ws: c.ws, muted: false, deaf: false, camera: false, screen: false });
     voiceOf.set(c.user, room.id);
     voiceChanged(room.id);
     return peers;

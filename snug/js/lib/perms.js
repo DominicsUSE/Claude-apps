@@ -6,10 +6,13 @@ export const PERMS = [
   { id: 'announce', label: 'Post notices', hint: 'Write in notice rooms, which are read-only for everyone else.' },
   { id: 'highlight', label: 'Curate highlights', hint: 'Add and remove a room’s highlighted messages.' },
   { id: 'moderate', label: 'Remove messages', hint: 'Delete messages written by other people.' },
+  { id: 'pin', label: 'Pin messages', hint: 'Pin and unpin messages in rooms. People who can remove messages can pin too.' },
   { id: 'rooms', label: 'Manage rooms', hint: 'Create, rename and delete rooms.' },
   { id: 'invite', label: 'Invite people', hint: 'Create invitation links.' },
   { id: 'roles', label: 'Manage roles and members', hint: 'Edit roles, and change who has them.' },
 ];
+// Custom emoji per house (server/emoji.js, js/views/emoji-custom.js).
+PERMS.push({ id: 'emoji', label: 'Manage emoji', hint: 'Add, rename and remove this house’s custom emoji.' });
 
 export function roleOf(S, houseId, userId = S.me) {
   const house = S.houses[houseId];

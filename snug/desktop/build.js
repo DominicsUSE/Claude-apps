@@ -15,7 +15,7 @@ const APP = path.join(ROOT, "snug");
 function copyApp() {
   fs.rmSync(APP, { recursive: true, force: true });
   fs.mkdirSync(APP, { recursive: true });
-  for (const name of ["index.html", "brand", "css", "js", "fonts", "vendor", "server"]) {
+  for (const name of ["index.html", "sw.js", "brand", "css", "js", "fonts", "vendor", "server"]) {
     fs.cpSync(path.join(SNUG, name), path.join(APP, name), { recursive: true });
   }
   // The server and page are ES modules; this marks the folder as such.

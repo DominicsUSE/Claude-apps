@@ -16,6 +16,8 @@ import { Icon } from '../ui/icons.js';
 import { Avatar, Rich, Stack, PRESENCE, copyText } from '../ui/kit.js';
 import { showProfile } from './people.js';
 import { EmojiPicker, EMOJI, QUICK } from './emoji.js';
+import { CustomEmoji, asTyped, customSuggest, parseKey, reactionFace, reactionLabel, resolveEmoji } from './emoji-custom.js'; // custom emoji per house
+import { mediaFile, pinMenuItem, PinnedMark, withPinLines, PinLine, VoiceButton, GifButton } from './media.js'; // voice messages, pins, GIFs
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 const atBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 48;
@@ -49,12 +51,13 @@ export function messageMenu(conv, m, pos) {
       !isThread(conv) && !m.state && { label: replies ? 'Open thread' : 'Start a thread', icon: 'thread', hint: 'T', onSelect: () => openThread(conv, m.id) },
       { label: saved ? 'Remove from Saved' : 'Save', icon: saved ? 'saved' : 'save', hint: 'S', onSelect: () => toggleSave(conv, m.id) },
       { sep: true },
-      { label: 'Copy text', icon: 'copy', onSelect: () => copyText(m.text) },
+      { label: 'Copy text', icon: 'copy', onSelect: () => copyText(asTyped(m.text)) },
       !mine && { label: 'Mark unread from here', icon: 'eye', onSelect: () => markUnreadFrom(conv, m) },
       room && can(S, meta.house, 'highlight') && {
         label: room.highlights.includes(m.id) ? 'Remove from highlights' : 'Add to room highlights', icon: 'pin',
         onSelect: () => toggleHighlight(conv, m.id),
       },
+      pinMenuItem(conv, m),
       (mine || mod) && { sep: true },
       mine && { label: 'Edit', icon: 'edit', hint: 'E', onSelect: () => setEditing(m.id) },
       (mine || mod) && { label: 'Delete', icon: 'trash', danger: true, onSelect: () => deleteMsg(conv, m.id) },
@@ -69,7 +72,7 @@ function grow(el) {
 }
 
 function EditBox({ conv, m }) {
-  const [text, setText] = useState(m.text);
+  const [text, setText] = useState(() => asTyped(m.text)); // custom emoji edit as :name:
   const ref = useRef();
   useEffect(() => {
     const el = ref.current;
@@ -78,7 +81,7 @@ function EditBox({ conv, m }) {
   }, []);
   useLayoutEffect(() => grow(ref.current), [text]);
   const onKey = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); editMsg(conv, m.id, text); focusComposer(conv); }
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); editMsg(conv, m.id, resolveEmoji(conv, text, m.text)); focusComposer(conv); }
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setEditing(null); focusComposer(conv); }
   };
   return html`<div class="msg-edit">
@@ -92,6 +95,8 @@ function Files({ files }) {
     ${files.map((f, i) => {
       const url = f.id ? `/api/files/${f.id}` : null;
       const src = f.src || url;
+      const media = mediaFile(f, src, i);
+      if (media) return media;
       if (f.kind === 'image' && src) {
         return html`<button key=${i} class="img" style=${`aspect-ratio:${f.w}/${f.h};width:${Math.min(420, f.w)}px`}
           aria-label=${`Open image ${f.name}`} onClick=${() => openLightbox(src, f.name)}>
@@ -154,6 +159,7 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
         <button class=${`msg-name${role?.hue != null ? ' hued' : ''}`} style=${role?.hue != null ? `--hue:${hueOf(role.hue)}` : ''} onClick=${profile(u)}>${u.name}</button>
         <time class="msg-time" datetime=${new Date(m.ts).toISOString()} data-tip=${fmtFull(m.ts)}>${fmtTime(m.ts)}</time>
       </div>`}
+      <${PinnedMark} conv=${conv} id=${m.id} />
       ${S.ui.editing === m.id
         ? html`<${EditBox} conv=${conv} m=${m} />`
         : m.text && html`<div class=${`msg-text${isJumbo(m.text) ? ' jumbo' : ''}`}>
@@ -165,8 +171,8 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
         ${reactions.map(([e, who]) => {
           const names = nameList(who.map((id) => (id === S.me ? 'You' : person(id).name.split(' ')[0])));
           return html`<button key=${e} class=${`rx${who.includes(S.me) ? ' mine' : ''}`} aria-pressed=${String(who.includes(S.me))}
-            aria-label=${`${e}, ${plural(who.length, 'reaction')}: ${names}`} data-tip=${names} onClick=${() => react(conv, m.id, e)}>
-            <span>${e}</span><span>${who.length}</span>
+            aria-label=${`${reactionLabel(e, m)}, ${plural(who.length, 'reaction')}: ${names}`} data-tip=${names} onClick=${() => react(conv, m.id, e)}>
+            <span>${reactionFace(e, m)}</span><span>${who.length}</span>
           </button>`;
         })}
         <button class="rx add" aria-label="Add a reaction" data-tip="Add a reaction" onClick=${(e) => pickReaction(conv, m, rectOf(e))}><${Icon} name="react" size=${16} /></button>
@@ -223,7 +229,7 @@ function suggest(value, caret, conv) {
   }
   if ((m = /(?:^|\s):([a-z0-9_+-]{2,})$/i.exec(before))) {
     const q = m[1].toLowerCase();
-    const items = EMOJI.filter(([, names]) => names.includes(q)).slice(0, 6);
+    const items = [...customSuggest(q, conv), ...EMOJI.filter(([, names]) => names.includes(q))].slice(0, 6);
     if (items.length) return { kind: 'emoji', from: caret - q.length - 1, items, i: 0 };
   }
   if ((m = /^\/(\w*)$/.exec(before))) {
@@ -262,6 +268,9 @@ export function Composer({ conv, placeholder }) {
   const [ac, setAc] = useState(null);
   const ta = useRef();
   const fileIn = useRef();
+  // Custom emoji chosen in the picker, by name: when two houses both have
+  // :party:, the one picked is the one sent.
+  const picked = useRef(new Map());
   const gate = canPost(S, conv);
   const replyId = S.ui.reply[conv];
   const replyTo = replyId ? findMsg(conv, replyId) : null;
@@ -290,7 +299,10 @@ export function Composer({ conv, placeholder }) {
   const accept = (item) => {
     const to = ta.current.selectionStart;
     if (ac.kind === 'at') insert(`@${item.handle} `, ac.from, to);
-    else if (ac.kind === 'emoji') insert(`${item[0]} `, ac.from, to);
+    else if (ac.kind === 'emoji') {
+      if (item[2]?.id) picked.current.set(item[1], `<:${item[1]}:${item[2].id}>`); // a custom emoji suggestion
+      insert(`${item[0]} `, ac.from, to);
+    }
     else insert(`/${item.name} `, 0, to);
   };
   const uploading = files.some((f) => f.status === 'uploading');
@@ -300,7 +312,8 @@ export function Composer({ conv, placeholder }) {
     if (uploading || (!body && !ready.length)) return;
     if (files.some((f) => f.status === 'error')) { toast('Remove the attachment that didn\u2019t upload, or attach it again.'); return; }
     const out = ready.map(({ id, kind, name, size, w, h, src }) => ({ id, kind, name, size, w, h, src }));
-    if (!(body.startsWith('/') && runCommand(conv, body))) sendMessage(conv, body, { replyTo: replyTo?.id, files: out });
+    if (!(body.startsWith('/') && runCommand(conv, body))) sendMessage(conv, resolveEmoji(conv, body, [...picked.current.values()].join(' ')), { replyTo: replyTo?.id, files: out });
+    picked.current.clear();
     update('');
     setFiles([]);
     setAc(null);
@@ -352,7 +365,7 @@ export function Composer({ conv, placeholder }) {
       ${ac.items.map((it, i) => html`<button key=${i} role="option" aria-selected=${String(i === ac.i)} class=${`menu-item${i === ac.i ? ' act' : ''}`}
         onMouseDown=${(e) => { e.preventDefault(); accept(it); }}>
         ${ac.kind === 'at' && html`<${Avatar} user=${it} presence /><span class="grow trunc">${it.name}</span><span class="end">@${it.handle}</span>`}
-        ${ac.kind === 'emoji' && html`<span class="emo">${it[0]}</span><span class="grow trunc">${it[1].split(' ')[0]}</span>`}
+        ${ac.kind === 'emoji' && html`${it[2] ? html`<span class="emo"><${CustomEmoji} e=${it[2]} /></span>` : html`<span class="emo">${it[0]}</span>`}<span class="grow trunc">${it[1].split(' ')[0]}</span>${it[2] && html`<span class="end">${S.houses[it[2].house]?.name}</span>`}`}
         ${ac.kind === 'cmd' && html`<span class="grow trunc">/${it.name}</span><span class="end">${it.hint}</span>`}
       </button>`)}
     </div>`}
@@ -374,8 +387,10 @@ export function Composer({ conv, placeholder }) {
         <button class="ib" aria-label="Attach a file" data-tip="Attach a file" onClick=${() => fileIn.current.click()}><${Icon} name="clip" /></button>
         <textarea ref=${ta} rows="1" placeholder=${placeholder} aria-label=${placeholder} value=${text}
           onInput=${onInput} onKeyDown=${onKey} onPaste=${onPaste} onBlur=${() => setAc(null)}></textarea>
+        <${GifButton} conv=${conv} />
         <button class="ib" aria-label="Insert an emoji" data-tip="Emoji"
-          onClick=${(e) => openPop({ anchor: rectOf(e), align: 'end', label: 'Insert an emoji', C: EmojiPicker, props: { onPick: (c) => { closePop(); insert(c); } } })}><${Icon} name="smile" /></button>
+          onClick=${(e) => openPop({ anchor: rectOf(e), align: 'end', label: 'Insert an emoji', C: EmojiPicker, props: { onPick: (c) => { closePop(); const k = parseKey(c); if (k) picked.current.set(k.name, c); insert(asTyped(c)); } } })}><${Icon} name="smile" /></button>
+        <${VoiceButton} conv=${conv} />
         <button class="ib send" aria-label="Send message" data-tip="Send" data-key="Enter" disabled=${!canSend} onClick=${submit}><${Icon} name="send" /></button>
       </div>
     </div>
@@ -398,7 +413,7 @@ export function Stream({ conv, intro, placeholder }) {
   const all = S.msgs[conv] || [];
   const win = S.ui.win[conv] || PAGE;
   const start = Math.max(0, all.length - win);
-  const items = buildItems(all.slice(start), { marker: S.ui.marker[conv], me: S.me });
+  const items = withPinLines(conv, buildItems(all.slice(start), { marker: S.ui.marker[conv], me: S.me }));
   const scroller = useRef();
   const inner = useRef();
   const stick = useRef(true);
@@ -547,6 +562,7 @@ export function Stream({ conv, intro, placeholder }) {
             return items.map((it) => {
               if (it.type === 'day') { lit = false; return html`<div class="day" key=${it.key}>${fmtDay(it.ts)}</div>`; }
               if (it.type === 'new') { lit = false; return html`<div class="newline" key="new" role="separator" aria-label="New messages"><span>New</span></div>`; }
+              if (it.type === 'pin') return html`<${PinLine} key=${it.key} conv=${conv} pin=${it.pin} />`;
               const toMe = forMe(S, conv, it.m);
               const cont = !toMe && it.grouped && lit;
               lit = toMe || cont;
