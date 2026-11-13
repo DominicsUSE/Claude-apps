@@ -28,6 +28,7 @@ import {
 const peers = new Map();
 const pendingKinds = new Map(); // user -> what their streams are, heard before the connection
 let mic = null;
+let micLost = false; // both captures failed in restartMic: muted until a microphone works again
 let send = null;     // what the others receive for my voice: the processed microphone (js/voiceopts.js)
 let cam = null;      // my camera stream, while it is on
 let screen = null;   // my screen stream, while I share
@@ -287,6 +288,7 @@ function stop() {
   stopMyLevel = null;
   mic?.getTracks().forEach((t) => t.stop());
   mic = null;
+  micLost = false;
   stopOutgoing();
   send = null;
   cam?.getTracks().forEach((t) => t.stop());
@@ -382,6 +384,8 @@ export function toggleMute() {
   // A moderator's mute (or deafen) can't be lifted from here.
   const mod = S.voiceState[S.call.room]?.[S.me];
   if (S.call.muted && (mod?.smute || mod?.sdeaf)) { toast('A moderator muted you here.'); return; }
+  // The microphone was lost: unmuting tries to capture again first.
+  if (S.call.muted && micLost) { restartMic().then((ok) => { if (ok && S.call?.muted) toggleMute(); }); return; }
   S.call.muted = !S.call.muted;
   const wasDeaf = S.call.deaf;
   if (!S.call.muted) S.call.deaf = false;
@@ -414,8 +418,26 @@ export function toggleDeaf() {
 export async function restartMic() {
   const c = S.call;
   if (!c || !mic) return false;
+  // Chromium gives a second capture of a device the processing of the first
+  // one still open, so the old capture stops first (a moment of silence).
+  const before = mic.getAudioTracks()[0]?.getConstraints?.() || {};
+  mic.getTracks().forEach((t) => t.stop());
   let next;
-  try { next = await getMic(); } catch (e) { toast(errText(e)); return false; }
+  try { next = await getMic(); } catch (e) {
+    toast(errText(e));
+    // Back to how it was, if that still works.
+    try { next = await navigator.mediaDevices.getUserMedia({ audio: before }); } catch {
+      // Neither works (the device was unplugged): the old capture is stopped,
+      // so say so and show this person as muted rather than silently unmuted.
+      if (S.call === c) {
+        micLost = true;
+        if (!c.muted) { c.muted = true; gate(); emit(); pushState(); }
+        toast('Snug lost your microphone, so you’re muted. Pick another one in Voice settings, or unmute to try again.');
+      }
+      return false;
+    }
+  }
+  micLost = false;
   if (S.call !== c || !mic) { next.getTracks().forEach((t) => t.stop()); return false; }
   const old = mic;
   mic = next;
@@ -587,6 +609,8 @@ export async function voiceStats() {
       audioTime: p.audio ? p.audio.currentTime : null, audioPaused: p.audio ? p.audio.paused : null,
       // Voice options: what I receive (its energy), and how loud I play it.
       energy, volume: p.audio ? p.audio.volume : null, muted: p.audio ? p.audio.muted : null, boost: p.audio ? boostOf(p.audio) : 0,
+      // The ceiling on my voice to this person (the room's bitrate).
+      voiceMax: (() => { const s = p.pc.getSenders().find((x) => x.track && x.track.kind === 'audio' && send && send.getAudioTracks().includes(x.track)); try { return s?.getParameters().encodings?.[0]?.maxBitrate ?? null; } catch { return null; } })(),
     };
   }
   return out;

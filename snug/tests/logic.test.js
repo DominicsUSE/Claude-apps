@@ -329,6 +329,18 @@ test('safety: role hierarchy, slowmode waits and durations', async () => {
   assert.equal(outranks(roles, members, 'o', 'm'), true);
   assert.equal(outranks(roles, members, 'm', 'm'), false, 'not yourself');
   assert.equal(outranks(roles, members, 'm', 'gone'), true, 'someone no longer in the house');
+  // Extra roles (places): a person acts with their best role.
+  assert.equal(outranks(roles, members, 'p', 'm2', { p: ['mod'] }), false, 'an extra role equal to theirs');
+  assert.equal(outranks(roles, { ...members, p2: 'mem' }, 'p', 'p2', { p: ['mod'] }), true, 'an extra role above theirs');
+  assert.equal(outranks(roles, members, 'm', 'p', { p: ['mod'] }), false, 'the target’s extra role counts too');
+  assert.equal(outranks(roles, members, 'm', 'p', { p: ['gone-role'] }), true, 'unknown extra roles are ignored');
+  const { roleBelow } = await import('../js/lib/safety.js');
+  assert.equal(roleBelow(roles, members, 'm', 'mem'), true);
+  assert.equal(roleBelow(roles, members, 'm', 'mod'), false, 'not their own role');
+  assert.equal(roleBelow(roles, members, 'm', 'own'), false);
+  assert.equal(roleBelow(roles, members, 'p', 'mem', { p: ['mod'] }), true, 'with an extra role above it');
+  assert.equal(roleBelow(roles, members, 'o', 'mod'), true, 'owners');
+  assert.equal(roleBelow(roles, members, 'gone', 'mem'), false, 'not a member');
   assert.equal(slowWait(10, 1000, 5000), 6000);
   assert.equal(slowWait(10, 1000, 20000), 0);
   assert.equal(slowWait(0, 1000, 1000), 0);
@@ -383,3 +395,223 @@ test('messaging: search filters for mentions, dates and pins', async () => {
   assert.ok(hits.length > 0 && hits.every((h) => /@robin/i.test(h.m.text)));
 });
 // --- end messaging -----------------------------------------------------------------
+
+// --- places, structure and community (js/lib/places.js) -----------------------------
+test('places: the room resolver: defaults, overrides in order, managers and owners, voice kinds', async () => {
+  const { resolveRoom } = await import('../js/lib/places.js');
+  const P = (...p) => new Set(p);
+  const all = { view: true, send: true, connect: true, speak: true, manage: true };
+  const none = { view: false, send: false, connect: false, speak: false, manage: false };
+  // Defaults come from the house-wide permissions.
+  assert.deepEqual(resolveRoom({ housePerms: P('post'), kind: 'text', userId: 'u' }), { view: true, send: true, connect: false, speak: false, manage: false });
+  assert.equal(resolveRoom({ housePerms: P(), kind: 'text', userId: 'u' }).send, false, 'no "post", no sending');
+  assert.equal(resolveRoom({ housePerms: P('post'), kind: 'news', userId: 'u' }).send, false, 'notice rooms need "announce"');
+  assert.equal(resolveRoom({ housePerms: P('announce'), kind: 'news', userId: 'u' }).send, true);
+  assert.deepEqual(resolveRoom({ housePerms: P('post'), kind: 'voice', userId: 'u' }), { view: true, send: true, connect: true, speak: true, manage: false });
+  const stage = resolveRoom({ housePerms: P('post'), kind: 'stage', userId: 'u' });
+  assert.equal(stage.connect, true); assert.equal(stage.speak, false, 'on a stage the audience does not speak by default');
+  assert.equal(resolveRoom({ housePerms: P('rooms'), kind: 'stage', userId: 'u' }).speak, true, 'people who run rooms speak on stages');
+  // Private rooms: nobody sees them without an override, and seeing nothing means doing nothing.
+  assert.deepEqual(resolveRoom({ housePerms: P('post'), isPrivate: true, userId: 'u' }), none);
+  const priv = [{ type: 'role', target: 'r1', allow: ['view'], deny: [] }];
+  assert.equal(resolveRoom({ housePerms: P('post'), isPrivate: true, overrides: priv, roleIds: ['r1'], userId: 'u' }).view, true);
+  assert.equal(resolveRoom({ housePerms: P('post'), isPrivate: true, overrides: priv, roleIds: ['r2'], userId: 'u' }).view, false);
+  // Everyone, then roles (across roles "on" beats "off"), then the person.
+  const ov = [
+    { type: 'everyone', target: '*', allow: [], deny: ['send'] },
+    { type: 'role', target: 'a', allow: ['send'], deny: [] },
+    { type: 'role', target: 'b', allow: [], deny: ['send', 'view'] },
+    { type: 'member', target: 'x', allow: [], deny: ['send'] },
+  ];
+  assert.equal(resolveRoom({ housePerms: P('post'), overrides: ov, roleIds: ['z'], userId: 'y' }).send, false, 'everyone: off');
+  assert.equal(resolveRoom({ housePerms: P('post'), overrides: ov, roleIds: ['a'], userId: 'y' }).send, true, 'a role turns it back on');
+  assert.deepEqual(resolveRoom({ housePerms: P('post'), overrides: ov, roleIds: ['b'], userId: 'y' }), none, 'a role that cannot see the room does nothing in it');
+  assert.deepEqual(resolveRoom({ housePerms: P('post'), overrides: ov, roleIds: ['a', 'b'], userId: 'y' }), none, 'nobody turns view back on, so a and b together still see nothing');
+  const ov2 = [{ type: 'role', target: 'a', allow: ['send'], deny: [] }, { type: 'role', target: 'b', allow: [], deny: ['send'] }];
+  assert.equal(resolveRoom({ housePerms: P('post'), overrides: ov2, roleIds: ['a', 'b'], userId: 'y' }).send, true, 'across roles, on beats off');
+  assert.equal(resolveRoom({ housePerms: P('post'), overrides: ov, roleIds: ['a'], userId: 'x' }).send, false, 'the person’s own setting beats their roles');
+  // Nobody can lock the house out: owners, and people who manage rooms, always see and manage.
+  const lockout = [{ type: 'everyone', target: '*', allow: [], deny: ['view', 'manage', 'send'] }];
+  assert.deepEqual(resolveRoom({ housePerms: P(), owner: true, isPrivate: true, overrides: lockout, userId: 'o' }), all);
+  const mgr = resolveRoom({ housePerms: P('rooms'), isPrivate: true, overrides: lockout, userId: 'm' });
+  assert.equal(mgr.view, true); assert.equal(mgr.manage, true); assert.equal(mgr.send, false, 'but they can still be kept quiet');
+  // Voice permissions never apply to text rooms, and no join means no speaking.
+  assert.equal(resolveRoom({ housePerms: P('post'), overrides: [{ type: 'everyone', target: '*', allow: ['connect', 'speak'], deny: [] }], userId: 'u' }).connect, false);
+  assert.equal(resolveRoom({ housePerms: P('post'), kind: 'voice', overrides: [{ type: 'everyone', target: '*', allow: [], deny: ['connect'] }], userId: 'u' }).speak, false);
+  // Unknown permission names in stored overrides are ignored.
+  assert.equal('fly' in resolveRoom({ housePerms: P('post'), overrides: [{ type: 'everyone', target: '*', allow: ['fly'], deny: [] }], userId: 'u' }), false);
+});
+
+test('places: role colours, icons and member-list groups; forum sort; the rail keeps folders and drops houses you left', async () => {
+  const { nameRole, hoistRole, iconRole, memberGroups, sortPosts, moveTo, railItems, railOrder, HUE_IDS, TEMPLATES, mentionsRole } = await import('../js/lib/places.js');
+  const roles = [
+    { id: 'own', name: 'Owner', hue: 20, hoist: true }, { id: 'mod', name: 'Mod', hue: null, hoist: true, icon: '🛡️' },
+    { id: 'art', name: 'Artists', hue: 142, hoist: false, icon: '🎨' }, { id: 'mem', name: 'Member', hue: null, hoist: false },
+  ];
+  assert.equal(nameRole(roles, ['mem', 'art', 'mod'])?.id, 'art', 'the name takes the highest role with a colour');
+  assert.equal(nameRole(roles, ['mem']), null);
+  assert.equal(hoistRole(roles, ['mem', 'art']), null, 'roles not shown separately do not group');
+  assert.equal(hoistRole(roles, ['art', 'mod'])?.id, 'mod');
+  assert.equal(iconRole(roles, ['art', 'mem'])?.icon, '🎨');
+  const people = [{ id: 'a', presence: 'online' }, { id: 'b', presence: 'idle' }, { id: 'c', presence: 'offline' }, { id: 'd', presence: 'online' }];
+  const of = { a: ['own'], b: ['mod', 'art'], c: ['mod'], d: ['mem'] };
+  const g = memberGroups(roles, people, (u) => of[u]);
+  assert.deepEqual(g.map((x) => [x.name, x.list.map((u) => u.id)]), [['Owner', ['a']], ['Mod', ['b']], ['Online', ['d']], ['Offline', ['c']]], 'offline people are never under a role');
+  const posts = [{ id: 1, ts: 100, last: 900 }, { id: 2, ts: 500 }, { id: 3, ts: 300, last: 400 }];
+  assert.deepEqual(sortPosts(posts).map((p) => p.id), [1, 2, 3], 'latest activity');
+  assert.deepEqual(sortPosts(posts, 'newest').map((p) => p.id), [2, 3, 1]);
+  assert.deepEqual(moveTo(['a', 'b', 'c', 'd'], 'd', 1), ['a', 'd', 'b', 'c']);
+  assert.deepEqual(moveTo(['a', 'b'], 'a', 99), ['b', 'a']);
+  const layout = { items: ['h3', { id: 'fd_1', name: 'Games', houses: ['h1', 'gone', 'h3'] }, 'gone2', { id: 'fd_2', houses: ['gone3'] }] };
+  const items = railItems(layout, ['h1', 'h2', 'h3']);
+  assert.deepEqual(items, ['h3', { id: 'fd_1', name: 'Games', houses: ['h1'] }, 'h2'], 'left houses drop out, a house appears once, empty folders go, new houses go last');
+  assert.deepEqual(railOrder(items), ['h3', 'h1', 'h2']);
+  // Templates only use theme-safe colours and real kinds; private rooms name real roles.
+  for (const t of TEMPLATES) {
+    for (const r of t.roles) assert.ok(r.hue === null || HUE_IDS.includes(r.hue), `${t.id}: ${r.name} uses a listed hue`);
+    for (const room of t.groups.flatMap((x) => x.rooms)) {
+      assert.ok(['text', 'voice', 'news', 'forum', 'stage'].includes(room[1]));
+      for (const k of room[3]?.only || []) assert.ok(t.roles.some((r) => r.key === k));
+    }
+  }
+  assert.deepEqual(TEMPLATES.map((t) => t.id), ['friends', 'study', 'gaming', 'club']);
+  // @Role mentions count only for mentionable roles you have.
+  const S = { me: 'u1', rooms: { r: { house: 'h' } }, threads: {}, houses: { h: { members: { u1: 'mem' }, extra: { u1: ['art'] }, roles: [...roles.slice(0, 2), { ...roles[2], mentionable: true }, roles[3]] } } };
+  assert.equal(mentionsRole(S, 'r', { text: 'hey @artists, look' }), true);
+  assert.equal(mentionsRole(S, 'r', { text: 'hey @artistsx' }), false);
+  assert.equal(mentionsRole(S, 'r', { text: 'hey @mod' }), false, 'not a role I have');
+  S.houses.h.roles[2].mentionable = false;
+  assert.equal(mentionsRole(S, 'r', { text: 'hey @artists' }), false, 'not mentionable');
+});
+// --- end places ----------------------------------------------------------------------
+
+// --- account: QR codes and settings rules (js/lib/qr.js, js/lib/account.js) ------------
+import { qrMatrix, qrPath } from '../js/lib/qr.js';
+import { cleanPrefs, mergePrefs, clearAt, deviceLabel, PREF_DEFAULTS, inQuiet, validZone } from '../js/lib/account.js';
+
+// Reference matrices from the Python qrcode library (level M, byte mode, the
+// given mask), one row per base-36 number.
+const QR_REF = [
+  ["Snug ünïcödé ✓", 2, 2, [
+    'jujjz',
+    'a5irl',
+    'ek319',
+    'ek7rx',
+    'ek6l9',
+    'a6tz5',
+    'jvfy7',
+    '1zi8',
+    'eue0s',
+    '2953m',
+    'hyab7',
+    '6asg0',
+    '80o9a',
+    'jfo6o',
+    'excnr',
+    'b1o6y',
+    'e96nx',
+    '2h3v',
+    'juw63',
+    'a6tjp',
+    'el6uz',
+    'el5zv',
+    'ek09x',
+    'a61xp',
+    'jv3qv',
+  ]],
+  ["otpauth://totp/Snug%3Aac-2fa?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Snug&algorithm=SHA1&digits=6&period=30", 3, 7, [
+    'cej1pjzwf',
+    '6dc5kz681',
+    '92lj7y5b1',
+    '93fz8oxgd',
+    '92nqalen1',
+    '6c6jlu2bl',
+    'cenaj8hhb',
+    '1he10pvk',
+    '8xf96b5mz',
+    '5bjc4gghz',
+    '5e3ug9zmv',
+    '8sgk5ow21',
+    '1a0rfrmvf',
+    't86uue2x',
+    '2a0hqsd68',
+    '9091ht9ak',
+    '1a3hqn9t4',
+    'cajo2abrk',
+    '149s8hd4e',
+    '78me65ant',
+    '9cgbqq70f',
+    '3jvolrifx',
+    'c7vrrpo4b',
+    '90gllspi0',
+    '689it8vsq',
+    '2731yzhs8',
+    '9objah1xw',
+    '9zc93vakt',
+    '6xcq6x2wt',
+    'b60jmsat2',
+    '38kgf5wui',
+    '5j42gegi2',
+    'c1c77kxce',
+    'z9vzrrk4',
+    'imsmd1oz',
+    '5v78gqhf4',
+    '7lj2pgliq',
+    '1fkjfjfc',
+    'cf6wenbrk',
+    '6cxnq0l5r',
+    '92yw2oo3h',
+    '93gy0pbcp',
+    '93w7m29la',
+    '6c5r1ho4x',
+    'cegftsd7g',
+  ]],
+];
+
+test('account: QR codes match a reference encoder module for module, and pick a version that fits', () => {
+  for (const [text, mask, version, rows] of QR_REF) {
+    const q = qrMatrix(text, { mask });
+    assert.equal(q.version, version);
+    const want = rows.map((r) => BigInt(`0x0`) + [...r].reduce((a, ch) => a * 36n + BigInt(parseInt(ch, 36)), 0n)).map((n) => n.toString(2).padStart(q.size, '0'));
+    assert.deepEqual(q.modules.map((r) => r.map((v) => (v ? '1' : '0')).join('')), want, `${text.slice(0, 16)}…`);
+  }
+  // Without a fixed mask it scores all eight and keeps one.
+  const auto = qrMatrix('otpauth://totp/Snug%3Arobin?secret=JBSWY3DPEHPK3PXP&issuer=Snug');
+  assert.ok(auto.mask >= 0 && auto.mask < 8);
+  assert.equal(qrPath(auto).size, auto.size + 8);
+  assert.throws(() => qrMatrix('x'.repeat(400)), /Too long/);
+});
+
+test('account: settings rules: defaults, merging, clearing a status, device names', () => {
+  assert.equal(PREF_DEFAULTS.theme, 'system');
+  assert.equal(PREF_DEFAULTS.tone, 'coral', 'coral stays the default tone');
+  const c = cleanPrefs({ theme: 'midnight', sidebarW: 300, quiet: { on: true, from: 1320, to: 420, tz: -60, extra: 1 } });
+  assert.deepEqual(c.quiet, { on: true, from: 1320, to: 420, tz: -60 }, 'unknown fields are dropped');
+  assert.throws(() => cleanPrefs({ sidebarW: 999 }), /200 to 420/);
+  assert.throws(() => cleanPrefs({ tts: 'yes' }), /on or off/);
+  assert.deepEqual(mergePrefs({ theme: 'dark', zoom: 110 }, { theme: null, zoom: 125 }), { zoom: 125 });
+  const t = Date.UTC(2026, 0, 1, 12);
+  assert.equal(clearAt('30m', t), t + 30 * 60000);
+  assert.equal(clearAt('4h', t), t + 4 * 3600000);
+  assert.equal(clearAt('today', t, t + 5), t + 5);
+  assert.equal(clearAt('never', t), null);
+  assert.equal(deviceLabel('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Version/17.0 Safari/605.1.15'), 'Safari on Mac');
+  assert.equal(deviceLabel('Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0'), 'Firefox on Windows');
+});
+test('account: quiet hours follow a named time zone through daylight saving; only real zones are kept', () => {
+  const q = { on: true, from: 22 * 60, to: 7 * 60, tz: 0, zone: 'Europe/Paris' };
+  // 21:30 UTC is 22:30 in Paris in winter (UTC+1) and 23:30 in summer (UTC+2): quiet either way.
+  assert.equal(inQuiet(q, Date.UTC(2026, 0, 15, 21, 30)), true);
+  assert.equal(inQuiet(q, Date.UTC(2026, 6, 15, 21, 30)), true);
+  // 20:30 UTC is 21:30 in winter (not yet) and 22:30 in summer (quiet): a fixed offset would get one wrong.
+  assert.equal(inQuiet(q, Date.UTC(2026, 0, 15, 20, 30)), false);
+  assert.equal(inQuiet(q, Date.UTC(2026, 6, 15, 20, 30)), true);
+  // No zone: the saved offset, as before.
+  assert.equal(inQuiet({ ...q, zone: undefined }, Date.UTC(2026, 6, 15, 20, 30)), false);
+  assert.equal(validZone('America/New_York'), true);
+  assert.equal(validZone('Mars/Olympus'), false);
+  assert.equal(validZone('../etc'), false);
+  assert.deepEqual(cleanPrefs({ quiet: { on: true, from: 1, to: 2, tz: 0, zone: 'UTC' } }).quiet, { on: true, from: 1, to: 2, tz: 0, zone: 'UTC' });
+  assert.throws(() => cleanPrefs({ quiet: { on: true, from: 1, to: 2, tz: 0, zone: 'Nowhere/Land' } }), /time zone/);
+});
+// --- end account -----------------------------------------------------------------------

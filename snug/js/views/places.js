@@ -2,7 +2,7 @@
 // rooms, stage rooms, per-house names and pictures, role colours and icons,
 // the welcome for newcomers, and the room details' extra controls. The
 // server decides every rule (server/places.js); this only draws them.
-import { html, useState, useEffect } from '../../vendor/preact-htm.js';
+import { html, useState } from '../../vendor/preact-htm.js';
 import {
   S, emit, toast, openModal, closeModal, openMenu, openThread, openConv, person, resync, subscribe,
 } from '../store.js';
@@ -14,7 +14,7 @@ import {
   railItems, sortPosts, nameRole, iconRole, PLACE_LIMITS as L,
 } from '../lib/places.js';
 import { Icon, addIcons } from '../ui/icons.js';
-import { Avatar, Tile, Seg, Switch, Empty, RoomIcon } from '../ui/kit.js';
+import { Avatar, Tile, Seg, Empty, RoomIcon } from '../ui/kit.js';
 import { joinVoice, leaveVoice, toggleMute } from '../voice.js';
 
 addIcons({
@@ -278,7 +278,8 @@ export function ForumView({ conv }) {
           ${posts.map((m) => {
             const u = msgFace(m, room.house);
             const following = !!S.followed[`t:${m.id}`];
-            return html`<li key=${m.id} class="post-card">
+            const editable = m.author === S.me || !!room.perms?.manage; // the server checks again (forum.edit)
+            return html`<li key=${m.id} class=${`post-card${editable ? ' editable' : ''}`}>
               <button class="post-open" onClick=${() => openThread(conv, m.id)} aria-label=${`${m.post.title}, by ${u.name}, ${plural(m.replies, 'reply', 'replies')}`}>
                 <span class="post-head"><b class="post-name">${m.post.title}</b></span>
                 ${m.post.tags.length > 0 && html`<span class="post-tags">${m.post.tags.map(tagOf).filter(Boolean).map((t) => html`<${TagChip} key=${t.id} tag=${t} />`)}</span>`}
@@ -287,8 +288,12 @@ export function ForumView({ conv }) {
                   <span aria-hidden="true">·</span><${Icon} name="thread" size=${14} /><span class="num">${m.replies}</span>
                   <span aria-hidden="true">·</span><span>${sort === 'newest' ? fmtWhen(m.ts) : `Active ${fmtWhen(m.last)}`}</span></span>
               </button>
-              <button class=${`ib sm post-follow${following ? ' on' : ''}`} aria-pressed=${String(following)} aria-label=${following ? `Stop following ${m.post.title}` : `Follow ${m.post.title}`}
-                data-tip=${following ? 'Following' : 'Follow'} onClick=${() => followPost(conv, m.id, !following)}><${Icon} name=${following ? 'bell' : 'bell-off'} size=${16} /></button>
+              <span class="post-acts">
+                ${editable && html`<button class="ib sm post-edit" aria-label=${`Edit the title and tags of ${m.post.title}`} data-tip="Edit title and tags"
+                  onClick=${() => openModal(PostForm, { room: conv, edit: m.id })}><${Icon} name="edit" size=${16} /></button>`}
+                <button class=${`ib sm post-follow${following ? ' on' : ''}`} aria-pressed=${String(following)} aria-label=${following ? `Stop following ${m.post.title}` : `Follow ${m.post.title}`}
+                  data-tip=${following ? 'Following' : 'Follow'} onClick=${() => followPost(conv, m.id, !following)}><${Icon} name=${following ? 'bell' : 'bell-off'} size=${16} /></button>
+              </span>
             </li>`;
           })}
         </ul>`
@@ -305,19 +310,27 @@ function followPost(conv, root, on) {
   act('follow.set', { thread: tid, on });
 }
 
-export function PostForm({ room: conv }) {
+// A new post, or (edit: a post's id) a new title and tags for one. The body
+// is the post's first message, edited like any other in its thread.
+export function PostForm({ room: conv, edit }) {
   const room = S.rooms[conv];
   const tags = room.tags || [];
-  const [title, setTitle] = useState('');
+  const was = edit ? (S.msgs[conv] || []).find((m) => m.id === edit)?.post : null;
+  const [title, setTitle] = useState(was?.title || '');
   const [text, setText] = useState('');
-  const [picked, setPicked] = useState([]);
+  const [picked, setPicked] = useState(was ? was.tags.filter((t) => tags.some((x) => x.id === t)) : []);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const fail = (err) => { setBusy(false); setError(err.offline ? 'You’re offline. Try again when you’re back.' : err.message); };
   const submit = (e) => {
     e.preventDefault();
     if (!title.trim()) { setError('Give your post a title.'); document.getElementById('post-title')?.focus(); return; }
     if (room.tagRequired && !picked.length) { setError(`Pick at least one tag. ${room.name} asks for one.`); return; }
     setBusy(true);
+    if (edit) {
+      call('forum.edit', { id: edit, title: title.trim(), tags: picked }).then(() => { closeModal(); toast('Post updated.'); }, fail);
+      return;
+    }
     call('forum.post', { room: conv, id: msgId(), title: title.trim(), text, tags: picked }).then((r) => {
       const list = (S.msgs[conv] ||= []);
       if (!list.some((m) => m.id === r.m.id)) list.push(r.m);
@@ -326,22 +339,24 @@ export function PostForm({ room: conv }) {
       S.followed[`t:${r.m.id}`] = true;
       closeModal();
       openThread(conv, r.m.id);
-    }, (err) => { setBusy(false); setError(err.offline ? 'You’re offline. Try again when you’re back.' : err.message); });
+    }, fail);
   };
+  if (edit && !was) return html`<p>That post is gone.</p><div class="modal-foot"><button class="btn" onClick=${closeModal}>Close</button></div>`;
   return html`<form class="form" onSubmit=${submit} novalidate>
-    <h2>New post in ${room.name}</h2>
+    <h2>${edit ? 'Edit post' : `New post in ${room.name}`}</h2>
     <div><label class="label" for="post-title">Title</label>
       <input id="post-title" class=${`field${error && !title.trim() ? ' bad' : ''}`} data-autofocus maxlength=${L.postTitle} value=${title} placeholder="One question or idea per post"
         aria-invalid=${String(!!error && !title.trim())} aria-describedby="post-msg" onInput=${(e) => { setTitle(e.target.value); setError(''); }} /></div>
-    <div><label class="label" for="post-body">Details <span class="faint">(optional)</span></label>
-      <textarea id="post-body" class="field" rows="4" maxlength="4000" value=${text} onInput=${(e) => setText(e.target.value)}></textarea></div>
+    ${!edit && html`<div><label class="label" for="post-body">Details <span class="faint">(optional)</span></label>
+      <textarea id="post-body" class="field" rows="4" maxlength="4000" value=${text} onInput=${(e) => setText(e.target.value)}></textarea></div>`}
     ${tags.length > 0 && html`<div><span class="label" id="post-tags">Tags${room.tagRequired ? html` <span class="faint">(pick at least one)</span>` : html` <span class="faint">(up to ${L.postTags})</span>`}</span>
       <div class="topic-chips" role="group" aria-labelledby="post-tags">
         ${tags.map((t) => html`<${TagChip} key=${t.id} tag=${t} on=${picked.includes(t.id)} onClick=${() => { setError(''); setPicked(picked.includes(t.id) ? picked.filter((x) => x !== t.id) : picked.length < L.postTags ? [...picked, t.id] : picked); }} />`)}
       </div></div>`}
-    ${error ? html`<div class="err" id="post-msg" role="alert"><${Icon} name="alert" size=${14} />${error}</div>` : html`<div class="hint" id="post-msg">Replies go in the post’s own thread. You’ll follow it.</div>`}
+    ${error ? html`<div class="err" id="post-msg" role="alert"><${Icon} name="alert" size=${14} />${error}</div>`
+      : html`<div class="hint" id="post-msg">${edit ? 'To change the details, edit the first message in the post’s thread.' : 'Replies go in the post’s own thread. You’ll follow it.'}</div>`}
     <div class="modal-foot"><button type="button" class="btn" onClick=${closeModal}>Cancel</button>
-      <button class="btn primary" disabled=${busy} aria-busy=${String(busy)}>${busy ? 'Posting…' : 'Post'}</button></div>
+      <button class="btn primary" disabled=${busy} aria-busy=${String(busy)}>${edit ? (busy ? 'Saving…' : 'Save') : busy ? 'Posting…' : 'Post'}</button></div>
   </form>`;
 }
 
@@ -517,8 +532,6 @@ function FollowForm({ source, targets }) {
   </form>`;
 }
 
-// For the people pane: who can see a room (all members unless it is restricted).
-export const viewersOf = (conv) => S.rooms[conv]?.viewers || null;
 export { fold };
 
 // The server mutes stage audiences and people who may not speak (smute). The

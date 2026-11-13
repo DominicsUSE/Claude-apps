@@ -74,17 +74,34 @@ export function filterHit(text, cfg) {
 }
 
 // Role hierarchy. roles is the house's list in order (the first is the owner
-// role), members maps a person to their role id. "actor" outranks "target" when
-// the actor's role sits strictly above the target's and the target is not an
-// owner. Nobody outranks themselves.
-export function outranks(roles, members, actor, target) {
+// role), members maps a person to their main role id, and extra (optional)
+// maps a person to the other roles they have (js/lib/places.js). A person acts
+// with their best role. "actor" outranks "target" when the actor's best role
+// sits strictly above the target's and the target is not an owner. Nobody
+// outranks themselves. The server's member, role and moderation ops all use it.
+export function outranks(roles, members, actor, target, extra = {}) {
   if (!actor || !target || actor === target) return false;
-  const pos = (u) => roles.findIndex((r) => r.id === members[u]);
+  const pos = (u) => {
+    if (!members[u]) return -1;
+    const at = [members[u], ...(extra[u] || [])].map((id) => roles.findIndex((r) => r.id === id)).filter((i) => i >= 0);
+    return at.length ? Math.min(...at) : -1;
+  };
   const a = pos(actor), t = pos(target);
   if (a < 0) return false;
   if (t === 0) return false;
   if (t < 0) return true; // not a member any more: only the permission matters
   return a < t;
+}
+
+// May this person give, take, edit or delete this role? Owners may do
+// anything but the owner role is only theirs; everyone else only roles below
+// their own best role.
+export function roleBelow(roles, members, actor, roleId, extra = {}) {
+  const i = roles.findIndex((r) => r.id === roleId);
+  if (i < 0 || !members[actor]) return false;
+  const mine = Math.min(...[members[actor], ...(extra[actor] || [])].map((id) => roles.findIndex((r) => r.id === id)).filter((x) => x >= 0));
+  if (mine === 0) return true;
+  return i > mine;
 }
 
 // How long until this person may write in this room again, in ms (0 now).

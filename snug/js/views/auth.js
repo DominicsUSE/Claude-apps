@@ -11,6 +11,7 @@ import { Lockup, Loading, Nook } from '../ui/brand.js';
 // few people around it, each in their own hue, some of them here now.
 const SCENE = [[142, 14, 30, 40, 'open'], [200, 76, 18, 32, 'around'], [335, 82, 62, 44, 'open'], [106, 20, 72, 28, 'away'], [228, 58, 84, 24, 'offline']];
 import { hueOf } from '../lib/util.js';
+import { TotpStep } from './account.js'; // two-factor sign-in, the second step
 
 function entered(user) {
   S.me = user.id;
@@ -31,6 +32,7 @@ export function Auth() {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const [invite, setInvite] = useState(null);
+  const [ticket, setTicket] = useState(null); // two-factor sign-in: the password was right, a code is next
   const refs = { handle: useRef(null), name: useRef(null), password: useRef(null) };
 
   useEffect(() => {
@@ -52,6 +54,7 @@ export function Auth() {
     setError(null);
     try {
       const r = await api(mode === 'new' ? '/api/register' : '/api/login', { handle: handle.trim(), name: name.trim(), password });
+      if (r.totp) { setBusy(false); setTicket(r.ticket); return undefined; }
       entered(r.user);
     } catch (err) {
       setBusy(false);
@@ -90,7 +93,8 @@ export function Auth() {
           <span>${isNew ? 'Create an account to join.' : 'Sign in to join.'}</span></div>
         </div>`}
         <h1 id="auth-title">${isNew ? 'Make yourself at home' : 'Welcome back'}</h1>
-        <form class="form auth-form" onSubmit=${submit} novalidate aria-labelledby="auth-title" aria-busy=${busy ? 'true' : undefined}>
+        ${ticket && html`<${TotpStep} ticket=${ticket} onDone=${entered} onBack=${() => { setTicket(null); setPassword(''); }} />`}
+        <form class="form auth-form" hidden=${!!ticket} onSubmit=${submit} novalidate aria-labelledby="auth-title" aria-busy=${busy ? 'true' : undefined}>
           <div class="auth-field">
             <label class="label" for="auth-handle">Username</label>
             <input id="auth-handle" ref=${refs.handle} class=${`field${bad('handle') ? ' bad' : ''}`} autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="24" value=${handle}
@@ -120,7 +124,7 @@ export function Auth() {
             ${busy ? (isNew ? 'Creating your account…' : 'Signing in…') : (isNew ? 'Create account' : 'Sign in')}
           </button>
         </form>
-        <p class="auth-swap">
+        <p class="auth-swap" hidden=${!!ticket}>
           ${isNew ? 'Already have an account?' : 'New to Snug?'}
           <button type="button" class="auth-link" onClick=${() => swap(isNew ? 'in' : 'new')}>${isNew ? 'Sign in' : 'Create an account'}</button>
         </p>

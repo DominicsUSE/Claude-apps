@@ -132,7 +132,7 @@ export const reportPerson = (user, house) => openModal(ReportForm, { user, house
 // ---------- A moderator acting on a person ----------
 const outranksIn = (house, target) => {
   const h = S.houses[house];
-  return !!h && outranks(h.roles, h.members, S.me, target);
+  return !!h && outranks(h.roles, h.members, S.me, target, h.extra || {});
 };
 export const mayAct = (house, target, perm) => !!house && target !== S.me && !!S.houses[house]?.members[target] && can(S, house, perm) && outranksIn(house, target);
 

@@ -183,8 +183,9 @@ test('slowmode counts down in the composer; screening asks a newcomer to accept 
   let jonas, aiko;
   try {
     await houseMenu(robin, 'House settings');
-    await robin.click('.layer-nav .row:has-text("Filter and screening")');
-    await robin.locator('.layer h1:has-text("Filter and screening")').waitFor();
+    // Slowmode is set per room on Rooms and access.
+    await robin.click('.layer-nav .row:has-text("Rooms and access")');
+    await robin.locator('.layer h1:has-text("Rooms and access")').waitFor();
     await robin.selectOption('select[aria-label="Slowmode in Glaze lab"]', '10');
     await priya.waitForFunction(() => window.snug.S.rooms.k_glaze.slowmode === 10);
     await go(priya, 'Glaze lab');
@@ -197,6 +198,7 @@ test('slowmode counts down in the composer; screening asks a newcomer to accept 
     assert.equal(await msg(priya, 'too soon').count(), 0);
 
     // Screening on (Kiln & Co. has rules), then a one-use link.
+    await robin.click('.layer-nav .row:has-text("Filter and screening")');
     await robin.click('.switch[aria-label="Member screening"]');
     await priya.waitForFunction(() => window.snug.S.houses.kiln.screening === true);
     assert.equal(await priya.evaluate(() => window.snug.S.houses.kiln.accepted), true, 'people already in are not asked');

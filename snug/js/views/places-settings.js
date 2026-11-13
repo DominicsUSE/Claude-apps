@@ -11,6 +11,8 @@ import { Icon } from '../ui/icons.js';
 import { Avatar, Switch, Seg, RoomIcon } from '../ui/kit.js';
 import { Confirm } from './modals.js';
 import { act, rolesOf } from './places.js';
+import { SLOWMODES, spell, roleBelow } from '../lib/safety.js';
+import { VOICE_LIMITS, BITRATES } from './voiceopts-settings.js';
 
 function Row({ label, hint, children, top }) {
   return html`<div class=${`set-row${top ? ' top' : ''}`}>
@@ -38,6 +40,8 @@ export function PlacesRoles({ house }) {
   const [q, setQ] = useState('');
   const role = h.roles.find((r) => r.id === sel) || h.roles[0];
   const owner = h.roles[0].id === role.id;
+  // The shared hierarchy (js/lib/safety.js): people who aren't owners change only roles below their own.
+  const mine = owner || roleBelow(h.roles, h.members, S.me, role.id, h.extra || {});
   const count = (id) => Object.keys(h.members).filter((u) => rolesOf(house, u).includes(id)).length;
   const extraHolders = Object.keys(h.members).filter((u) => (h.extra?.[u] || []).includes(role.id));
   const candidates = Object.keys(h.members).filter((u) => S.users[u] && h.members[u] !== role.id && !extraHolders.includes(u) && q && fuzzy(q, S.users[u].name) >= 0).slice(0, 6);
@@ -97,10 +101,11 @@ export function PlacesRoles({ house }) {
             <button class="btn sm primary" onClick=${() => { setExtra(u, true); setQ(''); }}>Give ${role.name}</button></div>`)}`}
         <div class="set-head">What ${role.name} can do</div>
         ${owner && html`<p class="hint">${role.name} is the owner role and can always do everything.</p>`}
+        ${!mine && html`<p class="hint">${role.name} is level with your highest role or above it, so only someone higher can change what it can do.</p>`}
         ${PERMS.map((p) => html`<${Row} key=${p.id} label=${p.label} hint=${p.hint}>
-          <${Switch} on=${owner || role.perms.includes(p.id)} label=${p.label} onChange=${(v) => !owner && setRolePerm(house, role.id, p.id, v)} />
+          <${Switch} on=${owner || role.perms.includes(p.id)} label=${p.label} disabled=${!owner && !mine} onChange=${(v) => !owner && setRolePerm(house, role.id, p.id, v)} />
         <//>`)}
-        ${!owner && html`<div style="margin-top:24px"><button class="btn danger" onClick=${() => openModal(Confirm, {
+        ${!owner && mine && html`<div style="margin-top:24px"><button class="btn danger" onClick=${() => openModal(Confirm, {
           title: `Remove ${role.name}?`, danger: true, action: 'Remove role',
           text: count(role.id) ? `${plural(count(role.id), 'person has', 'people have')} this role.` : 'Nobody has this role.',
           onConfirm: () => { removeRole(house, role.id); setSel(h.roles[0].id); },
@@ -110,21 +115,40 @@ export function PlacesRoles({ house }) {
 }
 
 // ---------- Rooms and their access ----------
+// Every room in one list: who can do what (Access), and each room's pace or
+// size: slowmode for rooms people write in (server/safety.js), user limit and
+// bitrate for voice rooms (server/voiceopts.js). Both need Manage rooms.
 export function RoomsPage({ house }) {
   const h = S.houses[house];
   const open = (id) => import('./places-access.js').then((m) => openModal(m.RoomAccess, { room: id }));
+  const manage = can(S, house, 'rooms');
+  const set = (op, d) => call(op, d).catch((e) => toast(e.offline ? 'You’re offline. Try again when you’re back.' : e.message));
   return html`
     <h1>Rooms and access</h1>
-    <p class="lead">Who can see, write, join and speak in each room. Private rooms show only to the roles and people you allow.</p>
+    <p class="lead">Who can see, write, join and speak in each room, and how fast or full each one can get. Private rooms show only to the roles and people you allow.</p>
     ${h.groups.map((g) => html`<div key=${g.id}>
       <div class="set-head">${g.name}</div>
       ${g.rooms.filter((r) => S.rooms[r]).map((r) => {
         const room = S.rooms[r];
-        return html`<div class="member-row" key=${r}>
+        const voice = room.kind === 'voice' || room.kind === 'stage';
+        return html`<div class="member-row room-set-row" key=${r}>
           <${RoomIcon} kind=${room.kind} />
           <span class="grow"><b style="font-weight:500">${room.name}</b>
             ${room.private ? html` <span class="pill"><${Icon} name="lock" size=${12} />Private</span>` : room.restricted ? html` <span class="pill">Custom access</span>` : null}
             <br /><span class="faint">${room.topic || ''}</span></span>
+          ${manage && html`<span class="room-set">
+            ${room.kind === 'voice' && html`
+              <select class="field" aria-label=${`User limit for ${room.name}`} value=${room.limit || 0} onChange=${(e) => set('room.voice', { room: r, limit: Number(e.target.value) })}>
+                ${VOICE_LIMITS.map(([n, t]) => html`<option key=${n} value=${n}>${t}</option>`)}
+              </select>
+              <select class="field" aria-label=${`Bitrate for ${room.name}`} value=${room.bitrate || 64} onChange=${(e) => set('room.voice', { room: r, bitrate: Number(e.target.value) })}>
+                ${BITRATES.map((b) => html`<option key=${b} value=${b}>${b} kbps</option>`)}
+              </select>`}
+            ${!voice && html`<select class="field" aria-label=${`Slowmode in ${room.name}`} data-tip="Slowmode: how often each person can write. Roles that can remove messages skip it." value=${room.slowmode || 0}
+                onChange=${(e) => set('room.slowmode', { room: r, seconds: Number(e.target.value) })}>
+                ${SLOWMODES.map((x) => html`<option key=${x} value=${x}>${x ? `Slowmode ${spell(x)}` : 'No slowmode'}</option>`)}
+              </select>`}
+          </span>`}
           ${room.perms?.manage && html`<button class="btn sm" aria-label=${`Access for ${room.name}`} onClick=${() => open(r)}>Access</button>`}
         </div>`;
       })}
@@ -132,7 +156,7 @@ export function RoomsPage({ house }) {
 }
 
 // ---------- Welcome and interests ----------
-export function WelcomePage({ house }) {
+export function WelcomePage({ house, embedded }) {
   const h = S.houses[house];
   const [welcome, setWelcome] = useState(h.welcome || '');
   const [list, setList] = useState((h.interests || []).map((i) => ({ ...i, roles: [...i.roles] })));
@@ -142,8 +166,8 @@ export function WelcomePage({ house }) {
   const save = () => call('onboard.set', { house, welcome: welcome.trim(), interests: list.filter((x) => x.label.trim()).map((x) => ({ ...(x.id ? { id: x.id } : {}), label: x.label.trim(), ...(x.emoji ? { emoji: x.emoji } : {}), roles: x.roles })) })
     .then(() => { setError(''); toast('Welcome saved.'); }, (e) => setError(e.message));
   return html`
-    <h1>Welcome</h1>
-    <p class="lead">What new people see the first time they open ${h.name}: a few words, good rooms to start in (Newcomers page), and interests to pick that give them roles.</p>
+    ${embedded ? html`<div class="set-head">Welcome</div>` : html`<h1>Welcome</h1>`}
+    <p class=${embedded ? 'hint' : 'lead'}>What new people see the first time they open ${h.name}: a few words, and interests to pick that give them roles.</p>
     <${Row} label="Welcome" hint="A few friendly lines." top>
       <textarea class="field" style="width:320px" rows="4" maxlength=${L.welcome} aria-label="Welcome text" value=${welcome} onInput=${(e) => setWelcome(e.target.value)}></textarea>
     <//>
@@ -216,8 +240,8 @@ export function InsightsPage({ house }) {
 }
 
 export const PLACES_PAGES = [
-  { id: 'rooms', label: 'Rooms and access', icon: 'lock', words: 'rooms private permissions overrides access webhooks follow tags forum', need: (house) => can(S, house, 'rooms') || Object.values(S.rooms).some((r) => r.house === house && r.perms?.manage) },
-  { id: 'onboarding', label: 'Welcome', icon: 'smile', words: 'welcome onboarding interests roles newcomers', need: (house) => can(S, house, 'roles') },
+  { id: 'rooms', label: 'Rooms and access', icon: 'lock', words: 'rooms private permissions overrides access webhooks follow tags forum slowmode slow mode user limit bitrate audio quality', need: (house) => can(S, house, 'rooms') || Object.values(S.rooms).some((r) => r.house === house && r.perms?.manage) },
   { id: 'insights', label: 'Insights', icon: 'chart', words: 'insights stats analytics members messages growth', need: (house) => isOwner(house) },
 ];
-export const PLACES_VIEWS = { roles: PlacesRoles, rooms: RoomsPage, onboarding: WelcomePage, insights: InsightsPage };
+// WelcomePage is drawn on the Newcomers page (js/views/settings.js).
+export const PLACES_VIEWS = { roles: PlacesRoles, rooms: RoomsPage, insights: InsightsPage };

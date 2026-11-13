@@ -27,7 +27,7 @@ import { newId, now } from './model.js';
 import { PERMS } from '../js/lib/perms.js';
 import { HUES } from '../js/lib/util.js';
 import {
-  resolveRoom, ROOM_PERM_IDS, ROOM_KINDS, VOICE_KINDS, PLACE_LIMITS as L, TEMPLATES, HUE_IDS, dayOf, railItems,
+  resolveRoom, ROOM_PERM_IDS, ROOM_KINDS, VOICE_KINDS, PLACE_LIMITS as L, TEMPLATES, HUE_IDS, dayOf, railItems, roleMentioned,
 } from '../js/lib/places.js';
 
 const json = (s, f) => { try { return s == null ? f : JSON.parse(s); } catch { return f; } };
@@ -374,9 +374,29 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
         return card;
       };
       if (name === 'discover') r.houses = r.houses.map(strip); else strip(r);
+      // An event in a room not everyone can see keeps its title, not where it is.
+      for (const e of r.events || []) {
+        const room = e.room && M.room(e.room);
+        if (room && !P.open(room)) { e.room = null; e.roomName = null; }
+      }
       return r;
     };
   }
+
+  // Events: anyone in the house sees an event, but only people who can see
+  // its room learn which room it is in (an event made before the room went private).
+  const eventFor = (user, e) => {
+    if (!e?.room) return e;
+    const room = M.room(e.room);
+    return room && !P.canView(user, room) ? { ...e, room: null } : e;
+  };
+  const baseEventsFor = M.eventsFor;
+  M.eventsFor = (user, at) => baseEventsFor(user, at).map((e) => eventFor(user, e));
+  hub.eventChanged = (eventId) => {
+    const e = M.eventView(M.eventRow(eventId));
+    if (!e) return;
+    for (const r of db.all('SELECT user FROM members WHERE house = ?', e.house)) hub.toUser(r.user, 'event', { event: eventFor(r.user, e) });
+  };
 
   // A permission or role change: everyone sees the house again, gets the
   // conversations they can now read, and leaves voice they may no longer join.
@@ -459,6 +479,18 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
     return r;
   });
 
+  // Highlights and events name a room: only one the person can see.
+  wrap('highlight.set', (c, d, base) => {
+    const room = typeof d.conv === 'string' ? M.room(d.conv) : null;
+    if (room && M.isMember(room.house, c.user) && !P.canView(c.user, room)) fail('Highlights belong to rooms.');
+    return base(c, d);
+  });
+  wrap('event.create', (c, d, base) => {
+    const room = typeof d.room === 'string' ? M.room(d.room) : null;
+    if (room && room.house === d.house && M.isMember(room.house, c.user) && !P.canView(c.user, room)) fail('That room isn’t in this house.');
+    return base(c, d);
+  });
+
   // Messages in notice rooms go on to the rooms that follow them.
   wrap('msg.send', (c, d, base) => {
     const fresh = typeof d.id === 'string' && !M.msg(d.id);
@@ -534,8 +566,21 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
     return r;
   });
 
+  // Push (server/push.js): an @mention of a mentionable role this person has
+  // counts as for them, as it does in the browser (js/lib/attention.js).
+  const baseForMe = M.forMeExtra;
+  M.forMeExtra = (user, row, w) => {
+    if (baseForMe?.(user, row, w)) return true;
+    if (!w.house || !row.text || !row.text.includes('@')) return false;
+    const mine = P.roleIds(w.house, user);
+    if (!mine.length) return false;
+    return db.all(`SELECT name FROM roles WHERE house = ? AND pos > 0 AND mentionable != 0 AND id IN (${mine.map(() => '?').join(',')})`, w.house, ...mine)
+      .some((r) => roleMentioned(row.text, r.name));
+  };
+
   // The rank a person acts with: their best role's position (owner is 0).
-  const rankOf = (house, user) => Math.min(...P.roleIds(house, user).map((r) => db.get('SELECT pos FROM roles WHERE id = ?', r)?.pos ?? 999));
+  // The shared hierarchy (server/safety.js): the position of the best role a person has.
+  const rankOf = (house, user) => M.rankOf(house, user);
   const orderedRoles = (house) => db.all('SELECT * FROM roles WHERE house = ? ORDER BY pos', house);
 
   // ---------- Templates and copying a house ----------
@@ -703,6 +748,12 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
     const have = db.all('SELECT role FROM member_roles WHERE house = ? AND user = ?', house, target).map((r) => r.role);
     const changed = [...want.map((r) => r.id).filter((r) => !have.includes(r)), ...have.filter((r) => !want.some((x) => x.id === r))];
     if (!owner && changed.some((r) => (roles.find((x) => x.id === r)?.pos ?? 0) <= mine)) fail('You can only give or take roles below your own.');
+    // Someone who isn't an owner changes only the extra roles of people below
+    // them: never their own, never an equal's or a higher role's.
+    if (!owner && target === c.user) fail('You can’t change your own roles. Ask an owner or someone above you.');
+    if (!owner && !M.outranks(house, c.user, target)) {
+      fail(M.isOwner(target, house) ? 'Only an owner can do that to an owner.' : 'That person’s role is the same as yours or above it.');
+    }
     db.tx(() => {
       db.run('DELETE FROM member_roles WHERE house = ? AND user = ?', house, target);
       for (const r of want) if (r.id !== primary) db.run("INSERT INTO member_roles (house, user, role, via) VALUES (?, ?, ?, 'manual')", house, target, r.id);
@@ -753,10 +804,14 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
     const tags = pickTags(room, d.tags);
     if (room.tag_required && !tags.length) fail(`Pick at least one tag. ${room.name} asks for one.`);
     slow('post', c.user);
+    // The house's word and link filter reads the title too (server/safety.js).
+    const flag = M.isMember(room.house, c.user) ? M.wordFilter?.(c.user, room.house, room.id, title) : null;
     const body = typeof d.text === 'string' ? d.text : '';
     forumSend = room.id;
     let r;
     try { r = ops['msg.send'](c, { conv: room.id, id: mid, text: body.trim() ? body : title, files: d.files }); } finally { forumSend = null; }
+    // A title the filter flags goes to Reports (a body-less post was already checked as the message).
+    if (flag && body.trim() && r?.m) M.fileFlag?.({ house: room.house, user: c.user, msg: mid, conv: room.id, body: title, note: `Title. ${flag}` });
     db.tx(() => {
       db.run('INSERT OR IGNORE INTO forum_posts (msg, room, title, tags) VALUES (?, ?, ?, ?)', mid, room.id, title, JSON.stringify(tags));
       db.run('INSERT OR IGNORE INTO threads (id, conv, root) VALUES (?, ?, ?)', `t:${mid}`, room.id, mid);
@@ -779,7 +834,9 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
     const title = d.title !== undefined ? str(d.title, { min: 1, max: L.postTitle, name: 'The title' }) : post.title;
     const tags = d.tags !== undefined ? pickTags(room, d.tags) : json(post.tags, []);
     if (room.tag_required && !tags.length) fail(`Pick at least one tag. ${room.name} asks for one.`);
+    const flag = d.title !== undefined ? M.wordFilter?.(c.user, room.house, room.id, title) : null;
     db.run('UPDATE forum_posts SET title = ?, tags = ? WHERE msg = ?', title, JSON.stringify(tags), row.id);
+    if (flag) M.fileFlag?.({ house: room.house, user: c.user, msg: row.id, conv: room.id, body: title, note: `Title. ${flag}` });
     hub.toConv(room.id, 'msg', msgEvent(room.id, row.id));
     return {};
   };

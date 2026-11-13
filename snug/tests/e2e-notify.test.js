@@ -311,7 +311,7 @@ test('two people: Ines writes while Robin has Snug closed; the push reaches Robi
   await robin.click('.self');
   await robin.click('.me-pop >> text=Settings');
   await robin.click('.layer-nav >> text=Account');
-  await robin.click('.layer-body button:text-is("Sign out")');
+  await robin.click('.layer-body .set-row:has-text("Sign out on this device") button:text-is("Sign out")');
   await robin.waitForSelector('.auth-form');
   assert.equal(srv.db.get('SELECT 1 FROM push_subs WHERE user = ?', robinId), undefined, 'signing out removes this device');
   await robinCtx.close();

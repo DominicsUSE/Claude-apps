@@ -347,7 +347,7 @@ test('signing out returns to sign-in and clears this device', async () => {
   await ines.click('.self');
   await ines.click('.me-pop >> text=Settings');
   await ines.click('.layer-nav >> text=Account');
-  await ines.click('.layer-body button:text-is("Sign out")');
+  await ines.click('.layer-body .set-row:has-text("Sign out on this device") button:text-is("Sign out")');
   await ines.waitForSelector('.auth-form');
   assert.equal(await ines.evaluate(() => localStorage.getItem('snug.cache')), null);
   await ines.reload();

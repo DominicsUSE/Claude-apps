@@ -1567,6 +1567,22 @@ test('push: subscribe rules, encrypted delivery only while closed, muted and Foc
     await send(`t:${root.id}`, 'Ordered 10 kg');
     [p] = await pushes(1);
     assert.equal(decrypt(p.body).title, 'Ada Okafor in a thread in Lounge');
+    // Message previews off, or streamer mode: the lock screen says that something
+    // came, never what (as the open app does).
+    ps.hub.resetLimits(); ps.push.reset();
+    for (const prefs of [{ preview: false }, { preview: null, streamer: true }]) {
+      await bo.open();
+      await bo.ok('prefs.set', { prefs });
+      await bo.shut();
+      await send(dm, 'the pin for the kiln shed is 4417');
+      [p] = await pushes(1);
+      note = decrypt(p.body);
+      assert.equal(note.body, 'New message', JSON.stringify(prefs));
+      assert.equal(note.title, 'Ada Okafor');
+    }
+    await bo.open();
+    await bo.ok('prefs.set', { prefs: { streamer: null } });
+    await bo.shut();
 
     // Rate limited per person: a burst sends at most five.
     ps.hub.resetLimits();
@@ -1907,6 +1923,17 @@ test('calls: a muted conversation rings quietly; starting calls is rate limited'
   await b.ok('notify.set', { kind: 'dm', id: dm, level: 'muted' });
   await a.ok('call.start', { dm });
   assert.equal((await b.next('call.ring', (r) => r.dm === dm)).quiet, true, 'shown, but without a ringtone');
+  await a.ok('voice.leave');
+  // Quiet hours ring quietly too ("no sounds, pop-ups or phone notifications").
+  await b.ok('notify.set', { kind: 'dm', id: dm, level: 'all' });
+  const t = new Date(); const mins = t.getUTCHours() * 60 + t.getUTCMinutes();
+  await b.ok('prefs.set', { prefs: { quiet: { on: true, from: (mins + 1430) % 1440, to: (mins + 10) % 1440, tz: 0 } } });
+  await a.ok('call.start', { dm });
+  assert.equal((await b.next('call.ring', (r) => r.dm === dm)).quiet, true, 'quiet hours: no ringtone');
+  await a.ok('voice.leave');
+  await b.ok('prefs.set', { prefs: { quiet: null } });
+  await a.ok('call.start', { dm });
+  assert.equal((await b.next('call.ring', (r) => r.dm === dm)).quiet, false, 'outside them it rings');
   await a.ok('voice.leave');
   srv.resetLimits();
   for (let i = 0; i < 4; i++) { await a.ok('call.start', { dm }); await a.ok('voice.leave'); }
@@ -2817,6 +2844,8 @@ test('voice options: sound uploads are checked from the WAV itself; only Manage 
   assert.equal((await voUpload(house, notPcm, ow.cookie)).status, 415);
   assert.equal((await voUpload(house, voWav(1, { rate: 96000 }), ow.cookie)).status, 415, 'sample rates above 48 kHz are refused');
   assert.equal((await voUpload(house, voWav(2, { channels: 2, bits: 8, rate: 8000 }), ow.cookie)).status, 201, '8-bit stereo is fine');
+  srv.resetLimits();
+  assert.equal((await voUpload(house, voWav(0.5), ow.cookie, '%E0%A4%A')).status, 201, 'a broken file name header is kept as sent, not a server error');
 
   const up = await voUpload(house, voWav(1.5), ow.cookie);
   assert.equal(up.status, 201);
@@ -3432,3 +3461,805 @@ test('places: insights are for owners: joins, leaves, messages per day and the b
   for (const c of [ow, mm, m2, ...s.more]) await c.close();
 });
 // --- end places ------------------------------------------------------------------
+
+test('places: the resolver reaches highlights, events, pins and forum titles; the word filter reads post titles', async () => {
+  const s = await placesHouse('rx');
+  const { ow, mm, m2, house, crew } = s;
+  // Crew can highlight, plan events and pin, house-wide; mm has Crew.
+  await ow.ok('role.update', { house, role: crew, perms: ['post', 'highlight', 'announce', 'pin'] });
+  await ow.ok('member.roles', { house, user: mm.id, roles: [crew] });
+  const { id: back } = await ow.ok('room.create', { house, name: 'Backroom', kind: 'text', private: true });
+  const secret = mid();
+  await ow.ok('msg.send', { conv: back, id: secret, text: 'owners only' });
+  assert.match(await mm.refused('highlight.set', { conv: back, id: secret, on: true }), /Highlights belong to rooms/);
+  assert.match(await mm.refused('msg.pin', { conv: back, id: secret, on: true }), /access/);
+  assert.match(await mm.refused('event.create', { house, title: 'Secret meeting', starts: Date.now() + 3_600_000, room: back }), /isn’t in this house/);
+  // Once the room lets Crew see it, the same house-wide permissions work there.
+  await ow.ok('room.override', { room: back, type: 'role', target: crew, allow: ['view'] });
+  await mm.ok('highlight.set', { conv: back, id: secret, on: true });
+  await mm.ok('event.create', { house, title: 'Crew meeting', starts: Date.now() + 3_600_000, room: back });
+  await m2.refused('highlight.set', { conv: back, id: secret, on: true });
+  // Forum titles go through the house's word filter, like any message.
+  const { id: forum } = await ow.ok('room.create', { house, name: 'Board', kind: 'forum' });
+  await ow.ok('automod.set', { house, words: ['badword'], action: 'block' });
+  assert.match(await m2.refused('forum.post', { room: forum, id: mid(), title: 'A BADWORD title', text: 'clean body' }), /word this house doesn’t allow/);
+  const pid = mid();
+  await m2.ok('forum.post', { room: forum, id: pid, title: 'A clean title', text: 'clean body' });
+  assert.match(await m2.refused('forum.edit', { id: pid, title: 'now a badword' }), /word this house doesn’t allow/);
+  assert.equal(srv.db.get('SELECT title FROM forum_posts WHERE msg = ?', pid).title, 'A clean title');
+  // With "flag", a title is posted and goes to Reports, on post and on edit.
+  await ow.ok('automod.set', { house, words: ['badword'], action: 'flag' });
+  const fid = mid();
+  await m2.ok('forum.post', { room: forum, id: fid, title: 'A badword title', text: 'clean body' });
+  await m2.ok('forum.edit', { id: pid, title: 'now a badword' });
+  const flagged = srv.db.all("SELECT msg, note FROM reports WHERE house = ? AND reason = 'filter' ORDER BY ts", house);
+  assert.deepEqual(flagged.map((r) => r.msg), [fid, pid]);
+  assert.match(flagged[0].note, /^Title\. Word: badword/);
+  // An exempt role counts when it is an extra role.
+  await ow.ok('automod.set', { house, words: ['badword'], action: 'block', exempt: [crew] });
+  await mm.ok('forum.post', { room: forum, id: mid(), title: 'crew may say badword', text: 'clean body' });
+  for (const c of [ow, mm, m2]) await c.close();
+});
+
+// --- account, profile, presence and security (server/account.js, js/lib/account.js) ---
+import { hotp, totpAt, totpMatch, unbase32, base32, stepAt } from '../server/account.js';
+import { inQuiet, hasKeyword, everyonePing } from '../js/lib/account.js';
+
+const acLogin = (handle, ua = 'Mozilla/5.0 (X11; Linux x86_64) Chrome/130.0 Safari/537.36') => fetch(`${base}/api/login`, {
+  method: 'POST', headers: { 'content-type': 'application/json', origin: base, 'user-agent': ua }, body: JSON.stringify({ handle, password: 'a long password' }),
+});
+// Another device signed in as the same person, with its own session and socket.
+async function acDevice(handle, ua) {
+  const res = await acLogin(handle, ua);
+  assert.equal(res.status, 200);
+  const c = new Client();
+  c.cookie = cookieOf(res);
+  c.id = (await res.json()).user.id;
+  await c.connect();
+  return c;
+}
+async function acFriends(a, b) {
+  await a.ok('friend.request', { user: b.id });
+  await b.ok('friend.accept', { user: a.id });
+  await a.next('friend', (d) => d.id === b.id && d.friend?.state === 'friends');
+}
+const acClosed = (c) => new Promise((r) => { if (c.ws.readyState === 3) r(c.ws.closeCode ?? 4001); else c.ws.on('close', (code) => r(code)); });
+
+test('account: settings follow the person to every device; the server checks every value', async () => {
+  const a1 = await Client.make('ac-set', 'Ari Settings');
+  const a2 = await acDevice('ac-set');
+  assert.deepEqual(a1.hello.account.prefs, {}, 'nothing stored yet');
+  const r = await a1.ok('prefs.set', { prefs: { theme: 'midnight', fontScale: 18, display: 'compact', keywords: ['glaze', 'Glaze', ' kiln '] } });
+  assert.deepEqual(r.prefs.keywords, ['glaze', 'kiln'], 'words are trimmed and kept once');
+  const ev = await a2.next('account', (d) => d.prefs);
+  assert.equal(ev.prefs.theme, 'midnight');
+  assert.equal(ev.prefs.fontScale, 18);
+  await a1.none('account', (d) => d.prefs, 150); // the device that changed it already knows
+  // Bad names and values never reach the database.
+  assert.match(await a1.refused('prefs.set', { prefs: { css: 'body{}' } }), /isn’t a setting/);
+  assert.match(await a1.refused('prefs.set', { prefs: { fontScale: 30 } }), /12 to 20/);
+  assert.match(await a1.refused('prefs.set', { prefs: { theme: 'neon' } }), /choices/);
+  assert.match(await a1.refused('prefs.set', { prefs: { zoom: 333 } }), /choices/);
+  assert.match(await a1.refused('prefs.set', { prefs: { keywords: Array.from({ length: 11 }, (_, i) => `w${i}`) } }), /up to 10/);
+  assert.match(await a1.refused('prefs.set', { prefs: { quiet: { on: true, from: 2000, to: 10, tz: 0 } } }), /start and an end/);
+  assert.match(await a1.refused('prefs.set', { prefs: { mutedSounds: { 'bad id!': true } } }), /isn’t valid/);
+  assert.match(await a1.refused('prefs.set', { prefs: 'theme=dark' }), /aren’t valid/);
+  // null puts one back to its default; the rest stay.
+  await a1.ok('prefs.set', { prefs: { display: null } });
+  // A new device starts with them.
+  const a3 = await acDevice('ac-set');
+  assert.deepEqual(a3.hello.account.prefs, { theme: 'midnight', fontScale: 18, keywords: ['glaze', 'kiln'] });
+  for (const c of [a1, a2, a3]) await c.close();
+});
+
+test('account: invisible shows as offline to everyone, Focused and auto-idle show to friends', async () => {
+  const iv = await Client.make('ac-inv', 'Ivy Invisible');
+  const fr = await Client.make('ac-inv-fr', 'Fred Friend');
+  await acFriends(iv, fr);
+  await iv.ok('me.update', { presence: 'offline' });
+  assert.equal((await fr.next('user', (d) => d.user.id === iv.id)).user.presence, 'offline');
+  assert.equal((await iv.next('user', (d) => d.user.id === iv.id)).user.presence, 'offline', 'they see their own choice');
+  // Still connected, still invisible in a fresh snapshot.
+  const fr2 = await acDevice('ac-inv-fr');
+  assert.equal(fr2.hello.users[iv.id].presence, 'offline');
+  // Coming back.
+  await iv.ok('me.update', { presence: 'around' });
+  assert.equal((await fr.next('user', (d) => d.user.id === iv.id)).user.presence, 'around');
+  // Auto-idle: every tab that reports is idle, so Around shows as Away, marked idle.
+  assert.deepEqual(await iv.ok('presence.idle', { idle: true }), { idle: true });
+  const idle = (await fr.next('user', (d) => d.user.id === iv.id)).user;
+  assert.equal(idle.presence, 'away');
+  assert.equal(idle.idle, true);
+  // A second tab in use keeps them Around.
+  const iv2 = await acDevice('ac-inv');
+  assert.deepEqual(await iv2.ok('presence.idle', { idle: false }), { idle: false });
+  assert.equal((await fr.next('user', (d) => d.user.id === iv.id)).user.presence, 'around');
+  // That tab closing leaves only the idle one: Away again.
+  await iv2.close();
+  assert.equal((await fr.next('user', (d) => d.user.id === iv.id && d.user.idle)).user.presence, 'away');
+  // Focused stays Focused when idle; invisible stays offline when idle.
+  await iv.ok('me.update', { presence: 'focus' });
+  assert.equal((await fr.next('user', (d) => d.user.id === iv.id && d.user.presence === 'focus')).user.idle, false);
+  await iv.ok('presence.idle', { idle: true });
+  await iv.ok('me.update', { presence: 'offline' });
+  await iv.ok('presence.idle', { idle: true });
+  const last = (await fr.next('user', (d) => d.user.id === iv.id && d.user.presence === 'offline')).user;
+  assert.equal(last.idle, false);
+  for (const c of [iv, fr, fr2]) await c.close();
+});
+
+test('account: a custom status has an emoji and clears on time, told to everyone by the server', async () => {
+  const st = await Client.make('ac-st', 'Sol Status');
+  const fr = await Client.make('ac-st-fr', 'Fia Friend');
+  await acFriends(st, fr);
+  const { until } = await st.ok('status.set', { text: 'At the wheel', emoji: '🏺', clear: '30m' });
+  assert.ok(until > Date.now() + 29 * 60_000 && until <= Date.now() + 30 * 60_000);
+  const seen = (await fr.next('user', (d) => d.user.id === st.id && d.user.status === 'At the wheel')).user;
+  assert.equal(seen.statusEmoji, '🏺');
+  assert.equal(seen.statusUntil, until);
+  assert.match(await st.refused('status.set', { text: 'x', emoji: '<b>hi</b>' }), /one emoji/);
+  assert.match(await st.refused('status.set', { text: 'x', clear: 'tomorrow' }), /times a status can clear/);
+  assert.match(await st.refused('status.set', { text: 'x', clear: 'today', until: Date.now() + 3 * 86_400_000 }), /end of your day/);
+  assert.match(await st.refused('status.set', { text: 'x'.repeat(81) }), /at most 80/);
+  // Run out: the view stops showing it at once, and the sweep tells everyone.
+  srv.db.run('UPDATE users SET status_until = ? WHERE id = ?', Date.now() - 1000, st.id);
+  assert.equal(srv.hub.userView(st.id).status, '', 'an expired status never shows');
+  assert.ok(srv.hub.sweepStatuses() >= 1);
+  const cleared = (await fr.next('user', (d) => d.user.id === st.id && d.user.status === '')).user;
+  assert.equal(cleared.statusEmoji, null);
+  // "Don't clear" keeps it.
+  assert.equal((await st.ok('status.set', { text: 'Glazing', emoji: '🔥', clear: 'never' })).until, null);
+  assert.equal(srv.hub.sweepStatuses(), 0);
+  assert.equal(srv.hub.userView(st.id).status, 'Glazing');
+  for (const c of [st, fr]) await c.close();
+});
+
+test('account: private notes reach only the writer’s devices', async () => {
+  const nw = await Client.make('ac-note', 'Nia Notes');
+  const nw2 = await acDevice('ac-note');
+  const tg = await Client.make('ac-note-t', 'Tam Target');
+  await acFriends(nw, tg);
+  await nw.ok('note.set', { user: tg.id, note: 'Met at the glaze night. Likes celadon.' });
+  assert.equal((await nw2.next('account', (d) => d.note)).note.note, 'Met at the glaze night. Likes celadon.');
+  await tg.none('account', () => true, 150);
+  assert.match(await nw.refused('note.set', { user: nw.id, note: 'me' }), /isn’t here/);
+  assert.match(await nw.refused('note.set', { user: tg.id, note: 'x'.repeat(257) }), /at most 256/);
+  const again = await acDevice('ac-note');
+  assert.deepEqual(again.hello.account.notes, { [tg.id]: 'Met at the glaze night. Likes celadon.' });
+  const theirs = await acDevice('ac-note-t');
+  assert.deepEqual(theirs.hello.account.notes, {}, 'the person a note is about never gets it');
+  await nw.ok('note.set', { user: tg.id, note: '' });
+  assert.deepEqual((await acDevice('ac-note')).hello.account.notes, {});
+  for (const c of [nw, nw2, tg, again, theirs]) await c.close();
+});
+
+test('account: profile: pronouns, accent, a longer About, and a banner only people who may see you can load', async () => {
+  const pr = await Client.make('ac-pro', 'Pip Profile');
+  const fr = await Client.make('ac-pro-fr', 'Fen Friend');
+  const xx = await Client.make('ac-pro-x', 'Xan Stranger');
+  await acFriends(pr, fr);
+  await pr.ok('me.update', { pronouns: 'they/them', accent: 200, about: `**Potter.** ${'a'.repeat(300)}` });
+  const v = (await fr.next('user', (d) => d.user.id === pr.id && d.user.pronouns)).user;
+  assert.equal(v.pronouns, 'they/them');
+  assert.equal(v.accent, 200);
+  assert.ok(v.about.length > 300);
+  assert.match(await pr.refused('me.update', { about: 'a'.repeat(401) }), /at most 400/);
+  assert.match(await pr.refused('me.update', { accent: 400 }), /colours/);
+  assert.match(await pr.refused('me.update', { pronouns: 'x'.repeat(41) }), /at most 40/);
+  // A banner is checked from its bytes.
+  const png = Buffer.alloc(40); png.writeUInt32BE(0x89504e47, 0); png.writeUInt32BE(0x0d0a1a0a, 4); png.writeUInt32BE(13, 8);
+  png.write('IHDR', 12, 'latin1'); png.writeUInt32BE(960, 16); png.writeUInt32BE(320, 20);
+  const up = (bytes, cookie) => fetch(`${base}/api/files?banner=1`, { method: 'POST', headers: { 'content-type': 'image/png', origin: base, cookie }, body: bytes });
+  assert.equal((await up(Buffer.from('<svg onload=alert(1)>'.padEnd(40)), pr.cookie)).status, 415);
+  const res = await up(png, pr.cookie);
+  assert.equal(res.status, 201);
+  const { id: banner } = await res.json();
+  // Someone else's upload can't become your banner.
+  const other = await (await up(png, xx.cookie)).json();
+  assert.match(await pr.refused('me.update', { banner: other.id }), /Upload the banner/);
+  await pr.ok('me.update', { banner });
+  assert.equal((await fr.next('user', (d) => d.user.id === pr.id && d.user.banner)).user.banner, banner);
+  const get = (cookie) => fetch(`${base}/api/banners/${banner}`, { headers: { cookie } });
+  assert.equal((await get(fr.cookie)).status, 200);
+  assert.equal((await get(pr.cookie)).status, 200);
+  assert.equal((await get(xx.cookie)).status, 404, 'a stranger can’t load it');
+  await pr.ok('me.update', { banner: null });
+  assert.equal((await get(fr.cookie)).status, 404, 'an old banner stops being served');
+  for (const c of [pr, fr, xx]) await c.close();
+});
+
+test('account: sessions list the device and last use; sign one out, or every other one', async () => {
+  const me1 = await Client.make('ac-ses', 'Sam Sessions');
+  const phone = await acDevice('ac-ses', 'Mozilla/5.0 (Linux; Android 14) Chrome/130.0 Mobile Safari/537.36');
+  const desk = await acDevice('ac-ses', 'Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Snug/0.5.0 Chrome/130.0 Electron/33.0 Safari/537.36');
+  const { sessions } = await me1.ok('sessions.list');
+  assert.equal(sessions.length, 3);
+  assert.equal(sessions.filter((s) => s.current).length, 1);
+  assert.ok(sessions.some((s) => s.agent === 'Chrome on Android'));
+  assert.ok(sessions.some((s) => s.agent === 'Snug desktop on Windows'));
+  assert.ok(sessions.every((s) => /^[0-9a-f]{16}$/.test(s.id) && s.seen >= s.created));
+  const mine = sessions.find((s) => s.current);
+  assert.match(await me1.refused('sessions.revoke', { id: mine.id }), /this device/);
+  assert.match(await me1.refused('sessions.revoke', { id: 'zz' }), /isn’t valid/);
+  // Sign the phone out: only its socket closes, and its cookie stops working.
+  const phoneId = sessions.find((s) => s.agent === 'Chrome on Android').id;
+  const closing = acClosed(phone);
+  await me1.ok('sessions.revoke', { id: phoneId });
+  assert.equal(await closing, 4001);
+  assert.equal((await fetch(`${base}/api/me`, { headers: { cookie: phone.cookie } })).status, 401);
+  assert.equal(desk.ws.readyState, 1, 'the desktop stays signed in');
+  // Every other one.
+  const deskClosing = acClosed(desk);
+  assert.deepEqual(await me1.ok('sessions.revokeOthers'), { ended: 1 });
+  assert.equal(await deskClosing, 4001);
+  assert.equal((await me1.ok('sessions.list')).sessions.length, 1);
+  assert.equal((await fetch(`${base}/api/me`, { headers: { cookie: me1.cookie } })).status, 200);
+  // Someone else's session id does nothing to theirs.
+  const other = await Client.make('ac-ses-o', 'Oli Other');
+  const theirs = (await other.ok('sessions.list')).sessions[0];
+  assert.match(await me1.refused('sessions.revoke', { id: theirs.id }), /already ended/);
+  for (const c of [me1, other]) await c.close();
+});
+
+test('account: TOTP follows RFC 6238; codes drift one step at most and are refused the second time', () => {
+  // RFC 6238 appendix B (SHA-1): the secret is the ASCII "12345678901234567890".
+  const key = Buffer.from('12345678901234567890');
+  assert.equal(hotp(key, Math.floor(59 / 30), 8), '94287082');
+  assert.equal(hotp(key, Math.floor(1111111109 / 30), 8), '07081804');
+  assert.equal(hotp(key, Math.floor(1234567890 / 30), 8), '89005924');
+  assert.equal(hotp(key, Math.floor(20000000000 / 30), 8), '65353130');
+  // RFC 4226 appendix D, counters 0 and 9.
+  assert.equal(hotp(key, 0), '755224');
+  assert.equal(hotp(key, 9), '520489');
+  assert.deepEqual([...unbase32(base32(key))], [...key]);
+  assert.equal(base32(Buffer.from('foobar')), 'MZXW6YTBOI');
+  const now = 1_700_000_000_000;
+  const s = stepAt(now);
+  assert.equal(totpMatch(key, totpAt(key, now), { now }), s);
+  assert.equal(totpMatch(key, hotp(key, s - 1), { now }), s - 1, 'one step late is fine');
+  assert.equal(totpMatch(key, hotp(key, s + 1), { now }), s + 1, 'one step early is fine');
+  assert.equal(totpMatch(key, hotp(key, s - 2), { now }), -1, 'two steps is too far');
+  assert.equal(totpMatch(key, hotp(key, s + 2), { now }), -1);
+  assert.equal(totpMatch(key, totpAt(key, now), { now, after: s }), -1, 'a used step is refused');
+  assert.equal(totpMatch(key, 'abcdef', { now }), -1);
+  assert.equal(totpMatch(key, '12345', { now }), -1);
+});
+
+test('account: two-factor sign-in: turning it on, required at sign-in, replay refused, backup codes, turning it off', async () => {
+  const tf = await Client.make('ac-2fa', 'Tove Twofactor');
+  const begun = await tf.ok('totp.begin');
+  assert.match(begun.uri, /^otpauth:\/\/totp\/Snug%3Aac-2fa\?secret=[A-Z2-7]{32}&issuer=Snug/);
+  const key = unbase32(begun.secret);
+  // Turning it on needs the password as well as a code: a stolen session alone
+  // can't put its own authenticator on the account and lock the owner out.
+  assert.match(await tf.refused('totp.enable', { code: totpAt(key, Date.now()) }), /password/);
+  assert.match(await tf.refused('totp.enable', { code: totpAt(key, Date.now()), password: 'not my password' }), /password/);
+  assert.equal(srv.db.get('SELECT enabled FROM totp WHERE user = ?', tf.id).enabled, 0, 'still off');
+  assert.match(await tf.refused('totp.enable', { password: 'a long password', code: '000000' === totpAt(key, Date.now()) ? '111111' : '000000' }), /isn’t right/);
+  const { codes } = await tf.ok('totp.enable', { password: 'a long password', code: totpAt(key, Date.now()) });
+  assert.equal(codes.length, 10);
+  assert.ok(codes.every((c) => /^[a-z2-9]{4}-[a-z2-9]{4}$/.test(c)));
+  srv.resetLimits(); // two-factor changes allow six tries in a burst
+  assert.match(await tf.refused('totp.begin'), /already on/);
+  // The password alone no longer signs in: no cookie, a ticket for the second step.
+  const first = await acLogin('ac-2fa');
+  assert.equal(first.status, 200);
+  assert.equal(first.headers.get('set-cookie'), null);
+  const { totp, ticket } = await first.json();
+  assert.equal(totp, true);
+  const step2 = (t, code) => post('/api/login/totp', { ticket: t, code });
+  assert.equal((await step2(ticket, '12345')).status, 401);
+  // The code just used to turn it on is spent: replaying it is refused.
+  assert.equal((await step2(ticket, totpAt(key, Date.now()))).status, 401);
+  // The next code (one step ahead, within the drift) works once.
+  const next = hotp(key, stepAt(Date.now()) + 1);
+  const ok = await step2(ticket, next);
+  assert.equal(ok.status, 200, await ok.clone().text());
+  const cookie = cookieOf(ok);
+  assert.equal((await fetch(`${base}/api/me`, { headers: { cookie } })).status, 200);
+  assert.equal((await step2(ticket, next)).status, 401, 'a ticket is good for one sign-in');
+  const t2 = (await (await acLogin('ac-2fa')).json()).ticket;
+  assert.equal((await step2(t2, next)).status, 401, 'the same code twice is refused');
+  // A backup code works once.
+  assert.equal((await step2(t2, codes[0].toUpperCase())).status, 200);
+  const t3 = (await (await acLogin('ac-2fa')).json()).ticket;
+  assert.equal((await step2(t3, codes[0])).status, 401, 'a backup code is single-use');
+  assert.equal((await step2('not-a-ticket', codes[1])).status, 401);
+  srv.resetLimits(); // the sign-in limit (10 tries per 15 minutes from one address) is checked elsewhere
+  // Five wrong codes (the spent backup code was the first) end the ticket, even for a right one after.
+  for (let i = 0; i < 4; i++) assert.equal((await step2(t3, '000001')).status, 401);
+  assert.equal((await step2(t3, codes[1])).status, 429);
+  assert.equal((await step2(t3, codes[1])).status, 401, 'the ticket is gone');
+  // A new password needs a code too.
+  assert.equal((await post('/api/password', { current: 'a long password', next: 'another long password' }, tf.cookie)).status, 401);
+  // New backup codes need the password and a code; the old ones stop working.
+  assert.match(await tf.refused('totp.codes', { password: 'wrong', code: codes[3] }), /password/);
+  assert.match(await tf.refused('totp.codes', { password: 'a long password' }), /code isn’t right/, 'the password alone isn’t enough');
+  assert.match(await tf.refused('totp.codes', { password: 'a long password', code: '999999' }), /code isn’t right/);
+  const { codes: fresh } = await tf.ok('totp.codes', { password: 'a long password', code: codes[3] });
+  const t4 = (await (await acLogin('ac-2fa')).json()).ticket;
+  assert.equal((await step2(t4, codes[2])).status, 401);
+  srv.resetLimits();
+  // Turning it off needs the password and a code.
+  assert.match(await tf.refused('totp.disable', { password: 'a long password', code: '999999' }), /isn’t right/);
+  assert.match(await tf.refused('totp.disable', { password: 'nope', code: fresh[0] }), /password/);
+  await tf.ok('totp.disable', { password: 'a long password', code: fresh[0] });
+  const plain = await acLogin('ac-2fa');
+  assert.ok(plain.headers.get('set-cookie'), 'password alone signs in again');
+  await tf.close();
+});
+
+test('account: export holds what you wrote; delete keeps your messages as Deleted user; deactivate until you sign in', async () => {
+  const ow = await Client.make('ac-del-ow', 'Oda Owner');
+  const dl = await Client.make('ac-del', 'Dee Deleting');
+  const made = await ow.ok('house.create', { name: 'Export house', hue: 40 });
+  const h = await ow.next('house', (d) => d.house.id === made.house);
+  const room = Object.values(h.rooms).find((r) => r.kind === 'text').id;
+  const { code } = await ow.ok('invite.create', { house: made.house });
+  await dl.ok('invite.accept', { code });
+  const mine = mid();
+  await dl.ok('msg.send', { conv: room, id: mine, text: 'Mine to keep' });
+  await ow.ok('msg.send', { conv: room, id: mid(), text: 'Not yours' });
+  await dl.ok('prefs.set', { prefs: { theme: 'light' } });
+  // Export: a JSON download of your own account and messages, nobody else's.
+  const ex = await fetch(`${base}/api/account/export`, { headers: { cookie: dl.cookie } });
+  assert.equal(ex.status, 200);
+  assert.match(ex.headers.get('content-disposition'), /attachment; filename="snug-ac-del-/);
+  const data = await ex.json();
+  assert.equal(data.account.handle, 'ac-del');
+  assert.equal(data.settings.theme, 'light');
+  assert.deepEqual(data.messages.map((m) => m.text), ['Mine to keep']);
+  assert.equal(data.messages[0].where, 'Export house / ' + h.rooms[room].name);
+  assert.deepEqual(data.houses.map((x) => x.name), ['Export house']);
+  assert.equal(JSON.stringify(data).includes('pass'), false, 'no password hash');
+  // The only owner of a house with people in it has to hand it over first.
+  const own = await post('/api/account/delete', { password: 'a long password', confirm: 'ac-del-ow' }, ow.cookie);
+  assert.equal(own.status, 409);
+  assert.match((await own.json()).error, /only owner of Export house/);
+  // Wrong password, or the wrong username typed, is refused.
+  assert.equal((await post('/api/account/delete', { password: 'nope', confirm: 'ac-del' }, dl.cookie)).status, 401);
+  assert.equal((await post('/api/account/delete', { password: 'a long password', confirm: 'someone' }, dl.cookie)).status, 401);
+  const closing = acClosed(dl);
+  const del = await post('/api/account/delete', { password: 'a long password', confirm: '@ac-del' }, dl.cookie);
+  assert.equal(del.status, 200);
+  assert.equal(await closing, 4001);
+  assert.match(del.headers.get('set-cookie'), /Max-Age=0/);
+  // Their message stays, by "Deleted user"; they are out of the house; they can't sign in.
+  const hist = await ow.ok('history', { conv: room });
+  assert.ok(hist.msgs.some((m) => m.id === mine && m.text === 'Mine to keep'));
+  const gone = srv.hub.userView(dl.id);
+  assert.equal(gone.name, 'Deleted user');
+  assert.equal(gone.deleted, true);
+  assert.notEqual(gone.handle, 'ac-del');
+  assert.equal(srv.M.isMember(made.house, dl.id), false);
+  assert.equal((await acLogin('ac-del')).status, 401);
+  assert.equal((await fetch(`${base}/api/me`, { headers: { cookie: dl.cookie } })).status, 401);
+  assert.equal(srv.db.get('SELECT COUNT(*) n FROM user_prefs WHERE user = ?', dl.id).n, 0);
+  // Deactivate: offline to everyone until they sign in again.
+  const da = await Client.make('ac-deact', 'Dax Deactivating');
+  await acFriends(ow, da);
+  assert.equal((await post('/api/account/deactivate', { password: 'wrong' }, da.cookie)).status, 401);
+  const daClosing = acClosed(da);
+  assert.equal((await post('/api/account/deactivate', { password: 'a long password' }, da.cookie)).status, 200);
+  assert.equal(await daClosing, 4001);
+  assert.equal(srv.hub.userView(da.id).presence, 'offline');
+  const back = await acDevice('ac-deact');
+  assert.equal(srv.M.userRow(da.id).deactivated, null, 'signing in brings the account back');
+  assert.notEqual((await ow.next('user', (d) => d.user.id === da.id && d.user.presence !== 'offline')).user.presence, 'offline');
+  for (const c of [ow, back]) await c.close();
+});
+
+test('account: quiet hours keep pushes quiet; highlight words and @everyone count as mentions', async () => {
+  const qa = await Client.make('ac-quiet', 'Quin Quiet');
+  const now = new Date();
+  const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
+  await qa.ok('prefs.set', { prefs: { quiet: { on: true, from: (mins + 1430) % 1440, to: (mins + 10) % 1440, tz: 0 }, keywords: ['raku'] } });
+  assert.equal(srv.M.quietFor(qa.id, 'someone', 'nowhere'), true, 'inside quiet hours');
+  await qa.ok('prefs.set', { prefs: { quiet: { on: true, from: (mins + 60) % 1440, to: (mins + 120) % 1440, tz: 0 } } });
+  assert.equal(srv.M.quietFor(qa.id, 'someone', 'nowhere'), false, 'outside them');
+  assert.equal(srv.M.forMeExtra(qa.id, { text: 'Anyone for RAKU firing?', author: 'x' }, { type: 'dm' }), true);
+  assert.equal(srv.M.forMeExtra(qa.id, { text: 'rakuware is different', author: 'x' }, { type: 'dm' }), false, 'whole words only');
+  // Pure rules, across midnight and time zones.
+  assert.equal(inQuiet({ on: true, from: 22 * 60, to: 7 * 60, tz: 0 }, Date.UTC(2026, 0, 1, 23, 30)), true);
+  assert.equal(inQuiet({ on: true, from: 22 * 60, to: 7 * 60, tz: 0 }, Date.UTC(2026, 0, 1, 12, 0)), false);
+  assert.equal(inQuiet({ on: true, from: 22 * 60, to: 7 * 60, tz: -60 }, Date.UTC(2026, 0, 1, 21, 30)), true, '21:30 UTC is 22:30 at UTC+1');
+  assert.equal(inQuiet({ on: false, from: 0, to: 1439, tz: 0 }), false);
+  assert.equal(hasKeyword('Ça va, café?', ['café']), true);
+  assert.equal(everyonePing('hey @everyone look'), 'everyone');
+  assert.equal(everyonePing('`@everyone` in code'), null);
+  assert.equal(everyonePing('mail@here.com'), null);
+  await qa.close();
+});
+// --- end account ----------------------------------------------------------------
+
+// ---------- Integration across tracks ----------
+test('integration: one role hierarchy for moderation, members and roles, counting extra roles; later ops go in the house log', async () => {
+  const s = await placesHouse('ih', 1);
+  const { ow, mm, m2, house, memberRole, crew, ownerRole } = s;
+  const [x0] = s.more;
+  // An Admin role above Crew, with Manage roles and every moderation right.
+  const { id: admin } = await ow.ok('role.create', { house });
+  await ow.ok('role.update', { house, role: admin, name: 'Admin', perms: ['post', 'roles', 'kick', 'timeout'] });
+  await ow.ok('role.move', { house, role: admin, index: 1 }); // owner, Admin, Member, Crew
+  await ow.ok('role.update', { house, role: memberRole, perms: ['post', 'roles', 'kick', 'timeout'] });
+  await ow.ok('member.role', { house, user: m2.id, role: admin });
+  // mm manages roles with the Member role: nobody at or above Member is theirs to change.
+  assert.match(await mm.refused('member.role', { house, user: m2.id, role: memberRole }), /same as yours or above/);
+  assert.match(await mm.refused('member.remove', { house, user: m2.id }), /same as yours or above/);
+  await ow.ok('member.role', { house, user: x0.id, role: crew });
+  assert.match(await mm.refused('member.role', { house, user: x0.id, role: admin }), /roles below your own/);
+  assert.match(await mm.refused('member.role', { house, user: x0.id, role: memberRole }), /roles below your own/, 'not their own role either');
+  await mm.ok('member.role', { house, user: x0.id, role: crew });
+  assert.match(await mm.refused('role.update', { house, role: admin, perms: ['post'] }), /roles below your own/);
+  assert.match(await mm.refused('role.update', { house, role: memberRole, perms: ['post', 'roles', 'ban'] }), /roles below your own/);
+  assert.match(await mm.refused('role.delete', { house, role: admin }), /roles below your own/);
+  await ow.ok('member.role', { house, user: x0.id, role: memberRole });
+  assert.match(await mm.refused('member.role', { house, user: x0.id, role: crew }), /same as yours or above/, 'an equal is not below');
+  await mm.ok('role.update', { house, role: crew, name: 'Crew and kiln' });
+  assert.match(await mm.refused('mod.timeout', { house, user: m2.id, ms: 60_000 }), /same as yours or above/);
+  // An extra role counts: with Admin as an extra role, mm now outranks Member and Crew people,
+  // and may hand out Member, but still not Admin (equal) or the owner role.
+  await ow.ok('member.roles', { house, user: mm.id, roles: [admin] });
+  await mm.ok('member.role', { house, user: x0.id, role: crew });
+  await mm.ok('member.role', { house, user: x0.id, role: memberRole });
+  await mm.ok('mod.timeout', { house, user: x0.id, ms: 60_000 });
+  assert.match(await mm.refused('mod.timeout', { house, user: m2.id, ms: 60_000 }), /same as yours or above/);
+  assert.match(await mm.refused('member.role', { house, user: x0.id, role: ownerRole }), /Only an owner/);
+  assert.match(await mm.refused('member.remove', { house, user: ow.id }), /owner/);
+  // Owners are not limited.
+  await ow.ok('role.update', { house, role: admin, perms: ['post', 'roles', 'kick', 'timeout', 'audit'] });
+
+  // Changes made through places, voice options and messaging ops reach the house log.
+  await ow.ok('room.private', { room: s.notices, on: true });
+  await ow.ok('room.voice', { room: s.voice, limit: 4 });
+  await ow.ok('house.soundboard', { house, open: false });
+  await ow.ok('member.profile', { house, user: x0.id, nick: 'Xan the Kiln' });
+  const { entries } = await ow.ok('audit.list', { house });
+  const kinds = entries.map((e) => e.action);
+  for (const k of ['room.private', 'room.voice', 'house.soundboard', 'member.profile', 'member.roles', 'role.move', 'member.role', 'member.timeout']) {
+    assert.ok(kinds.includes(k), `${k} is in the house log`);
+  }
+  assert.equal(entries.find((e) => e.action === 'member.profile').detail.nick, 'Xan the Kiln');
+  // Refused changes write nothing.
+  assert.equal(kinds.filter((k) => k === 'role.delete').length, 0);
+
+  // A role mention counts as for you in the push service, as in the browser: a
+  // mentionable role you have (extra roles too), whole names only.
+  const w = { type: 'room', house, room: s.lounge };
+  assert.equal(srv.M.forMeExtra(mm.id, { text: 'kiln is hot, @admin', author: ow.id }, w), true, 'an extra role');
+  assert.equal(srv.M.forMeExtra(m2.id, { text: 'kiln is hot, @Admin!', author: ow.id }, w), true);
+  assert.equal(srv.M.forMeExtra(x0.id, { text: 'kiln is hot, @admin', author: ow.id }, w), false, 'not their role');
+  assert.equal(srv.M.forMeExtra(m2.id, { text: 'kiln is hot, @administrators', author: ow.id }, w), false, 'whole names');
+  await ow.ok('role.update', { house, role: admin, mentionable: false });
+  assert.equal(srv.M.forMeExtra(m2.id, { text: 'kiln is hot, @admin', author: ow.id }, w), false, 'not mentionable');
+
+  // An event made in a room that later goes private keeps its title for the
+  // house, but only people who can see the room learn which room it is.
+  const { id: shed } = await ow.ok('room.create', { house, name: 'Kiln shed', kind: 'text' });
+  const { id: ev } = await ow.ok('event.create', { house, title: 'Glaze firing', starts: Date.now() + 3_600_000, room: shed });
+  await ow.ok('room.private', { room: shed, on: true });
+  x0.events.length = 0; ow.events.length = 0;
+  await ow.ok('event.rsvp', { event: ev, going: false }); // the maker was going
+  assert.equal((await x0.next('event', (d) => d.event.id === ev && !d.event.going.length)).event.room, null);
+  assert.equal((await ow.next('event', (d) => d.event.id === ev && !d.event.going.length)).event.room, shed);
+  await x0.close(); await x0.connect();
+  assert.equal(x0.hello.events[ev].room, null, 'and in a fresh snapshot');
+  assert.equal(x0.hello.events[ev].title, 'Glaze firing');
+
+  // Poll votes follow the same rules as reacting: blocks in a one-to-one conversation stop them.
+  await ow.ok('mod.timeout', { house, user: x0.id, ms: 0 });
+  const { id: dm } = await mm.ok('dm.open', { users: [x0.id] });
+  const poll = mid();
+  await mm.ok('poll.create', { conv: dm, id: poll, question: 'Raku or salt?', hours: 24, answers: [{ text: 'Raku' }, { text: 'Salt' }] });
+  await x0.ok('block.set', { user: mm.id, on: true });
+  assert.match(await x0.refused('poll.vote', { conv: dm, id: poll, answers: [0] }), /can’t do that with this person/);
+  await x0.ok('block.set', { user: mm.id, on: false });
+  await x0.ok('poll.vote', { conv: dm, id: poll, answers: [0] });
+  for (const c of [ow, mm, m2, x0]) await c.close();
+});
+
+// ---------- Security review: regressions ----------
+const FILTER_OFF = { words: [], links: false, action: 'block' };
+
+test('security: a moderator who can’t see a private room gets neither its reports nor its words and name from the house log', async () => {
+  const s = await placesHouse('sec1');
+  const { ow, mm, m2, house, lounge } = s;
+  // m2 moderates and reads the log, but can't see "Staff only"; mm can, by an override.
+  const { id: modRole } = await ow.ok('role.create', { house });
+  await ow.ok('role.update', { house, role: modRole, name: 'Mods', perms: ['post', 'moderate', 'audit'] });
+  await ow.ok('member.role', { house, user: m2.id, role: modRole });
+  const { id: secret } = await ow.ok('room.create', { house, name: 'Staff only', kind: 'text' });
+  await ow.ok('room.private', { room: secret, on: true });
+  await ow.ok('room.override', { room: secret, type: 'member', target: mm.id, allow: ['view', 'send'], deny: [] });
+  assert.equal(srv.M.canRead(m2.id, secret), false);
+  assert.equal(srv.M.canRead(mm.id, secret), true);
+  const m1 = mid();
+  await ow.ok('msg.send', { conv: secret, id: m1, text: 'TOP SECRET payroll numbers' });
+  await mm.ok('report.create', { conv: secret, msg: m1, reason: 'other' });
+  // A word-filter flag in the private room goes to the same queue.
+  await ow.ok('automod.set', { house, words: ['badword'], action: 'flag' });
+  await mm.ok('msg.send', { conv: secret, id: mid(), text: 'a badword in private' });
+  // And a report in a room everyone sees, for comparison.
+  const pub = mid();
+  await ow.ok('msg.send', { conv: lounge, id: pub, text: 'a public message' });
+  await mm.ok('report.create', { conv: lounge, msg: pub, reason: 'spam' });
+
+  const theirs = await m2.ok('report.list', { house });
+  assert.deepEqual(theirs.reports.map((r) => r.text), ['a public message'], 'only the report from a room they can see');
+  assert.equal(JSON.stringify(theirs).includes('TOP SECRET'), false);
+  assert.equal(JSON.stringify(theirs).includes('badword in private'), false);
+  const owners = await ow.ok('report.list', { house });
+  assert.equal(owners.reports.length, 3, 'the owner sees every report');
+  assert.equal(srv.M.houseView(house, m2.id).house.reportsOpen, 1, 'the count is only what they may see');
+  assert.equal(srv.M.houseView(house, ow.id).house.reportsOpen, 3);
+  const hidden = owners.reports.find((r) => r.text === 'TOP SECRET payroll numbers');
+  assert.match(await m2.refused('report.resolve', { id: hidden.id, status: 'dismissed' }), /doesn’t exist/);
+
+  // The log: a deleted message's words and the room's name stay with people who can see it.
+  const m3 = mid();
+  await mm.ok('msg.send', { conv: secret, id: m3, text: 'private member note in staff room' });
+  await ow.ok('msg.delete', { conv: secret, id: m3 });
+  const log = (await m2.ok('audit.list', { house })).entries;
+  const text = JSON.stringify(log);
+  assert.equal(text.includes('private member note'), false, 'no deleted words');
+  assert.equal(text.includes('Staff only'), false, 'no room name');
+  const del = log.find((e) => e.action === 'msg.delete');
+  assert.equal(del.detail.text, '');
+  assert.equal(del.detail.hidden, true);
+  for (const k of ['room.create', 'room.private', 'room.override']) {
+    const e = log.find((x) => x.action === k && x.target === secret);
+    assert.ok(e, `${k} is still listed`);
+    assert.equal(e.detail.name, 'a private room');
+  }
+  const full = JSON.stringify((await ow.ok('audit.list', { house })).entries);
+  assert.ok(full.includes('private member note') && full.includes('Staff only'), 'the owner sees all of it');
+  // Once m2 may see the room, they see it all.
+  await ow.ok('room.override', { room: secret, type: 'member', target: m2.id, allow: ['view'], deny: [] });
+  assert.ok(JSON.stringify((await m2.ok('audit.list', { house })).entries).includes('Staff only'));
+  assert.equal((await m2.ok('report.list', { house })).reports.length, 3);
+  await ow.ok('automod.set', { house, ...FILTER_OFF });
+  for (const c of [ow, mm, m2]) await c.close();
+});
+
+test('security: Manage roles can’t hand out permissions you lack, or change your own or a higher person’s roles', async () => {
+  const s = await placesHouse('sec2', 1);
+  const { ow, mm, m2, house, crew, memberRole } = s;
+  const [x0] = s.more;
+  // An Admin with only post and roles, above Member and Crew.
+  const { id: admin } = await ow.ok('role.create', { house });
+  await ow.ok('role.update', { house, role: admin, name: 'Admin', perms: ['post', 'roles'] });
+  await ow.ok('role.move', { house, role: admin, index: 1 });
+  await ow.ok('member.role', { house, user: mm.id, role: admin });
+  // A role of their own making can only carry what they have.
+  const { id: evil } = await mm.ok('role.create', { house });
+  assert.match(await mm.refused('role.update', { house, role: evil, perms: ['post', 'ban', 'kick', 'timeout', 'audit', 'voicemod', 'moderate', 'rooms'] }), /permissions you have yourself/);
+  assert.deepEqual(JSON.parse(srv.db.get('SELECT perms FROM roles WHERE id = ?', evil).perms), ['post'], 'nothing changed');
+  await mm.ok('role.update', { house, role: evil, perms: ['post', 'roles'] });
+  // Never onto themselves, even a role below them.
+  assert.match(await mm.refused('member.roles', { house, user: mm.id, roles: [evil] }), /your own roles/);
+  await ow.ok('role.update', { house, role: crew, perms: ['post', 'ban'] }); // an owner may
+  assert.match(await mm.refused('member.roles', { house, user: mm.id, roles: [crew] }), /your own roles/);
+  assert.equal(srv.M.can(mm.id, house, 'ban'), false, 'still no ban');
+  // Keeping a permission an owner gave, or taking it away, is fine.
+  await mm.ok('role.update', { house, role: crew, name: 'Crew and kiln', perms: ['post', 'ban'] });
+  await mm.ok('role.update', { house, role: crew, perms: ['post'] });
+  await ow.ok('role.update', { house, role: crew, perms: ['post', 'ban'] });
+  // Not on an equal or someone higher: m2 is an Admin too, and the owner is above everyone.
+  await ow.ok('member.role', { house, user: m2.id, role: admin });
+  await ow.ok('member.roles', { house, user: m2.id, roles: [crew] });
+  assert.match(await mm.refused('member.roles', { house, user: m2.id, roles: [] }), /same as yours or above/);
+  assert.equal(srv.db.get('SELECT COUNT(*) n FROM member_roles WHERE house = ? AND user = ?', house, m2.id).n, 1, 'their extra role stays');
+  assert.match(await mm.refused('member.roles', { house, user: ow.id, roles: [crew] }), /owner/);
+  // Someone below them is still theirs to manage.
+  assert.equal(srv.M.rankOf(house, x0.id) > srv.M.rankOf(house, mm.id), true);
+  await mm.ok('member.roles', { house, user: x0.id, roles: [crew] });
+  await mm.ok('member.roles', { house, user: x0.id, roles: [] });
+  void memberRole;
+  for (const c of [ow, mm, m2, x0]) await c.close();
+});
+
+test('security: deleting or deactivating an account drops its scheduled messages; the scheduler never sends as a deleted person', async () => {
+  const a = await Client.make('sec3-a', 'Ash Leaving');
+  const b = await Client.make('sec3-b', 'Bee Staying');
+  const d = await Client.make('sec3-d', 'Dot Pausing');
+  await acFriends(a, b);
+  await acFriends(d, b);
+  const { id: dm } = await a.ok('dm.open', { users: [b.id] });
+  const { id: dm2 } = await d.ok('dm.open', { users: [b.id] });
+  const soon = Date.now() + 5 * 60_000;
+  await a.ok('sched.create', { conv: dm, text: 'sent from beyond the grave', at: soon });
+  await d.ok('sched.create', { conv: dm2, text: 'sent while away', at: soon });
+  const closing = acClosed(a);
+  assert.equal((await post('/api/account/delete', { password: 'a long password', confirm: 'sec3-a' }, a.cookie)).status, 200);
+  await closing;
+  assert.equal(srv.db.get('SELECT COUNT(*) n FROM scheduled WHERE user = ?', a.id).n, 0, 'deleting drops them');
+  const pausing = acClosed(d);
+  assert.equal((await post('/api/account/deactivate', { password: 'a long password' }, d.cookie)).status, 200);
+  await pausing;
+  assert.equal(srv.db.get('SELECT COUNT(*) n FROM scheduled WHERE user = ?', d.id).n, 0, 'deactivating drops them');
+  // Even a row that's still there (an older server, a race) is never sent.
+  for (const [u, conv] of [[a.id, dm], [d.id, dm2]]) {
+    srv.db.run('INSERT INTO scheduled (id, user, conv, text, reply_to, at, created) VALUES (?, ?, ?, ?, NULL, ?, ?)', `sch_sec3${u.slice(-6)}`, u, conv, 'sent from beyond the grave', Date.now() - 1, Date.now());
+  }
+  srv.hub.messaging.tick();
+  assert.equal(srv.db.get("SELECT COUNT(*) n FROM messages WHERE text = 'sent from beyond the grave'").n, 0);
+  assert.equal(srv.db.get("SELECT COUNT(*) n FROM scheduled WHERE text = 'sent from beyond the grave'").n, 0, 'and the row is gone');
+  await b.none('msg', (x) => x.m.text === 'sent from beyond the grave', 150);
+  await b.close();
+});
+
+test('security: poll answers and forwarded words go through the house’s word and link filter', async () => {
+  const s = await placesHouse('sec5');
+  const { ow, mm, m2, house, lounge } = s;
+  await ow.ok('automod.set', { house, words: ['badword'], links: true, action: 'block' });
+  assert.match(await mm.refused('msg.send', { conv: lounge, id: mid(), text: 'a badword' }), /word this house doesn’t allow/);
+  const answers = (t) => [{ text: t }, { text: 'Fine' }];
+  assert.match(await mm.refused('poll.create', { conv: lounge, id: mid(), question: 'Which?', hours: 24, answers: answers('badword') }), /word this house doesn’t allow/);
+  assert.match(await mm.refused('poll.create', { conv: lounge, id: mid(), question: 'Which?', hours: 24, answers: answers('https://evil.example/x') }), /Links aren’t allowed/);
+  assert.equal(srv.db.get("SELECT COUNT(*) n FROM polls WHERE question = 'Which?'").n, 0);
+  // Forwarding from a direct conversation (no filter there) into the house.
+  const { id: dm } = await mm.ok('dm.open', { users: [m2.id] });
+  const src = mid();
+  await m2.ok('msg.send', { conv: dm, id: src, text: 'badword https://evil.example/x' });
+  assert.match(await mm.refused('msg.forward', { conv: dm, id: src, to: lounge, newId: mid() }), /word this house doesn’t allow|Links aren’t allowed/);
+  assert.equal(srv.db.get("SELECT COUNT(*) n FROM messages WHERE conv = ? AND fwd IS NOT NULL", lounge).n, 0);
+  // Into another direct conversation: no house, no filter.
+  const { id: dmOw } = await mm.ok('dm.open', { users: [ow.id] });
+  await mm.ok('msg.forward', { conv: dm, id: src, to: dmOw, newId: mid() });
+  // "Flag" lets them through and files a report saying where the word was.
+  await ow.ok('automod.set', { house, action: 'flag' });
+  const poll = mid();
+  await mm.ok('poll.create', { conv: lounge, id: poll, question: 'Which glaze?', hours: 24, answers: answers('badword') });
+  const fid = mid();
+  await mm.ok('msg.forward', { conv: dm, id: src, to: lounge, newId: fid });
+  const q = (await ow.ok('report.list', { house })).reports.filter((r) => r.reason === 'filter');
+  assert.ok(q.some((r) => r.msg === poll && /^Answers\. /.test(r.note)), 'the poll is flagged');
+  assert.ok(q.some((r) => r.msg === fid && /^Forwarded\. /.test(r.note)), 'the forward is flagged');
+  await ow.ok('automod.set', { house, ...FILTER_OFF });
+  for (const c of [ow, mm, m2]) await c.close();
+});
+
+test('security: the second sign-in step allows ten codes per account per 15 minutes, whatever the address', async () => {
+  const xdir = mkdtempSync(join(tmpdir(), 'snug-totp-'));
+  const xs = await startServer({ port: 0, dataDir: xdir, quiet: true, trustProxy: true });
+  const xbase = `http://127.0.0.1:${xs.port}`;
+  try {
+    const xpost = (path, body, ip) => fetch(xbase + path, { method: 'POST', headers: { 'content-type': 'application/json', origin: xbase, 'x-forwarded-for': ip }, body: JSON.stringify(body) });
+    const reg = await xpost('/api/register', { handle: 'sec6', name: 'Six Guessed', password: 'a long password' }, '10.9.0.1');
+    assert.equal(reg.status, 201);
+    const uid = (await reg.json()).user.id;
+    const key = Buffer.from('12345678901234567890');
+    xs.db.run('INSERT INTO totp (user, secret, enabled, step, backup, created) VALUES (?, ?, 1, 0, ?, ?)', uid, base32(key), '[]', Date.now());
+    let n = 0;
+    const ticket = async () => (await (await xpost('/api/login', { handle: 'sec6', password: 'a long password' }, `10.8.0.${++n}`)).json()).ticket;
+    // Ten wrong guesses, each from a new address, five to a ticket.
+    let t;
+    for (let i = 0; i < 10; i++) {
+      if (i % 5 === 0) t = await ticket();
+      assert.equal((await xpost('/api/login/totp', { ticket: t, code: '000000' === totpAt(key, Date.now()) ? '111111' : '000000' }, `10.7.0.${i}`)).status, 401);
+    }
+    // The eleventh, even the right code from yet another address, waits.
+    const res = await xpost('/api/login/totp', { ticket: await ticket(), code: totpAt(key, Date.now()) }, '10.6.0.1');
+    assert.equal(res.status, 429);
+    assert.match((await res.json()).error, /Too many attempts/);
+    xs.resetLimits();
+    const ok = await xpost('/api/login/totp', { ticket: await ticket(), code: totpAt(key, Date.now()) }, '10.6.0.2');
+    assert.equal(ok.status, 200, 'after the wait, the right code works');
+  } finally { await xs.close(); rmSync(xdir, { recursive: true, force: true }); }
+});
+
+test('security: a timeout stops editing too; a banned person’s webhook addresses stop working', async () => {
+  const s = await placesHouse('sec7');
+  const { ow, mm, m2, house, lounge, memberRole } = s;
+  const m3 = mid();
+  await mm.ok('msg.send', { conv: lounge, id: m3, text: 'hello' });
+  await ow.ok('mod.timeout', { house, user: mm.id, ms: 60_000 });
+  assert.match(await mm.refused('msg.edit', { conv: lounge, id: m3, text: 'edited while timed out' }), /timed out/);
+  assert.equal(srv.M.msg(m3).text, 'hello');
+  await ow.ok('mod.timeout', { house, user: mm.id, ms: 0 });
+  await mm.ok('msg.edit', { conv: lounge, id: m3, text: 'edited after' });
+  // Webhooks: m2 makes one, then is banned.
+  await ow.ok('role.update', { house, role: memberRole, perms: ['post', 'rooms'] });
+  const { url } = await m2.ok('hook.create', { room: lounge, name: 'Kiln sensor' });
+  const { url: ownUrl } = await ow.ok('hook.create', { room: lounge, name: 'Owner’s' });
+  const hit = (u) => fetch(base + u, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'kiln at 1200' }) });
+  assert.equal((await hit(url)).status, 200);
+  await ow.ok('mod.ban', { house, user: m2.id });
+  assert.equal((await hit(url)).status, 401, 'the banned person’s address is revoked');
+  assert.equal((await hit(ownUrl)).status, 200, 'other webhooks keep working');
+  await ow.ok('mod.unban', { house, user: m2.id });
+  await ow.ok('role.update', { house, role: memberRole, perms: ['post'] });
+  for (const c of [ow, mm, m2]) await c.close();
+});
+
+test('security: an invisible person’s custom status reaches only their own devices', async () => {
+  const iv = await Client.make('sec8', 'Ivo Invisible');
+  const fr = await Client.make('sec8-fr', 'Fay Friend');
+  await acFriends(iv, fr);
+  await iv.ok('me.update', { presence: 'offline' });
+  await fr.next('user', (d) => d.user.id === iv.id && d.user.presence === 'offline');
+  fr.events.length = 0;
+  await iv.ok('status.set', { text: 'Secretly glazing', emoji: '🏺', clear: 'never' });
+  const mine = await iv.next('user', (d) => d.user.id === iv.id && d.user.status === 'Secretly glazing');
+  assert.equal(mine.user.statusEmoji, '🏺', 'they see their own status');
+  await fr.none('user', (d) => d.user.id === iv.id, 250);
+  assert.equal(srv.hub.userView(iv.id).status, '');
+  assert.equal(srv.hub.userView(iv.id).statusEmoji, null);
+  const fr2 = await acDevice('sec8-fr');
+  assert.equal(fr2.hello.users[iv.id].status, '', 'nor in a fresh snapshot');
+  assert.equal(fr2.hello.users[iv.id].statusEmoji, null);
+  const iv2 = await acDevice('sec8');
+  assert.equal(iv2.hello.users[iv.id].status, 'Secretly glazing', 'their own snapshot has it');
+  // Coming back shows it.
+  await iv.ok('me.update', { presence: 'around' });
+  assert.equal((await fr.next('user', (d) => d.user.id === iv.id && d.user.presence === 'around')).user.status, 'Secretly glazing');
+  for (const c of [iv, fr, fr2, iv2]) await c.close();
+});
+
+test('security: a malformed percent-encoding in a file name, an address or a cookie is a client error, never a crash', async () => {
+  const s = await placesHouse('sec9');
+  const { ow, house } = s;
+  const png = Buffer.alloc(40); png.writeUInt32BE(0x89504e47, 0); png.writeUInt32BE(0x0d0a1a0a, 4); png.writeUInt32BE(13, 8);
+  png.write('IHDR', 12, 'latin1'); png.writeUInt32BE(64, 16); png.writeUInt32BE(64, 20);
+  const up = (path) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'image/png', origin: base, cookie: ow.cookie, 'x-file-name': '%E0%A4%A' }, body: png });
+  const st = await up(`/api/files?sticker=${house}`);
+  assert.equal(st.status, 201, await st.clone().text());
+  assert.equal((await st.json()).name, '%E0%A4%A', 'kept as it came');
+  const em = await up(`/api/files?emoji=${house}`);
+  assert.equal(em.status, 201, await em.clone().text());
+  const fl = await up(`/api/files?conv=${s.lounge}`);
+  assert.equal(fl.status, 201, await fl.clone().text());
+  // Before, a bad address rejected outside the handler's try: an unhandled rejection that stops Node.
+  assert.equal((await fetch(`${base}/%E0%A4%A`)).status, 400);
+  assert.equal((await fetch(`${base}/api/me`, { headers: { cookie: 'snug_session=%E0%A4%A' } })).status, 401);
+  assert.equal((await fetch(`${base}/api/me`, { headers: { cookie: ow.cookie } })).status, 200, 'the server is still up');
+  for (const c of [ow, s.mm, s.m2]) await c.close();
+});
+
+test('review: the house log says which of a nickname, picture or colour changed; “Today” allows a 25-hour day', async () => {
+  const s = await placesHouse('rv1');
+  const { ow, mm, m2, house } = s;
+  await ow.ok('member.profile', { house, user: mm.id, emoji: '🦊' });
+  await ow.ok('member.profile', { house, user: mm.id, nick: 'Mik', hue: 200 });
+  await ow.ok('member.profile', { house, user: mm.id, nick: null });
+  await ow.ok('member.profile', { house, user: mm.id, nick: null }); // nothing changed: nothing logged
+  const e = (await ow.ok('audit.list', { house, action: 'member.profile' })).entries.map((x) => x.detail);
+  assert.deepEqual(e, [{ fields: ['nick'], nick: null }, { fields: ['nick', 'hue'], nick: 'Mik' }, { fields: ['emoji'], nick: null }]);
+  // The end of a day the clocks go back on is up to 25 hours away.
+  const { until } = await m2.ok('status.set', { text: 'Firing', clear: 'today', until: Date.now() + 24.9 * 3_600_000 });
+  assert.ok(until > Date.now() + 24 * 3_600_000);
+  assert.match(await m2.refused('status.set', { text: 'x', clear: 'today', until: Date.now() + 27 * 3_600_000 }), /end of your day/);
+  for (const c of [ow, mm, m2]) await c.close();
+});
+
+test('security: a timeout takes away pinning, managing and moderating too, not just writing; reading and deleting your own stay', async () => {
+  const s = await placesHouse('sec10');
+  const { ow, mm, m2, house, lounge, memberRole } = s;
+  const mine = mid(), theirs = mid();
+  await mm.ok('msg.send', { conv: lounge, id: mine, text: 'mine' });
+  await m2.ok('msg.send', { conv: lounge, id: theirs, text: 'theirs' });
+  await ow.ok('role.update', { house, role: memberRole, perms: ['post', 'pin', 'rooms', 'announce', 'highlight', 'invite', 'emoji', 'moderate'] });
+  const forum = await ow.ok('room.create', { house, name: 'Forum', kind: 'forum' });
+  const post = mid();
+  await mm.ok('forum.post', { room: forum.id, id: post, title: 'My post', text: 'body' });
+  const { hook } = await mm.ok('hook.create', { room: lounge, name: 'Kiln' });
+  await ow.ok('mod.timeout', { house, user: mm.id, ms: 60_000 });
+  for (const [op, d] of [
+    ['msg.pin', { conv: lounge, id: theirs }], ['highlight.set', { conv: lounge, id: theirs, on: true }],
+    ['forum.edit', { id: post, title: 'Renamed while timed out' }], ['hook.create', { room: lounge, name: 'Another' }],
+    ['hook.delete', { hook: hook.id }], ['event.create', { house, title: 'Party', starts: Date.now() + 3_600_000 }],
+    ['room.create', { house, name: 'sneaky', kind: 'text' }], ['invite.create', { house }],
+    ['msg.delete', { conv: lounge, id: theirs }], ['member.profile', { house, user: mm.id, nick: 'Sneaky' }],
+  ]) assert.match(await mm.refused(op, d), /timed out/, op);
+  assert.equal(srv.db.get('SELECT title FROM forum_posts WHERE msg = ?', post).title, 'My post');
+  assert.ok(srv.M.liveMsg(theirs), 'their message is still there');
+  // Reading and taking your own words back still work.
+  await mm.ok('history', { conv: lounge });
+  await mm.ok('msg.delete', { conv: lounge, id: mine });
+  // Once the timeout ends, everything comes back.
+  await ow.ok('mod.timeout', { house, user: mm.id, ms: 0 });
+  await mm.ok('msg.pin', { conv: lounge, id: theirs });
+  await mm.ok('forum.edit', { id: post, title: 'Renamed after' });
+  await ow.ok('role.update', { house, role: memberRole, perms: ['post'] });
+  for (const c of [ow, mm, m2]) await c.close();
+});

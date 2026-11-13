@@ -234,14 +234,14 @@ test('each person’s volume: 50% and 150% on the element that plays them, a mut
 });
 
 test('soundboard: a sound added in House settings plays into the voice room and really arrives at the other person', async () => {
-  // Add a sound through House settings > Voice.
+  // Add a sound through House settings > Soundboard.
   const wav = join(dir, 'tada.wav');
   toneWav(wav);
   await openKiln(robin);
   await robin.click('.nav button.ctx-house');
   await robin.click('.menu-item:has-text("House settings")');
-  await robin.click('.layer-nav .row:has-text("Voice") >> nth=0');
-  await robin.locator('.layer-col h1:has-text("Voice")').waitFor();
+  await robin.click('.layer-nav .row:has-text("Soundboard")');
+  await robin.locator('.layer-col h1:has-text("Soundboard")').waitFor();
   await robin.setInputFiles('input.vo-file', wav);
   await robin.locator('.vo-drop-text:has-text("Ready to add")').waitFor();
   await robin.fill('.vo-add-form input[maxlength="40"]', 'Tada');
@@ -301,11 +301,15 @@ test('the floating call follows you to other places; a voice room’s user limit
   // A limit of 2: Tomasz (no voice moderation) can't join while Robin and Ines are in.
   await robin.click('.nav button.ctx-house');
   await robin.click('.menu-item:has-text("House settings")');
-  await robin.click('.layer-nav .row:has-text("Voice") >> nth=0');
+  // Each voice room's limit and bitrate are on Rooms and access.
+  await robin.click('.layer-nav .row:has-text("Rooms and access")');
   await robin.selectOption('select[aria-label="User limit for Wheel room"]', '2');
   await robin.waitForFunction(() => Object.values(window.snug.S.rooms).find((r) => r.name === 'Wheel room')?.limit === 2);
   await robin.selectOption('select[aria-label="Bitrate for Wheel room"]', '96');
   await robin.waitForFunction(() => Object.values(window.snug.S.rooms).find((r) => r.name === 'Wheel room')?.bitrate === 96);
+  // The new bitrate becomes the ceiling on Robin's voice to Ines, without rejoining.
+  const inesId = await ines.evaluate(() => window.snug.S.me);
+  await robin.waitForFunction(async (id) => (await window.snug.voiceStats())[id]?.voiceMax === 96000, inesId, { timeout: 5000 });
   await closeLayer(robin);
   const tomasz = await person('tomasz');
   await openWheelRoom(tomasz);
@@ -320,6 +324,91 @@ test('the floating call follows you to other places; a voice room’s user limit
   await leave(tomasz);
   await leave(robin);
   await tomasz.context().close();
+  await ines.context().close();
+  await robin.context().close();
+});
+
+test('processing applies live in a call; deafening mutes (or not); mute, join and leave sounds; leaving after a while alone; volume in a call', async () => {
+  robin = await person('robin');
+  await joinVoiceRoom(robin);
+  let d = await debug(robin);
+  assert.equal(d.mic.noise, true, 'noise suppression starts on');
+  const sent = d.sent;
+  const firstMic = d.mic.id;
+
+  // Turning noise suppression and echo cancellation off captures again with them off, under the same sent track.
+  await openVoiceSettings(robin);
+  await robin.click('button[role="switch"][aria-label="Noise suppression"]');
+  await robin.waitForFunction(() => window.snug.voiceDebug().mic?.noise === false);
+  await robin.click('button[role="switch"][aria-label="Echo cancellation"]');
+  await robin.waitForFunction(() => window.snug.voiceDebug().mic?.echo === false);
+  d = await debug(robin);
+  assert.notEqual(d.mic.id, firstMic, 'a new capture');
+  assert.equal(d.sent, sent, 'the track everyone receives stays the same, so nothing is renegotiated');
+  await robin.click('button[role="switch"][aria-label="Noise suppression"]');
+  await robin.click('button[role="switch"][aria-label="Echo cancellation"]');
+  await robin.waitForFunction(() => window.snug.voiceDebug().mic?.noise === true && window.snug.voiceDebug().mic?.echo === true);
+  // Leave voice rooms after a minute alone.
+  await robin.selectOption('select[aria-label="Leave voice rooms when alone"]', '1');
+  assert.equal(await robin.evaluate(() => window.snug.S.prefs.voice.afk), 1);
+  await closeLayer(robin);
+
+  // Mute and deafen sounds; deafening mutes too, and hearing again unmutes.
+  await openWheelRoom(robin);
+  await robin.click('.stage [aria-label="Mute"]');
+  assert.equal((await debug(robin)).cue?.kind, 'mute');
+  await robin.click('.stage [aria-label="Unmute"]');
+  assert.equal((await debug(robin)).cue?.kind, 'unmute');
+  await robin.click('.stage [aria-label="Stop hearing the room"]');
+  let c = await robin.evaluate(() => ({ ...window.snug.S.call }));
+  assert.deepEqual([c.deaf, c.muted], [true, true], 'deafening mutes');
+  assert.equal((await debug(robin)).cue?.kind, 'deafen');
+  assert.equal((await debug(robin)).trackEnabled, false);
+  await robin.click('.stage [aria-label="Hear the room again"]');
+  c = await robin.evaluate(() => ({ ...window.snug.S.call }));
+  assert.deepEqual([c.deaf, c.muted], [false, false], 'hearing again unmutes');
+  // With "Deafening mutes you too" off, the microphone stays open.
+  await robin.evaluate(() => { window.snug.S.prefs.voice = { ...window.snug.S.prefs.voice, deafMutes: false }; });
+  await robin.click('.stage [aria-label="Stop hearing the room"]');
+  c = await robin.evaluate(() => ({ ...window.snug.S.call }));
+  assert.deepEqual([c.deaf, c.muted], [true, false], 'deafened but still talking');
+  await robin.click('.stage [aria-label="Hear the room again"]');
+  await robin.evaluate(() => { window.snug.S.prefs.voice = { ...window.snug.S.prefs.voice, deafMutes: true }; });
+
+  // Someone coming in and going out plays a sound for Robin; while not alone, he stays however long it is.
+  ines = await person('ines');
+  await joinVoiceRoom(ines, 1);
+  await connected(robin, 1);
+  await robin.waitForFunction(() => window.snug.voiceDebug().cue?.kind === 'join');
+  assert.equal(await robin.evaluate(() => { const t = Date.now(); window.snug.voiceAfk(t); return window.snug.voiceAfk(t + 3_600_000); }), false);
+  await leave(ines);
+  await robin.waitForFunction(() => window.snug.voiceDebug().cue?.kind === 'leave');
+
+  // Alone: still there before the minute is up, gone after it, and told why.
+  const left = await robin.evaluate(() => { const t = Date.now(); const a = window.snug.voiceAfk(t); const b = window.snug.voiceAfk(t + 30_000); const c2 = window.snug.voiceAfk(t + 61_000); return [a, b, c2]; });
+  assert.deepEqual(left, [false, false, true]);
+  await robin.waitForFunction(() => !window.snug.S.call);
+  await robin.locator('.toast:has-text("You left Wheel room after 1 minute on your own.")').waitFor();
+
+  // In a call in a direct conversation: each person's volume and a mute only I hear work the same.
+  await robin.click('.rail-btn:has(.sr:text-matches("^Messages"))');
+  await robin.click('.nav .row:has-text("Ines Carvalho")');
+  await robin.click('.main .bar .call-btn[aria-label="Start a voice call"]');
+  await ines.locator('.incoming .inc-accept').click();
+  await ines.locator('.stage.call [aria-label="Leave call"]').waitFor();
+  await connected(robin, 1);
+  const inesId = await ines.evaluate(() => window.snug.S.me);
+  await robin.click('.stage.call .stage-person:has-text("Ines") .vo-vol');
+  await robin.$eval('.pop input.vo-range', (el) => { el.value = '40'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await robin.waitForFunction(async (id) => (await window.snug.voiceStats())[id]?.volume === 0.4, inesId);
+  await robin.click('.pop button:has-text("Mute Ines for me")');
+  await robin.waitForFunction(async (id) => (await window.snug.voiceStats())[id]?.muted === true, inesId);
+  assert.equal(await ines.evaluate(() => window.snug.S.call.muted), false, 'Ines isn’t told');
+  await robin.keyboard.press('Escape');
+  // A call never leaves on its own, however long alone.
+  assert.equal(await robin.evaluate(() => { const t = Date.now(); window.snug.voiceAfk(t); return window.snug.voiceAfk(t + 3_600_000); }), false);
+  await robin.click('.stage.call [aria-label="Leave call"]');
+  await robin.waitForFunction(() => !window.snug.S.call);
   await ines.context().close();
   await robin.context().close();
 });

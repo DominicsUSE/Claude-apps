@@ -16,6 +16,7 @@ import { hueOf, MIN, DAY, plural } from '../lib/util.js';
 import { personItems } from './safety.js'; // block, report, moderate
 import { houseFace, colourRole, rolesOf, RoleIconMark } from './places.js'; // nicknames, role colours and icons, every role
 import { memberGroups } from '../lib/places.js'; // groups by roles shown separately
+import { ProfileBanner, AboutText, Pronouns, PrivateNote, StatusEmoji, openCustomStatus } from './account.js'; // banner, pronouns, rich About, notes, custom status
 
 export function showProfile(user, anchor, house) {
   openPop({ anchor, label: `${user.name}, profile`, C: ProfileCard, props: { id: user.id, house } });
@@ -61,7 +62,8 @@ export function ago(ts, now = Date.now()) {
 export function doingOf(u) {
   const room = u.presence !== 'offline' && voiceRoomOf(u.id);
   if (room) return { live: room, text: `In ${S.rooms[room].name}`, where: S.houses[S.rooms[room].house]?.name };
-  if (u.status && u.presence !== 'offline') return { text: u.status };
+  // A status can be only an emoji: then the presence word goes with it.
+  if ((u.status || u.statusEmoji) && u.presence !== 'offline') return { text: u.status || PRESENCE[u.presence]?.label || 'Around', status: true };
   if (u.presence === 'offline') {
     const t = lastActive(u.id);
     return { text: t ? `Offline · last wrote ${ago(t)}` : 'Offline' };
@@ -73,7 +75,7 @@ export function Doing({ u }) {
   const d = doingOf(u);
   return html`<span class=${`doing${d.live ? ' is-live' : ''}`}>
     ${d.live && html`<${Icon} name="voice" size=${14} />`}
-    <span class="trunc">${d.text}${d.where ? html`<span class="doing-where"> · ${d.where}</span>` : ''}</span>
+    <span class="trunc">${d.status ? html`<${StatusEmoji} u=${u} />` : ''}${d.text}${d.where ? html`<span class="doing-where"> · ${d.where}</span>` : ''}</span>
   </span>`;
 }
 
@@ -214,21 +216,23 @@ function ProfileCard({ id, house }) {
   const d = doingOf(u);
   const mine = id === S.me;
   return html`<div class="pcard" style=${`--hue:${hueOf(u.hue)}`}>
+    <${ProfileBanner} u=${u} />
     <div class="pcard-body">
       <div class="pcard-top">
         <button class="pcard-av" aria-label=${`Open ${u.name}’s profile`} onClick=${() => openPerson(id)}><${Avatar} user=${u} presence size=${64} /></button>
         <${FavButton} id=${id} sm />
       </div>
       <button class="pcard-name" onClick=${() => openPerson(id)}>${u.name}</button>
-      <div class="pcard-handle">@${u.handle}</div>
+      <div class="pcard-handle"><span class="secret">@${u.handle}</span><${Pronouns} u=${u} /></div>
       <div class="pcard-line"><${Pres} user=${u} inline /><${Doing} u=${u} /></div>
-      ${u.about && html`<p class="pcard-about">${u.about}</p>`}
+      <${AboutText} u=${u} />
       ${role && html`<div class="profile-roles">
         <span class="role-tag"><i class=${`hue-dot${role.hue == null ? ' none' : ''}`} style=${role.hue != null ? `--hue:${hueOf(role.hue)}` : ''}></i>${role.name} in ${S.houses[house].name}</span>
       </div>`}
       ${!mine && mutualHouses(S, id).length > 0 && html`<div class="pcard-common">
         <span class="pcard-k">In common</span><${CommonHouses} id=${id} max=${5} names=${false} />
       </div>`}
+      ${!mine && !u.deleted && html`<${PrivateNote} id=${id} />`}
       <div class="pcard-acts">
         ${mine
           ? html`<button class="btn primary" data-autofocus onClick=${editProfile}><${Icon} name="edit" size=${16} />Edit profile</button>`
@@ -258,6 +262,7 @@ export function MePop() {
       ${u.presence === key && html`<span class="end"><${Icon} name="check" size=${16} /></span>`}
     </button>`)}
     <div class="menu-sep"></div>
+    <button class="menu-item" role="menuitem" onClick=${() => { closePop(); openCustomStatus(); }}><${Icon} name="smile" /><span class="grow">${u.status || u.statusEmoji ? 'Change status' : 'Set a status'}<small>An emoji, and when it clears</small></span>${u.statusEmoji && html`<span class="end">${u.statusEmoji}</span>`}</button>
     <div class="status-in">
       <label class="label" for="status-field">Status line</label>
       <input id="status-field" class="field" placeholder="What are you up to?" maxlength="80" value=${status}

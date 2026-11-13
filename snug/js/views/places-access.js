@@ -60,7 +60,40 @@ function AccessTab({ room }) {
     </div>
     ${entries.map((o) => html`<${OverrideRow} key=${`${o.type}:${o.target}`} room=${room} o=${o}
       label=${o.type === 'everyone' ? 'Everyone' : o.type === 'role' ? roleName(o.target) : person(o.target).name}
-      face=${o.type === 'member' ? html`<${Avatar} user=${person(o.target)} size=${24} />` : html`<${Icon} name=${o.type === 'everyone' ? 'people' : 'shield'} size=${18} />`} />`)}`;
+      face=${o.type === 'member' ? html`<${Avatar} user=${person(o.target)} size=${24} />` : html`<${Icon} name=${o.type === 'everyone' ? 'people' : 'shield'} size=${18} />`} />`)}
+    <${CheckPerson} room=${room} />`;
+}
+
+// What one person can do here once every role and override is counted,
+// worked out by the server's own resolver (room.perms).
+function CheckPerson({ room }) {
+  const h = S.houses[room.house];
+  const [who, setWho] = useState('');
+  const [res, setRes] = useState(null); // { user, perms } | { user, error }
+  const people = Object.keys(h.members).filter((u) => S.users[u]).sort((a, b) => person(a).name.localeCompare(person(b).name));
+  const sig = JSON.stringify([room.overrides || [], room.private, h.roles, h.members, h.extra || {}]);
+  useEffect(() => {
+    if (!who) { setRes(null); return undefined; }
+    let live = true;
+    setRes({ user: who, busy: true });
+    call('room.perms', { room: room.id, user: who }).then((r) => live && setRes({ user: who, perms: r.perms }), (e) => live && setRes({ user: who, error: e.message }));
+    return () => { live = false; };
+  }, [who, sig]);
+  const perms = ROOM_PERMS.filter((p) => VOICE_KINDS.includes(room.kind) || (p.id !== 'connect' && p.id !== 'speak'));
+  return html`<section class="ovr-check" aria-labelledby="ovr-check-h">
+    <h3 id="ovr-check-h">Check a person</h3>
+    <p class="hint">See what someone can do in ${room.name} with all of their roles and the settings above.</p>
+    <select class="field" aria-label="Person to check" value=${who} onChange=${(e) => setWho(e.target.value)}>
+      <option value="">Pick a person…</option>${people.map((u) => html`<option key=${u} value=${u}>${person(u).name}</option>`)}
+    </select>
+    ${res?.busy && html`<p class="faint" aria-busy="true">Checking…</p>`}
+    ${res?.error && html`<p class="err" role="alert"><${Icon} name="alert" size=${14} />${res.error}</p>`}
+    ${res?.perms && html`<ul class="ovr-result" aria-live="polite" aria-label=${`What ${person(res.user).name} can do`}>
+      ${perms.map((p) => html`<li key=${p.id} class=${res.perms[p.id] ? 'yes' : 'no'}>
+        <${Icon} name=${res.perms[p.id] ? 'check' : 'x'} size=${16} /><span>${p.label}</span><span class="sr">${res.perms[p.id] ? ": yes" : ": no"}</span>
+      </li>`)}
+    </ul>`}
+  </section>`;
 }
 
 function HooksTab({ room, follows }) {

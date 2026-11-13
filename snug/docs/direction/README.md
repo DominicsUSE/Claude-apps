@@ -421,11 +421,11 @@ Settings is a full layer with its own sidebar, so it never crowds the chat.
 
 ![Settings on Appearance: Theme, Density, Text size and Contrast as segmented controls, a live message preview, Motion](img/desk-dark-settings-appearance.jpg)
 
-**Pages:** Profile, Notifications, Appearance, Keyboard, Account. "Find a setting" filters by everyday words ("dark", "password"). A house has its own layer: Overview, Roles, Members, Newcomers.
+**Pages, in sections** (since 0.5): *You* (Profile, Account and security, Privacy and safety, Your data) and *App* (Notifications, Voice and video, Appearance, Accessibility, Streamer mode, Keyboard). "Find a setting" filters by everyday words ("dark", "password", "slowmode") and keeps each page's section; on a phone it stays first in the row of tabs, which are 44px tall. A house has its own layer: *House* (Overview, Roles, Members, Invitations, Emoji, Soundboard), *Rooms and newcomers* (Rooms and access, with each room's slowmode or user limit and bitrate beside its Access button; Newcomers, which holds the welcome and interests too), *Moderation* (Reports, Bans, Filter and screening, House log) and *Owners* (Insights). A house page shows only to people with its permission. New pages join a named section in `arrange()` in `js/views/settings.js`, so the structure stays one structure.
 
-**Every change applies at once; nothing to save.** A Save button creates a state where the screen shows one thing and the app does another. The live preview on Appearance (real messages, drawn by the app's own Message component) shows the effect before you leave.
+**Every change applies at once; nothing to save.** A Save button creates a state where the screen shows one thing and the app does another. The live preview on Appearance (a sample message in the same type, spacing and display tokens as the conversation) shows the effect before you leave.
 
-- **Appearance:** Theme (Match device, Light, Dark), Density, Text size, Contrast (Match device, Standard, High), Motion (Match device, Reduced).
+- **Appearance:** Theme (Match device, Dark, Light, Midnight), selection tone, message display, spacing, line height, text size, zoom, clock, saturation, role colours, sidebar width. Contrast and Motion moved to **Accessibility** in 0.5, so each setting has one home.
 - **Notifications:** Pop-ups, Desktop notifications, a note on Focused, and one three-way control per house with room overrides listed.
 - **Account:** connection state, password change, sign out here, sign out everywhere.
 
@@ -615,6 +615,13 @@ Each works between separate people and has its own browser tests; the main READM
 - **Custom emoji per house**, with a Manage emoji permission, a picker section, `:name:` suggestions and a `<:name:id>` token in `js/lib/format.js`.
 - **Notifications when Snug is closed**: Web Push with a service worker, VAPID keys and a send path using `needsMe`, and the desktop app running in the tray. Real delivery through Google's push service could not be reached from the test machine, so a real browser push has not been seen end to end.
 
+- **Safety, privacy and moderation**: blocking, who may message or befriend you, message requests, reports, bans, timeouts, voice mutes, slowmode, a word and link filter, expiring invitation links, member screening and a house log. One role hierarchy (extra roles count) for every moderation, role and member change.
+- **Messaging**: quotes, lists, headings, spoilers, masked links, highlighted code, dynamic times, polls, link previews fetched by the server behind SSRF checks, forwarding, edit history, scheduled messages, stickers and more search filters.
+- **Places**: one room permission resolver behind every check (private rooms, overrides per role and person), several roles per person, nicknames per house, forum, notice-following and stage rooms, webhooks, rail folders, templates, a welcome with interests, insights for owners.
+- **Voice and video options**: device choice and checks, push to talk, processing switches mid-call, volume per person, a soundboard, a floating call, per-room user limit and bitrate.
+- **Account**: settings that follow you, Midnight theme, text size, accessibility options with Atkinson Hyperlegible, custom status, auto-idle, private notes, devices, two-factor sign-in, data export, deactivate and delete.
+- **Settings in sections**: personal settings in You and App, house settings in House, Rooms and newcomers, Moderation and Owners, with a search that stays on a phone. Each room's slowmode, user limit and bitrate live with its access on one page.
+
 ## Not built yet
 
 What the brief asked for, or a person would expect, that is not in 0.3.0, and what each would need.
@@ -622,14 +629,15 @@ What the brief asked for, or a person would expect, that is not in 0.3.0, and wh
 - **Social sign-in.** Username and password only. Needs OAuth per provider, callback routes, server secrets and account linking.
 - **Email.** No verification, no "forgot password". Needs an email provider and token flows.
 - **Photo avatars and community images.** The Avatar component can show an image, but nothing uploads one; house marks are a letter or emoji. Needs an upload op, cropping, resizing and storage rules.
-- **Blocking and reporting.** Neither exists. Needs a block table checked in contacts, direct messages, friend requests and Discover, and a report queue for moderators.
-- **Moderation beyond removal.** No bans that survive rejoining a public house, no timeouts, slow mode or audit log.
-- **Privacy controls.** No setting for who may send requests or direct messages. Needs preferences enforced in `friend.request` and `dm.open`.
-- **Voice device settings.** No microphone or speaker choice, level meter, push-to-talk or per-person volume. Needs `enumerateDevices`, a Voice settings page and per-peer gain.
 - **TURN relay and larger rooms.** Voice and video connect directly; strict networks need a relay (`SNUG_TURN_*` is ready). Above 12 people, or more than a few cameras at once, needs a media server (SFU).
 - **Event reminders.** Saying you are going does not notify you at the start. Needs a scheduler and a rule in `attention.js` that counts a starting event you said yes to as needing you.
-- **Richer formatting.** Inline code and fenced code blocks exist; quotes, lists and spoilers do not. Needs new rules in `js/lib/format.js`.
 - **A setting for the newcomer first step.** Houses choose starter rooms, but the first step (`firstStep`) is only set by seed data; every other house falls back to "Say hello". Needs a field in `house.update` and a control on the Newcomers page.
 - **Native phone apps.** The phone product is the web app with a manifest. A Windows app exists; iOS and Android builds do not.
 - **More than one server process.** Presence, voice membership and rate limits live in memory. Scaling past a single process needs a shared message bus.
 - **The version label** in Settings, which should read 0.3.0 from one source (it is written by hand in `js/views/settings.js`).
+- **Reporting from direct messages.** Reports go to a house's moderators; in a direct message the only tool is Block. Needs a reviewer for the server as a whole.
+- **Server-side media for moderation.** A moderator's mute, and a stage audience, are enforced by honest browsers: audio is peer to peer, so a modified client could still send sound. Needs the same media server as larger rooms.
+- **Per-house About and pronouns.** A house can give you a nickname and picture, not a different profile.
+- **Composer suggestions for @everyone, @here and @Role.** They count as mentions, but the message box does not offer them.
+- **Editing scheduled messages and forwarding to several places at once.** Scheduled messages can only be cancelled; a forward goes to one place.
+- **Touch drag for rail folders and role order.** Built for mouse and keyboard, with menu alternatives; dragging on a touch screen is untested.

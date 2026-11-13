@@ -15,10 +15,11 @@ import { createMessagingHttp } from './messaging.js'; // sticker uploads and ima
 import { createVoiceOptsHttp } from './voiceopts.js'; // soundboard uploads and sound files
 import { createPush } from './push.js'; // notifications when Snug is closed (Web Push)
 import { createPlacesHttp } from './places.js'; // webhook deliveries: POST /api/hooks/<id>/<token>
+import { createAccountHttp } from './account.js'; // two-factor sign-in, export, deactivate, delete, banners
 import { HUES } from '../js/lib/util.js';
 import {
   hashPassword, checkPassword, burnPasswordCheck, createSession, sessionUser, endSession, endAllSessions,
-  readCookie, sessionCookie, COOKIE, limiter,
+  readCookie, sessionCookie, COOKIE, limiter, safeDecode,
 } from './auth.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -147,10 +148,11 @@ export async function startServer({
   const voiceOptsHttp = createVoiceOptsHttp({ db, M, filesDir, sendJson, error, body, headers, uploadLimit });
   hub.messaging?.configure({ filesDir, previews: linkPreviews, allowLoopback: linkAllowLocal });
   const placesHttp = createPlacesHttp({ db, M, hub, sendJson, error, jsonBody, ipOf }); // webhooks (server/places.js)
+  const accountHttp = createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonBody, body, headers, ipOf, secure, authLimit, uploadLimit, log }); // server/account.js
 
   async function handle(req, res) {
-    const url = new URL(req.url, 'http://x');
-    const path = decodeURIComponent(url.pathname);
+    let url, path;
+    try { url = new URL(req.url, 'http://x'); path = decodeURIComponent(url.pathname); } catch { return error(res, 400, 'That address isn’t valid.'); }
     try {
       if (path.startsWith('/api/')) return await api(req, res, path, url);
       if (req.method !== 'GET' && req.method !== 'HEAD') return error(res, 405, 'Method not allowed');
@@ -203,7 +205,7 @@ export async function startServer({
       const id = newId('u');
       const hue = HUES[Math.floor(Math.random() * HUES.length)][0];
       db.run('INSERT INTO users (id, handle, name, pass, hue, created) VALUES (?, ?, ?, ?, ?, ?)', id, handleV, name, hashPassword(password), hue, Date.now());
-      const token = createSession(db, id);
+      const token = createSession(db, id, accountHttp.agentOf(req));
       log('register', handleV);
       return sendJson(res, 201, { user: M.userView(M.userRow(id), 'around') }, { 'Set-Cookie': sessionCookie(token, { secure }) });
     }
@@ -216,8 +218,11 @@ export async function startServer({
       const row = db.get('SELECT * FROM users WHERE handle = ?', handleV);
       const ok = row ? checkPassword(password, row.pass) : burnPasswordCheck(password);
       if (!ok) return error(res, 401, 'That username and password don’t match.');
-      const token = createSession(db, row.id);
-      return sendJson(res, 200, { user: M.userView(row, row.presence) }, { 'Set-Cookie': sessionCookie(token, { secure }) });
+      // Two-factor sign-in asks for a code before any session exists (server/account.js).
+      const gate = accountHttp.loginGate(row);
+      if (gate) return sendJson(res, 200, gate);
+      const token = createSession(db, row.id, accountHttp.agentOf(req));
+      return sendJson(res, 200, { user: M.userView(row, row.presence, true) }, { 'Set-Cookie': sessionCookie(token, { secure }) });
     }
 
     if (post && path === '/api/logout') {
@@ -239,13 +244,15 @@ export async function startServer({
 
     // Webhooks carry their own secret instead of a session (server/places.js).
     if (await placesHttp(req, res, path)) return undefined;
+    if (await accountHttp.open(req, res, path)) return undefined; // POST /api/login/totp
 
     const user = userOf(req);
     if (!user) return error(res, 401, 'Sign in first.');
+    if (await accountHttp.authed(req, res, path, url, user)) return undefined; // export, deactivate, delete, banners
 
     if (req.method === 'GET' && path === '/api/me') {
       const row = M.userRow(user);
-      return sendJson(res, 200, { user: M.userView(row, row.presence), ice });
+      return sendJson(res, 200, { user: M.userView(row, row.presence, true), ice });
     }
     if (post && path === '/api/logout-all') {
       const token = readCookie(req.headers.cookie, COOKIE);
@@ -261,12 +268,14 @@ export async function startServer({
       if (!checkPassword(String(d.current || ''), row.pass)) return error(res, 401, 'Your current password isn’t right.');
       const next = String(d.next || '');
       if (next.length < 8 || next.length > 200) return error(res, 400, 'Passwords need at least 8 characters.');
+      // With two-factor sign-in on, a new password needs a code too (server/account.js).
+      if (accountHttp.totpOn(user) && !accountHttp.verifySecond(user, String(d.code || ''))) return error(res, 401, 'Type a code from your authenticator app, or a backup code.');
       db.run('UPDATE users SET pass = ? WHERE id = ?', hashPassword(next), user);
       // Every other device has to sign in again with the new password.
       endAllSessions(db, user);
       hub.endSessions(user);
       push.prune(); // this device re-sends its subscription when it reconnects
-      const fresh = createSession(db, user);
+      const fresh = createSession(db, user, accountHttp.agentOf(req));
       return sendJson(res, 200, {}, { 'Set-Cookie': sessionCookie(fresh, { secure }) });
     }
 
@@ -280,7 +289,7 @@ export async function startServer({
       if (!gate.ok) return error(res, 403, gate.why);
       const size = Number(req.headers['content-length']);
       if (!size || size > MAX_FILE) return error(res, 413, 'Files can be up to 10 MB.');
-      const name = (decodeURIComponent(String(req.headers['x-file-name'] || 'file')).replace(/[\u0000-\u001f\u007f/\\]/g, '').trim() || 'file').slice(0, 120);
+      const name = (safeDecode(String(req.headers['x-file-name'] || 'file')).replace(/[\u0000-\u001f\u007f/\\]/g, '').trim() || 'file').slice(0, 120);
       const data = await body(req, MAX_FILE);
       // Codec parameters are dropped; audio and video keep their type only if the bytes agree.
       const type = uploadType(req.headers['content-type'], data);
@@ -329,7 +338,7 @@ export async function startServer({
     port: address.port, db, M, hub, server,
     push, // push notifications: tests read push.stats and push.publicKey
     // For tests: forget every rate limit, the socket ones and the sign-in ones.
-    resetLimits: () => { hub.resetLimits(); authLimit.reset(); uploadLimit.reset(); mediaHttp.reset(); },
+    resetLimits: () => { hub.resetLimits(); authLimit.reset(); uploadLimit.reset(); mediaHttp.reset(); accountHttp.reset(); },
     close: () => new Promise((r) => { clearInterval(sweep); hub.close(); server.close(() => { db.close(); r(); }); server.closeAllConnections?.(); }),
   };
 }

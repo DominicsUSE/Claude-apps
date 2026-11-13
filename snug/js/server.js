@@ -233,14 +233,18 @@ function looking(conv) {
   const v = S.ui.view;
   return (v.type === 'conv' && v.id === conv) || S.ui.pane?.id === conv;
 }
+// Account settings (js/account.js) add quiet hours and sounds here: a filter returning false keeps it quiet.
+export const notifyFilters = [];
 function notify(conv, m) {
   if (m.author === S.me || looking(conv) || levelOf(S, conv) === 'muted' || !needsMe(S, conv, m)) return;
   if (S.users[S.me]?.presence === 'focus') return;
   const meta = convMeta(conv);
   if (!meta) return;
+  if (notifyFilters.some((f) => f(conv, m) === false)) return;
   const who = S.users[m.author]?.name || 'Someone';
   const where = meta.kind === 'dm' ? '' : meta.kind === 'thread' ? `in a thread in ${meta.where}` : `in ${meta.title}`;
-  const text = plain(m.text) || 'Sent an attachment';
+  // Previews off, or streamer mode: say that something came, not what (js/account.js).
+  const text = S.prefs.preview === false || S.prefs.streamer ? 'New message' : plain(m.text) || 'Sent an attachment';
   if (shown()) {
     if (S.prefs.toasts) toast(text, { note: { user: m.author, where }, run: () => jumpToMsg(conv, m.id) });
   } else if (S.prefs.desktop && 'Notification' in window && Notification.permission === 'granted') {

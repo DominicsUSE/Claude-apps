@@ -28,7 +28,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { newId, now } from './model.js';
-import { limiter } from './auth.js';
+import { limiter, safeDecode } from './auth.js';
 import { safeFetch, readMeta, previewLinks } from './linkpreview.js';
 import { emojiImage } from './emoji.js';
 import { sniff } from './media.js';
@@ -147,13 +147,6 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
   const canModerate = (user, conv, row) => row.author === user || (!!M.where(conv)?.house && M.can(user, M.where(conv).house, 'moderate'));
   const live = (conv, id) => { const r = M.liveMsg(idOf(id, 'message')); if (!r || r.conv !== conv) fail('That message was deleted.'); return r; };
   const cfg = { filesDir: null, previews: true, allowLoopback: false, tickMs: 1000 };
-  // Someone timed out in a house (server/safety.js) can't vote either: voting is like reacting.
-  const timedOut = (user, conv) => {
-    const house = M.where(conv)?.house;
-    if (!house) return false;
-    try { return !!db.get('SELECT 1 FROM timeouts WHERE house = ? AND user = ? AND until > ?', house, user, Date.now()); } catch { return false; }
-  };
-
   // Rate limits for everything here that writes or reaches other people,
   // registered with the hub so tests can reset them with the others.
   const L = {
@@ -384,6 +377,9 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
     const t = Date.now();
     for (const r of db.all('SELECT * FROM scheduled WHERE at <= ? ORDER BY at LIMIT 50', t)) {
       db.run('DELETE FROM scheduled WHERE id = ?', r.id);
+      // An account deleted or deactivated since never posts.
+      const author = M.userRow(r.user);
+      if (!author || author.deleted || author.deactivated) continue;
       try {
         // Checked again now: the right to post may have gone since it was written.
         ops['msg.send']({ user: r.user, ws: null }, { conv: r.conv, id: newId('m'), text: r.text, replyTo: r.reply_to || undefined });
@@ -510,7 +506,10 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
       if (d.hidden !== undefined && typeof d.hidden !== 'boolean') fail('Hiding results is yes or no.');
       const ends = Date.now() + hours * HOUR;
       if (pollMsgs.has(mid)) fail('That message id is already taken.');
-      return insertMessage(c, conv, mid, { text: question, foldExtra: answers.map((a) => a.text).join(' ') }, () => {
+      // The answers go through the house's word and link filter too (the question does in msg.send).
+      const said = answers.map((a) => a.text).join('\n');
+      const flag = M.filterExtra?.(c.user, conv, said);
+      const r = insertMessage(c, conv, mid, { text: question, foldExtra: answers.map((a) => a.text).join(' ') }, () => {
         db.run('INSERT INTO polls (msg, conv, by, question, answers, multi, hidden, ends) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
           mid, conv, c.user, question, JSON.stringify(answers), d.multi ? 1 : 0, d.hidden ? 1 : 0, ends);
         pollMsgs.add(mid);
@@ -518,6 +517,8 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
         db.run('DELETE FROM polls WHERE msg = ?', mid);
         pollMsgs.delete(mid);
       });
+      if (flag) M.fileFlag?.({ house: flag.house, user: c.user, msg: mid, conv, body: said, note: `Answers. ${flag.note}` });
+      return r;
     },
     'poll.vote'(c, d) {
       slow('poll.vote', c.user);
@@ -526,7 +527,8 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
       const row = live(conv, d.id);
       const p = pollRow(row.id) || fail('That message isn’t a poll.');
       if (isEnded(p)) fail('This poll has ended.');
-      if (timedOut(c.user, conv)) fail('You’re timed out in this house, so you can’t vote yet.');
+      // Voting is like reacting: timeouts, unaccepted rules and blocks stop it (server/safety.js).
+      M.mayTakePart?.(c.user, conv, 'vote');
       if (!Array.isArray(d.answers)) fail('Pick an answer.');
       const n = json(p.answers, []).length;
       const picks = [...new Set(d.answers)];
@@ -609,8 +611,14 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
         ...(src.sticker || orig?.sticker ? { sticker: json(src.sticker, null) || orig.sticker } : {}),
         ...(orig ? { conv: orig.conv, id: orig.id } : {}),
       };
-      if (!fwd.text && !files.length) fail('That message has nothing left to forward.');
-      return insertMessage(c, to, mid, { text: comment, files, fwd, foldExtra: fwd.text }, null, () => dropFiles(files));
+      if (!fwd.text && !files.length) { dropFiles(files); fail('That message has nothing left to forward.'); }
+      // What's forwarded goes through the word and link filter of the house it
+      // lands in, as the note does in msg.send.
+      let flag;
+      try { flag = M.filterExtra?.(c.user, to, fwd.text); } catch (e) { dropFiles(files); throw e; }
+      const r = insertMessage(c, to, mid, { text: comment, files, fwd, foldExtra: fwd.text }, null, () => dropFiles(files));
+      if (flag) M.fileFlag?.({ house: flag.house, user: c.user, msg: mid, conv: to, body: fwd.text, note: `Forwarded. ${flag.note}` });
+      return r;
     },
 
     // ----- Jump to a date: the first message on or after a time (else the last one before it) -----
@@ -729,7 +737,7 @@ export function createMessagingHttp({ db, M, filesDir, sendJson, error, body, he
       if (!img || (img.type !== 'image/png' && img.type !== 'image/webp')) { error(res, 415, 'Stickers need to be PNG, APNG or WebP images.'); return true; }
       if (!img.w || !img.h) { error(res, 415, 'Snug couldn’t read that image’s size.'); return true; }
       if (img.w > MAX_STICKER_SIDE || img.h > MAX_STICKER_SIDE) { error(res, 422, `That image is ${img.w} by ${img.h} pixels. Stickers can be up to ${MAX_STICKER_SIDE} by ${MAX_STICKER_SIDE}.`); return true; }
-      const name = (decodeURIComponent(String(req.headers['x-file-name'] || 'sticker')).replace(/[\u0000-\u001f\u007f/\\]/g, '').trim() || 'sticker').slice(0, 120);
+      const name = (safeDecode(String(req.headers['x-file-name'] || 'sticker')).replace(/[\u0000-\u001f\u007f/\\]/g, '').trim() || 'sticker').slice(0, 120);
       const id = newId('f');
       await writeFile(join(filesDir, id), data, { mode: 0o600 });
       db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',

@@ -28,8 +28,10 @@ import { PersonPage } from './views/person.js';
 import { HousePage } from './views/house.js';
 import { IncomingCall } from './views/calls.js'; // calls in direct conversations and groups
 import { ringtonePlaying } from './calls.js';
-import { MiniCall } from './views/voiceopts.js'; // the floating call while you look elsewhere
+import { MiniCall, afkCheck } from './views/voiceopts.js'; // the floating call while you look elsewhere
 import { voiceDebug } from './voiceopts.js';
+import { applyAppearance, goIdle, soundsPlayed } from './account.js'; // settings that follow you, auto-idle, sounds (js/account.js)
+import { openShortcuts, toggleStreamer } from './views/account.js'; // Ctrl+/ and Ctrl+Shift+S
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 
@@ -288,6 +290,8 @@ function onKey(e) {
   const k = e.key;
   if (mod && !e.shiftKey && k.toLowerCase() === 'k') { e.preventDefault(); return S.ui.quick ? closeQuick() : openQuick(); }
   if (mod && e.shiftKey && k.toLowerCase() === 'f') { e.preventDefault(); return go({ type: 'search', q: '' }); }
+  if (mod && !e.shiftKey && (k === '/' || e.code === 'Slash')) { e.preventDefault(); return openShortcuts(); } // js/views/account.js
+  if (mod && e.shiftKey && k.toLowerCase() === 's') { e.preventDefault(); return toggleStreamer(); }
   // Esc closes the top layer; with nothing to close it marks the open place read,
   // as people expect from other chat apps. Shift+Esc marks the whole house read.
   // Marking everything read is a button in Catch up, never a stray key.
@@ -339,6 +343,7 @@ S.ui.phone = phoneQuery.matches;
 phoneQuery.addEventListener('change', (e) => { S.ui.phone = e.matches; emit(); });
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', emit);
 applyPrefs();
+applyAppearance();
 document.addEventListener('keydown', onKey);
 initTooltips();
 render(html`<${App} />`, document.getElementById('app'));
@@ -368,3 +373,6 @@ boot();
 // Exposed for the end-to-end checks and for poking at state in the console.
 window.snug = { S, emit, voiceStats, ringtone: ringtonePlaying };
 window.snug.voiceDebug = voiceDebug; // voice options (js/voiceopts.js)
+window.snug.account = { goIdle, sounds: () => soundsPlayed }; // js/account.js
+window.snug.toggleStreamer = toggleStreamer; // the desktop app's View > Streamer mode
+window.snug.voiceAfk = afkCheck; // leaving a voice room after a while alone (js/views/voiceopts.js)

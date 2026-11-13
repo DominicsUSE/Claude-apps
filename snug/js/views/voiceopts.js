@@ -322,7 +322,6 @@ const ACCEL = (code) => {
     Insert: 'Insert', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
   }[code] || null;
 };
-export const accelFor = ACCEL;
 let globalKey = null;
 let globalTimer = null;
 function syncGlobal() {
@@ -358,20 +357,22 @@ on('voice', ({ room, users }) => {
 on('open', () => { lastUsers.clear(); for (const [r, u] of Object.entries(S.voice)) lastUsers.set(r, u); });
 
 let aloneSince = 0;
-setInterval(() => {
+// Checked every 5 seconds; takes the time so the end-to-end checks needn't wait minutes.
+export function afkCheck(now = Date.now()) {
   const c = S.call;
   const mins = vp().afk;
-  if (!c || c.dm || c.status !== 'live' || !mins) { aloneSince = 0; return; }
+  if (!c || c.dm || c.status !== 'live' || !mins) { aloneSince = 0; return false; }
   const alone = !(S.voice[c.room] || []).some((u) => u !== S.me);
-  if (!alone) { aloneSince = 0; return; }
-  aloneSince ||= Date.now();
-  if (Date.now() - aloneSince >= mins * 60_000) {
-    const name = S.rooms[c.room]?.name || 'voice';
-    aloneSince = 0;
-    leaveVoice();
-    toast(`You left ${name} after ${mins} ${mins === 1 ? 'minute' : 'minutes'} on your own.`);
-  }
-}, 5000);
+  if (!alone) { aloneSince = 0; return false; }
+  aloneSince ||= now;
+  if (now - aloneSince < mins * 60_000) return false;
+  const name = S.rooms[c.room]?.name || 'voice';
+  aloneSince = 0;
+  leaveVoice();
+  toast(`You left ${name} after ${mins} ${mins === 1 ? 'minute' : 'minutes'} on your own.`);
+  return true;
+}
+setInterval(() => afkCheck(), 5000);
 
 // Who just played a sound, for a few seconds beside their name.
 let soundTimer = null;

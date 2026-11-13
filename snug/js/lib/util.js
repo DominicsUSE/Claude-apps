@@ -13,10 +13,19 @@ export function sameDay(a, b) {
   return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
 }
 
-const timeFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
+let timeFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
 const shortFmt = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' });
-const fullFmt = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+let fullFmt = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+// Settings > Appearance > Clock (js/account.js): 'auto' follows the language, or force 12 or 24 hours.
+let clockMode = 'auto';
+export function setClock(mode = 'auto') {
+  if (mode === clockMode) return;
+  clockMode = mode;
+  const hc = mode === '24' ? { hourCycle: 'h23' } : mode === '12' ? { hourCycle: 'h12' } : {};
+  timeFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', ...hc });
+  fullFmt = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit', ...hc });
+}
 
 export const fmtTime = (ts) => timeFmt.format(ts);
 export const fmtFull = (ts) => fullFmt.format(ts);

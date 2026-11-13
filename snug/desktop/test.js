@@ -67,6 +67,12 @@ test("reopening goes straight in, still signed in, with the message still there"
   await page.click('.nav .row:has-text("Lounge")');
   await page.locator('.main .msg:has-text("First message from the desktop app")').waitFor();
   assert.equal(await page.locator(".self-name").textContent(), "Ada Okafor");
+  // View > Streamer mode (snug/js/views/account.js) turns it on and off in the page.
+  const clickStreamer = () => app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.find((i) => i.label === "View").submenu.items.find((i) => i.label === "Streamer mode").click());
+  await clickStreamer();
+  await page.waitForFunction(() => document.documentElement.hasAttribute("data-streamer"));
+  await clickStreamer();
+  await page.waitForFunction(() => !document.documentElement.hasAttribute("data-streamer"));
   await app.close();
 });
 

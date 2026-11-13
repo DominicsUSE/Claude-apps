@@ -37,8 +37,11 @@ export function missedCall(S, m) {
 
 // Is this message addressed to me: does it mention me, or reply to something I wrote?
 // The message list highlights exactly these, so what is counted and what is shown agree.
+// Highlight words and @everyone (js/account.js) count as mentions too.
+export const forMeHooks = [];
 export function forMe(S, conv, m) {
   if (m.author === S.me || m.sys) return false;
+  if (forMeHooks.some((f) => f(S, conv, m))) return true;
   if (m.call) return missedCall(S, m);
   if (mentions(m.text, S.users[S.me]?.handle)) return true;
   if (mentionsRole(S, conv, m)) return true; // a role I have, and anyone may mention it (js/lib/places.js)

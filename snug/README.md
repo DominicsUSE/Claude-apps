@@ -38,21 +38,28 @@ window and sign in as someone else to talk to yourself. `npm run seed --
 Tests:
 
 ```bash
-npm test            # rules (19) and the server with real sockets (53)
-npm run test:e2e    # separate people in separate browsers (49), needs Playwright
+npm test            # rules (27) and the server with real sockets (94)
+npm run test:e2e    # separate people in separate browsers (91), needs Playwright
 ```
 
 `test:e2e` runs every `tests/e2e*.test.js` one file at a time: the core
-flows (23), calls in direct messages and groups (6), camera and screen
-sharing (9), voice messages, pins and GIFs (4), custom emoji (3) and
-notifications when Snug is closed (4). Each also runs alone: `npm run
+flows (23), calls in direct messages and groups (10), camera and screen
+sharing (9), voice messages, pins and GIFs (4), custom emoji (3),
+notifications when Snug is closed (4), safety, privacy and moderation (5),
+messaging (11: rich text, polls, forwarding, previews, scheduling, stickers,
+search), places, structure and community (8: private rooms, forums, stages,
+roles and nicknames, rail folders, webhooks, templates, welcome and
+insights), voice and video options (6: devices, push to talk, volume per
+person, soundboard, room limits and bitrate, the floating call, live
+processing, deafen, sounds and leaving when alone), account, profile and
+appearance (6: settings that follow you, the quick switcher, status and
+invisible, two-factor sign-in, devices, notes and streamer mode) and the
+settings structure across all of them (2). Each also runs alone: `npm run
 test:e2e:calls`, `test:e2e:video`, `test:e2e:messages`, `test:e2e:emoji`,
-`test:e2e:notify`. The notifications file uses Playwright's newer headless
-Chromium (`channel: 'chromium'`).
-Safety, privacy and moderation (5) runs alone with `npm run test:e2e:safety`.
-Messaging (11: rich text, polls, forwarding, previews, scheduling, stickers, search) runs alone with `npm run test:e2e:messaging`.
-Places, structure and community (7: private rooms, forums, stages, roles and nicknames, rail folders, webhooks, templates, welcome and insights) runs alone with `npm run test:e2e:places`.
-Voice and video options (5: devices, push to talk, volume per person, soundboard, room limits and the floating call) runs alone with `npm run test:e2e:voice-options`.
+`test:e2e:notify`, `test:e2e:safety`, `test:e2e:messaging`,
+`test:e2e:places`, `test:e2e:voice-options`, `test:e2e:account`,
+`test:e2e:integration`. The notifications file uses Playwright's newer
+headless Chromium (`channel: 'chromium'`).
 
 ## The desktop app
 
@@ -202,9 +209,9 @@ Real, and covered by tests with separate users:
   honours). Not tested: the ringtone actually being heard (the test checks
   it starts and stops), a browser notification for a ring in a background
   tab, a ring push arriving through a real push service (only the mock), a
-  12-person call, and calls on real phones and networks. Snug has no way to
-  block a person yet, so there is nothing for calls to respect beyond
-  muting and Focused.
+  12-person call, and calls on real phones and networks. Calls respect
+  muting, Focused, quiet hours and blocks (a blocked person can't call you,
+  and a group call never rings someone who blocked the caller).
 - Offline: the app opens from a copy on the device, what you write waits,
   and it sends once when the connection is back.
 - Voice messages: hold the microphone to record (or tap to start and tap
@@ -236,6 +243,21 @@ Real, and covered by tests with separate users:
   one in a direct message is covered by the server tests only, and the Emoji
   settings page has not been driven on a phone (only looked at, at 390px).
 
+- **Settings in one structure** (`js/views/settings.js`): personal settings
+  in two sections (You: Profile, Account and security, Privacy and safety,
+  Your data; App: Notifications, Voice and video, Appearance, Accessibility,
+  Streamer mode, Keyboard) and house settings in four (House; Rooms and
+  newcomers; Moderation; Owners). Each house page shows only to people with
+  its permission; "Find a setting" matches what is on each page and stays
+  first in the row of tabs on a phone. Each room's slowmode, user limit and
+  bitrate sit with its Access button on Rooms and access. Covered by `npm run
+  test:e2e:integration` (2 tests, one on a 390px phone), and by one server
+  test (the "integration" block at the end of `tests/server.test.js`) for
+  the rules the tracks share: one role hierarchy across moderation, member
+  and role changes with extra roles counted, changes made by every track in
+  the house log, role mentions for pushes, events whose room went private,
+  and blocks stopping poll votes.
+
 - Safety, privacy and moderation (`server/safety.js`, `js/views/safety*.js`),
   every rule applied on the server:
   - **Blocking** from a profile or a message's menu. A blocked person can't
@@ -254,25 +276,35 @@ Real, and covered by tests with separate users:
     conversation; the same person can't ask again for a day.
   - **Moderation**, each with its own permission (Remove people, Ban people,
     Time people out, Moderate voice, See the house log) and only on people
-    whose role sits below yours; nobody can act on an owner. Remove; ban
+    whose best role (extra roles count) sits below yours; nobody can act on
+    an owner. The same hierarchy now guards changing someone's role, removing
+    them, and editing or deleting a role: someone who isn't an owner only
+    reaches people and roles below their own. Remove; ban
     (with a reason, optionally deleting their last 24 hours or 7 days of
     messages; bans hold against links, invitations and Discover; House
     settings > Bans to unban); time out for 60 seconds to a week (no writing,
-    reacting, threads or voice, with a countdown in their message box); in
+    editing, reacting, threads or voice, and none of their role's powers:
+    pinning, managing rooms, roles, webhooks, events, invitations or emoji,
+    or moderating others; reading and deleting their own messages still
+    work; with a countdown in their message box); in
     voice, mute and deafen (holding across rejoining until lifted), move and
     disconnect, from a button on the stage.
   - **Reports** of a message or a person, with a reason and a note, go to the
     house's moderators (people who can remove messages): House settings >
     Reports, with resolve, dismiss and reopen. In direct messages, block.
-  - **House log**: who did what to roles, rooms, settings, members, bans,
-    timeouts, voice, messages deleted by moderators, emoji and invitations,
-    filtered by kind and by person.
-  - **Slowmode** per room, 5 seconds to 6 hours, with a countdown above the
-    message box; roles that can remove messages skip it.
+  - **House log**: who did what to roles (and their order and extra roles),
+    rooms (and their access, tags, webhooks, slowmode, user limit and
+    bitrate), settings, the welcome, members and nicknames, bans, timeouts,
+    voice, messages deleted by moderators, emoji, stickers, the soundboard and
+    invitations, filtered by kind and by person.
+  - **Slowmode** per room, 5 seconds to 6 hours, set on House settings >
+    Rooms and access, with a countdown above the message box; roles that can
+    remove messages skip it.
   - **Word and link filter** per house: blocked words (whole words, any case
     or accent, `*` for "starts with") and links; block, flag to Reports, or
-    block and time out; roles to skip. Owners and roles that manage the house
-    always skip it.
+    block and time out; roles to skip (extra roles count). Owners and roles
+    that manage the house always skip it. Forum post titles go through it
+    too; a flagged title goes to Reports.
   - **Invitation links** that expire (30 minutes to never) or run out (1 to
     100 uses), listed with their uses and who made them, and revocable.
   - **Member screening**: with the house rules written (House settings >
@@ -305,7 +337,8 @@ Real, and covered by tests with separate users:
     changeable, one vote per person per answer (kept by the database),
     optionally hidden until you vote (the server sends nobody's counts to
     someone who hasn't voted, until it ends), ended early by its author or a
-    moderator, closed by the server on time.
+    moderator, closed by the server on time. Voting follows the same rules as
+    reacting: a timeout, unaccepted house rules or a block stop it.
   - **Link previews**: the server fetches up to three links per message (title,
     description, site and picture from Open Graph tags; pictures and MP4 videos
     linked directly show as themselves). It resolves each host itself and
@@ -354,11 +387,16 @@ Real, and covered by tests with separate users:
     A person's own setting beats their roles'; across roles, "on" beats
     "off". Owners, and people who manage rooms house-wide, always see every
     room, so nobody can lock the house out. Discovery and previews hide
-    rooms that not everyone in the house can see.
+    rooms that not everyone in the house can see. The room's access dialog
+    has **Check a person**: what one member can do there, worked out by the
+    server's own resolver. Highlights, events, pins and forum posts in a room
+    follow it too; an event made before its room went private still shows to
+    the house, without the room, to people who can't see it.
   - **Roles**: more than one per person (extra roles add permissions), an
     emoji icon, **show separately** in the member list (online people under
     their highest such role, then Online, then Offline), **mentionable**
-    (`@Role name` counts as a mention for everyone with it), colours from the
+    (`@Role name` counts as a mention for everyone with it, in the browser and
+    for phone notifications alike), colours from the
     theme-safe hue list only, and order by **drag** or **Alt and an arrow**.
     Managers who aren't owners can only move, give or take roles below their own.
   - **Per-house nicknames and pictures** (an emoji and a colour), with the
@@ -366,6 +404,8 @@ Real, and covered by tests with separate users:
   - **Forum rooms**: posts with a title, a body and the room's tags (a room
     can require one), sorted by latest activity or newest, as a list or a
     grid; each post opens as its own thread, which you can follow from its card.
+    The author, or whoever manages the room, can change a post's title and
+    tags; titles go through the house's word filter like any message.
   - **Notice rooms other houses can follow**: someone who manages a room in
     another house can have new notices copied there, posted by a bot that
     says where they came from. Private notice rooms can't be followed and
@@ -382,17 +422,18 @@ Real, and covered by tests with separate users:
   - **Rail folders**: drag a house onto another to make a folder, name and
     colour it, open and close it; drag or Alt and an arrow to reorder. Kept
     on the server, so every device has the same rail.
-  - **Welcome for newcomers**: a few lines, the starter rooms, and interests
-    to pick that grant roles (never roles that manage or moderate anything).
+  - **Welcome for newcomers** (House settings > Newcomers, one page): the
+    role newcomers join as, the starter rooms, a few lines of welcome, and
+    interests to pick that grant roles (never roles that manage or moderate anything).
   - **House templates** (Friends, Study group, Gaming, Club) and copying the
     structure of a house you manage (rooms, roles, access; never messages or members).
   - **Insights** for owners: members, who wrote this week, joins and leaves
     and messages per day, the busiest rooms (7, 30 or 90 days, with a table view).
-  Covered by `npm test` (12 server tests with real sockets, in the "places"
-  block of `tests/server.test.js`) and `npm run test:e2e:places` (7 tests,
-  two people in two browsers). Not tested: role mentions in push
-  notifications (the browser counts them; the push service does not yet),
-  dragging on a touch screen (folders and role order also work from the
+  Covered by `npm test` (2 tests of the resolver and the shared rules in
+  `tests/logic.test.js`, 13 server tests with real sockets, in the "places"
+  block of `tests/server.test.js`) and `npm run test:e2e:places` (8 tests,
+  two people in two browsers). Not tested: role mentions through a real
+  push service (the server's rule is tested), dragging on a touch screen (folders and role order also work from the
   keyboard and menus), and stage audio limits beyond the server's mute: in a
   peer-to-peer call a modified client could still send sound, which every
   other Snug ignores because the server marks it muted.
@@ -421,7 +462,7 @@ Real, and covered by tests with separate users:
     sees who played what. Needs to be in a voice room of that house and not
     muted; one sound every 3 seconds per person and 6 per 10 seconds per
     room. *Manage sounds* adds and removes them; a house can keep playing to
-    roles with *Use the soundboard*.
+    roles with *Use the soundboard*. Managed in House settings > Soundboard.
   - **The call follows you**: a floating, draggable call (mouse or arrow
     keys) while you look at other places, with the speakers, a shared screen
     or camera, and the controls; **picture in picture** for a shared screen or
@@ -434,18 +475,98 @@ Real, and covered by tests with separate users:
     time alone**.
   - **Per voice room**: a **user limit** the server enforces (people who
     moderate voice may still join) and an audio **bitrate** every browser in
-    the room applies.
+    the room applies, both set on House settings > Rooms and access.
   Covered by `npm test` (3 server tests in the "voice options" block of
   `tests/server.test.js`: upload and permission rules, playing and its
-  cooldowns, room limits), `npm run test:e2e:voice-options` (5 tests, two
+  cooldowns, room limits), `npm run test:e2e:voice-options` (6 tests, two
   and three people in separate browsers with fake devices: device lists and
   checks, push to talk gating what is sent, volume on the element that plays
-  someone, a sound arriving at the other person, the limit and the floating
-  call) and one desktop test (the global key). Not tested: real hardware
+  someone, a sound arriving at the other person, the limit, the bitrate
+  reaching the sender and the floating call, processing switched in a call
+  under the same sent track, deafen and its mute, the join, leave and mute
+  sounds, leaving after a while alone, and volume and a mute only you
+  hear in a direct call) and one desktop test (the global key). Not tested: real hardware
   (a second real microphone or speaker, `setSinkId` on a real output),
   picture in picture (headless Chromium offers neither kind), the automatic
   sensitivity against real speech, and the global key pressed on a real
   keyboard (the test sends the press the system would).
+
+- **Account, profile, appearance and security** (`server/account.js`,
+  `js/lib/account.js`, `js/lib/qr.js`, `js/account.js`, `js/views/account.js`,
+  `css/account.css`), every rule checked on the server:
+  - **Presence**: Open to talk and Around (online), Away (idle), Focused (do
+    not disturb: no pop-ups, sounds or phone notifications; optionally calls
+    from favourite friends still ring) and Offline (invisible: the server shows
+    you as offline to everyone while you stay connected). **Auto-idle** after
+    5 minutes to an hour without keyboard or mouse: shown as Away to others
+    only while every reporting tab is idle, never changing what you picked.
+  - **Custom status**: an emoji and a line, clearing after 30 minutes, 1 or 4
+    hours, at the end of your day, or never. The server stops showing it the
+    moment it runs out and tells everyone.
+  - **Profile**: pronouns, an accent hue (theme-safe, like every chosen
+    colour), a banner picture (PNG, JPEG, GIF or WebP up to 2 MB, read from its
+    bytes, served only to people who may see you), an About of up to 400
+    characters with message formatting, and **private notes** on people that
+    only your own devices ever receive. Per-house names and pictures are the
+    nicknames in Places.
+  - **Appearance**, saved on the server and applied at once on every device:
+    Dark, Light, **Midnight** (true black) or match the device; a selection
+    tone (coral stays the brand); **cozy or compact** messages, pictures in
+    compact; text size 12 to 20 px; zoom 80 to 150%; spacing; line height;
+    saturation; 12 or 24-hour clock; role colours on names;
+    the sidebar's width (drag its edge, or arrow keys on the grip). No custom
+    CSS: every setting is a value from a fixed list the server checks.
+  - **Accessibility**: Atkinson Hyperlegible (shipped in `fonts/`, OFL),
+    underlined links, contrast (standard, high or match the device), a focus
+    ring that always shows, motion (reduced or match the device), and reading new messages aloud with the browser's own voice (off
+    unless you turn it on).
+  - **Quick switcher** (`Ctrl`/`⌘ K`): houses, rooms, conversations and
+    people by fuzzy search, the places you were just in first, and actions
+    (mute or mark this place read, mark everything read, themes, presence,
+    invisible, set or clear a status, streamer mode). `Ctrl`/`⌘ /` opens the
+    keyboard shortcuts sheet.
+  - **Notifications**: a sound made with WebAudio (soft, bell, pop, drop or
+    off), sounds off per house, message text in notifications on or off,
+    **quiet hours** (no sounds, pop-ups or pushes; the server checks them for
+    pushes in your time zone), **highlight words** that count as mentions
+    (also for pushes), and **@everyone and @here** (from people who may post
+    notices) counted as mentions unless you turn that off for a house.
+  - **Streamer mode** (`Ctrl`/`⌘ Shift S`, Settings, or View in the desktop app): usernames,
+    invitation codes, two-factor secrets and notification text are hidden.
+  - **Security**: change your password (every other device signs out; with
+    two-factor on it needs a code). **Two-factor sign-in** with TOTP (RFC
+    6238, `node:crypto`, one 30-second step of drift either way, a used code
+    refused after), set up from a QR code drawn on the device (no network),
+    ten single-use backup codes stored hashed, and required at every sign-in
+    (the password alone gets a five-minute ticket good for five tries). The
+    **devices** list shows each session's browser and system and when it was
+    last used; sign one out, or every other one, and their sockets close at once.
+  - **Your data**: download everything you wrote as one JSON file (three times
+    an hour); **deactivate** (signed out everywhere, shown offline, back when
+    you sign in); **delete** with your password, your typed username and a code
+    if two-factor is on: you leave every house and friendship, your messages
+    stay as "Deleted user", and the only owner of a house with other people in
+    it is asked to hand it over first.
+  Covered by `npm test` (10 server tests in the "account" block of
+  `tests/server.test.js`: settings sync and validation, invisible and
+  auto-idle, expiring statuses, notes, profile fields and banner access,
+  sessions, TOTP against the RFC 6238 and RFC 4226 vectors with drift and
+  replay, two-factor sign-in with tickets and backup codes, export, delete and
+  deactivate, quiet hours and highlight words; and 2 rules tests: the QR
+  encoder matched module for module against the Python `qrcode` library,
+  and the settings rules) and `npm run test:e2e:account` (6 tests in
+  separate browsers: theme, compact, text size, clock and font applied and
+  carried to a second browser and back live; the quick switcher's fuzzy
+  search, recent places, actions and the shortcuts sheet; a custom status,
+  invisible and auto-idle as a friend sees them; setting up two-factor from
+  the QR code and signing in with a code and a backup code; signing out
+  another device; pronouns, a private note and streamer mode). Not tested:
+  sounds actually heard and speech actually spoken (headless Chromium), a
+  real authenticator app scanning the code (the test reads the key as text),
+  quiet hours and highlight words through a real push service, and every
+  option on a phone (only Appearance was looked at, at 390px). The desktop
+  app has **View > Streamer mode** (`Ctrl`/`⌘ Shift S`), checked by one
+  desktop test.
 
 Not built yet, on purpose, because each needs outside infrastructure:
 
@@ -530,8 +651,12 @@ before seeding anything that faces the internet, or better, do not seed there.
   links must be `https://` addresses.
 - **Blocks, privacy and moderation** are checked on the server for every
   action they touch (conversations, calls, rings, friend requests, pushes,
-  invitations, sending, reacting, voice). Moderators can only act on people
-  below them. Reports, blocks, moderation actions, new conversations,
+  invitations, sending, reacting, poll votes, voice). One role hierarchy
+  (`outranks` and `roleBelow` in `js/lib/safety.js`, counting extra roles)
+  decides moderation, role and member changes, nicknames and role order:
+  people who aren't owners only reach people and roles below their own.
+  One room resolver (`resolveRoom` in `js/lib/places.js`) decides what each
+  person can see and do in every room. Reports, blocks, moderation actions, new conversations,
   invitation links and filter changes are rate limited.
 - **Voice signalling** is relayed only between people in the same voice
   room or call. Only members of the house can join a voice room; only the
@@ -628,6 +753,16 @@ server/
   db.js             SQLite schema, prepared statements, and the column
                     migrations that bring an older database up to date
   seed.js           loads the sample data as real accounts
+  safety.js         blocks, privacy, moderation, reports, the filter, the house log,
+                    and the one role hierarchy (M.outranks, M.roleBelow, M.rankOf)
+  messaging.js      polls, forwarding, edit history, scheduled messages, stickers
+  linkpreview.js    the only outside fetch: link previews behind DNS-resolved SSRF checks
+  places.js         the room resolver behind every read and write check, roles,
+                    forums, stages, webhooks, rail, welcome, templates, insights
+  voiceopts.js      soundboard, voice room limit and bitrate
+  account.js        settings sync, status, idle, notes, sessions, two-factor, your data
+                    (ops.js merges each one in, in that order; M.auditLate() then logs
+                    the later modules' changes)
 js/
   app.js            root: sign-in or app, desktop or phone, overlays, keyboard map
   store.js          state and every action; updates the screen at once, then tells the server
@@ -637,10 +772,13 @@ js/
   calls.js          calls in direct messages and groups: start, accept, decline,
                     the WebAudio ringtone, notifications for a ring
   lib/              pure rules with tests: format, group, attention, search, perms,
-                    social (friends, happening now, events, topics)
+                    social (friends, happening now, events, topics), safety
+                    (hierarchy, filter), places (resolveRoom), account, highlight, qr
   ui/               icons, shared pieces (avatar, presence, rich text), overlays
   views/            auth, nav, stream (messages and composer), conversation, catch up,
-                    search and quick jump, people, settings, dialogs, calls
+                    search and quick jump, people, settings (one layer, pages in
+                    sections, arranged in settings.js), dialogs, calls, and each
+                    feature area's own views (safety, messaging, places, voiceopts, account)
 css/                tokens, base components, shell, conversation, other views
 tests/              logic, server integration (real sockets), browser end-to-end
 ```

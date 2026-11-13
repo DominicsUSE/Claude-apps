@@ -1,7 +1,7 @@
 // The real-time hub. Owns the WebSocket connections, works out who is online,
 // and delivers each change only to the people allowed to see it.
 import { WebSocketServer } from 'ws';
-import { readCookie, sessionUser, COOKIE, limiter } from './auth.js';
+import { readCookie, sessionUser, COOKIE, limiter, tokenHash } from './auth.js';
 import { createOps, UserError } from './ops.js';
 import { newId, now } from './model.js';
 import { addMediaSnapshot } from './media.js'; // pins and saved GIFs in every snapshot
@@ -74,7 +74,8 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
 
   // People as others see them, and as they see themselves.
   hub.userView = (u) => M.userView(M.userRow(u), presenceOf(u));
-  const selfView = (u) => M.userView(M.userRow(u), pref(u));
+  const selfView = (u) => M.userView(M.userRow(u), pref(u), true);
+  hub.selfView = selfView;
   hub.usersFor = (ids) => Object.fromEntries([...new Set(ids)].map((u) => [u, hub.userView(u)]).filter(([, v]) => v));
   hub.savedFor = (u) => db.all('SELECT msg AS id, conv, at, note FROM saved WHERE user = ? ORDER BY at DESC', u);
   hub.threadsFor = (convs) => Object.fromEntries(convs.filter((c) => c.startsWith('t:')).map((c) => [c, M.thread(c)]).filter(([, t]) => t).map(([c, t]) => [c, { conv: t.conv, root: t.root }]));
@@ -265,7 +266,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
   // long it still rings: devices count from that, not from `until`, because
   // their clocks need not agree with this server's.
   function ringView(call, u) {
-    const quiet = M.notifyOf(u, call.dm) === 'muted' || M.userRow(u)?.presence === 'focus';
+    const quiet = M.notifyOf(u, call.dm) === 'muted' || M.userRow(u)?.presence === 'focus' || !!M.quietHours?.(u); // quiet hours: server/account.js
     const until = call.ringing.get(u)?.until || Date.now();
     return { dm: call.dm, call: call.id, from: call.by, video: call.video, group: call.group, until, ms: Math.max(0, until - Date.now()), quiet };
   }
@@ -446,6 +447,10 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
 
   hub.endSessions = (u, exceptToken) => {
     for (const ws of socks.get(u) || []) if (ws.token !== exceptToken) ws.close(4001, 'signed out');
+  };
+  // One session ended from another device (server/account.js): only its sockets close.
+  hub.endToken = (u, hash) => {
+    for (const ws of socks.get(u) || []) if (ws.token && tokenHash(ws.token) === hash) ws.close(4001, 'signed out');
   };
   hub.close = () => {
     closed = true;

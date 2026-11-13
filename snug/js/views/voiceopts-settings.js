@@ -4,7 +4,6 @@ import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor
 import { S, toast, openModal, person } from '../store.js';
 import { call } from '../server.js';
 import { can } from '../lib/perms.js';
-import { roomIds } from '../lib/attention.js';
 import { Icon } from '../ui/icons.js';
 import { Seg, Switch } from '../ui/kit.js';
 import { Confirm } from './modals.js';
@@ -470,19 +469,17 @@ function SoundRow({ s }) {
   </li>`;
 }
 
-const LIMITS = [[0, 'No limit'], ...Array.from({ length: 12 }, (_, i) => [i + 1, `${i + 1} ${i ? 'people' : 'person'}`])];
-const BITRATES = [8, 16, 24, 32, 48, 64, 96, 128];
+// Voice room user limit and bitrate choices, shown per room on Rooms and access (js/views/places-settings.js).
+export const VOICE_LIMITS = [[0, 'No limit'], ...Array.from({ length: 12 }, (_, i) => [i + 1, `${i + 1} ${i ? 'people' : 'person'}`])];
+export const BITRATES = [8, 16, 24, 32, 48, 64, 96, 128];
 
 export function HouseVoice({ house }) {
   const h = S.houses[house];
   const list = S.sounds?.[house] || [];
   const manageSounds = can(S, house, 'sounds');
-  const manageRooms = can(S, house, 'rooms');
-  const voiceRooms = roomIds(S, house).filter((id) => S.rooms[id]?.kind === 'voice');
-  const setRoom = (room, patch) => call('room.voice', { room, ...patch }).catch((e) => toast(e.message));
   return html`
-    <h1>Voice</h1>
-    <p class="lead">Sounds anyone in a voice room can play for everyone there, and how many people each voice room holds.</p>
+    <h1>Soundboard</h1>
+    <p class="lead">Sounds anyone in a voice room can play for everyone there. Each voice room’s user limit and quality are on Rooms and access.</p>
     ${manageSounds && html`
       <div class="set-head">Soundboard <span class="faint" style="font-weight:400">${list.length} of ${MAX_SOUNDS}</span></div>
       <${Row} label="Everyone can play sounds" hint="Off: only roles with “Use the soundboard” or “Manage sounds” can.">
@@ -492,14 +489,5 @@ export function HouseVoice({ house }) {
       ${list.length
         ? html`<ul class="vo-snd-list">${list.map((s) => html`<${SoundRow} key=${s.id} s=${s} />`)}</ul>`
         : html`<p class="vo-note">No sounds yet. Short ones work best: a cheer, a drum roll, a door bell.</p>`}`}
-    ${manageRooms && html`
-      <div class="set-head">Voice rooms</div>
-      ${voiceRooms.length ? voiceRooms.map((id) => html`<${Row} key=${id} label=${S.rooms[id].name} hint="User limit, and the audio quality everyone sends. Lower bitrates suit weak connections.">
-        <select class="field" aria-label=${`User limit for ${S.rooms[id].name}`} value=${S.rooms[id].limit || 0} onChange=${(e) => setRoom(id, { limit: Number(e.target.value) })}>
-          ${LIMITS.map(([n, t]) => html`<option value=${n}>${t}</option>`)}
-        </select>
-        <select class="field" aria-label=${`Bitrate for ${S.rooms[id].name}`} value=${S.rooms[id].bitrate || 64} onChange=${(e) => setRoom(id, { bitrate: Number(e.target.value) })}>
-          ${BITRATES.map((b) => html`<option value=${b}>${b} kbps</option>`)}
-        </select>
-      <//>`) : html`<p class="vo-note">This house has no voice rooms yet.</p>`}`}`;
+`;
 }

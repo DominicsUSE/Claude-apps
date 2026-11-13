@@ -9,7 +9,7 @@ import {
 import { sendMessage, retry, sendTyping, uploadFile, loadHistory } from '../server.js';
 import { buildItems } from '../lib/group.js';
 import { unreadOf, isThread, forMe } from '../lib/attention.js';
-import { can, canPost, roleOf } from '../lib/perms.js';
+import { can, canPost } from '../lib/perms.js';
 import { fmtTime, fmtDay, fmtFull, fmtWhen, plural, fileSize, fuzzy, nameList, hueOf } from '../lib/util.js';
 import { plain, isJumbo } from '../lib/format.js';
 import { Icon } from '../ui/icons.js';

@@ -92,6 +92,9 @@ button.op:hover { background: var(--bg-2); }
 .layer-nav { background: var(--bg-2); --bg: var(--bg-2); border-right: 1px solid var(--line-subtle); padding: var(--s-4) var(--s-2); display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow-y: auto; }
 .layer-nav h2 { font-size: var(--t-16); font-weight: var(--w-semibold); padding: 0 var(--s-2) var(--s-3); display: flex; align-items: center; gap: var(--s-2); }
 .layer-nav .field { margin-bottom: var(--s-3); height: var(--h-sm); background: var(--bg-1); }
+.layer-sec { padding: var(--s-4) var(--s-2) var(--s-1); font-size: var(--t-12); font-weight: var(--w-semibold); color: var(--text-3); }
+.layer-nav .field + .layer-group > .layer-sec { padding-top: 0; }
+.layer-group { display: flex; flex-direction: column; gap: 2px; }
 .layer-foot { margin-top: auto; padding: var(--s-4) var(--s-2) 0; font-size: var(--t-12); color: var(--text-3); display: flex; align-items: center; gap: var(--s-2); }
 .layer-body { overflow-y: auto; padding: var(--s-8) var(--s-12) var(--s-12); min-width: 0; }
 .layer-col { max-width: 640px; }
@@ -114,8 +117,6 @@ button.op:hover { background: var(--bg-2); }
 .swatch[aria-pressed="true"] { outline: 2px solid var(--text-1); outline-offset: 2px; }
 .swatch:hover { transform: scale(1.08); }
 .swatch { transition: transform var(--m-fast) var(--ease-in-out); }
-.preview { border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--s-2) 0; margin: var(--s-4) 0; pointer-events: none; }
-.preview .msg:first-child { margin-top: 0; }
 .keys { display: grid; grid-template-columns: 1fr auto; gap: 0; }
 .keys > div { padding: var(--s-3) 0; border-bottom: 1px solid var(--line); display: flex; gap: var(--s-1); align-items: center; }
 .keys > div:nth-child(even) { justify-content: flex-end; }
@@ -205,8 +206,12 @@ select.field { width: auto; padding-right: var(--s-6); }
   .layer { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
   /* The close button keeps its own 44px on the right; the tabs scroll beside it, never under it. */
   .layer-nav { flex-direction: row; overflow-x: auto; padding: var(--s-2); margin-right: calc(var(--touch) + var(--s-2)); gap: var(--s-1); align-items: center; }
-  .layer-nav h2, .layer-nav .field, .layer-foot { display: none; }
-  .layer-nav .row { width: auto; flex: none; height: 40px; }
+  .layer-nav h2, .layer-foot { display: none; }
+  /* Many pages: the search stays first in the row, then the sections in order. */
+  .layer-nav .field { flex: none; width: 152px; height: var(--touch); margin: 0; }
+  .layer-group { flex-direction: row; align-items: center; gap: var(--s-1); flex: none; }
+  .layer-sec, .layer-nav .field + .layer-group > .layer-sec { flex: none; padding: 0 0 0 var(--s-3); white-space: nowrap; }
+  .layer-nav .row { width: auto; flex: none; height: var(--touch); }
   .layer-nav .row .row-ic { display: none; }
   .layer-body { padding: var(--s-4) var(--s-4) var(--s-12); }
   .layer-close { top: var(--s-2); right: var(--s-2); background: var(--bg-2); box-shadow: -8px 0 8px var(--bg-2); }

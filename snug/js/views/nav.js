@@ -20,6 +20,7 @@ import { TOPICS, friendRequests, upcomingEvents, eventState } from '../lib/socia
 import { Icon } from '../ui/icons.js';
 import { Nook } from '../ui/brand.js';
 import { Avatar, Stack, Tile, RoomIcon, PRESENCE, presenceLabel } from '../ui/kit.js';
+import { StatusEmoji, SidebarGrip } from './account.js'; // custom status emoji; dragging the column wider
 import { MePop } from './people.js';
 import { RoomForm, Confirm, Invite, AddHouse, NewMessage, RoomBrowser } from './modals.js';
 import { Settings, HouseSettings } from './settings.js';
@@ -540,7 +541,7 @@ export function SelfPanel() {
         <${Avatar} user=${u} presence />
         <span class="grow self-text">
           <span class="self-name trunc">${u.name}</span>
-          <span class="self-status trunc">${u.status || PRESENCE[u.presence].label}</span>
+          <span class="self-status trunc">${(u.status || u.statusEmoji) && u.presence !== 'offline' ? html`<${StatusEmoji} u=${u} />` : ''}${u.status || PRESENCE[u.presence].label}</span>
         </span>
       </button>
       <button class="ib" aria-label="Settings" data-tip="Settings" onClick=${() => openLayer({ C: Settings, props: {} })}><${Icon} name="sliders" /></button>
@@ -596,6 +597,7 @@ export function Nav() {
       ${ctx}
       ${!isOnline() && S.ui.view.type !== 'conv' && html`<div class="conn" role="status"><${Icon} name="offline" size=${16} />Can’t reach Snug. Trying again…</div>`}
       <${SelfPanel} />
+      <${SidebarGrip} />
     </nav>
   </div>`;
 }

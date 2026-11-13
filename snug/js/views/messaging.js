@@ -623,7 +623,7 @@ export function JumpToDate({ conv }) {
 
 // ---------- Settings > Appearance ----------
 export function MessagingSettings({ Row }) {
-  return html`<div class="set-head">Messages</div>
+  return html`<div class="set-head">Links</div>
     <${Row} label="Link previews" hint="Show a card with the title and picture of links people send, and pictures and videos linked directly. Snug fetches them, so the sites never see you.">
       <${Switch} on=${S.prefs.embeds !== false} label="Link previews" onChange=${(v) => setPref('embeds', v)} />
     <//>

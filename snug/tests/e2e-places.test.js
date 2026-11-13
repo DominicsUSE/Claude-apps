@@ -289,7 +289,9 @@ test('a house from the Study template; a welcome with interests that give a role
   try {
     // Robin writes a welcome for Kiln & Co. with an interest that gives a role.
     await houseMenu(robin, 'House settings');
-    await robin.click('.layer-nav .row:has-text("Welcome")');
+    // The welcome sits on the Newcomers page, under who newcomers join as and their starter rooms.
+    await robin.click('.layer-nav .row:has-text("Newcomers")');
+    await robin.locator('.layer-body select[aria-label="Role for newcomers"]').waitFor();
     await robin.fill('textarea[aria-label="Welcome text"]', 'Welcome to the studio. Tell us what you make.');
     await robin.click('button:has-text("Add an interest")');
     await robin.fill('input[aria-label="Interest"]', 'Glazes');
@@ -323,4 +325,58 @@ test('a house from the Study template; a welcome with interests that give a role
     await jonas.click('.nav .row:has-text("Questions")');
     await jonas.locator('.main .forum').waitFor();
   } finally { await close(robin); if (jonas) await close(jonas); }
+});
+
+test('a post’s title and tags are edited by its author, live for everyone; the access dialog checks what one person can do', async () => {
+  const robin = await person('robin');
+  const priya = await person('priya');
+  try {
+    await newRoom(robin, 'Ideas board', 'Forum');
+    await access(robin, 'Ideas board');
+    await robin.click('.modal .seg button:has-text("Tags")');
+    await robin.click('.modal button:has-text("Add a tag")');
+    await robin.fill('.modal input[aria-label="Tag name"]', 'Kit');
+    await robin.click('.modal button:has-text("Save tags")');
+    await robin.waitForFunction(() => Object.values(window.snug.S.rooms).find((r) => r.name === 'Ideas board')?.tags?.length === 1);
+    await robin.click('.modal button:has-text("Done")');
+    // Priya posts; only she (and people who manage the room) get the edit button.
+    await go(priya, 'Ideas board');
+    await priya.click('.main .forum button:has-text("New post")');
+    await priya.fill('#post-title', 'A bigger kiln');
+    await priya.click('.modal button.btn.primary:has-text("Post")');
+    await priya.locator('.pane[aria-label="Thread"] .post-title:has-text("A bigger kiln")').waitFor();
+    const mine = priya.locator('.main .post-card:has-text("A bigger kiln")');
+    await mine.locator('.post-edit').click();
+    assert.equal(await priya.locator('.modal #post-body').count(), 0, 'the body is edited in the thread, not here');
+    await priya.fill('#post-title', '');
+    await priya.click('.modal button.btn.primary:has-text("Save")');
+    await priya.locator('.modal .err:has-text("Give your post a title")').waitFor();
+    await priya.fill('#post-title', 'A bigger kiln for the studio');
+    await priya.click('.modal .chip:has-text("Kit")');
+    await priya.click('.modal button.btn.primary:has-text("Save")');
+    await priya.locator('.modal').waitFor({ state: 'detached' });
+    await go(robin, 'Ideas board');
+    const seen = robin.locator('.main .post-card:has-text("A bigger kiln for the studio")');
+    await seen.locator('.tag-chip:has-text("Kit")').waitFor();
+    assert.equal(await seen.locator('.post-edit').count(), 1, 'Robin manages the room, so he may edit it too');
+    // Robin's own post shows no edit button to Priya.
+    await robin.click('.main .forum button:has-text("New post")');
+    await robin.fill('#post-title', 'Glaze swap');
+    await robin.click('.modal button.btn.primary:has-text("Post")');
+    const his = priya.locator('.main .post-card:has-text("Glaze swap")');
+    await his.waitFor();
+    assert.equal(await his.locator('.post-edit').count(), 0);
+    assert.equal(await his.locator('.post-follow').count(), 1);
+    // Check a person: the server's resolver answers, and follows the settings.
+    await access(robin, 'Glaze lab');
+    await robin.selectOption('.modal select[aria-label="Person to check"]', 'priya');
+    const result = robin.locator('.modal .ovr-result[aria-label="What Priya Raman can do"]');
+    await result.locator('li.yes:has-text("See the room")').waitFor();
+    await robin.click('.modal .switch[aria-label="Private room"]');
+    await result.locator('li.no:has-text("See the room")').waitFor();
+    await result.locator('li.no:has-text("Send messages")').waitFor();
+    await robin.click('.modal .switch[aria-label="Private room"]');
+    await result.locator('li.yes:has-text("Send messages")').waitFor();
+    await robin.click('.modal button:has-text("Done")');
+  } finally { await close(robin); await close(priya); }
 });

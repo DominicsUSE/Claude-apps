@@ -54,8 +54,8 @@ export function Seg({ value, options, onChange, label }) {
   </div>`;
 }
 
-export const Switch = ({ on, onChange, label }) =>
-  html`<button type="button" class="switch" role="switch" aria-checked=${String(!!on)} aria-label=${label} onClick=${() => onChange(!on)}></button>`;
+export const Switch = ({ on, onChange, label, disabled }) =>
+  html`<button type="button" class="switch" role="switch" aria-checked=${String(!!on)} aria-label=${label} disabled=${disabled} onClick=${() => onChange(!on)}></button>`;
 
 export function Empty({ icon, title, text, children }) {
   return html`<div class="empty">

@@ -12,6 +12,8 @@ import { Avatar, Tile, RoomIcon, Rich, Empty } from '../ui/kit.js';
 import { Settings } from './settings.js';
 import { searchMessages } from '../server.js';
 import { openHouse } from './nav.js';
+import { ACCOUNT_ACTIONS } from './account.js'; // mute, mark read, themes, presence, status, streamer mode, shortcuts
+import { withRecent } from '../account.js'; // recent places come first
 import { SearchDateFilter, SearchSuggest, dateChipLabel } from './messaging.js'; // date filter, mentions, pinned, suggestions while typing
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
@@ -148,6 +150,7 @@ const ACTIONS = [
   { label: 'Set presence to Focused', icon: 'bell-off', words: 'focus focused do not disturb quiet', run: () => setPresence('focus') },
   { label: 'Set presence to Open to talk', icon: 'voice', words: 'open to talk available', run: () => setPresence('open') },
 ];
+ACTIONS.push(...ACCOUNT_ACTIONS);
 
 function candidates(q) {
   const out = [];
@@ -156,13 +159,13 @@ function candidates(q) {
     for (const id of roomIds(S, h)) {
       const r = S.rooms[id];
       const a = attention(S, id);
-      add(fuzzy(q, r.name) + (a.needs ? 5 : 0), { key: id, label: r.name, hint: S.houses[h].name, icon: html`<${RoomIcon} kind=${r.kind} />`, run: () => openConv(id) });
+      add(withRecent(fuzzy(q, r.name), id, q) + (a.needs ? 5 : 0), { key: id, label: r.name, hint: S.houses[h].name, icon: html`<${RoomIcon} kind=${r.kind} />`, run: () => openConv(id) });
     }
   }
   for (const d of S.dmOrder) {
     const meta = convMeta(d);
     const a = attention(S, d);
-    add(fuzzy(q, meta.title) + (a.needs ? 5 : 0) + 1, {
+    add(withRecent(fuzzy(q, meta.title), d, q) + (a.needs ? 5 : 0) + 1, {
       key: d, label: meta.title, hint: meta.user ? 'Direct' : 'Group',
       icon: meta.user ? html`<${Avatar} user=${meta.user} presence />` : html`<${Icon} name="people" />`, run: () => openConv(d),
     });
@@ -173,7 +176,7 @@ function candidates(q) {
       if (u.id === S.me || direct.has(u.id)) continue;
       add(Math.max(fuzzy(q, u.name), fuzzy(q, u.handle)) - 1, { key: `u${u.id}`, label: u.name, hint: 'Start a conversation', icon: html`<${Avatar} user=${u} presence />`, run: () => startDm([u.id]) });
     }
-    for (const h of S.houseOrder) add(fuzzy(q, S.houses[h].name) - 2, { key: `h${h}`, label: S.houses[h].name, hint: 'Community', icon: html`<${Tile} house=${S.houses[h]} />`, run: () => openHouse(h) });
+    for (const h of S.houseOrder) add(withRecent(fuzzy(q, S.houses[h].name), `h:${h}`, q) - 2, { key: `h${h}`, label: S.houses[h].name, hint: 'Community', icon: html`<${Tile} house=${S.houses[h]} />`, run: () => openHouse(h) });
     for (const a of ACTIONS) add(Math.max(fuzzy(q, a.label), ...a.words.split(' ').map((w) => (w.startsWith(q.toLowerCase()) ? 50 : -1))) - 3, { key: a.label, label: a.label, hint: 'Action', icon: html`<${Icon} name=${a.icon} />`, run: a.run });
   }
   out.sort((a, b) => b.score - a.score);

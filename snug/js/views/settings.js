@@ -2,13 +2,13 @@
 // house's settings in another. Every change applies at once; nothing to save.
 import { html, useState } from '../../vendor/preact-htm.js';
 import {
-  S, me, closeLayer, setPref, updateMe, setNotify, openModal, updateHouse, addRole, removeRole,
-  updateRole, setRolePerm, setMemberRole, leaveHouse, removeMember, signedOut, toast, openMenu,
+  S, me, closeLayer, setPref, updateMe, setNotify, openModal, updateHouse,
+  setMemberRole, leaveHouse, removeMember, signedOut, toast, openMenu,
 } from '../store.js';
 import { api, stopTransport } from '../server.js';
 import { leaveVoice } from '../voice.js';
 import { LEVEL_LABEL, levelOf, roomIds } from '../lib/attention.js';
-import { PERMS, can } from '../lib/perms.js';
+import { can } from '../lib/perms.js';
 import { fuzzy, HUES, hueOf } from '../lib/util.js';
 import { LIMITS, cleanInterests, safeLink } from '../lib/social.js';
 import { Icon } from '../ui/icons.js';
@@ -19,13 +19,14 @@ import { Confirm } from './modals.js';
 import { PushSetting } from './push-setting.js'; // notifications when Snug is closed
 import { pushSignOut } from '../push.js';
 import { HouseEmoji } from './emoji-settings.js'; // House settings > Emoji
-import { MessagingSettings, withStickers } from './messaging.js'; // link previews; stickers on the Emoji page
+import { withStickers } from './messaging.js'; // stickers on the Emoji page
 import { PrivacyPage, SAFETY_PAGES, SAFETY_VIEWS } from './safety-settings.js'; // privacy, blocks, moderation pages
-import { personItems } from './safety.js';
-import { PLACES_PAGES, PLACES_VIEWS } from './places-settings.js'; // roles with order and icons, rooms and access, welcome, insights
+import { personItems, mayAct } from './safety.js'; // Remove lives in the Moderate menu when you may kick
+import { PLACES_PAGES, PLACES_VIEWS, WelcomePage } from './places-settings.js'; // roles with order and icons, rooms and access, welcome, insights
 import { VoiceSettings, HouseVoice } from './voiceopts-settings.js'; // Voice and video; House settings > Voice
 import { setVoiceSettingsOpener, setHouseVoiceOpener } from './voiceopts.js';
 import { openLayer as openVoiceLayer } from '../store.js';
+import { registerAccountPages } from './account.js'; // appearance, accessibility, streamer mode, security, your data, profile extras
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
 const MOD = isMac ? '⌘' : 'Ctrl';
@@ -37,6 +38,17 @@ function Row({ label, hint, children, top }) {
   </div>`;
 }
 
+// Pages in runs that share a section name, in order.
+function groups(pages) {
+  const out = [];
+  for (const p of pages) {
+    const last = out[out.length - 1];
+    if (last && last.section === (p.section || null)) last.pages.push(p);
+    else out.push({ section: p.section || null, key: `${out.length}-${String(p.section || '').replace(/\W+/g, '-')}`, pages: [p] });
+  }
+  return out;
+}
+
 function Layer({ title, icon, pages, page, setPage, children, foot }) {
   const [q, setQ] = useState('');
   const shown = q ? pages.filter((p) => fuzzy(q, `${p.label} ${p.words || ''}`) >= 0) : pages;
@@ -44,9 +56,18 @@ function Layer({ title, icon, pages, page, setPage, children, foot }) {
     <nav class="layer-nav" aria-label=${`${title} sections`}>
       <h2>${icon}${title}</h2>
       <input class="field" type="search" placeholder="Find a setting" aria-label="Find a setting" value=${q} onInput=${(e) => setQ(e.target.value)} />
-      ${shown.map((p) => html`<button key=${p.id} class=${`row${page === p.id ? ' sel' : ''}`} aria-current=${page === p.id ? 'page' : undefined} onClick=${() => setPage(p.id)}>
-        <span class="row-ic"><${Icon} name=${p.icon} size=${18} /></span><span class="grow trunc">${p.label}</span>
-      </button>`)}
+      ${groups(shown).map((g) => {
+        const rows = g.pages.map((p) => html`<button key=${p.id} class=${`row${page === p.id ? ' sel' : ''}`} aria-current=${page === p.id ? 'page' : undefined} onClick=${() => setPage(p.id)}>
+          <span class="row-ic"><${Icon} name=${p.icon} size=${18} /></span><span class="grow trunc">${p.label}</span>
+        </button>`);
+        if (!g.section) return rows;
+        // Screen readers hear each section's name with its pages (You, App, Moderation...).
+        const hid = `layer-sec-${g.key}`;
+        return html`<div class="layer-group" role="group" aria-labelledby=${hid} key=${`g-${g.key}`}>
+          <div class="layer-sec" id=${hid}>${g.section}</div>
+          ${rows}
+        </div>`;
+      })}
       ${!shown.length && html`<p class="faint" style="padding:4px 8px">No setting called “${q}”</p>`}
       <div class="layer-foot">${foot}</div>
     </nav>
@@ -63,20 +84,14 @@ const PAGES = [
   { id: 'account', label: 'Account', icon: 'shield', words: 'account password sign out log out devices sessions connection' },
 ];
 
-const PREVIEW = [
-  { id: 'pv1', author: 'sunniva', ts: Date.now() - 6 * 60000, text: 'Swap half the kaolin for calcined. Same chemistry in the kiln, much less shrinkage on the pot.', reactions: { '💡': ['priya', 'robin'] } },
-  { id: 'pv2', author: 'sunniva', ts: Date.now() - 5 * 60000, text: 'Shout if it still crawls.' },
-  { id: 'pv3', author: 'robin', ts: Date.now() - 2 * 60000, text: 'Trying it on Thursday’s tiles.' },
-];
-
 function Profile() {
   const u = me();
   return html`
     <h1>Profile</h1>
     <p class="lead">How you appear to people in every house and conversation.</p>
     <${Row} label="Name"><input class="field" style="width:260px" value=${u.name} maxlength="40" aria-label="Name" onChange=${(e) => e.target.value.trim() && updateMe({ name: e.target.value.trim() })} /><//>
-    <${Row} label="About you" hint="A line or two on your profile card." top>
-      <textarea class="field" style="width:260px" rows="3" maxlength="160" aria-label="About you" onChange=${(e) => updateMe({ about: e.target.value.trim() })}>${u.about}</textarea>
+    <${Row} label="About you" hint="A few lines on your profile. Message formatting works here." top>
+      <textarea class="field" style="width:260px" rows="4" maxlength="400" aria-label="About you" onChange=${(e) => updateMe({ about: e.target.value.trim() })}>${u.about}</textarea>
     <//>
     <${Row} label="Picture" hint="Your initials on a colour, or an emoji.">
       <${Avatar} user=${u} size=${40} />
@@ -194,22 +209,6 @@ function Notify() {
     <//>`;
 }
 
-function Look() {
-  const p = S.prefs;
-  return html`
-    <h1>Appearance</h1>
-    <p class="lead">Changes apply as you make them.</p>
-    <${Row} label="Theme"><${Seg} label="Theme" value=${p.theme} options=${[['system', 'Match device'], ['light', 'Light'], ['dark', 'Dark']]} onChange=${(v) => setPref('theme', v)} /><//>
-    <${Row} label="Density" hint="How tightly messages sit. Compact fits the most on screen."><${Seg} label="Density" value=${p.density} options=${[['snug', 'Compact'], ['regular', 'Regular'], ['roomy', 'Roomy']]} onChange=${(v) => setPref('density', v)} /><//>
-    <${Row} label="Text size"><${Seg} label="Text size" value=${p.text} options=${[['s', 'Small'], ['m', 'Medium'], ['l', 'Large']]} onChange=${(v) => setPref('text', v)} /><//>
-    <${Row} label="Contrast" hint="High makes secondary text, times and outlines darker and the focus ring thicker."><${Seg} label="Contrast" value=${p.contrast || 'system'} options=${[['system', 'Match device'], ['standard', 'Standard'], ['high', 'High']]} onChange=${(v) => setPref('contrast', v)} /><//>
-    <div class="preview" aria-hidden="true">
-      ${PREVIEW.map((m, i) => html`<${Message} key=${m.id} conv="k_glaze" m=${m} grouped=${i === 1} />`)}
-    </div>
-    <${Row} label="Motion" hint="Panels slide and fade briefly. Reduced turns that off."><${Seg} label="Motion" value=${p.motion} options=${[['system', 'Match device'], ['reduced', 'Reduced']]} onChange=${(v) => setPref('motion', v)} /><//>
-    <${MessagingSettings} Row=${Row} />`;
-}
-
 const KEYS = [
   [[MOD, 'K'], 'Jump to a room or person, or search'],
   [[MOD, 'Shift', 'F'], 'Search messages'],
@@ -261,36 +260,6 @@ async function setDesktop(on) {
   return undefined;
 }
 
-const CONN_TEXT = {
-  open: 'Connected. Messages arrive as they are sent.',
-  connecting: 'Connecting\u2026',
-  reconnecting: 'Can\u2019t reach Snug. Trying again; what you write waits and sends when it\u2019s back.',
-  closed: 'Can\u2019t reach Snug. Trying again; what you write waits and sends when it\u2019s back.',
-  idle: 'Not connected.',
-};
-
-function PasswordForm() {
-  const [cur, setCur] = useState('');
-  const [next, setNext] = useState('');
-  const [msg, setMsg] = useState(null);
-  const submit = async (e) => {
-    e.preventDefault();
-    if (next.length < 8) return setMsg({ bad: true, text: 'Passwords need at least 8 characters.' });
-    try {
-      await api('/api/password', { current: cur, next });
-      setCur(''); setNext('');
-      setMsg({ text: 'Password changed. Other devices have been signed out.' });
-    } catch (err) { setMsg({ bad: true, text: err.message }); }
-    return undefined;
-  };
-  return html`<form class="form" style="max-width:320px" onSubmit=${submit} novalidate>
-    <div><label class="label" for="pw-cur">Current password</label><input id="pw-cur" class="field" type="password" autocomplete="current-password" value=${cur} onInput=${(e) => setCur(e.target.value)} /></div>
-    <div><label class="label" for="pw-next">New password</label><input id="pw-next" class="field" type="password" autocomplete="new-password" value=${next} onInput=${(e) => setNext(e.target.value)} /><div class="hint">At least 8 characters.</div></div>
-    ${msg && html`<div class=${msg.bad ? 'err' : 'hint'} role=${msg.bad ? 'alert' : 'status'}>${msg.text}</div>`}
-    <div><button class="btn" type="submit" disabled=${!cur || !next}>Change password</button></div>
-  </form>`;
-}
-
 async function signOut(everywhere) {
   leaveVoice();
   await pushSignOut(); // this device stops getting this person's notifications
@@ -300,42 +269,35 @@ async function signOut(everywhere) {
   signedOut();
 }
 
-function Account() {
-  const u = me();
-  return html`
-    <h1>Account</h1>
-    <p class="lead">Signed in as <b style="font-weight:500">${u.name}</b> (@${u.handle}).</p>
-    <${Row} label="Connection" hint=${CONN_TEXT[S.conn.socket]}>
-      <span class="sub" style="display:flex;gap:8px;align-items:center"><i class=${`pres inline ${S.conn.socket === 'open' ? 'open' : 'offline'}`}></i>${S.conn.socket === 'open' ? 'Online' : 'Offline'}</span>
-    <//>
-    <div class="set-head">Password</div>
-    <div style="padding:16px 0"><${PasswordForm} /></div>
-    <div class="set-head">Sign out</div>
-    <${Row} label="Sign out on this device" hint="Your houses and messages stay on the server.">
-      <button class="btn" onClick=${() => signOut(false)}>Sign out</button>
-    <//>
-    <${Row} label="Sign out everywhere" hint="Ends every session on every device, including this one.">
-      <button class="btn danger" onClick=${() => openModal(Confirm, {
-        title: 'Sign out everywhere?', danger: true, action: 'Sign out everywhere',
-        text: 'Every device signed in as you will need your password again.',
-        onConfirm: () => signOut(true),
-      })}>Sign out everywhere</button>
-    <//>`;
-}
-
-const VIEWS = { profile: Profile, notify: Notify, look: Look, keys: Keys, account: Account };
+// Appearance and Account and security are drawn by js/views/account.js (registerAccountPages below).
+const VIEWS = { profile: Profile, notify: Notify, keys: Keys };
 // Privacy and safety (js/views/safety-settings.js), before Account.
 PAGES.splice(PAGES.findIndex((p) => p.id === 'account'), 0, { id: 'privacy', label: 'Privacy and safety', icon: 'eye', words: 'privacy block blocked unblock messages requests friend requests dm safety' });
 VIEWS.privacy = PrivacyPage;
 // Voice and video (js/views/voiceopts-settings.js), after Notifications.
 PAGES.splice(PAGES.findIndex((p) => p.id === 'notify') + 1, 0, { id: 'voice', label: 'Voice and video', icon: 'voice', words: 'voice video microphone mic speaker headphones camera webcam push to talk ptt sensitivity noise suppression echo gain volume screen share quality sounds afk deafen' });
 VIEWS.voice = VoiceSettings;
+// Account (js/views/account.js): Appearance in full, Accessibility, Streamer mode, more Notifications and Profile, Account and security, Your data.
+registerAccountPages({ PAGES, VIEWS, Row, signOut, Settings, KEYS });
+
+// One structure for every settings layer: pages in sections, in this order.
+// Pages other modules add land in the section named here; anything unnamed
+// goes last, so a new page is never lost.
+function arrange(pages, plan) {
+  const at = new Map(plan.flatMap(([section, ids], si) => ids.map((id, i) => [id, { section, n: si * 100 + i }])));
+  for (const p of pages) Object.assign(p, at.has(p.id) ? { section: at.get(p.id).section } : {});
+  pages.sort((a, b) => (at.get(a.id)?.n ?? 1e4) - (at.get(b.id)?.n ?? 1e4));
+}
+arrange(PAGES, [
+  ['You', ['profile', 'account', 'privacy', 'data']],
+  ['App', ['notify', 'voice', 'look', 'a11y', 'streamer', 'keys']],
+]);
 
 export function Settings({ page: start = 'profile' }) {
   const [page, setPage] = useState(start);
   const V = VIEWS[page];
   return html`<${Layer} title="Settings" icon=${html`<${Icon} name="sliders" />`} pages=${PAGES} page=${page} setPage=${setPage}
-    foot=${html`<${Nook} size=${16} /><span>Snug 0.5</span>`}>
+    foot=${html`<${Nook} size=${16} /><span>Snug 0.6</span>`}>
     <${V} />
   <//>`;
 }
@@ -371,45 +333,6 @@ function HouseAbout({ house }) {
     <//>`;
 }
 
-function HouseRoles({ house }) {
-  const h = S.houses[house];
-  const [sel, setSel] = useState(h.roles[0].id);
-  const role = h.roles.find((r) => r.id === sel) || h.roles[0];
-  const owner = h.roles[0].id === role.id;
-  const count = (id) => Object.values(h.members).filter((r) => r === id).length;
-  return html`
-    <h1>Roles</h1>
-    <p class="lead">A role is a name, a colour and what it can do. Everyone has exactly one role here.</p>
-    <div class="role-list">
-      <div class="role-pick">
-        ${h.roles.map((r) => html`<button key=${r.id} class=${`row${r.id === role.id ? ' sel' : ''}`} onClick=${() => setSel(r.id)}>
-          <span class="row-ic"><i class=${`hue-dot${r.hue == null ? ' none' : ''}`} style=${r.hue != null ? `--hue:${hueOf(r.hue)}` : ''}></i></span>
-          <span class="grow trunc">${r.name}</span><span class="row-end faint num">${count(r.id)}</span>
-        </button>`)}
-        <button class="row" onClick=${() => addRole(house).then((rid) => rid && setSel(rid))}><span class="row-ic"><${Icon} name="plus" size=${16} /></span><span class="grow">New role</span></button>
-      </div>
-      <div>
-        <${Row} label="Name"><input class="field" style="width:200px" key=${role.id} value=${role.name} maxlength="24" aria-label="Role name" onChange=${(e) => e.target.value.trim() && updateRole(house, role.id, { name: e.target.value.trim() })} /><//>
-        <${Row} label="Name colour" hint="People with this role show their name in it." top>
-          <div class="swatches" role="group" aria-label="Role colour">
-            <button class="swatch" style="--hue:0;--tile-c:0" aria-pressed=${String(role.hue == null)} aria-label="No colour" onClick=${() => updateRole(house, role.id, { hue: null })}></button>
-            ${HUES.map(([v, name]) => html`<button key=${v} class="swatch strong" style=${`--hue:${v}`} aria-pressed=${String(role.hue != null && hueOf(role.hue) === v)} aria-label=${name} onClick=${() => updateRole(house, role.id, { hue: v })}></button>`)}
-          </div>
-        <//>
-        <div class="set-head">What ${role.name} can do</div>
-        ${owner && html`<p class="hint">${role.name} is the owner role and can always do everything.</p>`}
-        ${PERMS.map((p) => html`<${Row} key=${p.id} label=${p.label} hint=${p.hint}>
-          <${Switch} on=${owner || role.perms.includes(p.id)} label=${p.label} onChange=${(v) => !owner && setRolePerm(house, role.id, p.id, v)} />
-        <//>`)}
-        ${!owner && html`<div style="margin-top:24px"><button class="btn danger" onClick=${() => openModal(Confirm, {
-          title: `Remove ${role.name}?`, danger: true, action: 'Remove role',
-          text: `${count(role.id) ? `The ${count(role.id)} people with this role move to ${h.roles.find((r) => r.id === h.joinRole && r.id !== role.id)?.name || h.roles[h.roles.length - 1].name}.` : 'Nobody has this role.'}`,
-          onConfirm: () => { removeRole(house, role.id); setSel(h.roles[0].id); },
-        })}>Remove role</button></div>`}
-      </div>
-    </div>`;
-}
-
 function HouseMembers({ house }) {
   const h = S.houses[house];
   const [q, setQ] = useState('');
@@ -426,7 +349,7 @@ function HouseMembers({ house }) {
       </select>
       ${id !== S.me && personItems(id, house).some((x) => x.label && x.label !== 'Block' && x.label !== 'Unblock' && x.label !== 'Report') && html`<button class="ib" aria-label=${`Moderate ${S.users[id].name}`} aria-haspopup="menu" data-tip="Moderate"
         onClick=${(e) => openMenu({ anchor: e.currentTarget.getBoundingClientRect(), align: 'end', items: personItems(id, house).filter((x) => x.sep || !['Block', 'Unblock', 'Report'].includes(x.label)) })}><${Icon} name="shield" size=${18} /></button>`}
-      ${id !== S.me && html`<button class="ib danger" aria-label=${`Remove ${S.users[id].name} from ${h.name}`} data-tip="Remove from house" onClick=${() => openModal(Confirm, {
+      ${id !== S.me && !mayAct(house, id, 'kick') && html`<button class="ib danger" aria-label=${`Remove ${S.users[id].name} from ${h.name}`} data-tip="Remove from house" onClick=${() => openModal(Confirm, {
         title: `Remove ${S.users[id].name}?`, danger: true, action: 'Remove',
         text: `${S.users[id].name} leaves ${h.name} and its rooms. They can come back with a new invitation.`,
         onConfirm: () => removeMember(house, id),
@@ -440,7 +363,7 @@ function HouseWelcome({ house }) {
   const toggle = (id) => updateHouse(house, { starter: h.starter.includes(id) ? h.starter.filter((x) => x !== id) : [...h.starter, id].sort((a, b) => all.indexOf(a) - all.indexOf(b)) });
   return html`
     <h1>Newcomers</h1>
-    <p class="lead">New people see only these rooms, plus a welcome with one first step. The rest of the house opens after their first message.</p>
+    <p class="lead">New people see only these rooms, plus a welcome with one first step. The rest of the house opens after their first message. The welcome text and the interests that give roles are further down.</p>
     <${Row} label="Newcomers join as">
       <select class="field" aria-label="Role for newcomers" value=${h.joinRole} onChange=${(e) => updateHouse(house, { joinRole: e.target.value })}>
         ${h.roles.map((r) => html`<option value=${r.id}>${r.name}</option>`)}
@@ -452,7 +375,8 @@ function HouseWelcome({ house }) {
     <//>`)}`;
 }
 
-const HOUSE_VIEWS = { about: HouseAbout, roles: HouseRoles, members: HouseMembers, welcome: HouseWelcome };
+// Roles is drawn by js/views/places-settings.js (PLACES_VIEWS below).
+const HOUSE_VIEWS = { about: HouseAbout, members: HouseMembers, welcome: HouseWelcome };
 HOUSE_VIEWS.emoji = withStickers(HouseEmoji); // custom emoji, and the house's stickers below them
 // Moderation pages, each opened by its own permission (js/views/safety-settings.js).
 HOUSE_PAGES.push(...SAFETY_PAGES);
@@ -460,9 +384,20 @@ Object.assign(HOUSE_VIEWS, SAFETY_VIEWS);
 // Places (js/views/places-settings.js): its Roles page replaces the one above.
 HOUSE_PAGES.push(...PLACES_PAGES);
 Object.assign(HOUSE_VIEWS, PLACES_VIEWS);
-// Voice: the soundboard (Manage sounds) and voice room limits and bitrate (Manage rooms).
-HOUSE_PAGES.push({ id: 'voice', label: 'Voice', icon: 'voice', words: 'voice soundboard sounds user limit bitrate audio quality', need: (h) => can(S, h, 'sounds') || can(S, h, 'rooms') });
+// The soundboard (Manage sounds). Voice room limits and bitrate are per room, on Rooms and access.
+HOUSE_PAGES.push({ id: 'voice', label: 'Soundboard', icon: 'voice', words: 'voice soundboard sounds audio clips', need: (h) => can(S, h, 'sounds') });
 HOUSE_VIEWS.voice = HouseVoice;
+
+// Newcomers: who they join as and their starter rooms, then the welcome and
+// the interests that give roles (js/views/places-settings.js). One page.
+HOUSE_VIEWS.welcome = ({ house }) => html`<${HouseWelcome} house=${house} /><${WelcomePage} house=${house} embedded />`;
+HOUSE_PAGES.find((p) => p.id === 'welcome').words += ' welcome interests roles greeting';
+arrange(HOUSE_PAGES, [
+  ['House', ['about', 'roles', 'members', 'invites', 'emoji', 'voice']],
+  ['Rooms and newcomers', ['rooms', 'welcome']],
+  ['Moderation', ['reports', 'bans', 'filter', 'log']],
+  ['Owners', ['insights']],
+]);
 
 export function HouseSettings({ house, page: start = 'about' }) {
   const [page, setPage] = useState(start);

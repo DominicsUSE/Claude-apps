@@ -285,7 +285,9 @@ function buildMenu() {
     submenu: [
       { role: "reload" }, { type: "separator" },
       { role: "resetZoom" }, { role: "zoomIn" }, { role: "zoomOut" }, { type: "separator" },
-      { role: "togglefullscreen" },
+      { role: "togglefullscreen" }, { type: "separator" },
+      // Streamer mode (snug/js/views/account.js): hides usernames, codes and notification text.
+      { label: "Streamer mode", accelerator: "CmdOrCtrl+Shift+S", click: () => { win?.webContents.executeJavaScript("window.snug?.toggleStreamer?.()").catch(() => {}); } },
     ],
   };
   const template = isMac ? [{ role: "appMenu" }, snug, { role: "editMenu" }, view, { role: "windowMenu" }] : [snug, { role: "editMenu" }, view];

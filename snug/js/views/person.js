@@ -12,6 +12,8 @@ import {
   doingOf, FavButton, FriendButton, canMessage, Interests, Links, memberSince, editProfile, friendMenu, lastWrote, ago,
 } from './people.js';
 import { mutualFriendsOf } from './discover.js';
+import { ProfileBanner, Pronouns, PrivateNote, StatusEmoji } from './account.js'; // banner, pronouns, private notes, status emoji
+import { Rich } from '../ui/kit.js'; // the About with formatting
 
 const Back = () => S.ui.phone && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
 
@@ -25,7 +27,7 @@ function nowLine(u, d) {
   if (d.live) return html`${d.text}${d.where ? html`<span class="faint"> · ${d.where}</span>` : ''}`;
   const w = u.id === S.me ? null : lastWrote(u.id);
   const meta = w && convMeta(w.conv);
-  if (u.presence !== 'offline' && u.status) return u.status;
+  if (d.status) return html`<${StatusEmoji} u=${u} />${d.text}`;
   if (meta && Date.now() - w.ts < 3 * DAY) {
     return html`${u.presence === 'offline' ? 'Offline · ' : ''}${meta.kind === 'dm' ? 'Wrote to you' : `Wrote in ${meta.title}`} ${ago(w.ts)}`;
   }
@@ -77,11 +79,12 @@ export function PersonPage({ id }) {
     </header>
     <div class="view-body">
       <article class="pp" style=${`--hue:${hueOf(u.hue)}`}>
+        <${ProfileBanner} u=${u} big />
         <div class="pp-head">
           <div class="pp-av"><${Avatar} user=${u} presence size=${64} speaking=${!!S.speaking[id]} /></div>
           <div class="pp-id">
             <h2 class="pp-name">${u.name}</h2>
-            <div class="pp-handle">@${u.handle}${since ? html`<span class="pp-since"> · here since ${since}</span>` : ''}</div>
+            <div class="pp-handle"><span class="secret">@${u.handle}</span><${Pronouns} u=${u} />${since ? html`<span class="pp-since"> · here since ${since}</span>` : ''}</div>
           </div>
           ${!S.ui.phone && acts}
         </div>
@@ -99,9 +102,10 @@ export function PersonPage({ id }) {
             <section class="pp-sect" aria-labelledby="pp-about">
               <h3 id="pp-about">About</h3>
               ${u.about
-                ? html`<p class="pp-about">${u.about}</p>`
+                ? html`<div class="pp-about acc-about"><${Rich} text=${u.about} /></div>`
                 : html`<p class="pp-empty">${mine ? 'Nothing here yet. A line or two helps people know who they’re talking to.' : `${first} hasn’t written anything yet.`}</p>`}
             </section>
+            ${!mine && !u.deleted && html`<section class="pp-sect"><${PrivateNote} id=${id} /></section>`}
             ${(u.interests?.length > 0 || mine) && html`<section class="pp-sect" aria-labelledby="pp-int">
               <h3 id="pp-int">Into</h3>
               ${u.interests?.length ? html`<${Interests} list=${u.interests} />` : html`<p class="pp-empty">Add a few interests so people with the same ones can find you.</p>`}

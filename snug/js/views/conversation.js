@@ -3,14 +3,14 @@
 import { html } from '../../vendor/preact-htm.js';
 import {
   S, person, convMeta, membersOf, togglePane, closePane, back, go,
-  toggleFollow, setNotify, openModal, jumpToMsg, findMsg, openConv, setReply,
+  toggleFollow, setNotify, openModal, jumpToMsg, findMsg, openConv,
 } from '../store.js';
 import { levelOf, levelsFor, LEVEL_LABEL } from '../lib/attention.js';
 import { can } from '../lib/perms.js';
 import { fmtWhen, plural, nameList } from '../lib/util.js';
 import { plain } from '../lib/format.js';
 import { Icon } from '../ui/icons.js';
-import { Avatar, Stack, Tile, RoomIcon, Seg, Pres, presenceLabel } from '../ui/kit.js';
+import { Avatar, Stack, Tile, RoomIcon, Seg, presenceLabel } from '../ui/kit.js';
 import { Stream, Message, focusComposer } from './stream.js';
 import { RequestBanner, StageMod } from './safety.js'; // message requests; voice moderation on the stage
 import { JumpToDate } from './messaging.js'; // go to a date

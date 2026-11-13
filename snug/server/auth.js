@@ -29,29 +29,36 @@ export const burnPasswordCheck = (password) => { checkPassword(password, DUMMY);
 
 export const tokenHash = (token) => createHash('sha256').update(token).digest('hex');
 
-export function createSession(db, userId) {
+export function createSession(db, userId, agent = '') {
   const token = randomBytes(32).toString('base64url');
   const now = Date.now();
-  db.run('INSERT INTO sessions (hash, user, created, expires) VALUES (?, ?, ?, ?)',
-    tokenHash(token), userId, now, now + SESSION_DAYS * 86_400_000);
+  // agent and seen: the device list in Settings > Account (server/account.js).
+  db.run('INSERT INTO sessions (hash, user, created, expires, agent, seen) VALUES (?, ?, ?, ?, ?, ?)',
+    tokenHash(token), userId, now, now + SESSION_DAYS * 86_400_000, String(agent).slice(0, 80), now);
   return token;
 }
 
 export function sessionUser(db, token) {
   if (!token || token.length > 100) return null;
-  const row = db.get('SELECT user, expires FROM sessions WHERE hash = ?', tokenHash(token));
+  const row = db.get('SELECT user, expires, seen FROM sessions WHERE hash = ?', tokenHash(token));
   if (!row) return null;
   if (row.expires < Date.now()) { db.run('DELETE FROM sessions WHERE hash = ?', tokenHash(token)); return null; }
+  // When this device was last used, to the minute (server/account.js).
+  if (!row.seen || row.seen < Date.now() - 60_000) db.run('UPDATE sessions SET seen = ? WHERE hash = ?', Date.now(), tokenHash(token));
   return row.user;
 }
 
 export const endSession = (db, token) => token && db.run('DELETE FROM sessions WHERE hash = ?', tokenHash(token));
 export const endAllSessions = (db, userId) => db.run('DELETE FROM sessions WHERE user = ?', userId);
 
+// Percent-decoding that never throws: a malformed header or address is kept as
+// it came instead of failing the request (or, outside a try, the server).
+export const safeDecode = (v) => { try { return decodeURIComponent(v); } catch { return v; } };
+
 export function readCookie(header, name) {
   for (const part of String(header || '').split(';')) {
     const i = part.indexOf('=');
-    if (i > 0 && part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
+    if (i > 0 && part.slice(0, i).trim() === name) return safeDecode(part.slice(i + 1).trim());
   }
   return null;
 }

@@ -10,7 +10,7 @@ import { roomIds } from '../lib/attention.js';
 import { eventState, LIMITS } from '../lib/social.js';
 import { sameDay, plural, DAY, MIN } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
-import { Stack, Tile, RoomIcon, Empty } from '../ui/kit.js';
+import { Stack, Tile, RoomIcon } from '../ui/kit.js';
 import { Confirm } from './modals.js';
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();

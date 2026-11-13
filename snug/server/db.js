@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, chmodSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { migrateMessaging } from './messaging.js'; // polls, link previews, edit history, scheduled messages, stickers
+import { migrateAccount } from './account.js'; // profile fields, settings sync, notes, two-factor, session devices (server/account.js)
 import { migratePlaces } from './places.js'; // room overrides, extra roles, forums, webhooks, folders, onboarding (server/places.js)
 
 const SCHEMA = `
@@ -229,6 +230,7 @@ export function migrate(db) {
   migrateMessaging(db); // polls, link previews, edit history, scheduled messages, stickers (server/messaging.js)
   migratePlaces(db); // places, structure and community (server/places.js)
   migrateVoiceOpts(db); // soundboard, voice room limits and bitrate (server/voiceopts.js)
+  migrateAccount(db); // profile fields, settings sync, notes, two-factor, session devices (server/account.js)
 }
 
 // --- Voice options (server/voiceopts.js) ----------------------------------------

@@ -23,7 +23,7 @@ import { limiter } from './auth.js';
 import { newId, now } from './model.js';
 import {
   TIMEOUTS, SLOWMODES, INVITE_AGES, INVITE_USES, BAN_DELETE, REPORT_REASONS, PRIVACY_DM, PRIVACY_FRIENDS,
-  DEFAULT_PRIVACY, FILTER_ACTIONS, MAX_WORDS, cleanWord, filterHit, outranks, slowWait, left,
+  DEFAULT_PRIVACY, FILTER_ACTIONS, MAX_WORDS, cleanWord, filterHit, outranks, roleBelow, slowWait, left,
 } from '../js/lib/safety.js';
 
 const json = (s, f) => { try { return s == null ? f : JSON.parse(s); } catch { return f; } };
@@ -97,8 +97,32 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
   };
   R.timeout = (house, user) => db.get('SELECT * FROM timeouts WHERE house = ? AND user = ? AND until > ?', house, user, Date.now());
   R.roles = (house) => db.all('SELECT id, pos FROM roles WHERE house = ? ORDER BY pos', house);
-  R.members = (house) => Object.fromEntries(db.all('SELECT user, role FROM members WHERE house = ?', house).map((r) => [r.user, r.role]));
-  R.outranks = (house, actor, target) => outranks(R.roles(house), R.members(house), actor, target);
+  // Only the people involved are read (by primary key), never the whole house.
+  R.members = (house, users) => {
+    const out = {};
+    for (const u of new Set(users)) { const r = db.get('SELECT role FROM members WHERE house = ? AND user = ?', house, u); if (r) out[u] = r.role; }
+    return out;
+  };
+  // Extra roles (server/places.js) count: a person acts with their best role.
+  R.extra = (house, users) => {
+    const out = {};
+    for (const u of new Set(users)) {
+      const list = db.all('SELECT role FROM member_roles WHERE house = ? AND user = ?', house, u).map((r) => r.role);
+      if (list.length) out[u] = list;
+    }
+    return out;
+  };
+  R.outranks = (house, actor, target) => outranks(R.roles(house), R.members(house, [actor, target]), actor, target, R.extra(house, [actor, target]));
+  // The one role hierarchy every op uses: moderation here, member and role
+  // management below, nicknames, role order and extra roles in server/places.js.
+  M.outranks = R.outranks;
+  M.roleBelow = (house, actor, role) => roleBelow(R.roles(house), R.members(house, [actor]), actor, role, R.extra(house, [actor]));
+  M.rankOf = (house, user) => {
+    const roles = R.roles(house);
+    const mine = [db.get('SELECT role FROM members WHERE house = ? AND user = ?', house, user)?.role, ...(R.extra(house, [user])[user] || [])]
+      .map((id) => roles.findIndex((r) => r.id === id)).filter((i) => i >= 0);
+    return mine.length ? Math.min(...mine) : 999;
+  };
   R.accepted = (house, user) => {
     const h = db.get('SELECT screening FROM houses WHERE id = ?', house);
     if (!h?.screening) return true;
@@ -110,6 +134,16 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
     return a ? { words: json(a.words, []), links: !!a.links, action: a.action, timeoutMs: a.timeout_ms, exempt: json(a.exempt, []) } : null;
   };
   R.mods = (house, perm = 'moderate') => db.all('SELECT user FROM members WHERE house = ?', house).map((r) => r.user).filter((u) => M.can(u, house, perm));
+  // May this moderator see what happened in this conversation (a report's
+  // message, a log entry's room)? A room they can't see stays out of their
+  // queue and log. A room that's gone is for owners only: it may have been private.
+  R.seesConv = (user, house, conv) => {
+    if (!conv) return true;
+    if (M.isOwner(user, house)) return true;
+    return M.canRead(user, conv);
+  };
+  R.openReports = (house, viewer) => db.all("SELECT conv, COUNT(*) n FROM reports WHERE house = ? AND status = 'open' GROUP BY conv", house)
+    .reduce((sum, r) => sum + (R.seesConv(viewer, house, r.conv) ? r.n : 0), 0);
   R.state = (u) => {
     const blocks = db.all('SELECT other FROM blocks WHERE user = ? ORDER BY ts DESC', u).map((r) => r.other);
     const requests = db.all('SELECT dm, by, ts FROM dm_requests WHERE user = ? AND declined IS NULL ORDER BY ts DESC', u);
@@ -129,6 +163,32 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
     return !!(dm && R.pending(dm, user));
   };
   M.ringBlocked = (caller, user, dm) => R.either(caller, user) || !!(dm && R.pending(dm, user));
+  // Taking part in a conversation without writing (voting in a poll,
+  // server/messaging.js): a timeout, unaccepted rules, or a block in a
+  // one-to-one conversation stop it, as they stop reacting.
+  M.mayTakePart = (user, conv, what) => {
+    const house = R.houseOf(conv);
+    if (house && M.isMember(house, user)) guard(user, house, what);
+    const dm = house ? null : R.dmOf(conv);
+    if (dm && M.inDm(dm, user)) {
+      const members = R.dmMembers(dm);
+      const other = members.length === 2 && members.find((u) => u !== user);
+      if (other && R.either(user, other)) fail('You can’t do that with this person.');
+    }
+  };
+  // Forum post titles (server/places.js): refused or timed out like a message;
+  // a "flag" hit comes back as the note, and the post is filed with fileFlag.
+  M.wordFilter = (user, house, conv, body) => filter(user, house, conv, body);
+  M.fileFlag = ({ house, user, msg, conv, body, note }) => fileReport({ house, by: null, user, msg, conv, body, reason: 'filter', note });
+  // Words that go out with a message without being its text (poll answers, a
+  // forwarded message, server/messaging.js): the same filter, for the house
+  // the conversation is in. Returns what to flag afterwards, or null.
+  M.filterExtra = (user, conv, body) => {
+    const house = R.houseOf(conv);
+    if (!house || !body || !M.isMember(house, user)) return null;
+    const note = filter(user, house, conv, body);
+    return note ? { house, note } : null;
+  };
 
   // The house log.
   function audit(house, actor, action, target = null, detail = null) {
@@ -149,8 +209,9 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
     const cfg = R.automod(house);
     if (!cfg || (!cfg.words.length && !cfg.links)) return null;
     if (M.isOwner(user, house) || M.can(user, house, 'roles')) return null;
-    const role = db.get('SELECT role FROM members WHERE house = ? AND user = ?', house, user)?.role;
-    if (role && cfg.exempt.includes(role)) return null;
+    // Exempt roles count every role the person has (extra roles from server/places.js too).
+    const roles = [db.get('SELECT role FROM members WHERE house = ? AND user = ?', house, user)?.role, ...(R.extra(house, [user])[user] || [])];
+    if (roles.some((r) => r && cfg.exempt.includes(r))) return null;
     const hit = filterHit(body, cfg);
     if (!hit) return null;
     const what = hit.link ? 'Links aren’t allowed' : 'That message has a word this house doesn’t allow';
@@ -172,8 +233,9 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
     const rid = newId('rep');
     db.run('INSERT INTO reports (id, house, by, user, msg, conv, text, reason, note, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       rid, house, by, user, msg, conv, (body || '').slice(0, 2000), reason, note || '', Date.now());
-    // Moderators' house view carries the count of open reports.
-    for (const u of R.mods(house)) hub.sendHouse(u, house);
+    // Moderators' house view carries the count of open reports (only the ones
+    // they may see, so only they hear about it).
+    for (const u of R.mods(house)) if (R.seesConv(u, house, conv)) hub.sendHouse(u, house);
     return rid;
   }
 
@@ -191,7 +253,7 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
       if (M.can(viewer, houseId, 'timeout')) {
         v.house.timeouts = Object.fromEntries(db.all('SELECT user, until FROM timeouts WHERE house = ? AND until > ?', houseId, Date.now()).map((r) => [r.user, r.until]));
       }
-      if (M.can(viewer, houseId, 'moderate')) v.house.reportsOpen = db.get("SELECT COUNT(*) n FROM reports WHERE house = ? AND status = 'open'", houseId).n;
+      if (M.can(viewer, houseId, 'moderate')) v.house.reportsOpen = R.openReports(houseId, viewer);
     }
     return v;
   };
@@ -247,6 +309,8 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
   wrap('msg.edit', (c, d, base) => {
     const house = R.houseOf(d.conv);
     let flag = null;
+    // A timeout stops rewriting old messages as well as writing new ones.
+    if (house && M.isMember(house, c.user)) guard(c.user, house, 'edit messages');
     if (house && M.isMember(house, c.user) && typeof d.text === 'string') flag = filter(c.user, house, d.conv, d.text);
     const r = base(c, d);
     if (flag) fileReport({ house, by: null, user: c.user, msg: d.id, conv: d.conv, body: d.text, reason: 'filter', note: flag });
@@ -552,6 +616,8 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
     db.run('INSERT OR REPLACE INTO bans (house, user, by, reason, ts) VALUES (?, ?, ?, ?, ?)', h.id, t.id, c.user, reason, Date.now());
     db.run('DELETE FROM personal_invites WHERE house = ? AND user = ?', h.id, t.id);
     db.run('DELETE FROM rule_accepts WHERE house = ? AND user = ?', h.id, t.id);
+    // Webhook addresses they made stop working: they still know the secret.
+    db.run("DELETE FROM hooks WHERE house = ? AND by = ? AND kind = 'webhook'", h.id, t.id);
     let deleted = 0;
     if (window) {
       const rooms = db.all('SELECT id FROM rooms WHERE house = ?', h.id).map((r) => r.id);
@@ -642,14 +708,14 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
     if (to.id === room.id) return {};
     hub.voiceLeave(t.id);
     hub.toUser(t.id, 'voice.moved', { room: room.id, to: to.id, name: to.name });
-    audit(room.house, c.user, 'voice.move', t.id, { from: room.name, to: to.name });
+    audit(room.house, c.user, 'voice.move', t.id, { from: room.name, to: to.name, fromId: room.id, toId: to.id });
     return {};
   };
   ops['mod.disconnect'] = (c, d) => {
     const { t, room } = inVoiceHere(c, d);
     hub.toUser(t.id, 'voice.kicked', { room: room.id, reason: 'moderator' });
     hub.voiceLeave(t.id);
-    audit(room.house, c.user, 'voice.disconnect', t.id, { room: room.name });
+    audit(room.house, c.user, 'voice.disconnect', t.id, { room: room.name, roomId: room.id });
     return {};
   };
 
@@ -689,7 +755,9 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
     const h = houseRow(d.house);
     need(c.user, h.id, 'moderate', 'see reports');
     const open = d.status !== 'closed';
-    const rows = db.all(`SELECT * FROM reports WHERE house = ? AND ${open ? "status = 'open'" : "status != 'open'"} ORDER BY ts DESC LIMIT 200`, h.id);
+    // Reports from rooms this moderator can't see aren't theirs to read.
+    const rows = db.all(`SELECT * FROM reports WHERE house = ? AND ${open ? "status = 'open'" : "status != 'open'"} ORDER BY ts DESC LIMIT 1000`, h.id)
+      .filter((r) => R.seesConv(c.user, h.id, r.conv)).slice(0, 200);
     const ids = rows.flatMap((r) => [r.by, r.user, r.handled_by]).filter(Boolean);
     return {
       reports: rows.map((r) => ({
@@ -703,10 +771,11 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
   ops['report.resolve'] = (c, d) => {
     const r = db.get('SELECT * FROM reports WHERE id = ?', id(d.id, 'report')) || fail('That report doesn’t exist.');
     need(c.user, r.house, 'moderate', 'handle reports');
+    if (!R.seesConv(c.user, r.house, r.conv)) fail('That report doesn’t exist.');
     const status = oneOf(d.status, ['resolved', 'dismissed', 'open'], 'That status');
     db.run('UPDATE reports SET status = ?, handled_by = ?, handled_ts = ? WHERE id = ?', status, status === 'open' ? null : c.user, status === 'open' ? null : Date.now(), r.id);
     audit(r.house, c.user, `report.${status}`, r.user, { reason: r.reason });
-    for (const u of R.mods(r.house)) hub.sendHouse(u, r.house);
+    for (const u of R.mods(r.house)) if (R.seesConv(u, r.house, r.conv)) hub.sendHouse(u, r.house);
     return {};
   };
 
@@ -721,10 +790,32 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
     if (d.before != null) { where.push('id < ?'); params.push(Number.isSafeInteger(d.before) ? d.before : fail('That page isn’t valid.')); }
     const rows = db.all(`SELECT * FROM audit WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT ${AUDIT_PAGE + 1}`, ...params);
     const more = rows.length > AUDIT_PAGE;
-    const list = rows.slice(0, AUDIT_PAGE).map((r) => ({ id: r.id, ts: r.ts, actor: r.actor, action: r.action, target: r.target, detail: json(r.detail, null) }));
+    const list = rows.slice(0, AUDIT_PAGE).map((r) => ({ id: r.id, ts: r.ts, actor: r.actor, action: r.action, target: r.target, detail: redact(c.user, h.id, r) }));
     const people = list.flatMap((r) => [r.actor, r.target]).filter(Boolean);
     return { entries: list, more, users: Object.fromEntries(people.map((u) => [u, M.hiddenView(M.userRow(u))]).filter(([, v]) => v)) };
   };
+
+  // What a log entry says about a room or a message, for this viewer: the
+  // room's name and a deleted message's words only for people who can see
+  // that room (owners always). Older entries that don't say where are for owners.
+  const ROOM_FIELDS = ['name', 'hook', 'from', 'to', 'room', 'text'];
+  function redact(viewer, house, r) {
+    const d = json(r.detail, null);
+    if (!d) return d;
+    const owner = M.isOwner(viewer, house);
+    let places = null;
+    if (r.action === 'msg.delete') places = d.conv ? [d.conv] : null;
+    else if (r.action === 'voice.move') places = d.fromId ? [d.fromId, d.toId] : null;
+    else if (r.action === 'voice.disconnect') places = d.roomId ? [d.roomId] : null;
+    else if (/^(room|hook)\./.test(r.action)) places = [r.target];
+    else return d;
+    const ok = owner || (places && places.every((p) => R.seesConv(viewer, house, p)));
+    if (ok) return d;
+    const out = { ...d, hidden: true };
+    for (const k of ROOM_FIELDS) if (k in out) out[k] = k === 'text' ? '' : k === 'hook' ? 'a webhook' : 'a private room';
+    delete out.conv;
+    return out;
+  }
 
   // Changes made through other ops, recorded after they succeed.
   const logged = (name, fn) => wrap(name, (c, d, base) => {
@@ -733,7 +824,6 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
     try { const e = fn(c, d, r, before); if (e) audit(e.house, c.user, e.action || name, e.target ?? null, e.detail ?? null); } catch { /* the change stands */ }
     return r;
   });
-  const roomHouse = (d) => (typeof d.room === 'string' ? M.room(d.room)?.house : null);
   logged('house.update', (c, d) => ({ house: d.house, detail: { fields: Object.keys(d).filter((k) => k !== 'house') } }));
   logged('room.create', (c, d, r) => ({ house: d.house, target: r?.id, detail: { name: d.name, kind: d.kind } }));
   const roomBefore = (c, d) => (typeof d.room === 'string' ? M.room(d.room) : null);
@@ -748,12 +838,118 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
     before: (c, d) => typeof d.house === 'string' && typeof d.user === 'string' && M.isMember(d.house, d.user),
   }));
   logged('msg.delete', Object.assign((c, d, r, row) => row && row.author !== c.user && R.houseOf(row.conv) && ({
-    house: R.houseOf(row.conv), action: 'msg.delete', target: row.author, detail: { text: (row.text || '').slice(0, 200) },
+    house: R.houseOf(row.conv), action: 'msg.delete', target: row.author, detail: { text: (row.text || '').slice(0, 200), conv: row.conv },
   }), { before: (c, d) => (typeof d.id === 'string' ? M.liveMsg(d.id) : null) }));
   for (const name of ['emoji.add', 'emoji.rename', 'emoji.remove']) {
     logged(name, (c, d, r) => ({ house: d.house || (typeof d.id === 'string' ? db.get('SELECT house FROM house_emoji WHERE id = ?', d.id)?.house : null) || r?.emoji?.house, detail: { name: d.name } }));
   }
-  void roomHouse;
+
+  // The role hierarchy on member and role management, checked before the base
+  // op: someone who isn't an owner may only change people and roles below
+  // their own best role, and may only hand out roles below it.
+  const ranked = (c, d, { user, role }) => {
+    if (typeof d.house !== 'string' || !M.isMember(d.house, c.user) || M.isOwner(c.user, d.house)) return;
+    if (user && typeof d.user === 'string' && d.user !== c.user && M.isMember(d.house, d.user) && !R.outranks(d.house, c.user, d.user)) {
+      fail(M.isOwner(d.user, d.house) ? 'Only an owner can do that to an owner.' : `${first(d.user)}’s role is the same as yours or above it.`);
+    }
+    if (user && (typeof d.user !== 'string' || !M.isMember(d.house, d.user))) return; // the op says who isn't here
+    const roles = R.roles(d.house);
+    // The owner role has its own rule in the op ("Only an owner can...").
+    if (role && typeof d.role === 'string' && roles.some((r, i) => i > 0 && r.id === d.role) && !M.roleBelow(d.house, c.user, d.role)) {
+      fail('You can only change roles below your own.');
+    }
+  };
+  wrap('member.role', (c, d, base) => { ranked(c, d, { user: true, role: true }); return base(c, d); });
+  wrap('member.remove', (c, d, base) => { ranked(c, d, { user: true }); return base(c, d); });
+  wrap('role.update', (c, d, base) => { ranked(c, d, { role: true }); return base(c, d); });
+  wrap('role.delete', (c, d, base) => { ranked(c, d, { role: true }); return base(c, d); });
+
+  // Ops other modules add after this one (server/ops.js calls this last):
+  // their changes to roles, rooms, access and the house go in the log too.
+  M.auditLate = () => {
+    const roomOf = (d) => (typeof d.room === 'string' ? M.room(d.room) : null);
+    const inRoom = (fn) => Object.assign((c, d, r, room) => room && { house: room.house, target: room.id, detail: { name: room.name, ...fn(d) } }, { before: (c, d) => roomOf(d) });
+    logged('role.move', (c, d) => ({ house: d.house, target: d.role, detail: { index: d.index } }));
+    logged('member.roles', (c, d) => ({ house: d.house, target: d.user, detail: { roles: Array.isArray(d.roles) ? d.roles.slice(0, 20) : [] } }));
+    // Which of the nickname, picture and colour changed, and the nickname after.
+    const profileOf = (d) => db.get('SELECT nick, emoji, hue FROM member_profiles WHERE house = ? AND user = ?', d.house, d.user) || { nick: null, emoji: null, hue: null };
+    logged('member.profile', Object.assign((c, d, r, was) => {
+      if (!was) return null;
+      const now = profileOf(d);
+      const fields = ['nick', 'emoji', 'hue'].filter((k) => (now[k] ?? null) !== (was[k] ?? null));
+      return fields.length ? { house: d.house, target: d.user, detail: { fields, nick: now.nick ?? null } } : null;
+    }, { before: (c, d) => typeof d.house === 'string' && typeof d.user === 'string' && d.user !== c.user && profileOf(d) }));
+    logged('room.private', inRoom((d) => ({ on: !!d.on })));
+    logged('room.override', inRoom((d) => ({ type: d.type })));
+    logged('room.voice', inRoom((d) => ({ limit: d.limit, bitrate: d.bitrate })));
+    logged('forum.tags', Object.assign((c, d, r, room) => room && { house: room.house, action: 'room.tags', target: room.id, detail: { name: room.name } }, { before: (c, d) => roomOf(d) }));
+    logged('hook.create', inRoom((d) => ({ hook: typeof d.name === 'string' ? d.name.slice(0, 40) : 'Webhook' })));
+    const hookRoom = (c, d) => (typeof d.hook === 'string' ? M.room(db.get('SELECT room FROM hooks WHERE id = ?', d.hook)?.room) : null);
+    logged('hook.delete', Object.assign((c, d, r, room) => room && { house: room.house, target: room.id, detail: { name: room.name } }, { before: hookRoom }));
+    logged('hook.regen', Object.assign((c, d, r, room) => room && { house: room.house, target: room.id, detail: { name: room.name } }, { before: hookRoom }));
+    logged('onboard.set', (c, d) => ({ house: d.house, action: 'house.welcome', detail: null }));
+    logged('house.soundboard', (c, d) => ({ house: d.house, detail: { open: !!d.open } }));
+    logged('sound.add', (c, d) => ({ house: d.house, detail: { name: d.name } }));
+    const soundHouse = (c, d) => (typeof d.id === 'string' ? db.get('SELECT house, name FROM house_sounds WHERE id = ?', d.id) : null);
+    logged('sound.edit', Object.assign((c, d, r, s) => s && { house: s.house, detail: { name: d.name ?? s.name } }, { before: soundHouse }));
+    logged('sound.remove', Object.assign((c, d, r, s) => s && { house: s.house, detail: { name: s.name } }, { before: soundHouse }));
+    logged('sticker.add', (c, d) => ({ house: d.house, detail: { name: d.name } }));
+    const stickerHouse = (c, d) => (typeof d.id === 'string' ? db.get('SELECT house, name FROM house_stickers WHERE id = ?', d.id) : null);
+    logged('sticker.remove', Object.assign((c, d, r, s) => s && { house: s.house, detail: { name: s.name } }, { before: stickerHouse }));
+
+    // A timeout takes away everything but reading and leaving: no pinning,
+    // managing rooms, roles, webhooks, events, invites, emoji or members, and no
+    // moderating others, whatever the person's role (writing, reacting and voice
+    // are stopped above). Wrapped last so it holds over every module's version.
+    const str = (v) => (typeof v === 'string' ? v : null);
+    const byId = (table) => (d) => (str(d.id) ? db.get(`SELECT house FROM ${table} WHERE id = ?`, d.id)?.house : null);
+    const houseOfOp = (d) => str(d.house) || M.room(str(d.room) || '')?.house || R.houseOf(str(d.conv))
+      || (str(d.hook) ? db.get('SELECT house FROM hooks WHERE id = ?', d.hook)?.house : null)
+      || (str(d.event) ? M.eventRow?.(d.event)?.house : null) || null;
+    const custom = {
+      'forum.edit': (d) => M.room(str(d.id) ? db.get('SELECT room FROM forum_posts WHERE msg = ?', d.id)?.room || '' : '')?.house,
+      'emoji.rename': byId('house_emoji'), 'emoji.remove': byId('house_emoji'),
+      'sticker.remove': byId('house_stickers'), 'sound.edit': byId('house_sounds'), 'sound.remove': byId('house_sounds'),
+      'sound.play': byId('house_sounds'),
+      'invite.revoke': (d) => (str(d.code) ? db.get('SELECT house FROM invites WHERE code = ?', d.code)?.house : null),
+    };
+    const NO_TIMEOUT = {
+      'msg.pin': 'pin messages', 'msg.unpin': 'unpin messages', 'msg.restore': 'bring messages back', 'highlight.set': 'curate highlights',
+      'forum.edit': 'change posts', 'forum.tags': 'change tags', 'member.profile': 'change your profile here',
+      'hook.create': 'manage webhooks', 'hook.regen': 'manage webhooks', 'hook.delete': 'manage webhooks',
+      'news.follow': 'follow notice rooms', 'news.unfollow': 'follow notice rooms',
+      'event.create': 'plan events', 'event.delete': 'cancel events',
+      'room.create': 'manage rooms', 'room.update': 'manage rooms', 'room.delete': 'manage rooms', 'room.override': 'manage rooms',
+      'room.private': 'manage rooms', 'room.voice': 'manage rooms', 'room.slowmode': 'manage rooms',
+      'invite.create': 'invite people', 'invite.user': 'invite people', 'invite.revoke': 'manage invitations',
+      'house.update': 'change the house', 'house.screening': 'change the house', 'house.soundboard': 'change the house', 'onboard.set': 'change the house',
+      'emoji.add': 'manage emoji', 'emoji.rename': 'manage emoji', 'emoji.remove': 'manage emoji',
+      'sticker.add': 'manage stickers', 'sticker.remove': 'manage stickers',
+      'sound.add': 'manage sounds', 'sound.edit': 'manage sounds', 'sound.remove': 'manage sounds', 'sound.play': 'play sounds',
+      'role.create': 'manage roles', 'role.update': 'manage roles', 'role.delete': 'manage roles', 'role.move': 'manage roles',
+      'member.role': 'manage members', 'member.roles': 'manage members', 'member.remove': 'remove people',
+      'mod.kick': 'moderate', 'mod.ban': 'moderate', 'mod.unban': 'moderate', 'mod.timeout': 'moderate', 'mod.voice': 'moderate',
+      'mod.move': 'moderate', 'mod.disconnect': 'moderate', 'automod.set': 'change the filter', 'report.resolve': 'resolve reports',
+    };
+    for (const [name, what] of Object.entries(NO_TIMEOUT)) {
+      if (!ops[name]) continue;
+      wrap(name, (c, d, base) => {
+        let house = null;
+        try { house = (custom[name] || houseOfOp)(d); } catch { house = null; }
+        // mod.move and mod.disconnect name a person in a voice room, not a house.
+        if (!house && (name === 'mod.move' || name === 'mod.disconnect') && str(d.user)) house = M.room(hub.voicePlaceOf?.(d.user) || '')?.house;
+        if (house && M.isMember(house, c.user) && R.timeout(house, c.user)) guard(c.user, house, what);
+        return base(c, d);
+      });
+    }
+    // Deleting someone else's message is moderating; your own stays yours to delete.
+    wrap('msg.delete', (c, d, base) => {
+      const row = str(d.id) ? M.liveMsg(d.id) : null;
+      const house = row && row.author !== c.user ? R.houseOf(row.conv) : null;
+      if (house && M.isMember(house, c.user) && R.timeout(house, c.user)) guard(c.user, house, 'remove other people’s messages');
+      return base(c, d);
+    });
+  };
 
   // ---------- Slowmode, the filter, screening ----------
   ops['room.slowmode'] = (c, d) => {

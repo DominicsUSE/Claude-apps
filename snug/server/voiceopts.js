@@ -4,7 +4,7 @@
 // - A house keeps up to 24 sounds. Each is a short WAV file (PCM, mono or
 //   stereo, 8 or 16 bit, 8 to 48 kHz), at most 512 KB and 5.2 seconds long.
 //   Browsers turn whatever file was chosen into that WAV before uploading
-//   (js/views/voiceopts-sounds.js); the length and format are read here from the
+//   (toWav in js/views/voiceopts-settings.js); the length and format are read here from the
 //   file's own header, never taken from the browser.
 // - Adding, renaming and removing sounds needs the 'sounds' permission.
 //   Playing one needs to be in a voice room of that house, not muted or
@@ -23,7 +23,7 @@ import { writeFile, unlink } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { join } from 'node:path';
 import { newId } from './model.js';
-import { limiter } from './auth.js';
+import { limiter, safeDecode } from './auth.js';
 
 export const MAX_SOUNDS = 24;
 export const MAX_SOUND_BYTES = 512 * 1024;
@@ -36,6 +36,7 @@ export const DEFAULT_BITRATE = 64;
 export const MAX_ROOM_LIMIT = 12;         // the mesh maximum (server/hub.js VOICE_MAX)
 const FILE_ID = /^f_[a-z0-9]{8,40}$/;
 const EMOJI = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|‍|️|⃣|[#*0-9])+$/u;
+// A file name header that isn't valid percent-encoding is kept as sent, never a server error.
 const json = (s, f) => { try { return s == null ? f : JSON.parse(s); } catch { return f; } };
 
 // What a WAV file holds, from its header. Null unless it is plain PCM.
@@ -275,7 +276,7 @@ export function createVoiceOptsHttp({ db, M, filesDir, sendJson, error, body, he
       const info = wavInfo(data);
       if (!info) { error(res, 415, 'Snug couldn’t read that sound. Choose an audio file again.'); return true; }
       if (info.seconds > MAX_SOUND_SECONDS) { error(res, 422, `That sound is ${info.seconds.toFixed(1)} seconds long. Sounds can be up to ${MAX_SOUND_SECONDS} seconds.`); return true; }
-      const name = (decodeURIComponent(String(req.headers['x-file-name'] || 'sound')).replace(/[\u0000-\u001f\u007f/\\]/g, '').trim() || 'sound').slice(0, 120);
+      const name = (safeDecode(String(req.headers['x-file-name'] || 'sound')).replace(/[\u0000-\u001f\u007f/\\]/g, '').trim() || 'sound').slice(0, 120);
       const id = newId('f');
       await writeFile(join(filesDir, id), data, { mode: 0o600 });
       db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',

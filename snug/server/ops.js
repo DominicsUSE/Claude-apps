@@ -12,6 +12,7 @@ import { createSafetyOps } from './safety.js'; // blocks, privacy, moderation, a
 import { createMessagingOps } from './messaging.js'; // polls, link previews, forwarding, edit history, scheduled messages, stickers
 import { createPlacesOps } from './places.js'; // room permissions, forums, stages, webhooks, folders, onboarding, templates, insights
 import { createVoiceOptsOps } from './voiceopts.js'; // soundboard, voice room limits and bitrate
+import { createAccountOps } from './account.js'; // settings sync, custom status, auto-idle, notes, sessions, two-factor, profile fields
 
 export class UserError extends Error {}
 const fail = (msg) => { throw new UserError(msg); };
@@ -609,7 +610,14 @@ export function createOps({ db, M, hub }) {
       let perms = json(role.perms, []);
       if (d.perms !== undefined && !isOwnerRole) {
         if (!Array.isArray(d.perms)) fail('Permissions are missing.');
-        perms = [...new Set(d.perms)].filter((p) => PERM_IDS.includes(p));
+        const next = [...new Set(d.perms)].filter((p) => PERM_IDS.includes(p));
+        // Nobody but an owner hands out a permission they don't hold themselves
+        // (taking one away, or keeping one an owner gave, is fine).
+        if (!M.isOwner(c.user, houseId)) {
+          const added = next.filter((p) => !perms.includes(p) && !M.can(c.user, houseId, p));
+          if (added.length) fail('You can only give a role permissions you have yourself.');
+        }
+        perms = next;
       }
       db.run('UPDATE roles SET name = ?, hue = ?, perms = ? WHERE id = ?', name, hueV, JSON.stringify(perms), role.id);
       hub.houseChanged(houseId);
@@ -946,6 +954,10 @@ export function createOps({ db, M, hub }) {
   createPlacesOps({ db, M, hub, fail, ops });
   // Voice options (server/voiceopts.js): soundboard, voice room user limit and bitrate.
   Object.assign(ops, createVoiceOptsOps({ db, M, hub, fail, ops }));
+  // Account (server/account.js): settings that follow you, custom status, auto-idle, notes, sessions, two-factor, profile fields.
+  Object.assign(ops, createAccountOps({ db, M, hub, fail, ops }));
+  // Changes made through the ops above go in the house log too (server/safety.js).
+  M.auditLate?.();
 
   return ops;
 }

@@ -221,7 +221,10 @@ export function applySnapshot(d) {
   emit();
 }
 
+// Run when someone signs out on this device (js/account.js clears their synced settings).
+export const signOutHooks = [];
 export function signedOut() {
+  for (const f of signOutHooks) { try { f(); } catch { /* the rest still runs */ } }
   local.del(KEYS.cache);
   Object.assign(S, blank());
   S.ready = false;

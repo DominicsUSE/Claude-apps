@@ -21,7 +21,6 @@ export const ROOM_PERMS = [
 export const ROOM_PERM_IDS = ROOM_PERMS.map((p) => p.id);
 export const ROOM_KINDS = ['text', 'voice', 'news', 'forum', 'stage'];
 export const VOICE_KINDS = ['voice', 'stage'];
-export const EVERYONE = '@everyone';
 
 // Limits, shared so the browser can say them before the server refuses.
 export const PLACE_LIMITS = {
@@ -192,6 +191,11 @@ export function mentionsRole(S, conv, m) {
   const h = S.houses?.[S.rooms?.[roomId]?.house];
   if (!h || !m.text || !m.text.includes('@')) return false;
   const mine = new Set([h.members?.[S.me], ...(h.extra?.[S.me] || [])]);
-  const text = m.text.toLowerCase();
-  return h.roles.some((r, i) => i > 0 && mine.has(r.id) && r.mentionable !== false && new RegExp(`(^|[^\\w])@${r.name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w])`).test(text));
+  return h.roles.some((r, i) => i > 0 && mine.has(r.id) && r.mentionable !== false && roleMentioned(m.text, r.name));
+}
+// Does this text @mention a role by name? The browser (above) and the push
+// service (server/places.js) both use it.
+export function roleMentioned(text, name) {
+  if (!text || !name || !text.includes('@')) return false;
+  return new RegExp(`(^|[^\\w])@${name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w])`).test(text.toLowerCase());
 }

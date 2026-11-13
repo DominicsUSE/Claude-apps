@@ -415,5 +415,8 @@ export function voiceDebug() {
   return {
     mode: vp().mode, graph: g ? (g.raw ? 'raw' : 'mixed') : null, trackEnabled: g?.track ? g.track.enabled : null,
     gate: g && !g.raw ? g.gate.gain.value : null, open: micOpen(), ptt: pttDown, playing, meter: { ...meter }, ctx: ctx?.state || null,
+    // The captured microphone's processing as the browser applied it, and the track that is sent (it never changes in a call).
+    mic: (() => { const t = (g?.raw ? g.out : g?.src?.mediaStream)?.getAudioTracks()[0]; const st = t?.getSettings?.() || {}; return t ? { id: t.id, noise: st.noiseSuppression, echo: st.echoCancellation, agc: st.autoGainControl } : null; })(),
+    sent: g?.track?.id || null, cue: lastCue,
   };
 }

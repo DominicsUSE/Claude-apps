@@ -1,6 +1,6 @@
 {
   "name": "snug",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "description": "A calm place for your people: houses, rooms, threads and voice.",
@@ -17,7 +17,9 @@
     "test:e2e:safety": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-safety.test.js",
     "test:e2e:messaging": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-messaging.test.js",
     "test:e2e:places": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-places.test.js",
-    "test:e2e:voice-options": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-voice-options.test.js"
+    "test:e2e:voice-options": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-voice-options.test.js",
+    "test:e2e:account": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-account.test.js",
+    "test:e2e:integration": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-integration.test.js"
   },
   "dependencies": {
     "ws": "^8.18.3"

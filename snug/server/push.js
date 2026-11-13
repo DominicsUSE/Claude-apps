@@ -143,7 +143,8 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
     if (level === 'muted') return false;
     if (missed) return true;
     const forMe = mentions(row.text, u.handle)
-      || (!!row.reply_to && db.get('SELECT author FROM messages WHERE id = ?', row.reply_to)?.author === user);
+      || (!!row.reply_to && db.get('SELECT author FROM messages WHERE id = ?', row.reply_to)?.author === user)
+      || !!M.forMeExtra?.(user, row, w); // role mentions (server/places.js), highlight words and @everyone (server/account.js)
     if (w.type === 'dm') {
       const group = db.get('SELECT COUNT(*) n FROM dm_members WHERE dm = ?', w.dm).n > 2;
       if (!(group && level === 'mentions')) return true;
@@ -175,7 +176,11 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
     else if (isGroup(w.dm)) where = `in ${dmTitle(w.dm)}`;
     // A group call that others answered is still a missed call for this
     // person: the note says so, as the conversation does.
-    const text = row.sys && missedBy(row, user) ? 'Missed call' : plain(row.text) || 'Sent an attachment';
+    // Message previews off, or streamer mode: say that something came, not what
+    // (as the open app does, js/server.js).
+    const prefs = M.prefsOf?.(user) || {};
+    const hide = prefs.preview === false || !!prefs.streamer;
+    const text = row.sys && missedBy(row, user) ? 'Missed call' : hide ? 'New message' : plain(row.text) || 'Sent an attachment';
     return {
       title: where ? `${who} ${where}` : who,
       body: text.length > PREVIEW ? `${text.slice(0, PREVIEW - 1)}…` : text,
@@ -242,7 +247,7 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
   function onRing(user, ring) {
     if (hub.connected(user)) return Promise.resolve();
     const u = M.userRow(user);
-    if (!u || u.presence === 'focus' || M.notifyOf(user, ring.dm) === 'muted') return Promise.resolve();
+    if (!u || u.presence === 'focus' || M.notifyOf(user, ring.dm) === 'muted' || M.quietHours?.(user)) return Promise.resolve();
     const subs = db.all('SELECT p.* FROM push_subs p JOIN sessions s ON s.hash = p.session AND s.expires > ? WHERE p.user = ?', Date.now(), user);
     if (!subs.length || !rate.take(user)) return Promise.resolve();
     const who = M.userRow(ring.from)?.name || 'Someone';

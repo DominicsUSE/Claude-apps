@@ -4,10 +4,10 @@
 import { html, useEffect, useState } from '../../vendor/preact-htm.js';
 import { S, emit, toast, openModal, person, jumpToMsg, closeLayer, updateHouse } from '../store.js';
 import { call } from '../server.js';
-import { can, roleOf } from '../lib/perms.js';
+import { can } from '../lib/perms.js';
 import { fmtWhen, fmtFull } from '../lib/util.js';
 import {
-  PRIVACY_DM, PRIVACY_FRIENDS, REPORT_REASONS, FILTER_ACTIONS, TIMEOUTS, SLOWMODES, INVITE_AGES, INVITE_USES, spell, left, cleanWord, MAX_WORDS,
+  PRIVACY_DM, PRIVACY_FRIENDS, REPORT_REASONS, FILTER_ACTIONS, TIMEOUTS, INVITE_AGES, INVITE_USES, spell, left, cleanWord, MAX_WORDS,
 } from '../lib/safety.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Seg, Switch, Empty } from '../ui/kit.js';
@@ -144,7 +144,7 @@ export function HouseBans({ house }) {
 // ---------- House: log ----------
 const ACTIONS = [
   ['', 'Everything'], ['member', 'Members'], ['role', 'Roles'], ['room', 'Rooms'], ['house', 'House settings'],
-  ['msg', 'Deleted messages'], ['voice', 'Voice'], ['invite', 'Invitations'], ['report', 'Reports'], ['emoji', 'Emoji'], ['automod', 'Word filter'],
+  ['msg', 'Deleted messages'], ['voice', 'Voice'], ['invite', 'Invitations'], ['report', 'Reports'], ['emoji', 'Emoji'], ['sticker', 'Stickers'], ['sound', 'Soundboard'], ['hook', 'Webhooks'], ['automod', 'Word filter'],
 ];
 function describe(e, house) {
   const t = e.target && S.users[e.target] ? person(e.target).name : null;
@@ -185,6 +185,31 @@ function describe(e, house) {
     case 'emoji.add': return `added the emoji :${d.name}:`;
     case 'emoji.rename': return `renamed an emoji to :${d.name}:`;
     case 'emoji.remove': return 'removed an emoji';
+    case 'member.roles': return `changed ${t}’s extra roles`;
+    case 'member.profile': {
+      // Older entries only had the nickname.
+      const f = d.fields || ['nick'];
+      const parts = [];
+      if (f.includes('nick')) parts.push(d.nick ? `nickname to ${d.nick}` : 'nickname back to their name');
+      if (f.includes('emoji')) parts.push('picture');
+      if (f.includes('hue')) parts.push('colour');
+      return `changed ${t}’s ${parts.join(' and ') || 'house profile'}`;
+    }
+    case 'role.move': return `moved the ${roleName(e.target)} role`;
+    case 'room.private': return d.on ? `made ${d.name} private` : `opened ${d.name} to everyone`;
+    case 'room.override': return `changed who can do what in ${d.name}`;
+    case 'room.voice': return `changed the user limit or quality of ${d.name}`;
+    case 'room.tags': return `changed the tags in ${d.name}`;
+    case 'house.welcome': return 'changed the welcome and interests';
+    case 'hook.create': return `made the webhook ${d.hook} in ${d.name}`;
+    case 'hook.delete': return `deleted a webhook in ${d.name}`;
+    case 'hook.regen': return `gave a webhook in ${d.name} a new address`;
+    case 'house.soundboard': return d.open ? 'opened the soundboard to everyone' : 'kept the soundboard to some roles';
+    case 'sound.add': return `added the sound ${d.name}`;
+    case 'sound.edit': return `edited the sound ${d.name}`;
+    case 'sound.remove': return `removed the sound ${d.name}`;
+    case 'sticker.add': return `added the sticker ${d.name}`;
+    case 'sticker.remove': return `removed the sticker ${d.name}`;
     default: return e.action;
   }
 }
@@ -227,7 +252,7 @@ export function HouseLog({ house }) {
         ${more && html`<button class="btn safe-more" onClick=${loadMore}>Show older</button>`}`}`;
 }
 
-// ---------- House: filter, slowmode and screening ----------
+// ---------- House: filter and screening (slowmode is per room, on Rooms and access) ----------
 export function HouseFilter({ house }) {
   const h = S.houses[house];
   const [state, reload] = useLoad('automod.get', { house });
@@ -245,12 +270,11 @@ export function HouseFilter({ house }) {
     setDraft('');
     save({ words: [...cfg.words, ...words.map(cleanWord)] });
   };
-  const rooms = Object.values(S.rooms).filter((r) => r.house === house && r.kind !== 'voice');
   const rulesSet = !!(h.rules || '').trim();
   const screening = (on) => call('house.screening', { house, on }).catch((e) => toast(err(e)));
   return html`
     <h1>Filter and screening</h1>
-    <p class="lead">Keep words and links out, slow busy rooms down, and ask newcomers to accept the rules first. Owners and roles that manage the house skip the filter.</p>
+    <p class="lead">Keep words and links out, and ask newcomers to accept the rules first. Owners and roles that manage the house skip the filter. Slowmode is set per room, on Rooms and access.</p>
     <div class="set-head">Rules and screening</div>
     <${Row} label="House rules" hint="One rule per line. Shown on the house page, in Discover, and to newcomers when screening is on." top>
       <textarea class="field safe-rules" rows="5" maxlength="2000" aria-label="House rules" placeholder="Be kind.\nNo spam or selling."
@@ -292,15 +316,7 @@ export function HouseFilter({ house }) {
           <input type="checkbox" checked=${cfg.exempt.includes(r.id)} onChange=${(e) => save({ exempt: e.target.checked ? [...cfg.exempt, r.id] : cfg.exempt.filter((x) => x !== r.id) })} />${r.name}
         </label>`)}</div>
       <//>`}
-    ${can(S, house, 'rooms') && html`
-      <div class="set-head">Slowmode</div>
-      <p class="hint" style="margin:8px 0">How often each person can write in a room. Roles that can remove messages skip it.</p>
-      ${rooms.map((r) => html`<${Row} key=${r.id} label=${r.name}>
-        <select class="field" aria-label=${`Slowmode in ${r.name}`} value=${r.slowmode || 0}
-          onChange=${(e) => call('room.slowmode', { room: r.id, seconds: Number(e.target.value) }).catch((x) => toast(err(x)))}>
-          ${SLOWMODES.map((s) => html`<option key=${s} value=${s}>${s ? spell(s) : 'Off'}</option>`)}
-        </select>
-      <//>`)}`}`;
+`;
 }
 
 // ---------- House: invitations ----------
@@ -353,4 +369,3 @@ export const SAFETY_PAGES = [
   { id: 'invites', label: 'Invitations', icon: 'link', words: 'invites links expiry uses revoke', need: (h) => can(S, h, 'roles') },
 ];
 export const SAFETY_VIEWS = { reports: HouseReports, bans: HouseBans, log: HouseLog, filter: HouseFilter, invites: HouseInvites };
-void roleOf;
