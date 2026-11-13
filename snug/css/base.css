@@ -339,8 +339,6 @@ button.avatar { cursor: pointer; }
 .toast .btn:hover { background: var(--hover); }
 .toast .btn:active { background: var(--press); }
 .toast .ib { color: var(--text-2); }
-.toast.ok { border-left: 3px solid var(--mint); }
-.toast.bad { border-left: 3px solid var(--error); }
 .toast.note { background: var(--surface-float); border-color: var(--line); padding: var(--s-2) var(--s-3); cursor: pointer; align-items: flex-start; width: min(360px, 100%); --bg: var(--surface-float); text-align: left; transition: background var(--m-fast) var(--ease-in-out); }
 .toast.note:hover { background: var(--surface-hover); --bg: var(--bg-3); }
 .toast.note .avatar { --sz: var(--av-sm); }
