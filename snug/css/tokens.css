@@ -10,9 +10,11 @@
       column, panes, menus, message hover, bg-3 hover and inputs, bg-4 strong
       (selected nav row, popovers, secondary button).
   - One shadow family, only on floating layers (menus, popovers, dialogs).
-  - Coral (--brand) is the brand and "for you": primary button, the 3px
+  - Violet (--brand) is the brand and "for you": primary button, the 3px
     active indicator, count badges, the "New" separator, the edge of a
-    mention. Never a large coral background behind text.
+    mention. Never a large violet background behind text. The mark itself is
+    #8B5CF6; the token is lifted in dark themes (near-black text on it) and
+    deepened in light ones (white text on it) so button text reaches 4.5:1.
   - Mint online/success/speaking. Amber idle/warning/events. Cyan info and
     links. Rose reactions you added. Error red destructive/failed only.
   - People, roles and houses choose a hue only. Lightness and chroma belong to
@@ -131,16 +133,16 @@
   --line-strong: #393B3D;
   --line-subtle: #202223;
 
-  --brand: #F05A47;
-  --brand-hover: #FF6B57;
-  --brand-press: #DD4E3C;        /* nudged from #D94A39: on-brand text passes 4.5:1 */
-  --brand-soft: #3A211E;
-  --brand-ink: #FF7A68;            /* coral as text, on bg-1/2 and brand-soft */
-  --on-brand: #111211;             /* text on a coral fill */
+  --brand: #996FF7;                /* #8B5CF6 (the mark) lifted 4 points: near-black text reads 5.34:1 */
+  --brand-hover: #A37EF8;
+  --brand-press: #9266F7;          /* darker, and on-brand text still passes 4.5:1 (4.89) */
+  --brand-soft: #2B243C;
+  --brand-ink: #B191F9;            /* violet as text, on bg-1..3 and brand-soft */
+  --on-brand: #111211;             /* text on a violet fill (white fails: 3.52) */
   /* Accent: the person's choice for controls (primary button, selected edge,
-     switches, active tab). Coral by default; js/account.js sets these inline
+     switches, active tab). Violet by default; js/account.js sets these inline
      from accentRamp (js/lib/colour.js) when another accent is picked, so
-     fills keep 3:1 on bg-1 and accent text 4.5:1. --brand stays coral. */
+     fills keep 3:1 on bg-1 and accent text 4.5:1. --brand stays violet. */
   --accent: var(--brand); --accent-hover: var(--brand-hover); --accent-press: var(--brand-press);
   --accent-soft: var(--brand-soft); --accent-ink: var(--brand-ink); --on-accent: var(--on-brand);
 
@@ -158,7 +160,7 @@
   --hover: rgb(244 241 237 / 0.05);   /* state layer for controls on any surface */
   --press: rgb(244 241 237 / 0.09);
   --scrim: rgb(0 0 0 / 0.56);
-  --selection: rgb(240 90 71 / 0.32);
+  --selection: rgb(153 111 247 / 0.32);
 
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.18);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.24);
@@ -180,7 +182,7 @@
     --bg-0: #E9E6E1; --bg-1: #FBFAF8; --bg-2: #F3F1ED; --bg-3: #ECE9E4; --bg-4: #E2DED8;
     --text-1: #1A1817; --text-2: #57534E; --text-3: #6C6762; --text-disabled: #A39E97; --text-inverse: #FBFAF8;
     --line: #E2DED8; --line-strong: #CFCAC3; --line-subtle: #ECE9E4;
-    --brand: #E04B38; --brand-hover: #EC5A46; --brand-press: #C93F2E; --brand-soft: #FBE3DE; --brand-ink: #B5402F; --on-brand: #111211;
+    --brand: #763FF4; --brand-hover: #6C31F4; --brand-press: #6222F3; --brand-soft: #EBE4F8; --brand-ink: #6D28D9; --on-brand: #FFFFFF;
     --mint: #1F8F6E; --mint-soft: color-mix(in srgb, #1F8F6E 12%, #FBFAF8);
     --amber: #A86F0D; --amber-soft: color-mix(in srgb, #A86F0D 12%, #FBFAF8);
     --mint-ink: #156E54; --amber-ink: #8C5C08;
@@ -192,7 +194,7 @@
     --btn2-hover: #D9D5CE; --btn2-press: #D0CBC4;
     --hover: rgb(26 24 23 / 0.05); --press: rgb(26 24 23 / 0.09);
     --scrim: rgb(26 24 23 / 0.36);
-    --selection: rgb(224 75 56 / 0.22);
+    --selection: rgb(118 63 244 / 0.22);
     --shadow-sm: 0 2px 8px rgba(26, 24, 23, 0.08);
     --shadow-md: 0 8px 24px rgba(26, 24, 23, 0.12);
     --shadow-lg: 0 16px 48px rgba(26, 24, 23, 0.18);
@@ -206,7 +208,7 @@
   --bg-0: #E9E6E1; --bg-1: #FBFAF8; --bg-2: #F3F1ED; --bg-3: #ECE9E4; --bg-4: #E2DED8;
   --text-1: #1A1817; --text-2: #57534E; --text-3: #6C6762; --text-disabled: #A39E97; --text-inverse: #FBFAF8;
   --line: #E2DED8; --line-strong: #CFCAC3; --line-subtle: #ECE9E4;
-  --brand: #E04B38; --brand-hover: #EC5A46; --brand-press: #C93F2E; --brand-soft: #FBE3DE; --brand-ink: #B5402F; --on-brand: #111211;
+  --brand: #763FF4; --brand-hover: #6C31F4; --brand-press: #6222F3; --brand-soft: #EBE4F8; --brand-ink: #6D28D9; --on-brand: #FFFFFF;
   --mint: #1F8F6E; --mint-soft: color-mix(in srgb, #1F8F6E 12%, #FBFAF8);
   --amber: #A86F0D; --amber-soft: color-mix(in srgb, #A86F0D 12%, #FBFAF8);
     --mint-ink: #156E54; --amber-ink: #8C5C08;
@@ -218,7 +220,7 @@
   --btn2-hover: #D9D5CE; --btn2-press: #D0CBC4;
   --hover: rgb(26 24 23 / 0.05); --press: rgb(26 24 23 / 0.09);
   --scrim: rgb(26 24 23 / 0.36);
-  --selection: rgb(224 75 56 / 0.22);
+  --selection: rgb(118 63 244 / 0.22);
   --shadow-sm: 0 2px 8px rgba(26, 24, 23, 0.08);
   --shadow-md: 0 8px 24px rgba(26, 24, 23, 0.12);
   --shadow-lg: 0 16px 48px rgba(26, 24, 23, 0.18);

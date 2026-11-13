@@ -1,6 +1,6 @@
 /* Safety, privacy and moderation (js/views/safety.js, js/views/safety-settings.js).
    Tokens only. Blocked things are quiet grey, warnings amber, information cyan;
-   destructive actions use the error colour. Coral stays for "for you". */
+   destructive actions use the error colour. Violet stays for "for you". */
 
 /* A message from someone you blocked, folded away. */
 .msg.blocked-msg { min-height: 0; }

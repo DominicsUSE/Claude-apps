@@ -73,7 +73,7 @@ const msg = (page, text) => page.locator('.main .msg', { hasText: text });
 const loaded = (loc) => loc.evaluate((img) => img.complete && img.naturalWidth > 0);
 
 // A real PNG, w by h pixels of one colour, made here so the test needs no fixture.
-function png(w, h, rgb = [240, 90, 71]) {
+function png(w, h, rgb = [139, 92, 246]) {
   const chunk = (type, data) => {
     const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
     const td = Buffer.concat([Buffer.from(type, 'latin1'), data]);

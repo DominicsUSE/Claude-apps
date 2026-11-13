@@ -225,7 +225,7 @@ test('whiteboard: only people in the voice place draw and see it; strokes are ch
     { points: [[0.5]], colour: 'mint', width: 2 },
     { points: 'nope', colour: 'mint', width: 2 },
     { points: line, colour: '#ff0000', width: 2 },
-    { points: line, colour: 'coral', width: 2 },
+    { points: line, colour: 'violet', width: 2 }, // the brand: never a drawing colour
     { points: line, colour: 'mint', width: 5 },
     { points: line, colour: 'mint', width: 1.5 },
   ];

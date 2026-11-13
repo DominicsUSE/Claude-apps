@@ -25,7 +25,7 @@ const post = (path, body, cookie) => fetch(base + path, {
   method: 'POST', headers: { 'content-type': 'application/json', origin: base, ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body),
 });
 // A real PNG of one colour, w x h.
-function png(w, h, rgb = [240, 90, 71]) {
+function png(w, h, rgb = [139, 92, 246]) {
   const table = Array.from({ length: 256 }, (_, k) => { let c = k; for (let i = 0; i < 8; i++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
   const crc = (buf) => { let c = 0xffffffff; for (const b of buf) c = table[(c ^ b) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
   const chunk = (type, data) => {

@@ -8,6 +8,7 @@ import { useLayoutEffect, useState } from '../vendor/preact-htm.js';
 import { uid } from './lib/util.js';
 import { plain } from './lib/format.js';
 import { unreadOf, isThread, roomIds } from './lib/attention.js';
+import { upgradePrefs } from './lib/account.js';
 
 export const PAGE = 40;
 const KEYS = { prefs: 'snug.prefs', drafts: 'snug.drafts', cache: 'snug.cache', last: 'snug.last' };
@@ -62,7 +63,7 @@ export const S = {
   ...blank(),
   auth: 'checking',      // 'checking' | 'out' | 'in' | 'unreachable'
   ready: false,          // true once there is data to show, from the server or the device cache
-  prefs: { ...DEFAULT_PREFS, ...(local.get(KEYS.prefs) || {}) },
+  prefs: { ...DEFAULT_PREFS, ...(upgradePrefs(local.get(KEYS.prefs)) || {}) },
   drafts: local.get(KEYS.drafts) || {},
   typing: {}, speaking: {}, call: null, peers: {},
   // Calls in direct conversations (js/calls.js): each live call's details by

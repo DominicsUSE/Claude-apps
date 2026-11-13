@@ -8,7 +8,7 @@ import { needsMe, forMe, attention, levelOf, levelsFor, unreadOf, totalNeeds } f
 import { parseQuery, runSearch, setOp } from '../js/lib/search.js';
 import { can, canPost } from '../js/lib/perms.js';
 import { seed } from '../js/seed.js';
-import { MIN, DAY, HUES, hueOf } from '../js/lib/util.js';
+import { MIN, DAY, HUES, RETIRED_HUES, hueOf } from '../js/lib/util.js';
 import {
   TOPICS, friendsOnline, friendsList, friendRequests, activeConversations, liveVoice, upcomingEvents, eventState,
   mutualHouses, greeting, cleanInterests, safeLink,
@@ -125,9 +125,9 @@ test('calls: a missed call needs me, even in a quiet group; a call I took part i
 
 test('chosen colours stay clear of the colours that carry meaning', () => {
   // OKLCH hues of the semantic colours, dark and light themes: error #E05A5A 23 /
-  // #C93838 25, brand coral #F05A47 30, amber #A86F0D 73 / #E8B65A 81,
-  // mint #1F8F6E 168 / #58C7A5 170.
-  const reserved = [23, 25, 30, 73, 81, 168, 170];
+  // #C93838 25, amber #A86F0D 73 / #E8B65A 81, mint #1F8F6E 168 / #58C7A5 170,
+  // brand violet #763FF4 289 / mark #8B5CF6 293 / #996FF7 295 / ink #B191F9 297.
+  const reserved = [23, 25, 73, 81, 168, 170, 289, 293, 295, 297];
   const gap = (a, b) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
   for (const [h, name] of HUES) {
     assert.ok(name && !/^Hue/.test(name));
@@ -135,7 +135,9 @@ test('chosen colours stay clear of the colours that carry meaning', () => {
   }
   for (let h = 0; h < 360; h += 5) assert.ok(HUES.some(([v]) => v === hueOf(h)));
   assert.equal(hueOf(165), 142);
-  assert.equal(hueOf(30), 350, 'an old coral choice shows as pink, never as the brand');
+  assert.equal(hueOf(30), 350, 'a coral hue shows as pink');
+  assert.equal(hueOf(318), 335, 'a stored Plum (retired: too near the violet brand) shows as clay rose');
+  assert.ok(!HUES.some(([v]) => v === 318) && RETIRED_HUES.includes(318));
   assert.equal(hueOf(null), null);
 });
 
@@ -584,7 +586,7 @@ test('account: QR codes match a reference encoder module for module, and pick a 
 
 test('account: settings rules: defaults, merging, clearing a status, device names', () => {
   assert.equal(PREF_DEFAULTS.theme, 'system');
-  assert.equal(PREF_DEFAULTS.tone, 'coral', 'coral stays the default tone');
+  assert.equal(PREF_DEFAULTS.tone, 'violet', 'violet (the brand) is the default tone');
   const c = cleanPrefs({ theme: 'midnight', sidebarW: 300, quiet: { on: true, from: 1320, to: 420, tz: -60, extra: 1 } });
   assert.deepEqual(c.quiet, { on: true, from: 1320, to: 420, tz: -60 }, 'unknown fields are dropped');
   assert.throws(() => cleanPrefs({ sidebarW: 999 }), /200 to 420/);

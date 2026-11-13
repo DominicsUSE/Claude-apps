@@ -11,7 +11,7 @@ import { S, me, setPref, toast, openLayer } from '../store.js';
 import { call } from '../server.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Seg, Switch, nameAttrs, profileColours } from '../ui/kit.js';
-import { HUES } from '../lib/util.js';
+import { HUES, hueOf } from '../lib/util.js';
 import { contrastRatio, ratioLabel, profileInk, HEX } from '../lib/colour.js';
 import {
   THEME_PRESETS, THEME_NOTES, ACCENT_PRESETS, accentHex, accentProblem, accentTokens, deriveTheme, cleanTheme, decodeTheme, themeForCode,
@@ -76,7 +76,7 @@ function Swatch({ bg, surface, text, accent }) {
 }
 const presetLook = (id) => {
   const t = THEME_PRESETS[id];
-  return { bg: t.bg1, surface: t.bg2, text: t.text1, accent: ACCENT_PRESETS.coral[t.base] };
+  return { bg: t.bg1, surface: t.bg2, text: t.text1, accent: ACCENT_PRESETS.violet[t.base] };
 };
 function ThemeCards() {
   const p = effectivePrefs();
@@ -224,7 +224,7 @@ function AccentPicker() {
   return html`<div style="display:grid;gap:var(--s-2)">
     <div class="ap-accents" role="radiogroup" aria-label="Accent colour">
       ${Object.entries(ACCENT_PRESETS).map(([id, a]) => html`<button key=${id} type="button" role="radio" class="ap-accent" data-accent=${id}
-        aria-checked=${String(p.accent === id)} style=${`--c:${accentHex(id, th.base)}`} onClick=${() => choose(id)}><i aria-hidden="true"></i>${a.label}${id === 'coral' ? ' (Snug)' : ''}</button>`)}
+        aria-checked=${String(p.accent === id)} style=${`--c:${accentHex(id, th.base)}`} onClick=${() => choose(id)}><i aria-hidden="true"></i>${a.label}${id === 'violet' ? ' (Snug)' : ''}</button>`)}
       <button type="button" role="radio" class="ap-accent" data-accent="custom" aria-checked=${String(custom)} style=${`--c:${valid ? hex : 'transparent'}`} onClick=${() => valid && choose(hex)}><i aria-hidden="true"></i>Custom</button>
     </div>
     <div class="ap-custom">
@@ -271,7 +271,7 @@ export function AppearancePage() {
     <${ThemeCards} />
     <${MyThemes} />
     <div class="set-head">Accent</div>
-    <${Row} label="Accent colour" hint=${customId(p.theme) ? 'Your theme has its own accent. This applies to the built-in themes.' : 'Buttons, switches, the selected row and the focus ring. Snug’s coral still marks what needs you.'} top>
+    <${Row} label="Accent colour" hint=${customId(p.theme) ? 'Your theme has its own accent. This applies to the built-in themes.' : 'Buttons, switches, the selected row and the focus ring. Snug’s violet still marks what needs you.'} top>
       <${AccentPicker} />
     <//>
     <div class="set-head">Messages</div>
@@ -485,7 +485,7 @@ const save = (patch) => call('me.update', patch).catch((e) => toast(e.offline ? 
 function HueSwatches({ label, value, onChange }) {
   return html`<div class="swatches" role="radiogroup" aria-label=${label}>
     <button class="swatch none" role="radio" aria-checked=${String(value == null)} aria-label="Theme colour" onClick=${() => onChange(null)}></button>
-    ${HUES.map(([v, name]) => html`<button key=${v} class="swatch" role="radio" style=${`--hue:${v}`} aria-checked=${String(value === v)} aria-label=${name} onClick=${() => onChange(v)}></button>`)}
+    ${HUES.map(([v, name]) => html`<button key=${v} class="swatch" role="radio" style=${`--hue:${v}`} aria-checked=${String(value != null && hueOf(value) === v)} aria-label=${name} onClick=${() => onChange(v)}></button>`)}
   </div>`;
 }
 function DecorationPicker() {
@@ -523,7 +523,7 @@ function ProfileColoursEditor() {
   };
   return html`<div style="display:grid;gap:var(--s-3);justify-items:end">
     <div class=${`ap-card-pv${card.cls}`} style=${card.style} aria-label="Profile card preview" role="img">
-      <div class="acc-banner" style=${`--hue:${u.hue}`}></div>
+      <div class="acc-banner" style=${`--hue:${hueOf(u.hue)}`}></div>
       <div class="pc-body"><b ...${nameAttrs(u)}>${u.name}</b><span>@${u.handle}</span><span>${u.about || 'A few lines about you.'}</span></div>
     </div>
     <${ColourField} id="pc-1" label="Header" value=${c[0]} onChange=${(v) => { setC([v, c[1]]); setErr(''); }} badge=${inks[0] ? html`<${Badge} ratio=${inks[0].ratio} need=${4.5} label="Text on the header" />` : html`<span class="ap-badge bad">Unreadable</span>`} />

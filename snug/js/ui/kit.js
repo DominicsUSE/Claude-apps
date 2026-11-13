@@ -55,7 +55,7 @@ export function Avatar({ user, size, presence, speaking, dim, onClick, deco = tr
     : user.emoji ? html`<span class="emo">${user.emoji}</span>`
       : html`<span class="ini">${initials(user.name)[0]}<span class="ini2">${initials(user.name).slice(1)}</span></span>`;
   const mark = presence ? html`<${Pres} user=${user} />` : null;
-  const extra = { 'data-deco-hue': decorated && user.decorationHue != null ? String(user.decorationHue) : undefined };
+  const extra = { 'data-deco-hue': decorated && user.decorationHue != null ? String(hueOf(user.decorationHue)) : undefined };
   const hov = user.imgAnim ? { onPointerEnter: () => setHover(true), onPointerLeave: () => setHover(false), onFocus: () => setHover(true), onBlur: () => setHover(false) } : {};
   const ring = decorated ? html`<${Decoration} user=${user} />` : null;
   if (onClick) return html`<button class=${cls} style=${style} ...${extra} ...${hov} onClick=${onClick} aria-label=${`${user.name}, open profile`}>${face}${ring}${mark}</button>`;
@@ -70,7 +70,7 @@ export function nameAttrs(u) {
   return {
     'data-ns-font': ns.font && ns.font !== 'inter' ? ns.font : undefined,
     'data-ns-weight': ns.weight === 'bold' ? 'bold' : undefined,
-    'data-ns-hue': ns.hue != null ? String(ns.hue) : undefined,
+    'data-ns-hue': ns.hue != null ? String(hueOf(ns.hue)) : undefined,
   };
 }
 // Profile colours on a card: a class and the custom properties, or nothing.

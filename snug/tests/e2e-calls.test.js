@@ -205,7 +205,7 @@ test('nobody answers: after the ring times out the caller sees "No answer", the 
   await robin.locator('.call-strip.ended.no-answer:has-text("No answer")').waitFor();
   await robin.locator('.callline:has-text("no answer")').last().waitFor();
   assert.equal(await robin.locator('.nav .row:has-text("Ines Carvalho") .call-mark').count(), 0, 'no longer live');
-  // For Ines it is for her: a count on Messages and in the title, and a coral line.
+  // For Ines it is for her: a count on Messages and in the title, and a violet line.
   const badge = ines.locator('.rail-btn:has(.sr:text-matches("^Messages")) .rail-badge');
   await badge.waitFor();
   assert.equal(await badge.textContent(), '1');
@@ -359,7 +359,7 @@ test('no microphone: accepting fails, the call still rings here, and can be decl
   await robin.locator('.call-strip.ended.declined').waitFor();
 });
 
-test('a group call I declined is a quiet line, not a coral missed call', async () => {
+test('a group call I declined is a quiet line, not a violet missed call', async () => {
   const robin = await person('robin');
   const ines = await person('ines');
   const malik = await person('malik');

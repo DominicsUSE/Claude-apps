@@ -1,7 +1,7 @@
 /* Calls in direct conversations and groups: header buttons, the incoming-call
    screen, the strip that offers Join, the note when a call ends, and call
    records in the conversation. Tokens only. Mint means live and in-call, so
-   Accept and Join are mint; coral stays for what is for you (a missed call).
+   Accept and Join are mint; violet stays for what is for you (a missed call).
    People are circles, controls are rectangles. */
 
 /* ---------- Mint controls ----------
@@ -96,7 +96,7 @@
 .callline-sub { color: var(--text-3); }
 .callline-time { font-size: var(--t-12); color: var(--text-3); margin-left: auto; }
 .callline .btn { height: var(--h-sm); padding: 0 var(--s-3); }
-/* A call I missed is for me: coral, like a mention. */
+/* A call I missed is for me: violet, like a mention. */
 .callline.missed .callline-ic { color: var(--brand); }
 .callline.missed .callline-text b { color: var(--brand-ink); }
 .callline + .msg { margin-top: var(--s-2); }

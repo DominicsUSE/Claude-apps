@@ -43,7 +43,7 @@
           "snug/css/media.css"
         ],
         "createdAt": "2026-11-12T20:56:58.367Z",
-        "reason": "Recording indicator: blinks only while the microphone is recording a voice message, tied to live state"
+        "reason": "Dot pulses only while a real in-progress state lasts (ringing, reconnecting, recording) and stops when it ends; labelled in text"
       },
       {
         "rule": "side-tab",
@@ -62,6 +62,42 @@
         ],
         "createdAt": "2026-11-12T20:56:58.385Z",
         "reason": "News excerpt: 2px neutral quote rule before quoted message text; not a card accent"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "snug/css/messaging.css"
+        ],
+        "createdAt": "2026-11-13T13:57:47.710Z",
+        "reason": "Block-quote and forwarded-message bars: neutral 3px line marking quoted text, the standard quote affordance, not a card accent"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "snug/css/chat.css"
+        ],
+        "createdAt": "2026-11-13T13:57:47.720Z",
+        "reason": "Message-link card: neutral quote bar marks an embedded quoted message, same affordance as block quotes"
+      },
+      {
+        "rule": "pulsing-dot",
+        "value": "*",
+        "files": [
+          "snug/css/calls.css"
+        ],
+        "createdAt": "2026-11-13T13:57:47.732Z",
+        "reason": "Dot pulses only while a real in-progress state lasts (ringing, reconnecting, recording) and stops when it ends; labelled in text"
+      },
+      {
+        "rule": "pulsing-dot",
+        "value": "*",
+        "files": [
+          "snug/css/activities.css"
+        ],
+        "createdAt": "2026-11-13T13:57:47.742Z",
+        "reason": "Dot pulses only while a real in-progress state lasts (ringing, reconnecting, recording) and stops when it ends; labelled in text"
       }
     ]
   }

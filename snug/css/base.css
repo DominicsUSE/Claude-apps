@@ -45,7 +45,8 @@ a:hover { text-decoration-color: currentColor; }
 .ic { flex: none; display: block; }
 
 /* ---------- Buttons ----------
-   Secondary is the default (bg-4). Primary is coral with dark text: one per view.
+   Secondary is the default (bg-4). Primary is violet (the accent), near-black text on it in dark themes and
+   white in light ones: one per view.
    Ghost (.quiet) for low-weight actions. Destructive (.danger) outlined in red. */
 .btn {
   height: var(--h-sm); padding: 0 var(--s-3);
@@ -133,7 +134,7 @@ textarea.field { height: auto; padding: var(--s-2) var(--s-3); resize: vertical;
 .switch[aria-checked="true"]::after { transform: translateX(16px); background: var(--on-accent); }
 .switch[disabled] { opacity: 0.5; pointer-events: none; }
 
-/* Counts and dots: two levels of unread. Counts are coral: they need you. */
+/* Counts and dots: two levels of unread. Counts are violet: they need you. */
 .badge {
   min-width: 18px; height: 18px; padding: 0 5px; flex: none;
   display: inline-grid; place-items: center;
@@ -164,7 +165,7 @@ button.avatar { cursor: pointer; }
 
 /* ---------- Presence: shape first, colour second ----------
    open: mint dot. around: mint ring with a centre dot. focus: red dot with a
-   bar. away: amber half dot. offline: grey ring. live (in voice): a coral
+   bar. away: amber half dot. offline: grey ring. live (in voice): a violet
    rounded rect with sound bars. Attached to the avatar, never over the face. */
 .pres {
   --ring: var(--bg, var(--bg-1));

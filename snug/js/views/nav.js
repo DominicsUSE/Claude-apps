@@ -161,7 +161,7 @@ function Row({ icon, label, hint, sel, attn, muted, sub, live, end, onClick, onM
 
 const current = () => (S.ui.view.type === 'conv' ? S.ui.view.id : null);
 // Home's Recent list repeats places counted elsewhere (Catch up carries the
-// total), so it marks them with a plain dot instead of another coral count.
+// total), so it marks them with a plain dot instead of another violet count.
 const quietAttn = (a) => ({ needs: 0, soft: !!(a?.needs || a?.soft) });
 
 function notifyItems(kind, id, level, pos) {

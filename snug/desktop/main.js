@@ -616,8 +616,9 @@ function badgeImage(n) {
   const size = 16;
   const buf = Buffer.alloc(size * size * 4);
   const put = (x, y, [r, g, b, a]) => { if (x < 0 || y < 0 || x >= size || y >= size) return; const i = (y * size + x) * 4; buf[i] = b; buf[i + 1] = g; buf[i + 2] = r; buf[i + 3] = a; };
-  // A coral disc (Brand Coral: the count is for you) with near-black digits.
-  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) { const dx = x - 7.5, dy = y - 7.5; if (dx * dx + dy * dy <= 56) put(x, y, [0xF0, 0x5A, 0x47, 255]); }
+  // A violet disc (Brand Violet, the dark --brand #996FF7: the count is for
+  // you) with near-black digits (5.34:1).
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) { const dx = x - 7.5, dy = y - 7.5; if (dx * dx + dy * dy <= 56) put(x, y, [0x99, 0x6F, 0xF7, 255]); }
   const text = n > 9 ? "9+" : String(n);
   const w = text.length * 4 - 1;
   let x0 = Math.floor((size - w) / 2);

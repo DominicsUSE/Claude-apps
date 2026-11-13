@@ -168,7 +168,7 @@ function recordText(m) {
   const kind = c.video ? 'Video call' : 'Call';
   const took = (c.joined || []).includes(S.me);
   // I declined a group call (which went on, or rang out, for the others):
-  // history, not a missed call, so not coral and not for me.
+  // history, not a missed call, so not violet and not for me.
   if (!mine && !took && (c.declined || []).includes(S.me) && c.outcome !== 'declined') {
     return { title: `Declined ${c.video ? 'video call' : 'call'}`, sub: `from ${by}${c.outcome === 'answered' ? ` · ${dur(c.dur)}` : ''}` };
   }

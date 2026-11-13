@@ -6,13 +6,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { contrastRatio, luminance, nudge, accentRamp, inkOn, profileInk, ratioLabel, mix } from '../js/lib/colour.js';
+import { contrastRatio, luminance, nudge, accentRamp, inkOn, profileInk, ratioLabel, mix, toHsl } from '../js/lib/colour.js';
 import {
   THEME_PRESETS, THEMES, ACCENT_PRESETS, accentTokens, accentProblem, deriveTheme, cleanTheme, encodeTheme, decodeTheme, CODE_PREFIX,
   cleanNameStyle, cleanProfileColors, validThemeName,
 } from '../js/lib/theme.js';
 import { parseCombo, normCombo, matches, eventCombo, conflictOf, cleanKeys, bindings, actionFor, ACTIONS } from '../js/lib/keys.js';
-import { cleanPrefs, PREF_DEFAULTS, soundKind, soundFor, SOUND_PACKS, packOf } from '../js/lib/account.js';
+import { cleanPrefs, upgradePrefs, PREF_DEFAULTS, soundKind, soundFor, SOUND_PACKS, packOf } from '../js/lib/account.js';
 
 const css = (f) => readFileSync(fileURLToPath(new URL(`../css/${f}`, import.meta.url)), 'utf8');
 const near = (a, b, d = 0.01) => assert.ok(Math.abs(a - b) <= d, `${a} ≈ ${b}`);
@@ -34,19 +34,20 @@ test('contrast: WCAG ratios match known pairs', () => {
 test('contrast: nudging moves lightness the least it can, and refuses past the limit', () => {
   const bg = '#141516';
   const ok = (c) => contrastRatio(c, bg) >= 3;
-  assert.equal(nudge('#F05A47', ok), '#F05A47', 'already fine: unchanged');
+  assert.equal(nudge('#996FF7', ok), '#996FF7', 'already fine: unchanged');
   const dark = nudge('#3A2A60', ok, { prefer: 1 });
   assert.ok(dark && contrastRatio(dark, bg) >= 3, 'a dark purple is lightened until it passes');
   assert.equal(nudge('#151617', ok, { prefer: 1 }), null, 'near-black would need more than a small nudge');
   assert.equal(nudge('#151617', ok, { prefer: 1, max: 60 }) !== null, true, 'with a bigger allowance it could');
-  assert.equal(inkOn('#F05A47').ink, '#111211');
+  assert.equal(inkOn('#996FF7').ink, '#111211', 'dark-theme violet takes near-black text');
+  assert.equal(inkOn('#763FF4').ink, '#FFFFFF', 'light-theme violet takes white text');
   assert.equal(inkOn('#1F3A6B').ink, '#FFFFFF');
 });
 
 test('accents: every preset works on every built-in theme; ramps pass the rules; unreadable hexes are refused', () => {
   for (const [a] of Object.entries(ACCENT_PRESETS)) {
     for (const [id, t] of Object.entries(THEME_PRESETS)) {
-      const r = accentTokens(a, t.bg1, t.base) || accentRamp(ACCENT_PRESETS.coral[t.base], t.bg1);
+      const r = accentTokens(a, t.bg1, t.base) || accentRamp(ACCENT_PRESETS.violet[t.base], t.bg1);
       assert.ok(r, `${a} on ${id}`);
       assert.ok(contrastRatio(r['--accent'], t.bg1) >= 3, `${a} fill on ${id}`);
       assert.ok(contrastRatio(r['--accent-hover'], t.bg1) >= 3, `${a} hover on ${id}`);
@@ -56,7 +57,9 @@ test('accents: every preset works on every built-in theme; ramps pass the rules;
       assert.ok(contrastRatio(r['--on-accent'], r['--accent']) >= 4.5, `text on ${a} on ${id}`);
     }
   }
-  assert.equal(accentTokens('coral', '#141516', 'dark'), null, 'coral is the CSS default (the brand tokens)');
+  assert.equal(accentTokens('violet', '#141516', 'dark'), null, 'violet is the CSS default (the brand tokens)');
+  assert.equal(accentTokens('coral', '#141516', 'dark'), null, 'a stale coral (the old default) also paints with the brand tokens');
+  assert.ok(!ACCENT_PRESETS.coral, 'no coral preset: it sat next to error red');
   assert.equal(accentProblem('#3A7BD5'), null);
   assert.match(accentProblem('#151617'), /Dark theme/);
   assert.match(accentProblem('#FFFFFF'), /Light theme/);
@@ -97,8 +100,26 @@ test('theme presets: each CSS block is complete and readable, and matches the ta
     assert.equal(b['bg-0'].toUpperCase(), THEME_PRESETS[id].bg0, `${id}: bg-0 matches`);
     assert.equal(b['text-1'].toUpperCase(), THEME_PRESETS[id].text1, `${id}: text-1 matches`);
     if (id !== 'dark') {
-      // Coral stays the brand and the semantic colours stay legible as fills.
+      // Violet stays the brand and the semantic colours stay legible as fills.
       for (const k of ['brand', 'mint', 'amber', 'cyan', 'rose']) assert.ok(b[k] && contrastRatio(b[k], b['bg-1']) >= 3, `${id}: ${k} as a fill`);
+    }
+    // The brand ramp: text on every fill state 4.5:1, fills 3:1 on every
+    // surface, violet as text 4.5:1 on the surfaces and on its own tint.
+    const r = (a, c) => contrastRatio(b[a], b[c]);
+    for (const f of ['brand', 'brand-hover', 'brand-press']) assert.ok(r('on-brand', f) >= 4.5, `${id}: on-brand on ${f} is ${r('on-brand', f).toFixed(2)}`);
+    for (const s of ['bg-0', 'bg-1', 'bg-2', 'bg-3', 'bg-4']) assert.ok(r('brand', s) >= 3, `${id}: brand on ${s} is ${r('brand', s).toFixed(2)}`);
+    for (const s of ['bg-1', 'bg-2', 'bg-3', 'brand-soft']) assert.ok(r('brand-ink', s) >= 4.5, `${id}: brand-ink on ${s} is ${r('brand-ink', s).toFixed(2)}`);
+    // Your @mention chip (css/stream.css): violet into bg-1, 20% on hover and
+    // 22% inside a message that mentions you; its violet text still 4.5:1.
+    for (const p of [0.20, 0.22]) {
+      const chip = mix(b['bg-1'], b.brand, p);
+      assert.ok(contrastRatio(b['brand-ink'], chip) >= 4.5, `${id}: brand-ink on the ${p * 100}% mention chip is ${contrastRatio(b['brand-ink'], chip).toFixed(2)}`);
+    }
+    // Violet never passes for a link, a reaction or an error: a clear hue step
+    // (HSL) from cyan, the link colour, rose and red in every theme.
+    const hue = (c) => toHsl(c)[0], gap = (x, y) => Math.min(Math.abs(x - y), 360 - Math.abs(x - y));
+    for (const k of ['cyan', 'link', 'rose', 'error', 'mint', 'amber']) {
+      if (b[k]) assert.ok(gap(hue(b.brand), hue(b[k])) >= 45, `${id}: brand ${b.brand} is too near ${k} ${b[k]}`);
     }
   }
   for (const t of ['ash', 'slate', 'moss', 'paper', 'sepia', 'contrast']) assert.ok(THEMES.includes(t));
@@ -153,7 +174,14 @@ test('theme codes: round trip, and malformed or hostile codes are refused with a
 });
 
 test('settings rules: themes, custom themes, fonts, chat display, sounds and keys', () => {
-  assert.equal(PREF_DEFAULTS.accent, 'coral');
+  assert.equal(PREF_DEFAULTS.accent, 'violet');
+  // Coral was Snug's colour before violet: stored or sent, it means violet.
+  assert.deepEqual(cleanPrefs({ accent: 'coral' }), { accent: 'violet' });
+  assert.deepEqual(cleanPrefs({ tone: 'coral' }), { tone: 'violet' });
+  assert.deepEqual(upgradePrefs({ accent: 'coral', tone: 'coral', theme: 'dark' }), { accent: 'violet', tone: 'violet', theme: 'dark' });
+  const kept = { accent: 'mint', tone: 'cyan' };
+  assert.equal(upgradePrefs(kept), kept, 'nothing to upgrade: the same object');
+  assert.equal(upgradePrefs(null), null);
   assert.equal(PREF_DEFAULTS.gifAutoplay, 'auto');
   assert.equal(PREF_DEFAULTS.sounds, null, 'the older single sound applies until one is picked');
   assert.equal(validThemeName('custom:abcd12'), true);

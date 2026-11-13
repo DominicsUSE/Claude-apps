@@ -31,7 +31,7 @@ import { join } from 'node:path';
 import { newId } from './model.js';
 import { limiter, checkPassword, tokenHash, createSession, sessionCookie, endAllSessions } from './auth.js';
 import { imageInfo } from './messaging.js';
-import { cleanPrefs, mergePrefs, inQuiet, hasKeyword, everyonePing, MAX_PREFS_BYTES, deviceLabel } from '../js/lib/account.js';
+import { cleanPrefs, upgradePrefs, mergePrefs, inQuiet, hasKeyword, everyonePing, MAX_PREFS_BYTES, deviceLabel } from '../js/lib/account.js';
 
 export { deviceLabel };
 export const BACKUP_CODES = 10;
@@ -140,7 +140,7 @@ export function migrateAccount(db) {
 // Reads shared by the ops and the HTTP routes.
 function reads(db) {
   const R = {};
-  R.prefs = (u) => json(db.get('SELECT prefs FROM user_prefs WHERE user = ?', u)?.prefs, {});
+  R.prefs = (u) => upgradePrefs(json(db.get('SELECT prefs FROM user_prefs WHERE user = ?', u)?.prefs, {}));
   R.totp = (u) => db.get('SELECT * FROM totp WHERE user = ?', u);
   R.totpOn = (u) => !!R.totp(u)?.enabled;
   R.notes = (u) => Object.fromEntries(db.all('SELECT target, note FROM user_notes WHERE user = ?', u).map((r) => [r.target, r.note]));

@@ -12,10 +12,11 @@ import { cleanKeys } from './keys.js';
 export const PREF_RULES = {
   // A built-in theme (js/lib/theme.js THEMES) or "custom:<id>" of a saved one.
   theme: ['fn', (v, fail) => (validThemeName(v) ? v : fail('That isn’t one of the choices for theme.')), 'system'],
-  // The selection tone (selected text, the selected row's edge). Coral stays
+  // The selection tone (selected text, the selected row's edge). Violet stays
   // the brand: it is the default. Cyan and neutral are offered; mint and rose
   // are still accepted from older Snugs and show as neutral (css/account.css).
-  tone: ['enum', ['coral', 'cyan', 'mint', 'rose', 'neutral'], 'coral'],
+  // A stored 'coral' (the brand before violet) reads as violet: upgradePrefs.
+  tone: ['enum', ['violet', 'cyan', 'mint', 'rose', 'neutral'], 'violet'],
   display: ['enum', ['cozy', 'compact'], 'cozy'],
   density: ['enum', ['snug', 'regular', 'roomy'], 'regular'],
   fontScale: ['int', [12, 20], 16],
@@ -51,7 +52,7 @@ export const PREF_RULES = {
   // --- end text and messages ---
   // --- Customisation (js/lib/theme.js, js/lib/keys.js, js/views/appearance.js) ---
   // Accent: a preset name or a hex colour that stays readable on every built-in theme.
-  accent: ['fn', (v, fail) => { const why = accentProblem(v); return why ? fail(why) : (v.startsWith('#') ? v.toUpperCase() : v); }, 'coral'],
+  accent: ['fn', (v, fail) => { const why = accentProblem(v); return why ? fail(why) : (v.startsWith('#') ? v.toUpperCase() : v); }, 'violet'],
   // Up to 5 saved themes, each checked with deriveTheme (contrast rules) before it is kept.
   customThemes: ['fn', cleanThemes, []],
   codeFont: ['enum', ['mono', 'system-mono'], 'mono'],
@@ -146,10 +147,25 @@ export const MAX_PREFS_BYTES = 16 * 1024;
 
 const PLACE_ID = /^[\w:.-]{1,80}$/;
 
+// Values renamed since they were stored. Snug's own colour was coral and is
+// violet now, so a stored 'coral' accent or tone (nearly always the old
+// default) means violet. The server applies this to what it reads back and to
+// every change; the browser to what it adopts and keeps on the device.
+const RENAMED = { accent: { coral: 'violet' }, tone: { coral: 'violet' } };
+export function upgradePrefs(p) {
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return p;
+  let out = p;
+  for (const [k, map] of Object.entries(RENAMED)) {
+    if (typeof p[k] === 'string' && Object.hasOwn(map, p[k])) { if (out === p) out = { ...p }; out[k] = map[p[k]]; }
+  }
+  return out;
+}
+
 // Check a patch of settings. Unknown names and bad values are refused with a
 // sentence a person can read; null puts a setting back to its default.
 export function cleanPrefs(patch, fail = (m) => { throw new Error(m); }) {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) fail('Those settings aren’t valid.');
+  patch = upgradePrefs(patch);
   const out = {};
   for (const [k, v] of Object.entries(patch)) {
     const rule = PREF_RULES[k];

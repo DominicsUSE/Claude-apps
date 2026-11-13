@@ -8,56 +8,53 @@ Screenshots come from a seeded server at 1440x900 (desktop) and 390x844 (phone).
 
 **A place with someone in it.**
 
-Most chat apps open on an empty channel list, a feed, or a server you have to pick. None of them tell you whether anyone is around. Snug opens on people. The symbol is an open doorway with a person on its step. The first screen after sign-in is Home, which leads with who is around and where people are talking. Discover's heading is "Places with people in them."
+Most chat apps open on an empty channel list, a feed, or a server you have to pick. None of them tell you whether anyone is around. Snug opens on people. The symbol is a place with two people in it, sitting close. The first screen after sign-in is Home, which leads with who is around and where people are talking. Discover's heading is "Places with people in them."
 
-![Sign-in page: the lockup, a large Doorstep with people around it, "Your people are here.", and the sign-in form](img/desk-dark-signin.jpg)
+![Sign-in page: the lockup, a large Huddle with people around it, "Your people are here.", and the sign-in form](img/desk-dark-signin.jpg)
 
-The sign-in page is the one place the brand speaks at full volume: the lockup, a large Doorstep with a few people in their own hues around it, and one line, "Your people are here." The form is small and plain, and errors sit under the field they are about. After this page the brand recedes to a coral bar, a few badges and a dot.
+The sign-in page is the one place the brand speaks at full volume: the lockup, a large Huddle with a few people in their own hues around it, and one line, "Your people are here." The form is small and plain, and errors sit under the field they are about. After this page the brand recedes to a violet bar, a few badges and a dot.
 
 Why it works:
 
 - **It answers the question people open a chat app with.** "Is anyone here?" comes before "what did I miss?".
-- **The mark is part of the interface.** The person on the doorstep is the same circle as the presence dot on every avatar. When you see the dot, someone is there.
-- **Warmth without a mascot.** The tone comes from coral, rounded letterforms and short copy ("3 people talking", not "3 active users"). No character, no confetti, no gradient, so it stays adult.
+- **The mark is part of the interface.** The two cut-outs in the Huddle are the same circle as the presence dot on every avatar. When you see the dot, someone is there.
+- **Warmth without a mascot.** The tone comes from one violet on warm charcoal and paper, rounded letterforms and short copy ("3 people talking", not "3 active users"). No character, no confetti, no gradient, so it stays adult.
 
 ## 2. Logo
 
-The symbol is the **Doorstep**: an open archway with a person standing on its threshold. (In code it keeps its old name, `Nook`, in `js/ui/brand.js`, so callers did not change.)
+The symbol is the **Huddle**: an arch with two round cut-outs side by side at its foot, one a little larger. Two people sitting close in one place, or a pair of eyes looking out. (In code it keeps its old name, `Nook`, in `js/ui/brand.js`, so callers did not change.) It replaced the Doorstep, an open archway with a person on its threshold, in 0.7.0; `docs/brand/BRAND.md` is the short brand sheet.
 
-![The lockup on the dark ground: coral Doorstep and off-white wordmark](img/brand-lockup-dark.jpg)
+![The lockup on the dark ground: violet Huddle and off-white wordmark](img/brand-lockup-dark.jpg)
 
-![The lockup on the light ground: coral Doorstep and near-black wordmark](img/brand-lockup-light.jpg)
+![The lockup on the light ground: violet Huddle and near-black wordmark](img/brand-lockup-light.jpg)
 
 | Part | Geometry (64-unit grid, `brand/nook.svg`) |
 |---|---|
-| Archway | 52 wide by 54 tall, centred. A half-circle top (outer r 26), straight sides, a foot radius of 4 on the outer corners. |
-| Opening | 28 wide with an r 14 top, running all the way to the ground, so the band is 12 units everywhere. |
-| Person | A solid circle, r 9, centred at (32, 50): standing on the threshold line, 5 units clear of each side. |
-| Fill | Archway and person in Brand Coral. On the app icon the person is `#F4F1ED`. |
+| Arch | 48 wide by 54 tall (x 8 to 56, y 6 to 60). A half-circle top (r 24), straight sides, a foot radius of 4 on both bottom corners. |
+| Cut-outs | Circle r 8 at (23, 46) and circle r 6 at (41, 48): bottoms level, 6 units above the ground, 4 units apart. |
+| Fill | One solid shape in Brand Violet `#8B5CF6` (`fill-rule="evenodd"`); the cut-outs show the ground. |
 
-- **Open to the ground.** The old mark was a closed door with a hole in it; this one is a way in. The opening reaches the floor, so the shape reads as an entrance you could walk through, not a tombstone or a keyhole.
-- **Someone on the step.** The person stands on the threshold rather than floating in the middle, so it reads as arriving, or as someone waiting at your door. That is the product: a private place, and whether your people are in it.
-- **Built from the two shapes the interface already uses.** Places are arches, people are circles; the mark is exactly one of each, the same arch as the community tiles (with their 4-unit foot) and the same circle as a presence dot.
-- **Both parts solid, the ground showing between them.** The opening takes whatever colour is behind the mark, so it works on light and dark without a second file. Five units of clearance keep the person separate down to 16px.
-- **Why this one.** Six other directions were drawn and rasterised at 16 to 256px: two people inside an arch (read as a ghost's face), a doorway that is also a speech bubble (generic, and the tail vanished at 16px), an S drawn from two arcs (legible but anonymous), a bowl holding a person (merged into a blob at 16px), two leaning circles (too close to overlapping-circle logos) and an arch with a presence badge (read as a notification badge on a taskbar). The open archway was the boldest at 16px and the only one that is unmistakably a place with someone in it. Its one risk, a horseshoe magnet, is answered by the person on the step and the rounded feet; a magnet has neither.
+- **Two people, not a face.** Unequal circles set low read as two different people side by side, or as eyes peering out of a doorway. Two equal circles in the middle would be a socket or a ghost; this exact idea was set aside in the first round for that reason, and the unequal sizes, the low placement and the flat foot (no wavy hem) are what answer it.
+- **Built from the two shapes the interface already uses.** Places are arches, people are circles; the mark is one arch (the community tile shape, with its 4-unit foot) and two presence dots.
+- **One solid shape.** No thin band to break up at small sizes, a clean white silhouette for notification badges, and the cut-outs take whatever colour is behind the mark, so it works on light and dark without a second file.
 
-**Wordmark:** "snug", lowercase, Inter Bold, tracking -0.03em, outlined to paths. `#F4F1ED` on dark, `#141516` on light in the brand files; inside the app it is `currentColor`, so it takes `--text-1`. Lowercase keeps it friendly; tight tracking keeps it from looking soft. In the lockup (`brand/lockup.svg`, 196 by 56) the symbol is 1.4 times the cap height, one person's width from the word, centred on the x-height.
+**Wordmark:** "snug", lowercase, Inter Bold, tracking -0.03em, outlined to paths. `#F4F1ED` on dark, `#141516` on light in the brand files; inside the app it is `currentColor`, so it takes `--text-1`. Lowercase keeps it friendly; tight tracking keeps it from looking soft. In the lockup (`brand/lockup.svg`, 192 by 56) the symbol is 1.4 times the cap height, about one large cut-out's width from the word, centred on the x-height.
 
-![App icon at 512px: charcoal rounded square, coral archway, off-white person on the threshold](img/brand-app-icon-512.jpg)
+![App icon at 512px: charcoal rounded square, the violet Huddle with its two cut-outs showing the charcoal](img/brand-app-icon-512.jpg)
 
-**App icon:** a charcoal `#141516` rounded square (radius 22.5%), the Doorstep at about 58% of the height, the person off-white. A coral square would be loud on a taskbar and turn the brand colour into a background, which the colour rules forbid. On charcoal the archway is the only bright thing, so it is found quickly, and the off-white person is the brightest point inside it.
+**App icon:** a charcoal `#141516` rounded square (radius 22.5%), the Huddle at 58% of the height (11 times the 64 grid). A violet square would be loud on a taskbar and turn the brand colour into a background, which the colour rules forbid. On charcoal the arch is the only bright thing, so it is found quickly, and the two dark eyes read even at 16px.
 
-**Small sizes are redrawn, not scaled.** `brand/favicon.svg` is drawn on the 16px grid: a 12 by 13 archway with a 3px band, a 6px opening and a 4px person, 1px clear each side. `brand/app-icon-small.svg` does the same on the charcoal square (2px band) for 16 to 32px, and the desktop `.ico` uses it for its 16, 24 and 32px entries. The `Nook` component switches to the 16-grid drawing at 24px and below. `brand/notify-badge.png` is the mark as a white silhouette on transparent, as Android and Windows badges need.
+**Small sizes are redrawn, not scaled.** `brand/favicon.svg` is drawn on the 16px grid: a 12 by 13 arch with 4px and 3px cut-outs, 1px apart, 2px clear of the sides and the foot. `brand/app-icon-small.svg` does the same on the charcoal square for 16 to 32px; there the arch grows to 12 by 12 so the cut-outs can stay 4px and 3px (a 2px cut-out renders as a square, and the pair stops reading as two people). The desktop `.ico` uses it for its 16, 24 and 32px entries. The `Nook` component switches to the 16-grid drawing at 24px and below. `brand/notify-badge.png` is the mark as a white silhouette on transparent, as Android and Windows badges need.
 
 ![The favicon at a true 16px on a light and a dark tab, enlarged 8x](img/brand-favicon-16-8x.jpg)
 
 ![The favicon at 32px on a light and a dark tab, enlarged 8x](img/brand-favicon-32-8x.jpg)
 
-Every edge lands on a pixel, and the opening takes the tab colour, so one file works on light and dark browser chrome. Below 16px the rule is to use the presence dot alone.
+Every edge lands on a pixel, and the cut-outs take the tab colour, so one file works on light and dark browser chrome. Below 16px the rule is to use the presence dot alone.
 
-**Rules:** no stretching, rotating, effects or shadows. The person never leaves the threshold, except in the loading mark, where it steps onto it. The archway is never mint, amber or red, because those mean status. The wordmark is never coral. The arch is never used for a person or a control, with one deliberate exception: the Home button in the rail is the Doorstep itself (section 8).
+**Rules:** no stretching, rotating, effects or shadows. The cut-outs never move, change size or fill in, except in the loading mark, where they open one after the other. The arch is never mint, amber, cyan, rose or red, because those mean something. The wordmark is never violet. The arch is never used for a person or a control, with one deliberate exception: the Home button in the rail is the Huddle itself (section 8).
 
-*Screenshots:* the sign-in and empty Home captures were retaken with the Doorstep. The other screen captures in this document were taken before it and still show the old mark at rail size; they need retaking.
+*Screenshots:* the brand figures in this section were redrawn from `brand/` with the Huddle. The screen captures below were taken before the change to violet and the Huddle; where a caption and a capture disagree on colour, the caption (violet) is current.
 
 ## 3. Color palette
 
@@ -86,22 +83,36 @@ Why steps instead of shadows: shadows on every panel make dark UI muddy and blur
 
 | Token | Dark | Light | Reason |
 |---|---|---|---|
-| `--brand` | `#F05A47` | `#E04B38` | Brand Coral. Darker in light to hold contrast on paper. |
-| `--brand-hover` | `#FF6B57` | `#EC5A46` | Lighter on hover: the button comes towards you. |
-| `--brand-press` | `#DD4E3C` | `#C93F2E` | Darker on press. Dark value nudged from `#D94A39` so dark text still passes 4.5:1. |
-| `--brand-soft` | `#3A211E` | `#FBE3DE` | Mention background. Warm without shouting. |
-| `--brand-ink` | `#FF7A68` | `#B5402F` | Coral as text, which needs more contrast than a fill. |
-| `--on-brand` | `#111211` | `#111211` | Text on coral. White on the light coral is about 4.2:1 and fails; near-black passes. |
+| `--brand` | `#996FF7` | `#763FF4` | Brand Violet. The mark is `#8B5CF6`, which takes neither white (4.23:1) nor near-black (4.43:1) text, so the token is moved the least it can: 4 HSL lightness points up in dark (near-black text 5.34:1), 6 down in light (white text 5.54:1). Fill on `--bg-1`: 5.20:1 dark, 5.32:1 light. |
+| `--brand-hover` | `#A37EF8` | `#6C31F4` | Away from the ground on hover: lighter in dark (text 6.17:1), deeper in light (text 6.21:1). |
+| `--brand-press` | `#9266F7` | `#6222F3` | A step back on press; its text still passes (4.89:1 dark, 6.90:1 light). |
+| `--brand-soft` | `#2B243C` | `#EBE4F8` | Mention background: 17% violet into `--bg-1` in dark, 12% in light. |
+| `--brand-ink` | `#B191F9` | `#6D28D9` | Violet as text, which needs more contrast than a fill: 7.22:1 / 6.81:1 on `--bg-1`, 5.83:1 / 5.75:1 on `--brand-soft`. |
+| `--on-brand` | `#111211` | `#FFFFFF` | Text on violet: near-black on the lifted dark violet, white on the deeper light one. |
 
-**Coral means "for you".** It marks the primary button, the 3px bar beside the place you are in, count badges, the "New" line, the edge of a message that mentions you, and the live moment of voice and events. It is never a large field behind text. Coral is warm, leans orange so it is not the red of errors, and is not the blue or purple of the large chat apps. With one hue for everything that needs you, a glance tells you how much needs you and where.
+Every built-in theme carries its own copy of the ramp (`css/appearance.css`, `css/account.css`), checked by `tests/logic-custom.test.js`: text on brand, hover and press at least 4.5:1, the brand fill at least 3:1 on every surface step (`--bg-0` to `--bg-4`), `--brand-ink` at least 4.5:1 on `--bg-1` to `--bg-3` and on `--brand-soft`. The dark ramp is shared by Dark, Ash, Slate, Moss and Midnight (only the soft tint changes); Paper and Sepia share the light one; Contrast dark lifts it further (`#A783F8`, hover `#B191F9`, press `#9C74F7`, ink `#BBA0FA`, black text 7.25:1).
+
+| Theme | Brand on bg-1 | Lowest fill (bg-4) | Ink on bg-1 | Ink on soft |
+|---|---|---|---|---|
+| Dark | 5.20 | 4.04 | 7.22 | 5.83 |
+| Ash | 4.52 | 3.28 | 6.27 | 5.01 |
+| Slate | 4.97 | 3.63 | 6.90 | 5.55 |
+| Moss | 5.06 | 3.81 | 7.03 | 5.64 |
+| Midnight | 5.97 | 4.58 | 8.29 | 7.08 |
+| Contrast dark | 7.25 | 5.69 | 9.52 | 7.95 |
+| Light | 5.32 | 4.14 | 6.81 | 5.75 |
+| Paper | 5.54 | 4.34 | 7.10 | 5.97 |
+| Sepia | 4.81 | 3.64 | 6.16 | 5.22 |
+
+**Violet means "for you".** It marks the primary button, the 3px bar beside the place you are in, count badges, the "New" line, the edge of a message that mentions you, selection, and the live moment of voice and events. It is never a large field behind text. Why violet over the old coral: coral sat 5 to 7 degrees of OKLCH hue from error red, so "for you" and "failed" were one family held apart only by lightness. Violet (hue 289 to 297) is 60 degrees or more from cyan links, about 70 from rose, and far from mint, amber and red, and it is the only cool saturated colour on warm charcoal and paper, so it is found at a glance. The cost is that it is closer to the purple of some large chat and streaming apps than coral was; the identity leans on the Huddle shape and the warm grounds. With one hue for everything that needs you, a glance tells you how much needs you and where.
 
 ### Meaning colours
 
 | Token | Dark | Light | Meaning and reason |
 |---|---|---|---|
-| `--mint` | `#58C7A5` | `#1F8F6E` | Online, connected, speaking, "Going". Blue-green, so it sits beside coral without clashing. |
+| `--mint` | `#58C7A5` | `#1F8F6E` | Online, connected, speaking, "Going". Blue-green, well away from violet. |
 | `--amber` | `#E8B65A` | `#A86F0D` | Away, warnings, an event starting soon, a weak voice connection. Caution, clearly not an error. The code also uses it for the favourite star on Friends and profiles, a second meaning the contract does not give it. |
-| `--cyan` | `#62B8D8` | `#1F7EA3` | Links, information, the "4 replies" link. Quiet enough not to compete with coral. |
+| `--cyan` | `#62B8D8` | `#1F7EA3` | Links, information, the "4 replies" link. Low chroma and 60 degrees of hue from violet, so a link never reads as "for you". |
 | `--rose` | `#D98598` | `#B24E66` | Reactions you added. Warm, clearly yours, soft enough for every message. |
 | `--error` | `#E05A5A` | `#C93838` | Destructive actions and failures. Also the Focused dot: "don't interrupt". |
 | `--offline` | `#686663` | `#8C8781` | The offline ring. Grey, because offline is an absence. |
@@ -110,13 +121,13 @@ Mint, amber, cyan, rose and error each have a `-soft` tint for backgrounds (in l
 
 ### Colours people choose
 
-People, roles and houses choose a **hue only**: Olive, Green, Teal, Sky, Blue, Plum, Clay rose or Pink (`HUES` in `js/lib/util.js`). The theme sets lightness and chroma in OKLCH (names 0.80/0.10 in dark, 0.47/0.12 in light). If people picked full colours, someone would pick red and read as an error, or pale yellow and vanish on paper. Fixed lightness keeps every name readable in both themes, and keeping the list clear of coral, red, amber and mint means a person's colour never reads as a status.
+People, roles and houses choose a **hue only**: Olive, Green, Teal, Sky, Blue, Clay rose or Pink (`HUES` in `js/lib/util.js`). Plum (hue 318) was retired with the move to violet, because it sat 21 degrees from the brand; a stored Plum is still accepted and shows as Clay rose (`RETIRED_HUES`, `hueOf`). The theme sets lightness and chroma in OKLCH (names 0.80/0.10 in dark, 0.47/0.12 in light). If people picked full colours, someone would pick red and read as an error, or pale yellow and vanish on paper. Fixed lightness keeps every name readable in both themes, and keeping the list at least 25 degrees clear of violet, red, amber and mint means a person's colour never reads as a status or as the brand.
 
 ![Home in the light theme: the same layout on warm paper, pastel avatar grounds with dark initials, house tiles in mid-tone colour](img/desk-light-home.jpg)
 
-![The floor in the light theme: Malik's mention of Robin on a pale coral tint with a coral edge, one reaction of Robin's in rose, the coral New line](img/desk-light-room.jpg)
+![The floor in the light theme: Malik's mention of Robin on a pale brand tint with a brand edge, one reaction of Robin's in rose, the New line](img/desk-light-room.jpg)
 
-The light theme keeps every relationship: shell darkest, content lightest, avatar grounds flipped to pastel with dark initials (`--tile-l` 0.88), the mention still `--brand-soft` with a 2px coral edge. House tiles do not go pastel: they sit at a mid lightness (`--house-l` 0.56) with light letters, so the arch still reads as a solid door on paper.
+The light theme keeps every relationship: shell darkest, content lightest, avatar grounds flipped to pastel with dark initials (`--tile-l` 0.88), the mention still `--brand-soft` with a 2px violet edge. House tiles do not go pastel: they sit at a mid lightness (`--house-l` 0.56) with light letters, so the arch still reads as a solid door on paper.
 
 **High contrast** (a setting that also follows `prefers-contrast: more`) mixes secondary text and lines toward the main text and thickens the focus ring to 3px, computed from each theme's own values.
 
@@ -163,7 +174,7 @@ Some marks are deliberately not icons: topics use a plain "#", presence uses CSS
 ![Kiln & Co. front page: the arch tile beside the name, round member faces, rectangular buttons](img/desk-dark-house.jpg)
 
 - **Places are arches.** Community tiles use `--r-arch` on a portrait box 0.84 times as wide as tall, so the top closes into a full round and reads as a doorway even at 28px. A community is a door you can walk through, the same shape as the logo. Even the smallest house marks (the shared-house tiles in friend rows, the tiles in Settings) stay arches; there is no smaller fallback shape.
-- **People are circles.** Avatars, presence and the person on the Doorstep. The only other circles are badges and dots, which are about people too.
+- **People are circles.** Avatars, presence and the two cut-outs in the Huddle. The only other circles are badges and dots, which are about people too.
 - **Controls are rectangles.** Buttons and inputs 6px, menus 8px, dialogs and the few cards 12px, large media 16px. Chips are the one rounded control.
 
 In a chat app you scan for where, who, and what can I do. A distinct silhouette for each lets a row be parsed before it is read. On the house page above, the arch says place, the circles say people, and the buttons are plainly buttons. Rounded squares for everything, the common choice, lose that signal.
@@ -177,7 +188,7 @@ In a chat app you scan for where, who, and what can I do. A distinct silhouette 
 | Focused | Red dot with a bar | Heads down. Notifications wait in Catch up |
 | Away | Amber half dot | Not at the screen |
 | Offline | Grey ring | Not here, or appearing offline |
-| In a voice room | Coral rounded rectangle with sound bars | Wins over the rest: the most useful thing to know |
+| In a voice room | Violet rounded rectangle with sound bars | Wins over the rest: the most useful thing to know |
 
 About one man in twelve has a colour vision deficiency, and green against amber is a pair that blurs. A dot, a ring, a bar and a half dot differ in greyscale. The voice mark is a rectangle because it is the one state that is also an action: join them.
 
@@ -208,7 +219,7 @@ Fixed regions that never reorder let people build a spatial memory and reach for
 
 The place you are in is `S.ui.space`: `home`, `messages`, `discover` or a house id. It follows the view (a room puts you in its house, a direct message in Messages) and is remembered per device with the last view in each place.
 
-**The rail.** Home is the Doorstep itself, in coral: the logo is the way home. Messages and Discover are rectangles on a quiet step, because they are controls. Communities are arch tiles in your order. Create or join is a dashed "+". The left edge says what each item is to you: a 3px coral bar where you are, a short light pill (the same bar at a third of its height) where something is new, and a coral count on the tile when something needs you. A bar rather than a filled tile keeps coral fills for counts.
+**The rail.** Home is the Huddle itself, in violet: the logo is the way home. Messages and Discover are rectangles on a quiet step, because they are controls. Communities are arch tiles in your order. Create or join is a dashed "+". The left edge says what each item is to you: a 3px violet bar where you are, a short light pill (the same bar at a third of its height) where something is new, and a violet count on the tile when something needs you. A bar rather than a filled tile keeps coral fills for counts.
 
 **The context column**, per place:
 
@@ -229,7 +240,7 @@ Home answers: who is around, where are people talking, what is about to happen, 
 
 ![Robin's Home: greeting, Catch up and friend request chips, Conversations going, Recently here, Happening now, Your communities, Recommended](img/desk-dark-home.jpg)
 
-The greeting ("Good afternoon, Robin") is followed by a summary from real state ("2 conversations going, something on now.") and two chips with coral counts: "6 for you in Catch up" and "Bex wants to be friends". Each goes straight to the place that deals with it.
+The greeting ("Good afternoon, Robin") is followed by a summary from real state ("2 conversations going, something on now.") and two chips with violet counts: "6 for you in Catch up" and "Bex wants to be friends". Each goes straight to the place that deals with it.
 
 The main column, each section only if it has something:
 
@@ -241,7 +252,7 @@ The main column, each section only if it has something:
 
 With nothing on: "It's quiet right now." The side column has Your communities (online count or "Just you") and Recommended for you (three communities, or two and one person you might know), fetched at most once every five minutes.
 
-![Home for a brand-new account: greeting, the Doorstep, "Snug is better with people in it", two buttons, three recommended communities](img/desk-dark-home-empty.jpg)
+![Home for a brand-new account: greeting, the Huddle, "Snug is better with people in it", two buttons, three recommended communities](img/desk-dark-home-empty.jpg)
 
 A new account sees one warm sentence, Find a community and Add a friend, and three recommended communities. No tour, no checklist.
 
@@ -253,7 +264,7 @@ Tabs: Online, All, Requests and Add friend.
 
 ![Friends, Online tab: two online friends with their status and a shared house arch, then two offline friends (both starred) under Recently active](img/desk-dark-friends.jpg)
 
-**Online** lists friends who are here: online favourites first under their own "Favourites" heading, then the rest ("Also online") by the most reachable (Open to talk before Around before Focused), then by name. Each row shows the face, name, what they are doing ("Open to talk", a status, "In Wheel room"), and the communities you share as small arches. On hover or focus the arches step aside for actions. Below, **Recently active** shows up to five offline friends who wrote in the last few days ("last wrote 41 min ago"). Favourites carry a star, drawn in amber. Add friend is the fourth tab, set apart at the right in coral ink.
+**Online** lists friends who are here: online favourites first under their own "Favourites" heading, then the rest ("Also online") by the most reachable (Open to talk before Around before Focused), then by name. Each row shows the face, name, what they are doing ("Open to talk", a status, "In Wheel room"), and the communities you share as small arches. On hover or focus the arches step aside for actions. Below, **Recently active** shows up to five offline friends who wrote in the last few days ("last wrote 41 min ago"). Favourites carry a star, drawn in amber. Add friend is the fourth tab, set apart at the right in violet ink.
 
 ![Friends, Requests tab: one waiting on you with Accept and Decline, one sent with Cancel](img/desk-dark-friends-requests.jpg)
 
@@ -275,7 +286,7 @@ Direct messages and groups live under Messages. You can write to friends and to 
 
 ![Messages tab on a phone: search and compose, a list of direct messages and groups with previews, times and an unread badge](img/phone-dark-messages.jpg)
 
-Each row shows the face with presence (a count for a group, such as "3" for Saturday load), the name, the time and the last line. A conversation with something new shows a coral count, because a direct message is always for you. On the phone, rows grow to two lines with a 40px face and its full presence mark. The face keeps the single initial of the small row icon even at 40px, where two would fit.
+Each row shows the face with presence (a count for a group, such as "3" for Saturday load), the name, the time and the last line. A conversation with something new shows a violet count, because a direct message is always for you. On the phone, rows grow to two lines with a 40px face and its full presence mark. The face keeps the single initial of the small row icon even at 40px, where two would fit.
 
 A direct message is the same component as a room: stream, composer, threads, reactions, replies, saved messages, search. One model means one set of habits.
 
@@ -306,7 +317,7 @@ Discover lists only public houses, as counts and room names, never member lists.
 A community (a **house**) has a front page: About in its column, or its tile chosen again. See the Kiln & Co. screenshot in section 6.
 
 - **Header:** arch tile, name, "Art & making · Open to everyone", description, "1 here now · 10 members", and Invite people and Settings for those allowed. No banner and no colour wash: the arch carries the colour and a 1px line ends the header. A banner needs artwork most small communities do not have.
-- **Happening now:** live voice and events on now, with a coral pulse. Live voice is a row, not a card.
+- **Happening now:** live voice and events on now, with a violet pulse. Live voice is a row, not a card.
 - **Upcoming events**, with Create event for those allowed.
 - **Busiest rooms** on desktop, because the column already lists every room. The phone shows the full list.
 - **Side column:** House rules, and Members with role names in role colours ("Studio lead", "Technician"). The rules are a numbered list that starts open for newcomers and folded to "House rules 4" for everyone else, as in the screenshot.
@@ -319,19 +330,19 @@ A community (a **house**) has a front page: About in its column, or its tile cho
 
 **Roles** are checked on the server, and the same rules file (`js/lib/perms.js`) decides what the browser shows. Permissions: send messages, post notices, curate highlights, remove messages, manage rooms, invite people, manage roles and members.
 
-**Events** are planned by members who may post notices or manage rooms; any member can say they are going, and the planner is going. No end time means two hours. States: Live (coral), Soon (within the hour, amber), later.
+**Events** are planned by members who may post notices or manage rooms; any member can say they are going, and the planner is going. No end time means two hours. States: Live (violet), Soon (within the hour, amber), later.
 
 ## 14. Text channels
 
 A room is one continuous stream, dense where people read.
 
-![Glaze lab: a thread stub on Robin's message, a reaction, the Today divider, the coral New line, inline code, and a quoted reply](img/desk-dark-room.jpg)
+![Glaze lab: a thread stub on Robin's message, a reaction, the Today divider, the New line, inline code, and a quoted reply](img/desk-dark-room.jpg)
 
 **The header:** room icon and name, topic, who is here ("1 here", never counting you, or "Just you"), "2 in voice" in a voice room, and search, people and details.
 
-**Messages** are rows: avatar, name in the person's colour, time, text. Consecutive messages from one person group under one name. Hover lifts a row one step. A message that mentions you or replies to you gets `--brand-soft` with a 2px coral edge; a mention of someone else is a quiet grey chip. The same rule (`forMe` in `attention.js`) decides what is counted and what is highlighted, so they always agree.
+**Messages** are rows: avatar, name in the person's colour, time, text. Consecutive messages from one person group under one name. Hover lifts a row one step. A message that mentions you or replies to you gets `--brand-soft` with a 2px violet edge; a mention of someone else is a quiet grey chip. The same rule (`forMe` in `attention.js`) decides what is counted and what is highlighted, so they always agree.
 
-**The "New" line** is a coral rule with a small "New" label at its end. Arriving in a room goes to where you left off this session, else to the first unread with context above it, else to the latest.
+**The "New" line** is a violet rule with a small "New" label at its end. Arriving in a room goes to where you left off this session, else to the first unread with context above it, else to the latest.
 
 **Replies** show an elbow from the margin to a quoted line. **Threads** show a stub with the repliers' faces, "4 replies" in cyan and the last time, branching from the message. A thread opens in the side pane beside its conversation (section 7) with its own "New" line and composer. Followed threads with news appear under their room in the sidebar, and replies in them count as needing you. A thread that replaces the conversation loses context; one in a popover cannot be read. A pane keeps both.
 
@@ -362,7 +373,7 @@ Voice rooms are rooms with a stage above their text history. Audio is real WebRT
 - **Speaking** is detected from the real audio level with a short hold. A mint ring appears at once and fades over 160ms. Mint, because speaking means connected and active.
 - Three bars beside each other person's name show their connection quality once you are in (amber when weak). Your own face has none.
 - Mute, deafen and leave sit under the stage. Leave has red ink and fills only when you reach for it.
-- Your presence becomes the coral voice mark, the header says "2 in voice", and the voice dock follows you anywhere.
+- Your presence becomes the violet voice mark, the header says "2 in voice", and the voice dock follows you anywhere.
 
 The text history stays below, because people in voice paste links and notes and should not need a second channel.
 
@@ -402,7 +413,7 @@ A profile is a person's corner, reached in two steps: a card for a quick look, a
 - `needsMe`: is it a direct message, for me, or a reply in a thread I follow?
 - `attention`: should the navigation show a dot or a number?
 
-**Two levels of unread.** What needs you gets a coral count. Everything else is a dot, never a number. A number on every channel trains people to ignore numbers; when only personal things are counted, the count means something and can reach zero.
+**Two levels of unread.** What needs you gets a violet count. Everything else is a dot, never a number. A number on every channel trains people to ignore numbers; when only personal things are counted, the count means something and can reach zero.
 
 **One setting per place:** Everything, Only what needs me, or Nothing. Rooms inherit from their house.
 
@@ -416,7 +427,7 @@ Search covers every stored message you may read, on the server. Offline, it cove
 
 **The query reads like a sentence:** `from:sunniva in:"glaze lab" has:image`. The chips (From, In, With, Saved only) write those words for you, so people learn the syntax by watching. Examples use a real person and room of yours, so they work when clicked.
 
-**Results** say how many and in what order ("4 messages, newest first"; at most the first 80, and offline it says it only covers this device), keep the conversation's left margin, carry an author and place label, and show the match in bold with a 2px coral underline. A yellow highlighter would add a colour that means nothing else in the system.
+**Results** say how many and in what order ("4 messages, newest first"; at most the first 80, and offline it says it only covers this device), keep the conversation's left margin, carry an author and place label, and show the match in bold with a 2px violet underline. A yellow highlighter would add a colour that means nothing else in the system.
 
 **Quick jump** (`Ctrl/Cmd K`) is one field for going somewhere or finding something. **Saved messages** sit under Home, each with an optional note, synced across devices.
 
@@ -510,13 +521,13 @@ All token durations become 0ms under reduced motion. Three loops have hard-coded
 | State | Treatment |
 |---|---|
 | Hover | Text colour at 5% (`--hover`), or one surface step up for rows |
-| Pressed | Text colour at 9%; coral to `--brand-press`, secondary to `#3B3D3F` (`#D0CBC4` in light) |
-| Focus | 2px `--text-1` outline, offset 2px (3px in high contrast). Text fields are the exception: a focused field gets a coral border plus a 1px coral ring instead (visible on the sign-in and search screenshots) |
-| Selected | `--bg-4`, plus the 3px coral bar for the current place |
+| Pressed | Text colour at 9%; violet to `--brand-press`, secondary to `#3B3D3F` (`#D0CBC4` in light) |
+| Focus | 2px `--text-1` outline, offset 2px (3px in high contrast). Text fields are the exception: a focused field gets an accent border plus a 1px accent ring instead (violet by default) (visible on the sign-in and search screenshots) |
+| Selected | `--bg-4`, plus the 3px violet bar for the current place |
 | Unread | Bold label and a small `--text-1` dot |
-| Needs you | Coral count badge, `#111211` text |
+| Needs you | Violet count badge: `--on-brand` text (`#111211` on dark, white on light) |
 | Disabled | `--text-disabled`, no hover |
-| Loading | Skeletons on `--bg-3` in the shape of what is coming (static under reduced motion); the Doorstep loader for the app |
+| Loading | Skeletons on `--bg-3` in the shape of what is coming (static under reduced motion); the Huddle loader for the app |
 | Error | `--error` text under its field; a plain toast when the server refuses |
 | Success | A toast with Undo; mint for "Going" and "Connected" |
 | Empty | One sentence, one way forward |
@@ -545,22 +556,22 @@ Motion explains where something came from. It does not decorate.
 
 **The loading mark** is the one piece of brand motion.
 
-![The splash: "Opening Snug…" with the loading mark caught 70ms into its cycle, the person still dropping onto the threshold](img/brand-loading-mid.jpg)
+![The splash: "Opening Snug…" with the loading mark caught 120ms into its cycle, the larger cut-out half open](img/brand-loading-mid.jpg)
 
-![The loading mark at 0, 60, 120, 180, 240 and 1080ms: empty archway, the person dropping and fading in, landed on the threshold, then fading out](img/brand-loading-filmstrip.jpg)
+![The loading mark at 0, 120, 240, 360, 600 and 1080ms: a solid arch, the larger cut-out opening, then the smaller, both open, then closing](img/brand-loading-filmstrip.jpg)
 
-The person drops onto the threshold and fades in over 240ms, rests, fades, and repeats every 1.2 seconds, always with `role="status"` and a label. A spinner says "wait"; this says "someone is arriving".
+The arch stands solid and the two cut-outs open in it, the larger over the first 240ms, the smaller just after; they rest, close, and the cycle repeats every 1.2 seconds, always with `role="status"` and a label. A spinner says "wait"; this says "people are arriving".
 
-**Loops are rare and small:** breathing typing dots, a coral pulse beside "Happening now", breathing skeletons. One exception to the rule: the live pulse grows with `transform: scale`, which is neither position nor opacity. It stops under reduced motion, but it should be named as the one allowed scale.
+**Loops are rare and small:** breathing typing dots, a violet pulse beside "Happening now", breathing skeletons. One exception to the rule: the live pulse grows with `transform: scale`, which is neither position nor opacity. It stops under reduced motion, but it should be named as the one allowed scale.
 
 ## 24. Accessibility principles
 
 Accessibility lives in the tokens and shared components, not in per-screen fixes.
 
-- **Measured contrast.** `--text-3` and `--brand-press` were nudged to pass 4.5:1 where used. Coral buttons use near-black text because white fails. Light adds darker `-ink` values for mint, amber and links.
+- **Measured contrast.** `--text-3` and `--brand-press` were nudged to pass 4.5:1 where used. Violet buttons use near-black text in dark themes and white in light ones, because `#8B5CF6` itself passes with neither; each theme moves the token the least it can (section 3). Light adds darker `-ink` values for mint, amber and links.
 - **High contrast** follows the system or the setting.
 - **Never colour alone.** Presence has shapes. Saved and starred fill. Your reactions are rose and `aria-pressed`. Mentions have an edge as well as a tint. The "New" line has a label.
-- **Visible focus:** one 2px ring in the text colour, offset 2px. Not coral, because a coral ring on a coral button vanishes. Text fields break this rule: they show focus as a coral border and ring, which works on a field but is a second focus style.
+- **Visible focus:** one 2px ring in the text colour, offset 2px. Not violet, because a violet ring on a violet button vanishes. Text fields break this rule: they show focus as an accent border and ring, which works on a field but is a second focus style.
 - **Keyboard:** everything reachable, roving focus in lists, the rail as a toolbar with arrow keys, `?` for the full list.
 - **Screen readers:** presence marks are `role="img"` with labels ("Open to talk", "In Wheel room"); loading is `role="status"`; icon buttons are named ("Join Wheel room"); Settings is a modal dialog; the current page has `aria-current`.
 - **Size and density:** three text sizes scale every rem value without moving the grid; three densities change spacing.
@@ -589,9 +600,9 @@ These choices cost some short-term engagement. They follow from the promise, "a 
 
 ## The final visual test
 
-**Brand.** Own identity? Mostly. The Doorstep, arch tiles and the shape rule are not borrowed, and coral on warm charcoal is distinct from the blue and purple of the big chat apps. The frame (rail, column, content) still reads as Discord-like from across a room, because that layout suits the job. The identity lives in the details more than the structure.
+**Brand.** Own identity? Mostly. The Huddle, arch tiles and the shape rule are not borrowed. Violet is nearer the purple of some big chat and streaming apps than coral was, so the identity rests more on the Huddle and the warm charcoal and paper than on the hue. The frame (rail, column, content) still reads as Discord-like from across a room, because that layout suits the job. The identity lives in the details more than the structure.
 
-**Color.** Disciplined? Largely. Surfaces carry depth and each meaning colour does one job. The weak spot is coral: it also marks "live" (the Live tag, the Happening now pulse, "Lively right now", the voice header). Live and "for you" are close, but strictly coral has two meanings. Amber picks up a second one too: the favourite star. Focused text fields also borrow coral for their border. A rail with several house badges plus the Messages badge also looks busier than the counting promise suggests, though each badge is honest.
+**Color.** Disciplined? Largely. Surfaces carry depth and each meaning colour does one job. The weak spot is violet: it also marks "live" (the Live tag, the Happening now pulse, "Lively right now", the voice header). Live and "for you" are close, but strictly violet has two meanings. Amber picks up a second one too: the favourite star. Focused text fields also borrow the accent for their border. A rail with several house badges plus the Messages badge also looks busier than the counting promise suggests, though each badge is honest.
 
 **Layout.** Clear and stable? Yes: three fixed levels, one margin through the stream, a pane that overlays at medium widths, a separate phone product. Two visible flaws: Home's Recently here strip clips its last face with no sign that it scrolls, and the voice stage leaves an empty band above the text.
 
@@ -603,7 +614,7 @@ These choices cost some short-term engagement. They follow from the promise, "a 
 
 **Restraint.** No gradients, glass, giant radii or card overload? Yes. The largest UI radius is 16px, and cards are limited to attachments, events, the Discover stage, previews and floating layers. People may choose blue or plum for their own face at low chroma; the chrome uses neither.
 
-**Consistency.** Do the rules hold? Mostly. The shape rule holds on every screen checked, and one Message component renders rooms, threads, search results and the settings preview. Exceptions: the scaling live pulse, the wrong version in Settings, the coral focus on text fields, icon sizes off the token scale, and the contract is now out of date on presence and banners.
+**Consistency.** Do the rules hold? Mostly. The shape rule holds on every screen checked, and one Message component renders rooms, threads, search results and the settings preview. Exceptions: the scaling live pulse, the wrong version in Settings, the accent focus on text fields, icon sizes off the token scale, and the contract is now out of date on presence and banners.
 
 **Originality.** Anything new? Three things: Catch up as a triage list with one item per conversation and one policy file behind every count; presence states that say what someone is open to, each with its own shape; previews with house rules before joining. Threads in a side pane are well done, not new.
 

@@ -1,6 +1,6 @@
 /* Account: themes and appearance settings, accessibility, streamer mode, and
    the account views (status, profile extras, security, data, shortcuts).
-   Tokens only; coral stays the brand. js/account.js sets the attributes. */
+   Tokens only; violet stays the brand. js/account.js sets the attributes. */
 
 /* Atkinson Hyperlegible (Braille Institute), latin, 400 and 700. OFL: fonts/OFL-AtkinsonHyperlegible.txt */
 @font-face { font-family: "Atkinson Hyperlegible"; src: url(../fonts/ah-latin-400.woff2) format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
@@ -12,7 +12,7 @@
   --bg-0: #000000; --bg-1: #000000; --bg-2: #0B0B0C; --bg-3: #161718; --bg-4: #202123;
   --text-1: #F4F1ED; --text-2: #B8B4AE; --text-3: #8F8C88; --text-disabled: #5C5A57; --text-inverse: #111211;
   --line: #1E1F21; --line-strong: #2E3033; --line-subtle: #141516;
-  --brand: #F05A47; --brand-hover: #FF6B57; --brand-press: #DD4E3C; --brand-soft: #2A1714; --brand-ink: #FF7A68; --on-brand: #111211;
+  --brand: #996FF7; --brand-hover: #A37EF8; --brand-press: #9266F7; --brand-soft: #1A132A; --brand-ink: #B191F9; --on-brand: #111211;
   --mint: #58C7A5; --mint-soft: #0F2620; --amber: #E8B65A; --amber-soft: #2A2110;
   --mint-ink: var(--mint); --amber-ink: var(--amber);
   --cyan: #62B8D8; --cyan-soft: #0F2128; --rose: #D98598; --rose-soft: #2A141B;
@@ -20,14 +20,14 @@
   --btn2: var(--bg-4); --btn2-hover: #2A2B2E; --btn2-press: #333538;
   --hover: rgb(244 241 237 / 0.05); --press: rgb(244 241 237 / 0.09);
   --scrim: rgb(0 0 0 / 0.7);
-  --selection: rgb(240 90 71 / 0.32);
+  --selection: rgb(153 111 247 / 0.32);
   --shadow-sm: 0 0 0 1px #26282B; --shadow-md: 0 0 0 1px #26282B, 0 8px 24px rgb(0 0 0 / 0.6); --shadow-lg: 0 0 0 1px #26282B, 0 16px 48px rgb(0 0 0 / 0.7);
   --name-l: 0.80; --name-c: 0.10;
   --tile-l: 0.40; --tile-c: 0.065; --tile-ink-l: 0.93; --tile-ink-c: 0.045;
   --house-l: 0.64; --house-c: 0.10; --house-ink: #111211;
 }
 
-/* ---------- Selection tone (coral is the default) ----------
+/* ---------- Selection tone (violet is the default) ----------
    Mint means live and rose means reactions, so neither is offered; a tone
    saved as one of them before shows as neutral. */
 :root[data-tone="cyan"] { --selection: color-mix(in srgb, var(--cyan) 34%, transparent); }
@@ -109,7 +109,7 @@
 .acc-tone:active { background: var(--btn2-press); }
 .acc-tone[aria-checked="true"] { background: var(--bg-4); color: var(--text-1); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .acc-tone i { width: var(--s-3); height: var(--s-3); border-radius: var(--r-xs); }
-.acc-tone.t-coral i { background: var(--brand); }
+.acc-tone.t-violet i { background: var(--brand); }
 .acc-tone.t-cyan i { background: var(--cyan); }
 .acc-tone.t-neutral i { background: var(--text-2); }
 .acc-preview { margin: var(--s-4) 0; padding: var(--s-3) var(--s-4); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg-1); }

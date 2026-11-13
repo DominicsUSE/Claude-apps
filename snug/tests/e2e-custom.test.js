@@ -203,11 +203,41 @@ test('accent: a custom colour with a contrast badge; another browser on the same
   await settings(b, 'Appearance');
   const primary = b.locator('.ap-preview .btn.primary');
   assert.equal(await css(primary, 'backgroundColor'), rgb(want), 'the second browser shows the new accent on primary buttons');
-  // Coral stays the brand for what needs you.
-  assert.equal(await rootVar(b, '--brand'), base === 'dark' ? '#F05A47' : '#E04B38');
-  await b.click('.ap-accent[data-accent="coral"]');
-  await syncedPrefs('robin', (p) => !p.accent || p.accent === 'coral');
+  // Violet stays the brand for what needs you.
+  assert.equal(await rootVar(b, '--brand'), base === 'dark' ? '#996FF7' : '#763FF4');
+  await b.click('.ap-accent[data-accent="violet"]');
+  await syncedPrefs('robin', (p) => !p.accent || p.accent === 'violet');
+  await b.waitForFunction(() => !document.documentElement.hasAttribute('data-accent'));
   await close(a); await close(b);
+  // An account and a device saved while Snug was coral (accent and tone
+  // 'coral', the old default) open in violet, with no leftover attributes.
+  const row = prefsOf('robin');
+  srv.db.run('UPDATE user_prefs SET prefs = ? WHERE user = (SELECT id FROM users WHERE handle = ?)', JSON.stringify({ ...row, accent: 'coral', tone: 'coral' }), 'robin');
+  const c = await person('robin');
+  await c.evaluate(() => { const p = JSON.parse(localStorage.getItem('snug.prefs')); localStorage.setItem('snug.prefs', JSON.stringify({ ...p, accent: 'coral', tone: 'coral' })); });
+  await c.reload();
+  await c.waitForFunction(() => window.snug?.S?.prefs?.accent === 'violet' && window.snug.S.prefs.tone === 'violet');
+  assert.equal(await c.evaluate(() => ['data-accent', 'data-tone'].some((n) => document.documentElement.hasAttribute(n))), false);
+  assert.equal(await rootVar(c, '--accent'), base === 'dark' ? '#996FF7' : '#763FF4', 'the brand tokens paint the controls');
+  await settings(c, 'Appearance');
+  assert.equal(await c.locator('.ap-accent[data-accent="violet"]').getAttribute('aria-checked'), 'true');
+  await closeLayer(c);
+  // A device last synced while coral (its prefs and what it last sent both say
+  // 'coral') must not read the rename as an offline change: an accent and tone
+  // picked since on another device survive its next sign-in.
+  await c.evaluate(() => {
+    for (const k of ['snug.prefs', 'snug.prefsSent']) { const p = JSON.parse(localStorage.getItem(k)) || {}; localStorage.setItem(k, JSON.stringify({ ...p, accent: 'coral', tone: 'coral' })); }
+  });
+  srv.db.run('UPDATE user_prefs SET prefs = ? WHERE user = (SELECT id FROM users WHERE handle = ?)', JSON.stringify({ ...prefsOf('robin'), accent: 'cyan', tone: 'cyan' }), 'robin');
+  await c.reload();
+  await c.waitForFunction(() => window.snug?.S?.conn?.socket === 'open' && window.snug.S.prefs.accent === 'cyan' && window.snug.S.prefs.tone === 'cyan');
+  await c.waitForTimeout(1500); // a wrong push would land within the sync debounce
+  assert.equal(prefsOf('robin').accent, 'cyan', 'the newer accent stays on the account');
+  assert.equal(prefsOf('robin').tone, 'cyan', 'the newer tone stays on the account');
+  assert.deepEqual(await c.evaluate(() => [window.snug.S.prefs.accent, window.snug.S.prefs.tone]), ['cyan', 'cyan']);
+  await setPrefs(c, { accent: 'violet', tone: 'violet' });
+  await syncedPrefs('robin', (p) => (!p.accent || p.accent === 'violet') && (!p.tone || p.tone === 'violet'));
+  await close(c);
 });
 
 test('themes: named cards, quick switcher actions, and the live preview follows text size and accent', async () => {
@@ -224,10 +254,11 @@ test('themes: named cards, quick switcher actions, and the live preview follows 
   await a.waitForFunction(() => document.documentElement.style.fontSize === '19px');
   assert.ok(parseFloat(await css(text, 'fontSize')) > before, 'preview text grows with the text size');
   const btn = a.locator('.ap-preview .btn.primary');
-  const coral = await css(btn, 'backgroundColor');
+  const violet = await css(btn, 'backgroundColor');
+  assert.equal(violet, rgb('#763FF4'), 'Sepia: the light-theme violet');
   await a.click('.ap-accent[data-accent="cyan"]');
   const cyan = rgb(accentTokens('cyan', THEME_PRESETS.sepia.bg1, 'light')['--accent']);
-  assert.notEqual(cyan, coral);
+  assert.notEqual(cyan, violet);
   await a.waitForFunction((c) => getComputedStyle(document.querySelector('.ap-preview .btn.primary')).backgroundColor === c, cyan);
   await closeLayer(a);
   // Quick switcher: themes by name.
@@ -236,7 +267,7 @@ test('themes: named cards, quick switcher actions, and the live preview follows 
   await a.locator('.quick .menu-item:has-text("Switch to Slate theme")').waitFor();
   await a.keyboard.press('Enter');
   await a.waitForFunction(() => document.documentElement.getAttribute('data-theme') === 'slate');
-  await setPrefs(a, { theme: 'system', accent: 'coral', fontScale: 16 });
+  await setPrefs(a, { theme: 'system', accent: 'violet', fontScale: 16 });
   await syncedPrefs('robin', (p) => !p.theme && !p.fontScale);
   await close(a);
 });

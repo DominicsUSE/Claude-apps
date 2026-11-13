@@ -9,7 +9,7 @@
 //   and can always manage it, so nobody can lock the house out of a room.
 // - Forum posts, stage rooms, house templates, the rail's folders and the
 //   member list's groups.
-import { HUES } from './util.js';
+import { HUES, RETIRED_HUES } from './util.js';
 
 export const ROOM_PERMS = [
   { id: 'view', label: 'See the room', hint: 'Find it in the sidebar and read what is said in it.' },
@@ -132,7 +132,7 @@ export function railItems(layout, houseIds) {
 }
 export const railOrder = (items) => items.flatMap((it) => (typeof it === 'string' ? [it] : it.houses));
 
-export const HUE_IDS = HUES.map(([v]) => v);
+export const HUE_IDS = [...HUES.map(([v]) => v), ...RETIRED_HUES]; // retired ones show as the nearest (hueOf)
 
 // House templates. Rooms with "only" are private to those roles.
 export const TEMPLATES = [
@@ -161,7 +161,7 @@ export const TEMPLATES = [
     id: 'gaming', label: 'Gaming', hint: 'Announcements, clips, looking for a group and squad rooms.',
     about: 'Where we squad up.',
     roles: [
-      { key: 'mod', name: 'Moderator', hue: 318, perms: ['post', 'announce', 'pin', 'moderate', 'invite', 'kick', 'timeout', 'voicemod'], icon: '🛡️' },
+      { key: 'mod', name: 'Moderator', hue: 255, perms: ['post', 'announce', 'pin', 'moderate', 'invite', 'kick', 'timeout', 'voicemod'], icon: '🛡️' },
       { key: 'player', name: 'Player', hue: null, perms: ['post', 'invite'] },
     ],
     groups: [

@@ -1,6 +1,6 @@
 /* Voice messages, pinned messages and GIFs (js/views/media.js).
    Attachments are cards (a separate object); pins are quiet lines and marks.
-   Mint means live: the recording dot and level meter. Coral stays on Send. */
+   Mint means live: the recording dot and level meter. Violet stays on Send. */
 
 /* Voice message: one compact row. Played bars take the text colour. */
 .voice { height: var(--h-lg); display: inline-flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-2) 0 6px; max-width: min(100%, 380px); width: 380px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-md); }

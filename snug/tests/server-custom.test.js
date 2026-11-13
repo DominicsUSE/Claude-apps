@@ -22,7 +22,7 @@ const post = (path, body, cookie) => fetch(base + path, {
 });
 
 // A real PNG of one colour, w x h.
-export function png(w, h, rgb = [240, 90, 71]) {
+export function png(w, h, rgb = [139, 92, 246]) {
   const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
   const crc = (buf) => { let c = 0xffffffff; for (const b of buf) c = crcTable[(c ^ b) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
   const chunk = (type, data) => {
@@ -177,7 +177,7 @@ test('decorations, name styles and profile colours: fixed lists and readable col
   assert.match(await ava.refused('me.update', { nameStyle: { hue: 5 } }), /name colours/);
   assert.match(await ava.refused('me.update', { nameStyle: { font: 'mono', css: 'x' } }), /isn’t valid/);
   assert.match(await ava.refused('me.update', { nameStyle: 'font:serif' }), /isn’t valid/);
-  await ava.ok('me.update', { nameStyle: { font: 'serif', weight: 'bold', hue: 318 } });
+  await ava.ok('me.update', { nameStyle: { font: 'serif', weight: 'bold', hue: 318 } }); // Plum: retired, still accepted
   seen = await bo.next('user', (d) => d.user.id === ava.id && d.user.nameStyle);
   assert.deepEqual(seen.user.nameStyle, { font: 'serif', weight: 'bold', hue: 318 });
 
@@ -207,6 +207,16 @@ test('settings: accents must stay readable on every theme; custom themes are che
   const r = await ava.ok('prefs.set', { prefs: { accent: '#3a7bd5' } });
   assert.equal(r.prefs.accent, '#3A7BD5');
   await ava.ok('prefs.set', { prefs: { accent: 'mint' } });
+  // Snug's colour was coral before violet: an older client may still send it,
+  // and a stored one reads back as violet.
+  assert.equal((await ava.ok('prefs.set', { prefs: { accent: 'coral', tone: 'coral' } })).prefs.accent, 'violet');
+  srv.db.run('UPDATE user_prefs SET prefs = ? WHERE user = ?', JSON.stringify({ accent: 'coral', tone: 'coral', theme: 'sepia' }), ava.id);
+  assert.deepEqual(srv.M.prefsOf(ava.id), { accent: 'violet', tone: 'violet', theme: 'sepia' });
+  const again = Object.assign(new Client(), { cookie: ava.cookie });
+  await again.connect();
+  assert.equal(again.hello.account.prefs.accent, 'violet', 'the snapshot carries the upgraded value');
+  again.ws.close();
+  await ava.ok('prefs.set', { prefs: { accent: 'mint', tone: null, theme: null } });
 
   const good = { id: 'night1', name: 'Night', base: 'dark', bg: '#1E2228', surface: '#252A31', text: '#E8ECF1', accent: '#7AA2F7' };
   // Unreadable: grey text on grey.

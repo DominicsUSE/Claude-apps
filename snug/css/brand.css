@@ -1,5 +1,5 @@
 /*
-  Brand: the Doorstep (the Nook component), the wordmark and lockup, the loading mark, and the two
+  Brand: the Huddle (the Nook component), the wordmark and lockup, the loading mark, and the two
   screens the brand owns outright (sign in, splash). Geometry lives in
   js/ui/brand.js and brand/*.svg; docs/brand/BRAND.md explains it.
   Rule: places are arches, people are circles, controls are rectangles.
@@ -7,16 +7,24 @@
 
 .nook, .lockup, .wordmark { display: block; flex: none; }
 
-/* Loading: the person steps onto the threshold. One 240ms move inside a
-   1.2s cycle reads as "arriving", not as a spinner. */
+/* Loading: the two arrive, one after the other. Each cut-out grows from its
+   foot in 240ms within a 1.2s cycle, which reads as "arriving", not as a
+   spinner. The circles live in the mask: scaling them opens the holes. */
 .loading { display: inline-flex; flex-direction: column; align-items: center; gap: var(--s-3); color: var(--text-3); font-size: var(--t-13); line-height: var(--lh-ui); }
 .loading.quiet .loading-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.loading-dot { animation: nook-settle 1200ms var(--ease-out) infinite; }
-@keyframes nook-settle {
-  0% { transform: translateY(-14px); opacity: 0; }
-  20% { transform: translateY(0); opacity: 1; }
-  80% { transform: translateY(0); opacity: 1; }
-  100% { transform: translateY(0); opacity: 0; }
+.loading-dot { transform-box: fill-box; transform-origin: 50% 100%; animation: nook-arrive 1200ms var(--ease-out) infinite; }
+.loading-dot.two { animation-name: nook-arrive-two; }
+@keyframes nook-arrive {
+  0% { transform: scale(0); }
+  20% { transform: scale(1); }
+  85% { transform: scale(1); }
+  100% { transform: scale(0); }
+}
+@keyframes nook-arrive-two {
+  0%, 15% { transform: scale(0); }
+  35% { transform: scale(1); }
+  85% { transform: scale(1); }
+  100% { transform: scale(0); }
 }
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-motion="full"]) .loading-dot { animation: none; }

@@ -7,7 +7,7 @@
 
 // ---------- Whiteboard ----------
 // Colours are token names, never free colours, so a drawing reads in both
-// themes and nobody draws in coral (the brand) or error red.
+// themes and nobody draws in violet (the brand) or error red.
 export const BOARD_COLOURS = ['ink', 'mint', 'amber', 'cyan', 'rose'];
 export const BOARD_WIDTHS = [1, 2, 3, 4];
 export const BOARD_LIMITS = { points: 256, strokes: 2000 };

@@ -1,6 +1,6 @@
 /* The conversation: one continuous stream, dense where people read.
    Rows are transparent; hover lifts one step (bg-2); a mention of you is
-   brand-soft with a 2px coral edge; the selected message is bg-4. */
+   brand-soft with a 2px violet edge; the selected message is bg-4. */
 
 .stream { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .scroller { flex: 1; min-height: 0; overflow-y: auto; overflow-anchor: none; position: relative; display: flex; flex-direction: column; }
@@ -47,11 +47,11 @@
 .edited { font-size: var(--t-11); color: var(--text-3); margin-left: var(--s-1); }
 .sys { color: var(--text-2); font-style: italic; }
 
-/* A mention of you is coral. A mention of someone else is a quiet chip. */
+/* A mention of you is violet. A mention of someone else is a quiet chip. */
 .at { font-weight: var(--w-medium); border-radius: var(--r-xs); padding: 0 3px; background: var(--bg-3); color: var(--text-1); cursor: pointer; transition: background var(--m-fast) var(--ease-in-out); }
 .at:hover { background: var(--bg-4); }
 .at.at-you { background: var(--brand-soft); color: var(--brand-ink); font-weight: var(--w-semibold); }
-.at.at-you:hover { background: color-mix(in srgb, var(--brand) 28%, var(--bg-1)); }
+.at.at-you:hover { background: color-mix(in srgb, var(--brand) 20%, var(--bg-1)); } /* 20%: violet text keeps 4.5:1 in Ash, Sepia and Light */
 .msg.mention .at.at-you { background: color-mix(in srgb, var(--brand) 22%, var(--bg-1)); }
 mark.hit { background: none; color: inherit; font-weight: var(--w-bold); text-decoration: underline 2px var(--brand); text-underline-offset: 3px; }
 
@@ -111,7 +111,7 @@ mark.hit { background: none; color: inherit; font-weight: var(--w-bold); text-de
 .day + .msg { margin-top: var(--s-3); }
 .thread-count { padding: var(--s-3) var(--s-4) 0; padding-left: calc(var(--s-4) + var(--avatar) + var(--s-3)); font-size: var(--t-12); font-weight: var(--w-semibold); color: var(--text-3); }
 .thread-count + .day { margin-top: var(--s-3); }
-/* Unread separator: a coral line and a small "New" label at its end. */
+/* Unread separator: a violet line and a small "New" label at its end. */
 .newline { display: flex; align-items: center; gap: 0; padding: 0 var(--s-4); margin-top: var(--s-3); height: 16px; }
 .newline::before { content: ""; flex: 1; height: 1px; background: var(--brand); }
 .newline span { color: var(--on-brand); background: var(--brand); font-size: var(--t-11); font-weight: var(--w-bold); letter-spacing: 0.02em; padding: 0 6px; border-radius: 0 var(--r-xs) var(--r-xs) 0; line-height: 16px; }
@@ -132,7 +132,7 @@ mark.hit { background: none; color: inherit; font-weight: var(--w-bold); text-de
 .jump-wrap { position: relative; height: 0; }
 
 /* Composer: always at the bottom, grows with the text. It is always focused
-   while you write, so focus firms the line instead of lighting it coral. */
+   while you write, so focus firms the line instead of lighting it violet. */
 .composer { flex: none; padding: 0 var(--s-4); position: relative; }
 .composer-box { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg-2); --bg: var(--bg-2); transition: border-color var(--m-fast) var(--ease-in-out); }
 .composer-box:hover { border-color: var(--line-strong); }

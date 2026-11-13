@@ -1,7 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
   <title>Snug</title>
-  <!-- The Doorstep: an open archway (52 x 54, outer r26, opening 28 wide with
-       an r14 top, 12-unit band, 4-unit outer feet, open to the ground) and a
-       person (r9 dot) standing on the threshold, 5 units clear of each side. -->
-  <path fill="#F05A47" d="M6 55V31a26 26 0 0 1 52 0v24a4 4 0 0 1-4 4H46V31a14 14 0 0 0-28 0v28H10a4 4 0 0 1-4-4ZM23 50a9 9 0 1 0 18 0a9 9 0 1 0-18 0Z"/>
+  <!-- The Huddle: an arch (48 x 54, r24 top, r4 feet) with two round
+       cut-outs side by side at its foot, r8 and r6, bottoms level: two people
+       sitting close in one place, or a pair of eyes. The cut-outs show the
+       ground, so the mark is one solid shape (fill-rule evenodd). -->
+  <path fill="#8B5CF6" fill-rule="evenodd" d="M8 56V30a24 24 0 0 1 48 0v26a4 4 0 0 1-4 4H12a4 4 0 0 1-4-4ZM15 46a8 8 0 1 0 16 0a8 8 0 1 0-16 0ZM35 48a6 6 0 1 0 12 0a6 6 0 1 0-12 0Z"/>
 </svg>

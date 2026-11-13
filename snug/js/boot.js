@@ -12,7 +12,7 @@ try {
   if (p.zoom && p.zoom !== 100) r.style.zoom = p.zoom + '%';
   if (p.display === 'compact') r.setAttribute('data-display', 'compact');
   if (p.font === 'hyperlegible') r.setAttribute('data-font', 'hyperlegible');
-  if (p.tone && p.tone !== 'coral') r.setAttribute('data-tone', p.tone);
+  if (p.tone && p.tone !== 'violet' && p.tone !== 'coral') r.setAttribute('data-tone', p.tone); // coral: the old default
   // The look js/account.js applied last time on this device (custom theme and
   // accent colours, this-device-only settings). Only data-* attributes with
   // plain values, and colour properties as hex or rgb(), are accepted.

@@ -10,7 +10,7 @@
 //   aloud, and the recent places the quick switcher offers first.
 import { S, emit, subscribe, toast, convMeta, signOutHooks, applyPrefs } from './store.js';
 import { call, on, notifyFilters } from './server.js';
-import { PREF_RULES, PREF_DEFAULTS, cleanPrefs, inQuiet, hasKeyword, everyonePing, soundKind, soundFor } from './lib/account.js';
+import { PREF_RULES, PREF_DEFAULTS, cleanPrefs, upgradePrefs, inQuiet, hasKeyword, everyonePing, soundKind, soundFor } from './lib/account.js';
 import { THEME_PRESETS, customId, deriveTheme, accentTokens } from './lib/theme.js';
 import { parseHex } from './lib/colour.js';
 import { forMeHooks, needsMe, levelOf, forMe } from './lib/attention.js';
@@ -41,6 +41,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const setSent = (v) => { sent = v; if (v) local.set(SENT, v); else local.del(SENT); };
 
 function adopt(server) {
+  server = upgradePrefs(server);
   for (const k of SYNCED) S.prefs[k] = k in server ? structuredClone(server[k]) : structuredClone(PREF_DEFAULTS[k]);
   setSent(pick(S.prefs));
   applyAppearance();
@@ -97,7 +98,9 @@ on('open', () => {
   } else {
     // Changes made here while offline (against what the server last knew)
     // win over the server's copy; everything else comes from the server.
-    const base = sent || (owner === S.me ? local.get(SENT) : null);
+    // A base saved before violet still says 'coral': upgrade it as S.prefs was,
+    // or the rename would look like an offline change and wipe the server's.
+    const base = upgradePrefs(sent || (owner === S.me ? local.get(SENT) : null));
     const now = pick(S.prefs);
     const mine = base ? SYNCED.filter((k) => k in base && !same(now[k], base[k])) : [];
     adopt(server);
@@ -189,7 +192,7 @@ export function applyAppearance() {
   const key = JSON.stringify([pick(p), th.attr, th.bg1]);
   if (key === applied) return;
   applied = key;
-  attr('data-tone', p.tone !== 'coral' && (!p.accent || p.accent === 'coral') ? p.tone : null);
+  attr('data-tone', p.tone && p.tone !== 'violet' && (!p.accent || p.accent === 'violet') ? p.tone : null);
   attr('data-display', p.display === 'compact' ? 'compact' : null);
   attr('data-compact-avatars', p.display === 'compact' && p.compactAvatars);
   attr('data-lh', p.lineHeight !== 'normal' ? p.lineHeight : null);
@@ -222,7 +225,7 @@ export function applyAppearance() {
     const ramp = accentTokens(p.accent, th.bg1, th.base);
     if (ramp) { Object.assign(props, ramp); const [r, g, b] = parseHex(ramp['--accent']); props['--selection'] = `rgb(${r} ${g} ${b} / 0.32)`; }
   }
-  attr('data-accent', th.custom || (p.accent && p.accent !== 'coral') ? '' : null);
+  attr('data-accent', th.custom || (p.accent && p.accent !== 'violet') ? '' : null);
   for (const k of inline) if (!(k in props)) root.style.removeProperty(k);
   for (const [k, v] of Object.entries(props)) root.style.setProperty(k, v);
   inline = new Set(Object.keys(props));

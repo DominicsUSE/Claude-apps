@@ -85,12 +85,15 @@ export const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 
 // The colours people, roles and houses can choose: OKLCH hues only, named for
 // screen readers. The theme sets lightness and chroma. Kept at least 25 degrees
-// clear of the hues that carry meaning: error red (23 to 25), brand coral (30),
-// amber (73 to 81) and mint (168 to 170). Nothing warm sits between coral and
-// amber, so no chosen colour can pass for the brand, a warning or a presence.
-// Only two cool blues and one plum, so a screen of people and houses stays warm
-// and never reads purple or blue.
-export const HUES = [[106, 'Olive'], [142, 'Green'], [200, 'Teal'], [228, 'Sky'], [255, 'Blue'], [318, 'Plum'], [335, 'Clay rose'], [350, 'Pink']];
+// clear of the hues that carry meaning: error red (23 to 25), amber (73 to 81),
+// mint (168 to 170) and brand violet (289 to 297: the mark 293, the tokens
+// from 289 in light to 297 as dark text). Nothing sits between Blue and Clay
+// rose, so no chosen colour can pass for the brand, a warning or a presence.
+export const HUES = [[106, 'Olive'], [142, 'Green'], [200, 'Teal'], [228, 'Sky'], [255, 'Blue'], [335, 'Clay rose'], [350, 'Pink']];
+// Hues that were choosable once and may still be stored. They stay valid (a
+// role saved as Plum can be saved again) but show as the nearest choosable
+// hue (hueOf): Plum (318) sat too close to the violet brand.
+export const RETIRED_HUES = [318];
 
 // Any stored hue, shown as the nearest choosable one, so older choices never
 // read as a warning, a highlight or a presence colour.

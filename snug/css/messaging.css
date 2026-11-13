@@ -2,7 +2,7 @@
    polls, link previews, forwards, stickers, scheduling, the formatting bar,
    the unread bar and search suggestions.
    Colour: cyan for links and info, mint for nothing here (nothing is live),
-   coral only on the primary buttons. Polls and previews are cards because
+   violet only on the primary buttons. Polls and previews are cards because
    they are separate objects; quotes, lists and headings are just text. */
 
 /* ---------- Rich text ---------- */

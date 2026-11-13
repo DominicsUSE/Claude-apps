@@ -15,7 +15,7 @@
 .rail-scroll::-webkit-scrollbar { display: none; }
 .rail-item { position: relative; width: 100%; display: flex; justify-content: center; flex: none; }
 
-/* The left edge says what an item is to you: a coral bar where you are, a
+/* The left edge says what an item is to you: a violet bar where you are, a
    small light dot where something is new, a hint of it on hover. */
 .rail-item::before {
   /* Full height once, scaled per state: transform animates without layout work. */
@@ -190,7 +190,7 @@ button.home-row:hover .home-row-ic:not(:has(> .avatar, > .tile)) { background: v
 .phone-house .nav-scroll { padding-top: var(--s-2); }
 
 /* ---------- Catch up and Search (views owned by the nav agent) ----------
-   Rows with quiet separators; coral marks what is for you. */
+   Rows with quiet separators; violet marks what is for you. */
 .catchup .view-sect, .saved .view-sect { gap: var(--s-2); }
 .catchup .col > div + div > .view-sect, .catchup .col > .view-sect:not(:first-child) { border-top: 1px solid var(--line-subtle); margin-top: var(--s-4); padding-top: var(--s-4); }
 .catchup .view-sect .tile { --sz: 20px; }

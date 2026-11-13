@@ -448,7 +448,7 @@ export function NickForm({ house, user = S.me }) {
     <div><span class="label" id="nick-hue">Colour</span>
       <div class="swatches" role="group" aria-labelledby="nick-hue">
         <button type="button" class="swatch" style="--hue:0;--tile-c:0" aria-pressed=${String(hue == null)} aria-label="Same as everywhere" onClick=${() => setHue(null)}></button>
-        ${HUES.map(([v, name]) => html`<button type="button" key=${v} class="swatch strong" style=${`--hue:${v}`} aria-pressed=${String(hue === v)} aria-label=${name} onClick=${() => setHue(v)}></button>`)}
+        ${HUES.map(([v, name]) => html`<button type="button" key=${v} class="swatch strong" style=${`--hue:${v}`} aria-pressed=${String(hue != null && hueOf(hue) === v)} aria-label=${name} onClick=${() => setHue(v)}></button>`)}
       </div></div>
     <div class="modal-foot"><button type="button" class="btn" onClick=${closeModal}>Cancel</button><button class="btn primary">Save</button></div>
   </form>`;

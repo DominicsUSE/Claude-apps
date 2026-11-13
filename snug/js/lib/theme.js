@@ -12,7 +12,7 @@
 //   store an unreadable theme. Themes travel as "snug-theme:1:<base64url JSON>".
 // - Profile styling: avatar decorations and name styles, from fixed lists.
 import { HEX, parseHex, normHex, contrastRatio, mix, nudge, accentRamp, isDark, profileInk } from './colour.js';
-import { HUES } from './util.js';
+import { HUES, RETIRED_HUES } from './util.js';
 
 // ---------- Built-in themes ----------
 // bg1 is the conversation surface; semantic colours come from the base.
@@ -34,19 +34,22 @@ export const THEME_NOTES = {
   contrast: 'Black with white text and firm lines.',
 };
 
-// Semantic colours each base keeps whatever the theme (coral brand, mint
+// Semantic colours each base keeps whatever the theme (violet brand, mint
 // live, amber idle, cyan info, rose reactions, red errors). A custom theme
 // must keep them readable: 3:1 on its surfaces.
 export const BASE_SEMANTIC = {
-  dark: { brand: '#F05A47', mint: '#58C7A5', amber: '#E8B65A', cyan: '#62B8D8', rose: '#D98598', error: '#E05A5A' },
-  light: { brand: '#E04B38', mint: '#1F8F6E', amber: '#A86F0D', cyan: '#1F7EA3', rose: '#B24E66', error: '#C93838' },
+  dark: { brand: '#996FF7', mint: '#58C7A5', amber: '#E8B65A', cyan: '#62B8D8', rose: '#D98598', error: '#E05A5A' },
+  light: { brand: '#763FF4', mint: '#1F8F6E', amber: '#A86F0D', cyan: '#1F7EA3', rose: '#B24E66', error: '#C93838' },
 };
 
 // ---------- Accents ----------
-// Coral is Snug's own colour and the default. Each preset has a value for
-// dark and one for light themes; a custom hex is nudged per theme.
+// Violet is Snug's own colour and the default (the brand tokens: #8B5CF6, the
+// mark's colour, lifted for dark themes and deepened for light ones so button
+// text passes). Each preset has a value for dark and one for light themes; a
+// custom hex is nudged per theme. There is no coral preset any more: it sat
+// next to error red, and a stored 'coral' reads as violet (upgradePrefs).
 export const ACCENT_PRESETS = {
-  coral: { label: 'Coral', dark: '#F05A47', light: '#E04B38' },
+  violet: { label: 'Violet', dark: '#996FF7', light: '#763FF4' },
   cyan: { label: 'Cyan', dark: '#62B8D8', light: '#1F7EA3' },
   mint: { label: 'Mint', dark: '#58C7A5', light: '#1F8F6E' },
   amber: { label: 'Amber', dark: '#E8B65A', light: '#A86F0D' },
@@ -71,7 +74,7 @@ export function accentProblem(accent) {
 }
 // The tokens an accent paints with on a surface (null: use the CSS default).
 export function accentTokens(accent, bg, base) {
-  if (accent === 'coral' || !accent) return null;
+  if (accent === 'violet' || accent === 'coral' || !accent) return null;
   return accentRamp(accentHex(accent, base), bg);
 }
 
@@ -185,7 +188,7 @@ export const DECORATIONS = [
   ['ring', 'Ring'], ['double', 'Double ring'], ['dotted', 'Dotted ring'], ['halo', 'Arch halo'], ['leaves', 'Leaves'], ['stars', 'Stars'],
 ];
 export const DECORATION_IDS = DECORATIONS.map(([id]) => id);
-export const HUE_IDS = HUES.map(([v]) => v);
+export const HUE_IDS = [...HUES.map(([v]) => v), ...RETIRED_HUES]; // retired ones show as the nearest (hueOf)
 export const NAME_FONTS = [['inter', 'Inter'], ['hyperlegible', 'Hyperlegible'], ['mono', 'Mono'], ['serif', 'Serif']];
 export const NAME_WEIGHTS = [['semibold', 'Semibold'], ['bold', 'Bold']];
 // A name style, or null for the plain one. Throws a readable sentence.

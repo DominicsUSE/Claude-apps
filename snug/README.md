@@ -652,12 +652,13 @@ Real, and covered by tests with separate users:
       a dark or light base. Every other token is derived, with live contrast
       badges; up to 5 saved themes. Share one as a code
       (`snug-theme:1:` and base64url JSON) and import it on any account.
-    - **Accent**: coral (Snug's own), cyan, mint, amber, rose, neutral, or any
+    - **Accent**: violet (Snug's own), cyan, mint, amber, rose, neutral, or any
       hex colour, for the primary button, switches, the selected row, the
       active tab and the focus ring. It is nudged per theme so fills reach
       3:1 and accent text 4.5:1; a colour that would need more than a small
-      nudge on any built-in theme is refused. Coral stays the brand and "for
-      you" (mentions, the New line, badges) whatever the accent.
+      nudge on any built-in theme is refused. Violet stays the brand and "for
+      you" (mentions, the New line, badges) whatever the accent. An accent
+      saved as coral (Snug's colour before violet) reads as violet.
     - **Chat**: times always or on hover, big emoji on or off, emoji size,
       reactions shown or hidden, GIFs and animated custom emoji (match
       motion, always, on hover, never: a still frame until pointed at),
@@ -1058,8 +1059,9 @@ the filter chips write those words for you. No promotions anywhere.
 
 ## Design system
 
-The idea is *a place with someone in it*. The symbol, the Doorstep, is an
-open archway with a person (the presence dot) standing on its threshold; the
+The idea is *a place with someone in it*. The symbol, the Huddle, is an
+arch with two round cut-outs (two presence dots) side by side at its foot:
+two people sitting close in one place. It is Brand Violet `#8B5CF6`; the
 brand sheet is in `docs/brand/BRAND.md` and the reasons for it are in
 `docs/direction/README.md` section 2. All tokens are in `css/tokens.css`. The rules, briefly:
 
@@ -1078,8 +1080,10 @@ brand sheet is in `docs/brand/BRAND.md` and the reasons for it are in
   rectangles. Buttons and inputs 6px, menus 8px, dialogs 12px.
 - **Colour.** Dark is the default, warm paper is the light theme; depth
   comes from five surface steps, and only floating layers cast the single
-  shadow. Coral is the brand and means *for you*: the main button, the
-  selected place's bar, count badges, the New line, mentions. Mint means
+  shadow. Violet is the brand and means *for you*: the main button, the
+  selected place's bar, count badges, the New line, mentions, selection
+  (`#996FF7` with near-black text in dark themes, `#763FF4` with white text
+  in light ones, so text on it reaches 4.5:1). Mint means
   online or connected, amber idle or happening soon, cyan links, rose your
   own reactions, red destructive or failed. People, roles and houses choose
   a hue only; the theme owns lightness and chroma, and the offered hues stay

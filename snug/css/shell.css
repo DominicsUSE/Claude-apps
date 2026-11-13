@@ -44,7 +44,7 @@
 .nav-group:first-child { margin-top: 0; }
 
 /* A row: icon, name, optional marker. Rest, hover, pressed, selected, unread, muted.
-   Selected is a strong surface plus a 3px coral indicator, never a bright pill. */
+   Selected is a strong surface plus a 3px violet indicator, never a bright pill. */
 .row {
   width: 100%; height: var(--row-h); padding: 0 var(--s-2);
   display: flex; align-items: center; gap: var(--s-2);
@@ -93,7 +93,7 @@
 .house-row .chev.shut { transform: rotate(-90deg); }
 .house-body { padding-left: 0; }
 
-/* Live dock: appears only while you are in a voice room. The voice moment is coral. */
+/* Live dock: appears only while you are in a voice room. The voice moment is violet. */
 .dock { flex: none; margin: 0 var(--s-2) var(--s-2); padding: var(--s-2); background: var(--bg-1); --bg: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-md); display: grid; gap: var(--s-2); animation: rise-in var(--m-smooth) var(--ease-out); }
 .dock-head { display: flex; align-items: center; gap: var(--s-2); min-width: 0; }
 .dock-head .ic { color: var(--brand); }
