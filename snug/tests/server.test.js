@@ -2052,3 +2052,1383 @@ test('calls: someone with Snug closed gets a "Name is calling" push that opens t
   }
 });
 // --- end calls ----------------------------------------------------------------
+
+// --- messaging (server/messaging.js, server/linkpreview.js) --------------------
+// Polls, forwarding, edit history, scheduled messages, stickers, link previews
+// and the newer search filters. Separate people, real sockets.
+{
+  const { createServer: mxHttp } = await import('node:http');
+  const { deflateSync, crc32 } = await import('node:zlib');
+  const L = await import('../server/linkpreview.js');
+  let ann, bea, cy, dee, hall, room, dmAC;
+  const mxWait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const upload = (cookie, path, data, type, name = 'file') => fetch(base + path, {
+    method: 'POST', headers: { cookie, origin: base, 'content-type': type, 'x-file-name': name }, body: data,
+  });
+  // A real PNG, w by h, one colour.
+  const png = (w, h) => {
+    const chunk = (t, d) => { const b = Buffer.alloc(8 + d.length + 4); b.writeUInt32BE(d.length, 0); b.write(t, 4, 'latin1'); d.copy(b, 8); b.writeUInt32BE(crc32(Buffer.concat([Buffer.from(t, 'latin1'), d])), 8 + d.length); return b; };
+    const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+    const raw = Buffer.alloc((w * 3 + 1) * h, 0x80); for (let y = 0; y < h; y++) raw[y * (w * 3 + 1)] = 0;
+    return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+  };
+
+  test('messaging: polls are one vote per person, hide results until you vote, and end', async () => {
+    ann = await Client.make('mxann', 'Ann Marsh');
+    bea = await Client.make('mxbea', 'Bea Moss');
+    cy = await Client.make('mxcy', 'Cy Mead');
+    dee = await Client.make('mxdee', 'Dee Mint');
+    ({ house: hall, room } = await ann.ok('house.create', { name: 'Poll Hall', hue: 200 }));
+    const { code } = await ann.ok('invite.create', { house: hall });
+    await bea.ok('invite.accept', { code });
+    await dee.ok('invite.accept', { code });
+    const base0 = { conv: room, question: 'Which glaze?', hours: 24 };
+    const ans = (...t) => t.map((x) => ({ text: x }));
+    assert.match(await ann.refused('poll.create', { ...base0, id: mid(), answers: ans('Only one') }), /at least two/);
+    assert.match(await ann.refused('poll.create', { ...base0, id: mid(), answers: ans(...'abcdefghijk'.split('')) }), /up to 10/);
+    assert.match(await ann.refused('poll.create', { ...base0, id: mid(), hours: 2, answers: ans('a', 'b') }), /how long/);
+    assert.match(await ann.refused('poll.create', { ...base0, id: mid(), answers: ans('Same', 'same') }), /same thing/);
+    assert.match(await ann.refused('poll.create', { ...base0, id: mid(), answers: [{ text: 'a', emoji: 'not emoji' }, { text: 'b' }] }), /emoji/);
+    assert.match(await cy.refused('poll.create', { ...base0, id: mid(), answers: ans('a', 'b') }), /access|member/);
+
+    const p1 = mid();
+    await ann.ok('poll.create', { ...base0, id: p1, answers: [{ text: 'Celadon', emoji: '🍵' }, { text: 'Tenmoku' }, { text: 'Shino' }] });
+    const got = await bea.next('msg', (d) => d.m.id === p1);
+    assert.deepEqual({ q: got.m.poll.question, n: got.m.poll.answers.length, e: got.m.poll.answers[0].emoji, c: got.m.poll.counts, t: got.m.poll.total, multi: got.m.poll.multi },
+      { q: 'Which glaze?', n: 3, e: '🍵', c: [0, 0, 0], t: 0, multi: false });
+    assert.deepEqual((await bea.ok('poll.vote', { conv: room, id: p1, answers: [1] })).votes, [1]);
+    assert.deepEqual((await ann.next('poll', (d) => d.id === p1)).poll.counts, [0, 1, 0]);
+    assert.match(await bea.refused('poll.vote', { conv: room, id: p1, answers: [0, 1] }), /one answer/);
+    assert.match(await bea.refused('poll.vote', { conv: room, id: p1, answers: [7] }), /choices/);
+    await bea.ok('poll.vote', { conv: room, id: p1, answers: [2] });
+    // Voting twice is one vote: it moves, it doesn't add.
+    await bea.ok('poll.vote', { conv: room, id: p1, answers: [2] });
+    const after = (await ann.ok('poll.view', { conv: room, id: p1 })).poll;
+    assert.deepEqual({ c: after.counts, t: after.total }, { c: [0, 0, 1], t: 1 });
+    assert.equal(srv.db.get('SELECT COUNT(*) n FROM poll_votes WHERE msg = ?', p1).n, 1);
+    assert.match(await cy.refused('poll.vote', { conv: room, id: p1, answers: [0] }), /access/);
+    assert.match(await cy.refused('poll.view', { conv: room, id: p1 }), /access/);
+    assert.match(await ann.refused('msg.edit', { conv: room, id: p1, text: 'Which clay?' }), /Polls can’t be edited/);
+
+    // Hidden results: nobody's counts reach someone who hasn't voted.
+    const p2 = mid();
+    await ann.ok('poll.create', { ...base0, id: p2, question: 'Days?', multi: true, hidden: true, answers: ans('Mon', 'Tue', 'Wed') });
+    const hid = await dee.next('msg', (d) => d.m.id === p2);
+    assert.equal(hid.m.poll.counts, undefined);
+    await bea.ok('poll.vote', { conv: room, id: p2, answers: [0, 2] });
+    assert.deepEqual((await ann.next('poll', (d) => d.id === p2)).poll.counts, [1, 0, 1], 'the author sees results');
+    const deeSees = await dee.next('poll', (d) => d.id === p2);
+    assert.equal(deeSees.poll.counts, undefined, 'someone who has not voted sees no counts');
+    assert.equal(deeSees.poll.total, 1);
+    assert.equal((await dee.ok('poll.view', { conv: room, id: p2 })).poll.counts, undefined);
+    await dee.ok('poll.vote', { conv: room, id: p2, answers: [1] });
+    assert.deepEqual((await dee.ok('poll.view', { conv: room, id: p2 })).poll.counts, [1, 1, 1]);
+    // Only its author ends it early; then it is closed to votes and open to everyone's eyes.
+    assert.match(await bea.refused('poll.end', { conv: room, id: p2 }), /Only the person/);
+    await ann.ok('poll.end', { conv: room, id: p2 });
+    assert.equal((await dee.next('poll', (d) => d.id === p2 && d.poll.ended)).poll.ended, true);
+    assert.match(await bea.refused('poll.vote', { conv: room, id: p2, answers: [1] }), /ended/);
+    // A poll's time running out closes it, and everyone hears.
+    const p3 = mid();
+    await ann.ok('poll.create', { ...base0, id: p3, question: 'Quick one?', hours: 1, answers: ans('Yes', 'No') });
+    srv.db.run('UPDATE polls SET ends = ? WHERE msg = ?', Date.now() - 1000, p3);
+    srv.hub.messaging.tick();
+    assert.equal((await bea.next('poll', (d) => d.id === p3)).poll.ended, true);
+    assert.match(await bea.refused('poll.vote', { conv: room, id: p3, answers: [0] }), /ended/);
+    // Someone timed out in the house (server/safety.js) can't vote.
+    srv.db.run('INSERT INTO timeouts (house, user, until, by) VALUES (?, ?, ?, ?)', hall, dee.id, Date.now() + 60_000, ann.id);
+    assert.match(await dee.refused('poll.vote', { conv: room, id: p1, answers: [0] }), /timed out/);
+    srv.db.run('DELETE FROM timeouts WHERE house = ? AND user = ?', hall, dee.id);
+    // Your votes come back with every snapshot.
+    await bea.close(); await bea.connect();
+    assert.deepEqual(bea.hello.pollVotes[p1], [2]);
+  });
+
+  test('messaging: forwarding keeps who wrote it, copies files, and respects both places', async () => {
+    await cy.ok('friend.request', { handle: 'mxann' });
+    await ann.ok('friend.accept', { user: cy.id });
+    ({ id: dmAC } = await ann.ok('dm.open', { users: [cy.id] }));
+    const up = await upload(ann.cookie, `/api/files?conv=${room}`, Buffer.from('kiln log, cone 6'), 'text/plain', 'log.txt');
+    assert.equal(up.status, 201);
+    const file = await up.json();
+    const src = mid();
+    await ann.ok('msg.send', { conv: room, id: src, text: 'Firing log attached', files: [{ id: file.id }] });
+    const fid = mid();
+    const r = await ann.ok('msg.forward', { conv: room, id: src, to: dmAC, comment: 'for you', newId: fid });
+    assert.equal(r.m.fwd.author, ann.id);
+    const seen = await cy.next('msg', (d) => d.m.id === fid);
+    assert.deepEqual({ text: seen.m.text, ftext: seen.m.fwd.text, author: seen.m.fwd.author }, { text: 'for you', ftext: 'Firing log attached', author: ann.id });
+    const copy = seen.m.files[0].id;
+    assert.notEqual(copy, file.id, 'files are copied into the new place');
+    assert.equal((await fetch(`${base}/api/files/${copy}`, { headers: { cookie: cy.cookie } })).status, 200);
+    assert.equal((await fetch(`${base}/api/files/${file.id}`, { headers: { cookie: cy.cookie } })).status, 404, 'the original stays private');
+    // The way back works only for people who can read the original.
+    assert.match(await cy.refused('history', { conv: seen.m.fwd.conv, fromId: seen.m.fwd.id }), /access/);
+    // Cy can't forward from a room they can't read; Bea can't forward into a conversation she isn't in.
+    assert.match(await cy.refused('msg.forward', { conv: room, id: src, to: dmAC, newId: mid() }), /access/);
+    assert.match(await bea.refused('msg.forward', { conv: room, id: src, to: dmAC, newId: mid() }), /access/);
+    // A forward of a forward still names the first author; with no note it's still a message.
+    const f2 = mid();
+    const again = await cy.ok('msg.forward', { conv: dmAC, id: fid, to: dmAC, newId: f2 });
+    assert.deepEqual({ a: again.m.fwd.author, t: again.m.text, ft: again.m.fwd.text }, { a: ann.id, t: '', ft: 'Firing log attached' });
+    // Retrying the same forward doesn't make a second copy.
+    await cy.ok('msg.forward', { conv: dmAC, id: fid, to: dmAC, newId: f2 });
+    assert.equal(srv.db.get('SELECT COUNT(*) n FROM messages WHERE id = ?', f2).n, 1);
+  });
+
+  test('messaging: edit history keeps the last ten versions, for readers only', async () => {
+    const id1 = mid();
+    await ann.ok('msg.send', { conv: room, id: id1, text: 'v1' });
+    await ann.ok('msg.edit', { conv: room, id: id1, text: 'v2' });
+    await ann.ok('msg.edit', { conv: room, id: id1, text: 'v3' });
+    const h = await bea.ok('msg.edits', { conv: room, id: id1 });
+    assert.equal(h.current.text, 'v3');
+    assert.deepEqual(h.edits.map((e) => e.text), ['v2', 'v1']);
+    assert.match(await cy.refused('msg.edits', { conv: room, id: id1 }), /access/);
+    for (let i = 4; i <= 14; i++) await ann.ok('msg.edit', { conv: room, id: id1, text: `v${i}` });
+    const all = await bea.ok('msg.edits', { conv: room, id: id1 });
+    assert.equal(all.edits.length, 10);
+    assert.deepEqual([all.edits[0].text, all.edits[9].text], ['v13', 'v4']);
+  });
+
+  test('messaging: scheduled messages wait, can be cancelled, send on time and are checked again', async () => {
+    const soon = Date.now() + 5 * 60_000;
+    assert.match(await ann.refused('sched.create', { conv: room, text: 'x', at: Date.now() + 1000 }), /minute/);
+    assert.match(await ann.refused('sched.create', { conv: room, text: 'x', at: Date.now() + 31 * 86_400_000 }), /30 days/);
+    assert.match(await cy.refused('sched.create', { conv: room, text: 'x', at: soon }), /access/);
+    const { id: s1 } = await ann.ok('sched.create', { conv: room, text: 'Kiln opens at 9', at: soon });
+    assert.equal((await ann.next('sched')).list.length, 1);
+    await ann.close(); await ann.connect();
+    assert.deepEqual(ann.hello.scheduled.map((s) => s.id), [s1]);
+    assert.equal((await ann.ok('sched.cancel', { id: s1 })).text, 'Kiln opens at 9');
+    assert.equal((await ann.next('sched')).list.length, 0);
+    assert.equal((await bea.ok('sched.cancel', { id: s1 })).gone, true, 'someone else’s id does nothing');
+    // Due: the server sends it, as Ann.
+    const { id: s2 } = await ann.ok('sched.create', { conv: room, text: 'Glaze day tomorrow', at: soon });
+    srv.db.run('UPDATE scheduled SET at = ? WHERE id = ?', Date.now() - 1, s2);
+    srv.hub.messaging.tick();
+    const sent = await bea.next('msg', (d) => d.m.text === 'Glaze day tomorrow');
+    assert.equal(sent.m.author, ann.id);
+    assert.equal(srv.db.get('SELECT COUNT(*) n FROM scheduled WHERE id = ?', s2).n, 0);
+    // Someone removed from the house before it is due: refused at send time, and told.
+    const { id: s3 } = await bea.ok('sched.create', { conv: room, text: 'still here?', at: soon });
+    await ann.ok('member.remove', { house: hall, user: bea.id });
+    srv.db.run('UPDATE scheduled SET at = ? WHERE id = ?', Date.now() - 1, s3);
+    srv.hub.messaging.tick();
+    assert.equal((await bea.next('sched.failed')).id, s3);
+    assert.equal(srv.db.get("SELECT COUNT(*) n FROM messages WHERE text = 'still here?'").n, 0);
+    const { code } = await ann.ok('invite.create', { house: hall });
+    await bea.ok('invite.accept', { code });
+  });
+
+  test('messaging: stickers are checked from the file, managed by role, and sent only by members', async () => {
+    const path = `/api/files?sticker=${hall}`;
+    assert.equal((await upload(bea.cookie, path, png(64, 64), 'image/png')).status, 403, 'no Manage emoji permission');
+    assert.equal((await upload(ann.cookie, path, png(400, 400), 'image/png')).status, 422);
+    assert.equal((await upload(ann.cookie, path, Buffer.from('GIF89a\x10\x00\x10\x00\x80\x00\x00xxxxxxxxxx'), 'image/gif')).status, 415);
+    assert.equal((await upload(ann.cookie, path, Buffer.alloc(600 * 1024, 1), 'image/png')).status, 413);
+    const up = await upload(ann.cookie, path, png(64, 64), 'image/png', 'pot.png');
+    assert.equal(up.status, 201);
+    const f = await up.json();
+    assert.match(await ann.refused('sticker.add', { house: hall, file: f.id, name: 'x' }), /2 to 30/);
+    const { sticker } = await ann.ok('sticker.add', { house: hall, file: f.id, name: 'Happy pot' });
+    assert.equal((await bea.next('stickers', (d) => d.house === hall && d.list.length)).list[0].name, 'Happy pot');
+    assert.match(await ann.refused('sticker.add', { house: hall, file: f.id, name: 'Again' }), /already a sticker/);
+    // The picker's image: members only.
+    assert.equal((await fetch(`${base}/api/stickers/${f.id}`, { headers: { cookie: bea.cookie } })).status, 200);
+    assert.equal((await fetch(`${base}/api/stickers/${f.id}`, { headers: { cookie: cy.cookie } })).status, 404);
+    const sm = mid();
+    await bea.ok('sticker.send', { conv: room, id: sm, sticker: sticker.id });
+    const got = await ann.next('msg', (d) => d.m.id === sm);
+    assert.equal(got.m.sticker.name, 'Happy pot');
+    assert.equal((await fetch(`${base}/api/files/${got.m.files[0].id}`, { headers: { cookie: ann.cookie } })).status, 200);
+    // Cy isn't in Poll Hall: Ann may send its sticker to Cy, Cy may not use it.
+    assert.match(await cy.refused('sticker.send', { conv: dmAC, id: mid(), sticker: sticker.id }), /houses you’re in/);
+    const sm2 = mid();
+    await ann.ok('sticker.send', { conv: dmAC, id: sm2, sticker: sticker.id });
+    const cs = await cy.next('msg', (d) => d.m.id === sm2);
+    assert.equal((await fetch(`${base}/api/files/${cs.m.files[0].id}`, { headers: { cookie: cy.cookie } })).status, 200);
+    assert.match(await bea.refused('sticker.remove', { id: sticker.id }), /can’t manage stickers/);
+    await ann.ok('sticker.remove', { id: sticker.id });
+    assert.equal((await bea.next('stickers', (d) => d.house === hall && !d.list.length)).list.length, 0);
+  });
+
+  test('messaging: link previews refuse private addresses and fetch public pages safely', async () => {
+    // The address checks themselves.
+    for (const a of ['127.0.0.1', '10.0.0.8', '172.16.4.4', '192.168.0.1', '169.254.169.254', '100.64.1.1', '0.0.0.0', '::1', 'fe80::1', 'fd00::1', '::ffff:127.0.0.1', '::ffff:a9fe:a9fe', '64:ff9b::7f00:1']) {
+      assert.equal(L.addressBlocked(a), true, a);
+    }
+    for (const a of ['93.184.216.34', '2606:4700:4700::1111']) assert.equal(L.addressBlocked(a), false, a);
+    assert.equal(L.checkUrl('file:///etc/passwd'), null);
+    assert.equal(L.checkUrl('http://user:pw@example.com/'), null);
+    assert.equal(L.checkUrl('http://example.com:22/'), null);
+    assert.equal(await L.resolvePublic('localhost'), null);
+    assert.equal(await L.resolvePublic('2130706433'), null, 'an IP written as a number');
+    await assert.rejects(L.safeFetch('http://169.254.169.254/latest/meta-data/'), /refused/);
+
+    // A stand-in site on this machine. It counts every request it gets.
+    let hits = 0;
+    const big = Buffer.alloc(11 * 1024 * 1024, 7);
+    const site = mxHttp((req, res) => {
+      hits++;
+      const host = `http://127.0.0.1:${site.address().port}`;
+      if (req.url === '/page') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(`<html><head><title>Fallback</title><meta property="og:title" content="Kiln Weekly &amp; more"><meta property="og:description" content="Cone 6 news"><meta property="og:site_name" content="Kiln"><meta property="og:image" content="${host}/pic.png"></head><body>hi</body></html>`); return; }
+      if (req.url === '/pic.png') { res.writeHead(200, { 'content-type': 'image/png' }); res.end(png(40, 20)); return; }
+      if (req.url === '/meta') { res.writeHead(302, { location: 'http://169.254.169.254/latest/meta-data/' }); res.end(); return; }
+      if (req.url === '/inside') { res.writeHead(301, { location: 'http://10.0.0.1/' }); res.end(); return; }
+      if (req.url === '/big.png') { res.writeHead(200, { 'content-type': 'image/png' }); res.end(big); return; }
+      if (req.url === '/fake.png') { res.writeHead(200, { 'content-type': 'image/png' }); res.end('<script>alert(1)</script>'); return; }
+      if (req.url === '/slow') { res.writeHead(200, { 'content-type': 'text/html' }); const t = setInterval(() => res.write(' '), 100); res.on('close', () => clearInterval(t)); return; }
+      res.writeHead(404); res.end();
+    });
+    await new Promise((r) => site.listen(0, '127.0.0.1', r));
+    const at = (p) => `http://127.0.0.1:${site.address().port}${p}`;
+    const M = srv.hub.messaging;
+    try {
+      // By default nothing on this machine is ever fetched.
+      const m0 = mid();
+      await ann.ok('msg.send', { conv: room, id: m0, text: `look ${at('/page')} and http://localhost:8080/ and http://[::1]:8443/` });
+      await mxWait(150); await M.idle();
+      assert.equal(hits, 0, 'no request reached the local site');
+      assert.equal(srv.db.get('SELECT embeds FROM messages WHERE id = ?', m0).embeds, null);
+
+      M.set({ allowLoopback: true }); // tests only: the stand-in may be fetched, nothing else private
+      const m1 = mid();
+      await ann.ok('msg.send', { conv: room, id: m1, text: `look ${at('/page')}` });
+      const ev = await bea.next('msg', (d) => d.m.id === m1 && d.m.embeds, 5000);
+      const e = ev.m.embeds[0];
+      assert.deepEqual({ k: e.kind, t: e.title, d: e.description, s: e.site, h: e.host }, { k: 'link', t: 'Kiln Weekly & more', d: 'Cone 6 news', s: 'Kiln', h: '127.0.0.1' });
+      const img = await fetch(`${base}/api/files/${e.image.id}`, { headers: { cookie: bea.cookie } });
+      assert.deepEqual([img.status, img.headers.get('content-type')], [200, 'image/png'], 'the picture is a Snug file');
+      assert.deepEqual([e.image.w, e.image.h], [40, 20]);
+      assert.equal((await fetch(`${base}/api/files/${e.image.id}`, { headers: { cookie: cy.cookie } })).status, 404);
+      // Cached: the same link again costs the site nothing.
+      const before = hits;
+      const m2 = mid();
+      await ann.ok('msg.send', { conv: room, id: m2, text: `again ${at('/page')}` });
+      await bea.next('msg', (d) => d.m.id === m2 && d.m.embeds, 5000);
+      assert.equal(hits, before);
+      // A picture linked directly shows as itself.
+      const m3 = mid();
+      await ann.ok('msg.send', { conv: room, id: m3, text: at('/pic.png') });
+      assert.equal((await bea.next('msg', (d) => d.m.id === m3 && d.m.embeds, 5000)).m.embeds[0].kind, 'image');
+      // Redirects into private space, oversize files, a page pretending to be a picture, <links>: nothing.
+      const m4 = mid();
+      await ann.ok('msg.send', { conv: room, id: m4, text: `${at('/meta')} ${at('/inside')} ${at('/big.png')} <${at('/page')}>` });
+      await mxWait(100); await M.idle();
+      assert.equal(srv.db.get('SELECT embeds FROM messages WHERE id = ?', m4).embeds, null);
+      const m5 = mid();
+      await ann.ok('msg.send', { conv: room, id: m5, text: at('/fake.png') });
+      await mxWait(100); await M.idle();
+      assert.equal(srv.db.get('SELECT embeds FROM messages WHERE id = ?', m5).embeds, null);
+      // A site that drips forever is cut off at the time limit.
+      const t0 = Date.now();
+      await assert.rejects(L.safeFetch(at('/slow'), { allowLoopback: true, timeoutMs: 400 }));
+      assert.ok(Date.now() - t0 < 1500, 'stopped at the deadline');
+      // Only its author (or a moderator) removes a message's previews.
+      assert.match(await bea.refused('msg.embeds', { conv: room, id: m1, on: false }), /Only the person/);
+      await ann.ok('msg.embeds', { conv: room, id: m1, on: false });
+      const gone = await bea.next('msg', (d) => d.m.id === m1 && d.m.noEmbeds);
+      assert.equal(gone.m.embeds, undefined);
+      // Turned off on the server: no previews at all.
+      M.set({ previews: false });
+      const m6 = mid();
+      await ann.ok('msg.send', { conv: room, id: m6, text: at('/pic.png') });
+      await mxWait(100); await M.idle();
+      assert.equal(srv.db.get('SELECT embeds FROM messages WHERE id = ?', m6).embeds, null);
+    } finally {
+      M.set({ allowLoopback: false, previews: true });
+      site.close();
+    }
+  });
+
+  test('messaging: search by mentions, dates, pins and polls', async () => {
+    const id1 = mid();
+    await ann.ok('msg.send', { conv: room, id: id1, text: 'ask @mxbea about the kiln' });
+    await ann.ok('msg.pin', { conv: room, id: id1 });
+    const ids = async (q, tz = 0) => (await bea.ok('search', { q, tz })).hits.map((h) => h.m.id);
+    assert.ok((await ids('mentions:mxbea')).includes(id1));
+    assert.ok(!(await ids('mentions:mxdee')).includes(id1));
+    assert.ok((await ids('pinned:true')).includes(id1));
+    assert.ok((await ids('has:poll')).length >= 3);
+    assert.ok((await ids('has:poll')).every((m) => srv.db.get('SELECT 1 FROM polls WHERE msg = ?', m)));
+    const today = new Date();
+    const day = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`;
+    assert.ok((await ids(`kiln during:${day}`)).includes(id1));
+    assert.equal((await ids('kiln before:2001')).length, 0);
+    assert.ok((await ids('kiln after:2001')).includes(id1));
+    assert.equal((await cy.ok('search', { q: 'mentions:mxbea' })).hits.length, 0, 'not a member: nothing');
+  });
+}
+// --- end messaging ---------------------------------------------------------------
+
+// --- safety, privacy and moderation (server/safety.js) -----------------------
+// A house for these tests: an owner, a moderator role directly under the owner
+// (the house's Member role, given moderation permissions) and a plain role
+// under that (Newcomer, which new members get).
+async function safeHouse(prefix) {
+  const ow = await Client.make(`${prefix}-ow`, `Owen ${prefix}`);
+  const md = await Client.make(`${prefix}-md`, `Mona ${prefix}`);
+  const mm = await Client.make(`${prefix}-mm`, `Milo ${prefix}`);
+  const m2 = await Client.make(`${prefix}-m2`, `Mara ${prefix}`);
+  const made = await ow.ok('house.create', { name: `Safe ${prefix}`, hue: 35 });
+  const h = await ow.next('house', (d) => d.house.id === made.house);
+  const [ownerRole, modRole] = h.house.roles.map((r) => r.id);
+  await ow.ok('role.update', { house: made.house, role: modRole, name: 'Mod', perms: ['post', 'invite', 'moderate', 'kick', 'ban', 'timeout', 'voicemod', 'audit'] });
+  const { id: plainRole } = await ow.ok('role.create', { house: made.house });
+  await ow.ok('role.update', { house: made.house, role: plainRole, name: 'Newcomer', perms: ['post'] });
+  await ow.ok('house.update', { house: made.house, joinRole: plainRole });
+  for (const c of [md, mm, m2]) {
+    const { code } = await ow.ok('invite.create', { house: made.house });
+    await c.ok('invite.accept', { code });
+  }
+  await ow.ok('member.role', { house: made.house, user: md.id, role: modRole });
+  await ow.ok('member.role', { house: made.house, user: m2.id, role: modRole });
+  const rooms = Object.values(h.rooms);
+  return {
+    ow, md, mm, m2, house: made.house, lounge: made.room, ownerRole, modRole, plainRole,
+    voice: rooms.find((r) => r.kind === 'voice').id, intro: rooms.find((r) => r.name === 'Introductions').id, groups: h.house.groups.map((g) => g.id),
+  };
+}
+
+test('safety: blocking ends a friendship and keeps someone out of your messages, calls, requests and pings', async () => {
+  const al = await Client.make('sf-al', 'Alma Lind');
+  const bz = await Client.make('sf-bz', 'Bruno Zed');
+  const cq = await Client.make('sf-cq', 'Cleo Quist');
+  const made = await al.ok('house.create', { name: 'Blockhouse', hue: 35 });
+  for (const c of [bz, cq]) { const { code } = await al.ok('invite.create', { house: made.house }); await c.ok('invite.accept', { code }); }
+  const { id: dm } = await bz.ok('dm.open', { users: [al.id] });
+  await bz.ok('msg.send', { conv: dm, id: mid(), text: 'before' });
+  await bz.ok('friend.request', { user: al.id });
+  const { id: group } = await cq.ok('dm.open', { users: [al.id, bz.id] });
+
+  await al.ok('block.set', { user: bz.id, on: true });
+  const st = await al.next('safety', (d) => d.blocks.includes(bz.id));
+  assert.deepEqual(st.blocks, [bz.id]);
+  assert.equal(srv.db.get('SELECT COUNT(*) n FROM friends WHERE (user = ? AND other = ?) OR (user = ? AND other = ?)', al.id, bz.id, bz.id, al.id).n, 0, 'the pending request is gone');
+  assert.equal((await bz.next('friend', (d) => d.id === al.id && d.friend === null)).friend, null);
+
+  // No messages, reactions, calls, new conversations or friend requests, either way.
+  assert.match(await bz.refused('msg.send', { conv: dm, id: mid(), text: 'hi' }), /couldn’t be delivered/);
+  await al.refused('msg.send', { conv: dm, id: mid(), text: 'hi' });
+  const before = srv.db.get('SELECT id FROM messages WHERE conv = ? ORDER BY seq LIMIT 1', dm).id;
+  await al.refused('react', { conv: dm, id: before, emoji: '👍', on: true });
+  assert.match(await bz.refused('call.start', { dm }), /can’t call/);
+  assert.match(await bz.refused('dm.open', { users: [al.id] }), /can’t message/);
+  await bz.refused('dm.open', { users: [al.id, cq.id] });
+  assert.match(await bz.refused('friend.request', { user: al.id }), /can’t send/);
+  await bz.refused('friend.request', { handle: 'sf-al' });
+  await al.refused('friend.request', { user: bz.id });
+
+  // In a shared house their messages still arrive, but never ping or push.
+  assert.equal(srv.M.quietFor(al.id, bz.id, made.room), true);
+  assert.equal(srv.M.quietFor(cq.id, bz.id, made.room), false);
+  await bz.ok('msg.send', { conv: made.room, id: mid(), text: 'hey @sf-al' });
+
+  // A group call they start rings everyone but the person who blocked them.
+  await bz.ok('call.start', { dm: group });
+  await cq.next('call.ring', (d) => d.dm === group);
+  await al.none('call.ring', (d) => d.dm === group);
+  await bz.ok('voice.leave');
+
+  // The block list comes back on every connect.
+  await al.close(); await al.connect();
+  assert.deepEqual(al.hello.safety.blocks, [bz.id]);
+  assert.ok(al.hello.users[bz.id], 'the blocked person is known by name, for the block list');
+
+  await al.refused('block.set', { user: al.id, on: true });
+  await al.refused('block.set', { user: 'u_nobody', on: true });
+  await al.refused('block.set', { user: bz.id, on: 'yes' });
+  await al.ok('block.set', { user: bz.id, on: false });
+  await al.next('safety', (d) => !d.blocks.length);
+  await bz.ok('msg.send', { conv: dm, id: mid(), text: 'hello again' });
+  for (const c of [al, bz, cq]) await c.close();
+});
+
+test('safety: privacy decides who may message and befriend you; strangers land in message requests', async () => {
+  const pa = await Client.make('sf-pa', 'Pia Alto');
+  const pb = await Client.make('sf-pb', 'Per Berg');
+  const pc = await Client.make('sf-pc', 'Pim Cole');
+  // By default only friends and housemates can start a conversation.
+  assert.match(await pb.refused('dm.open', { users: [pa.id] }), /friends and people you share a house with/);
+  await pa.ok('privacy.set', { dm: 'everyone' });
+  const { id: dm } = await pb.ok('dm.open', { users: [pa.id] });
+  const st = await pa.next('safety', (d) => d.requests.some((r) => r.dm === dm));
+  assert.equal(st.requests[0].by, pb.id);
+  await pa.next('dm', (d) => d.dm.id === dm);
+  assert.equal(srv.M.quietFor(pa.id, pb.id, dm), true, 'a waiting request never notifies');
+  await pb.ok('msg.send', { conv: dm, id: mid(), text: 'hello, stranger' });
+  assert.match(await pb.refused('call.start', { dm }), /hasn’t accepted/);
+  assert.match(await pa.refused('call.start', { dm }), /Accept the message request/);
+  await pa.ok('dm.request.accept', { dm });
+  assert.equal(srv.M.quietFor(pa.id, pb.id, dm), false);
+  assert.deepEqual((await pa.next('safety', (d) => !d.requests.length)).requests, []);
+
+  // Declining leaves the conversation, and the same person can't ask again for a day.
+  const { id: dm2 } = await pc.ok('dm.open', { users: [pa.id] });
+  await pa.ok('dm.request.decline', { dm: dm2 });
+  assert.equal(srv.M.inDm(dm2, pa.id), false);
+  assert.ok((await pa.next('safety', (d) => d.left?.includes(dm2))));
+  assert.match(await pc.refused('dm.open', { users: [pa.id] }), /declined/);
+  await pa.refused('dm.request.decline', { dm: 'bad id!' });
+
+  // Friends only: housemates can't start one either.
+  const pd = await Client.make('sf-pd', 'Pol Dorn');
+  const made = await pa.ok('house.create', { name: 'Private Place', hue: 200 });
+  const { code } = await pa.ok('invite.create', { house: made.house });
+  await pd.ok('invite.accept', { code });
+  await pa.ok('privacy.set', { dm: 'friends' });
+  assert.match(await pd.refused('dm.open', { users: [pa.id] }), /only takes messages from friends/);
+  // People in my houses, with message requests for everyone who isn't a friend.
+  await pa.ok('privacy.set', { dm: 'houses', requests: true });
+  const { id: dm3 } = await pd.ok('dm.open', { users: [pa.id] });
+  assert.ok(srv.M.quietFor(pa.id, pd.id, dm3));
+  await pa.ok('msg.send', { conv: dm3, id: mid(), text: 'replying accepts it' });
+  assert.equal(srv.M.quietFor(pa.id, pd.id, dm3), false);
+
+  // Friend requests: nobody, then friends of friends.
+  await pb.ok('friend.request', { user: pa.id });
+  await pa.ok('friend.accept', { user: pb.id });
+  await pa.ok('privacy.set', { friends: 'nobody' });
+  assert.match(await pc.refused('friend.request', { user: pa.id }), /isn’t taking friend requests/);
+  await pa.ok('privacy.set', { friends: 'fof' });
+  assert.match(await pc.refused('friend.request', { user: pa.id }), /friends of friends/);
+  await pc.ok('friend.request', { user: pb.id });
+  await pb.ok('friend.accept', { user: pc.id });
+  assert.equal((await pc.ok('friend.request', { user: pa.id })).state, 'outgoing');
+
+  assert.match(await pa.refused('privacy.set', { dm: 'anyone' }), /choices/);
+  await pa.refused('privacy.set', { friends: 'all' });
+  await pa.refused('privacy.set', { requests: 'yes' });
+  await pa.close(); await pa.connect();
+  assert.deepEqual(pa.hello.safety.privacy, { dm: 'houses', friends: 'fof', requests: true });
+  for (const c of [pa, pb, pc, pd]) await c.close();
+});
+
+test('safety: kick, ban and timeout need their permission and a role above the person', async () => {
+  const s = await safeHouse('sh');
+  const { ow, md, mm, m2, house, lounge } = s;
+  // No permission, or not above them.
+  assert.match(await mm.refused('mod.kick', { house, user: m2.id }), /Your role can’t remove people/);
+  assert.match(await md.refused('mod.kick', { house, user: ow.id }), /owner/);
+  assert.match(await md.refused('mod.ban', { house, user: m2.id }), /same as yours or above/);
+  assert.match(await md.refused('mod.timeout', { house, user: md.id, ms: 60_000 }), /yourself/);
+  await md.refused('mod.timeout', { house, user: mm.id, ms: 1234 });
+  await md.refused('mod.kick', { house, user: mm.id, reason: 'x'.repeat(301) });
+
+  // Timeout: no writing, reacting, voice or threads until it ends.
+  await mm.ok('msg.send', { conv: lounge, id: mid(), text: 'before the timeout' });
+  const mine = srv.db.get('SELECT id FROM messages WHERE conv = ? AND author = ? ORDER BY seq DESC', lounge, mm.id).id;
+  await md.ok('mod.timeout', { house, user: mm.id, ms: 60_000, reason: 'cool off' });
+  const note = await mm.next('mod.notice', (d) => d.action === 'timeout');
+  assert.equal(note.reason, 'cool off');
+  const hv = await mm.next('house', (d) => d.house.id === house && d.house.timedOut);
+  assert.ok(hv.house.timedOut > Date.now() + 50_000);
+  assert.equal(hv.house.timeouts, undefined, 'only people who can time others out see the list');
+  assert.ok((await md.next('house', (d) => d.house.id === house && d.house.timeouts?.[mm.id])));
+  assert.match(await mm.refused('msg.send', { conv: lounge, id: mid(), text: 'still here' }), /timed out/);
+  assert.match(await mm.refused('msg.send', { conv: `t:${mine}`, id: mid(), text: 'a thread' }), /timed out/);
+  assert.match(await mm.refused('react', { conv: lounge, id: mine, emoji: '👍', on: true }), /timed out/);
+  assert.match(await mm.refused('voice.join', { room: s.voice }), /timed out/);
+  assert.deepEqual(await mm.ok('typing', { conv: lounge }), {});
+  await md.ok('mod.timeout', { house, user: mm.id, ms: 0 });
+  await mm.ok('msg.send', { conv: lounge, id: mid(), text: 'back' });
+
+  // Ban with the last day of messages: they leave, their messages go, they can't come back.
+  await md.ok('mod.ban', { house, user: mm.id, reason: 'spam', deleteMs: 86_400_000 });
+  assert.equal((await mm.next('mod.notice', (d) => d.action === 'ban')).reason, 'spam');
+  await mm.next('house.gone', (d) => d.id === house);
+  await ow.next('msg.del', (d) => d.id === mine);
+  assert.equal(srv.db.get('SELECT COUNT(*) n FROM messages WHERE author = ? AND conv = ? AND deleted IS NULL', mm.id, lounge).n, 0);
+  const { code } = await ow.ok('invite.create', { house });
+  assert.match(await mm.refused('invite.accept', { code }), /can’t join/);
+  await ow.ok('house.update', { house, public: true });
+  assert.match(await mm.refused('house.joinPublic', { house }), /can’t join/);
+  assert.match(await ow.refused('invite.user', { house, handle: 'sh-mm' }), /banned/);
+  const bans = await md.ok('mod.bans', { house });
+  assert.equal(bans.bans[0].user, mm.id);
+  assert.equal(bans.bans[0].reason, 'spam');
+  await mm.refused('mod.bans', { house });
+  await md.ok('mod.unban', { house, user: mm.id });
+  await mm.ok('invite.accept', { code });
+
+  // Kick: the owner can remove a moderator.
+  await ow.ok('mod.kick', { house, user: m2.id, reason: 'bye' });
+  await m2.next('house.gone', (d) => d.id === house);
+  assert.equal(srv.M.isMember(house, m2.id), false);
+
+  // The house log has it all, newest first, and filters by kind and by who.
+  const log = await ow.ok('audit.list', { house });
+  const kinds = log.entries.map((e) => e.action);
+  for (const k of ['member.timeout', 'member.untimeout', 'member.ban', 'member.unban', 'member.kick', 'member.role', 'role.update', 'invite.create']) assert.ok(kinds.includes(k), k);
+  assert.equal(log.entries.find((e) => e.action === 'member.ban').detail.reason, 'spam');
+  assert.ok(log.entries.find((e) => e.action === 'member.ban').detail.deleted >= 2);
+  const onlyBans = await md.ok('audit.list', { house, action: 'member.ban' });
+  assert.deepEqual([...new Set(onlyBans.entries.map((e) => e.action))], ['member.ban']);
+  const byOwner = await md.ok('audit.list', { house, actor: ow.id });
+  assert.ok(byOwner.entries.every((e) => e.actor === ow.id));
+  assert.ok(log.users[md.id]);
+  assert.match(await mm.refused('audit.list', { house }), /house log/);
+  for (const c of [ow, md, mm, m2]) await c.close();
+});
+
+test('safety: moderators mute, deafen, move and disconnect people in voice; mutes hold until lifted', async () => {
+  const s = await safeHouse('sv');
+  const { ow, md, mm, house } = s;
+  const { id: stage } = await ow.ok('room.create', { house, group: s.groups[1], name: 'Stage', kind: 'voice' });
+  await mm.ok('voice.join', { room: s.voice });
+  await md.ok('mod.voice', { house, user: mm.id, mute: true });
+  const v = await mm.next('voice', (d) => d.room === s.voice && d.state[mm.id]?.smute);
+  assert.equal(v.state[mm.id].muted, true);
+  assert.match(await mm.refused('voice.state', { muted: false }), /muted you/);
+  // Leaving and coming back keeps the mute.
+  await mm.ok('voice.leave');
+  await mm.ok('voice.join', { room: s.voice });
+  await mm.next('voice', (d) => d.room === s.voice && d.state[mm.id]?.smute);
+  await md.ok('mod.voice', { house, user: mm.id, mute: false, deaf: true });
+  await mm.next('voice', (d) => d.room === s.voice && d.state[mm.id]?.sdeaf && d.state[mm.id]?.deaf);
+  await mm.refused('voice.state', { deaf: false });
+  await md.ok('mod.voice', { house, user: mm.id, deaf: false });
+  await mm.ok('voice.state', { muted: false, deaf: false });
+  assert.match(await mm.refused('mod.voice', { house, user: md.id, mute: true }), /Your role can’t/);
+  await md.refused('mod.voice', { house, user: ow.id, mute: true });
+  // Move: they leave this room and are told where to go.
+  await md.ok('mod.move', { user: mm.id, room: stage });
+  assert.equal((await mm.next('voice.moved')).to, stage);
+  assert.equal(srv.hub.voicePlaceOf(mm.id), null);
+  await md.refused('mod.move', { user: mm.id, room: stage });
+  await mm.ok('voice.join', { room: stage });
+  await md.refused('mod.move', { user: mm.id, room: s.lounge });
+  // Disconnect.
+  await md.ok('mod.disconnect', { user: mm.id });
+  assert.equal((await mm.next('voice.kicked')).reason, 'moderator');
+  assert.equal(srv.hub.voicePlaceOf(mm.id), null);
+  const log = await ow.ok('audit.list', { house, action: 'voice' });
+  assert.deepEqual(log.entries.map((e) => e.action).reverse(), ['voice.mute', 'voice.unmute', 'voice.deafen', 'voice.undeafen', 'voice.move', 'voice.disconnect']);
+  for (const c of [ow, md, mm, s.m2]) await c.close();
+});
+
+test('safety: slowmode, the word and link filter, and exempt roles', async () => {
+  const s = await safeHouse('sw');
+  const { ow, md, mm, house, lounge } = s;
+  assert.match(await mm.refused('room.slowmode', { room: lounge, seconds: 5 }), /Your role can’t/);
+  await ow.refused('room.slowmode', { room: lounge, seconds: 7 });
+  await ow.ok('room.slowmode', { room: lounge, seconds: 5 });
+  assert.equal((await mm.next('house', (d) => d.rooms[lounge]?.slowmode === 5)).rooms[lounge].slowmode, 5);
+  await mm.ok('msg.send', { conv: lounge, id: mid(), text: 'one' });
+  assert.match(await mm.refused('msg.send', { conv: lounge, id: mid(), text: 'two' }), /Slowmode is on in Lounge. You can send again in [1-5]s/);
+  await md.ok('msg.send', { conv: lounge, id: mid(), text: 'mods skip slowmode' });
+  await md.ok('msg.send', { conv: lounge, id: mid(), text: 'twice' });
+  await ow.ok('room.slowmode', { room: lounge, seconds: 0 });
+
+  assert.match(await md.refused('automod.set', { house, words: ['x'] }), /Your role can’t/);
+  await ow.refused('automod.set', { house, words: ['<script>'] });
+  await ow.refused('automod.set', { house, action: 'explode' });
+  const cfg = await ow.ok('automod.set', { house, words: ['Badword', 'scam*'], links: true, action: 'block' });
+  assert.deepEqual(cfg.words, ['badword', 'scam*']);
+  const intro = s.intro;
+  assert.match(await mm.refused('msg.send', { conv: intro, id: mid(), text: 'what a BÁDWORD' }), /word this house doesn’t allow/);
+  await mm.refused('msg.send', { conv: intro, id: mid(), text: 'such scammers' });
+  await mm.ok('msg.send', { conv: intro, id: mid(), text: 'badwords are fine as a different word' });
+  assert.match(await mm.refused('msg.send', { conv: intro, id: mid(), text: 'see https://example.com/x' }), /Links aren’t allowed/);
+  const ok = mid();
+  await mm.ok('msg.send', { conv: intro, id: ok, text: 'clean' });
+  await mm.refused('msg.edit', { conv: intro, id: ok, text: 'now a badword' });
+  await md.refused('msg.send', { conv: intro, id: mid(), text: 'mods are filtered too' + ' badword' });
+  await ow.ok('msg.send', { conv: intro, id: mid(), text: 'owners are not: badword' });
+  // Exempt roles skip it.
+  await ow.ok('automod.set', { house, exempt: [s.modRole] });
+  await md.ok('msg.send', { conv: intro, id: mid(), text: 'exempt badword' });
+  // Flag: it goes through and lands in the moderators' queue.
+  await ow.ok('automod.set', { house, action: 'flag', exempt: [] });
+  await mm.ok('msg.send', { conv: intro, id: mid(), text: 'flag this badword' });
+  const q = await md.ok('report.list', { house });
+  assert.equal(q.reports[0].reason, 'filter');
+  assert.equal(q.reports[0].by, null);
+  assert.match(q.reports[0].note, /badword/);
+  // Timeout: blocked, and the person is timed out.
+  await ow.ok('automod.set', { house, action: 'timeout', timeoutMs: 60_000 });
+  assert.match(await mm.refused('msg.send', { conv: intro, id: mid(), text: 'badword again' }), /timed out for/);
+  assert.match(await mm.refused('msg.send', { conv: intro, id: mid(), text: 'clean now' }), /timed out/);
+  const back = await ow.ok('automod.get', { house });
+  assert.equal(back.action, 'timeout');
+  for (const c of [ow, md, mm, s.m2]) await c.close();
+});
+
+test('safety: reports go to moderators, who resolve them; DMs are for blocking instead', async () => {
+  const s = await safeHouse('sr');
+  const { ow, md, mm, m2, house, lounge } = s;
+  const id1 = mid();
+  await m2.ok('msg.send', { conv: lounge, id: id1, text: 'something rude' });
+  await mm.refused('report.create', { conv: lounge, msg: id1, reason: 'rude' });
+  await mm.refused('report.create', { conv: lounge, msg: id1, reason: 'spam', note: 'x'.repeat(501) });
+  const { id: rep } = await mm.ok('report.create', { conv: lounge, msg: id1, reason: 'harassment', note: 'third time' });
+  assert.match(await mm.refused('report.create', { conv: lounge, msg: id1, reason: 'spam' }), /already reported/);
+  assert.match(await m2.refused('report.create', { conv: lounge, msg: id1, reason: 'spam' }), /your own/);
+  await md.next('house', (d) => d.house.id === house && d.house.reportsOpen === 1);
+  await mm.ok('report.create', { house, user: m2.id, reason: 'spam' });
+  assert.match(await mm.refused('report.create', { house, user: mm.id, reason: 'spam' }), /yourself/);
+  const { id: dm } = await mm.ok('dm.open', { users: [m2.id] });
+  const id2 = mid();
+  await m2.ok('msg.send', { conv: dm, id: id2, text: 'in private' });
+  assert.match(await mm.refused('report.create', { conv: dm, msg: id2, reason: 'spam' }), /block the person/);
+  // Somebody who can't read the room can't report in it.
+  const out = await Client.make('sr-out');
+  await out.refused('report.create', { conv: lounge, msg: id1, reason: 'spam' });
+  assert.match(await mm.refused('report.list', { house }), /see reports/);
+  const q = await md.ok('report.list', { house });
+  assert.equal(q.reports.length, 2);
+  const r = q.reports.find((x) => x.id === rep);
+  assert.equal(r.text, 'something rude');
+  assert.equal(r.user, m2.id);
+  assert.equal(r.by, mm.id);
+  assert.equal(r.live, true);
+  await mm.refused('report.resolve', { id: rep, status: 'resolved' });
+  await md.ok('report.resolve', { id: rep, status: 'resolved' });
+  assert.equal((await md.ok('report.list', { house })).reports.length, 1);
+  const closed = await md.ok('report.list', { house, status: 'closed' });
+  assert.equal(closed.reports[0].handledBy, md.id);
+  // Reports are rate limited.
+  srv.resetLimits();
+  const many = [];
+  for (let i = 0; i < 7; i++) { const x = mid(); await m2.ok('msg.send', { conv: s.intro, id: x, text: `msg ${i}` }); many.push(x); }
+  let refused = 0;
+  for (const x of many) { const a = await mm.op('report.create', { conv: s.intro, msg: x, reason: 'spam' }); if (!a.ok) refused++; }
+  assert.ok(refused >= 2, 'the sixth report in a row is refused');
+  for (const c of [ow, md, mm, m2, out]) await c.close();
+});
+
+test('safety: invitations expire, run out, can be revoked and listed; screening asks newcomers to accept the rules', async () => {
+  const s = await safeHouse('si');
+  const { ow, md, mm, house } = s;
+  const once = await md.ok('invite.create', { house, maxUses: 1, maxAge: 1_800_000 });
+  assert.ok(once.expires > Date.now() + 1_700_000 && once.expires <= Date.now() + 1_800_000);
+  const forever = await ow.ok('invite.create', { house, maxAge: 0 });
+  assert.equal(forever.expires, null);
+  await ow.refused('invite.create', { house, maxAge: 999 });
+  await ow.refused('invite.create', { house, maxUses: 3 });
+  assert.match(await mm.refused('invite.create', { house }), /Your role can’t invite/);
+  const n1 = await Client.make('si-n1');
+  const n2 = await Client.make('si-n2');
+  assert.equal((await fetch(`${base}/api/invite/${once.code}`)).status, 200);
+  await n1.ok('invite.accept', { code: once.code });
+  assert.match(await n2.refused('invite.accept', { code: once.code }), /expired/);
+  assert.equal((await fetch(`${base}/api/invite/${once.code}`)).status, 404);
+  // The owner sees every link with its uses; a member sees only their own.
+  const all = await ow.ok('invite.list', { house });
+  assert.equal(all.all, true);
+  const f = all.invites.find((i) => i.code === forever.code);
+  assert.equal(f.expires, null);
+  assert.equal(f.by, ow.id);
+  assert.ok(!all.invites.some((i) => i.code === once.code), 'a used-up link is no longer listed');
+  const own = await md.ok('invite.list', { house });
+  assert.ok(own.invites.every((i) => i.by === md.id));
+  assert.match(await md.refused('invite.revoke', { house, code: forever.code }), /only revoke invitations you made/);
+  await ow.ok('invite.revoke', { house, code: forever.code });
+  assert.match(await n2.refused('invite.accept', { code: forever.code }), /expired/);
+  assert.equal((await fetch(`${base}/api/invite/${forever.code}`)).status, 404);
+
+  // Screening: the rules first; people already here are not asked.
+  assert.match(await md.refused('house.screening', { house, on: true }), /Your role can’t/);
+  assert.match(await ow.refused('house.screening', { house, on: true }), /rules first/);
+  await ow.ok('house.update', { house, rules: 'Be kind. No spam.' });
+  await ow.ok('house.screening', { house, on: true });
+  await mm.ok('msg.send', { conv: s.lounge, id: mid(), text: 'old members carry on' });
+  const { code } = await ow.ok('invite.create', { house });
+  await n2.ok('invite.accept', { code });
+  const view = await n2.next('house', (d) => d.house.id === house && d.house.screening);
+  assert.equal(view.house.accepted, false);
+  assert.match(await n2.refused('msg.send', { conv: s.lounge, id: mid(), text: 'hi' }), /accept this house’s rules/);
+  await n2.refused('voice.join', { room: s.voice });
+  await n2.ok('rules.accept', { house });
+  assert.equal((await n2.next('house', (d) => d.house.id === house && d.house.accepted)).house.accepted, true);
+  await n2.ok('msg.send', { conv: s.lounge, id: mid(), text: 'hello, I read them' });
+  const log = await ow.ok('audit.list', { house });
+  for (const k of ['invite.revoke', 'house.screening', 'member.join', 'house.update']) assert.ok(log.entries.some((e) => e.action === k), k);
+  for (const c of [ow, md, mm, s.m2, n1, n2]) await c.close();
+});
+// --- end safety ---------------------------------------------------------------
+
+// --- voice options: soundboard, voice room limits and bitrate (server/voiceopts.js) ---
+// A real PCM WAV, made here: `seconds` of a 440 Hz tone.
+function voWav(seconds, { rate = 16000, channels = 1, bits = 16 } = {}) {
+  const frames = Math.round(seconds * rate);
+  const bps = bits / 8;
+  const data = Buffer.alloc(frames * channels * bps);
+  for (let i = 0; i < frames; i++) {
+    const v = Math.sin((2 * Math.PI * 440 * i) / rate) * 0.5;
+    for (let ch = 0; ch < channels; ch++) {
+      const at = (i * channels + ch) * bps;
+      if (bits === 16) data.writeInt16LE(Math.round(v * 32767), at); else data[at] = Math.round(128 + v * 127);
+    }
+  }
+  const h = Buffer.alloc(44);
+  h.write('RIFF', 0, 'latin1'); h.writeUInt32LE(36 + data.length, 4); h.write('WAVE', 8, 'latin1');
+  h.write('fmt ', 12, 'latin1'); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(channels, 22);
+  h.writeUInt32LE(rate, 24); h.writeUInt32LE(rate * channels * bps, 28); h.writeUInt16LE(channels * bps, 32); h.writeUInt16LE(bits, 34);
+  h.write('data', 36, 'latin1'); h.writeUInt32LE(data.length, 40);
+  return Buffer.concat([h, data]);
+}
+const voUpload = (house, bytes, cookie, name = 'horn.wav') => fetch(`${base}/api/files?sound=${encodeURIComponent(house)}`, {
+  method: 'POST', headers: { 'content-type': 'audio/wav', 'x-file-name': name, origin: base, cookie }, body: bytes,
+});
+async function voHouse(prefix) {
+  const ow = await Client.make(`${prefix}-ow`, `Owen ${prefix}`);
+  const mm = await Client.make(`${prefix}-mm`, `Milo ${prefix}`);
+  const md = await Client.make(`${prefix}-md`, `Mona ${prefix}`);
+  const out = await Client.make(`${prefix}-out`, `Otto ${prefix}`);
+  const made = await ow.ok('house.create', { name: `Voice ${prefix}`, hue: 120 });
+  const h = await ow.next('house', (d) => d.house.id === made.house);
+  const memberRole = h.house.roles[1].id;
+  const { id: modRole } = await ow.ok('role.create', { house: made.house });
+  await ow.ok('role.update', { house: made.house, role: modRole, name: 'Mod', perms: ['post', 'voicemod'] });
+  for (const c of [mm, md]) {
+    const { code } = await ow.ok('invite.create', { house: made.house });
+    await c.ok('invite.accept', { code });
+  }
+  await ow.ok('member.role', { house: made.house, user: md.id, role: modRole });
+  const voice = Object.values(h.rooms).find((r) => r.kind === 'voice').id;
+  return { ow, mm, md, out, house: made.house, voice, memberRole, modRole };
+}
+
+test('voice options: sound uploads are checked from the WAV itself; only Manage sounds may add, edit and remove', async () => {
+  const { ow, mm, out, house, memberRole } = await voHouse('vo1');
+  // Snapshots and house views carry the soundboard and the room settings.
+  const fresh = await Client.make('vo1-late', 'Late');
+  assert.deepEqual(fresh.hello.sounds, {});
+  assert.deepEqual(mm.hello.sounds, {}, 'no houses yet when the socket opened');
+
+  // Without the permission: no upload, no add.
+  const refused = await voUpload(house, voWav(1), mm.cookie);
+  assert.equal(refused.status, 403);
+  assert.match((await refused.json()).error, /can’t manage the soundboard/);
+  assert.equal((await voUpload(house, voWav(1), out.cookie)).status, 403, 'outsiders are refused');
+  assert.equal((await voUpload('h_nothere', voWav(1), ow.cookie)).status, 404);
+  // Limits, read from the file: length, size, and a real PCM WAV.
+  const long = await voUpload(house, voWav(6), ow.cookie);
+  assert.equal(long.status, 422);
+  assert.match((await long.json()).error, /6\.0 seconds long/);
+  assert.equal((await voUpload(house, voWav(5.1), ow.cookie)).status, 201, 'just under the limit is fine');
+  const big = await voUpload(house, Buffer.concat([voWav(1), Buffer.alloc(512 * 1024)]), ow.cookie);
+  assert.equal(big.status, 413);
+  const fake = await voUpload(house, Buffer.from('ID3\x04\0\0\0\0\0\0' + 'x'.repeat(200), 'latin1'), ow.cookie, 'a.mp3');
+  assert.equal(fake.status, 415, 'the type the browser claims is not trusted');
+  const notPcm = voWav(1); notPcm.writeUInt16LE(3, 20); // IEEE float
+  assert.equal((await voUpload(house, notPcm, ow.cookie)).status, 415);
+  assert.equal((await voUpload(house, voWav(1, { rate: 96000 }), ow.cookie)).status, 415, 'sample rates above 48 kHz are refused');
+  assert.equal((await voUpload(house, voWav(2, { channels: 2, bits: 8, rate: 8000 }), ow.cookie)).status, 201, '8-bit stereo is fine');
+
+  const up = await voUpload(house, voWav(1.5), ow.cookie);
+  assert.equal(up.status, 201);
+  const file = await up.json();
+  assert.equal(file.seconds, 1.5);
+  // Only the house can fetch the file, and only through the sound route.
+  assert.equal((await fetch(`${base}/api/sounds/${file.id}`, { headers: { cookie: ow.cookie } })).status, 200);
+  assert.equal((await fetch(`${base}/api/sounds/${file.id}`, { headers: { cookie: out.cookie } })).status, 404);
+  assert.equal((await fetch(`${base}/api/files/${file.id}`, { headers: { cookie: ow.cookie } })).status, 404, 'not through the message file route');
+
+  // Adding: validated name, emoji and volume; someone else's upload can't be used.
+  assert.match(await mm.refused('sound.add', { house, file: file.id, name: 'Horn' }), /can’t manage the soundboard/);
+  assert.match(await ow.refused('sound.add', { house, file: file.id, name: '   ' }), /name/);
+  assert.match(await ow.refused('sound.add', { house, file: file.id, name: 'x'.repeat(33) }), /at most 32/);
+  assert.match(await ow.refused('sound.add', { house, file: file.id, name: 'Horn', emoji: 'abc' }), /emoji/);
+  assert.match(await ow.refused('sound.add', { house, file: file.id, name: 'Horn', volume: 1.5 }), /volume/);
+  assert.match(await ow.refused('sound.add', { house, file: 'f_nothere123', name: 'Horn' }), /finish uploading/);
+  const { sound } = await ow.ok('sound.add', { house, file: file.id, name: ' Horn ', emoji: '📯', volume: 0.8 });
+  assert.deepEqual([sound.name, sound.emoji, sound.volume], ['Horn', '📯', 0.8]);
+  const seen = await mm.next('sounds', (d) => d.house === house && d.list.length > 0);
+  assert.equal(seen.list.length, 1, 'every member hears about the new sound');
+  assert.match(await ow.refused('sound.add', { house, file: file.id, name: 'Again' }), /already a sound/);
+  // Members can play it, so they can fetch it.
+  assert.equal((await fetch(`${base}/api/sounds/${file.id}`, { headers: { cookie: mm.cookie } })).status, 200);
+
+  // A role given Manage sounds can manage; edits are validated.
+  await ow.ok('role.update', { house, role: memberRole, name: 'Member', perms: ['post', 'invite', 'sounds'] });
+  const edited = await mm.ok('sound.edit', { id: sound.id, name: 'Big horn', volume: 0.5, emoji: null });
+  assert.deepEqual([edited.sound.name, edited.sound.volume, edited.sound.emoji], ['Big horn', 0.5, null]);
+  assert.match(await mm.refused('sound.edit', { id: sound.id, volume: -1 }), /volume/);
+  assert.match(await out.refused('sound.edit', { id: sound.id, name: 'mine' }), /not a member/);
+  assert.match(await out.refused('sound.remove', { id: sound.id }), /not a member/);
+
+  // The house limit.
+  for (let i = srv.db.get('SELECT COUNT(*) n FROM house_sounds WHERE house = ?', house).n; i < 24; i++) {
+    const f = await (await voUpload(house, voWav(0.2), ow.cookie)).json();
+    await ow.ok('sound.add', { house, file: f.id, name: `S${i}` });
+    srv.resetLimits();
+  }
+  const over = await (await voUpload(house, voWav(0.2), ow.cookie)).json();
+  assert.match(await ow.refused('sound.add', { house, file: over.id, name: 'One more' }), /up to 24 sounds/);
+
+  // Removing deletes the file too.
+  await mm.ok('sound.remove', { id: sound.id });
+  assert.equal(srv.db.get('SELECT 1 FROM files WHERE id = ?', file.id), undefined);
+  assert.equal((await fetch(`${base}/api/sounds/${file.id}`, { headers: { cookie: ow.cookie } })).status, 404);
+  for (const c of [ow, mm, out, fresh]) await c.close();
+});
+
+test('voice options: playing a sound needs voice in its house, unmuted, the right to use it, and respects the cooldowns', async () => {
+  const { ow, mm, md, out, house, voice, memberRole } = await voHouse('vo2');
+  const f = await (await voUpload(house, voWav(1), ow.cookie)).json();
+  const { sound } = await ow.ok('sound.add', { house, file: f.id, name: 'Ding' });
+  // Not in voice, or in voice somewhere else: refused.
+  assert.match(await mm.refused('sound.play', { id: sound.id }), /Join a voice room/);
+  assert.match(await out.refused('sound.play', { id: sound.id }), /Join a voice room/);
+  const other = await out.ok('house.create', { name: 'Elsewhere', hue: 10 });
+  const oh = await out.next('house', (d) => d.house.id === other.house);
+  await out.ok('voice.join', { room: Object.values(oh.rooms).find((r) => r.kind === 'voice').id });
+  assert.match(await out.refused('sound.play', { id: sound.id }), /Join a voice room in this sound’s house/);
+  assert.match(await mm.refused('sound.play', { id: 'snd_nothere' }), /removed/);
+
+  await mm.ok('voice.join', { room: voice });
+  await ow.ok('voice.join', { room: voice });
+  ow.events.length = 0;
+  const played = await mm.ok('sound.play', { id: sound.id });
+  assert.equal(played.file, f.id);
+  const ev = await ow.next('sound.play', (d) => d.id === sound.id);
+  assert.deepEqual([ev.room, ev.user, ev.name], [voice, mm.id, 'Ding'], 'the room hears who played what');
+  await md.none('sound.play', () => true, 100);
+  // Cooldown: one sound every 3 seconds per person.
+  assert.match(await mm.refused('sound.play', { id: sound.id }), /one sound every 3 seconds/);
+  // Muted or deafened: refused, and a moderator's mute too.
+  srv.resetLimits();
+  await mm.ok('voice.state', { muted: true });
+  assert.match(await mm.refused('sound.play', { id: sound.id }), /Unmute/);
+  await mm.ok('voice.state', { muted: false, deaf: false });
+  await ow.ok('mod.voice', { house, user: mm.id, mute: true });
+  assert.match(await mm.refused('sound.play', { id: sound.id }), /moderator/);
+  await ow.ok('mod.voice', { house, user: mm.id, mute: false });
+  await mm.ok('voice.state', { muted: false });
+  await mm.ok('sound.play', { id: sound.id });
+
+  // The house keeps the soundboard to some roles: Members lose it, a role with "Use the soundboard" keeps it.
+  assert.match(await mm.refused('house.soundboard', { house, open: false }), /can’t manage the soundboard/);
+  assert.match(await ow.refused('house.soundboard', { house, open: 'no' }), /isn’t valid/);
+  await ow.ok('house.soundboard', { house, open: false });
+  const hv = await mm.next('house', (d) => d.house.id === house && d.house.soundOpen === false);
+  assert.equal(hv.house.soundOpen, false);
+  srv.resetLimits();
+  assert.match(await mm.refused('sound.play', { id: sound.id }), /can’t use the soundboard/);
+  await ow.ok('role.update', { house, role: memberRole, name: 'Member', perms: ['post', 'invite', 'soundboard'] });
+  await mm.ok('sound.play', { id: sound.id });
+  await ow.ok('sound.play', { id: sound.id }); // owners always may
+
+  // A busy room: at most 6 sounds in a burst, whoever plays them.
+  await ow.ok('house.soundboard', { house, open: true });
+  srv.resetLimits();
+  await md.ok('voice.join', { room: voice });
+  let ok = 0, burst = 0;
+  for (let i = 0; i < 9; i++) {
+    srv.hub.soundLimits.perUser.reset(); // keep the per-person cooldown out of the way
+    const who = [ow, mm, md][i % 3];
+    const a = await who.op('sound.play', { id: sound.id });
+    if (a.ok) ok++; else if (/heard a lot of sounds/.test(a.error)) burst++; else assert.fail(a.error);
+  }
+  assert.equal(ok, 6, 'six sounds get through');
+  assert.equal(burst, 3, 'the rest wait for the room');
+  for (const c of [ow, mm, md, out]) await c.close();
+});
+
+test('voice options: a voice room’s user limit is enforced by the server; bitrate is validated; only Manage rooms may change them', async () => {
+  const { ow, mm, md, out, house, voice } = await voHouse('vo3');
+  const third = await Client.make('vo3-th', 'Thea');
+  const { code } = await ow.ok('invite.create', { house });
+  await third.ok('invite.accept', { code });
+  // Defaults in the house view.
+  const before = await third.next('house', (d) => d.house.id === house);
+  assert.deepEqual([before.rooms[voice].limit, before.rooms[voice].bitrate], [0, 64]);
+
+  assert.match(await mm.refused('room.voice', { room: voice, limit: 2 }), /can’t change voice rooms/);
+  assert.match(await out.refused('room.voice', { room: voice, limit: 2 }), /not a member/);
+  assert.match(await ow.refused('room.voice', { room: voice, limit: 13 }), /1 to 12/);
+  assert.match(await ow.refused('room.voice', { room: voice, limit: 1.5 }), /1 to 12/);
+  assert.match(await ow.refused('room.voice', { room: voice, bitrate: 65 }), /bitrates/);
+  const lounge = Object.values(before.rooms).find((r) => r.kind === 'text').id;
+  assert.match(await ow.refused('room.voice', { room: lounge, limit: 2 }), /isn’t a voice room/);
+  assert.deepEqual(await ow.ok('room.voice', { room: voice, limit: 2, bitrate: 96 }), { limit: 2, bitrate: 96 });
+  const after = await third.next('house', (d) => d.house.id === house && d.rooms[voice].limit === 2);
+  assert.equal(after.rooms[voice].bitrate, 96, 'everyone in the house learns the new settings');
+
+  await ow.ok('voice.join', { room: voice });
+  await mm.ok('voice.join', { room: voice });
+  assert.match(await third.refused('voice.join', { room: voice }), /full\. It holds up to 2 people/);
+  await mm.ok('voice.join', { room: voice }); // rejoining from the same seat is fine
+  // People who can moderate voice may still come in.
+  await md.ok('voice.join', { room: voice });
+  await mm.ok('voice.leave');
+  await md.ok('voice.leave');
+  await third.ok('voice.join', { room: voice });
+  // No limit again.
+  await ow.ok('room.voice', { room: voice, limit: 0 });
+  await mm.ok('voice.join', { room: voice });
+  for (const c of [ow, mm, md, out, third]) await c.close();
+});
+// --- end voice options ------------------------------------------------------------
+
+// --- places, structure and community (server/places.js, js/lib/places.js) ----
+// A house for these tests: an owner (ow), two members (mm, m2) with the
+// house's Member role, and a "Crew" role nobody has yet.
+async function placesHouse(prefix, extra = 0) {
+  const ow = await Client.make(`${prefix}-ow`, `Ola ${prefix}`);
+  const mm = await Client.make(`${prefix}-mm`, `Mika ${prefix}`);
+  const m2 = await Client.make(`${prefix}-m2`, `Nora ${prefix}`);
+  const more = [];
+  for (let i = 0; i < extra; i++) more.push(await Client.make(`${prefix}-x${i}`, `Xan${i} ${prefix}`));
+  const made = await ow.ok('house.create', { name: `Place ${prefix}`, hue: 35 });
+  const h = await ow.next('house', (d) => d.house.id === made.house);
+  const [ownerRole, memberRole] = h.house.roles.map((r) => r.id);
+  const { id: crew } = await ow.ok('role.create', { house: made.house });
+  await ow.ok('role.update', { house: made.house, role: crew, name: 'Crew', perms: ['post'] });
+  for (const c of [mm, m2, ...more]) {
+    const { code } = await ow.ok('invite.create', { house: made.house });
+    await c.ok('invite.accept', { code });
+    await c.ok('msg.send', { conv: made.room, id: mid(), text: 'hello' }); // past the newcomer stage
+  }
+  const rooms = Object.values(h.rooms);
+  return {
+    ow, mm, m2, more, house: made.house, lounge: made.room, ownerRole, memberRole, crew,
+    notices: rooms.find((r) => r.kind === 'news').id, voice: rooms.find((r) => r.kind === 'voice').id,
+  };
+}
+const lastHouse = (c, house) => [...c.events].reverse().find((e) => e.ev === 'house' && e.d.house.id === house)?.d;
+const settle = () => new Promise((r) => setTimeout(r, 120));
+
+test('places: the room resolver: owners, managers, private rooms, role and member overrides, voice kinds', async () => {
+  const { resolveRoom } = await import('../js/lib/places.js');
+  const base = { housePerms: new Set(['post']), kind: 'text', roleIds: ['r1'], userId: 'u1' };
+  assert.deepEqual(resolveRoom(base), { view: true, send: true, connect: false, speak: false, manage: false });
+  assert.equal(resolveRoom({ ...base, isPrivate: true }).view, false);
+  assert.equal(resolveRoom({ ...base, isPrivate: true }).send, false, 'no view, nothing else');
+  assert.equal(resolveRoom({ ...base, isPrivate: true, overrides: [{ type: 'role', target: 'r1', allow: ['view'] }] }).view, true);
+  assert.equal(resolveRoom({ ...base, isPrivate: true, overrides: [{ type: 'role', target: 'r2', allow: ['view'] }] }).view, false);
+  // Allow beats deny across roles; a member override beats both; everyone comes first.
+  const two = { ...base, roleIds: ['r1', 'r2'] };
+  assert.equal(resolveRoom({ ...two, overrides: [{ type: 'role', target: 'r1', deny: ['send'] }, { type: 'role', target: 'r2', allow: ['send'] }] }).send, true);
+  assert.equal(resolveRoom({ ...two, overrides: [{ type: 'role', target: 'r1', allow: ['send'] }, { type: 'member', target: 'u1', deny: ['send'] }] }).send, false);
+  assert.equal(resolveRoom({ ...base, overrides: [{ type: 'everyone', target: '*', deny: ['send'] }, { type: 'role', target: 'r1', allow: ['send'] }] }).send, true);
+  assert.equal(resolveRoom({ ...base, overrides: [{ type: 'everyone', target: '*', deny: ['view'] }] }).view, false);
+  // Notices need 'announce'; owners and room managers can't be locked out.
+  assert.equal(resolveRoom({ ...base, kind: 'news' }).send, false);
+  assert.equal(resolveRoom({ ...base, kind: 'news', housePerms: new Set(['announce']) }).send, true);
+  assert.equal(resolveRoom({ ...base, owner: true, isPrivate: true, overrides: [{ type: 'member', target: 'u1', deny: ['view', 'send'] }] }).send, true);
+  const mgr = resolveRoom({ ...base, housePerms: new Set(['rooms']), isPrivate: true, overrides: [{ type: 'member', target: 'u1', deny: ['view', 'manage'] }] });
+  assert.equal(mgr.view && mgr.manage, true);
+  // Voice: connect and speak; a stage lets only its managers speak uninvited.
+  assert.deepEqual(resolveRoom({ ...base, kind: 'voice' }), { view: true, send: true, connect: true, speak: true, manage: false });
+  assert.equal(resolveRoom({ ...base, kind: 'stage' }).speak, false);
+  assert.equal(resolveRoom({ ...base, kind: 'stage', housePerms: new Set(['rooms']) }).speak, true);
+  assert.equal(resolveRoom({ ...base, kind: 'voice', overrides: [{ type: 'role', target: 'r1', deny: ['connect'] }] }).speak, false, 'no connect, no speaking');
+});
+
+test('places: a private room is out of reach everywhere: rooms list, live delivery, history, threads, search, files, snapshot', async () => {
+  const s = await placesHouse('pv');
+  const { ow, mm, m2, house, crew } = s;
+  const { id: back } = await ow.ok('room.create', { house, name: 'Backroom', kind: 'text', private: true });
+  await settle();
+  assert.ok(lastHouse(ow, house).rooms[back], 'the owner sees it');
+  assert.equal(lastHouse(mm, house).rooms[back], undefined, 'members do not');
+  assert.equal(lastHouse(mm, house).house.groups.some((g) => g.rooms.includes(back)), false);
+  const secret = mid();
+  await ow.ok('msg.send', { conv: back, id: secret, text: 'pineapple plans' });
+  await mm.none('msg', (d) => d.conv === back);
+  assert.match(await mm.refused('msg.send', { conv: back, id: mid(), text: 'let me in' }), /access/);
+  await mm.refused('history', { conv: back });
+  await mm.refused('react', { conv: back, id: secret, emoji: '👍', on: true });
+  await mm.refused('follow.set', { thread: `t:${secret}`, on: true });
+  await mm.refused('msg.send', { conv: `t:${secret}`, id: mid(), text: 'thread sneak' });
+  assert.equal((await mm.ok('search', { q: 'pineapple' })).hits.length, 0);
+  assert.equal((await ow.ok('search', { q: 'pineapple' })).hits.length, 1);
+  const f = await (await upload(ow.cookie, back, 'text/plain', Buffer.from('secret notes'), 'notes.txt')).json();
+  assert.equal((await fetch(`${base}/api/files/${f.id}`, { headers: { cookie: mm.cookie } })).status, 404);
+  assert.equal((await fetch(`${base}/api/files/${f.id}`, { headers: { cookie: ow.cookie } })).status, 200);
+  assert.equal((await upload(mm.cookie, back, 'text/plain', Buffer.from('x'), 'x.txt')).status, 403);
+  await mm.close(); await mm.connect();
+  assert.equal(mm.hello.rooms[back], undefined, 'not in the snapshot');
+  assert.equal(mm.hello.msgs[back], undefined);
+
+  // An override for a role, and a second role for one person: Nora gets in.
+  await ow.ok('room.override', { room: back, type: 'role', target: crew, allow: ['view'] });
+  await ow.ok('member.roles', { house, user: m2.id, roles: [crew] });
+  const content = await m2.next('content', (d) => d.msgs[back]);
+  assert.ok(content.msgs[back].some((m) => m.id === secret), 'what was said arrives once she can see it');
+  assert.ok(lastHouse(m2, house).rooms[back].viewers.includes(m2.id));
+  await ow.ok('msg.send', { conv: back, id: mid(), text: 'welcome Nora' });
+  await m2.next('msg', (d) => d.conv === back);
+  await mm.none('msg', (d) => d.conv === back);
+  await m2.ok('msg.send', { conv: back, id: mid(), text: 'thanks' });
+  // A member override takes sending away from her alone.
+  await ow.ok('room.override', { room: back, type: 'member', target: m2.id, deny: ['send'] });
+  assert.match(await m2.refused('msg.send', { conv: back, id: mid(), text: 'still here?' }), /can’t send/);
+  assert.equal((await ow.ok('room.perms', { room: back, user: m2.id })).perms.send, false);
+  // Taking the role away takes the room away.
+  await ow.ok('member.roles', { house, user: m2.id, roles: [] });
+  await settle();
+  assert.equal(lastHouse(m2, house).rooms[back], undefined);
+  await m2.refused('history', { conv: back });
+  // Outsiders previewing a public house never see its private room's name.
+  await ow.ok('house.update', { house, public: true });
+  const outsider = await Client.make('pv-out', 'Otto Side');
+  const card = await outsider.ok('house.preview', { house });
+  assert.equal(card.rooms.some((r) => r.name === 'Backroom'), false);
+  assert.ok(card.rooms.some((r) => r.name === 'Lounge'));
+  assert.equal((await outsider.ok('discover', { q: 'Place pv' })).houses.find((h) => h.id === house).rooms.some((r) => r.name === 'Backroom'), false);
+  await outsider.close();
+  // Making it public again opens it to everyone.
+  await ow.ok('room.private', { room: back, on: false });
+  await ow.ok('room.override', { room: back, type: 'role', target: crew, allow: [] });
+  await ow.ok('room.override', { room: back, type: 'member', target: m2.id });
+  await mm.ok('history', { conv: back });
+  for (const c of [ow, mm, m2]) await c.close();
+});
+
+test('places: overrides decide sending and managing; only room managers change them, with valid input', async () => {
+  const s = await placesHouse('ov');
+  const { ow, mm, m2, house, lounge, memberRole, ownerRole } = s;
+  await ow.ok('room.override', { room: lounge, type: 'everyone', allow: [], deny: ['send'] });
+  assert.match(await mm.refused('msg.send', { conv: lounge, id: mid(), text: 'quiet please' }), /can’t send/);
+  await ow.ok('room.override', { room: lounge, type: 'member', target: mm.id, allow: ['send'] });
+  await mm.ok('msg.send', { conv: lounge, id: mid(), text: 'I may' });
+  await m2.refused('msg.send', { conv: lounge, id: mid(), text: 'I may not' });
+  // Members can't change overrides; bad input is refused.
+  assert.match(await mm.refused('room.override', { room: lounge, type: 'everyone', allow: ['send'] }), /can’t manage/);
+  await mm.refused('room.private', { room: lounge, on: true });
+  assert.match(await ow.refused('room.override', { room: lounge, type: 'role', target: ownerRole, deny: ['view'] }), /owner role/);
+  assert.match(await ow.refused('room.override', { room: lounge, type: 'role', target: memberRole, deny: ['fly'] }), /doesn’t exist/);
+  await ow.refused('room.override', { room: lounge, type: 'gang', target: memberRole, deny: ['send'] });
+  await ow.refused('room.override', { room: lounge, type: 'member', target: 'u_nobody123', deny: ['send'] });
+  await ow.refused('room.override', { room: lounge, type: 'role', target: memberRole, deny: 'send' });
+  // "Manage the room" on one room lets Mika rename it, and nothing else.
+  const intro = Object.values(lastHouse(ow, house).rooms).find((r) => r.name === 'Introductions').id;
+  await ow.ok('room.override', { room: intro, type: 'member', target: mm.id, allow: ['manage'] });
+  await mm.ok('room.update', { room: intro, name: 'Hellos' });
+  assert.equal(srv.db.get('SELECT name FROM rooms WHERE id = ?', intro).name, 'Hellos');
+  await mm.ok('room.override', { room: intro, type: 'everyone', deny: ['send'] });
+  assert.match(await mm.refused('room.update', { room: lounge, name: 'Mine now' }), /Your role can’t/);
+  await mm.refused('room.delete', { room: lounge });
+  await mm.refused('room.create', { house, name: 'Extra', kind: 'text' });
+  for (const c of [ow, mm, m2]) await c.close();
+});
+
+test('places: voice and stages: joining and speaking follow the resolver; the audience is muted by the server', async () => {
+  const s = await placesHouse('st');
+  const { ow, mm, m2, house, voice, memberRole } = s;
+  await ow.ok('room.override', { room: voice, type: 'role', target: memberRole, deny: ['connect'] });
+  assert.match(await mm.refused('voice.join', { room: voice }), /can’t join/);
+  await ow.ok('room.override', { room: voice, type: 'role', target: memberRole, allow: [], deny: ['speak'] });
+  await mm.ok('voice.join', { room: voice });
+  const v = await ow.next('voice', (d) => d.room === voice && d.users.includes(mm.id) && d.state[mm.id]?.smute);
+  assert.equal(v.state[mm.id].muted, true, 'joins muted by the server');
+  assert.match(await mm.refused('voice.state', { muted: false }), /can’t speak/);
+  await mm.ok('voice.state', { muted: true, deaf: true });
+  // Losing "see the room" takes you out of its voice.
+  await ow.ok('room.override', { room: voice, type: 'member', target: mm.id, deny: ['view'] });
+  await mm.next('voice.kicked', (d) => d.room === voice);
+  await ow.ok('room.override', { room: voice, type: 'member', target: mm.id });
+
+  const { id: stage } = await ow.ok('room.create', { house, name: 'Town hall', kind: 'stage' });
+  await ow.ok('voice.join', { room: stage });
+  await mm.ok('voice.join', { room: stage });
+  const sv = await ow.next('voice', (d) => d.room === stage && d.users.includes(mm.id) && d.state[mm.id]?.smute);
+  assert.equal(sv.state[ow.id].smute, undefined, 'the owner may speak');
+  assert.match(await mm.refused('voice.state', { muted: false }), /audience/);
+  assert.match(await mm.refused('voice.state', { camera: true }), /audience/);
+  assert.match(await mm.refused('stage.speak', { room: stage }), /Raise your hand/);
+  await mm.ok('stage.hand', { room: stage, up: true });
+  assert.deepEqual((await ow.next('stage', (d) => d.room === stage && d.hands.length)).hands, [mm.id]);
+  await m2.refused('stage.hand', { room: stage, up: true }); // not on the stage
+  assert.match(await mm.refused('stage.invite', { room: stage, user: mm.id }), /run this stage/);
+  assert.match(await mm.refused('stage.topic', { room: stage, topic: 'mine' }), /run this stage/);
+  await ow.ok('stage.topic', { room: stage, topic: 'Budget questions' });
+  assert.equal((await mm.next('stage', (d) => d.topic === 'Budget questions')).topic, 'Budget questions');
+  await ow.ok('stage.invite', { room: stage, user: mm.id });
+  const st = await mm.next('stage', (d) => d.speakers.includes(mm.id));
+  assert.deepEqual(st.hands, []);
+  await mm.ok('voice.state', { muted: false });
+  await ow.ok('stage.audience', { room: stage, user: mm.id });
+  await ow.next('voice', (d) => d.room === stage && d.state[mm.id]?.smute && d.state[mm.id]?.muted);
+  await mm.refused('voice.state', { muted: false });
+  // Mika can step down himself, and a moderator's unmute never makes him a speaker.
+  await mm.ok('stage.audience', { room: stage });
+  await ow.ok('mod.voice', { house, user: mm.id, mute: false });
+  await mm.refused('voice.state', { muted: false });
+  assert.equal(lastHouse(ow, house).rooms[stage].kind, 'stage');
+  for (const c of [ow, mm, m2]) await c.close();
+});
+
+test('places: roles: extra roles add permissions, order, icon, show separately, mentionable; nicknames per house', async () => {
+  const s = await placesHouse('rl');
+  const { ow, mm, m2, house, notices, memberRole, crew } = s;
+  assert.match(await mm.refused('msg.send', { conv: notices, id: mid(), text: 'news!' }), /post notices|Only/);
+  await ow.ok('role.update', { house, role: crew, perms: ['post', 'announce'], icon: '🎨', hoist: false, mentionable: false });
+  await ow.ok('member.roles', { house, user: mm.id, roles: [crew] });
+  await mm.ok('msg.send', { conv: notices, id: mid(), text: 'news from the crew' });
+  await settle();
+  const view = lastHouse(m2, house).house;
+  const c = view.roles.find((r) => r.id === crew);
+  assert.deepEqual([c.icon, c.hoist, c.mentionable], ['🎨', false, false]);
+  assert.deepEqual(view.extra[mm.id], [crew]);
+  await ow.refused('role.update', { house, role: crew, icon: 'not an emoji' });
+  assert.match(await ow.refused('role.update', { house, role: crew, hue: 12 }), /colours/);
+  await ow.refused('role.update', { house, role: crew, hoist: 'yes' });
+  await mm.refused('member.roles', { house, user: m2.id, roles: [crew] });
+  await ow.refused('member.roles', { house, user: m2.id, roles: [s.ownerRole] });
+  // Order: the owner role stays first; others move by index.
+  await ow.ok('role.move', { house, role: crew, index: 1 });
+  assert.deepEqual(srv.db.all('SELECT id FROM roles WHERE house = ? ORDER BY pos', house).map((r) => r.id), [s.ownerRole, crew, memberRole]);
+  await ow.refused('role.move', { house, role: s.ownerRole, index: 2 });
+  await ow.refused('role.move', { house, role: crew, index: 0 });
+  // A manager below the top can't move roles above their own.
+  await ow.ok('role.update', { house, role: memberRole, perms: ['post', 'roles', 'nick'] });
+  assert.match(await mm.refused('role.move', { house, role: crew, index: 2 }), /below your own/);
+  assert.match(await mm.refused('member.roles', { house, user: m2.id, roles: [crew] }), /below your own/);
+  await ow.ok('role.update', { house, role: memberRole, perms: ['post', 'invite', 'nick'] });
+
+  // Nicknames and pictures per house.
+  await mm.ok('member.profile', { house, nick: 'Mik', emoji: '🦊', hue: 200 });
+  await settle();
+  assert.deepEqual(lastHouse(m2, house).house.profiles[mm.id], { nick: 'Mik', emoji: '🦊', hue: 200 });
+  assert.match(await m2.refused('member.profile', { house, user: mm.id, nick: 'Silly' }), /other people’s nicknames/);
+  await mm.refused('member.profile', { house, nick: 'x'.repeat(40) });
+  await mm.refused('member.profile', { house, hue: 13 });
+  await ow.ok('member.profile', { house, user: mm.id, nick: 'Mika (crew)' });
+  await ow.ok('role.update', { house, role: memberRole, perms: ['post', 'invite'] });
+  assert.match(await m2.refused('member.profile', { house, nick: 'Nono' }), /can’t change its nickname/);
+  // Leaving drops extra roles and the nickname.
+  await mm.ok('house.leave', { house });
+  assert.equal(srv.db.get('SELECT COUNT(*) n FROM member_roles WHERE house = ? AND user = ?', house, mm.id).n, 0);
+  assert.equal(srv.db.get('SELECT COUNT(*) n FROM member_profiles WHERE house = ? AND user = ?', house, mm.id).n, 0);
+  for (const x of [ow, mm, m2]) await x.close();
+});
+
+test('places: forum rooms: posts with a title and tags, required tags, replies in each post’s thread, follow, edit', async () => {
+  const s = await placesHouse('fm');
+  const { ow, mm, m2, house } = s;
+  const { id: forum } = await ow.ok('room.create', { house, name: 'Questions', kind: 'forum' });
+  await mm.refused('forum.tags', { room: forum, tags: [{ name: 'Glaze' }] });
+  const { tags } = await ow.ok('forum.tags', { room: forum, tags: [{ name: 'Glaze' }, { name: 'Kiln', emoji: '🔥' }], required: true });
+  assert.equal(tags.length, 2);
+  await ow.refused('forum.tags', { room: forum, tags: [{ name: 'Same' }, { name: 'same' }] });
+  // Plain messages are refused; posts need a title and, here, a tag.
+  assert.match(await mm.refused('msg.send', { conv: forum, id: mid(), text: 'just chatting' }), /forum/);
+  assert.match(await mm.refused('forum.post', { room: forum, id: mid(), title: 'No tag', text: 'body' }), /at least one tag/);
+  await mm.refused('forum.post', { room: forum, id: mid(), title: '', text: 'body', tags: [tags[0].id] });
+  await mm.refused('forum.post', { room: forum, id: mid(), title: 'Bad tag', tags: ['tg_madeup1'] });
+  const pid = mid();
+  const { m } = await mm.ok('forum.post', { room: forum, id: pid, title: 'Why does my glaze crawl?', text: 'Thick application, cone 6.', tags: [tags[0].id] });
+  assert.deepEqual([m.post.title, m.post.tags, m.post.replies], ['Why does my glaze crawl?', [tags[0].id], 0]);
+  const seen = await m2.next('msg', (d) => d.conv === forum && d.m.post);
+  assert.equal(seen.m.post.title, 'Why does my glaze crawl?');
+  await m2.next('forum.thread', (d) => d.id === `t:${pid}`);
+  assert.ok(srv.db.get('SELECT 1 FROM follows WHERE user = ? AND thread = ?', mm.id, `t:${pid}`), 'the author follows their post');
+  await m2.ok('msg.send', { conv: `t:${pid}`, id: mid(), text: 'Try sanding the bisque.' });
+  await m2.ok('follow.set', { thread: `t:${pid}`, on: true });
+  const h = await mm.ok('history', { conv: forum });
+  assert.equal(h.msgs.find((x) => x.id === pid).post.replies, 1);
+  // Editing: the author, or whoever manages the room.
+  await m2.refused('forum.edit', { id: pid, title: 'Hijacked' });
+  await mm.ok('forum.edit', { id: pid, title: 'Glaze crawling at cone 6', tags: [tags[1].id] });
+  assert.equal((await m2.next('msg', (d) => d.m.id === pid && d.m.post?.title.startsWith('Glaze'))).m.post.tags[0], tags[1].id);
+  await ow.ok('forum.edit', { id: pid, tags: [tags[0].id, tags[1].id] });
+  // Denying send stops new posts and replies.
+  await ow.ok('room.override', { room: forum, type: 'member', target: m2.id, deny: ['send'] });
+  await m2.refused('forum.post', { room: forum, id: mid(), title: 'Mine', tags: [tags[0].id] });
+  await m2.refused('msg.send', { conv: `t:${pid}`, id: mid(), text: 'one more' });
+  for (const c of [ow, mm, m2]) await c.close();
+});
+
+test('places: notices followed into another house are copied with where they came from', async () => {
+  const s = await placesHouse('nf');
+  const { ow, mm, house, notices, lounge } = s;
+  const other = await mm.ok('house.create', { name: 'Mika’s club', hue: 200 });
+  const target = other.room;
+  // Following needs a notice room, a room you manage elsewhere, and an open source.
+  assert.match(await mm.refused('news.follow', { source: lounge, target }), /notice rooms/);
+  assert.match(await mm.refused('news.follow', { source: notices, target: lounge }), /another house|manage/);
+  assert.match(await s.m2.refused('news.follow', { source: notices, target }), /manage|member/);
+  const { hook } = await mm.ok('news.follow', { source: notices, target });
+  assert.equal(hook.kind, 'follow');
+  await mm.refused('news.follow', { source: notices, target });
+  await ow.ok('msg.send', { conv: notices, id: mid(), text: 'Firing on Saturday' });
+  const copy = await mm.next('msg', (d) => d.conv === target && d.m.text === 'Firing on Saturday');
+  assert.equal(copy.m.bot.follow.room, 'Notices');
+  assert.equal(copy.m.bot.follow.house, `Place nf`);
+  assert.notEqual(copy.m.author, ow.id, 'copied by a bot, not as the author');
+  // Bots can't sign in.
+  assert.equal((await post('/api/login', { handle: srv.db.get('SELECT handle FROM users WHERE id = ?', copy.m.author).handle, password: '!' })).status, 401);
+  // A private notice room stops copying.
+  await ow.ok('room.private', { room: notices, on: true });
+  await ow.ok('msg.send', { conv: notices, id: mid(), text: 'Committee only' });
+  await mm.none('msg', (d) => d.conv === target && d.m.text === 'Committee only');
+  await ow.ok('room.private', { room: notices, on: false });
+  await mm.ok('news.unfollow', { hook: hook.id });
+  await ow.ok('msg.send', { conv: notices, id: mid(), text: 'After unfollow' });
+  await mm.none('msg', (d) => d.conv === target && d.m.text === 'After unfollow');
+  for (const c of [ow, mm, s.m2]) await c.close();
+});
+
+test('places: webhooks: a secret address posts with a bot badge; wrong tokens are refused; limited, regenerated, deleted', async () => {
+  const s = await placesHouse('wh');
+  const { ow, mm, house, lounge, voice } = s;
+  assert.match(await mm.refused('hook.create', { room: lounge, name: 'CI' }), /can’t manage/);
+  await ow.refused('hook.create', { room: voice, name: 'CI' });
+  const { hook, url } = await ow.ok('hook.create', { room: lounge, name: 'Kiln sensor' });
+  assert.match(url, /^\/api\/hooks\/wh_[a-z0-9]+\/[\w-]{20,}$/);
+  assert.equal(srv.db.get('SELECT token FROM hooks WHERE id = ?', hook.id).token.includes(url.split('/').pop()), false, 'only a hash is stored');
+  const send = (path, body, headers = {}) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
+  const ok = await send(url, { content: 'Kiln at 1220°C', username: 'Kiln 2', avatar_url: 'https://example.com/a.png' });
+  assert.equal(ok.status, 200, await ok.clone().text());
+  const got = await mm.next('msg', (d) => d.conv === lounge && d.m.text === 'Kiln at 1220°C');
+  assert.equal(got.m.bot.name, 'Kiln 2');
+  assert.equal(got.m.bot.hook, hook.id);
+  // Wrong token, unknown hook, a page on another site, bad bodies.
+  const wrong = url.replace(/[\w-]{20,}$/, 'x'.repeat(32));
+  assert.equal((await send(wrong, { content: 'forged' })).status, 401);
+  assert.equal((await send('/api/hooks/wh_doesnotexist01/' + 'y'.repeat(32), { content: 'forged' })).status, 401);
+  assert.equal((await send(url, { content: 'x' }, { origin: 'https://evil.example' })).status, 403);
+  assert.equal((await send(url, { content: '' })).status, 400);
+  assert.equal((await send(url, { content: 'y'.repeat(2001) })).status, 400);
+  assert.equal((await send(url, { content: 'ok', avatar_url: 'http://169.254.169.254/latest' })).status, 400);
+  assert.equal((await fetch(base + url, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: 'hi' })).status, 415);
+  await mm.none('msg', (d) => d.conv === lounge && d.m.text === 'forged');
+  // Rate limited per hook.
+  srv.resetLimits();
+  const codes = [];
+  for (let i = 0; i < 8; i++) codes.push((await send(url, { content: `burst ${i}` })).status);
+  assert.ok(codes.includes(429), `some were refused: ${codes}`);
+  assert.equal(codes.filter((x) => x === 200).length, 5);
+  srv.resetLimits();
+  // Regenerate: the old address stops working. Delete: the new one does too.
+  const { url: url2 } = await ow.ok('hook.regen', { hook: hook.id });
+  assert.equal((await send(url, { content: 'old' })).status, 401);
+  assert.equal((await send(url2, { content: 'new' })).status, 200);
+  const list = await ow.ok('hook.list', { room: lounge });
+  assert.deepEqual(list.hooks.map((h) => h.id), [hook.id]);
+  assert.equal(JSON.stringify(list).includes(url2.split('/').pop()), false, 'the list never shows a token');
+  await mm.refused('hook.delete', { hook: hook.id });
+  await ow.ok('hook.delete', { hook: hook.id });
+  assert.equal((await send(url2, { content: 'gone' })).status, 401);
+  // Readers who can't see the room never get its webhook messages.
+  const { hook: h2, url: url3 } = await ow.ok('hook.create', { room: lounge, name: 'Again' });
+  await ow.ok('room.override', { room: lounge, type: 'member', target: mm.id, deny: ['view'] });
+  assert.equal((await send(url3, { content: 'hidden from Mika' })).status, 200);
+  await mm.none('msg', (d) => d.m.text === 'hidden from Mika');
+  await ow.ok('hook.delete', { hook: h2.id });
+  void house;
+  for (const c of [ow, mm, s.m2]) await c.close();
+});
+
+test('places: the rail keeps folders and house order per person, on every device, and checks them', async () => {
+  const s = await placesHouse('rail');
+  const { ow, mm, house } = s;
+  const h2 = (await ow.ok('house.create', { name: 'Second', hue: 200 })).house;
+  const h3 = (await ow.ok('house.create', { name: 'Third', hue: 142 })).house;
+  const items = [h3, { name: 'Pottery', hue: 200, open: true, houses: [house, h2] }];
+  const { rail } = await ow.ok('rail.set', { items });
+  assert.equal(rail.items[0], h3);
+  assert.deepEqual(rail.items[1].houses, [house, h2]);
+  assert.match(rail.items[1].id, /^fd_/);
+  const other = await Client.make('rail-dev', 'Unused');
+  void other;
+  await ow.close(); await ow.connect();
+  assert.deepEqual(ow.hello.places.rail.items[1].houses, [house, h2], 'kept across connections');
+  assert.equal(ow.hello.places.rail.items[1].name, 'Pottery');
+  await ow.refused('rail.set', { items: ['h_notmine12345'] });
+  await mm.refused('rail.set', { items: [h2] });
+  await ow.refused('rail.set', { items: [house, { name: 'Dup', houses: [house] }] });
+  await ow.refused('rail.set', { items: [{ name: 'x'.repeat(40), houses: [house] }] });
+  await ow.refused('rail.set', { items: [{ name: 'Bad hue', hue: 13, houses: [house] }] });
+  await ow.refused('rail.set', { items: Array.from({ length: 21 }, () => ({ name: 'f', houses: [house] })) });
+  // A house left out goes at the end.
+  const { rail: r2 } = await ow.ok('rail.set', { items: [h2] });
+  assert.deepEqual(r2.items.slice(1).sort(), [house, h3].sort());
+  for (const c of [ow, mm, s.m2, other]) await c.close();
+});
+
+test('places: welcome and interests: picking an interest grants its roles; managing roles can’t be handed out', async () => {
+  const s = await placesHouse('ob');
+  const { ow, mm, house, crew, memberRole } = s;
+  const { id: mods } = await ow.ok('role.create', { house });
+  await ow.ok('role.update', { house, role: mods, name: 'Mods', perms: ['post', 'moderate'] });
+  assert.match(await ow.refused('onboard.set', { house, interests: [{ label: 'Power', roles: [mods] }] }), /can’t be handed out/);
+  await ow.refused('onboard.set', { house, interests: [{ label: 'Owner', roles: [s.ownerRole] }] });
+  await mm.refused('onboard.set', { house, welcome: 'mine' });
+  await ow.ok('onboard.set', { house, welcome: 'Welcome! Pick what you are into.', interests: [{ label: 'Glazes', emoji: '🎨', roles: [crew] }, { label: 'Wheel', roles: [] }] });
+  await settle();
+  const v = lastHouse(mm, house).house;
+  assert.equal(v.welcome, 'Welcome! Pick what you are into.');
+  assert.equal(v.interests.length, 2);
+  await mm.refused('onboard.pick', { house, interests: ['in_notreal1'] });
+  const r = await mm.ok('onboard.pick', { house, interests: [v.interests[0].id] });
+  assert.deepEqual(r.roles, [crew]);
+  assert.ok(srv.db.get("SELECT 1 FROM member_roles WHERE house = ? AND user = ? AND role = ? AND via = 'interest'", house, mm.id, crew));
+  // If the role later gains a managing permission, picking no longer grants it.
+  await ow.ok('role.update', { house, role: crew, perms: ['post', 'kick'] });
+  assert.deepEqual((await mm.ok('onboard.pick', { house, interests: [v.interests[0].id] })).roles, []);
+  // Unpicking removes what interests gave, never roles given by hand.
+  await ow.ok('role.update', { house, role: crew, perms: ['post'] });
+  await ow.ok('member.roles', { house, user: mm.id, roles: [crew] });
+  await mm.ok('onboard.pick', { house, interests: [] });
+  assert.ok(srv.db.get('SELECT 1 FROM member_roles WHERE house = ? AND user = ? AND role = ?', house, mm.id, crew), 'given by hand, kept');
+  void memberRole;
+  for (const c of [ow, mm, s.m2]) await c.close();
+});
+
+test('places: templates and copying a house’s structure (never its messages or members)', async () => {
+  const a = await Client.make('tp-a', 'Tia Pal');
+  await a.refused('house.create', { name: 'Bad', hue: 35, template: 'castle' });
+  const made = await a.ok('house.create', { name: 'Study buddies', hue: 228, template: 'study' });
+  const h = await a.next('house', (d) => d.house.id === made.house);
+  const kinds = Object.values(h.rooms).map((r) => r.kind).sort();
+  assert.deepEqual(kinds, ['forum', 'news', 'stage', 'text', 'voice']);
+  const forum = Object.values(h.rooms).find((r) => r.kind === 'forum');
+  assert.equal(forum.tagRequired, true);
+  assert.deepEqual(forum.tags.map((t) => t.name), ['Maths', 'Science', 'Languages', 'Other']);
+  assert.deepEqual(h.house.roles.map((r) => r.name), ['Owner', 'Tutor', 'Student']);
+  assert.equal(h.house.roles[1].icon, '🎓');
+  const club = await a.ok('house.create', { name: 'Our club', hue: 200, template: 'club' });
+  const ch = await a.next('house', (d) => d.house.id === club.house);
+  const committee = Object.values(ch.rooms).find((r) => r.name === 'Committee');
+  assert.equal(committee.private, true);
+  // A member of the club doesn't see the committee room.
+  const b = await Client.make('tp-b', 'Ben Pal');
+  const { code } = await a.ok('invite.create', { house: club.house });
+  await b.ok('invite.accept', { code });
+  const bh = await b.next('house', (d) => d.house.id === club.house);
+  assert.equal(bh.rooms[committee.id], undefined);
+  // Copy: same rooms, roles and overrides; no messages, no other members.
+  await a.ok('msg.send', { conv: club.room, id: mid(), text: 'not copied' });
+  srv.resetLimits();
+  assert.match(await b.refused('house.create', { name: 'Stolen', hue: 35, from: club.house }), /Your role can’t/);
+  const copy = await a.ok('house.create', { name: 'Club two', hue: 35, from: club.house });
+  const cp = await a.next('house', (d) => d.house.id === copy.house);
+  assert.deepEqual(Object.values(cp.rooms).map((r) => r.name).sort(), Object.values(ch.rooms).map((r) => r.name).sort());
+  assert.deepEqual(cp.house.roles.map((r) => r.name), ch.house.roles.map((r) => r.name));
+  assert.equal(Object.values(cp.rooms).find((r) => r.name === 'Committee').private, true);
+  assert.deepEqual(Object.keys(cp.house.members), [a.id]);
+  assert.equal(srv.db.get(`SELECT COUNT(*) n FROM messages WHERE conv IN (SELECT id FROM rooms WHERE house = ?)`, copy.house).n, 0);
+  // Template creation is rate limited.
+  srv.resetLimits();
+  for (let i = 0; i < 3; i++) await a.ok('house.create', { name: `T${i}`, hue: 35, template: 'friends' });
+  assert.match(await a.refused('house.create', { name: 'T4', hue: 35, template: 'friends' }), /little fast/);
+  await a.close(); await b.close();
+});
+
+test('places: insights are for owners: joins, leaves, messages per day and the busiest rooms', async () => {
+  const s = await placesHouse('in', 1);
+  const { ow, mm, m2, house, lounge } = s;
+  await ow.ok('msg.send', { conv: lounge, id: mid(), text: 'one' });
+  await m2.ok('house.leave', { house });
+  assert.match(await mm.refused('insights.get', { house }), /Only owners/);
+  const r = await ow.ok('insights.get', { house });
+  assert.equal(r.days, 30);
+  assert.equal(r.messages.length, 30);
+  const today = r.messages[r.messages.length - 1];
+  assert.ok(today.n >= 4, `messages today: ${today.n}`);
+  assert.ok(r.joined[r.joined.length - 1].n >= 3, 'joins today');
+  assert.equal(r.left[r.left.length - 1].n, 1, 'one left today');
+  assert.equal(r.rooms[0].id, lounge);
+  assert.equal(r.members, 3);
+  assert.ok(r.active >= 2);
+  assert.equal((await ow.ok('insights.get', { house, days: 7 })).messages.length, 7);
+  for (const c of [ow, mm, m2, ...s.more]) await c.close();
+});
+// --- end places ------------------------------------------------------------------

@@ -49,7 +49,8 @@ export function Menu({ menu }) {
   const ref = useRef();
   const [pos, setPos] = useState(null);
   const [act, setAct] = useState(-1);
-  const items = menu.items.filter(Boolean);
+  // No separator at either end, and never two in a row.
+  const items = menu.items.filter(Boolean).filter((it, i, all) => !it.sep || (i > 0 && i < all.length - 1 && !all[i + 1].sep));
   const live = items.map((it, i) => (it.label && !it.disabled ? i : -1)).filter((i) => i >= 0);
 
   useReturnFocus();

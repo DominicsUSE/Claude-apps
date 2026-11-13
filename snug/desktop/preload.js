@@ -32,5 +32,8 @@ if (location.protocol === "http:" || location.protocol === "https:") {
     }),
     // That ring is over: its notification goes.
     callOver: (info) => ipcRenderer.send("call:over", { dm: String(info?.dm || "").slice(0, 80) }),
+    // Push to talk while another app is in front: one plain key, or null to let it go.
+    setPushToTalk: (key) => ipcRenderer.invoke("ptt:set", key == null ? null : String(key).slice(0, 16)),
+    onPushToTalk: (fn) => { if (typeof fn === "function") ipcRenderer.on("ptt:press", () => fn()); },
   });
 }

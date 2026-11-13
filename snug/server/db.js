@@ -4,6 +4,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, chmodSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { migrateMessaging } from './messaging.js'; // polls, link previews, edit history, scheduled messages, stickers
+import { migratePlaces } from './places.js'; // room overrides, extra roles, forums, webhooks, folders, onboarding (server/places.js)
 
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
@@ -223,7 +225,140 @@ export function migrate(db) {
   }
   migrateMessagesExtras(db);
   migrateCustomEmoji(db); // custom emoji per house (server/emoji.js)
+  migrateSafety(db); // blocks, privacy, moderation, audit log (server/safety.js)
+  migrateMessaging(db); // polls, link previews, edit history, scheduled messages, stickers (server/messaging.js)
+  migratePlaces(db); // places, structure and community (server/places.js)
+  migrateVoiceOpts(db); // soundboard, voice room limits and bitrate (server/voiceopts.js)
 }
+
+// --- Voice options (server/voiceopts.js) ----------------------------------------
+// Each house's soundboard, who may use it, and each voice room's user limit and bitrate.
+function migrateVoiceOpts(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS house_sounds (
+      id TEXT PRIMARY KEY,
+      house TEXT NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      emoji TEXT,
+      file TEXT NOT NULL,
+      volume REAL NOT NULL DEFAULT 1,
+      by TEXT NOT NULL,
+      created INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS house_sounds_house ON house_sounds(house);`);
+  // Names and types are fixed here, never from input.
+  for (const [table, column, type] of [
+    ['rooms', 'user_limit', 'INTEGER NOT NULL DEFAULT 0'],
+    ['rooms', 'bitrate', 'INTEGER NOT NULL DEFAULT 64'],
+    ['houses', 'sound_open', 'INTEGER NOT NULL DEFAULT 1'],
+  ]) {
+    if (!db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+}
+// --- end voice options ------------------------------------------------------------
+
+// --- Safety, privacy and moderation (server/safety.js) ----------------------
+// Blocks and privacy per person, message requests, bans, timeouts, voice
+// moderation, the audit log, reports, the word filter, rule acceptance, and
+// columns for slowmode, member screening and invitation limits.
+function migrateSafety(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS blocks (
+      user TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      other TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      ts INTEGER NOT NULL,
+      PRIMARY KEY (user, other)
+    );
+    CREATE INDEX IF NOT EXISTS blocks_other ON blocks(other);
+    CREATE TABLE IF NOT EXISTS privacy (
+      user TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      dm TEXT NOT NULL DEFAULT 'houses',
+      friends TEXT NOT NULL DEFAULT 'everyone',
+      requests INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS dm_requests (
+      dm TEXT NOT NULL REFERENCES dms(id) ON DELETE CASCADE,
+      user TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      by TEXT NOT NULL,
+      ts INTEGER NOT NULL,
+      declined INTEGER,
+      PRIMARY KEY (dm, user)
+    );
+    CREATE TABLE IF NOT EXISTS bans (
+      house TEXT NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+      user TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      by TEXT NOT NULL,
+      reason TEXT NOT NULL DEFAULT '',
+      ts INTEGER NOT NULL,
+      PRIMARY KEY (house, user)
+    );
+    CREATE TABLE IF NOT EXISTS timeouts (
+      house TEXT NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+      user TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      until INTEGER NOT NULL,
+      by TEXT NOT NULL,
+      reason TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (house, user)
+    );
+    CREATE TABLE IF NOT EXISTS voice_mod (
+      house TEXT NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+      user TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      mute INTEGER NOT NULL DEFAULT 0,
+      deaf INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (house, user)
+    );
+    CREATE TABLE IF NOT EXISTS audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      house TEXT NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+      ts INTEGER NOT NULL,
+      actor TEXT,
+      action TEXT NOT NULL,
+      target TEXT,
+      detail TEXT
+    );
+    CREATE INDEX IF NOT EXISTS audit_house ON audit(house, id);
+    CREATE TABLE IF NOT EXISTS reports (
+      id TEXT PRIMARY KEY,
+      house TEXT NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+      by TEXT,
+      user TEXT,
+      msg TEXT,
+      conv TEXT,
+      text TEXT NOT NULL DEFAULT '',
+      reason TEXT NOT NULL,
+      note TEXT NOT NULL DEFAULT '',
+      ts INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      handled_by TEXT,
+      handled_ts INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS reports_house ON reports(house, status, ts);
+    CREATE TABLE IF NOT EXISTS automod (
+      house TEXT PRIMARY KEY REFERENCES houses(id) ON DELETE CASCADE,
+      words TEXT NOT NULL DEFAULT '[]',
+      links INTEGER NOT NULL DEFAULT 0,
+      action TEXT NOT NULL DEFAULT 'block',
+      timeout_ms INTEGER NOT NULL DEFAULT 300000,
+      exempt TEXT NOT NULL DEFAULT '[]'
+    );
+    CREATE TABLE IF NOT EXISTS rule_accepts (
+      house TEXT NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+      user TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      ts INTEGER NOT NULL,
+      PRIMARY KEY (house, user)
+    );`);
+  // Names and types are fixed here, never from input.
+  for (const [table, column, type] of [
+    ['rooms', 'slowmode', 'INTEGER NOT NULL DEFAULT 0'],
+    ['houses', 'screening', 'INTEGER NOT NULL DEFAULT 0'],
+    ['invites', 'max_uses', 'INTEGER NOT NULL DEFAULT 0'],
+    ['invites', 'uses', 'INTEGER NOT NULL DEFAULT 0'],
+    ['invites', 'revoked', 'INTEGER'],
+  ]) {
+    if (!db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+}
+// --- end safety ---------------------------------------------------------------
 
 // --- Custom emoji (server/emoji.js) -----------------------------------------
 // Each house's emoji, and where emoji were used outside their own house (so

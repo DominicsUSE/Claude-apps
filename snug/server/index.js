@@ -11,7 +11,10 @@ import { createModel, newId } from './model.js';
 import { createHub, ringMsFrom } from './hub.js';
 import { AUDIO_TYPES, uploadType, fileKind, parseRange, createMediaHttp } from './media.js'; // voice messages, GIFs
 import { createEmojiHttp, emojiReads } from './emoji.js'; // custom emoji per house
+import { createMessagingHttp } from './messaging.js'; // sticker uploads and images; link previews and the scheduler are configured below
+import { createVoiceOptsHttp } from './voiceopts.js'; // soundboard uploads and sound files
 import { createPush } from './push.js'; // notifications when Snug is closed (Web Push)
+import { createPlacesHttp } from './places.js'; // webhook deliveries: POST /api/hooks/<id>/<token>
 import { HUES } from '../js/lib/util.js';
 import {
   hashPassword, checkPassword, burnPasswordCheck, createSession, sessionUser, endSession, endAllSessions,
@@ -51,6 +54,10 @@ export async function startServer({
   pushAllowLocal = process.env.SNUG_PUSH_ALLOW_LOCAL === '1',
   // How long a call rings before it counts as missed. Tests shorten it.
   ringMs = ringMsFrom(),
+  // Link previews (server/messaging.js). SNUG_LINK_PREVIEWS=0 turns them off.
+  linkPreviews = process.env.SNUG_LINK_PREVIEWS !== '0',
+  // Tests only: let previews fetch a local stand-in site on 127.0.0.1 (every other private address stays refused).
+  linkAllowLocal = false,
 } = {}) {
   const db = openDb(dataDir === ':memory:' ? ':memory:' : join(dataDir, 'snug.db'));
   const filesDir = join(dataDir === ':memory:' ? join(ROOT, 'data', 'test-files') : dataDir, 'files');
@@ -133,6 +140,13 @@ export async function startServer({
   // Custom emoji: uploads at POST /api/files?emoji=<house>, and who may fetch an emoji image.
   const emojiHttp = createEmojiHttp({ db, M, filesDir, sendJson, error, body, uploadLimit });
   const emojiR = emojiReads(db, M);
+  // Messaging (server/messaging.js): sticker uploads at POST /api/files?sticker=<house>, sticker images, and
+  // the background work: link previews and the scheduler (scheduled messages, polls closing).
+  const messagingHttp = createMessagingHttp({ db, M, filesDir, sendJson, error, body, headers, uploadLimit });
+  // Soundboard (server/voiceopts.js): uploads at POST /api/files?sound=<house>, files at GET /api/sounds/<file>.
+  const voiceOptsHttp = createVoiceOptsHttp({ db, M, filesDir, sendJson, error, body, headers, uploadLimit });
+  hub.messaging?.configure({ filesDir, previews: linkPreviews, allowLoopback: linkAllowLocal });
+  const placesHttp = createPlacesHttp({ db, M, hub, sendJson, error, jsonBody, ipOf }); // webhooks (server/places.js)
 
   async function handle(req, res) {
     const url = new URL(req.url, 'http://x');
@@ -216,12 +230,15 @@ export async function startServer({
     const invite = /^\/api\/invite\/([\w-]{6,40})$/.exec(path);
     if (req.method === 'GET' && invite) {
       const inv = db.get('SELECT * FROM invites WHERE code = ?', invite[1]);
-      if (!inv || inv.expires < Date.now()) return error(res, 404, 'That invitation has expired. Ask for a new link.');
+      if (!inv || inv.expires < Date.now() || inv.revoked || (inv.max_uses && inv.uses >= inv.max_uses)) return error(res, 404, 'That invitation has expired. Ask for a new link.');
       const h = db.get('SELECT name, mark, hue, about FROM houses WHERE id = ?', inv.house);
       const count = db.get('SELECT COUNT(*) n FROM members WHERE house = ?', inv.house).n;
       const by = db.get('SELECT name FROM users WHERE id = ?', inv.by)?.name;
       return sendJson(res, 200, { house: { ...h, members: count }, by });
     }
+
+    // Webhooks carry their own secret instead of a session (server/places.js).
+    if (await placesHttp(req, res, path)) return undefined;
 
     const user = userOf(req);
     if (!user) return error(res, 401, 'Sign in first.');
@@ -253,6 +270,8 @@ export async function startServer({
       return sendJson(res, 200, {}, { 'Set-Cookie': sessionCookie(fresh, { secure }) });
     }
 
+    if (await messagingHttp(req, res, path, url, user)) return undefined; // POST /api/files?sticker=<house>, GET /api/stickers/<file>
+    if (await voiceOptsHttp(req, res, path, url, user)) return undefined; // POST /api/files?sound=<house>, GET /api/sounds/<file>
     if (await emojiHttp(req, res, path, url, user)) return undefined; // POST /api/files?emoji=<house>
     if (post && path === '/api/files') {
       if (!uploadLimit.take(user)) return error(res, 429, 'Too many uploads at once. Wait a moment.');

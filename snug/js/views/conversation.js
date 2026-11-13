@@ -12,6 +12,8 @@ import { plain } from '../lib/format.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Stack, Tile, RoomIcon, Seg, Pres, presenceLabel } from '../ui/kit.js';
 import { Stream, Message, focusComposer } from './stream.js';
+import { RequestBanner, StageMod } from './safety.js'; // message requests; voice moderation on the stage
+import { JumpToDate } from './messaging.js'; // go to a date
 import { joinVoice, leaveVoice, toggleMute, toggleDeaf } from '../voice.js';
 import { leavingCall } from '../calls.js';
 import { toggleCamera, toggleScreen, mediaOf, canShareScreen } from '../voice.js';
@@ -19,7 +21,9 @@ import { emit, toast } from '../store.js';
 import { RoomForm, RoomBrowser } from './modals.js';
 import { showProfile } from './people.js';
 import { PinsButton } from './media.js'; // pinned messages
+import { ForumView, StageRoom, RoomPlaces } from './places.js'; // forum and stage rooms; access, follows and nicknames in details
 import { CallButtons, CallStrip, CallEndNote } from './calls.js'; // calls in direct conversations and groups
+import { PersonExtras, RoomLimit, VoiceExtras, PopOut } from './voiceopts.js'; // per-person volume, room limit, soundboard and options, picture in picture
 
 const Back = () => S.ui.phone && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
 
@@ -31,6 +35,7 @@ export function VoiceControls({ compact }) {
     <button class=${`ib vc${c.muted ? ' on' : ''}`} aria-pressed=${String(c.muted)} aria-label=${c.muted ? 'Unmute' : 'Mute'} data-tip=${c.muted ? 'Unmute' : 'Mute'} onClick=${toggleMute}><${Icon} name=${c.muted ? 'mic-off' : 'mic'} size=${size} /></button>
     <button class=${`ib vc${c.deaf ? ' on' : ''}`} aria-pressed=${String(c.deaf)} aria-label=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} data-tip=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} onClick=${toggleDeaf}><${Icon} name=${c.deaf ? 'ear-off' : 'ear'} size=${size} /></button>
     <${MediaControls} c=${c} size=${size} compact=${compact} />
+    <${VoiceExtras} compact=${compact} />
     <button class="ib vc danger leave" aria-label=${leave} data-tip=${c.dm ? 'Hang up' : 'Leave'} onClick=${leaveVoice}><${Icon} name="leave" size=${size} /></button>`;
 }
 
@@ -145,6 +150,8 @@ function MediaTile({ t, roomId, focused, small }) {
     </span>
     ${note && html`<span class="vt-note" role="status">${note}</span>`}
     ${screenTile && t.stream && html`<button class="ib vt-full" aria-label=${full ? 'Exit full screen' : 'Show full screen'} data-tip=${full ? 'Exit full screen' : 'Show full screen'} onClick=${toggleFullscreen}><${Icon} name=${full ? 'shrink' : 'expand'} size=${18} /></button>`}
+    ${t.kind !== 'face' && html`<${PopOut} t=${t} />`}
+    ${!screenTile && html`<span class="vt-extras"><${PersonExtras} id=${t.id} room=${roomId} /></span>`}
   </div>`;
 }
 
@@ -189,7 +196,7 @@ function Stage({ roomId, dm }) {
   const media = tiles.some((t) => t.kind !== 'face');
   return html`<div class=${`stage${inCall ? ' in' : ''}${ids.length ? '' : ' empty'}${media ? ' media' : ''}${dm ? ' call' : ''}`} data-size=${size} role="region" aria-label=${dm ? 'Call' : 'Voice'}>
     <div class="stage-top">
-      <span class="stage-count"><${Icon} name=${dm ? 'phone' : 'voice'} size=${16} />${ids.length ? `${ids.length} in ${dm ? 'the call' : 'voice'}` : dm ? 'Call' : 'Voice'}</span>
+      <span class="stage-count"><${Icon} name=${dm ? 'phone' : 'voice'} size=${16} />${ids.length ? `${ids.length} in ${dm ? 'the call' : 'voice'}` : dm ? 'Call' : 'Voice'}<${RoomLimit} room=${roomId} n=${ids.length} /></span>
       ${status}
     </div>
     ${media ? html`<${MediaStage} tiles=${tiles} roomId=${roomId} />` : ids.length
@@ -209,6 +216,8 @@ function Stage({ roomId, dm }) {
               </span>
               <span class="stage-name"><span class="trunc">${mine ? 'You' : u.name.split(' ')[0]}</span><${MediaMarks} st=${st} /><${Quality} id=${id} inCall=${inCall && !starting} /></span>
               ${note && html`<span class="stage-note">${note}</span>`}
+              <${StageMod} id=${id} room=${roomId} />
+              <${PersonExtras} id=${id} room=${roomId} />
             </div>`;
           })}
           ${ringingIds.map((id) => html`<div class="stage-person ringing" key=${id}>
@@ -299,6 +308,7 @@ export function Conversation({ conv }) {
         </span>`}
         ${meta.dm && html`<${CallButtons} conv=${conv} />`}
         <${PinsButton} conv=${conv} />
+        <${JumpToDate} conv=${conv} />
         <button class="ib" aria-label=${`Search in ${meta.title}`} data-tip="Search here" onClick=${() => go({ type: 'search', q: `in:"${meta.title.toLowerCase()}" ` })}><${Icon} name="search" /></button>
         ${!meta.user && html`<button class=${`ib${pane === 'people' ? ' on' : ''}`} aria-pressed=${String(pane === 'people')} aria-label=${`People, ${here.length} here`}
           data-tip="People" onClick=${() => togglePane('people')}><${Icon} name="people" /></button>`}
@@ -306,11 +316,13 @@ export function Conversation({ conv }) {
       </div>
     </header>
     ${meta.kind === 'voice' && html`<${Stage} roomId=${conv} />`}
+    ${meta.kind === 'stage' && html`<${StageRoom} conv=${conv} />`}
     ${meta.dm && (S.call?.room === conv
       ? html`<${Stage} roomId=${conv} dm />`
       : html`<${CallStrip} conv=${conv} /><${CallEndNote} conv=${conv} />`)}
-    <${Stream} key=${conv} conv=${conv} intro=${html`<${Intro} conv=${conv} meta=${meta} />`}
-      placeholder=${meta.user ? `Message ${first}` : `Message ${meta.title}`} />
+    ${meta.dm && html`<${RequestBanner} conv=${conv} />`}
+    ${meta.kind === 'forum' ? html`<${ForumView} key=${conv} conv=${conv} />` : html`<${Stream} key=${conv} conv=${conv} intro=${html`<${Intro} conv=${conv} meta=${meta} />`}
+      placeholder=${meta.user ? `Message ${first}` : `Message ${meta.title}`} />`}
   </section>`;
 }
 
@@ -370,7 +382,8 @@ export function DetailsPane({ conv }) {
           ? html`<h2 style="display:flex;gap:8px;align-items:center"><${RoomIcon} kind=${room.kind} />${room.name}</h2>
               <p class="sub">${room.topic || 'No description yet.'}</p>
               <p class="faint">In ${S.houses[room.house].name}</p>
-              ${can(S, room.house, 'rooms') && html`<div><button class="btn" onClick=${() => openModal(RoomForm, { room: conv })}><${Icon} name="edit" size=${16} />Edit room</button></div>`}`
+              ${(can(S, room.house, 'rooms') || room.perms?.manage) && html`<div><button class="btn" onClick=${() => openModal(RoomForm, { room: conv })}><${Icon} name="edit" size=${16} />Edit room</button></div>`}
+              <${RoomPlaces} conv=${conv} />`
           : meta.user
             ? html`<button class="person" style="margin:0 -8px;width:calc(100% + 16px)" onClick=${(e) => showProfile(meta.user, e.currentTarget.getBoundingClientRect())}>
                 <${Avatar} user=${meta.user} presence /><span class="grow"><span class="person-name" style="display:block">${meta.user.name}</span><span class="person-sub" style="display:block">${presenceLabel(meta.user)}</span></span>

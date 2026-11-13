@@ -131,6 +131,8 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
   // level and Focused rules the client applies before notifying.
   function needs(user, conv, w, row) {
     if (row.author === user) return false;
+    // Blocked authors and unaccepted message requests never notify (server/safety.js).
+    if (M.quietFor?.(user, row.author, conv)) return false;
     // A call record needs only the people who missed it, and them even in a
     // group set to "Only what needs me" (as needsMe says).
     const missed = !!row.sys && missedBy(row, user);

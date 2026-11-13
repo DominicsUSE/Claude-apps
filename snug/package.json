@@ -13,7 +13,11 @@
     "test:e2e:video": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-video.test.js",
     "test:e2e:emoji": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-emoji.test.js",
     "test:e2e:notify": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-notify.test.js",
-    "test:e2e:messages": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-messages.test.js"
+    "test:e2e:messages": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-messages.test.js",
+    "test:e2e:safety": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-safety.test.js",
+    "test:e2e:messaging": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-messaging.test.js",
+    "test:e2e:places": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-places.test.js",
+    "test:e2e:voice-options": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-voice-options.test.js"
   },
   "dependencies": {
     "ws": "^8.18.3"

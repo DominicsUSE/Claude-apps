@@ -5,7 +5,7 @@
 //         computer's app-data folder. Optionally other people on the same
 //         network can join it from their browser or their own Snug app.
 //   join  The window opens a Snug server that runs somewhere else.
-const { app, BrowserWindow, Menu, clipboard, desktopCapturer, dialog, ipcMain, nativeTheme, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, nativeTheme, session, shell } = require("electron");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -432,6 +432,35 @@ ipcMain.on("call:over", (e, info) => {
   closeCallNote(String(info?.dm || "").slice(0, 80));
 });
 ipcMain.handle("keep:set", (e, on) => (fromSnug(e.senderFrame.url) ? setKeepRunning(on === true) : null));
+
+// ---------- push to talk while Snug isn't in front ----------
+// The Snug page asks for one key (an Electron accelerator built from a plain
+// key, js/views/voiceopts.js) while it is in a call in push-to-talk mode, and
+// null to let it go. The system reports presses only (and repeats while the
+// key is held), so the page keeps the microphone open while presses keep
+// coming. Only single keys from a fixed list are accepted: never a shortcut
+// another app or the system could depend on.
+const PTT_KEY = /^(?:[A-Z0-9]|F(?:[1-9]|1[0-9]|2[0-4])|num[0-9]|Space|Capslock|Scrolllock|Pause|Insert|Home|End|PageUp|PageDown|[`\-=[\]\;',./])$/;
+let pttKey = null;
+let pttFrom = null;
+globalThis.snugPushToTalk = () => pttKey; // for the desktop test
+function releasePtt() {
+  if (pttKey) { try { globalShortcut.unregister(pttKey); } catch { /* already gone */ } }
+  pttKey = null;
+  pttFrom = null;
+}
+ipcMain.handle("ptt:set", (e, key) => {
+  if (!fromSnug(e.senderFrame.url)) return false;
+  if (key != null && (typeof key !== "string" || !PTT_KEY.test(key))) return false;
+  releasePtt();
+  if (key == null) return true;
+  let ok = false;
+  try { ok = globalShortcut.register(key, () => { if (pttFrom && !pttFrom.isDestroyed()) pttFrom.send("ptt:press"); }); } catch { ok = false; }
+  if (ok) { pttKey = key; pttFrom = e.sender; e.sender.once("destroyed", releasePtt); }
+  return ok;
+});
+app.on("will-quit", () => { try { globalShortcut.unregisterAll(); } catch { /* quitting */ } });
+// ---------- end push to talk ----------
 // ---------- end running in the tray ----------
 
 // The setup page asks for the current choice and saves a new one.

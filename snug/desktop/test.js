@@ -386,3 +386,59 @@ test("incoming call: the hidden window comes back from the tray with a notificat
   for (let i = 0; i < 50 && await app.evaluate(() => globalThis.snugCallNotesOpen()); i++) await new Promise((r) => setTimeout(r, 100));
   assert.equal(await app.evaluate(() => globalThis.snugCallNotesOpen()), 0, "the ring's notification closed");
 });
+
+// ---------- Push to talk while Snug isn't in front (voice options) ----------
+// In a voice room in push-to-talk mode, the page asks the app for a global
+// shortcut; each press the system reports opens the microphone, which closes
+// again shortly after the presses stop. Leaving voice lets the key go.
+test("push to talk: a global key is held only while in voice in push-to-talk mode, and its presses open the microphone", async (t) => {
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-ptt-"));
+  const bin = process.env.SNUG_BIN && path.resolve(process.env.SNUG_BIN);
+  const app = await electron.launch({
+    executablePath: bin || require("electron"),
+    args: [...(bin ? [] : [__dirname]), "--no-sandbox", `--user-data-dir=${userData}`, "--use-fake-device-for-media-stream"],
+    cwd: __dirname,
+  });
+  t.after(async () => {
+    await app.close().catch(() => {});
+    fs.rmSync(userData, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  });
+  const page = await app.firstWindow();
+  page.setDefaultTimeout(20000);
+  await page.waitForSelector("#setup");
+  await page.click("#go");
+  await page.waitForSelector(".auth-form");
+  await page.click('.auth-link:has-text("Create an account")');
+  await page.fill("#auth-handle", "pat");
+  await page.fill("#auth-name", "Pat Lee");
+  await page.fill("#auth-pass", "a long password");
+  await page.click(".auth-form button[type=submit]");
+  await page.waitForSelector(".nav");
+  await page.click(".rail-add");
+  await page.fill("#house-name", "Studio");
+  await page.click(".modal button[type=submit]");
+  await page.waitForSelector('.main .bar-title:has-text("Lounge")');
+  assert.equal(await page.evaluate(() => typeof window.snugApp.setPushToTalk), "function");
+  await page.click('.nav .row:has-text("Hangout")');
+  await page.click('.stage .btn.primary:has-text("Join voice")');
+  await page.locator('.stage [aria-label="Leave voice"]').waitFor();
+  assert.equal(await app.evaluate(() => globalThis.snugPushToTalk()), null, "voice activity needs no key");
+  await page.click(".stage .vo-opts");
+  await page.click('.menu-item:has-text("Push to talk")');
+  for (let i = 0; i < 50 && !(await app.evaluate(() => globalThis.snugPushToTalk())); i++) await new Promise((r) => setTimeout(r, 100));
+  assert.equal(await app.evaluate(() => globalThis.snugPushToTalk()), "`");
+  await page.waitForFunction(() => window.snug.voiceDebug().trackEnabled === false);
+  // What the system sends when the key is pressed (and repeated while held).
+  const press = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.send("ptt:press"));
+  await press();
+  await page.waitForFunction(() => window.snug.voiceDebug().trackEnabled === true);
+  for (let i = 0; i < 6; i++) { await new Promise((r) => setTimeout(r, 200)); await press(); }
+  assert.equal(await page.evaluate(() => window.snug.voiceDebug().trackEnabled), true, "repeats keep it open");
+  await page.waitForFunction(() => window.snug.voiceDebug().trackEnabled === false, null, { timeout: 5000 });
+  // Only plain keys from the fixed list are accepted.
+  assert.equal(await page.evaluate(() => window.snugApp.setPushToTalk("CommandOrControl+Q")), false);
+  await page.click('.stage [aria-label="Leave voice"]');
+  for (let i = 0; i < 50 && (await app.evaluate(() => globalThis.snugPushToTalk())); i++) await new Promise((r) => setTimeout(r, 100));
+  assert.equal(await app.evaluate(() => globalThis.snugPushToTalk()), null, "leaving voice lets the key go");
+});
+// ---------- end push to talk ----------

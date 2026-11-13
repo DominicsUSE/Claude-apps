@@ -71,7 +71,7 @@ export function PersonPage({ id }) {
       <${Back} />
       <h1 class="bar-title trunc">${mine ? 'Your profile' : u.name}</h1>
       <div class="bar-end">
-        ${!mine && state === 'friends' && html`<button class="ib" aria-label=${`More for ${u.name}`} aria-haspopup="menu" data-tip="More"
+        ${!mine && html`<button class="ib" aria-label=${`More for ${u.name}`} aria-haspopup="menu" data-tip="More"
           onClick=${(e) => friendMenu(id, e.currentTarget.getBoundingClientRect(), { profile: false })}><${Icon} name="more" /></button>`}
       </div>
     </header>

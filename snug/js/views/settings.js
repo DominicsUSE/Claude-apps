@@ -3,7 +3,7 @@
 import { html, useState } from '../../vendor/preact-htm.js';
 import {
   S, me, closeLayer, setPref, updateMe, setNotify, openModal, updateHouse, addRole, removeRole,
-  updateRole, setRolePerm, setMemberRole, leaveHouse, removeMember, signedOut, toast,
+  updateRole, setRolePerm, setMemberRole, leaveHouse, removeMember, signedOut, toast, openMenu,
 } from '../store.js';
 import { api, stopTransport } from '../server.js';
 import { leaveVoice } from '../voice.js';
@@ -19,6 +19,13 @@ import { Confirm } from './modals.js';
 import { PushSetting } from './push-setting.js'; // notifications when Snug is closed
 import { pushSignOut } from '../push.js';
 import { HouseEmoji } from './emoji-settings.js'; // House settings > Emoji
+import { MessagingSettings, withStickers } from './messaging.js'; // link previews; stickers on the Emoji page
+import { PrivacyPage, SAFETY_PAGES, SAFETY_VIEWS } from './safety-settings.js'; // privacy, blocks, moderation pages
+import { personItems } from './safety.js';
+import { PLACES_PAGES, PLACES_VIEWS } from './places-settings.js'; // roles with order and icons, rooms and access, welcome, insights
+import { VoiceSettings, HouseVoice } from './voiceopts-settings.js'; // Voice and video; House settings > Voice
+import { setVoiceSettingsOpener, setHouseVoiceOpener } from './voiceopts.js';
+import { openLayer as openVoiceLayer } from '../store.js';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
 const MOD = isMac ? '⌘' : 'Ctrl';
@@ -199,7 +206,8 @@ function Look() {
     <div class="preview" aria-hidden="true">
       ${PREVIEW.map((m, i) => html`<${Message} key=${m.id} conv="k_glaze" m=${m} grouped=${i === 1} />`)}
     </div>
-    <${Row} label="Motion" hint="Panels slide and fade briefly. Reduced turns that off."><${Seg} label="Motion" value=${p.motion} options=${[['system', 'Match device'], ['reduced', 'Reduced']]} onChange=${(v) => setPref('motion', v)} /><//>`;
+    <${Row} label="Motion" hint="Panels slide and fade briefly. Reduced turns that off."><${Seg} label="Motion" value=${p.motion} options=${[['system', 'Match device'], ['reduced', 'Reduced']]} onChange=${(v) => setPref('motion', v)} /><//>
+    <${MessagingSettings} Row=${Row} />`;
 }
 
 const KEYS = [
@@ -223,6 +231,11 @@ const KEYS = [
   [['E'], 'In Catch up: mark the item done'],
   [['?'], 'Show this list'],
 ];
+// Formatting in the message box (js/views/messaging.js).
+KEYS.push(
+  [[MOD, 'B'], 'In the message box: bold the selection'], [[MOD, 'I'], 'Italic'], [[MOD, 'U'], 'Underline'],
+  [[MOD, 'Shift', 'X'], 'Strikethrough'], [[MOD, 'E'], 'Code'], [[MOD, 'K'], 'Make the selection a link'],
+);
 
 function Keys() {
   return html`
@@ -311,6 +324,12 @@ function Account() {
 }
 
 const VIEWS = { profile: Profile, notify: Notify, look: Look, keys: Keys, account: Account };
+// Privacy and safety (js/views/safety-settings.js), before Account.
+PAGES.splice(PAGES.findIndex((p) => p.id === 'account'), 0, { id: 'privacy', label: 'Privacy and safety', icon: 'eye', words: 'privacy block blocked unblock messages requests friend requests dm safety' });
+VIEWS.privacy = PrivacyPage;
+// Voice and video (js/views/voiceopts-settings.js), after Notifications.
+PAGES.splice(PAGES.findIndex((p) => p.id === 'notify') + 1, 0, { id: 'voice', label: 'Voice and video', icon: 'voice', words: 'voice video microphone mic speaker headphones camera webcam push to talk ptt sensitivity noise suppression echo gain volume screen share quality sounds afk deafen' });
+VIEWS.voice = VoiceSettings;
 
 export function Settings({ page: start = 'profile' }) {
   const [page, setPage] = useState(start);
@@ -405,6 +424,8 @@ function HouseMembers({ house }) {
       <select class="field" aria-label=${`Role for ${S.users[id].name}`} value=${h.members[id]} disabled=${id === S.me} onChange=${(e) => setMemberRole(house, id, e.target.value)}>
         ${h.roles.map((r) => html`<option value=${r.id}>${r.name}</option>`)}
       </select>
+      ${id !== S.me && personItems(id, house).some((x) => x.label && x.label !== 'Block' && x.label !== 'Unblock' && x.label !== 'Report') && html`<button class="ib" aria-label=${`Moderate ${S.users[id].name}`} aria-haspopup="menu" data-tip="Moderate"
+        onClick=${(e) => openMenu({ anchor: e.currentTarget.getBoundingClientRect(), align: 'end', items: personItems(id, house).filter((x) => x.sep || !['Block', 'Unblock', 'Report'].includes(x.label)) })}><${Icon} name="shield" size=${18} /></button>`}
       ${id !== S.me && html`<button class="ib danger" aria-label=${`Remove ${S.users[id].name} from ${h.name}`} data-tip="Remove from house" onClick=${() => openModal(Confirm, {
         title: `Remove ${S.users[id].name}?`, danger: true, action: 'Remove',
         text: `${S.users[id].name} leaves ${h.name} and its rooms. They can come back with a new invitation.`,
@@ -432,16 +453,32 @@ function HouseWelcome({ house }) {
 }
 
 const HOUSE_VIEWS = { about: HouseAbout, roles: HouseRoles, members: HouseMembers, welcome: HouseWelcome };
-HOUSE_VIEWS.emoji = HouseEmoji; // custom emoji
+HOUSE_VIEWS.emoji = withStickers(HouseEmoji); // custom emoji, and the house's stickers below them
+// Moderation pages, each opened by its own permission (js/views/safety-settings.js).
+HOUSE_PAGES.push(...SAFETY_PAGES);
+Object.assign(HOUSE_VIEWS, SAFETY_VIEWS);
+// Places (js/views/places-settings.js): its Roles page replaces the one above.
+HOUSE_PAGES.push(...PLACES_PAGES);
+Object.assign(HOUSE_VIEWS, PLACES_VIEWS);
+// Voice: the soundboard (Manage sounds) and voice room limits and bitrate (Manage rooms).
+HOUSE_PAGES.push({ id: 'voice', label: 'Voice', icon: 'voice', words: 'voice soundboard sounds user limit bitrate audio quality', need: (h) => can(S, h, 'sounds') || can(S, h, 'rooms') });
+HOUSE_VIEWS.voice = HouseVoice;
 
 export function HouseSettings({ house, page: start = 'about' }) {
   const [page, setPage] = useState(start);
   const h = S.houses[house];
   // Custom emoji: a role with Manage emoji but not Manage roles gets the Emoji page alone.
   const emojiOnly = !!h && !can(S, house, 'roles') && can(S, house, 'emoji');
-  if (!h || (!can(S, house, 'roles') && !emojiOnly)) return null;
-  const V = HOUSE_VIEWS[emojiOnly ? 'emoji' : page];
-  return html`<${Layer} title=${h.name} icon=${html`<${Tile} house=${h} />`} pages=${emojiOnly ? HOUSE_PAGES.filter((p) => p.id === 'emoji') : HOUSE_PAGES} page=${emojiOnly ? 'emoji' : page} setPage=${setPage}>
+  // Pages with their own permission (moderation) show to whoever has it; the rest need Manage roles.
+  const pages = !h ? [] : HOUSE_PAGES.filter((p) => (p.need ? p.need(house) : can(S, house, 'roles') || (emojiOnly && p.id === 'emoji')));
+  if (!h || !pages.length) return null;
+  const cur = pages.some((p) => p.id === page) ? page : pages[0].id;
+  const V = HOUSE_VIEWS[cur];
+  return html`<${Layer} title=${h.name} icon=${html`<${Tile} house=${h} />`} pages=${pages} page=${cur} setPage=${setPage}>
     <${V} house=${house} />
   <//>`;
 }
+
+// The voice options open these pages from a call (js/views/voiceopts.js).
+setVoiceSettingsOpener(() => openVoiceLayer({ C: Settings, props: { page: 'voice' } }));
+setHouseVoiceOpener((house) => openVoiceLayer({ C: HouseSettings, props: { house, page: 'voice' } }));

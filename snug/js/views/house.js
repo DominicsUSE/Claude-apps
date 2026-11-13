@@ -86,7 +86,7 @@ function Bar({ house, title, children }) {
 // ---------- A house you are in ----------
 
 function voiceIn(id) {
-  return roomIds(S, id).filter((r) => S.rooms[r]?.kind === 'voice' && (S.voice[r] || []).length)
+  return roomIds(S, id).filter((r) => (S.rooms[r]?.kind === 'voice' || S.rooms[r]?.kind === 'stage') && (S.voice[r] || []).length)
     .map((r) => ({ room: S.rooms[r], people: S.voice[r].map((u) => S.users[u]).filter(Boolean) }))
     .sort((a, b) => b.people.length - a.people.length);
 }

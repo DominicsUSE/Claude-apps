@@ -2,6 +2,7 @@
 // This file is the whole notification policy. Every badge, dot, toast and
 // Catch up entry is derived from the three functions below.
 import { mentions } from './format.js';
+import { mentionsRole } from './places.js'; // @Role mentions
 
 export const LEVELS = ['all', 'mentions', 'muted'];
 export const LEVEL_LABEL = { all: 'Everything', mentions: 'Only what needs me', muted: 'Nothing' };
@@ -40,6 +41,7 @@ export function forMe(S, conv, m) {
   if (m.author === S.me || m.sys) return false;
   if (m.call) return missedCall(S, m);
   if (mentions(m.text, S.users[S.me]?.handle)) return true;
+  if (mentionsRole(S, conv, m)) return true; // a role I have, and anyone may mention it (js/lib/places.js)
   if (m.replyTo) {
     const target = (S.msgs[conv] || []).find((x) => x.id === m.replyTo);
     if (target && target.author === S.me) return true;
@@ -53,6 +55,8 @@ export function forMe(S, conv, m) {
 // Everything else is "new activity": worth a dot, never a number.
 export function needsMe(S, conv, m) {
   if (m.author === S.me || m.sys) return false;
+  // Blocked people and unaccepted message requests never need me (js/views/safety.js).
+  if (S.safety?.blocks?.includes(m.author) || S.safety?.requests?.some((r) => r.dm === conv)) return false;
   // A missed call is for me even in a group set to "Only what needs me".
   if (m.call) return missedCall(S, m);
   if (S.dms[conv] && !(isGroup(S, conv) && S.dms[conv].notify === 'mentions')) return true;

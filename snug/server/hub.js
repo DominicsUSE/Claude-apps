@@ -120,7 +120,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
   // A house plus its conversations, for someone who has just joined or created it.
   hub.sendHouseContent = (u, houseId) => {
     hub.sendHouse(u, houseId);
-    const rooms = db.all('SELECT id FROM rooms WHERE house = ?', houseId).map((r) => r.id);
+    const rooms = db.all('SELECT id FROM rooms WHERE house = ?', houseId).map((r) => r.id).filter((r) => M.canRead(u, r)); // private rooms (server/places.js)
     const threads = rooms.length ? db.all(`SELECT * FROM threads WHERE conv IN (${rooms.map(() => '?').join(',')})`, ...rooms) : [];
     const msgs = {}, more = {};
     for (const conv of [...rooms, ...threads.map((t) => t.id)]) {
@@ -170,7 +170,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
   // Who hears about a voice place: the house for a room, only the conversation's people for a call.
   function audienceOf(place) {
     const r = M.room(place);
-    if (r) return db.all('SELECT user FROM members WHERE house = ?', r.house).map((x) => x.user);
+    if (r) return M.audience(place); // who can see the room (server/places.js)
     return dmMembers(place);
   }
   function callView(call) {
@@ -182,7 +182,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
   function voiceView(place) {
     const m = voiceRooms.get(place);
     const call = calls.get(place);
-    const v = !m ? { users: [], state: {} } : { users: [...m.keys()], state: Object.fromEntries([...m].map(([u, s]) => [u, { muted: s.muted, deaf: s.deaf, camera: !!s.camera, screen: !!s.screen }])) };
+    const v = !m ? { users: [], state: {} } : { users: [...m.keys()], state: Object.fromEntries([...m].map(([u, s]) => [u, { muted: s.muted, deaf: s.deaf, camera: !!s.camera, screen: !!s.screen, ...(s.smute ? { smute: true } : {}), ...(s.sdeaf ? { sdeaf: true } : {}) }])) };
     if (call) v.call = callView(call);
     else if (!M.room(place)) v.call = null;
     return v;
@@ -242,6 +242,14 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
     if (!room || voiceOf.get(to) !== room) return false;
     send(voiceRooms.get(room).get(to).ws, { t: 'ev', ev: 'rtc', d: { from, data } });
     return true;
+  };
+  // Where someone is talking right now (server/safety.js: voice moderation).
+  hub.voicePlaceOf = (u) => voiceOf.get(u) || null;
+  // Who is in a voice place, and one person's flags there (server/voiceopts.js: the soundboard).
+  hub.voiceUsers = (place) => [...(voiceRooms.get(place)?.keys() || [])];
+  hub.voiceStateOf = (u) => {
+    const e = voiceOf.has(u) && voiceRooms.get(voiceOf.get(u))?.get(u);
+    return e ? { muted: !!e.muted, deaf: !!e.deaf, smute: !!e.smute, sdeaf: !!e.sdeaf } : null;
   };
   hub.leaveVoiceInHouse = (u, houseId) => {
     const room = voiceOf.get(u);
@@ -329,7 +337,8 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
     calls.set(dm, call);
     let peers;
     try { peers = hub.voiceJoin(c, dm); } catch (e) { calls.delete(dm); throw e; }
-    for (const u of members) if (u !== c.user) ring(call, u);
+    // Nobody who blocked the caller (or hasn't accepted their message request) is rung (server/safety.js).
+    for (const u of members) if (u !== c.user && !M.ringBlocked?.(c.user, u, dm)) ring(call, u);
     voiceChanged(dm);
     return { peers, call: call.id };
   };
@@ -447,6 +456,6 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
     wss.close();
   };
   hub.ops = ops;
-  hub.resetLimits = () => Object.values(limits).forEach((l) => l.reset());
+  hub.resetLimits = () => { Object.values(limits).forEach((l) => l.reset()); (hub.extraLimits || []).forEach((l) => l.reset()); };
   return hub;
 }

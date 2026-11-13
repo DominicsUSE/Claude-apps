@@ -298,3 +298,88 @@ test('mutual houses, greetings, interests and links', () => {
   assert.equal(safeLink('https://localhost'), null);
   assert.equal(TOPICS.length, 10);
 });
+
+// --- safety rules (js/lib/safety.js) -------------------------------------------
+test('safety: the word filter matches whole words, any case or accent, with * for prefixes; links when blocked', async () => {
+  const { filterHit, cleanWord } = await import('../js/lib/safety.js');
+  const cfg = { words: ['badword', 'scam*', 'two words'], links: false };
+  assert.deepEqual(filterHit('what a BÁDWORD!', cfg), { word: 'badword' });
+  assert.equal(filterHit('badwords and abadword', cfg), null, 'only whole words');
+  assert.deepEqual(filterHit('such scammers', cfg), { word: 'scam*' });
+  assert.deepEqual(filterHit('it has two   words in it', cfg), { word: 'two words' });
+  assert.equal(filterHit('see https://example.org', cfg), null);
+  assert.deepEqual(filterHit('see https://example.org', { ...cfg, links: true }), { link: true });
+  assert.deepEqual(filterHit('go to shop.example.com now', { words: [], links: true }), { link: true });
+  assert.equal(filterHit('a sentence. Another one', { words: [], links: true }), null);
+  assert.equal(cleanWord('  Hello  World '), 'hello world');
+  assert.equal(cleanWord('<script>'), '');
+  assert.equal(cleanWord('x'.repeat(41)), '');
+  assert.equal(cleanWord('free*'), 'free*');
+});
+
+test('safety: role hierarchy, slowmode waits and durations', async () => {
+  const { outranks, slowWait, left, spell } = await import('../js/lib/safety.js');
+  const roles = [{ id: 'own' }, { id: 'mod' }, { id: 'mem' }];
+  const members = { o: 'own', o2: 'own', m: 'mod', m2: 'mod', p: 'mem' };
+  assert.equal(outranks(roles, members, 'm', 'p'), true);
+  assert.equal(outranks(roles, members, 'm', 'm2'), false, 'equal roles');
+  assert.equal(outranks(roles, members, 'p', 'm'), false, 'lower roles');
+  assert.equal(outranks(roles, members, 'm', 'o'), false, 'never the owner');
+  assert.equal(outranks(roles, members, 'o', 'o2'), false, 'not even another owner');
+  assert.equal(outranks(roles, members, 'o', 'm'), true);
+  assert.equal(outranks(roles, members, 'm', 'm'), false, 'not yourself');
+  assert.equal(outranks(roles, members, 'm', 'gone'), true, 'someone no longer in the house');
+  assert.equal(slowWait(10, 1000, 5000), 6000);
+  assert.equal(slowWait(10, 1000, 20000), 0);
+  assert.equal(slowWait(0, 1000, 1000), 0);
+  assert.equal(left(4200), '5s');
+  assert.equal(left(125_000), '2m 5s');
+  assert.equal(left(3_700_000), '1h 1m');
+  assert.equal(spell(21600), '6 hours');
+  assert.equal(spell(5), '5 seconds');
+});
+// --- end safety rules ------------------------------------------------------------
+
+// --- messaging (js/lib/format.js, js/lib/highlight.js, js/lib/search.js) -------
+test('messaging: rich markup becomes tokens: blocks, underline, spoilers, masked links, timestamps, escapes', async () => {
+  const { highlight } = await import('../js/lib/highlight.js');
+  const { fmtStamp } = await import('../js/lib/format.js');
+  const t = parse('# Title\nplain line\n> quoted\n- one\n- two\n3. three\n-# small');
+  assert.deepEqual(t.map((x) => x.t), ['h', 'text', 'quote', 'list', 'list', 'sub']);
+  assert.equal(t[0].level, 1);
+  assert.deepEqual([t[3].ordered, t[3].items.length, t[4].ordered, t[4].start], [false, 2, true, 3]);
+  assert.deepEqual(parse('__u__ ||s||').map((x) => x.t), ['u', 'text', 'spoiler']);
+  assert.deepEqual(parse('[docs](https://example.org/a)')[0], { t: 'mlink', v: 'https://example.org/a', c: [{ t: 'text', v: 'docs' }] });
+  assert.equal(parse('[x](javascript:alert(1))').some((x) => x.t === 'mlink'), false, 'only http(s) can hide behind text');
+  assert.deepEqual(parse('<t:1893456000:R>')[0], { t: 'ts', v: 1893456000, style: 'R' });
+  assert.deepEqual(parse('<https://example.org/x>')[0], { t: 'link', v: 'https://example.org/x' });
+  assert.deepEqual(parse('\\*not italic\\*'), [{ t: 'text', v: '*not italic*' }]);
+  assert.deepEqual(parse('***both***')[0], { t: 'b', c: [{ t: 'i', c: [{ t: 'text', v: 'both' }] }] });
+  assert.equal(parse('>not a quote')[0].t, 'text');
+  assert.equal(plain('the ending is ||he was a ghost||'), 'the ending is [spoiler]');
+  assert.equal(plain('# Hi\n> there [docs](https://e.org)'), 'Hi there docs');
+  assert.equal(fmtStamp(0, 'R', 3_600_000, 'en'), '1 hour ago');
+  assert.equal(fmtStamp(86_400, 'd', 0, 'en-GB').includes('1970'), true);
+  // Highlighting is tokens too, and unknown languages stay plain.
+  assert.deepEqual(highlight('const a = "x"; // c', 'js').map((x) => x.t), ['kw', 'text', 'str', 'text', 'com']);
+  assert.deepEqual(highlight('<b class="x">', 'html').map((x) => x.t), ['kw', 'text', 'attr', 'text', 'str', 'kw']);
+  assert.deepEqual(highlight('anything <b>', 'klingon'), [{ t: 'text', v: 'anything <b>' }]);
+});
+
+test('messaging: search filters for mentions, dates and pins', async () => {
+  const { dateRange, inDates, isEmptyQuery } = await import('../js/lib/search.js');
+  const p = parseQuery('mentions:@Ines during:2026-11 pinned:true has:poll kiln');
+  assert.deepEqual({ m: p.mentions, d: p.during, pin: p.pinned, has: p.has, terms: p.terms }, { m: ['ines'], d: '2026-11', pin: true, has: ['poll'], terms: ['kiln'] });
+  assert.equal(isEmptyQuery(parseQuery('before:2026-01-01')), false);
+  assert.equal(parseQuery('before:yesterday').before, undefined, 'a date that does not parse is ignored');
+  assert.deepEqual(dateRange('2026-11-12', 0), [Date.UTC(2026, 10, 12), Date.UTC(2026, 10, 13)]);
+  assert.deepEqual(dateRange('2026-11-12', -60), [Date.UTC(2026, 10, 12) - 3_600_000, Date.UTC(2026, 10, 13) - 3_600_000], 'a day in the searcher’s time zone');
+  assert.equal(dateRange('2026-02-30', 0), null);
+  assert.equal(inDates({ before: '2026-11-12' }, Date.UTC(2026, 10, 11, 23), 0), true);
+  assert.equal(inDates({ after: '2026-11-12' }, Date.UTC(2026, 10, 12, 23), 0), false);
+  // Local search (offline) knows the same filters.
+  const S = fresh();
+  const hits = runSearch(S, parseQuery('mentions:robin'));
+  assert.ok(hits.length > 0 && hits.every((h) => /@robin/i.test(h.m.text)));
+});
+// --- end messaging -----------------------------------------------------------------

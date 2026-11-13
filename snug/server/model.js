@@ -3,7 +3,7 @@
 import { randomBytes } from 'node:crypto';
 import { can, canPost } from '../js/lib/perms.js';
 import { fold } from '../js/lib/util.js';
-import { parseQuery } from '../js/lib/search.js';
+import { parseQuery, isEmptyQuery, dateRange } from '../js/lib/search.js';
 import { EVENT_LENGTH } from '../js/lib/social.js';
 
 export const PAGE = 60;
@@ -287,9 +287,10 @@ export function createModel(db) {
   };
 
   // Search over stored messages the person can read.
-  M.search = (user, q, limit = 80) => {
+  // tz: the searcher's Date#getTimezoneOffset(), so before:/after:/during: mean their days.
+  M.search = (user, q, limit = 80, tz = 0) => {
     const p = parseQuery(q);
-    if (!p.terms.length && !p.from.length && !p.in.length && !p.has.length && !p.saved) return [];
+    if (isEmptyQuery(p)) return [];
     let convs = M.readable(user);
     if (p.in.length) {
       const nameOf = (conv) => {
@@ -313,12 +314,24 @@ export function createModel(db) {
       params.push(...authors);
     }
     if (p.saved) { where.push('id IN (SELECT msg FROM saved WHERE user = ?)'); params.push(user); }
+    // Mentions, dates and pins (messaging track).
+    for (const h of p.mentions || []) { where.push("fold LIKE ? ESCAPE '\\'"); params.push(`%@${h.replace(/[\\%_]/g, (x) => `\\${x}`)}%`); }
+    for (const [k, cmp] of [['before', (r) => ['ts < ?', r[0]]], ['after', (r) => ['ts >= ?', r[1]]], ['during', (r) => ['ts >= ? AND ts < ?', r[0], r[1]]]]) {
+      const r = p[k] && dateRange(p[k], tz);
+      if (r) { const [sql, ...v] = cmp(r); where.push(sql); params.push(...v); }
+    }
+    if (p.pinned) where.push('id IN (SELECT msg FROM pins)');
+    if (p.has.includes('poll')) where.push('id IN (SELECT msg FROM polls)');
+    if (p.has.includes('sticker')) where.push('sticker IS NOT NULL');
+    if (p.has.includes('embed')) where.push('embeds IS NOT NULL AND noembed IS NULL');
     const rows = db.all(`SELECT * FROM messages WHERE ${where.join(' AND ')} ORDER BY seq DESC LIMIT 1000`, ...params)
       .filter((r) => {
         const files = json(r.files, []);
         return p.has.every((h) => (h === 'image' && files.some((f) => f.kind === 'image'))
           || (h === 'file' && files.some((f) => f.kind === 'file'))
-          || (h === 'link' && /https?:\/\//.test(r.text)));
+          || (h === 'link' && /https?:\/\//.test(r.text))
+          || (h === 'video' && files.some((f) => f.kind === 'video'))
+          || ['poll', 'sticker', 'embed'].includes(h)); // checked in SQL above
       }).slice(0, limit);
     return M.withReactions(rows).map((m, i) => ({ conv: rows[i].conv, m }));
   };

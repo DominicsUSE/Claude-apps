@@ -28,7 +28,7 @@ export function seedDatabase(db, filesDir, { password = 'snug-demo-1', now = Dat
         h.id, h.name, h.mark, h.hue, h.about, h.joinRole, JSON.stringify(h.starter), h.firstStep ? JSON.stringify(h.firstStep) : null,
         h.created ?? now - 50 * 86_400_000, h.public ? 1 : 0, h.topic || null, h.rules || '');
       h.roles.forEach((r, i) => db.run('INSERT INTO roles (id, house, name, hue, perms, pos) VALUES (?, ?, ?, ?, ?, ?)',
-        `${h.id}_${r.id}`, h.id, r.name, r.hue, JSON.stringify(r.perms), i));
+        `${h.id}_${r.id}`, h.id, r.name, r.hue, JSON.stringify([...r.perms, 'nick']), i)); // nick: everyone picks their own name per house (server/places.js)
       let order = 0;
       for (const [u, role] of Object.entries(h.members)) {
         db.run('INSERT INTO members (house, user, role, newcomer, joined) VALUES (?, ?, ?, 0, ?)', h.id, u, `${h.id}_${role}`, now - 40 * 86_400_000 + order++);

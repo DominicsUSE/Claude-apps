@@ -13,6 +13,26 @@ export const PERMS = [
 ];
 // Custom emoji per house (server/emoji.js, js/views/emoji-custom.js).
 PERMS.push({ id: 'emoji', label: 'Manage emoji', hint: 'Add, rename and remove this house’s custom emoji.' });
+// Moderation (server/safety.js, js/views/safety*.js). Acting on a person also
+// needs a role above theirs; nobody can act on an owner.
+PERMS.push(
+  { id: 'kick', label: 'Remove people', hint: 'Remove someone from the house. They can come back with a new invitation.' },
+  { id: 'ban', label: 'Ban people', hint: 'Remove someone and keep them out, optionally with their recent messages.' },
+  { id: 'timeout', label: 'Time people out', hint: 'Stop someone writing, reacting and talking for a while.' },
+  { id: 'voicemod', label: 'Moderate voice', hint: 'Mute, deafen, move and disconnect people in voice rooms.' },
+  { id: 'audit', label: 'See the house log', hint: 'Read who changed what in this house.' },
+);
+// Places (server/places.js): nicknames per house.
+PERMS.push(
+  { id: 'nick', label: 'Change nickname', hint: 'Pick their own name and picture in this house.' },
+  { id: 'nicks', label: 'Manage nicknames', hint: 'Change other people’s names and pictures here, below their own role.' },
+);
+// Soundboard (server/voiceopts.js, js/views/voiceopts*.js). Using it is open to
+// everyone unless the house turns that off; then only these roles may.
+PERMS.push(
+  { id: 'soundboard', label: 'Use the soundboard', hint: 'Play this house’s sounds in its voice rooms, even when the house keeps the soundboard to some roles.' },
+  { id: 'sounds', label: 'Manage sounds', hint: 'Add, rename and remove this house’s soundboard sounds, and choose who may play them.' },
+);
 
 export function roleOf(S, houseId, userId = S.me) {
   const house = S.houses[houseId];
@@ -26,13 +46,19 @@ export function can(S, houseId, perm, userId = S.me) {
   const role = roleOf(S, houseId, userId);
   if (!house || !role) return false;
   if (house.roles[0].id === role.id) return true;
-  return role.perms.includes(perm);
+  // Extra roles count too (js/lib/places.js, server/places.js).
+  return role.perms.includes(perm) || (house.extra?.[userId] || []).some((id) => house.roles.find((r) => r.id === id)?.perms.includes(perm));
 }
 
 // Can this person write in this conversation, and if not, why?
 export function canPost(S, conv) {
   const room = S.rooms[conv];
   if (!room) return { ok: true };
+  // The server works out each room's permissions with its overrides (server/places.js).
+  if (room.perms && !room.perms.send && !(room.kind === 'news' && !can(S, room.house, 'announce'))) {
+    return { ok: false, why: `You can’t send messages in ${room.name}.` }; // notice rooms say who can, below
+  }
+  if (room.perms?.send) return { ok: true };
   if (room.kind === 'news' && !can(S, room.house, 'announce')) {
     const who = S.houses[room.house].roles.filter((r, i) => i === 0 || r.perms.includes('announce')).map((r) => r.name);
     return { ok: false, why: `Only ${who.join(' and ')} can post in ${room.name}. You can still react and reply in threads.` };

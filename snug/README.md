@@ -49,6 +49,10 @@ notifications when Snug is closed (4). Each also runs alone: `npm run
 test:e2e:calls`, `test:e2e:video`, `test:e2e:messages`, `test:e2e:emoji`,
 `test:e2e:notify`. The notifications file uses Playwright's newer headless
 Chromium (`channel: 'chromium'`).
+Safety, privacy and moderation (5) runs alone with `npm run test:e2e:safety`.
+Messaging (11: rich text, polls, forwarding, previews, scheduling, stickers, search) runs alone with `npm run test:e2e:messaging`.
+Places, structure and community (7: private rooms, forums, stages, roles and nicknames, rail folders, webhooks, templates, welcome and insights) runs alone with `npm run test:e2e:places`.
+Voice and video options (5: devices, push to talk, volume per person, soundboard, room limits and the floating call) runs alone with `npm run test:e2e:voice-options`.
 
 ## The desktop app
 
@@ -232,6 +236,217 @@ Real, and covered by tests with separate users:
   one in a direct message is covered by the server tests only, and the Emoji
   settings page has not been driven on a phone (only looked at, at 390px).
 
+- Safety, privacy and moderation (`server/safety.js`, `js/views/safety*.js`),
+  every rule applied on the server:
+  - **Blocking** from a profile or a message's menu. A blocked person can't
+    start a conversation with you, write or react in your one-to-one
+    conversation, call you (nor ring you in a group call), send you a friend
+    request, or reach you with a mention or a push. Blocking ends a
+    friendship and takes back pending requests. In houses you share, their
+    messages fold to "Blocked message" with Show. Settings > Privacy and
+    safety lists them, with Unblock. The person blocked isn't told.
+  - **Privacy**: who can start a conversation with you (everyone, people in
+    your houses, friends only), who can send you friend requests (everyone,
+    friends of friends, nobody), and **message requests**: a conversation
+    from someone who isn't your friend waits behind Accept, Decline and Block,
+    never notifies, and can't call you until you accept (replying accepts it).
+    People with no house in common always land there. Declining leaves the
+    conversation; the same person can't ask again for a day.
+  - **Moderation**, each with its own permission (Remove people, Ban people,
+    Time people out, Moderate voice, See the house log) and only on people
+    whose role sits below yours; nobody can act on an owner. Remove; ban
+    (with a reason, optionally deleting their last 24 hours or 7 days of
+    messages; bans hold against links, invitations and Discover; House
+    settings > Bans to unban); time out for 60 seconds to a week (no writing,
+    reacting, threads or voice, with a countdown in their message box); in
+    voice, mute and deafen (holding across rejoining until lifted), move and
+    disconnect, from a button on the stage.
+  - **Reports** of a message or a person, with a reason and a note, go to the
+    house's moderators (people who can remove messages): House settings >
+    Reports, with resolve, dismiss and reopen. In direct messages, block.
+  - **House log**: who did what to roles, rooms, settings, members, bans,
+    timeouts, voice, messages deleted by moderators, emoji and invitations,
+    filtered by kind and by person.
+  - **Slowmode** per room, 5 seconds to 6 hours, with a countdown above the
+    message box; roles that can remove messages skip it.
+  - **Word and link filter** per house: blocked words (whole words, any case
+    or accent, `*` for "starts with") and links; block, flag to Reports, or
+    block and time out; roles to skip. Owners and roles that manage the house
+    always skip it.
+  - **Invitation links** that expire (30 minutes to never) or run out (1 to
+    100 uses), listed with their uses and who made them, and revocable.
+  - **Member screening**: with the house rules written (House settings >
+    Filter and screening), newcomers read and accept them before they can
+    write, react or join voice.
+  Covered by `npm test` (7 server tests with real sockets, 2 rules tests) and
+  `npm run test:e2e:safety` (5 tests, separate browsers, one on a phone).
+  Limits: a server mute is enforced by honest browsers (the muted person's
+  microphone track is switched off and everyone else's browser stops playing
+  them); audio is peer to peer, so a modified client could still send sound
+  to people whose browsers ignore the flag. The receiving side was checked
+  through the voice state, not by measuring the audio element.
+
+- Messaging (`server/messaging.js`, `server/linkpreview.js`, `js/views/messaging.js`,
+  `js/views/rich.js`), every rule checked on the server:
+  - **Rich text**: bold, italic, bold italic, __underline__, ~~strikethrough~~,
+    ||spoilers|| (hidden from sight and from screen readers until clicked),
+    inline code, fenced code blocks with a language label, Copy and light
+    highlighting (JavaScript and TypeScript, JSON, Python, CSS, HTML and XML,
+    shell, SQL, Go, Rust; nothing downloaded), quotes (`>` and `>>>`), headings
+    (`#`, `##`, `###`), lists, subtext (`-#`), `\` to escape, and masked links
+    `[text](https://...)` that show their real host on hover and ask before
+    opening a host you haven't trusted. Built from tokens, never from HTML.
+    Select text in the message box for a formatting bar, or use Ctrl (⌘) + B,
+    I, U, E (code), K (link), Shift+X (strikethrough).
+  - **Dynamic times**: `<t:unix:style>` (t, T, d, D, f, F, R) reads in each
+    reader's own language and time zone; + > Insert a time picks one.
+  - **Polls** from the + by the message box: 2 to 10 answers with optional
+    emoji, one or many choices, open 1 hour to 1 week, results live, votes
+    changeable, one vote per person per answer (kept by the database),
+    optionally hidden until you vote (the server sends nobody's counts to
+    someone who hasn't voted, until it ends), ended early by its author or a
+    moderator, closed by the server on time.
+  - **Link previews**: the server fetches up to three links per message (title,
+    description, site and picture from Open Graph tags; pictures and MP4 videos
+    linked directly show as themselves). It resolves each host itself and
+    refuses loopback, private, link-local and cloud metadata addresses, CGNAT,
+    multicast and reserved ranges (IPv4 and IPv6, IPv4 inside IPv6 too),
+    connects only to the address it checked, follows at most three redirects
+    and checks each one, allows ports 80, 443, 8080 and 8443 only, stops at
+    6 seconds and at 10 MB (4 MB for a page's picture), and caches for hours.
+    Pictures are stored as Snug files in the conversation, so a reader's
+    browser never loads another site. The author or a moderator removes a
+    message's previews; `<https://...>` asks for none; Settings > Appearance >
+    Link previews hides them; `SNUG_LINK_PREVIEWS=0` turns fetching off.
+  - **Forward** a message (from its menu) to any room or conversation you can
+    post in, with a note: who wrote it and when travel with it, files are
+    copied, and "Go to message" shows only to people who can read the original.
+  - **Edit history**: the last ten earlier versions, for everyone who can read
+    the message; gone with its content when it is deleted.
+  - **Scheduled messages**: + > Schedule a message, up to 30 days ahead and 25
+    waiting; listed above the box with Cancel; sent by the server on time and
+    checked again then (someone removed meanwhile is told it wasn't sent).
+  - **Stickers**: up to 30 per house in House settings > Emoji (PNG, APNG or
+    WebP, up to 512 KB and 320 by 320 pixels, read from the file), sent from
+    + > Send a sticker by members of that house, anywhere they can post.
+  - **Mark unread** from a message, a bar to **jump to the first unread** (or
+    mark it read), and **go to a date** from the calendar in a conversation's header.
+  - **Search filters**: `mentions:`, `before:`, `after:`, `during:` (a day,
+    month or year in your time zone), `pinned:true`, `has:poll`, `has:sticker`,
+    `has:video`, as chips, with suggestions while you type an operator.
+  - Typing notices and per-conversation drafts were already there.
+  Covered by `npm test` (7 server tests with real sockets, 2 rules tests) and
+  `npm run test:e2e:messaging` (11 tests, two people in two browsers, one on a
+  phone). Link previews were tested against a stand-in site on this machine,
+  which only the test runner may reach; real sites were not fetched from here.
+  Not tested: Go, Rust and SQL highlighting in a browser (unit tests only),
+  APNG animation (checked as PNG), forwarding a voice message, and the
+  scheduler under a server restart (scheduled messages are stored, so they
+  survive one, but no test restarts the server between scheduling and sending).
+
+- **Places, structure and community** (`server/places.js`, `js/lib/places.js`,
+  `js/views/places*.js`, `css/structure.css`):
+  - **Room permissions**: per room, overrides for everyone, for a role and for
+    one person (see the room, send messages, join voice, speak, manage the
+    room), and **private rooms**. One resolver answers every server check:
+    reading (live delivery, history, threads, search, files, push, the
+    snapshot), writing, joining and speaking in voice, and managing a room.
+    A person's own setting beats their roles'; across roles, "on" beats
+    "off". Owners, and people who manage rooms house-wide, always see every
+    room, so nobody can lock the house out. Discovery and previews hide
+    rooms that not everyone in the house can see.
+  - **Roles**: more than one per person (extra roles add permissions), an
+    emoji icon, **show separately** in the member list (online people under
+    their highest such role, then Online, then Offline), **mentionable**
+    (`@Role name` counts as a mention for everyone with it), colours from the
+    theme-safe hue list only, and order by **drag** or **Alt and an arrow**.
+    Managers who aren't owners can only move, give or take roles below their own.
+  - **Per-house nicknames and pictures** (an emoji and a colour), with the
+    *Change nickname* and *Manage nicknames* permissions.
+  - **Forum rooms**: posts with a title, a body and the room's tags (a room
+    can require one), sorted by latest activity or newest, as a list or a
+    grid; each post opens as its own thread, which you can follow from its card.
+  - **Notice rooms other houses can follow**: someone who manages a room in
+    another house can have new notices copied there, posted by a bot that
+    says where they came from. Private notice rooms can't be followed and
+    stop copying.
+  - **Stage rooms**: speakers and an audience on the same voice connections;
+    the audience is muted by the server, raises a hand, is invited to speak
+    or moved back by the people who run the stage, and sees a live topic.
+  - **Webhooks** per room: a secret address (only its hash is stored) that
+    takes `POST {"content", "username", "avatar_url"}` and posts with a
+    **Bot** badge; 5 at once then one every 2 seconds per hook, 30 per
+    address; new address or delete at any time. `avatar_url` must be https
+    and is kept but never fetched or shown: Snug loads no images from other
+    sites, so no server-side fetch and no readers' addresses leak.
+  - **Rail folders**: drag a house onto another to make a folder, name and
+    colour it, open and close it; drag or Alt and an arrow to reorder. Kept
+    on the server, so every device has the same rail.
+  - **Welcome for newcomers**: a few lines, the starter rooms, and interests
+    to pick that grant roles (never roles that manage or moderate anything).
+  - **House templates** (Friends, Study group, Gaming, Club) and copying the
+    structure of a house you manage (rooms, roles, access; never messages or members).
+  - **Insights** for owners: members, who wrote this week, joins and leaves
+    and messages per day, the busiest rooms (7, 30 or 90 days, with a table view).
+  Covered by `npm test` (12 server tests with real sockets, in the "places"
+  block of `tests/server.test.js`) and `npm run test:e2e:places` (7 tests,
+  two people in two browsers). Not tested: role mentions in push
+  notifications (the browser counts them; the push service does not yet),
+  dragging on a touch screen (folders and role order also work from the
+  keyboard and menus), and stage audio limits beyond the server's mute: in a
+  peer-to-peer call a modified client could still send sound, which every
+  other Snug ignores because the server marks it muted.
+
+- **Voice and video options** (`server/voiceopts.js`, `js/voiceopts.js`,
+  `js/views/voiceopts*.js`, `css/voiceopts.css`):
+  - **Devices**: choose the microphone, the speaker (where the browser can
+    send sound to a chosen output) and the camera, in Settings > Voice and
+    video. A microphone check with a level meter and "hear yourself", and a
+    camera preview. A device that has gone falls back to the default, saying so.
+  - **Input mode**: voice activity, with sensitivity set automatically or by
+    hand on the live meter, or **push to talk** with a key you pick, an
+    on-screen hold button (phones too), and a release delay. In the desktop
+    app the key also works while another app is in front (a global shortcut;
+    the system only reports presses and their repeats, so the microphone
+    closes shortly after they stop).
+  - **Noise suppression, echo cancellation and automatic gain**, changed
+    during a call without anyone's connection being renegotiated: what is
+    sent goes through one WebAudio graph whose track never changes.
+  - **Each person's volume** (0 to 200%) and a **mute only you hear**, in voice
+    rooms and calls, remembered per person on this device.
+  - **Soundboard**: up to 24 short sounds per house (any audio file, turned
+    into a WAV of at most 5.2 seconds and 512 KB, checked again from the file
+    on the server), each with a name, an emoji and a volume. Playing one
+    mixes it into your own voice, so everyone in the room hears it; the room
+    sees who played what. Needs to be in a voice room of that house and not
+    muted; one sound every 3 seconds per person and 6 per 10 seconds per
+    room. *Manage sounds* adds and removes them; a house can keep playing to
+    roles with *Use the soundboard*.
+  - **The call follows you**: a floating, draggable call (mouse or arrow
+    keys) while you look at other places, with the speakers, a shared screen
+    or camera, and the controls; **picture in picture** for a shared screen or
+    camera where the browser supports it.
+  - **Screen share quality**: 720p, 1080p or source; 15, 30 or 60 frames a
+    second; with or without sound.
+  - **Sounds** for people joining and leaving and for muting (made with
+    WebAudio), each switchable; **deafening mutes you too** (or not); hearing
+    again puts your mute back how it was; **leave a voice room after a chosen
+    time alone**.
+  - **Per voice room**: a **user limit** the server enforces (people who
+    moderate voice may still join) and an audio **bitrate** every browser in
+    the room applies.
+  Covered by `npm test` (3 server tests in the "voice options" block of
+  `tests/server.test.js`: upload and permission rules, playing and its
+  cooldowns, room limits), `npm run test:e2e:voice-options` (5 tests, two
+  and three people in separate browsers with fake devices: device lists and
+  checks, push to talk gating what is sent, volume on the element that plays
+  someone, a sound arriving at the other person, the limit and the floating
+  call) and one desktop test (the global key). Not tested: real hardware
+  (a second real microphone or speaker, `setSinkId` on a real output),
+  picture in picture (headless Chromium offers neither kind), the automatic
+  sensitivity against real speech, and the global key pressed on a real
+  keyboard (the test sends the press the system would).
+
 Not built yet, on purpose, because each needs outside infrastructure:
 
 - **Email.** No address verification and no "forgot password". Until then an
@@ -303,6 +518,8 @@ before seeding anything that faces the internet, or better, do not seed there.
 - **Uploads**: 10 MB limit, fetched only by people who can read the
   conversation, served with `nosniff` and a sandboxing policy. Anything that
   is not a known image type downloads instead of opening.
+  Soundboard sounds must be plain PCM WAV (format, length and size read from
+  the file on the server) and are fetched only by members of their house.
 - **Rate limits**: per person for messages, typing, search, friend requests
   (10 at once, then one every 10 seconds; at most 50 waiting), discovery and
   general actions; per address for sign-in and registration.
@@ -311,6 +528,11 @@ before seeding anything that faces the internet, or better, do not seed there.
   you, never anyone else. Presence shows only for people who share a place
   with you or are your friends. Favourites are visible only to you. Profile
   links must be `https://` addresses.
+- **Blocks, privacy and moderation** are checked on the server for every
+  action they touch (conversations, calls, rings, friend requests, pushes,
+  invitations, sending, reacting, voice). Moderators can only act on people
+  below them. Reports, blocks, moderation actions, new conversations,
+  invitation links and filter changes are rate limited.
 - **Voice signalling** is relayed only between people in the same voice
   room or call. Only members of the house can join a voice room; only the
   people in a conversation can start, join, decline or see its call, and

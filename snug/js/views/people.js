@@ -13,6 +13,9 @@ import { Avatar, Pres, Tile, PRESENCE, presenceLabel } from '../ui/kit.js';
 import { Settings } from './settings.js';
 import { Confirm } from './modals.js';
 import { hueOf, MIN, DAY, plural } from '../lib/util.js';
+import { personItems } from './safety.js'; // block, report, moderate
+import { houseFace, colourRole, rolesOf, RoleIconMark } from './places.js'; // nicknames, role colours and icons, every role
+import { memberGroups } from '../lib/places.js'; // groups by roles shown separately
 
 export function showProfile(user, anchor, house) {
   openPop({ anchor, label: `${user.name}, profile`, C: ProfileCard, props: { id: user.id, house } });
@@ -85,7 +88,7 @@ export function confirmRemoveFriend(id) {
   });
 }
 
-export function friendMenu(id, anchor, { profile = true } = {}) {
+export function friendMenu(id, anchor, { profile = true, house = null } = {}) {
   const f = S.friends[id];
   openMenu({
     anchor, align: 'end',
@@ -94,6 +97,7 @@ export function friendMenu(id, anchor, { profile = true } = {}) {
       f?.state === 'friends' && { label: f.favorite ? 'Remove from favourites' : 'Add to favourites', icon: f.favorite ? 'starred' : 'star', onSelect: () => setFavoriteFriend(id, !f.favorite) },
       f?.state === 'friends' && { sep: true },
       f?.state === 'friends' && { label: 'Remove friend', icon: 'leave', danger: true, onSelect: () => confirmRemoveFriend(id) },
+      ...personItems(id, house), // block or unblock, and in a house: report and moderate
     ],
   });
 }
@@ -232,6 +236,8 @@ function ProfileCard({ id, house }) {
             : html`<${FriendButton} id=${id} primary />`}
         ${d.live && !mine && html`<button class="btn" onClick=${() => { closePop(); openConv(d.live); }}><${Icon} name="voice" size=${16} />Join</button>`}
         <button class="btn" onClick=${() => openPerson(id)}>Profile</button>
+        ${!mine && html`<button class="ib" aria-label=${`More for ${u.name}`} aria-haspopup="menu" data-tip="More"
+          onClick=${(e) => friendMenu(id, e.currentTarget.getBoundingClientRect(), { profile: false, house })}><${Icon} name="more" /></button>`}
       </div>
     </div>
   </div>`;
@@ -267,14 +273,15 @@ export function MePop() {
 
 // ---------- The people pane ----------
 
-function PersonRow({ u, house }) {
-  const role = house ? roleOf(S, house, u.id) : null;
+function PersonRow({ u: real, house }) {
+  const u = houseFace(real, house); // their nickname and picture here (js/views/places.js)
+  const role = house ? colourRole(house, u.id) : null;
   const live = u.presence !== 'offline' && voiceRoomOf(u.id);
   const fav = S.friends[u.id]?.favorite;
   return html`<button class="person" onClick=${(e) => showProfile(u, e.currentTarget.getBoundingClientRect(), house)}>
     <${Avatar} user=${u} presence dim=${u.presence === 'offline'} speaking=${!!S.speaking[u.id]} />
     <span class="grow">
-      <span class=${`person-name trunc${role?.hue != null ? ' role-name' : ''}`} style=${`display:block${role?.hue != null ? `;--hue:${hueOf(role.hue)}` : ''}`}>${u.name}${u.id === S.me ? ' (you)' : ''}</span>
+      <span class=${`person-name trunc${role?.hue != null ? ' role-name' : ''}`} style=${`display:block${role?.hue != null ? `;--hue:${hueOf(role.hue)}` : ''}`}>${u.name}${u.id === S.me ? ' (you)' : ''}${house ? html` <${RoleIconMark} house=${house} uid=${u.id} />` : null}</span>
       <span class=${`person-sub trunc${live ? ' is-live' : ''}`} style="display:block">${live ? `In ${S.rooms[live].name}` : u.status || PRESENCE[u.presence].label}</span>
     </span>
     ${fav && html`<span class="person-fav" role="img" aria-label="Favourite"><${Icon} name="starred" size=${14} /></span>`}
@@ -288,10 +295,8 @@ export function PeoplePane({ conv }) {
   const house = meta?.house;
   let groups;
   if (house) {
-    const h = S.houses[house];
-    const online = users.filter((u) => u.presence !== 'offline');
-    groups = h.roles.map((r) => ({ name: r.name, list: online.filter((u) => h.members[u.id] === r.id) }));
-    groups.push({ name: 'Offline', list: users.filter((u) => u.presence === 'offline') });
+    // Online people under their highest role shown separately, then Online, then Offline (js/lib/places.js).
+    groups = memberGroups(S.houses[house].roles, users, (id) => rolesOf(house, id));
   } else groups = [{ name: 'In this conversation', list: users }];
   return html`<aside class="pane" aria-label="People">
     <header class="bar">

@@ -19,6 +19,9 @@ import { EmojiPicker, EMOJI, QUICK } from './emoji.js';
 import { CustomEmoji, asTyped, customSuggest, parseKey, reactionFace, reactionLabel, resolveEmoji } from './emoji-custom.js'; // custom emoji per house
 import { mediaFile, pinMenuItem, PinnedMark, withPinLines, PinLine, VoiceButton, GifButton } from './media.js'; // voice messages, pins, GIFs
 import { CallLine } from './calls.js'; // call records, written by the server
+import { msgFace, colourRole, BotBadge, PostTitle, RoleIconMark } from './places.js'; // nicknames, bots, role colours and icons, forum post titles
+import { messageItems, hiddenBlocked, BlockedLine, composerGate, GateNote, SlowNote, slowLeft } from './safety.js'; // blocks, reports, moderation, slowmode
+import { MessageExtras, ownsFiles, messagingMenuItems, PlusMenu, FormatBar, formatKey, ScheduledNote, UnreadBar } from './messaging.js'; // polls, previews, forwarding, stickers, formatting, scheduling
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 const atBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 48;
@@ -59,9 +62,11 @@ export function messageMenu(conv, m, pos) {
         onSelect: () => toggleHighlight(conv, m.id),
       },
       pinMenuItem(conv, m),
+      ...messagingMenuItems(conv, m), // forward, edit history, previews, end a poll
       (mine || mod) && { sep: true },
       mine && { label: 'Edit', icon: 'edit', hint: 'E', onSelect: () => setEditing(m.id) },
       (mine || mod) && { label: 'Delete', icon: 'trash', danger: true, onSelect: () => deleteMsg(conv, m.id) },
+      ...messageItems(conv, m), // report, block, and a moderator's actions on the author
     ],
   });
 }
@@ -114,15 +119,16 @@ function Files({ files }) {
 }
 
 export function Message({ conv, m, grouped, inThread, tab, lit }) {
-  const u = person(m.author);
+  const u = msgFace(m, convMeta(conv)?.house); // nickname and picture in this house, or a bot's name (js/views/places.js)
   const meta = convMeta(conv);
-  const role = meta?.house ? roleOf(S, meta.house, m.author) : null;
+  const role = meta?.house && !m.bot ? colourRole(meta.house, m.author) : null; // highest coloured role (js/views/places.js)
   const pending = m.state === 'sending' || m.state === 'queued';
   const toMe = forMe(S, conv, m);
   const replies = isThread(conv) ? [] : S.msgs[`t:${m.id}`] || [];
   const quoted = m.replyTo ? findMsg(conv, m.replyTo) : null;
   const saved = isSaved(m.id);
   const press = useRef();
+  if (hiddenBlocked(m)) return html`<${BlockedLine} m=${m} />`; // from someone I blocked: folded away until shown
   const profile = (who) => (e) => showProfile(who, rectOf(e), meta?.house);
 
   const menu = (pos) => messageMenu(conv, m, pos);
@@ -158,16 +164,19 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
     <div class="msg-body">
       ${!grouped && html`<div class="msg-head">
         <button class=${`msg-name${role?.hue != null ? ' hued' : ''}`} style=${role?.hue != null ? `--hue:${hueOf(role.hue)}` : ''} onClick=${profile(u)}>${u.name}</button>
+        ${meta?.house && !m.bot && html`<${RoleIconMark} house=${meta.house} uid=${m.author} />`}<${BotBadge} m=${m} />
         <time class="msg-time" datetime=${new Date(m.ts).toISOString()} data-tip=${fmtFull(m.ts)}>${fmtTime(m.ts)}</time>
       </div>`}
       <${PinnedMark} conv=${conv} id=${m.id} />
+      <${PostTitle} m=${m} />
       ${S.ui.editing === m.id
         ? html`<${EditBox} conv=${conv} m=${m} />`
-        : m.text && html`<div class=${`msg-text${isJumbo(m.text) ? ' jumbo' : ''}`}>
+        : m.text && !m.poll && html`<div class=${`msg-text${isJumbo(m.text) ? ' jumbo' : ''}`}>
             <${Rich} m=${m} onMention=${(who, e) => showProfile(who, e.target.getBoundingClientRect(), meta?.house)} />
             ${m.edited && html`<span class="edited" data-tip=${`Edited ${fmtFull(m.edited)}`}>(edited)</span>`}
           </div>`}
-      ${m.files?.length > 0 && html`<${Files} files=${m.files} />`}
+      ${m.files?.length > 0 && !ownsFiles(m) && html`<${Files} files=${m.files} />`}
+      <${MessageExtras} conv=${conv} m=${m} Files=${Files} />
       ${reactions.length > 0 && html`<div class="reactions">
         ${reactions.map(([e, who]) => {
           const names = nameList(who.map((id) => (id === S.me ? 'You' : person(id).name.split(' ')[0])));
@@ -308,6 +317,7 @@ export function Composer({ conv, placeholder }) {
   };
   const uploading = files.some((f) => f.status === 'uploading');
   const submit = () => {
+    if (slowLeft(conv)) { toast('Slowmode is on here. Wait for the countdown, then send.'); return; }
     const body = text.trim();
     const ready = files.filter((f) => f.status === 'ready');
     if (uploading || (!body && !ready.length)) return;
@@ -320,6 +330,7 @@ export function Composer({ conv, placeholder }) {
     setAc(null);
   };
   const onKey = (e) => {
+    if (formatKey(e, ta.current, text, update)) return; // Ctrl+B, I, U, E, K, Shift+X (js/views/messaging.js)
     if (ac) {
       const n = ac.items.length;
       if (e.key === 'ArrowDown') { e.preventDefault(); return setAc({ ...ac, i: (ac.i + 1) % n }); }
@@ -359,6 +370,9 @@ export function Composer({ conv, placeholder }) {
   if (!gate.ok) {
     return html`<div class="composer"><div class="composer-locked"><${Icon} name="news" /><span>${gate.why}</span></div></div>`;
   }
+  // Timed out, house rules not yet accepted, or a blocked person (js/views/safety.js).
+  const safetyGate = composerGate(conv);
+  if (safetyGate) return html`<${GateNote} gate=${safetyGate} />`;
   const canSend = !uploading && (text.trim() || files.some((f) => f.status === 'ready'));
   return html`<div class="composer" data-composer=${conv}
     onDragOver=${(e) => e.preventDefault()} onDrop=${(e) => { e.preventDefault(); addFiles([...e.dataTransfer.files]); }}>
@@ -384,8 +398,12 @@ export function Composer({ conv, placeholder }) {
           <button class="ib sm" aria-label=${`Remove ${f.name}`} onClick=${() => setFiles(files.filter((x) => x.key !== f.key))}><${Icon} name="x" size=${16} /></button>
         </div>`)}
       </div>`}
+      <${SlowNote} conv=${conv} />
+      <${ScheduledNote} conv=${conv} />
+      <${FormatBar} ta=${ta} text=${text} update=${update} />
       <div class="composer-row">
         <button class="ib" aria-label="Attach a file" data-tip="Attach a file" onClick=${() => fileIn.current.click()}><${Icon} name="clip" /></button>
+        <${PlusMenu} conv=${conv} text=${text} update=${update} insert=${insert} replyTo=${replyTo?.id} />
         <textarea ref=${ta} rows="1" placeholder=${placeholder} aria-label=${placeholder} value=${text}
           onInput=${onInput} onKeyDown=${onKey} onPaste=${onPaste} onBlur=${() => setAc(null)}></textarea>
         <${GifButton} conv=${conv} />
@@ -547,6 +565,7 @@ export function Stream({ conv, intro, placeholder }) {
     ${!isOnline() && html`<div class="banner" role="status">
       <${Icon} name="offline" size=${16} /><span><b>You’re offline.</b> What you write will wait here and send when you’re back.</span>
     </div>`}
+    <${UnreadBar} conv=${conv} scroller=${scroller} />
     <div class="scroller" ref=${scroller} onScroll=${onScroll} onKeyDown=${onKey}>
       ${!ready
         ? html`<div class="msgs"><${Skeleton} rows=${[72, 48, 64, 40, 56]} /></div>`

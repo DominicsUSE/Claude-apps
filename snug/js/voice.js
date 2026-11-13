@@ -17,12 +17,18 @@
 // right picture.
 import { S, emit, toast } from './store.js';
 import { call, on } from './server.js';
+// Devices, input mode, processing, per-person volume, soundboard mixing (js/voiceopts.js).
+import {
+  getMic, outgoing, swapMic, stopOutgoing, gate, micOpen, tuneAudio, forgetAudio, boostOf, onRetune, cue, vp,
+  cameraConstraints, screenConstraints, screenBitrate, roomBitrate,
+} from './voiceopts.js';
 
 // user -> { pc, audio, screenAudio, queue, stopLevel, polite, makingOffer,
 //           ignoreOffer, settingAnswer, chain, kinds, video, tx }
 const peers = new Map();
 const pendingKinds = new Map(); // user -> what their streams are, heard before the connection
 let mic = null;
+let send = null;     // what the others receive for my voice: the processed microphone (js/voiceopts.js)
 let cam = null;      // my camera stream, while it is on
 let screen = null;   // my screen stream, while I share
 // What the others receive: one stream per kind for the whole call, so its id
@@ -58,7 +64,7 @@ function watchLevel(user, stream) {
       an.getByteTimeDomainData(buf);
       let sum = 0;
       for (const v of buf) sum += (v - 128) ** 2;
-      const loud = Math.sqrt(sum / buf.length) > 6 && !(user === S.me && S.call?.muted);
+      const loud = Math.sqrt(sum / buf.length) > 6 && !(user === S.me && (S.call?.muted || !micOpen()));
       quietFor = loud ? 0 : quietFor + 1;
       const speaking = quietFor < 3;
       if (!!S.speaking[user] !== speaking) {
@@ -76,7 +82,7 @@ function signal(to, data) { call('rtc', { to, data }).catch(() => {}); }
 // Which of my streams is which. Sent before any track is added, so it reaches
 // the other person before the offer that carries the track.
 const myKinds = () => ({
-  mic: mic?.id || null,
+  mic: (send || mic)?.id || null,
   camera: cam && out ? out.camera.id : null,
   screen: screen && out ? out.screen.id : null,
   screenAudio: screen && out ? out.screenAudio.id : null,
@@ -86,8 +92,10 @@ const tellKinds = (user) => signal(user, { kinds: myKinds() });
 // Bitrate ceilings, lower as the mesh grows, so twelve cameras still fit.
 function capBitrate(p) {
   const many = peers.size > 3;
-  for (const [slot, max] of [['camera', many ? 450_000 : 900_000], ['screen', many ? 900_000 : 1_800_000]]) {
-    const s = p.tx[slot]?.sender;
+  // The voice follows the room's bitrate (js/voiceopts.js); a screen share its chosen quality.
+  const voiceSender = p.pc.getSenders().find((x) => x.track && x.track.kind === 'audio' && send && send.getAudioTracks().includes(x.track));
+  for (const [slot, max] of [['camera', many ? 450_000 : 900_000], ['screen', screenBitrate(many)], ['voice', roomBitrate()]]) {
+    const s = slot === 'voice' ? voiceSender : p.tx[slot]?.sender;
     if (!s?.track) continue;
     try {
       const prm = s.getParameters();
@@ -149,7 +157,7 @@ function peer(user, offering) {
     } catch { /* a newer negotiation replaced this one */ } finally { p.makingOffer = false; }
   };
   tellKinds(user);
-  mic.getTracks().forEach((t) => pc.addTrack(t, mic));
+  (send || mic).getTracks().forEach((t) => pc.addTrack(t, send || mic));
   // Late joiners get whatever I am already showing.
   if (cam) sendOn(p, 'camera', cam.getVideoTracks()[0], out.camera);
   if (screen) {
@@ -171,7 +179,7 @@ function peer(user, offering) {
     const audio = new Audio();
     audio.srcObject = stream;
     audio.autoplay = true;
-    audio.muted = !!S.call?.deaf;
+    tuneAudio(user, audio, heard(user));
     audio.play().catch(() => {});
     if (isScreen) { if (p.screenAudio) p.screenAudio.srcObject = null; p.screenAudio = audio; return; }
     p.audio = audio;
@@ -191,8 +199,8 @@ function dropPeer(user) {
   if (!p) return;
   peers.delete(user);
   p.stopLevel?.();
-  if (p.audio) { p.audio.srcObject = null; }
-  if (p.screenAudio) { p.screenAudio.srcObject = null; }
+  if (p.audio) { forgetAudio(p.audio); p.audio.srcObject = null; }
+  if (p.screenAudio) { forgetAudio(p.screenAudio); p.screenAudio.srcObject = null; }
   p.pc.close();
   const next = { ...S.peers };
   delete next[user];
@@ -279,6 +287,8 @@ function stop() {
   stopMyLevel = null;
   mic?.getTracks().forEach((t) => t.stop());
   mic = null;
+  stopOutgoing();
+  send = null;
   cam?.getTracks().forEach((t) => t.stop());
   cam = null;
   screen?.getTracks().forEach((t) => t.stop());
@@ -310,8 +320,11 @@ export async function joinVoice(room, { start = false, video = false } = {}) {
   out = { camera: new MediaStream(), screen: new MediaStream(), screenAudio: new MediaStream() };
   emit();
   try {
-    mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    mic = await getMic();
+    send = await outgoing(mic);
   } catch (e) {
+    mic?.getTracks().forEach((t) => t.stop());
+    mic = null;
     S.call = null;
     emit();
     toast(errText(e));
@@ -328,6 +341,7 @@ export async function joinVoice(room, { start = false, video = false } = {}) {
     S.call.status = 'live';
     S.call.id = r.call || null;
     emit();
+    cue('join');
     for (const u of r.peers) peer(u, true);
     if (video) toggleCamera();
     return 'ok';
@@ -340,8 +354,10 @@ export async function joinVoice(room, { start = false, video = false } = {}) {
 
 export function leaveVoice() {
   if (!S.call) return;
+  const live = S.call.status === 'live';
   call('voice.leave').catch(() => {});
   stop();
+  if (live) cue('leave');
 }
 
 function pushState() {
@@ -349,31 +365,83 @@ function pushState() {
   call('voice.state', { muted: S.call.muted, deaf: S.call.deaf, camera: !!S.call.camera, screen: !!S.call.screen }).catch(() => {});
 }
 
+// Whether I should hear this person: not while I'm deafened, and never while a
+// moderator has server-muted them (js/views/safety.js, server/safety.js).
+const heard = (user) => !S.call?.deaf && !S.voiceState[S.call?.room]?.[user]?.smute;
+export function applyHearing() {
+  // Also each person's volume and a mute only I hear (js/voiceopts.js).
+  for (const [user, p] of peers) {
+    if (p.audio) tuneAudio(user, p.audio, heard(user));
+    if (p.screenAudio) tuneAudio(user, p.screenAudio, heard(user));
+  }
+}
+onRetune(applyHearing);
+
 export function toggleMute() {
   if (!S.call) return;
+  // A moderator's mute (or deafen) can't be lifted from here.
+  const mod = S.voiceState[S.call.room]?.[S.me];
+  if (S.call.muted && (mod?.smute || mod?.sdeaf)) { toast('A moderator muted you here.'); return; }
   S.call.muted = !S.call.muted;
+  const wasDeaf = S.call.deaf;
   if (!S.call.muted) S.call.deaf = false;
   mic?.getAudioTracks().forEach((t) => { t.enabled = !S.call.muted; });
-  for (const p of peers.values()) {
-    if (p.audio) p.audio.muted = S.call.deaf;
-    if (p.screenAudio) p.screenAudio.muted = S.call.deaf;
-  }
+  gate();
+  applyHearing();
+  cue(wasDeaf && !S.call.deaf ? 'undeafen' : S.call.muted ? 'mute' : 'unmute');
   emit();
   pushState();
 }
 
 export function toggleDeaf() {
   if (!S.call) return;
+  if (S.call.deaf && S.voiceState[S.call.room]?.[S.me]?.sdeaf) { toast('A moderator deafened you here.'); return; }
   S.call.deaf = !S.call.deaf;
-  if (S.call.deaf) S.call.muted = true;
+  // Deafening mutes too, unless turned off in settings; hearing again puts the mute back how it was.
+  if (S.call.deaf) { S.call.mutedBeforeDeaf = S.call.muted; if (vp().deafMutes) S.call.muted = true; }
+  else if (S.call.mutedBeforeDeaf === false && !S.voiceState[S.call.room]?.[S.me]?.smute) S.call.muted = false;
   mic?.getAudioTracks().forEach((t) => { t.enabled = !S.call.muted; });
-  for (const p of peers.values()) {
-    if (p.audio) p.audio.muted = S.call.deaf;
-    if (p.screenAudio) p.screenAudio.muted = S.call.deaf;
-  }
+  gate();
+  applyHearing();
+  cue(S.call.deaf ? 'deafen' : 'undeafen');
   emit();
   pushState();
 }
+
+// A new microphone, or new processing (noise suppression, echo cancellation,
+// automatic gain): capture again and swap it in under the same outgoing track,
+// so nobody's connection is renegotiated.
+export async function restartMic() {
+  const c = S.call;
+  if (!c || !mic) return false;
+  let next;
+  try { next = await getMic(); } catch (e) { toast(errText(e)); return false; }
+  if (S.call !== c || !mic) { next.getTracks().forEach((t) => t.stop()); return false; }
+  const old = mic;
+  mic = next;
+  mic.getAudioTracks().forEach((t) => { t.enabled = !c.muted; });
+  const now = swapMic(mic);
+  if (now && now !== send) {
+    // No WebAudio here: the raw microphone is what is sent, so its track changes on every connection.
+    send = now;
+    for (const p of peers.values()) {
+      const s = p.pc.getSenders().find((x) => x.track && x.track.kind === 'audio' && old.getAudioTracks().includes(x.track));
+      s?.replaceTrack(mic.getAudioTracks()[0]).catch(() => {});
+    }
+  }
+  stopMyLevel?.();
+  stopMyLevel = watchLevel(S.me, mic);
+  old.getTracks().forEach((t) => t.stop());
+  return true;
+}
+// A new camera: turn it off and on again with the chosen one.
+export async function restartCamera() {
+  if (!S.call?.camera) return;
+  stopCamera();
+  await toggleCamera();
+}
+// Re-apply bitrate ceilings, after the room's bitrate or the screen quality changed.
+export function recapBitrates() { for (const p of peers.values()) capBitrate(p); }
 
 // ---------- Camera and screen ----------
 
@@ -415,10 +483,10 @@ export async function toggleCamera() {
   emit();
   let stream = null;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: CAMERA });
+    stream = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(CAMERA) });
   } catch (e) {
     // A camera that can't do 640x360 still beats no camera.
-    if (e?.name === 'OverconstrainedError') {
+    if (e?.name === 'OverconstrainedError' || (e?.name === 'NotFoundError' && vp().camera)) {
       stream = await navigator.mediaDevices.getUserMedia({ video: true }).catch((e2) => { toast(camErrText(e2)); return null; });
     } else toast(camErrText(e));
   }
@@ -456,12 +524,8 @@ export async function toggleScreen() {
   emit();
   let stream = null;
   try {
-    stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: 15, max: 30 }, width: { max: 1920 }, height: { max: 1080 } },
-      audio: true, // the system or tab sound, where the browser offers it
-      systemAudio: 'include',
-      surfaceSwitching: 'include',
-    });
+    // Resolution, frame rate and whether to share sound come from the voice options (js/voiceopts.js).
+    stream = await navigator.mediaDevices.getDisplayMedia(screenConstraints());
   } catch (e) {
     // Closing the picker is a choice, not an error. A refusal from the system is.
     if (e?.name === 'NotAllowedError' && /system/i.test(e.message || '')) toast('Your computer isn’t letting the browser share the screen. Allow screen recording for it in your system settings.');
@@ -515,12 +579,14 @@ export function mediaOf(user) {
 export async function voiceStats() {
   const out = {};
   for (const [u, p] of peers) {
-    let bytes = 0;
-    (await p.pc.getStats()).forEach((r) => { if (r.type === 'inbound-rtp' && r.kind === 'audio') bytes += r.bytesReceived; });
+    let bytes = 0, energy = 0;
+    (await p.pc.getStats()).forEach((r) => { if (r.type === 'inbound-rtp' && r.kind === 'audio') { bytes += r.bytesReceived; energy += r.totalAudioEnergy || 0; } });
     out[u] = {
       state: p.pc.connectionState, bytes, tx: p.pc.getTransceivers().length, screenSound: !!p.screenAudio?.srcObject?.getAudioTracks().length, glare: p.glare || 0,
       // The remote voice really playing: its element's clock moves on.
       audioTime: p.audio ? p.audio.currentTime : null, audioPaused: p.audio ? p.audio.paused : null,
+      // Voice options: what I receive (its energy), and how loud I play it.
+      energy, volume: p.audio ? p.audio.volume : null, muted: p.audio ? p.audio.muted : null, boost: p.audio ? boostOf(p.audio) : 0,
     };
   }
   return out;

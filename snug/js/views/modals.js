@@ -9,6 +9,7 @@ import { Icon } from '../ui/icons.js';
 import { Avatar, Tile, RoomIcon, Seg, copyText } from '../ui/kit.js';
 import { TOPICS } from '../lib/social.js';
 import { call, api } from '../server.js';
+import { TemplatePick, startArgs } from './places-start.js'; // start a house from a template or another house
 
 export function Confirm({ title, text, action, danger, onConfirm }) {
   return html`
@@ -20,11 +21,13 @@ export function Confirm({ title, text, action, danger, onConfirm }) {
     </div>`;
 }
 
-const KINDS = [['text', 'Conversation'], ['voice', 'Voice'], ['news', 'Notices']];
+const KINDS = [['text', 'Conversation'], ['voice', 'Voice'], ['news', 'Notices'], ['forum', 'Forum'], ['stage', 'Stage']]; // forum, stage: js/views/places.js
 const KIND_HINT = {
   text: 'Everyone with access can write.',
   voice: 'People drop in and talk. It has a text side too.',
   news: 'Only roles that can post notices write here. Everyone else reads, reacts and replies in threads.',
+  forum: 'Posts with a title and tags. Each post has its own thread for replies.',
+  stage: 'A voice room with speakers and an audience. Listeners raise a hand to ask to speak.',
 };
 
 // Create a room, or edit one when `room` is given.
@@ -186,6 +189,7 @@ export function AddHouse() {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [start, setStart] = useState('blank'); // a template id, or 'copy:<house>' (js/views/places-start.js)
   const submit = (e) => {
     e.preventDefault();
     const clean = name.trim();
@@ -193,7 +197,7 @@ export function AddHouse() {
     setBusy(true);
     // house.create takes a name and a colour; being public and a topic are
     // house settings, saved straight after.
-    createHouse({ name: clean, hue }).then((id) => {
+    createHouse({ name: clean, hue, ...startArgs(start) }).then((id) => {
       if (id && (open || topic)) {
         call('house.update', { house: id, public: open, topic: topic || null })
           .catch((err) => toast(err.offline ? 'Your house is ready, but being public wasn\u2019t saved. Change it in House settings.' : err.message));
@@ -223,6 +227,7 @@ export function AddHouse() {
           : html`<div class="hint" id="house-name-msg">Rename it or add rooms any time.</div>`}
       </div>
     </div>
+    <${TemplatePick} value=${start} onChange=${setStart} />
     <div>
       <span class="label" id="house-hue">Colour</span>
       <div class="swatches" role="group" aria-labelledby="house-hue">

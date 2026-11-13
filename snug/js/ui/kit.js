@@ -6,6 +6,7 @@ import { initials, hueOf } from '../lib/util.js';
 import { parse } from '../lib/format.js';
 import { Icon } from './icons.js';
 import { CustomEmoji } from '../views/emoji-custom.js'; // custom emoji per house
+import { CodeBlock, renderExtra } from '../views/rich.js'; // headings, quotes, lists, spoilers, masked links, timestamps, code blocks
 
 export const PRESENCE = {
   open: { label: 'Open to talk', hint: 'Happy to be called or pulled into a room.' },
@@ -44,7 +45,7 @@ export function Stack({ users, max = 3, size }) {
 
 export const Tile = ({ house, lg }) => html`<span class=${`tile${lg ? ' lg' : ''}`} style=${`--hue:${hueOf(house.hue)}`}>${house.mark}</span>`;
 
-const KIND_ICON = { text: 'room', voice: 'voice', news: 'news', thread: 'thread' };
+export const KIND_ICON = { text: 'room', voice: 'voice', news: 'news', thread: 'thread', forum: 'forum', stage: 'stage' }; // forum, stage: js/views/places.js
 export const RoomIcon = ({ kind, size }) => html`<${Icon} name=${KIND_ICON[kind] || 'room'} size=${size} />`;
 
 export function Seg({ value, options, onChange, label }) {
@@ -77,7 +78,7 @@ function render(tokens, ctx) {
     switch (t.t) {
       case 'text': return marked(t.v, ctx.hl);
       case 'code': return html`<code>${t.v}</code>`;
-      case 'pre': return html`<pre><code>${t.v}</code></pre>`;
+      case 'pre': return html`<${CodeBlock} lang=${t.lang} v=${t.v} />`;
       case 'b': return html`<strong>${render(t.c, ctx)}</strong>`;
       case 'i': return html`<em>${render(t.c, ctx)}</em>`;
       case 's': return html`<s>${render(t.c, ctx)}</s>`;
@@ -88,7 +89,7 @@ function render(tokens, ctx) {
         return html`<span class=${`at${u.id === S.me ? ' at-you' : ''}`} onClick=${(e) => ctx.onMention?.(u, e)}>@${u.name}</span>`;
       }
       case 'emoji': return html`<${CustomEmoji} id=${t.id} name=${t.v} m=${ctx.m} />`; // <:name:id>
-      default: return null;
+      default: return renderExtra(t, ctx, render); // js/views/rich.js
     }
   });
 }

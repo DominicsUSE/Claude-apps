@@ -75,7 +75,24 @@ const P = {
   play: 'f:M6.500 4.500v11l9-5.500z|M6.500 4.500v11l9-5.500z',
   pause: 'f:M5.500 4.500h3v11h-3z|f:M11.500 4.500h3v11h-3z',
   gif: 'M3 5.500h14a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Z|M8 8.500H6.500a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1H8V10H7|M10.500 8.500v3|M13 11.500v-3h2|M13 10h1.500',
+  // Added for messaging (js/views/messaging.js): polls, forwarding, scheduling, stickers, edit history, formatting.
+  poll: 'M4 5.5h8|M4 10h12|M4 14.5h5',
+  forward: 'M12 5l4 4-4 4|M16 9H8.5A4.5 4.5 0 0 0 4 13.5V15',
+  clock: 'M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14Z|M10 6.5V10l2.5 1.5',
+  history: 'M3.5 10a6.5 6.5 0 1 0 1.9-4.6|M3.5 3.5v3h3|M10 7v3.2l2.2 1.3',
+  sticker: 'M16.5 11.5V5A1.5 1.5 0 0 0 15 3.5H5A1.5 1.5 0 0 0 3.5 5v10A1.5 1.5 0 0 0 5 16.5h6.5Z|M11.5 16.5V13a1.5 1.5 0 0 1 1.5-1.5h3.5|M7.5 8v.3|M12.5 8v.3',
+  bold: 'M6 4h4.5a3 3 0 0 1 0 6H6z|M6 10h5.5a3 3 0 0 1 0 6H6z',
+  italic: 'M9 4h6|M5 16h6|M12 4L8 16',
+  underline: 'M6 4v5a4 4 0 0 0 8 0V4|M5 16.5h10',
+  strike: 'M4 10h12|M13.5 6.5c-.5-1.2-1.8-2-3.5-2-2 0-3.5 1-3.5 2.5|M7 13.5c.5 1.2 1.8 2 3.3 2 2 0 3.5-1 3.5-2.5',
+  code: 'M7 6l-4 4 4 4|M13 6l4 4-4 4',
+  spoiler: 'M3 10s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5Z|M3.5 3.5l13 13',
+  quote: 'M5 5v10|M9 7h7|M9 10h7|M9 13h5',
+  list: 'M8 6h8|M8 10h8|M8 14h8|M4.5 6v.2|M4.5 10v.2|M4.5 14v.2',
 };
+
+// Places (js/views/places.js) and voice options (js/views/voiceopts.js) add their own icons here.
+export const addIcons = (more) => Object.assign(P, more);
 
 export function Icon({ name, size = 20 }) {
   const parts = (P[name] || '').split('|');

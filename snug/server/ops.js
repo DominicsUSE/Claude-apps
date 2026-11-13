@@ -8,6 +8,10 @@ import { TOPICS, LIMITS, EVENT_LENGTH, eventEnd, eventState, cleanInterests, saf
 import { fold } from '../js/lib/util.js';
 import { decorateFile, createMediaOps } from './media.js'; // voice messages, pins, GIFs
 import { createEmojiOps } from './emoji.js'; // custom emoji per house
+import { createSafetyOps } from './safety.js'; // blocks, privacy, moderation, audit log
+import { createMessagingOps } from './messaging.js'; // polls, link previews, forwarding, edit history, scheduled messages, stickers
+import { createPlacesOps } from './places.js'; // room permissions, forums, stages, webhooks, folders, onboarding, templates, insights
+import { createVoiceOptsOps } from './voiceopts.js'; // soundboard, voice room limits and bitrate
 
 export class UserError extends Error {}
 const fail = (msg) => { throw new UserError(msg); };
@@ -30,7 +34,7 @@ const MSG_ID = /^m_[a-z0-9]{8,40}$/;
 const EMOJI = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|‍|️|⃣|[#*0-9])+$/u;
 const PRESENCE = ['open', 'around', 'focus', 'away', 'offline'];
 const LEVELS = ['all', 'mentions', 'muted'];
-const KINDS = ['text', 'voice', 'news'];
+const KINDS = ['text', 'voice', 'news', 'forum', 'stage']; // forum and stage: server/places.js
 const PERM_IDS = PERMS.map((p) => p.id);
 const json = (s, f) => { try { return s == null ? f : JSON.parse(s); } catch { return f; } };
 const MIN = 60_000, DAY = 86_400_000;
@@ -238,7 +242,7 @@ export function createOps({ db, M, hub }) {
         decorateFile(out, row, f, fail); // voice length and waveform, GIF flag
         files.push(out);
       }
-      if (!text.trim() && !files.length) fail('Write something first.');
+      if (!text.trim() && !files.length && !M.emptyOk?.has(d)) fail('Write something first.'); // emptyOk: a forward with no note (server/messaging.js)
       let replyTo = null;
       if (d.replyTo != null) {
         const r = M.liveMsg(id(d.replyTo, 'message'));
@@ -867,7 +871,7 @@ export function createOps({ db, M, hub }) {
 
     search(c, d) {
       const q = str(d.q ?? '', { max: 200, name: 'The search' });
-      const hits = M.search(c.user, q);
+      const hits = M.search(c.user, q, 80, Number.isInteger(d.tz) && Math.abs(d.tz) <= 900 ? d.tz : 0); // tz: for before:/after:/during:
       return { hits, users: hub.usersFor(hits.map((h) => h.m.author)), threads: hub.threadsFor(hits.map((h) => h.conv)) };
     },
 
@@ -875,7 +879,7 @@ export function createOps({ db, M, hub }) {
     'voice.join'(c, d) {
       const room = M.room(id(d.room, 'room')) || fail('That room doesn’t exist.');
       member(c.user, room.house);
-      if (room.kind !== 'voice') fail('That isn’t a voice room.');
+      if (room.kind !== 'voice' && room.kind !== 'stage') fail('That isn’t a voice room.'); // stage: server/places.js
       return { peers: hub.voiceJoin(c, room.id) };
     },
     'voice.leave': (c) => { hub.voiceLeave(c.user); return {}; },
@@ -932,6 +936,16 @@ export function createOps({ db, M, hub }) {
       return base(c, d);
     };
   }
+
+  // Safety, privacy and moderation (server/safety.js): new ops, and rules
+  // wrapped around msg.send, react, voice, calls, dm.open, friends and invites.
+  Object.assign(ops, createSafetyOps({ db, M, hub, fail, ops, removeMember }));
+  // Polls, link previews, forwarding, edit history, scheduled messages and stickers (server/messaging.js).
+  Object.assign(ops, createMessagingOps({ db, M, hub, fail, ops }));
+  // Places, structure and community (server/places.js): the room permission resolver behind every check, and its ops.
+  createPlacesOps({ db, M, hub, fail, ops });
+  // Voice options (server/voiceopts.js): soundboard, voice room user limit and bitrate.
+  Object.assign(ops, createVoiceOptsOps({ db, M, hub, fail, ops }));
 
   return ops;
 }

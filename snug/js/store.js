@@ -20,12 +20,16 @@ const local = {
 const DEFAULT_PREFS = {
   theme: 'system', density: 'regular', text: 'm', motion: 'system', contrast: 'system',
   toasts: true, desktop: false, houseShut: {}, groupShut: {}, recent: [],
+  embeds: true, trustedHosts: [], // link previews shown; hosts a masked link may open without asking (js/views/messaging.js, rich.js)
 };
 
 // Everything that comes from the server.
 const DATA = ['me', 'users', 'houses', 'rooms', 'houseOrder', 'dms', 'dmOrder', 'msgs', 'more', 'threads', 'read', 'followed', 'saved', 'cache', 'invites', 'voice', 'voiceState', 'friends', 'events'];
 DATA.push('pins', 'gifFavs'); // pinned messages and saved GIFs (js/views/media.js)
 DATA.push('emoji'); // each joined house's custom emoji (js/views/emoji-custom.js)
+DATA.push('scheduled', 'stickers', 'pollVotes'); // messaging (js/views/messaging.js)
+DATA.push('safety'); // blocks, privacy and message requests (js/views/safety.js)
+DATA.push('places'); // the rail's folders and order (js/views/places.js)
 function blank() {
   return {
     me: null, users: {}, houses: {}, rooms: {}, houseOrder: [], dms: {}, dmOrder: [], msgs: {}, more: {}, threads: {},
@@ -35,6 +39,10 @@ function blank() {
     pins: {},      // { [conv]: [{ id, by, at }] }, newest first
     gifFavs: [],   // [{ id, name, size, w, h, kind, at }]: GIFs this person saved
     emoji: {},     // { [houseId]: [{ id, house, name, file, by, created }] }: custom emoji
+    scheduled: [], // [{ id, conv, text, replyTo, at, created }]: my messages waiting to be sent (js/views/messaging.js)
+    stickers: {},  // { [houseId]: [{ id, house, name, file, by, created }] }
+    pollVotes: {}, // { [msgId]: [answer index] }: my votes
+    safety: { blocks: [], privacy: { dm: 'houses', friends: 'everyone', requests: false }, requests: [], sent: [] }, // js/views/safety.js
   };
 }
 
@@ -263,7 +271,7 @@ export function convMeta(conv) {
 export function membersOf(conv) {
   const meta = convMeta(conv);
   if (!meta) return [];
-  if (meta.house) return Object.keys(S.houses[meta.house].members).filter((u) => S.users[u]);
+  if (meta.house) return (meta.room?.viewers || Object.keys(S.houses[meta.house].members)).filter((u) => S.users[u]); // private rooms: only who can see them
   if (meta.dm) return meta.dm.members.filter((u) => S.users[u]);
   if (meta.parent) return membersOf(meta.parent);
   return [];
@@ -582,10 +590,10 @@ export function leaveHouse(id) {
   });
 }
 
-export function createHouse({ name, hue }) {
-  return call('house.create', { name, hue }).then((r) => {
+export function createHouse({ name, hue, ...from }) { // from: { template } or { from: houseId } (server/places.js)
+  return call('house.create', { name, hue, ...from }).then((r) => {
     S.ui.modal = null;
-    openConv(r.room);
+    if (r.room) openConv(r.room);
     return r.house;
   });
 }

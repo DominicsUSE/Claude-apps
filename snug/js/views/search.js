@@ -2,7 +2,7 @@
 // One field leads to both.
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import {
-  S, back, go, emit, convMeta, jumpToMsg, openConv, openMenu, startDm, closeQuick, openLayer, setPresence, setPref,
+  S, back, go, emit, convMeta, jumpToMsg, openConv, openMenu, startDm, closeQuick, openLayer, setPresence, setPref, openPop,
 } from '../store.js';
 import { parseQuery, runSearch, setOp, isEmptyQuery } from '../lib/search.js';
 import { attention, isThread, roomIds } from '../lib/attention.js';
@@ -12,6 +12,7 @@ import { Avatar, Tile, RoomIcon, Rich, Empty } from '../ui/kit.js';
 import { Settings } from './settings.js';
 import { searchMessages } from '../server.js';
 import { openHouse } from './nav.js';
+import { SearchDateFilter, SearchSuggest, dateChipLabel } from './messaging.js'; // date filter, mentions, pinned, suggestions while typing
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 
@@ -25,6 +26,9 @@ function examples() {
     ['has:file', 'Messages with a file attached'],
     ['has:link', 'Messages with a link'],
     ['is:saved', 'Only messages you saved'],
+    [`mentions:${someone}`, 'Messages that mention someone'],
+    [`during:${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`, 'Messages from this month (before: and after: work too)'],
+    ['pinned:true has:poll', 'Pinned messages, polls'],
   ];
 }
 
@@ -68,7 +72,7 @@ export function Search() {
       ...options.map(([value, label]) => ({ label, checked: current === value.toLowerCase(), onSelect: () => set(setOp(q, key, value.toLowerCase())) })),
     ],
   });
-  const filtered = p.from.length || p.in.length || p.has.length || p.saved;
+  const filtered = p.from.length || p.in.length || p.has.length || p.saved || p.mentions?.length || p.before || p.after || p.during || p.pinned;
 
   return html`<section class="main view" aria-label="Search">
     <div class="search-bar">
@@ -77,14 +81,21 @@ export function Search() {
         <input class="field" ref=${input} type="search" placeholder="Search messages" aria-label="Search messages" value=${q}
           style=${S.ui.phone ? 'padding-left:12px' : ''} onInput=${(e) => set(e.target.value)} />
         ${q && html`<button class="ib" aria-label="Clear search" data-tip="Clear" onClick=${() => { set(''); input.current.focus(); }}><${Icon} name="x" /></button>`}
+        <${SearchSuggest} q=${q} set=${set} places=${places} input=${input} />
       </div>
       <div class="filters" role="group" aria-label="Filters">
         <button class=${`chip${p.from.length ? ' on' : ''}`} onClick=${(e) => pick(e, 'from', people.map((u) => [u.handle, u.name]), p.from[0])}>
           ${p.from.length ? `From ${people.find((u) => u.handle === p.from[0])?.name.split(' ')[0] || p.from[0]}` : 'From anyone'}<${Icon} name="chev-d" size=${14} /></button>
         <button class=${`chip${p.in.length ? ' on' : ''}`} onClick=${(e) => pick(e, 'in', places.map((n) => [n, n]), p.in[0])}>
           ${p.in.length ? `In ${places.find((n) => n.toLowerCase() === p.in[0]) || p.in[0]}` : 'In any place'}<${Icon} name="chev-d" size=${14} /></button>
-        <button class=${`chip${p.has.length ? ' on' : ''}`} onClick=${(e) => pick(e, 'has', [['image', 'A picture'], ['file', 'A file'], ['link', 'A link']], p.has[0])}>
+        <button class=${`chip${p.has.length ? ' on' : ''}`} onClick=${(e) => pick(e, 'has', [['image', 'A picture'], ['file', 'A file'], ['link', 'A link'], ['poll', 'A poll'], ['sticker', 'A sticker'], ['video', 'A video']], p.has[0])}>
           ${p.has.length ? `With a ${p.has[0] === 'image' ? 'picture' : p.has[0]}` : 'With anything'}<${Icon} name="chev-d" size=${14} /></button>
+        <button class=${`chip${p.mentions?.length ? ' on' : ''}`} onClick=${(e) => pick(e, 'mentions', people.map((u) => [u.handle, u.name]), p.mentions?.[0])}>
+          ${p.mentions?.length ? `Mentions ${people.find((u) => u.handle === p.mentions[0])?.name.split(' ')[0] || p.mentions[0]}` : 'Mentioning anyone'}<${Icon} name="chev-d" size=${14} /></button>
+        <button class=${`chip${p.before || p.after || p.during ? ' on' : ''}`} onClick=${(e) => openPop({ anchor: rectOf(e), align: 'start', label: 'Filter by date', C: SearchDateFilter, props: { q, set, setOp, p } })}>
+          <${Icon} name="calendar" size=${14} />${dateChipLabel(p)}<${Icon} name="chev-d" size=${14} /></button>
+        <button class=${`chip${p.pinned ? ' on' : ''}`} aria-pressed=${String(!!p.pinned)} onClick=${() => set(setOp(setOp(q, 'is', p.saved ? 'saved' : null), 'pinned', p.pinned ? null : 'true'))}>
+          <${Icon} name="pin" size=${14} />Pinned only</button>
         <button class=${`chip${p.saved ? ' on' : ''}`} aria-pressed=${String(p.saved)} onClick=${() => set(setOp(q, 'is', p.saved ? null : 'saved'))}>
           <${Icon} name=${p.saved ? 'saved' : 'save'} size=${14} />Saved only</button>
       </div>

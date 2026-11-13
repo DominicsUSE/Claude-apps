@@ -23,7 +23,9 @@ import { Avatar, Stack, Tile, RoomIcon, PRESENCE, presenceLabel } from '../ui/ki
 import { MePop } from './people.js';
 import { RoomForm, Confirm, Invite, AddHouse, NewMessage, RoomBrowser } from './modals.js';
 import { Settings, HouseSettings } from './settings.js';
+import { modPages, requestOf } from './safety.js'; // moderation entry in the house menu; message requests
 import { VoiceControls } from './conversation.js';
+import { RailHouses } from './places.js'; // the rail's folders and house order
 import { joinVoice } from '../voice.js';
 import { leavingCall } from '../calls.js';
 
@@ -215,6 +217,10 @@ export function houseMenu(id, pos) {
       settings && { label: 'House settings', icon: 'sliders', onSelect: () => openLayer({ C: HouseSettings, props: { house: id } }) },
       // Custom emoji: roles that may manage emoji but not the house reach the Emoji page from here.
       !settings && can(S, id, 'emoji') && { label: 'Custom emoji', icon: 'smile', onSelect: () => openLayer({ C: HouseSettings, props: { house: id, page: 'emoji' } }) },
+      // Soundboard and voice rooms (js/views/voiceopts-settings.js): for roles that manage sounds but not the house.
+      !settings && can(S, id, 'sounds') && { label: 'Soundboard', icon: 'voice', onSelect: () => openLayer({ C: HouseSettings, props: { house: id, page: 'voice' } }) },
+      // Moderation (js/views/safety-settings.js): reports, bans and the house log, each by its own permission.
+      modPages(id) && { label: h.reportsOpen ? `Moderation (${h.reportsOpen} open)` : 'Moderation', icon: 'shield', onSelect: () => openLayer({ C: HouseSettings, props: { house: id, page: can(S, id, 'moderate') ? 'reports' : can(S, id, 'ban') ? 'bans' : 'log' } }) },
       { sep: true },
       {
         label: 'Leave house', icon: 'leave', danger: true,
@@ -285,13 +291,7 @@ export function Rail() {
         <${Icon} name="compass" size=${22} />
       <//>
       <div class="rail-sep" role="separator"></div>
-      ${S.houseOrder.map((id) => {
-        const h = S.houses[id];
-        return html`<${RailItem} key=${id} label=${h.name} cls="rail-house" sel=${sp === id} attn=${houseAttention(S, id)}
-          onClick=${() => openSpace(id)} onMenu=${(pos) => houseMenu(id, pos)}>
-          <${Tile} house=${h} />
-        <//>`;
-      })}
+      <${RailHouses} sp=${sp} RailItem=${RailItem} houseMenu=${houseMenu} openSpace=${openSpace} houseAttention=${houseAttention} />
       <${RailItem} label="Create or join a community" cls="rail-add" attn=${{ needs: 0 }} onClick=${() => openModal(AddHouse)}>
         <${Icon} name="plus" size=${22} />
       <//>
@@ -362,7 +362,7 @@ export function NavDirect() {
     <div class="sect"><span>Direct messages</span>
       <button class="ib sm" aria-label="New message" data-tip="New message" onClick=${() => openModal(NewMessage)}><${Icon} name="plus" size=${16} /></button>
     </div>
-    ${S.dmOrder.map((id) => {
+    ${S.dmOrder.filter((id) => !requestOf(id)).map((id) => {
       const meta = convMeta(id);
       if (S.ui.phone) return html`<${DmRow} key=${id} id=${id} />`;
       return html`<${Row} key=${id} icon=${convIcon(id)} label=${meta.title} sel=${cur === id} attn=${attention(S, id)} muted=${levelOf(S, id) === 'muted'}
@@ -370,6 +370,10 @@ export function NavDirect() {
         onClick=${() => openConv(id)} onMenu=${(pos) => dmMenu(id, pos)} />`;
     })}
     ${!S.dmOrder.length && html`<p class="ctx-note">No conversations yet. Start one with the plus, or from someone’s profile.</p>`}
+    ${(S.safety?.requests || []).some((r) => S.dms[r.dm]) && html`
+      <div class="sect"><span>Message requests</span></div>
+      ${S.safety.requests.filter((r) => S.dms[r.dm]).map((r) => html`<${Row} key=${r.dm} icon=${convIcon(r.dm)} label=${convMeta(r.dm).title}
+        hint="Wants to talk" sel=${cur === r.dm} onClick=${() => openConv(r.dm)} />`)}`}
   </div>`;
 }
 
@@ -428,7 +432,7 @@ function DiscoverCtx() {
 function RoomRow({ id }) {
   const room = S.rooms[id];
   const cur = current();
-  const voice = room.kind === 'voice';
+  const voice = room.kind === 'voice' || room.kind === 'stage'; // stage: js/views/places.js
   const inside = voice ? (S.voice[id] || []).map((u) => S.users[u]).filter(Boolean) : [];
   const end = inside.length ? html`<${Stack} users=${inside} max=${3} />${inside.length > 3 ? html`<span class="num faint">${inside.length}</span>` : null}` : null;
   const row = html`<${Row} icon=${html`<${RoomIcon} kind=${room.kind} size=${18} />`} label=${room.name} sel=${cur === id}
