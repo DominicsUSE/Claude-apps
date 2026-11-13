@@ -554,7 +554,10 @@ test("desktop shell: badge and flash, theme colour, settings, global voice keys,
   let r = await page.evaluate(() => window.snugApp.setDesktopSettings({ openAtLogin: true, minimizeToTray: true }));
   assert.equal(r.settings.openAtLogin, true);
   assert.equal(await app.evaluate(() => globalThis.snugLoginItem), true);
-  if (process.platform === "win32" || process.platform === "darwin") assert.equal(await app.evaluate(({ app: a }) => a.getLoginItemSettings().openAtLogin), true);
+  // Windows matches the Run entry by path and args, so ask with the args main.js registers.
+  const loginItem = () => app.evaluate(({ app: a }) => a.getLoginItemSettings({ args: ["--hidden"] }).openAtLogin);
+  const hasLoginItems = process.platform === "win32" || process.platform === "darwin";
+  if (hasLoginItems) assert.equal(await loginItem(), true);
   const cfg = JSON.parse(fs.readFileSync(path.join(shellDir, "desktop.json"), "utf8"));
   assert.equal(cfg.openAtLogin, true);
   assert.equal(cfg.minimizeToTray, true);
@@ -570,6 +573,7 @@ test("desktop shell: badge and flash, theme colour, settings, global voice keys,
   await page.waitForFunction(() => !window.snugApp.hidden());
   r = await page.evaluate(() => window.snugApp.setDesktopSettings({ openAtLogin: false, minimizeToTray: false }));
   assert.equal(await app.evaluate(() => globalThis.snugLoginItem), false);
+  if (hasLoginItems) assert.equal(await loginItem(), false);
   // The Snug menu mirrors them.
   const labels = await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.find((i) => i.label === "Snug").submenu.items.map((i) => i.label));
   for (const l of ["Open Snug at login", "Start minimised", "Minimise to the tray", "Check for a newer Snug"]) assert.ok(labels.includes(l), l);
@@ -648,6 +652,8 @@ test("desktop shell: badge and flash, theme colour, settings, global voice keys,
 
 test("desktop shell: the window opens where it was; a place off every screen falls back to the centre", async (t) => {
   let { app, page } = await launchShell();
+  const first = app;
+  t.after(() => first.close().catch(() => {})); // even if a check below fails, so the data folder can be removed
   await page.waitForSelector(".nav");
   const b = await mainWin(app, (w) => w.getBounds());
   assert.deepEqual({ w: b.width, h: b.height }, { w: 900, h: 700 }, "size kept");
