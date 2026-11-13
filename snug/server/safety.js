@@ -212,6 +212,7 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
     // Exempt roles count every role the person has (extra roles from server/places.js too).
     const roles = [db.get('SELECT role FROM members WHERE house = ? AND user = ?', house, user)?.role, ...(R.extra(house, [user])[user] || [])];
     if (roles.some((r) => r && cfg.exempt.includes(r))) return null;
+    if (M.automodRoomExempt?.(house, conv)) return null; // rooms the house exempts (server/community.js)
     const hit = filterHit(body, cfg);
     if (!hit) return null;
     const what = hit.link ? 'Links aren’t allowed' : 'That message has a word this house doesn’t allow';
@@ -290,6 +291,9 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
         if (wait > 0) fail(`Slowmode is on in ${room.name}. You can send again in ${left(wait)}.`);
       }
       if (typeof d.text === 'string') flag = filter(c.user, house, conv, d.text);
+      // Spam rules (server/community.js): mentions, flooding, other houses' invitations, shouting.
+      const spam = typeof d.text === 'string' ? M.spamCheck?.(c.user, house, conv, d.text, false) : null;
+      if (spam) flag = flag ? `${flag}. ${spam}` : spam;
     }
     const dm = house ? null : R.dmOf(conv);
     if (dm && M.inDm(dm, c.user)) {
@@ -302,6 +306,7 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
       if (R.pending(dm, c.user)) { db.run('DELETE FROM dm_requests WHERE dm = ? AND user = ?', dm, c.user); sendState(c.user); }
     }
     const r = base(c, d);
+    if (house && r?.m) M.spamSent?.(c.user, house, r.m.text);
     if (flag && r?.m) fileReport({ house, by: null, user: c.user, msg: r.m.id, conv, body: r.m.text, reason: 'filter', note: flag });
     return r;
   });
@@ -312,6 +317,8 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
     // A timeout stops rewriting old messages as well as writing new ones.
     if (house && M.isMember(house, c.user)) guard(c.user, house, 'edit messages');
     if (house && M.isMember(house, c.user) && typeof d.text === 'string') flag = filter(c.user, house, d.conv, d.text);
+    const spam = house && M.isMember(house, c.user) && typeof d.text === 'string' ? M.spamCheck?.(c.user, house, d.conv, d.text, true) : null;
+    if (spam) flag = flag ? `${flag}. ${spam}` : spam;
     const r = base(c, d);
     if (flag) fileReport({ house, by: null, user: c.user, msg: d.id, conv: d.conv, body: d.text, reason: 'filter', note: flag });
     return r;
@@ -380,7 +387,7 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
     const rows = others.map((u) => userRow(u));
     const want = [c.user, ...others].sort().join();
     const existing = db.all('SELECT dm FROM dm_members WHERE user = ?', c.user).map((r) => r.dm)
-      .find((dm) => R.dmMembers(dm).sort().join() === want);
+      .find((dm) => R.dmMembers(dm).sort().join() === want && !(others.length === 1 && M.isGroupDm?.(dm))); // a group that shrank to two stays a group
     for (const u of rows) if (R.either(c.user, u.id)) fail(`You can’t message ${u.name}.`);
     if (existing) return base(c, d);
     const asks = [];

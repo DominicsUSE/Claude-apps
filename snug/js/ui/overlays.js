@@ -5,6 +5,7 @@ import { S, closeMenu, closePop, closeModal, dismissToast, closeLightbox } from 
 import { clamp } from '../lib/util.js';
 import { Icon } from './icons.js';
 import { Avatar } from './kit.js';
+import { Viewer } from '../views/viewer.js'; // the media viewer
 
 const EDGE = 8;
 
@@ -156,12 +157,11 @@ export function Toasts() {
   </div>`;
 }
 
+// The media viewer (js/views/viewer.js): zoom, next and previous, download, alt text.
 export function Lightbox() {
   const lb = S.ui.lightbox;
   if (!lb) return null;
-  return html`<div class="lightbox" onClick=${closeLightbox} role="dialog" aria-label=${lb.alt}>
-    <img src=${lb.src} alt=${lb.alt} />
-  </div>`;
+  return html`<${Viewer} key=${`${lb.src}|${lb.mid || ''}|${lb.fileId || ''}`} lb=${lb} />`;
 }
 
 // Tooltips: one element, shown after a short rest on anything with data-tip.

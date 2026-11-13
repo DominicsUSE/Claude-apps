@@ -3,6 +3,7 @@
 // Catch up entry is derived from the three functions below.
 import { mentions } from './format.js';
 import { mentionsRole } from './places.js'; // @Role mentions
+import { mergeUnread } from './inbox.js'; // server unread counts, timed mutes (server/inbox.js)
 
 export const LEVELS = ['all', 'mentions', 'muted'];
 export const LEVEL_LABEL = { all: 'Everything', mentions: 'Only what needs me', muted: 'Nothing' };
@@ -20,11 +21,13 @@ export const levelsFor = (S, kind, id) => (kind === 'dm' && !isGroup(S, id) ? ['
 export const parentOf = (S, conv) => (isThread(conv) ? S.threads[conv]?.conv : conv);
 
 // One setting per place, three values. A room inherits from its house unless overridden.
+// A timed mute whose time is over counts as unset (server/inbox.js does the same).
+const live = (p) => (p?.notify && p.notifyUntil && p.notifyUntil <= Date.now() ? null : p?.notify);
 export function levelOf(S, conv) {
   const id = parentOf(S, conv);
   const room = S.rooms[id];
-  if (room) return room.notify || S.houses[room.house]?.notify || 'all';
-  return S.dms[id]?.notify || 'all';
+  if (room) return live(room) || live(S.houses[room.house]) || 'all';
+  return live(S.dms[id]) || 'all';
 }
 
 // A call record (written by the server) that I missed: someone else started
@@ -45,7 +48,7 @@ export function forMe(S, conv, m) {
   if (m.call) return missedCall(S, m);
   if (mentions(m.text, S.users[S.me]?.handle)) return true;
   if (mentionsRole(S, conv, m)) return true; // a role I have, and anyone may mention it (js/lib/places.js)
-  if (m.replyTo) {
+  if (m.replyTo && m.replyPing !== false) { // the reply banner's @ Off: a reply that doesn't notify (server/chat.js)
     const target = (S.msgs[conv] || []).find((x) => x.id === m.replyTo);
     if (target && target.author === S.me) return true;
   }
@@ -62,17 +65,21 @@ export function needsMe(S, conv, m) {
   if (S.safety?.blocks?.includes(m.author) || S.safety?.requests?.some((r) => r.dm === conv)) return false;
   // A missed call is for me even in a group set to "Only what needs me".
   if (m.call) return missedCall(S, m);
-  if (S.dms[conv] && !(isGroup(S, conv) && S.dms[conv].notify === 'mentions')) return true;
+  if (S.dms[conv] && !(isGroup(S, conv) && levelOf(S, conv) === 'mentions')) return true;
   if (forMe(S, conv, m)) return true;
   if (isThread(conv) && S.followed[conv]) return true;
   return false;
 }
 
 // Raw unread facts for one conversation, ignoring notification level.
+// The server's count (S.unread, server/inbox.js) covers messages older than
+// what is loaded; the larger of the two wins (js/lib/inbox.js mergeUnread).
 export function unreadOf(S, conv) {
   const list = S.msgs[conv] || [];
   const since = S.read[conv] || 0;
+  const server = S.unread?.[conv];
   let count = 0, needs = 0, firstTs = null;
+  const after = { count: 0, needs: 0 };
   const people = new Set();
   for (let i = list.length - 1; i >= 0; i--) {
     const m = list[i];
@@ -82,9 +89,11 @@ export function unreadOf(S, conv) {
     count++;
     firstTs = m.ts;
     people.add(m.author);
-    if (needsMe(S, conv, m)) needs++;
+    const need = needsMe(S, conv, m);
+    if (need) needs++;
+    if (server && m.ts > server.upTo) { after.count++; if (need) after.needs++; }
   }
-  return { count, needs, firstTs, people: [...people] };
+  return mergeUnread({ count, needs, firstTs, people: [...people] }, server, since, after);
 }
 
 export const threadsOf = (S, conv) =>

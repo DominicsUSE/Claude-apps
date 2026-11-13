@@ -1,8 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
   <title>Snug</title>
   <!-- The app icon redrawn on the 16px grid for 16, 24 and 32px uses (taskbar,
-       title bar, small .ico entries): a bigger Nook, a 4px person on whole pixels. -->
+       title bar, small .ico entries): archway 10 x 11 with a 2px band, a 4px
+       off-white person on the threshold, all on whole pixels. -->
   <rect width="16" height="16" rx="3.5" fill="#141516"/>
-  <path fill="#F05A47" d="M4 12.5V7a4 4 0 0 1 8 0v5.5a.5.5 0 0 1-.5.5h-7a.5.5 0 0 1-.5-.5Z"/>
-  <circle cx="8" cy="10" r="2" fill="#F4F1ED"/>
+  <path fill="#F05A47" d="M3 13.5V8a5 5 0 0 1 10 0v5.5a.5.5 0 0 1-.5.5H11V8a3 3 0 0 0-6 0v6H3.5a.5.5 0 0 1-.5-.5Z"/>
+  <circle cx="8" cy="12" r="2" fill="#F4F1ED"/>
 </svg>

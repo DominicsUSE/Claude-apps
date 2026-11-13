@@ -16,6 +16,7 @@ export const ROOM_PERMS = [
   { id: 'send', label: 'Send messages', hint: 'Write here, start posts and reply in threads.' },
   { id: 'connect', label: 'Join voice', hint: 'Join the room’s voice or stage.' },
   { id: 'speak', label: 'Speak', hint: 'Talk in voice. On a stage, speak without being invited.' },
+  { id: 'video', label: 'Share camera and screen', hint: 'Turn a camera on or share a screen in the room’s voice.' }, // voice and calls track
   { id: 'manage', label: 'Manage the room', hint: 'Rename it, change who can see it, add webhooks, run the stage.' },
 ];
 export const ROOM_PERM_IDS = ROOM_PERMS.map((p) => p.id);
@@ -38,7 +39,7 @@ const set = (list) => new Set(Array.isArray(list) ? list : []);
 //   overrides: [{ type: 'everyone'|'role'|'member', target, allow: [], deny: [] }]
 //   roleIds: the person's roles; userId: the person
 export function resolveRoom({ housePerms, owner = false, kind = 'text', isPrivate = false, overrides = [], roleIds = [], userId }) {
-  if (owner) return { view: true, send: true, connect: true, speak: true, manage: true };
+  if (owner) return { view: true, send: true, connect: true, speak: true, manage: true, video: true };
   const has = (p) => housePerms.has(p);
   const manager = has('rooms');
   const r = {
@@ -48,6 +49,7 @@ export function resolveRoom({ housePerms, owner = false, kind = 'text', isPrivat
     // On a stage, only the people who run it speak without an invitation.
     speak: VOICE_KINDS.includes(kind) && (kind !== 'stage' || manager),
     manage: manager,
+    video: VOICE_KINDS.includes(kind), // camera and screen: on for voice rooms unless an override turns it off
   };
   const apply = (deny, allow) => { for (const p of deny) if (p in r) r[p] = false; for (const p of allow) if (p in r) r[p] = true; };
   for (const o of overrides) if (o.type === 'everyone') apply(set(o.deny), set(o.allow));
@@ -61,9 +63,9 @@ export function resolveRoom({ housePerms, owner = false, kind = 'text', isPrivat
   apply(deny, allow);
   for (const o of overrides) if (o.type === 'member' && o.target === userId) apply(set(o.deny), set(o.allow));
   if (manager) { r.view = true; r.manage = true; }
-  if (!VOICE_KINDS.includes(kind)) { r.connect = false; r.speak = false; }
-  if (!r.view) return { view: false, send: false, connect: false, speak: false, manage: false };
-  if (!r.connect) r.speak = false;
+  if (!VOICE_KINDS.includes(kind)) { r.connect = false; r.speak = false; r.video = false; }
+  if (!r.view) return { view: false, send: false, connect: false, speak: false, manage: false, video: false };
+  if (!r.connect) { r.speak = false; r.video = false; }
   return r;
 }
 
@@ -190,6 +192,7 @@ export function mentionsRole(S, conv, m) {
   const roomId = conv.startsWith('t:') ? S.threads?.[conv]?.conv : conv;
   const h = S.houses?.[S.rooms?.[roomId]?.house];
   if (!h || !m.text || !m.text.includes('@')) return false;
+  if (S.prefs?.rolesOff?.[h.id]) return false; // Suppress @role mentions for this house (js/inbox.js, server/inbox.js)
   const mine = new Set([h.members?.[S.me], ...(h.extra?.[S.me] || [])]);
   return h.roles.some((r, i) => i > 0 && mine.has(r.id) && r.mentionable !== false && roleMentioned(m.text, r.name));
 }

@@ -19,6 +19,7 @@ import { fmtWhen, plural } from '../lib/util.js';
 import { plain } from '../lib/format.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar } from '../ui/kit.js';
+import { XIcon, openViewer } from './viewer.js'; // the media viewer, and icons it adds
 
 const MAX_SECONDS = 300;
 const PEAKS = 48;
@@ -42,10 +43,13 @@ const spoken = (sec) => {
 
 // What an attachment is called in a one-line preview.
 export function fileLabel(f) {
-  if (f.kind === 'audio') return `Voice message${f.duration ? `, ${clock(f.duration)}` : ''}`;
+  if (isVoice(f)) return `Voice message${f.duration ? `, ${clock(f.duration)}` : ''}`;
+  if (f.spoiler) return f.kind === 'video' ? 'Spoiler video' : f.kind === 'image' ? 'Spoiler image' : `Spoiler: ${f.name}`;
   if (f.gif) return 'GIF';
   return f.name;
 }
+// A recorded voice message (voice: true; older ones are known by their waveform), not any sound file.
+export const isVoice = (f) => f.kind === 'audio' && (f.voice === true || (Array.isArray(f.peaks) && f.peaks.length > 0));
 const preview = (m) => plain(m.text) || (m.files || []).map(fileLabel).join(', ') || 'Attachment';
 
 // Live changes from the server.
@@ -391,7 +395,7 @@ export function VoiceButton({ conv }) {
     try {
       const up = await uploadFile(conv, take.blob, name);
       const duration = Math.round(take.duration * 10) / 10;
-      sendMessage(conv, '', { replyTo: S.ui.reply[conv], files: [{ id: up.id, kind: 'audio', name, size: up.size, duration, peaks: take.peaks, src: URL.createObjectURL(take.blob) }] });
+      sendMessage(conv, '', { replyTo: S.ui.reply[conv], files: [{ id: up.id, kind: 'audio', voice: true, name, size: up.size, duration, peaks: take.peaks, src: URL.createObjectURL(take.blob) }] });
       setRec(null);
       focusBox(conv);
     } catch (e) {
@@ -485,7 +489,7 @@ export function toggleGifFav(f) {
 }
 
 // A still first frame, for reduced motion and for GIFs scrolled out of view.
-function Still({ src, alt }) {
+export function Still({ src, alt, onError }) {
   const ref = useRef();
   useEffect(() => {
     const img = new Image();
@@ -495,6 +499,7 @@ function Still({ src, alt }) {
       c.width = img.naturalWidth; c.height = img.naturalHeight;
       try { c.getContext('2d').drawImage(img, 0, 0); } catch { /* nothing to draw */ }
     };
+    if (onError) img.onerror = onError;
     img.src = src;
   }, [src]);
   return html`<canvas ref=${ref} role="img" aria-label=${alt}></canvas>`;
@@ -513,35 +518,173 @@ function useVisible(ref) {
 
 // A GIF in a message: plays on its own, unless motion is reduced (then it
 // waits for Play) or it is scrolled away. Its star saves it to your GIFs.
-export function GifImage({ f, src }) {
+export function GifImage({ f, src, ctx = {} }) {
   const box = useRef();
   const vid = useRef();
   const visible = useVisible(box);
   const reduced = reducedMotion();
   const [chosen, setChosen] = useState(null);   // null follows the setting; true/false is the person's choice
-  const play = (chosen ?? !reduced) && visible;
+  // Settings > Appearance > Chat (gifAutoplay): auto plays unless motion is
+  // reduced; always plays even then; hover plays while the pointer is on the
+  // message (or it has focus); never stays still until you point at the GIF.
+  const [over, setOver] = useState(false);
+  const mode = S.prefs.gifAutoplay || 'auto';
+  useEffect(() => {
+    if (mode !== 'hover' && mode !== 'never') return undefined;
+    const el = (mode === 'hover' && box.current?.closest('.msg')) || box.current;
+    if (!el) return undefined;
+    const on = () => setOver(true), off = () => setOver(false);
+    const evs = [['pointerenter', on], ['pointerleave', off], ['focusin', on], ['focusout', off]];
+    evs.forEach(([n, fn]) => el.addEventListener(n, fn));
+    return () => evs.forEach(([n, fn]) => el.removeEventListener(n, fn));
+  }, [mode]);
+  const auto = mode === 'always' ? true : mode === 'auto' ? !reduced : over;
+  const play = (chosen ?? auto) && visible;
   const fav = f.id && isFavGif(f.id);
   const w = f.w || 240, h = f.h || 180;
   useEffect(() => { const v = vid.current; if (v) { if (play) v.play().catch(() => {}); else v.pause(); } }, [play]);
   return html`<div class=${`gif${play ? ' playing' : ''}`} ref=${box} style=${`aspect-ratio:${w}/${h};width:${Math.min(320, w)}px`}>
-    <button class="gif-open" aria-label=${`Open GIF ${f.name}`} onClick=${() => openLightbox(src, f.name)}>
+    <button class="gif-open" aria-label=${`Open GIF ${f.alt || f.name}`} onClick=${() => (ctx.m ? openViewer(ctx.conv, ctx.m, f) : openLightbox(src, f.name))}>
       ${f.kind === 'video'
-        ? html`<video ref=${vid} src=${src} muted loop playsinline preload="metadata" aria-label=${f.name}></video>`
-        : play ? html`<img src=${src} alt=${f.name} />` : html`<${Still} src=${src} alt=${f.name} />`}
+        ? html`<video ref=${vid} src=${src} muted loop playsinline preload="metadata" aria-label=${f.alt || f.name}></video>`
+        : play ? html`<img src=${src} alt=${f.alt || f.name} />` : html`<${Still} src=${src} alt=${f.alt || f.name} />`}
     </button>
     <span class="gif-tag" aria-hidden="true">GIF</span>
     ${!play && visible && html`<button class="gif-play" aria-label="Play GIF" onClick=${() => setChosen(true)}><${Icon} name="play" size=${20} /></button>`}
-    ${play && reduced && html`<button class="gif-pause" aria-label="Pause GIF" data-tip="Pause" onClick=${() => setChosen(false)}><${Icon} name="pause" size=${16} /></button>`}
-    ${f.id && html`<button class=${`gif-star${fav ? ' on' : ''}`} aria-pressed=${String(!!fav)} aria-label=${fav ? 'Remove from your GIFs' : 'Save to your GIFs'}
+    ${play && (reduced || chosen) && html`<button class="gif-pause" aria-label="Pause GIF" data-tip="Pause" onClick=${() => setChosen(false)}><${Icon} name="pause" size=${16} /></button>`}
+    ${f.id && !f.spoiler && html`<button class=${`gif-star${fav ? ' on' : ''}`} aria-pressed=${String(!!fav)} aria-label=${fav ? 'Remove from your GIFs' : 'Save to your GIFs'}
       data-tip=${fav ? 'In your GIFs' : 'Save to your GIFs'} onClick=${() => toggleGifFav(f)}><${Icon} name=${fav ? 'starred' : 'star'} size=${16} /></button>`}
   </div>`;
 }
 
 // Hook for the stream's attachment list: voice messages and GIFs draw themselves.
-export function mediaFile(f, src, key) {
-  if (f.kind === 'audio') return html`<${VoicePlayer} key=${key} f=${f} />`;
-  if ((f.gif || f.kind === 'video') && src) return html`<${GifImage} key=${key} f=${f} src=${src} />`;
+// Voice messages, sound files, videos and GIFs each draw themselves.
+export function mediaFile(f, src, key, ctx = {}) {
+  if (isVoice(f)) return html`<${VoicePlayer} key=${key} f=${f} />`;
+  if (f.kind === 'audio') return html`<${AudioFile} key=${key} f=${f} src=${src} />`;
+  if (f.gif && src) return html`<${GifImage} key=${key} f=${f} src=${src} ctx=${ctx} />`;
+  if (f.kind === 'video' && src) return html`<${VideoPlayer} key=${key} f=${f} src=${src} ctx=${ctx} />`;
   return null;
+}
+
+// ---------------------------------------------------------------- Video and sound files
+// One player plays at a time, whatever kind.
+let current = null;
+const claim = (el) => { if (current && current !== el && !current.paused) current.pause(); current = el; };
+const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
+
+// Seek with the keyboard (arrows 5 s, Page keys 10%, Home, End) or by pointer.
+function Seek({ t, total, onSeek, label }) {
+  const frac = total ? Math.min(1, t / total) : 0;
+  const at = (e) => { const r = e.currentTarget.getBoundingClientRect(); onSeek(((e.clientX - r.left) / r.width) * total); };
+  const onDown = (e) => {
+    if (!total) return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    at(e);
+  };
+  const onMove = (e) => { if (e.buttons && e.currentTarget.hasPointerCapture?.(e.pointerId)) at(e); };
+  const onKey = (e) => {
+    const step = { ArrowRight: 5, ArrowUp: 5, ArrowLeft: -5, ArrowDown: -5, PageUp: total / 10, PageDown: -total / 10 }[e.key];
+    if (step) onSeek(t + step);
+    else if (e.key === 'Home') onSeek(0);
+    else if (e.key === 'End') onSeek(total);
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  return html`<div class="mp-seek" role="slider" tabindex="0" aria-label=${label} aria-valuemin="0" aria-valuemax=${Math.round(total)}
+    aria-valuenow=${Math.round(t)} aria-valuetext=${`${clock(t)} of ${clock(total)}`} onPointerDown=${onDown} onPointerMove=${onMove} onKeyDown=${onKey}>
+    <span class="mp-track"><span class="mp-fill" style=${`width:${frac * 100}%`}></span><span class="mp-knob" style=${`left:${frac * 100}%`}></span></span>
+  </div>`;
+}
+
+// Shared state for an <audio> or <video> element.
+function useMediaEl(ref, src, known) {
+  const [st, setSt] = useState({ on: false, t: 0, dur: known || 0, muted: false, vol: 1, failed: false, ready: false });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const put = (d) => setSt((s) => ({ ...s, ...d }));
+    const h = {
+      play: () => { claim(el); put({ on: true }); },
+      pause: () => put({ on: false }),
+      ended: () => put({ on: false }),
+      timeupdate: () => put({ t: el.currentTime }),
+      loadedmetadata: () => put({ ready: true, ...(Number.isFinite(el.duration) && el.duration > 0 ? { dur: el.duration } : {}) }),
+      durationchange: () => { if (Number.isFinite(el.duration) && el.duration > 0) put({ dur: el.duration }); },
+      volumechange: () => put({ muted: el.muted, vol: el.volume }),
+      error: () => put({ failed: true }),
+    };
+    for (const [k, f] of Object.entries(h)) el.addEventListener(k, f);
+    return () => { for (const [k, f] of Object.entries(h)) el.removeEventListener(k, f); el.pause(); if (current === el) current = null; };
+  }, [src]);
+  const toggle = () => { const el = ref.current; if (!el) return; if (el.paused) el.play().catch(() => setSt((s) => ({ ...s, failed: true }))); else el.pause(); };
+  const seek = (sec) => { const el = ref.current; const total = st.dur; if (!el || !total) return; el.currentTime = Math.max(0, Math.min(total - 0.05, sec)); setSt((s) => ({ ...s, t: el.currentTime })); };
+  return [st, toggle, seek];
+}
+
+// A video in a message: its first frame as the poster, then our own controls.
+export function VideoPlayer({ f, src, ctx = {} }) {
+  const box = useRef();
+  const vid = useRef();
+  const [st, toggle, seek] = useMediaEl(vid, src, f.duration);
+  const [full, setFull] = useState(false);
+  const w = f.w || 480, h = f.h || 270;
+  const name = f.alt || f.name;
+  useEffect(() => {
+    const on = () => setFull(fsEl() === box.current);
+    document.addEventListener('fullscreenchange', on);
+    return () => document.removeEventListener('fullscreenchange', on);
+  }, []);
+  const setVol = (v) => { const el = vid.current; if (!el) return; el.volume = v; el.muted = v === 0; };
+  const fullscreen = () => { if (fsEl()) document.exitFullscreen?.(); else box.current?.requestFullscreen?.().catch(() => toast('Full screen isn’t available here.')); };
+  const pip = () => {
+    const el = vid.current;
+    if (!el) return;
+    if (document.pictureInPictureElement === el) document.exitPictureInPicture?.();
+    else el.requestPictureInPicture?.().catch(() => toast('Picture in picture isn’t available here.'));
+  };
+  const onKey = (e) => {
+    if (e.target.closest('.mp-seek, input, a')) return;
+    if (e.key === ' ' || e.key === 'k') { e.preventDefault(); e.stopPropagation(); toggle(); }
+    else if (e.key === 'm') { e.preventDefault(); e.stopPropagation(); if (vid.current) vid.current.muted = !vid.current.muted; }
+    else if (e.key === 'f') { e.preventDefault(); e.stopPropagation(); fullscreen(); }
+  };
+  const total = st.dur || f.duration || 0;
+  const canPip = typeof document !== 'undefined' && document.pictureInPictureEnabled;
+  return html`<div class=${`vplayer${st.on ? ' on' : ''}${full ? ' full' : ''}${st.failed ? ' failed' : ''}`} ref=${box} role="group" aria-label=${`Video: ${name}`}
+    style=${full ? '' : `aspect-ratio:${w}/${h};width:min(100%, ${Math.min(480, Math.max(360, w))}px)`} onKeyDown=${onKey}>
+    <video ref=${vid} src=${`${src}#t=0.1`} preload="metadata" playsinline aria-label=${name} onClick=${toggle}></video>
+    ${!st.on && !st.failed && html`<button class="vp-big" aria-label=${`Play video ${name}`} onClick=${toggle}><${Icon} name="play" size=${28} /></button>`}
+    ${st.failed && html`<div class="vp-err" role="status"><${Icon} name="alert" size=${16} />This video can’t play here. Download it instead.</div>`}
+    <div class="vp-bar">
+      <button class="vp-btn" aria-label=${st.on ? 'Pause' : 'Play'} aria-pressed=${String(st.on)} data-tip=${st.on ? 'Pause' : 'Play'} data-key="K" onClick=${toggle}><${Icon} name=${st.on ? 'pause' : 'play'} size=${16} /></button>
+      <${Seek} t=${st.t} total=${total} onSeek=${seek} label="Position in video" />
+      <span class="vp-time num">${clock(st.t)} / ${clock(total)}</span>
+      <button class="vp-btn" aria-label=${st.muted ? 'Unmute' : 'Mute'} aria-pressed=${String(st.muted)} data-tip=${st.muted ? 'Unmute' : 'Mute'} data-key="M"
+        onClick=${() => { if (vid.current) vid.current.muted = !vid.current.muted; }}><${XIcon} name=${st.muted || st.vol === 0 ? 'volume-off' : 'volume'} size=${16} /></button>
+      <input class="vp-vol" type="range" min="0" max="1" step="0.05" value=${st.muted ? 0 : st.vol} aria-label="Volume" onInput=${(e) => setVol(Number(e.target.value))} />
+      ${canPip && html`<button class="vp-btn" aria-label="Picture in picture" data-tip="Picture in picture" onClick=${pip}><${XIcon} name="pip" size=${16} /></button>`}
+      <a class="vp-btn" href=${src} download=${f.name} aria-label=${`Download ${f.name}`} data-tip="Download"><${XIcon} name="download" size=${16} /></a>
+      <button class="vp-btn" aria-label=${full ? 'Leave full screen' : 'Full screen'} data-tip=${full ? 'Leave full screen' : 'Full screen'} data-key="F" onClick=${fullscreen}><${Icon} name=${full ? 'shrink' : 'expand'} size=${16} /></button>
+    </div>
+  </div>`;
+}
+
+// A sound file that isn't a voice message: its name and length, a seek bar, download.
+export function AudioFile({ f, src }) {
+  const el = useRef();
+  const [st, toggle, seek] = useMediaEl(el, src, f.duration);
+  const total = st.dur || f.duration || 0;
+  return html`<div class=${`afile${st.on ? ' on' : ''}${st.failed ? ' failed' : ''}`} role="group" aria-label=${`Sound file ${f.name}`}>
+    <button class="voice-play" aria-label=${`${st.on ? 'Pause' : 'Play'} ${f.name}`} aria-pressed=${String(st.on)} disabled=${!src} onClick=${toggle}><${Icon} name=${st.on ? 'pause' : 'play'} size=${16} /></button>
+    <div class="afile-main">
+      <div class="afile-head"><span class="afile-name trunc">${f.name}</span><span class="afile-time num">${st.failed ? 'Can’t play' : `${clock(st.t)} / ${clock(total)}`}</span></div>
+      <${Seek} t=${st.t} total=${total} onSeek=${seek} label=${`Position in ${f.name}`} />
+    </div>
+    ${src && html`<a class="ib sm" href=${src} download=${f.name} aria-label=${`Download ${f.name}`} data-tip="Download"><${XIcon} name="download" size=${16} /></a>`}
+    ${src && html`<audio ref=${el} src=${src} preload="metadata"></audio>`}
+  </div>`;
 }
 
 let gifConfig = null;
@@ -565,22 +708,26 @@ function Thumb({ src, alt, w, h, video }) {
   return reduced ? html`<span style=${ratio}><${Still} src=${src} alt=${alt} /></span>` : html`<img src=${src} alt=${alt} style=${ratio} loading="lazy" />`;
 }
 
-export function GifPicker({ conv }) {
+// query: from /giphy in the composer. It searches when the server has a GIF
+// provider, and otherwise narrows your GIFs and recent ones by name.
+export function GifPicker({ conv, query = '' }) {
   const favs = S.gifFavs || [];
   const [tab, setTab] = useState(favs.length ? 'mine' : 'recent');
   const [search, setSearch] = useState(false);
   const [recent, setRecent] = useState(null);     // null loading | [] | 'error'
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(query);
   const [found, setFound] = useState({ q: '', list: [], state: 'idle' });
   const [busy, setBusy] = useState(null);
   const input = useRef();
 
-  useEffect(() => { loadGifConfig().then((c) => setSearch(!!c.search)); }, []);
+  useEffect(() => { loadGifConfig().then((c) => { setSearch(!!c.search); if (c.search && query) setTab('search'); }); }, []);
   useEffect(() => {
     if (tab !== 'recent' || recent) return;
     call('gif.recent').then((r) => setRecent(r.gifs), () => setRecent('error'));
   }, [tab]);
-  useLayoutEffect(() => { if (tab === 'search') input.current?.focus(); }, [tab]);
+  useLayoutEffect(() => { if (tab === 'search' || query) input.current?.focus(); }, [tab]);
+  const term = q.trim().toLowerCase();
+  const named = (list) => (term ? list.filter((g) => (g.name || '').toLowerCase().includes(term)) : list);
   useEffect(() => {
     if (tab !== 'search') return undefined;
     const term = q.trim();
@@ -624,10 +771,11 @@ export function GifPicker({ conv }) {
       ${tabs.map(([id, label]) => html`<button key=${id} role="tab" aria-selected=${String(tab === id)} class=${tab === id ? 'on' : ''} onClick=${() => setTab(id)}>${label}</button>`)}
     </div>
     <div class="gif-body" role="tabpanel">
-      ${tab === 'mine' && (favs.length ? grid(favs, true) : html`<p class="gif-none">Star a GIF in any conversation to keep it here. Your GIFs follow you to every device.</p>`)}
+      ${tab !== 'search' && html`<input class="field gif-filter" ref=${input} placeholder="Find a GIF by name" aria-label="Find a GIF by name" value=${q} onInput=${(e) => setQ(e.target.value)} />`}
+      ${tab === 'mine' && (favs.length ? (named(favs).length ? grid(named(favs), true) : html`<p class="gif-none">None of your GIFs is called “${q.trim()}”.</p>`) : html`<p class="gif-none">Star a GIF in any conversation to keep it here. Your GIFs follow you to every device.</p>`)}
       ${tab === 'recent' && (recent === null ? loading
         : recent === 'error' ? html`<p class="gif-none">Recent GIFs didn’t load. <button class="btn quiet" onClick=${() => { setRecent(null); call('gif.recent').then((r) => setRecent(r.gifs), () => setRecent('error')); }}>Try again</button></p>`
-        : recent.length ? grid(recent, true) : html`<p class="gif-none">No GIFs in your places yet. When someone posts one, it shows up here.</p>`)}
+        : recent.length ? (named(recent).length ? grid(named(recent), true) : html`<p class="gif-none">No recent GIF is called “${q.trim()}”.</p>`) : html`<p class="gif-none">No GIFs in your places yet. When someone posts one, it shows up here.</p>`)}
       ${tab === 'search' && html`
         <input class="field" ref=${input} placeholder="Search GIFs" aria-label="Search GIFs" value=${q} onInput=${(e) => setQ(e.target.value)} />
         ${found.state === 'loading' ? loading

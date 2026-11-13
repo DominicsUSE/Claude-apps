@@ -102,6 +102,10 @@ function connect() {
   };
 }
 
+// For the end-to-end checks: the connection dropping without a goodbye (4000 is
+// not a clean close, so the server holds a voice place as it would for a real drop).
+export function dropSocket() { if (ws && ws.readyState === 1) ws.close(4000, 'dropped'); }
+
 export function startTransport() {
   attempt = 0;
   connect();
@@ -135,9 +139,11 @@ function place(conv, m) {
   delete S.cache[m.id];
 }
 
-export function sendMessage(conv, text, { replyTo, files } = {}) {
+export function sendMessage(conv, text, { replyTo, files, silent, replyPing } = {}) {
   const m = { id: msgId(), author: S.me, ts: Date.now(), text, state: 'sending' };
   if (replyTo) m.replyTo = replyTo;
+  if (silent) m.silent = true; // no sound, no push (server/chat.js)
+  if (replyTo && replyPing === false) m.replyPing = false; // a reply that doesn't notify its author
   if (files?.length) m.files = files;
   (S.msgs[conv] ||= []).push(m);
   delete S.ui.hold[conv];
@@ -155,8 +161,9 @@ function send(conv, m) {
   delete m.error;
   emit();
   // Voice messages also carry their length and waveform.
-  const files = (m.files || []).map((f) => ({ id: f.id, w: f.w, h: f.h, duration: f.duration, peaks: f.peaks }));
-  call('msg.send', { conv, id: m.id, text: m.text, replyTo: m.replyTo, files }).then((r) => {
+  // Recorded voice messages say so; any attachment may be a spoiler and have a description (server/chat.js).
+  const files = (m.files || []).map((f) => ({ id: f.id, w: f.w, h: f.h, duration: f.duration, peaks: f.peaks, voice: f.voice || undefined, spoiler: f.spoiler || undefined, alt: f.alt || undefined }));
+  call('msg.send', { conv, id: m.id, text: m.text, replyTo: m.replyTo, files, silent: m.silent || undefined, replyPing: m.replyPing }).then((r) => {
     place(conv, { ...r.m, files: r.m.files });
     if (isThread(conv)) S.followed[conv] = true;
     emit();
@@ -236,7 +243,7 @@ function looking(conv) {
 // Account settings (js/account.js) add quiet hours and sounds here: a filter returning false keeps it quiet.
 export const notifyFilters = [];
 function notify(conv, m) {
-  if (m.author === S.me || looking(conv) || levelOf(S, conv) === 'muted' || !needsMe(S, conv, m)) return;
+  if (m.author === S.me || m.silent || looking(conv) || levelOf(S, conv) === 'muted' || !needsMe(S, conv, m)) return; // silent: counted, never heard
   if (S.users[S.me]?.presence === 'focus') return;
   const meta = convMeta(conv);
   if (!meta) return;
@@ -318,7 +325,7 @@ const EVENTS = {
     }
     checkView();
   },
-  'house.gone'({ id }) {
+  'house.gone'({ id, deleted }) {
     const name = S.houses[id]?.name;
     const v = S.ui.view;
     const onPage = v.type === 'house' && v.id === id;
@@ -327,7 +334,8 @@ const EVENTS = {
     // A house page would fall back to the visitor preview, which a private
     // house refuses; go home instead of showing an error.
     if (onPage) S.ui.view = { type: 'home' };
-    if (wasViewing && name) toast(`You’re no longer in ${name}.`);
+    if (deleted && name) toast(`${name} was deleted by its owner.`); // server/community.js
+    else if (wasViewing && name) toast(`You’re no longer in ${name}.`);
   },
   content({ msgs, more, read, threads, users, voice, events }) {
     Object.assign(S.events, events || {});

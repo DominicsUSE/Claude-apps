@@ -12,13 +12,16 @@ import {
 import { api, call, stopTransport } from '../server.js';
 import { leaveVoice } from '../voice.js';
 import { pushSignOut } from '../push.js';
-import { PREF_RULES, CLEAR_AFTER, endOfToday } from '../lib/account.js';
+import { CLEAR_AFTER, endOfToday } from '../lib/account.js';
 import { qrMatrix, qrPath } from '../lib/qr.js';
 import { HUES, hueOf, fmtWhen, plural } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
-import { Avatar, Seg, Switch, Tile, Rich } from '../ui/kit.js';
-import { playSound, speak } from '../account.js';
+import { Seg, Switch, Tile, Rich } from '../ui/kit.js';
+import { speak } from '../account.js';
 import { MessagingSettings } from './messaging.js';
+import { AppearancePage, ProfileStyle, SoundSettings, setSettingsLayer } from './appearance.js'; // customisation (js/views/appearance.js)
+import { bindings, comboKeys, ACTIONS } from '../lib/keys.js'; // the person's shortcuts in the sheet
+import { setLook } from '../account.js';
 import { Confirm } from './modals.js';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
@@ -121,80 +124,8 @@ export const openCustomStatus = () => openModal(CustomStatus, { wide: true });
 
 // ---------- Appearance ----------
 
-// Mint (live) and rose (reactions) are kept for status, so they aren't selection tones.
-const TONES = [['coral', 'Coral (Snug)'], ['cyan', 'Cyan'], ['neutral', 'Neutral']];
-const opts = (k, labels) => PREF_RULES[k][1].map((v) => [v, labels[v] ?? String(v)]);
-
-function Slider({ id, label, min, max, step = 1, value, unit = '', onChange, hint }) {
-  const [v, setV] = useState(value);
-  useEffect(() => setV(value), [value]);
-  return html`<div class="acc-slider">
-    <input id=${id} type="range" min=${min} max=${max} step=${step} value=${v} aria-label=${label} aria-valuetext=${`${v}${unit}`}
-      aria-describedby=${hint ? `${id}-hint` : undefined}
-      onInput=${(e) => setV(Number(e.target.value))} onChange=${(e) => onChange(Number(e.target.value))} />
-    <output for=${id} class="num">${v}${unit}</output>
-  </div>`;
-}
-
-export function AccountLook() {
-  const p = S.prefs;
-  return html`
-    <h1>Appearance</h1>
-    <p class="lead">Changes apply as you make them, and follow you to every device you sign in on.</p>
-    <div class="set-head">Theme</div>
-    <${Row} label="Theme" hint="Midnight is true black, for OLED screens and dark rooms.">
-      <${Seg} label="Theme" value=${p.theme} options=${[['system', 'Match device'], ['dark', 'Dark'], ['light', 'Light'], ['midnight', 'Midnight']]} onChange=${(v) => setPref('theme', v)} />
-    <//>
-    <${Row} label="Selection tone" hint="The colour of selected text. Coral stays Snug’s own colour for what needs you." top>
-      <div class="acc-tones" role="radiogroup" aria-label="Selection tone">
-        ${TONES.map(([v, name]) => html`<button key=${v} type="button" role="radio" class=${`acc-tone t-${v}`} aria-checked=${String(p.tone === v || (v === 'neutral' && (p.tone === 'mint' || p.tone === 'rose')))} onClick=${() => setPref('tone', v)}>
-          <i aria-hidden="true"></i>${name}
-        </button>`)}
-      </div>
-    <//>
-    <div class="set-head">Messages</div>
-    <${Row} label="Message display" hint="Compact puts the name and time on the same line as the message.">
-      <${Seg} label="Message display" value=${p.display} options=${[['cozy', 'Cozy'], ['compact', 'Compact']]} onChange=${(v) => setPref('display', v)} />
-    <//>
-    <${Row} label="Pictures in compact" hint=${p.display === 'compact' ? 'Show people’s pictures beside compact messages.' : 'Only applies to Compact.'}>
-      <${Switch} on=${p.compactAvatars} label="Show pictures in compact" onChange=${(v) => setPref('compactAvatars', v)} />
-    <//>
-    <${Row} label="Spacing" hint="Room between groups of messages.">
-      <${Seg} label="Spacing" value=${p.density} options=${[['snug', 'Tight'], ['regular', 'Regular'], ['roomy', 'Roomy']]} onChange=${(v) => setPref('density', v)} />
-    <//>
-    <${Row} label="Line height" hint="Space between the lines of a message.">
-      <${Seg} label="Line height" value=${p.lineHeight} options=${[['tight', 'Tight'], ['normal', 'Normal'], ['loose', 'Loose']]} onChange=${(v) => setPref('lineHeight', v)} />
-    <//>
-    <div class="acc-preview" aria-hidden="true">
-      <div class="acc-pv"><${Avatar} user=${{ hue: 200, name: 'Sunniva Berg' }} size=${32} /><div><b>Sunniva Berg</b> <time class="msg-time">${new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', ...(p.clock === '24' ? { hourCycle: 'h23' } : p.clock === '12' ? { hourCycle: 'h12' } : {}) }).format(Date.now() - 6 * 60000)}</time>
-        <p>Swap half the kaolin for calcined. Same chemistry in the kiln, much less shrinkage on the pot.</p></div></div>
-    </div>
-    <div class="set-head">Text</div>
-    <${Row} label="Text size" hint="12 to 20 pixels. Every size in Snug scales with it.">
-      <${Slider} id="acc-font" label="Text size" min=${12} max=${20} value=${p.fontScale} unit="px" onChange=${(v) => setPref('fontScale', v)} />
-    <//>
-    <${Row} label="Zoom" hint="Makes everything bigger or smaller, like the browser’s zoom.">
-      <${Seg} label="Zoom" value=${p.zoom} options=${opts('zoom', {}).map(([v]) => [v, `${v}%`])} onChange=${(v) => setPref('zoom', v)} />
-    <//>
-    <${Row} label="Clock" hint="Times on messages and in lists.">
-      <${Seg} label="Clock" value=${p.clock} options=${[['auto', 'Match language'], ['12', '12-hour'], ['24', '24-hour']]} onChange=${(v) => setPref('clock', v)} />
-    <//>
-    <div class="set-head">Colour</div>
-    <${Row} label="Saturation" hint="Turn colours down, all the way to greys.">
-      <${Slider} id="acc-sat" label="Saturation" min=${0} max=${100} step=${5} value=${p.saturation} unit="%" onChange=${(v) => setPref('saturation', v)} />
-    <//>
-    <${Row} label="Role colours on names" hint="Names take the colour of their highest coloured role.">
-      <${Switch} on=${p.roleColors !== false} label="Role colours on names" onChange=${(v) => setPref('roleColors', v)} />
-    <//>
-    <div class="set-head">Layout</div>
-    <${Row} label="Sidebar width" hint="Or drag the sidebar’s edge.">
-      <${Slider} id="acc-side" label="Sidebar width" min=${200} max=${420} step=${4} value=${p.sidebarW} unit="px" onChange=${(v) => setPref('sidebarW', v)} />
-    <//>
-    <${Row} label="Contrast and motion" hint="On the Accessibility page.">
-      <button class="btn" onClick=${() => SettingsC && openLayer({ C: SettingsC, props: { page: 'a11y' } })}>Accessibility</button>
-    <//>
-    <${MessagingSettings} Row=${Row} />`;
-}
+// The page itself is js/views/appearance.js (themes, accent, chat display, fonts, live preview).
+export const AccountLook = AppearancePage;
 
 // ---------- Accessibility ----------
 
@@ -204,8 +135,8 @@ export function A11yPage() {
   return html`
     <h1>Accessibility</h1>
     <p class="lead">Ways to make Snug easier to read and use. They follow you to every device.</p>
-    <${Row} label="Font" hint="Atkinson Hyperlegible was drawn for low vision: letters that are easy to tell apart (I, l and 1; O and 0). Many people with dyslexia find it easier too.">
-      <${Seg} label="Font" value=${p.font} options=${[['inter', 'Inter'], ['hyperlegible', 'Atkinson Hyperlegible']]} onChange=${(v) => setPref('font', v)} />
+    <${Row} label="Font" hint="Atkinson Hyperlegible was drawn for low vision: letters that are easy to tell apart (I, l and 1; O and 0). Fonts are on the Appearance page.">
+      <button class="btn" onClick=${() => SettingsC && openLayer({ C: SettingsC, props: { page: 'look' } })}>Choose a font</button>
     <//>
     <${Row} label="Underline links" hint="Every link and link-like button gets a clear underline.">
       <${Switch} on=${p.underlineLinks} label="Underline links" onChange=${(v) => setPref('underlineLinks', v)} />
@@ -278,12 +209,7 @@ export function NotifyMore() {
   };
   return html`
     <div class="set-head">Sounds and previews</div>
-    <${Row} label="Notification sound" hint="Plays when something needs you and you’re looking elsewhere.">
-      <div class="acc-inline">
-        <${Seg} label="Notification sound" value=${p.sound} options=${[['off', 'Off'], ['soft', 'Soft'], ['bell', 'Bell'], ['pop', 'Pop'], ['drop', 'Drop']]} onChange=${(v) => { setPref('sound', v); playSound(v); }} />
-        <button class="ib" aria-label="Play the sound" data-tip="Play" disabled=${p.sound === 'off'} onClick=${() => playSound(p.sound)}><${Icon} name="play" /></button>
-      </div>
-    <//>
+    <${SoundSettings} Row=${Row} />
     <${Row} label="Show message text" hint="In desktop notifications and pop-ups. Off says only who wrote and where.">
       <${Switch} on=${p.preview !== false} label="Show message text in notifications" onChange=${(v) => setPref('preview', v)} />
     <//>
@@ -600,11 +526,12 @@ export function ProfileMore() {
     setBusy(false);
   };
   return html`
+    <${ProfileStyle} Row=${Row} />
     <div class="set-head">More about you</div>
     <${Row} label="Pronouns" hint="Shown next to your name on your profile.">
       <input class="field" style="width:260px" maxlength="40" placeholder="they/them" aria-label="Pronouns" value=${u.pronouns || ''} onChange=${(e) => updateMe({ pronouns: e.target.value.trim() })} />
     <//>
-    <${Row} label="Accent" hint="The colour across the top of your profile when there’s no banner. Every choice stays readable in every theme." top>
+    <${Row} label="Accent" hint="The colour across the top of your profile when there’s no banner and no profile colours (above). Every choice stays readable in every theme." top>
       <div class="swatches" role="radiogroup" aria-label="Profile accent">
         <button class="swatch none" role="radio" aria-checked=${String(u.accent == null)} aria-label="Same as your picture" onClick=${() => updateMe({ accent: null })}></button>
         ${HUES.map(([v, name]) => html`<button key=${v} class="swatch" role="radio" style=${`--hue:${v}`} aria-checked=${String(u.accent != null && hueOf(u.accent) === v)} aria-label=${name} onClick=${() => updateMe({ accent: v })}></button>`)}
@@ -684,10 +611,16 @@ const SHEET = [
     [[MOD, 'Shift', 'X'], 'Strikethrough'],
   ]],
 ];
+// The sheet shows the person's own bindings (Settings > Keyboard) first.
+function sheet() {
+  const b = bindings(S.prefs.keys);
+  const mine = [...new Set(ACTIONS.map((a) => a.group))].map((g) => [g, ACTIONS.filter((a) => a.group === g && b[a.id]).map((a) => [comboKeys(b[a.id], isMac), a.label])]);
+  return [...mine, ...SHEET.filter(([head]) => head !== 'Getting around'), ['Also', SHEET[0][1].filter(([, what]) => /Back to|Esc|close/i.test(what) || what.startsWith('Close'))]];
+}
 export function ShortcutsSheet() {
   return html`<h2 id="ks-title">Keyboard shortcuts</h2>
     <div class="acc-keys" aria-labelledby="ks-title">
-      ${SHEET.map(([head, rows]) => html`<section key=${head}><h3>${head}</h3><dl>
+      ${sheet().filter(([, rows]) => rows.length).map(([head, rows]) => html`<section key=${head}><h3>${head}</h3><dl>
         ${rows.map(([keys, what]) => html`<div class="acc-key-row"><dt>${keys.map((k) => html`<kbd class="kbd">${k}</kbd>`)}</dt><dd>${what}</dd></div>`)}
       </dl></section>`)}
     </div>
@@ -708,9 +641,9 @@ export const ACCOUNT_ACTIONS = [
   } },
   { label: 'Mark this place read', icon: 'check', words: 'mark read seen clear unread', run: () => (here() ? markConvRead(here()) : toast('Open a room or conversation first.')) },
   { label: 'Mark everything read', icon: 'tray', words: 'mark all read everything clear', run: () => markAllRead() },
-  { label: 'Switch to midnight theme', icon: 'eye', words: 'midnight black oled theme dark', run: () => setPref('theme', 'midnight') },
-  { label: 'Match the device’s theme', icon: 'eye', words: 'system device auto theme', run: () => setPref('theme', 'system') },
-  { label: 'Toggle theme', icon: 'eye', words: 'toggle theme switch dark light', run: () => setPref('theme', (S.prefs.theme === 'light' || (S.prefs.theme === 'system' && !matchMedia('(prefers-color-scheme: dark)').matches)) ? 'dark' : 'light') },
+  { label: 'Switch to midnight theme', icon: 'eye', words: 'midnight black oled theme dark', run: () => setLook('theme', 'midnight') },
+  { label: 'Match the device’s theme', icon: 'eye', words: 'system device auto theme', run: () => setLook('theme', 'system') },
+  { label: 'Toggle theme', icon: 'eye', words: 'toggle theme switch dark light', run: () => setLook('theme', (S.prefs.theme === 'light' || (S.prefs.theme === 'system' && !matchMedia('(prefers-color-scheme: dark)').matches)) ? 'dark' : 'light') },
   { label: 'Set presence to Around', icon: 'user', words: 'around available online present', run: () => setPresence('around') },
   { label: 'Set presence to Away', icon: 'clock', words: 'away idle afk', run: () => setPresence('away') },
   { label: 'Go invisible', icon: 'eye', words: 'invisible offline hide appear offline', run: () => setPresence('offline') },
@@ -742,30 +675,31 @@ export function SidebarGrip() {
     if (!drag) return;
     const next = clamp(drag.w + e.clientX - drag.x);
     setDrag(null);
-    setPref('sidebarW', next);
+    setLook('sidebarW', next);
   };
   const key = (e) => {
     const step = e.shiftKey ? 32 : 8;
-    if (e.key === 'ArrowLeft') { e.preventDefault(); setPref('sidebarW', clamp(w - step)); }
-    if (e.key === 'ArrowRight') { e.preventDefault(); setPref('sidebarW', clamp(w + step)); }
-    if (e.key === 'Home') { e.preventDefault(); setPref('sidebarW', 264); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); setLook('sidebarW', clamp(w - step)); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); setLook('sidebarW', clamp(w + step)); }
+    if (e.key === 'Home') { e.preventDefault(); setLook('sidebarW', 264); }
   };
   return html`<div class=${`ctx-grip${drag ? ' dragging' : ''}`} role="separator" aria-orientation="vertical" aria-label="Sidebar width"
     aria-valuemin="200" aria-valuemax="420" aria-valuenow=${w} tabindex="0" data-tip="Drag to resize"
-    onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} onKeyDown=${key} onDblClick=${() => setPref('sidebarW', 264)}></div>`;
+    onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} onKeyDown=${key} onDblClick=${() => setLook('sidebarW', 264)}></div>`;
 }
 
 // ---------- Registration (called once by js/views/settings.js) ----------
 
-export function registerAccountPages({ PAGES, VIEWS, Row: R, signOut, Settings, KEYS }) {
+export function registerAccountPages({ PAGES, VIEWS, Row: R, signOut, Settings }) {
   if (R) Row = R;
   baseSignOut = signOut;
   SettingsC = Settings;
   const at = (id) => PAGES.findIndex((p) => p.id === id);
   // Appearance gets the full set; Accessibility and Streamer mode follow it.
-  VIEWS.look = AccountLook;
+  VIEWS.look = AppearancePage; // js/views/appearance.js
+  setSettingsLayer(Settings);
   const look = PAGES[at('look')];
-  if (look) look.words = `${look.words} midnight black oled tone accent zoom font scale line height saturation 24 hour clock role colours sidebar width compact cozy`;
+  if (look) look.words = `${look.words} midnight black oled tone accent zoom font scale line height saturation 24 hour clock role colours sidebar width compact cozy ash slate moss paper sepia custom theme builder import export preview emoji gif reactions spoilers serif mono code font background pattern device`;
   PAGES.splice(at('look') + 1, 0,
     { id: 'a11y', label: 'Accessibility', icon: 'eye', words: 'accessibility dyslexia dyslexic font hyperlegible underline links contrast focus ring motion speech read aloud tts screen reader keyboard' },
     { id: 'streamer', label: 'Streamer mode', icon: 'screen', words: 'streamer stream hide handles invite codes privacy screen share' });
@@ -775,17 +709,16 @@ export function registerAccountPages({ PAGES, VIEWS, Row: R, signOut, Settings, 
   const BaseNotify = VIEWS.notify;
   VIEWS.notify = () => html`<${BaseNotify} /><${NotifyMore} />`;
   const notify = PAGES[at('notify')];
-  if (notify) notify.words = `${notify.words} sound sounds preview quiet hours schedule keywords highlight words everyone here idle away`;
+  if (notify) notify.words = `${notify.words} sound sounds pack volume preview quiet hours schedule keywords highlight words everyone here idle away`;
   // Profile: the original page, then pronouns, accent, banner, status.
   const BaseProfile = VIEWS.profile;
   VIEWS.profile = () => html`<${BaseProfile} /><${ProfileMore} />`;
   const prof = PAGES[at('profile')];
-  if (prof) prof.words = `${prof.words} pronouns banner accent status`;
+  if (prof) prof.words = `${prof.words} pronouns banner accent status picture photo upload avatar decoration name style profile colours`;
   // Account becomes Account and security; Your data after it.
   VIEWS.account = SecurityPage;
   const account = PAGES[at('account')];
   if (account) { account.label = 'Account and security'; account.words = `${account.words} two factor 2fa authenticator totp backup codes devices sessions`; }
   PAGES.splice(at('account') + 1, 0, { id: 'data', label: 'Your data', icon: 'file', words: 'data export download delete deactivate close account gdpr' });
   VIEWS.data = DataPage;
-  KEYS?.push([[MOD, '/'], 'Keyboard shortcuts sheet'], [[MOD, 'Shift', 'S'], 'Streamer mode on or off']);
 }

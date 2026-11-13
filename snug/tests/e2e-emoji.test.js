@@ -210,10 +210,10 @@ test('reactions with a custom emoji sync both ways', async () => {
   await chip.click();
   await msg(robin, 'Look at this').locator('.rx.mine:has-text("2")').waitFor();
   await msg(priya, 'Look at this').locator('.rx.mine:has-text("2")').waitFor();
-  // It's now among Robin's recent emoji.
+  // It's now among Robin's frequently used emoji (js/views/emoji.js).
   await target.hover();
   await target.locator('.msg-actions [aria-label="Add a reaction"]').click();
-  await robin.locator('.picker .picker-sec:has-text("Recent") + .picker-custom[aria-label="party (Kiln & Co.)"]').waitFor();
+  await robin.locator('.picker .picker-sec:has-text("Frequently used") + .picker-custom[aria-label="party (Kiln & Co.)"]').waitFor();
   await robin.keyboard.press('Escape');
 });
 

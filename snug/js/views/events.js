@@ -3,8 +3,11 @@
 // the dialog that plans one.
 import { html, useEffect, useState } from '../../vendor/preact-htm.js';
 import {
-  S, go, openConv, openMenu, openModal, closeModal, createEvent, rsvpEvent, deleteEvent, convMeta, toast,
+  S, go, openConv, openMenu, openModal, closeModal, deleteEvent, convMeta, toast, emit,
 } from '../store.js';
+import { call } from '../server.js';
+import { LOCATION_MAX, COVER_TYPES, COVER_BYTES } from '../lib/community.js'; // editing, location, cover, interested (server/community.js)
+import { safeLink } from '../lib/social.js';
 import { can } from '../lib/perms.js';
 import { roomIds } from '../lib/attention.js';
 import { eventState, LIMITS } from '../lib/social.js';
@@ -25,10 +28,28 @@ export function useNow(ms = 30_000) {
   return Date.now();
 }
 
-// The backend lets people who may post notices or manage rooms plan events.
-export const canPlan = (houseId) => !!S.houses[houseId]?.joined && (can(S, houseId, 'announce') || can(S, houseId, 'rooms'));
+// Roles with "Plan events" plan, edit and cancel any event; anyone edits or cancels their own.
+export const canPlan = (houseId) => !!S.houses[houseId]?.joined && can(S, houseId, 'events');
 const plannable = () => (S.houseOrder || []).filter(canPlan);
 const canCancel = (e) => e.by === S.me || canPlan(e.house);
+const errText = (e) => (e?.offline ? 'You’re offline. Try again when you’re back.' : e?.message || 'That didn’t work. Try again.');
+
+// Going or interested, counted separately; the same answer again takes it back.
+export function answer(e, kind) {
+  const was = e.going?.includes(S.me) ? 'going' : e.interested?.includes(S.me) ? 'interested' : null;
+  const next = was === kind ? null : kind;
+  const ev = S.events[e.id];
+  if (ev) {
+    ev.going = (ev.going || []).filter((u) => u !== S.me);
+    ev.interested = (ev.interested || []).filter((u) => u !== S.me);
+    if (next) ev[next] = [...ev[next], S.me];
+    emit();
+  }
+  return call('event.rsvp', { event: e.id, kind: next }).then(() => {
+    if (next === 'going') toast(`You’re going to ${e.title}`);
+    else if (next === 'interested') toast(`You’ll get a reminder before ${e.title}`);
+  }, (err) => toast(errText(err)));
+}
 
 // Dates and times in the person's own locale.
 const monFmt = new Intl.DateTimeFormat(undefined, { month: 'short' });
@@ -77,6 +98,7 @@ function eventMenu(e, anchor) {
       e.room && convMeta(e.room) && { label: `Open ${S.rooms[e.room].name}`, icon: S.rooms[e.room].kind === 'voice' ? 'voice' : 'room', onSelect: () => openConv(e.room) },
       { label: `Events in ${S.houses[e.house].name}`, icon: 'calendar', onSelect: () => go({ type: 'house', id: e.house, about: true, events: true }) },
       canCancel(e) && { sep: true },
+      canCancel(e) && { label: 'Edit event', icon: 'edit', onSelect: () => openModal(CreateEvent, { house: e.house, event: e.id }) },
       canCancel(e) && {
         label: 'Cancel event', icon: 'trash', danger: true,
         onSelect: () => openModal(Confirm, {
@@ -99,6 +121,9 @@ export function EventRow({ ev, compact, showHouse }) {
   const goingIds = member ? e.going : (e.friendsGoing || []);
   const count = member ? e.going.length : (e.goingCount ?? goingIds.length);
   const going = member && e.going.includes(S.me);
+  const interested = member && (e.interested || []).includes(S.me);
+  const keen = member ? (e.interested || []).length : 0;
+  const link = e.location && safeLink(e.location);
   const faces = goingIds.map((id) => S.users[id]).filter(Boolean);
   const room = e.room && S.rooms[e.room];
   const roomName = room?.name || e.roomName;
@@ -108,10 +133,9 @@ export function EventRow({ ev, compact, showHouse }) {
     if (room && convMeta(e.room)) openConv(e.room);
     else go({ type: 'house', id: e.house, about: true, events: true });
   };
-  const toggle = () => {
-    rsvpEvent(e.id, !going).then((r) => { if (r && !going) toast(`You’re going to ${e.title}`); });
-  };
-  return html`<div class=${`ev-row ${st}${compact ? ' compact' : ''}${going ? ' going' : ''}`}>
+  const toggle = () => answer(e, 'going');
+  return html`<div class=${`ev-row ${st}${compact ? ' compact' : ''}${going ? ' going' : ''}${e.cover && !compact && member ? ' has-cover' : ''}`}>
+    ${e.cover && !compact && member && html`<div class="ev-cover" aria-hidden="true"><img src=${`/api/eventcovers/${e.cover}`} alt="" loading="lazy" onError=${(x) => { x.currentTarget.parentNode.hidden = true; }} /></div>`}
     <${DateBlock} ts=${e.starts} state=${st} />
     <div class="ev-main">
       <div class="ev-line">
@@ -123,15 +147,23 @@ export function EventRow({ ev, compact, showHouse }) {
       <div class="ev-meta">
         <span class="num">${whenText(e, now)}</span>
         ${roomName && html`<span class="ev-where">${room ? html`<${RoomIcon} kind=${room.kind} size=${14} />` : html`<${Icon} name="room" size=${14} />`}${roomName}</span>`}
+        ${e.location && html`<span class="ev-where ev-loc">${link
+          ? html`<a href=${link} target="_blank" rel="noopener noreferrer nofollow"><${Icon} name="external" size=${14} />${e.location.replace(/^https:\/\/(www\.)?/, '').slice(0, 60)}</a>`
+          : html`<${Icon} name="compass" size=${14} />${e.location}`}</span>`}
         ${showHouse && house && html`<span class="ev-where"><${Tile} house=${house} />${house.name}</span>`}
       </div>
       ${!compact && e.about && html`<p class="ev-about">${e.about}</p>`}
     </div>
     <div class="ev-side">
-      ${count > 0 && html`<span class="ev-going" aria-label=${`${count} going`}>
+      ${count > 0 && html`<span class="ev-going" aria-label=${`${count} going${keen ? `, ${keen} interested` : ''}`}>
         ${faces.length > 0 && html`<${Stack} users=${faces} max=${3} size=${20} />`}
         <span class="num">${count} going</span>
       </span>`}
+      ${!count && keen > 0 && html`<span class="ev-going num">${keen} interested</span>`}
+      ${count > 0 && keen > 0 && html`<span class="ev-keen num faint">${keen} interested</span>`}
+      ${member && st !== 'past' && !going && html`<button class=${`btn ev-keen-btn${interested ? ' on' : ''}`} aria-pressed=${String(interested)}
+        aria-label=${interested ? `Interested in ${e.title}. Press to take it back` : `Say you’re interested in ${e.title}`}
+        onClick=${() => answer(e, 'interested')}><${Icon} name=${interested ? 'check' : 'star'} size=${16} />Interested</button>`}
       ${member && st !== 'past' && html`<button class=${`btn ev-rsvp${going ? ' on' : ''}`} aria-pressed=${String(going)}
         aria-label=${going ? `Going to ${e.title}. Press to say you can’t make it` : `Say you’re going to ${e.title}`}
         data-tip=${going ? 'You’re going. Press to change' : null} onClick=${toggle}>
@@ -196,18 +228,23 @@ function Err({ id, text }) {
   return text ? html`<div class="err" id=${id} role="alert"><${Icon} name="alert" size=${14} />${text}</div>` : null;
 }
 
-export function CreateEvent({ house }) {
-  const choices = plannable();
-  const [houseId, setHouseId] = useState(house && canPlan(house) ? house : choices[0]);
-  const next = new Date(Date.now() + 60 * MIN);
-  next.setMinutes(0, 0, 0);
-  const [title, setTitle] = useState('');
-  const [about, setAbout] = useState('');
+// Plan an event, or (with `event`) change one: its author or a role that plans events.
+export function CreateEvent({ house, event }) {
+  const old = event ? S.events[event] : null;
+  const choices = old ? [old.house] : plannable();
+  const [houseId, setHouseId] = useState(old ? old.house : house && canPlan(house) ? house : choices[0]);
+  const next = old ? new Date(old.starts) : new Date(Date.now() + 60 * MIN);
+  if (!old) next.setMinutes(0, 0, 0);
+  const [title, setTitle] = useState(old?.title || '');
+  const [about, setAbout] = useState(old?.about || '');
   const [date, setDate] = useState(dateValue(next));
   const [time, setTime] = useState(timeValue(next));
-  const [hasEnd, setHasEnd] = useState(false);
-  const [endTime, setEndTime] = useState(timeValue(new Date(next.getTime() + 2 * 60 * MIN)));
-  const [room, setRoom] = useState('');
+  const [hasEnd, setHasEnd] = useState(!!old?.ends);
+  const [endTime, setEndTime] = useState(timeValue(new Date(old?.ends || next.getTime() + 2 * 60 * MIN)));
+  const [room, setRoom] = useState(old?.room || '');
+  const [where, setWhere] = useState(old?.location || '');
+  const [cover, setCover] = useState(old?.cover || null);
+  const [coverBusy, setCoverBusy] = useState(false);
   const [errs, setErrs] = useState({});
   const [busy, setBusy] = useState(false);
 
@@ -219,8 +256,11 @@ export function CreateEvent({ house }) {
   const h = S.houses[houseId];
   const rooms = roomIds(S, houseId).map((id) => S.rooms[id]);
 
-  const starts = at(date, time);
+  // Editing: the same minute as before keeps the stored time exactly, so an event already under way stays editable.
+  const picked = at(date, time);
+  const starts = old && Math.floor(picked / MIN) === Math.floor(old.starts / MIN) ? old.starts : picked;
   let ends = hasEnd ? at(date, endTime) : null;
+  if (old?.ends && ends != null && Math.floor(ends / MIN) === Math.floor(old.ends / MIN)) ends = old.ends;
   const nextDay = hasEnd && ends <= starts;
   if (nextDay) ends += DAY;
 
@@ -231,11 +271,29 @@ export function CreateEvent({ house }) {
     else if (t.length > LIMITS.eventTitle) out.title = `Keep the name under ${LIMITS.eventTitle} characters.`;
     if (about.length > LIMITS.eventAbout) out.about = `That’s ${about.length - LIMITS.eventAbout} characters too long.`;
     if (!Number.isFinite(starts)) out.when = 'Pick a day and a start time.';
-    else if (starts < Date.now() - 5 * MIN) out.when = 'That time has already passed. Pick a later one.';
+    else if ((!old || starts !== old.starts) && starts < Date.now() - 5 * MIN) out.when = 'That time has already passed. Pick a later one.';
     else if (starts > Date.now() + 365 * DAY) out.when = 'Events can be planned up to a year ahead.';
     if (hasEnd && !Number.isFinite(ends)) out.end = 'Pick an end time, or remove it.';
+    if (where.trim().length > LOCATION_MAX) out.where = `Keep it under ${LOCATION_MAX} characters.`;
+    else if (/^[a-z][a-z0-9+.-]*:|^www\./i.test(where.trim()) && !safeLink(where.trim())) out.where = 'A link needs to be a full https:// address.';
     return out;
   };
+  // A cover for an event that exists: PNG, JPEG or WebP, up to 2 MB, type from the bytes on the server.
+  const pickCover = async (ev) => {
+    const file = ev.target.files?.[0];
+    ev.target.value = '';
+    if (!file || !old) return;
+    if (file.size > COVER_BYTES) { setErrs({ ...errs, cover: 'Covers can be up to 2 MB.' }); return; }
+    setCoverBusy(true);
+    try {
+      const res = await fetch(`/api/files?eventCover=${encodeURIComponent(old.id)}`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'That cover didn’t upload.');
+      setCover(data.id); setErrs({ ...errs, cover: '' });
+    } catch (x) { setErrs({ ...errs, cover: x.message === 'Failed to fetch' ? 'Can’t reach Snug. Try again.' : x.message }); }
+    setCoverBusy(false);
+  };
+  const dropCover = () => call('event.cover', { event: old.id, cover: null }).then(() => setCover(null), (x) => setErrs({ ...errs, cover: errText(x) }));
   const set = (f, key) => (e) => { f(e.target.value); if (errs[key] || errs.form) setErrs({ ...errs, [key]: '', form: '' }); };
 
   const submit = (e) => {
@@ -243,22 +301,25 @@ export function CreateEvent({ house }) {
     const found = check();
     if (Object.values(found).some(Boolean)) {
       setErrs(found);
-      const first = ['title', 'about', 'when', 'end'].find((k) => found[k]);
+      const first = ['title', 'about', 'when', 'end', 'where'].find((k) => found[k]);
       document.getElementById(`ev-${first}`)?.focus();
       return;
     }
     setBusy(true);
     const name = title.trim();
-    createEvent(houseId, { title: name, about: about.trim(), starts, ends: hasEnd ? ends : null, room: room || null }).then((r) => {
-      if (r?.event) toast(`${name} is on the calendar`);
-      else { setBusy(false); setErrs({ form: 'It didn’t save. Check the details and try again.' }); }
-    });
+    const d = { title: name, about: about.trim(), starts, ends: hasEnd ? ends : null, room: room || null, location: where.trim() || null };
+    const req = old ? call('event.update', { event: old.id, ...d }) : call('event.create', { house: houseId, ...d });
+    req.then((r) => {
+      if (r?.event) S.events[r.event.id] = r.event;
+      closeModal();
+      toast(old ? `${name} is updated` : `${name} is on the calendar`);
+    }, (x) => { setBusy(false); setErrs({ form: errText(x) }); });
   };
 
   return html`<form class="form ev-form" onSubmit=${submit} novalidate>
     <div>
-      <h2>Plan an event</h2>
-      <p class="modal-lead" style="margin:0">${choices.length > 1 && !house ? 'Pick the house it’s in.' : `Everyone in ${h.name} can see it and say they’re going.`}</p>
+      <h2>${old ? `Edit ${old.title}` : 'Plan an event'}</h2>
+      <p class="modal-lead" style="margin:0">${old ? `Everyone in ${h.name} sees the change at once.` : choices.length > 1 && !house ? 'Pick the house it’s in.' : `Everyone in ${h.name} can see it and say they’re going.`}</p>
     </div>
     ${choices.length > 1 && !house && html`<div>
       <label class="label" for="ev-house">House</label>
@@ -304,10 +365,25 @@ export function CreateEvent({ house }) {
       </select>
       <div class="hint">People can jump straight there when it starts.</div>
     </div>
+    <div>
+      <label class="label" for="ev-where">Somewhere else <span class="faint">(optional)</span></label>
+      <input id="ev-where" class="field" maxlength=${LOCATION_MAX + 20} placeholder="The studio on Elm St, or an https:// link" value=${where}
+        aria-invalid=${String(!!errs.where)} aria-describedby="ev-where-msg" onInput=${set(setWhere, 'where')} />
+      ${errs.where ? html`<${Err} id="ev-where-msg" text=${errs.where} />` : html`<div class="hint" id="ev-where-msg">A place or a link. Links show as text; Snug never opens them for you.</div>`}
+    </div>
+    ${old && html`<div>
+      <span class="label">Cover <span class="faint">(optional)</span></span>
+      <div class="ev-cover-edit">
+        ${cover ? html`<img src=${`/api/eventcovers/${cover}`} alt="The event’s cover" />` : html`<span class="ev-cover-none">No cover</span>`}
+        <label class="btn"><input type="file" accept=${COVER_TYPES.join(',')} hidden onChange=${pickCover} />${coverBusy ? 'Uploading…' : cover ? 'Change' : 'Upload'}</label>
+        ${cover && html`<button type="button" class="btn quiet" onClick=${dropCover}>Remove</button>`}
+      </div>
+      ${errs.cover ? html`<${Err} text=${errs.cover} />` : html`<div class="hint">PNG, JPEG or WebP, up to 2 MB. Only people in ${h.name} see it.</div>`}
+    </div>`}
     <${Err} text=${errs.form} />
     <div class="modal-foot" style="margin-top:0">
       <button type="button" class="btn" onClick=${closeModal}>Cancel</button>
-      <button type="submit" class="btn primary" disabled=${busy} aria-busy=${String(busy)}>${busy ? 'Planning…' : 'Create event'}</button>
+      <button type="submit" class="btn primary" disabled=${busy} aria-busy=${String(busy)}>${busy ? (old ? 'Saving…' : 'Planning…') : old ? 'Save changes' : 'Create event'}</button>
     </div>
   </form>`;
 }

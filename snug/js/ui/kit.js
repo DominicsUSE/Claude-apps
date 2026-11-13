@@ -1,11 +1,13 @@
 // Shared building blocks. A person, a house, a room and a piece of message
 // text look and behave the same wherever they appear.
-import { html } from '../../vendor/preact-htm.js';
+import { html, useState } from '../../vendor/preact-htm.js';
 import { S, voiceRoomOf, toast } from '../store.js';
 import { initials, hueOf } from '../lib/util.js';
 import { parse } from '../lib/format.js';
 import { Icon } from './icons.js';
 import { CustomEmoji } from '../views/emoji-custom.js'; // custom emoji per house
+import { Still, reducedMotion } from '../views/media.js'; // a still frame for animated pictures
+import { profileInk } from '../lib/colour.js'; // profile colours keep their text readable
 import { CodeBlock, renderExtra } from '../views/rich.js'; // headings, quotes, lists, spoilers, masked links, timestamps, code blocks
 
 export const PRESENCE = {
@@ -27,15 +29,57 @@ export function Pres({ user, inline }) {
   return html`<i class=${`pres ${presenceOf(user)}${inline ? ' inline' : ''}`} role="img" aria-label=${presenceLabel(user)}></i>`;
 }
 
-export function Avatar({ user, size, presence, speaking, dim, onClick }) {
-  const cls = `avatar${speaking ? ' speaking' : ''}${dim ? ' dim' : ''}`;
+// Decorations drawn around the circle (people's own choice, js/lib/theme.js).
+const star = (x, y, r) => `M${x} ${y - r}L${x + r / 4} ${y - r / 4}L${x + r} ${y}L${x + r / 4} ${y + r / 4}L${x} ${y + r}L${x - r / 4} ${y + r / 4}L${x - r} ${y}L${x - r / 4} ${y - r / 4}Z`;
+const DECO_ART = {
+  leaves: html`<svg viewBox="0 0 100 100" aria-hidden="true"><path fill="currentColor" d="M16 84c-10-9-11-25-2-33 6 11 7 23 2 33Zm68 0c10-9 11-25 2-33-6 11-7 23-2 33ZM26 92c-4-7-1-15 6-18 1 7-1 14-6 18Zm48 0c4-7 1-15-6-18-1 7 1 14 6 18Z"/></svg>`,
+  stars: html`<svg viewBox="0 0 100 100" aria-hidden="true"><path fill="currentColor" d=${`${star(12, 18, 8)}${star(90, 12, 6)}${star(92, 80, 7)}`}/></svg>`,
+};
+export function Decoration({ user }) {
+  if (!user?.decoration) return null;
+  return html`<i class=${`deco ${user.decoration}`} aria-hidden="true">${DECO_ART[user.decoration] || null}</i>`;
+}
+
+export function Avatar({ user, size, presence, speaking, dim, onClick, deco = true }) {
+  const [hover, setHover] = useState(false);
+  const decorated = deco && user.decoration && (size ?? 40) >= 32;
+  const cls = `avatar${speaking ? ' speaking' : ''}${dim ? ' dim' : ''}${decorated ? ' decorated' : ''}`;
   const style = `--hue:${hueOf(user.hue)}${size ? `;--sz:${size}px` : ''}`;
-  const face = user.img ? html`<img src=${user.img} alt="" />`
+  // An animated picture is still until hovered, and always still with reduced motion.
+  // A picture that can't load (removed, or its owner blocked you) falls back to the initials.
+  const [broken, setBroken] = useState(null);
+  const img = user.img && broken !== user.img ? user.img : null;
+  const gone = () => setBroken(user.img);
+  const still = img && user.imgAnim && (!hover || reducedMotion());
+  const face = img ? (still ? html`<${Still} src=${img} alt="" onError=${gone} />` : html`<img src=${img} alt="" onError=${gone} />`)
     : user.emoji ? html`<span class="emo">${user.emoji}</span>`
       : html`<span class="ini">${initials(user.name)[0]}<span class="ini2">${initials(user.name).slice(1)}</span></span>`;
   const mark = presence ? html`<${Pres} user=${user} />` : null;
-  if (onClick) return html`<button class=${cls} style=${style} onClick=${onClick} aria-label=${`${user.name}, open profile`}>${face}${mark}</button>`;
-  return html`<span class=${cls} style=${style}>${face}${mark}</span>`;
+  const extra = { 'data-deco-hue': decorated && user.decorationHue != null ? String(user.decorationHue) : undefined };
+  const hov = user.imgAnim ? { onPointerEnter: () => setHover(true), onPointerLeave: () => setHover(false), onFocus: () => setHover(true), onBlur: () => setHover(false) } : {};
+  const ring = decorated ? html`<${Decoration} user=${user} />` : null;
+  if (onClick) return html`<button class=${cls} style=${style} ...${extra} ...${hov} onClick=${onClick} aria-label=${`${user.name}, open profile`}>${face}${ring}${mark}</button>`;
+  return html`<span class=${cls} style=${style} ...${extra} ...${hov}>${face}${ring}${mark}</span>`;
+}
+
+// A person's name style, as data attributes (css/appearance.css draws them;
+// a viewer can turn them off, and role colours win while shown).
+export function nameAttrs(u) {
+  const ns = u?.nameStyle;
+  if (!ns) return {};
+  return {
+    'data-ns-font': ns.font && ns.font !== 'inter' ? ns.font : undefined,
+    'data-ns-weight': ns.weight === 'bold' ? 'bold' : undefined,
+    'data-ns-hue': ns.hue != null ? String(ns.hue) : undefined,
+  };
+}
+// Profile colours on a card: a class and the custom properties, or nothing.
+export function profileColours(u) {
+  const pc = u?.profileColors;
+  if (!Array.isArray(pc) || pc.length !== 2) return { cls: '', style: '' };
+  const a = profileInk(pc[0]), b = profileInk(pc[1]);
+  if (!a || !b) return { cls: '', style: '' };
+  return { cls: ' has-pcolors', style: `;--pc-1:${pc[0]};--pc-2:${pc[1]};--pc-ink-1:${a.ink};--pc-ink-2:${b.ink}` };
 }
 
 export function Stack({ users, max = 3, size }) {
@@ -43,7 +87,10 @@ export function Stack({ users, max = 3, size }) {
   return html`<span class="stack">${shown.map((u) => html`<${Avatar} key=${u.id} user=${u} size=${size} speaking=${!!S.speaking[u.id]} />`)}</span>`;
 }
 
-export const Tile = ({ house, lg }) => html`<span class=${`tile${lg ? ' lg' : ''}`} style=${`--hue:${hueOf(house.hue)}`}>${house.mark}</span>`;
+// A house's tile: its icon clipped to the arch when it has one (server/community.js),
+// over the mark and hue, which show if the picture can't load.
+export const Tile = ({ house, lg, invite }) => html`<span class=${`tile${lg ? ' lg' : ''}${house.icon ? ' pic' : ''}`} style=${`--hue:${hueOf(house.hue)}`}>${house.mark}${house.icon
+  ? html`<img src=${`/api/housepics/${house.icon}${invite ? `?invite=${encodeURIComponent(invite)}` : ''}`} alt="" loading="lazy" decoding="async" onError=${(e) => e.currentTarget.remove()} />` : null}</span>`;
 
 export const KIND_ICON = { text: 'room', voice: 'voice', news: 'news', thread: 'thread', forum: 'forum', stage: 'stage' }; // forum, stage: js/views/places.js
 export const RoomIcon = ({ kind, size }) => html`<${Icon} name=${KIND_ICON[kind] || 'room'} size=${size} />`;

@@ -137,6 +137,12 @@
   --brand-soft: #3A211E;
   --brand-ink: #FF7A68;            /* coral as text, on bg-1/2 and brand-soft */
   --on-brand: #111211;             /* text on a coral fill */
+  /* Accent: the person's choice for controls (primary button, selected edge,
+     switches, active tab). Coral by default; js/account.js sets these inline
+     from accentRamp (js/lib/colour.js) when another accent is picked, so
+     fills keep 3:1 on bg-1 and accent text 4.5:1. --brand stays coral. */
+  --accent: var(--brand); --accent-hover: var(--brand-hover); --accent-press: var(--brand-press);
+  --accent-soft: var(--brand-soft); --accent-ink: var(--brand-ink); --on-accent: var(--on-brand);
 
   --mint: #58C7A5;  --mint-soft: #18332B;
   --amber: #E8B65A; --amber-soft: #332A19;
@@ -172,7 +178,7 @@
   :root:not([data-theme="dark"]) {
     color-scheme: light;
     --bg-0: #E9E6E1; --bg-1: #FBFAF8; --bg-2: #F3F1ED; --bg-3: #ECE9E4; --bg-4: #E2DED8;
-    --text-1: #1A1817; --text-2: #57534E; --text-3: #6F6A64; --text-disabled: #A39E97; --text-inverse: #FBFAF8;
+    --text-1: #1A1817; --text-2: #57534E; --text-3: #6C6762; --text-disabled: #A39E97; --text-inverse: #FBFAF8;
     --line: #E2DED8; --line-strong: #CFCAC3; --line-subtle: #ECE9E4;
     --brand: #E04B38; --brand-hover: #EC5A46; --brand-press: #C93F2E; --brand-soft: #FBE3DE; --brand-ink: #B5402F; --on-brand: #111211;
     --mint: #1F8F6E; --mint-soft: color-mix(in srgb, #1F8F6E 12%, #FBFAF8);
@@ -198,7 +204,7 @@
 :root[data-theme="light"] {
   color-scheme: light;
   --bg-0: #E9E6E1; --bg-1: #FBFAF8; --bg-2: #F3F1ED; --bg-3: #ECE9E4; --bg-4: #E2DED8;
-  --text-1: #1A1817; --text-2: #57534E; --text-3: #6F6A64; --text-disabled: #A39E97; --text-inverse: #FBFAF8;
+  --text-1: #1A1817; --text-2: #57534E; --text-3: #6C6762; --text-disabled: #A39E97; --text-inverse: #FBFAF8;
   --line: #E2DED8; --line-strong: #CFCAC3; --line-subtle: #ECE9E4;
   --brand: #E04B38; --brand-hover: #EC5A46; --brand-press: #C93F2E; --brand-soft: #FBE3DE; --brand-ink: #B5402F; --on-brand: #111211;
   --mint: #1F8F6E; --mint-soft: color-mix(in srgb, #1F8F6E 12%, #FBFAF8);

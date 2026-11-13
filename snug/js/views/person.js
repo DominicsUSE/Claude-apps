@@ -1,12 +1,14 @@
 // A person's corner: the full profile page ({ type: 'person', id }).
 // A 64px face and a bold "now" line (no banner), who they are, what they
 // are doing, what they care about, and what you have in common.
-import { html } from '../../vendor/preact-htm.js';
+import { html, useEffect, useState } from '../../vendor/preact-htm.js';
+import { call } from '../server.js';
 import { S, back, go, startDm, openConv, convMeta } from '../store.js';
 import { mutualHouses, friendState, upcomingEvents, eventState } from '../lib/social.js';
 import { hueOf, plural, DAY } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Pres, Empty, Tile } from '../ui/kit.js';
+import { nameAttrs, profileColours } from '../ui/kit.js'; // name styles and profile colours (css/appearance.css)
 import { EventRow } from './events.js';
 import {
   doingOf, FavButton, FriendButton, canMessage, Interests, Links, memberSince, editProfile, friendMenu, lastWrote, ago,
@@ -41,6 +43,31 @@ function PlaceTiles({ ids }) {
       <${Tile} house=${S.houses[h]} lg /><span class="trunc">${S.houses[h].name}</span>
     </button></li>`)}
   </ul>`;
+}
+
+// Friends you have in common (friends.mutual, server/inbox.js): a count that
+// opens into their circles. The server answers only for people you may see.
+function MutualFriends({ id, fallback }) {
+  const [ids, setIds] = useState(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    let live = true;
+    setIds(null); setOpen(false);
+    call('friends.mutual', { user: id }).then((r) => live && setIds(r.users), () => live && setIds(undefined));
+    return () => { live = false; };
+  }, [id]);
+  if (ids === undefined) return fallback > 0 ? html`<p class="pp-fact"><${Icon} name="people" size=${16} />${plural(fallback, 'mutual friend')}</p>` : null;
+  if (!ids || !ids.length) return null;
+  const people = ids.map((x) => S.users[x]).filter(Boolean);
+  return html`<div class="pp-mutual">
+    <button class="pp-fact pp-mutual-toggle" aria-expanded=${String(open)} aria-controls="pp-mutual-list" onClick=${() => setOpen(!open)}>
+      <${Icon} name="people" size=${16} />${plural(ids.length, 'mutual friend')}<span class=${`pp-mutual-chev${open ? ' open' : ''}`} aria-hidden="true"><${Icon} name="chev-d" size=${14} /></span>
+    </button>
+    ${open && html`<ul class="pp-mutual-list" id="pp-mutual-list" aria-label="Mutual friends">
+      ${people.map((p) => html`<li key=${p.id}><button class="pp-mutual-person" onClick=${() => go({ type: 'person', id: p.id })}>
+        <${Avatar} user=${p} size=${32} presence /><span class="trunc">${p.name}</span></button></li>`)}
+    </ul>`}
+  </div>`;
 }
 
 export function PersonPage({ id }) {
@@ -78,12 +105,12 @@ export function PersonPage({ id }) {
       </div>
     </header>
     <div class="view-body">
-      <article class="pp" style=${`--hue:${hueOf(u.hue)}`}>
+      <article class=${`pp${profileColours(u).cls}`} style=${`--hue:${hueOf(u.hue)}${profileColours(u).style}`}>
         <${ProfileBanner} u=${u} big />
         <div class="pp-head">
           <div class="pp-av"><${Avatar} user=${u} presence size=${64} speaking=${!!S.speaking[id]} /></div>
           <div class="pp-id">
-            <h2 class="pp-name">${u.name}</h2>
+            <h2 class="pp-name" ...${nameAttrs(u)}>${u.name}</h2>
             <div class="pp-handle"><span class="secret">@${u.handle}</span><${Pronouns} u=${u} />${since ? html`<span class="pp-since"> · here since ${since}</span>` : ''}</div>
           </div>
           ${!S.ui.phone && acts}
@@ -125,7 +152,7 @@ export function PersonPage({ id }) {
               ${common.length
                 ? html`<${PlaceTiles} ids=${common} who=${id} />`
                 : html`<p class="pp-empty">${mine ? 'You’re not in a community yet.' : 'No places in common yet.'}</p>`}
-              ${!mine && mutual != null && mutual > 0 && html`<p class="pp-fact"><${Icon} name="people" size=${16} />${plural(mutual, 'mutual friend')}</p>`}
+              ${!mine && !u.deleted && html`<${MutualFriends} id=${id} fallback=${mutual} />`}
             </section>
 
           </aside>

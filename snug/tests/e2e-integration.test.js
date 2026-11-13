@@ -66,7 +66,7 @@ test('settings: one structure in sections with a search; each room’s pace and 
   await robin.locator('.layer-body h1').waitFor();
   assert.deepEqual(await navText(robin), [
     '# You', 'Profile', 'Account and security', 'Privacy and safety', 'Your data',
-    '# App', 'Notifications', 'Voice and video', 'Appearance', 'Accessibility', 'Streamer mode', 'Keyboard',
+    '# App', 'Notifications', 'Voice and video', 'Appearance', 'Text and messages', 'Accessibility', 'Streamer mode', 'Keyboard',
   ]);
   // Contrast and motion have one home, on Accessibility.
   await robin.click('.layer-nav .row:has-text("Appearance")');
@@ -77,6 +77,11 @@ test('settings: one structure in sections with a search; each room’s pace and 
   // The search finds pages by what is on them, and keeps their section.
   await robin.fill('.layer-nav input[type=search]', 'two factor');
   assert.deepEqual(await navText(robin), ['# You', 'Account and security']);
+  // Options every track added are found where they live.
+  for (const [q, want] of [['ringtone', ['# App', 'Voice and video']], ['theme builder', ['# App', 'Appearance']], ['skin tone', ['# App', 'Text and messages']], ['decoration', ['# You', 'Profile']], ['rebind', ['# App', 'Keyboard']]]) {
+    await robin.fill('.layer-nav input[type=search]', q);
+    assert.deepEqual(await navText(robin), want, `search for “${q}”`);
+  }
   await robin.fill('.layer-nav input[type=search]', 'zzzz');
   await robin.locator('.layer-nav:has-text("No setting called")').waitFor();
   await robin.keyboard.press('Escape');

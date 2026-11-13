@@ -10,8 +10,8 @@ import { Lockup, Loading, Nook } from '../ui/brand.js';
 // The brand idea on the sign-in panel: a doorway with someone in it, and a
 // few people around it, each in their own hue, some of them here now.
 const SCENE = [[142, 14, 30, 40, 'open'], [200, 76, 18, 32, 'around'], [335, 82, 62, 44, 'open'], [106, 20, 72, 28, 'away'], [228, 58, 84, 24, 'offline']];
-import { hueOf } from '../lib/util.js';
 import { TotpStep } from './account.js'; // two-factor sign-in, the second step
+import { Tile } from '../ui/kit.js'; // the house's icon in its arch (server/community.js)
 
 function entered(user) {
   S.me = user.id;
@@ -88,7 +88,7 @@ export function Auth() {
     <main class="auth-main">
       <div class="auth-panel">
         ${invite && html`<div class="auth-invite">
-          <span class="tile lg" style=${`--hue:${hueOf(invite.house.hue)}`}>${invite.house.mark}</span>
+          <${Tile} house=${invite.house} lg invite=${S.ui.joinCode} />
           <div><b>${invite.by ? `${invite.by} invited you to ${invite.house.name}` : `You’re invited to ${invite.house.name}`}</b>
           <span>${isNew ? 'Create an account to join.' : 'Sign in to join.'}</span></div>
         </div>`}

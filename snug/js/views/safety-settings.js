@@ -14,6 +14,7 @@ import { Avatar, Seg, Switch, Empty } from '../ui/kit.js';
 import { Confirm } from './modals.js';
 import { safety, unblockUser, liftTimeout, moderate, mayAct } from './safety.js';
 import { copyText } from '../ui/kit.js';
+import { JoinSafety, SpamRules, describeCommunity } from './community-settings.js'; // verification, pausing, spam rules, their log lines
 
 const err = (e) => (e.offline ? 'You’re offline. Try again once you’re back.' : e.message);
 function Row({ label, hint, children, top }) {
@@ -145,6 +146,7 @@ export function HouseBans({ house }) {
 const ACTIONS = [
   ['', 'Everything'], ['member', 'Members'], ['role', 'Roles'], ['room', 'Rooms'], ['house', 'House settings'],
   ['msg', 'Deleted messages'], ['voice', 'Voice'], ['invite', 'Invitations'], ['report', 'Reports'], ['emoji', 'Emoji'], ['sticker', 'Stickers'], ['sound', 'Soundboard'], ['hook', 'Webhooks'], ['automod', 'Word filter'],
+  ['group', 'Categories'], ['event', 'Events'], // server/community.js
 ];
 function describe(e, house) {
   const t = e.target && S.users[e.target] ? person(e.target).name : null;
@@ -210,7 +212,7 @@ function describe(e, house) {
     case 'sound.remove': return `removed the sound ${d.name}`;
     case 'sticker.add': return `added the sticker ${d.name}`;
     case 'sticker.remove': return `removed the sticker ${d.name}`;
-    default: return e.action;
+    default: return describeCommunity(e, t) || e.action; // categories, pictures, verification, spam rules (js/views/community-settings.js)
   }
 }
 export function HouseLog({ house }) {
@@ -246,7 +248,7 @@ export function HouseLog({ house }) {
       : !entries.length ? html`<${Empty} icon="eye" title="Nothing here yet" text=${action || actor ? 'Nothing matches. Try another kind of change, or anyone.' : 'Changes to roles, rooms, members and settings show up here.'} />`
         : html`<ol class="safe-log" aria-label="House log">${entries.map((e) => html`<li key=${e.id} class="safe-log-row">
           ${e.actor ? html`<${Avatar} user=${person(e.actor)} />` : html`<span class="safe-auto" aria-hidden="true"><${Icon} name="shield" size=${16} /></span>`}
-          <span class="grow"><b>${e.actor ? person(e.actor).name : 'Word filter'}</b> ${describe(e, house)}</span>
+          <span class="grow"><b>${e.actor ? person(e.actor).name : 'Automatic moderation'}</b> ${describe(e, house)}</span>
           <time class="faint num" datetime=${new Date(e.ts).toISOString()} title=${fmtFull(e.ts)}>${fmtWhen(e.ts)}</time>
         </li>`)}</ol>
         ${more && html`<button class="btn safe-more" onClick=${loadMore}>Show older</button>`}`}`;
@@ -315,7 +317,9 @@ export function HouseFilter({ house }) {
         <div class="safe-roles">${h.roles.slice(1).map((r) => html`<label key=${r.id} class="safe-check">
           <input type="checkbox" checked=${cfg.exempt.includes(r.id)} onChange=${(e) => save({ exempt: e.target.checked ? [...cfg.exempt, r.id] : cfg.exempt.filter((x) => x !== r.id) })} />${r.name}
         </label>`)}</div>
-      <//>`}
+      <//>
+      <${SpamRules} house=${house} cfg=${cfg} save=${save} />`}
+    <${JoinSafety} house=${house} />
 `;
 }
 
@@ -365,7 +369,7 @@ export const SAFETY_PAGES = [
   { id: 'reports', label: 'Reports', icon: 'alert', words: 'reports moderation queue flagged timeouts', need: (h) => can(S, h, 'moderate') || can(S, h, 'timeout') },
   { id: 'bans', label: 'Bans', icon: 'shield', words: 'bans banned unban', need: (h) => can(S, h, 'ban') },
   { id: 'log', label: 'House log', icon: 'eye', words: 'audit log history changes who did what', need: (h) => can(S, h, 'audit') },
-  { id: 'filter', label: 'Filter and screening', icon: 'sliders', words: 'automod word filter links slowmode screening rules', need: (h) => can(S, h, 'roles') },
+  { id: 'filter', label: 'Filter and screening', icon: 'sliders', words: 'automod word filter links slowmode screening rules spam mentions flood caps raid verification pause lockdown two-factor', need: (h) => can(S, h, 'roles') },
   { id: 'invites', label: 'Invitations', icon: 'link', words: 'invites links expiry uses revoke', need: (h) => can(S, h, 'roles') },
 ];
 export const SAFETY_VIEWS = { reports: HouseReports, bans: HouseBans, log: HouseLog, filter: HouseFilter, invites: HouseInvites };

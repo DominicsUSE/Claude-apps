@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
   <title>Snug</title>
-  <!-- The Nook: a doorway (40 x 56, round top r20, 4-unit foot radius) with a
-       person in it (r9 dot, centred, 9 units above the threshold, 11 from each side), cut out. -->
-  <path fill="#F05A47" fill-rule="evenodd" d="M12 56V24a20 20 0 0 1 40 0v32a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4ZM23 42a9 9 0 1 0 18 0a9 9 0 1 0-18 0Z"/>
+  <!-- The Doorstep: an open archway (52 x 54, outer r26, opening 28 wide with
+       an r14 top, 12-unit band, 4-unit outer feet, open to the ground) and a
+       person (r9 dot) standing on the threshold, 5 units clear of each side. -->
+  <path fill="#F05A47" d="M6 55V31a26 26 0 0 1 52 0v24a4 4 0 0 1-4 4H46V31a14 14 0 0 0-28 0v28H10a4 4 0 0 1-4-4ZM23 50a9 9 0 1 0 18 0a9 9 0 1 0-18 0Z"/>
 </svg>

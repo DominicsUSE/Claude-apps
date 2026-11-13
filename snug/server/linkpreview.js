@@ -221,13 +221,23 @@ export function readMeta(html, pageUrl) {
 
 // Links in a message that should get a preview: http(s) only, at most three,
 // each once. A link written as <https://...> asks for no preview.
+export const MESSAGE_LINK_PATH = /^\/m\/([\w:.-]{1,80})\/([\w.-]{1,80})\/?$/;
+export function isMessageLink(url) {
+  try { return MESSAGE_LINK_PATH.test(new URL(url).pathname); } catch { return false; }
+}
+
 export function previewLinks(text, max = 3, { anyPort = false } = {}) {
   const out = [];
-  const src = String(text || '').replace(/```[\s\S]*?```/g, ' ').replace(/`[^`\n]*`/g, ' ');
+  // Code shows no previews, and neither does a link inside a ||spoiler|| (its
+  // preview would give it away).
+  const src = String(text || '').replace(/```[\s\S]*?```/g, ' ').replace(/`[^`\n]*`/g, ' ').replace(/\|\|(?=\S)[\s\S]+?\|\|/g, ' ');
   for (const m of src.matchAll(/(<)?(https?:\/\/[^\s<>]+[^\s<>.,;:!?)\]'"])(>)?/g)) {
     if (m[1] && m[3]) continue;
     const before = src.slice(Math.max(0, m.index - 2), m.index);
     if (before.endsWith('](')) continue; // masked link: [text](url) shows no preview of its own
+    // A Snug message link (/m/<conversation>/<message>) shows as a quote card
+    // drawn by the reader's own app, never as a fetched preview.
+    if (isMessageLink(m[2])) continue;
     if (!checkUrl(m[2], { anyPort })) continue;
     if (!out.includes(m[2])) out.push(m[2]);
     if (out.length >= max) break;

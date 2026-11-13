@@ -20,6 +20,7 @@
 //   full room. bitrate is the audio ceiling, in kbit/s, that every browser in
 //   the room applies to its microphone.
 import { writeFile, unlink } from 'node:fs/promises';
+import { createHmac } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { join } from 'node:path';
 import { newId } from './model.js';
@@ -60,6 +61,27 @@ export function wavInfo(buf) {
   if (fmt.format !== 1 || (fmt.channels !== 1 && fmt.channels !== 2) || (fmt.bits !== 8 && fmt.bits !== 16)) return null;
   if (fmt.rate < 8000 || fmt.rate > 48000) return null;
   return { channels: fmt.channels, rate: fmt.rate, bits: fmt.bits, seconds: data / (fmt.rate * fmt.channels * (fmt.bits / 8)) };
+}
+
+// ---------- STUN and TURN (voice and calls track) ----------
+// SNUG_STUN: comma-separated STUN URLs. SNUG_TURN_URL: TURN URLs. With
+// SNUG_TURN_SECRET (the coturn "use-auth-secret" / REST API scheme), every
+// person gets their own credential that runs out after TURN_TTL_S: the
+// username is "<expiry>:<user id>" and the credential is the base64
+// HMAC-SHA1 of it under the secret, so the TURN server checks it without
+// asking Snug. Without a secret, SNUG_TURN_USER / SNUG_TURN_PASS are sent as
+// they are; with one, they are never sent.
+export const TURN_TTL_S = 12 * 3600;
+export function turnCredential(secret, user, now = Date.now(), ttl = TURN_TTL_S) {
+  const username = `${Math.floor(now / 1000) + ttl}:${user}`;
+  return { username, credential: createHmac('sha1', secret).update(username).digest('base64') };
+}
+export function iceConfig(env = process.env) {
+  const stun = { urls: (env.SNUG_STUN || 'stun:stun.l.google.com:19302').split(',').map((u) => u.trim()).filter(Boolean) };
+  const turnUrls = (env.SNUG_TURN_URL || '').split(',').map((u) => u.trim()).filter(Boolean);
+  if (!turnUrls.length) return [stun];
+  if (env.SNUG_TURN_SECRET) return (user) => [stun, { urls: turnUrls, ...turnCredential(env.SNUG_TURN_SECRET, user) }];
+  return [stun, { urls: turnUrls, username: env.SNUG_TURN_USER, credential: env.SNUG_TURN_PASS }];
 }
 
 export const soundView = (s) => s && {

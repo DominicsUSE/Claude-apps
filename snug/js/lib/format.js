@@ -17,8 +17,25 @@ const RULES = [
   ['ts', /<t:(-?\d{1,13})(?::([tTdDfFR]))?>/],
   ['nolink', /<(https?:\/\/[^\s<>]+)>/],
   ['link', /https?:\/\/[^\s<>]+[^\s<>.,;:!?)\]'"]/],
+  // @everyone and @here (before people, so nobody named "here" takes them), <#room>.
+  ['everyone', /(?<![\w@])@(everyone|here)(?![\w])/],
+  ['room', /<#([\w:.-]{1,80})>/],
   ['at', /(?<![\w@])@([a-z0-9](?:[a-z0-9_.-]*[a-z0-9])?)/i],
 ];
+
+// What the parser needs from the app, set by js/views/rich.js (tests set their own):
+//   role(after)  the role named at the start of `after` (the text after an @),
+//                as { id, name, hue, len }, or null. Users win over roles.
+//   origin       this Snug's own address, so its message links become cards.
+//   roomName(id) a room's name if this person can see it, for plain().
+export const formatHooks = { role: null, origin: '', roomName: null };
+const MSG_LINK = /^\/m\/([\w:.-]{1,80})\/([\w.-]{1,80})\/?$/;
+// A link to a message on this Snug: { conv, id }, or null.
+export function messageLinkOf(url, origin = formatHooks.origin) {
+  if (!origin || !url || !url.startsWith(`${origin}/m/`)) return null;
+  const m = MSG_LINK.exec(url.slice(origin.length));
+  return m ? { conv: decodeURIComponent(m[1]), id: m[2] } : null;
+}
 // Custom emoji (js/views/emoji-custom.js): <:name:id>, resolved when the message was sent.
 export const CUSTOM_EMOJI = /<:([a-z0-9_]{2,32}):(em_[a-z0-9]{8,40})>/;
 const CUSTOM_EMOJI_G = new RegExp(CUSTOM_EMOJI.source, 'g');
@@ -38,9 +55,15 @@ function inline(s) {
     if (m.index) text(s.slice(0, m.index));
     if (t === 'esc') text(m[1]);
     else if (t === 'code') out.push({ t, v: m[1] });
-    else if (t === 'link') out.push({ t, v: m[0] });
+    else if (t === 'link') { const ml = messageLinkOf(m[0]); out.push(ml ? { t: 'msglink', v: m[0], ...ml } : { t, v: m[0] }); }
     else if (t === 'nolink') out.push({ t: 'link', v: m[1] });
-    else if (t === 'at') out.push({ t, v: m[1].toLowerCase() });
+    else if (t === 'everyone') out.push({ t, v: m[1] });
+    else if (t === 'room') out.push({ t, v: m[1] });
+    else if (t === 'at') {
+      const role = formatHooks.role?.(s.slice(m.index + 1));
+      if (role) { out.push({ t: 'role', v: role.name, id: role.id, hue: role.hue ?? null }); s = s.slice(m.index + 1 + role.len); continue; }
+      out.push({ t, v: m[1].toLowerCase() });
+    }
     else if (t === 'emoji') out.push({ t, v: m[1], id: m[2] });
     else if (t === 'bi') out.push({ t: 'b', c: [{ t: 'i', c: inline(m[1]) }] });
     else if (t === 'mlink') out.push({ t, v: m[2], c: inline(m[1]) });
@@ -157,6 +180,7 @@ export function plain(text) {
     .replace(/^(?:#{1,3}|-#|>>>|>) +/gm, '')
     .replace(/\*\*|__|~~|`/g, '')
     .replace(CUSTOM_EMOJI_G, ':$1:') // custom emoji read as their name
+    .replace(/<#([\w:.-]{1,80})>/g, (_, id) => `#${formatHooks.roomName?.(id) || 'unknown room'}`)
     .replace(/\s+/g, ' ')
     .trim();
 }

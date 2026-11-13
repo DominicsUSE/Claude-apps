@@ -12,7 +12,7 @@ import { act } from './places.js';
 const STATE = [['deny', 'Off'], ['inherit', 'As usual'], ['allow', 'On']];
 
 function OverrideRow({ room, o, label, face }) {
-  const perms = ROOM_PERMS.filter((p) => VOICE_KINDS.includes(room.kind) || (p.id !== 'connect' && p.id !== 'speak'));
+  const perms = ROOM_PERMS.filter((p) => VOICE_KINDS.includes(room.kind) || !['connect', 'speak', 'video'].includes(p.id));
   const stateOf = (p) => (o.allow.includes(p) ? 'allow' : o.deny.includes(p) ? 'deny' : 'inherit');
   const set = (p, v) => {
     const allow = o.allow.filter((x) => x !== p), deny = o.deny.filter((x) => x !== p);
@@ -79,7 +79,7 @@ function CheckPerson({ room }) {
     call('room.perms', { room: room.id, user: who }).then((r) => live && setRes({ user: who, perms: r.perms }), (e) => live && setRes({ user: who, error: e.message }));
     return () => { live = false; };
   }, [who, sig]);
-  const perms = ROOM_PERMS.filter((p) => VOICE_KINDS.includes(room.kind) || (p.id !== 'connect' && p.id !== 'speak'));
+  const perms = ROOM_PERMS.filter((p) => VOICE_KINDS.includes(room.kind) || !['connect', 'speak', 'video'].includes(p.id));
   return html`<section class="ovr-check" aria-labelledby="ovr-check-h">
     <h3 id="ovr-check-h">Check a person</h3>
     <p class="hint">See what someone can do in ${room.name} with all of their roles and the settings above.</p>

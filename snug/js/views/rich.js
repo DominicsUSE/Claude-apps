@@ -8,6 +8,7 @@ import { fmtStamp } from '../lib/format.js';
 import { highlight, langOf } from '../lib/highlight.js';
 import { fmtFull } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
+import { EveryonePill, RolePill, RoomPill, MessageCard } from './chat.js'; // mentions, rooms and message links
 
 function copy(text) {
   try { navigator.clipboard.writeText(text).then(() => toast('Copied'), () => toast('Couldn’t copy. Select the text and copy it by hand.')); } catch { toast('Couldn’t copy. Select the text and copy it by hand.'); }
@@ -83,6 +84,10 @@ export function renderExtra(t, ctx, render) {
     case 'spoiler': return html`<${Spoiler}>${render(t.c, ctx)}<//>`;
     case 'mlink': return html`<${MaskedLink} url=${t.v}>${render(t.c, ctx)}<//>`;
     case 'ts': return html`<${Stamp} v=${t.v} style=${t.style} />`;
+    case 'everyone': return html`<${EveryonePill} v=${t.v} />`;
+    case 'role': return html`<${RolePill} v=${t.v} hue=${t.hue} />`;
+    case 'room': return html`<${RoomPill} id=${t.v} />`;
+    case 'msglink': return html`<${MessageCard} conv=${t.conv} id=${t.id} url=${t.v} />`;
     case 'h': {
       const Tag = t.level === 1 ? 'h3' : t.level === 2 ? 'h4' : 'h5';
       return html`<${Tag} class=${`rh rh${t.level}`}>${render(t.c, ctx)}<//>`;

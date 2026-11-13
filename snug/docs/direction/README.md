@@ -8,51 +8,56 @@ Screenshots come from a seeded server at 1440x900 (desktop) and 390x844 (phone).
 
 **A place with someone in it.**
 
-Most chat apps open on an empty channel list, a feed, or a server you have to pick. None of them tell you whether anyone is around. Snug opens on people. The symbol is a doorway with a person in it. The first screen after sign-in is Home, which leads with who is around and where people are talking. Discover's heading is "Places with people in them."
+Most chat apps open on an empty channel list, a feed, or a server you have to pick. None of them tell you whether anyone is around. Snug opens on people. The symbol is an open doorway with a person on its step. The first screen after sign-in is Home, which leads with who is around and where people are talking. Discover's heading is "Places with people in them."
 
-![Sign-in page: the lockup, a large Nook with people around it, "Your people are here.", and the sign-in form](img/desk-dark-signin.jpg)
+![Sign-in page: the lockup, a large Doorstep with people around it, "Your people are here.", and the sign-in form](img/desk-dark-signin.jpg)
 
-The sign-in page is the one place the brand speaks at full volume: the lockup, a large Nook with a few people in their own hues around it, and one line, "Your people are here." The form is small and plain, and errors sit under the field they are about. After this page the brand recedes to a coral bar, a few badges and a dot.
+The sign-in page is the one place the brand speaks at full volume: the lockup, a large Doorstep with a few people in their own hues around it, and one line, "Your people are here." The form is small and plain, and errors sit under the field they are about. After this page the brand recedes to a coral bar, a few badges and a dot.
 
 Why it works:
 
 - **It answers the question people open a chat app with.** "Is anyone here?" comes before "what did I miss?".
-- **The mark is part of the interface.** The person in the doorway is the same circle as the presence dot on every avatar. When you see the dot, someone is there.
+- **The mark is part of the interface.** The person on the doorstep is the same circle as the presence dot on every avatar. When you see the dot, someone is there.
 - **Warmth without a mascot.** The tone comes from coral, rounded letterforms and short copy ("3 people talking", not "3 active users"). No character, no confetti, no gradient, so it stays adult.
 
 ## 2. Logo
 
-The symbol is the **Nook**: a doorway with a person standing in it.
+The symbol is the **Doorstep**: an open archway with a person standing on its threshold. (In code it keeps its old name, `Nook`, in `js/ui/brand.js`, so callers did not change.)
 
-![The lockup on the dark ground: coral Nook and off-white wordmark](img/brand-lockup-dark.jpg)
+![The lockup on the dark ground: coral Doorstep and off-white wordmark](img/brand-lockup-dark.jpg)
 
-![The lockup on the light ground: coral Nook and near-black wordmark](img/brand-lockup-light.jpg)
+![The lockup on the light ground: coral Doorstep and near-black wordmark](img/brand-lockup-light.jpg)
 
-| Part | Geometry (64-unit grid, from `docs/brand/BRAND.md`) |
+| Part | Geometry (64-unit grid, `brand/nook.svg`) |
 |---|---|
-| Doorway | 40 wide by 56 tall. Straight sides, a half-circle top (r 20), a foot radius of 4. |
-| Person | A circle, r 9, centred at (32, 42): 9 units above the threshold, 11 from each side. |
-| Fill | Doorway in Brand Coral. The person is cut out, or filled `#F4F1ED` on the app icon. |
+| Archway | 52 wide by 54 tall, centred. A half-circle top (outer r 26), straight sides, a foot radius of 4 on the outer corners. |
+| Opening | 28 wide with an r 14 top, running all the way to the ground, so the band is 12 units everywhere. |
+| Person | A solid circle, r 9, centred at (32, 50): standing on the threshold line, 5 units clear of each side. |
+| Fill | Archway and person in Brand Coral. On the app icon the person is `#F4F1ED`. |
 
-- **Taller than wide (1 : 1.4), with a person inside.** A round-topped rectangle alone reads as a tombstone. The proportion and the figure make it a door.
-- **Centred and low.** Centred, it is calm and lands on whole pixels. Slightly less space below than beside makes the person sit rather than float.
-- **Cut out, not drawn on.** The person takes the colour of whatever is behind the mark, so the doorway always shows the ground through it: a space you can enter.
+- **Open to the ground.** The old mark was a closed door with a hole in it; this one is a way in. The opening reaches the floor, so the shape reads as an entrance you could walk through, not a tombstone or a keyhole.
+- **Someone on the step.** The person stands on the threshold rather than floating in the middle, so it reads as arriving, or as someone waiting at your door. That is the product: a private place, and whether your people are in it.
+- **Built from the two shapes the interface already uses.** Places are arches, people are circles; the mark is exactly one of each, the same arch as the community tiles (with their 4-unit foot) and the same circle as a presence dot.
+- **Both parts solid, the ground showing between them.** The opening takes whatever colour is behind the mark, so it works on light and dark without a second file. Five units of clearance keep the person separate down to 16px.
+- **Why this one.** Six other directions were drawn and rasterised at 16 to 256px: two people inside an arch (read as a ghost's face), a doorway that is also a speech bubble (generic, and the tail vanished at 16px), an S drawn from two arcs (legible but anonymous), a bowl holding a person (merged into a blob at 16px), two leaning circles (too close to overlapping-circle logos) and an arch with a presence badge (read as a notification badge on a taskbar). The open archway was the boldest at 16px and the only one that is unmistakably a place with someone in it. Its one risk, a horseshoe magnet, is answered by the person on the step and the rounded feet; a magnet has neither.
 
-**Wordmark:** "snug", lowercase, Inter Bold, tracking -0.03em, outlined to paths. `#F4F1ED` on dark, `#141516` on light in the brand files; inside the app it is `currentColor`, so it takes `--text-1`. Lowercase keeps it friendly; tight tracking keeps it from looking soft. In the lockup the symbol is 1.4 times the cap height, one person's width from the word.
+**Wordmark:** "snug", lowercase, Inter Bold, tracking -0.03em, outlined to paths. `#F4F1ED` on dark, `#141516` on light in the brand files; inside the app it is `currentColor`, so it takes `--text-1`. Lowercase keeps it friendly; tight tracking keeps it from looking soft. In the lockup (`brand/lockup.svg`, 196 by 56) the symbol is 1.4 times the cap height, one person's width from the word, centred on the x-height.
 
-![App icon at 512px: charcoal rounded square, coral arch, off-white person](img/brand-app-icon-512.jpg)
+![App icon at 512px: charcoal rounded square, coral archway, off-white person on the threshold](img/brand-app-icon-512.jpg)
 
-**App icon:** a charcoal `#141516` rounded square (radius 22.5%), the Nook at 60% of the height, the person off-white. A coral square would be loud on a taskbar and turn the brand colour into a background, which the colour rules forbid. On charcoal the doorway is the only bright thing, so it is found quickly.
+**App icon:** a charcoal `#141516` rounded square (radius 22.5%), the Doorstep at about 58% of the height, the person off-white. A coral square would be loud on a taskbar and turn the brand colour into a background, which the colour rules forbid. On charcoal the archway is the only bright thing, so it is found quickly, and the off-white person is the brightest point inside it.
 
-**Small sizes are redrawn, not scaled.** `brand/favicon.svg` is drawn on the 16px grid (a 10 by 14 doorway, a 4px person on whole pixels). `brand/app-icon-small.svg` does the same for 16 to 32px.
+**Small sizes are redrawn, not scaled.** `brand/favicon.svg` is drawn on the 16px grid: a 12 by 13 archway with a 3px band, a 6px opening and a 4px person, 1px clear each side. `brand/app-icon-small.svg` does the same on the charcoal square (2px band) for 16 to 32px, and the desktop `.ico` uses it for its 16, 24 and 32px entries. The `Nook` component switches to the 16-grid drawing at 24px and below. `brand/notify-badge.png` is the mark as a white silhouette on transparent, as Android and Windows badges need.
 
 ![The favicon at a true 16px on a light and a dark tab, enlarged 8x](img/brand-favicon-16-8x.jpg)
 
 ![The favicon at 32px on a light and a dark tab, enlarged 8x](img/brand-favicon-32-8x.jpg)
 
-Every edge lands on a pixel, and the cut-out takes the tab colour, so one file works on light and dark browser chrome. Below 16px the rule is to use the presence dot alone.
+Every edge lands on a pixel, and the opening takes the tab colour, so one file works on light and dark browser chrome. Below 16px the rule is to use the presence dot alone.
 
-**Rules:** no stretching, rotating, effects or shadows. The person never moves. The doorway is never mint, amber or red, because those mean status. The wordmark is never coral. The arch is never used for a person or a control, with one deliberate exception: the Home button in the rail is the Nook itself (section 8).
+**Rules:** no stretching, rotating, effects or shadows. The person never leaves the threshold, except in the loading mark, where it steps onto it. The archway is never mint, amber or red, because those mean status. The wordmark is never coral. The arch is never used for a person or a control, with one deliberate exception: the Home button in the rail is the Doorstep itself (section 8).
+
+*Screenshots:* the sign-in and empty Home captures were retaken with the Doorstep. The other screen captures in this document were taken before it and still show the old mark at rail size; they need retaking.
 
 ## 3. Color palette
 
@@ -158,7 +163,7 @@ Some marks are deliberately not icons: topics use a plain "#", presence uses CSS
 ![Kiln & Co. front page: the arch tile beside the name, round member faces, rectangular buttons](img/desk-dark-house.jpg)
 
 - **Places are arches.** Community tiles use `--r-arch` on a portrait box 0.84 times as wide as tall, so the top closes into a full round and reads as a doorway even at 28px. A community is a door you can walk through, the same shape as the logo. Even the smallest house marks (the shared-house tiles in friend rows, the tiles in Settings) stay arches; there is no smaller fallback shape.
-- **People are circles.** Avatars, presence and the person in the Nook. The only other circles are badges and dots, which are about people too.
+- **People are circles.** Avatars, presence and the person on the Doorstep. The only other circles are badges and dots, which are about people too.
 - **Controls are rectangles.** Buttons and inputs 6px, menus 8px, dialogs and the few cards 12px, large media 16px. Chips are the one rounded control.
 
 In a chat app you scan for where, who, and what can I do. A distinct silhouette for each lets a row be parsed before it is read. On the house page above, the arch says place, the circles say people, and the buttons are plainly buttons. Rounded squares for everything, the common choice, lose that signal.
@@ -203,7 +208,7 @@ Fixed regions that never reorder let people build a spatial memory and reach for
 
 The place you are in is `S.ui.space`: `home`, `messages`, `discover` or a house id. It follows the view (a room puts you in its house, a direct message in Messages) and is remembered per device with the last view in each place.
 
-**The rail.** Home is the Nook itself, in coral: the logo is the way home. Messages and Discover are rectangles on a quiet step, because they are controls. Communities are arch tiles in your order. Create or join is a dashed "+". The left edge says what each item is to you: a 3px coral bar where you are, a short light pill (the same bar at a third of its height) where something is new, and a coral count on the tile when something needs you. A bar rather than a filled tile keeps coral fills for counts.
+**The rail.** Home is the Doorstep itself, in coral: the logo is the way home. Messages and Discover are rectangles on a quiet step, because they are controls. Communities are arch tiles in your order. Create or join is a dashed "+". The left edge says what each item is to you: a 3px coral bar where you are, a short light pill (the same bar at a third of its height) where something is new, and a coral count on the tile when something needs you. A bar rather than a filled tile keeps coral fills for counts.
 
 **The context column**, per place:
 
@@ -236,7 +241,7 @@ The main column, each section only if it has something:
 
 With nothing on: "It's quiet right now." The side column has Your communities (online count or "Just you") and Recommended for you (three communities, or two and one person you might know), fetched at most once every five minutes.
 
-![Home for a brand-new account: greeting, a Nook, "Snug is better with people in it", two buttons, three recommended communities](img/desk-dark-home-empty.jpg)
+![Home for a brand-new account: greeting, the Doorstep, "Snug is better with people in it", two buttons, three recommended communities](img/desk-dark-home-empty.jpg)
 
 A new account sees one warm sentence, Find a community and Add a friend, and three recommended communities. No tour, no checklist.
 
@@ -511,7 +516,7 @@ All token durations become 0ms under reduced motion. Three loops have hard-coded
 | Unread | Bold label and a small `--text-1` dot |
 | Needs you | Coral count badge, `#111211` text |
 | Disabled | `--text-disabled`, no hover |
-| Loading | Skeletons on `--bg-3` in the shape of what is coming (static under reduced motion); the Nook loader for the app |
+| Loading | Skeletons on `--bg-3` in the shape of what is coming (static under reduced motion); the Doorstep loader for the app |
 | Error | `--error` text under its field; a plain toast when the server refuses |
 | Success | A toast with Undo; mint for "Going" and "Connected" |
 | Empty | One sentence, one way forward |
@@ -540,11 +545,11 @@ Motion explains where something came from. It does not decorate.
 
 **The loading mark** is the one piece of brand motion.
 
-![The splash: "Opening Snug…" with the loading mark caught 70ms into its cycle, the dot still dropping into the doorway](img/brand-loading-mid.jpg)
+![The splash: "Opening Snug…" with the loading mark caught 70ms into its cycle, the person still dropping onto the threshold](img/brand-loading-mid.jpg)
 
-![The loading mark at 0, 60, 120, 180, 240 and 1080ms: empty doorway, the dot dropping and fading in, landed, then fading out](img/brand-loading-filmstrip.jpg)
+![The loading mark at 0, 60, 120, 180, 240 and 1080ms: empty archway, the person dropping and fading in, landed on the threshold, then fading out](img/brand-loading-filmstrip.jpg)
 
-The person drops into the doorway and fades in over 240ms, rests, fades, and repeats every 1.2 seconds, always with `role="status"` and a label. A spinner says "wait"; this says "someone is arriving".
+The person drops onto the threshold and fades in over 240ms, rests, fades, and repeats every 1.2 seconds, always with `role="status"` and a label. A spinner says "wait"; this says "someone is arriving".
 
 **Loops are rare and small:** breathing typing dots, a coral pulse beside "Happening now", breathing skeletons. One exception to the rule: the live pulse grows with `transform: scale`, which is neither position nor opacity. It stops under reduced motion, but it should be named as the one allowed scale.
 
@@ -584,7 +589,7 @@ These choices cost some short-term engagement. They follow from the promise, "a 
 
 ## The final visual test
 
-**Brand.** Own identity? Mostly. The Nook, arch tiles and the shape rule are not borrowed, and coral on warm charcoal is distinct from the blue and purple of the big chat apps. The frame (rail, column, content) still reads as Discord-like from across a room, because that layout suits the job. The identity lives in the details more than the structure.
+**Brand.** Own identity? Mostly. The Doorstep, arch tiles and the shape rule are not borrowed, and coral on warm charcoal is distinct from the blue and purple of the big chat apps. The frame (rail, column, content) still reads as Discord-like from across a room, because that layout suits the job. The identity lives in the details more than the structure.
 
 **Color.** Disciplined? Largely. Surfaces carry depth and each meaning colour does one job. The weak spot is coral: it also marks "live" (the Live tag, the Happening now pulse, "Lively right now", the voice header). Live and "for you" are close, but strictly coral has two meanings. Amber picks up a second one too: the favourite star. Focused text fields also borrow coral for their border. A rail with several house badges plus the Messages badge also looks busier than the counting promise suggests, though each badge is honest.
 

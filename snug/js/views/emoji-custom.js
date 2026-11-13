@@ -11,6 +11,7 @@
 import { html, useState } from '../../vendor/preact-htm.js';
 import { S, convMeta } from '../store.js';
 import { on } from '../server.js';
+import { Still, reducedMotion } from './media.js'; // a still frame for animated emoji (Settings > Appearance > Chat)
 
 const KEY = /^<:([a-z0-9_]{2,32}):(em_[a-z0-9]{8,40})>$/;
 const TOKEN_G = /<:([a-z0-9_]{2,32}):(em_[a-z0-9]{8,40})>/g;
@@ -78,12 +79,22 @@ export function customSuggest(q, conv) {
 
 export function CustomEmoji({ id, name, m, e: given }) {
   const [broken, setBroken] = useState(null);
+  const [over, setOver] = useState(false);
   const e = given || emojiById(id, m);
   if (!e || !FILE.test(e.file) || broken === e.file) {
     return html`<span class="cemoji-gone" title="This emoji was removed, or is from a house you’re not in">:${name || e?.name}:</span>`;
   }
-  return html`<img class="cemoji" src=${`/api/files/${e.file}`} alt=${`:${e.name}:`} title=${`:${e.name}:`} draggable="false"
-    onError=${() => setBroken(e.file)} />`;
+  // Settings > Appearance > Chat (animatedEmoji): auto moves unless motion is
+  // reduced; hover and never show a still frame until pointed at or focused.
+  const mode = S.prefs.animatedEmoji || 'auto';
+  const still = mode === 'always' ? false : mode === 'auto' ? reducedMotion() : !over;
+  const src = `/api/files/${e.file}`;
+  if (still) {
+    return html`<span class="cemoji cemoji-still" title=${`:${e.name}:`} tabindex=${mode === 'auto' ? undefined : -1}
+      onPointerEnter=${() => setOver(true)} onFocus=${() => setOver(true)}><${Still} src=${src} alt=${`:${e.name}:`} /></span>`;
+  }
+  return html`<img class="cemoji" src=${src} alt=${`:${e.name}:`} title=${`:${e.name}:`} draggable="false"
+    onPointerLeave=${() => setOver(false)} onBlur=${() => setOver(false)} onError=${() => setBroken(e.file)} />`;
 }
 
 // Reaction chips: the face and the words for a reaction key.

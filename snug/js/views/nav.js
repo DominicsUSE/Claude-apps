@@ -26,9 +26,13 @@ import { RoomForm, Confirm, Invite, AddHouse, NewMessage, RoomBrowser } from './
 import { Settings, HouseSettings } from './settings.js';
 import { modPages, requestOf } from './safety.js'; // moderation entry in the house menu; message requests
 import { VoiceControls } from './conversation.js';
+import { CallTimer } from './activities.js'; // the call clock in the dock (voice and calls track)
 import { RailHouses } from './places.js'; // the rail's folders and house order
 import { joinVoice } from '../voice.js';
 import { leavingCall } from '../calls.js';
+import { groupMenu, roomMoveItems, roomDrag, groupDrag, mayArrange, GroupForm, HouseBanner } from './community.js'; // categories, moving rooms, the house banner
+import { muteItems, rolesOff, setRolesOff, orderDms } from '../inbox.js'; // timed mutes, @role suppression, pinned and closed conversations
+import { dmManageItems, groupFace } from './dm-manage.js'; // close, pin, rename, icon, add people, leave
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
@@ -160,11 +164,13 @@ const current = () => (S.ui.view.type === 'conv' ? S.ui.view.id : null);
 // total), so it marks them with a plain dot instead of another coral count.
 const quietAttn = (a) => ({ needs: 0, soft: !!(a?.needs || a?.soft) });
 
-function notifyItems(kind, id, level) {
+function notifyItems(kind, id, level, pos) {
   const levels = levelsFor(S, kind, id);
   return [
     { heading: 'Notify me about' },
     ...levels.map((l) => ({ label: LEVEL_LABEL[l], checked: level === l, onSelect: () => setNotify(kind, id, l) })),
+    ...muteItems(kind, id, pos), // "Mute for…" and "Muted until 14:30" (js/inbox.js)
+    kind === 'house' && { label: 'Suppress @role mentions', checked: rolesOff(id), onSelect: () => setRolesOff(id, !rolesOff(id)) },
   ];
 }
 
@@ -176,9 +182,10 @@ function roomMenu(id, pos) {
     ...pos,
     items: [
       { label: 'Mark read', icon: 'check', disabled: !a.soft && !a.needs, onSelect: () => markConvRead(id) },
-      ...notifyItems('room', id, levelOf(S, id)),
+      ...notifyItems('room', id, levelOf(S, id), pos),
       manage && { sep: true },
       manage && { label: 'Edit room', icon: 'edit', onSelect: () => openModal(RoomForm, { room: id }) },
+      ...roomMoveItems(id), // Move up, Move down, Move to another category (js/views/community.js)
       manage && {
         label: 'Delete room', icon: 'trash', danger: true,
         onSelect: () => openModal(Confirm, {
@@ -197,7 +204,8 @@ function dmMenu(id, pos) {
     ...pos,
     items: [
       { label: 'Mark read', icon: 'check', disabled: !a.soft && !a.needs, onSelect: () => markConvRead(id) },
-      ...notifyItems('dm', id, levelOf(S, id)),
+      ...notifyItems('dm', id, levelOf(S, id), pos),
+      ...dmManageItems(id), // js/views/dm-manage.js
     ],
   });
 }
@@ -205,16 +213,17 @@ function dmMenu(id, pos) {
 export function houseMenu(id, pos) {
   const h = S.houses[id];
   const a = houseAttention(S, id);
-  const settings = can(S, id, 'roles');
+  const settings = can(S, id, 'roles') || can(S, id, 'house'); // 'house': Overview and Danger zone (js/views/community-settings.js)
   openMenu({
     ...pos,
     items: [
       { label: 'Mark house as read', icon: 'check', disabled: !a.soft && !a.needs, onSelect: () => markHouseRead(id) },
-      ...notifyItems('house', id, h.notify),
+      ...notifyItems('house', id, h.notify, pos),
       { sep: true },
       can(S, id, 'invite') && { label: 'Invite people', icon: 'link', onSelect: () => openModal(Invite, { house: id }) },
       { label: 'Browse rooms', icon: 'room', onSelect: () => openModal(RoomBrowser, { house: id }) },
       can(S, id, 'rooms') && { label: 'New room', icon: 'plus', onSelect: () => openModal(RoomForm, { house: id, group: h.groups[0].id }) },
+      can(S, id, 'rooms') && { label: 'New category', icon: 'list', onSelect: () => openModal(GroupForm, { house: id }) },
       settings && { label: 'House settings', icon: 'sliders', onSelect: () => openLayer({ C: HouseSettings, props: { house: id } }) },
       // Custom emoji: roles that may manage emoji but not the house reach the Emoji page from here.
       !settings && can(S, id, 'emoji') && { label: 'Custom emoji', icon: 'smile', onSelect: () => openLayer({ C: HouseSettings, props: { house: id, page: 'emoji' } }) },
@@ -326,7 +335,7 @@ const CallMark = () => html`<span class="call-mark" role="img" aria-label="Call 
 function convIcon(id) {
   const meta = convMeta(id);
   if (meta.user) return html`<${Avatar} user=${meta.user} presence />`;
-  if (meta.dm) return html`<span class="avatar" style="--tile-c:0;--tile-ink-c:0">${meta.dm.members.length}</span>`;
+  if (meta.dm) return groupFace(id) || html`<span class="avatar" style="--tile-c:0;--tile-ink-c:0">${meta.dm.members.length}</span>`;
   return html`<${RoomIcon} kind=${meta.kind} size=${18} />`;
 }
 
@@ -363,7 +372,7 @@ export function NavDirect() {
     <div class="sect"><span>Direct messages</span>
       <button class="ib sm" aria-label="New message" data-tip="New message" onClick=${() => openModal(NewMessage)}><${Icon} name="plus" size=${16} /></button>
     </div>
-    ${S.dmOrder.filter((id) => !requestOf(id)).map((id) => {
+    ${orderDms().filter((id) => !requestOf(id)).map((id) => {
       const meta = convMeta(id);
       if (S.ui.phone) return html`<${DmRow} key=${id} id=${id} />`;
       return html`<${Row} key=${id} icon=${convIcon(id)} label=${meta.title} sel=${cur === id} attn=${attention(S, id)} muted=${levelOf(S, id) === 'muted'}
@@ -473,16 +482,21 @@ export function HouseRooms({ id }) {
       const gShut = !!S.prefs.groupShut[g.id];
       let rooms = h.newcomer ? g.rooms.filter((r) => h.starter.includes(r)) : g.rooms;
       if (!rooms.length && !mayAdd) return null;
+      const empty = !rooms.length;
       // A collapsed group still shows the room you are in and anything that needs you.
       if (gShut) rooms = rooms.filter((r) => r === cur || attention(S, r).needs > 0);
-      return html`<div class="nav-group" key=${g.id}>
-        <div class="sect">
+      // Managers drag rooms and categories (js/views/community.js); the menu moves them by keyboard.
+      return html`<div class="nav-group" key=${g.id} data-group=${g.id}>
+        <div class="sect" ...${h.newcomer ? {} : groupDrag(id, g.id)}
+          onContextMenu=${mayAdd ? (e) => { e.preventDefault(); groupMenu(id, g.id, { x: e.clientX, y: e.clientY }); } : undefined}>
           <button class="sect-name" aria-expanded=${String(!gShut)} onClick=${() => toggleGroup(g.id)}>
             <span class=${`chev${gShut ? ' shut' : ''}`}><${Icon} name="chev-d" size=${14} /></span>${g.name}
           </button>
+          ${mayAdd && html`<button class="ib sm sect-more" aria-label=${`${g.name} category options`} aria-haspopup="menu" data-tip="Category" onClick=${(e) => groupMenu(id, g.id, { anchor: rectOf(e) })}><${Icon} name="more" size=${16} /></button>`}
           ${mayAdd && html`<button class="ib sm" aria-label=${`New room in ${g.name}`} data-tip="New room" onClick=${() => openModal(RoomForm, { house: id, group: g.id })}><${Icon} name="plus" size=${16} /></button>`}
         </div>
-        ${rooms.map((r) => html`<${RoomRow} key=${r} id=${r} />`)}
+        ${empty && mayAdd && !gShut && html`<p class="ctx-note group-empty">No rooms here yet. Drag one in, or add one with the plus.</p>`}
+        ${rooms.map((r) => (mayArrange(id) && !h.newcomer ? html`<div class="room-dnd" key=${r} ...${roomDrag(id, r)}><${RoomRow} id=${r} /></div>` : html`<${RoomRow} key=${r} id=${r} />`))}
       </div>`;
     })}
     ${hidden > 0 && html`<div class="nav-group"><${Row} icon=${html`<${Icon} name="chev-r" size=${16} />`} label=${`Browse ${plural(hidden, 'more room')}`} onClick=${() => openModal(RoomBrowser, { house: id })} /></div>`}`;
@@ -506,6 +520,7 @@ function HouseHead({ id }) {
 
 function HouseCtx({ id }) {
   return html`
+    <${HouseBanner} house=${id} />
     <${CtxHead} cls="ctx-house-head"><${HouseHead} id=${id} /><//>
     <div class="nav-scroll"><${HouseRooms} id=${id} /></div>`;
 }
@@ -521,11 +536,13 @@ export function LiveDock() {
   const meta = !room && c.dm ? convMeta(c.room) : null;
   if (!room && !meta) return null;
   const users = (S.voice[c.room] || []).map((id) => S.users[id]).filter(Boolean);
-  const sub = room ? S.houses[room.house].name : c.status !== 'live' ? 'Calling\u2026' : (S.calls[c.room]?.ringing.length && users.length <= 1 ? 'Ringing\u2026' : 'Call');
+  const sub = c.status === 'reconnecting' ? html`<span class="act-reconn-sm">Reconnecting\u2026</span>` // voice and calls track
+    : room ? S.houses[room.house].name : c.status !== 'live' ? 'Calling\u2026' : (S.calls[c.room]?.ringing.length && users.length <= 1 ? 'Ringing\u2026' : 'Call');
   return html`<div class=${`dock${meta ? ' call' : ''}`} role="region" aria-label=${room ? 'Voice room you are in' : 'Call you are in'}>
     <button class="dock-head" onClick=${() => openConv(c.room)} aria-label=${room ? `Back to ${room.name}` : `Back to the call with ${meta.title}`}>
       <${Icon} name=${room ? 'voice' : 'phone'} size=${16} />
       <span class="trunc"><span class="dock-name">${room ? room.name : meta.title}</span> <span class="faint">${sub}</span></span>
+      ${c.status === 'live' && html`<${CallTimer} room=${c.room} />`}
     </button>
     <div class="dock-row"><${Stack} users=${users} max=${4} size=${24} /><${VoiceControls} compact /></div>
   </div>`;

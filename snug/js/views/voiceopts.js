@@ -11,7 +11,8 @@ import { call, on } from '../server.js';
 import { can } from '../lib/perms.js';
 import { Icon, addIcons } from '../ui/icons.js';
 import { Avatar } from '../ui/kit.js';
-import { leaveVoice, toggleMute, toggleDeaf, mediaOf, recapBitrates } from '../voice.js';
+import { leaveVoice, toggleMute, toggleDeaf, mediaOf, recapBitrates, restartMic, restartCamera } from '../voice.js';
+import { CallTimer, MutedBanner } from './activities.js'; // the call clock and the muted note (voice and calls track)
 import {
   vp, setVoice, volumeOf, mutedForMe, setPersonVolume, setPersonMuted, pttPress, pttRelease, pttHeld,
   playIntoCall, cue, RESOLUTIONS, FRAME_RATES,
@@ -136,11 +137,30 @@ function holdHandlers() {
   };
 }
 
-function optionsMenu(e) {
+// Devices in the options menu (voice and calls track): checked items that switch at once, in the call.
+const DEV_NAME = { audioinput: 'Microphone', audiooutput: 'Speaker', videoinput: 'Camera' };
+function deviceItems(list, kind, heading, current, pick) {
+  const devs = list.filter((d) => d.kind === kind && d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications');
+  if (!devs.length) return [];
+  return [
+    { heading },
+    { label: 'System default', checked: !current, onSelect: () => pick('') },
+    ...devs.map((d, i) => ({ label: d.label || `${DEV_NAME[kind]} ${i + 1}`, checked: current === d.deviceId, onSelect: () => pick(d.deviceId) })),
+    { sep: true },
+  ];
+}
+async function optionsMenu(e) {
   const v = vp();
+  const anchor = rectOf(e);
+  let list = [];
+  try { list = await navigator.mediaDevices.enumerateDevices(); } catch { /* no devices to show */ }
+  const speakers = typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
   openMenu({
-    anchor: rectOf(e), align: 'end',
+    anchor, align: 'end',
     items: [
+      ...deviceItems(list, 'audioinput', 'Microphone', v.input, async (id) => { setVoice({ input: id }); if (S.call) await restartMic(); }),
+      ...(speakers ? deviceItems(list, 'audiooutput', 'Speaker', v.output, (id) => setVoice({ output: id })) : []),
+      ...deviceItems(list, 'videoinput', 'Camera', v.camera, async (id) => { setVoice({ camera: id }); await restartCamera(); }),
       { heading: 'Your microphone' },
       { label: 'Voice activity', checked: v.mode === 'vad', onSelect: () => setVoice({ mode: 'vad' }) },
       { label: `Push to talk (${v.pttLabel})`, checked: v.mode === 'ptt', onSelect: () => setVoice({ mode: 'ptt' }) },
@@ -223,7 +243,7 @@ export function MiniCall() {
   useEffect(() => { const f = () => relayout((n) => n + 1); addEventListener('resize', f); return () => removeEventListener('resize', f); }, []);
   const c = S.call;
   const v = S.ui.view;
-  if (!c || c.status !== 'live' || S.ui.miniHidden === c.room || (v.type === 'conv' && v.id === c.room)) return null;
+  if (!c || (c.status !== 'live' && c.status !== 'reconnecting') || S.ui.miniHidden === c.room || (v.type === 'conv' && v.id === c.room)) return null;
   const room = S.rooms[c.room];
   const meta = room ? null : convMeta(c.room);
   if (!room && !meta) return null;
@@ -269,6 +289,7 @@ export function MiniCall() {
         onPointerDown=${onDown} onPointerMove=${onMove} onPointerUp=${onUp} onPointerCancel=${onUp} onKeyDown=${onKey}><${Icon} name="vo-grip" size=${16} /></button>
       <button class="vo-mini-title" onClick=${() => openConv(c.room)} aria-label=${`Back to ${title}`}>
         <${Icon} name=${room ? 'voice' : 'phone'} size=${16} /><span class="trunc">${title}</span><span class="faint num">${ids.length}</span>
+        ${c.status === 'reconnecting' ? html`<span class="act-reconn-sm">Reconnecting…</span>` : html`<${CallTimer} room=${c.room} />`}
       </button>
       <button class="ib sm" aria-label="Hide the call window" data-tip="Hide" onClick=${() => { S.ui.miniHidden = c.room; emit(); }}><${Icon} name="x" size=${16} /></button>
     </div>
@@ -284,6 +305,7 @@ export function MiniCall() {
           })}
           ${ids.length > 6 && html`<span class="vo-mini-more num">+${ids.length - 6}</span>`}
         </div>`}
+    <${MutedBanner} />
     <div class="vo-mini-acts">
       <button class=${`ib vc${c.muted ? ' on' : ''}`} aria-pressed=${String(c.muted)} aria-label=${c.muted ? 'Unmute' : 'Mute'} data-tip=${c.muted ? 'Unmute' : 'Mute'} onClick=${toggleMute}><${Icon} name=${c.muted ? 'mic-off' : 'mic'} size=${18} /></button>
       <button class=${`ib vc${c.deaf ? ' on' : ''}`} aria-pressed=${String(c.deaf)} aria-label=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} data-tip=${c.deaf ? 'Hear again' : 'Deafen'} onClick=${toggleDeaf}><${Icon} name=${c.deaf ? 'ear-off' : 'ear'} size=${18} /></button>

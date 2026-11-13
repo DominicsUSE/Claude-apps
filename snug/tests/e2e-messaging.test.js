@@ -180,7 +180,7 @@ test('polls: made from the + menu, voted on live, one vote each, ended by the au
   await robin.click('.modal button:has-text("Add an answer")');
   await robin.fill('.modal input[aria-label="Answer 3"]', 'Celadon');
   await robin.click('.modal button[aria-label="Add an emoji to answer 3"]');
-  await robin.locator('.modal .poll-emo-pick button').first().click();
+  await robin.locator('.modal .poll-emo-pick .picker-grid button').first().click();
   await robin.click('.modal button:has-text("Post poll")');
   await robin.locator('.modal').waitFor({ state: 'detached' });
   const poll = ines.locator('.main .poll:has-text("Which glaze for the bowls?")');

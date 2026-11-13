@@ -19,6 +19,15 @@ export function ringMsFrom(env = process.env) {
   return env.NODE_TEST_CONTEXT && Number.isFinite(v) && v >= 100 ? v : RING_MS;
 }
 
+// How long a voice slot is held for someone whose connection dropped, so they
+// come back into the same call with the same mute and deafen. Shortened by
+// SNUG_VOICE_GRACE_MS only under the test runner, like SNUG_RING_MS.
+export const VOICE_GRACE = 20_000;
+export function voiceGraceFrom(env = process.env) {
+  const v = Number(env.SNUG_VOICE_GRACE_MS);
+  return env.NODE_TEST_CONTEXT && Number.isFinite(v) && v >= 100 ? v : VOICE_GRACE;
+}
+
 // "4m 12s", "38s", "1h 2m": the length of a call in its record.
 export function callLength(ms) {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -27,7 +36,7 @@ export function callLength(ms) {
   return m ? `${m}m ${r}s` : `${r}s`;
 }
 
-export function createHub({ db, M, server, origins, ice = [], log = () => {}, ringMs = ringMsFrom() }) {
+export function createHub({ db, M, server, origins, ice = [], log = () => {}, ringMs = ringMsFrom(), voiceGraceMs = voiceGraceFrom() }) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 512 * 1024 });
   const socks = new Map();        // user -> Set<ws>
   const offlineTimers = new Map();
@@ -67,6 +76,10 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
   // with nothing open, and the end of a ring (so a pushed "is calling" note
   // doesn't stay on their phone).
   hub.hooks = { message: null, ring: null, ringStop: null };
+  // Voice comings and goings, for activities (server/activities.js): someone
+  // joined (or came back to) a place, someone left one, a place emptied.
+  hub.voiceHooks = { joined: [], left: [], empty: [] };
+  const fireVoice = (kind, ...a) => { for (const fn of hub.voiceHooks[kind]) { try { fn(...a); } catch (e) { log('error', `voice.${kind}`, e); } } };
 
   hub.toUser = (u, ev, d, exceptWs) => { for (const ws of socks.get(u) || []) if (ws !== exceptWs) send(ws, { t: 'ev', ev, d }); };
   hub.toUsers = (users, ev, d, exceptUser) => { for (const u of new Set(users)) if (u !== exceptUser) hub.toUser(u, ev, d); };
@@ -183,7 +196,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
   function voiceView(place) {
     const m = voiceRooms.get(place);
     const call = calls.get(place);
-    const v = !m ? { users: [], state: {} } : { users: [...m.keys()], state: Object.fromEntries([...m].map(([u, s]) => [u, { muted: s.muted, deaf: s.deaf, camera: !!s.camera, screen: !!s.screen, ...(s.smute ? { smute: true } : {}), ...(s.sdeaf ? { sdeaf: true } : {}) }])) };
+    const v = !m ? { users: [], state: {} } : { users: [...m.keys()], state: Object.fromEntries([...m].map(([u, s]) => [u, { muted: s.muted, deaf: s.deaf, camera: !!s.camera, screen: !!s.screen, ...(s.smute ? { smute: true } : {}), ...(s.sdeaf ? { sdeaf: true } : {}), ...(s.lost ? { reconnecting: true } : {}) }])) };
     if (call) v.call = callView(call);
     else if (!M.room(place)) v.call = null;
     return v;
@@ -198,6 +211,17 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
   hub.voiceJoin = (c, place) => {
     const was = voiceOf.get(c.user);
     const before = was && voiceRooms.get(was)?.get(c.user);
+    // Back after a dropped connection, inside the grace period: the same slot,
+    // on the new socket, with mute, deafen, camera and screen as they were.
+    if (before?.lost && was === place) {
+      clearTimeout(before.lostTimer);
+      before.lost = false;
+      before.lostTimer = null;
+      before.ws = c.ws;
+      voiceChanged(place);
+      fireVoice('joined', c.user, place, { back: true });
+      return [...voiceRooms.get(place).keys()].filter((u) => u !== c.user);
+    }
     const m0 = voiceRooms.get(place);
     if (was !== place && (m0?.size || 0) >= VOICE_MAX) {
       throw new UserError(calls.has(place) ? 'This call is full. It holds up to 12 people.' : 'This voice room is full. It holds up to 12 people.');
@@ -211,6 +235,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
     m.set(c.user, { ws: c.ws, muted: false, deaf: false, camera: false, screen: false });
     voiceOf.set(c.user, place);
     voiceChanged(place);
+    fireVoice('joined', c.user, place, { back: false });
     return peers;
   };
   hub.voiceLeave = (u, { moving = false } = {}) => {
@@ -218,8 +243,11 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
     if (!place) return;
     voiceOf.delete(u);
     const m = voiceRooms.get(place);
+    clearTimeout(m?.get(u)?.lostTimer);
     m?.delete(u);
     if (m && !m.size) voiceRooms.delete(place);
+    fireVoice('left', u, place);
+    if (!voiceRooms.has(place)) fireVoice('empty', place);
     const call = calls.get(place);
     if (call && !moving) {
       const left = voiceRooms.get(place)?.size || 0;
@@ -230,6 +258,21 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
     voiceChanged(place);
     return undefined;
   };
+  // A connection dropped while it held a voice slot: hold the slot for the
+  // grace period (shown as reconnecting) instead of leaving at once.
+  hub.voiceLost = (u, ws) => {
+    const place = voiceOf.get(u);
+    const entry = place && voiceRooms.get(place)?.get(u);
+    if (!entry || entry.ws !== ws || entry.lost) return false;
+    entry.lost = true;
+    entry.lostTimer = setTimeout(() => {
+      if (voiceOf.get(u) === place && voiceRooms.get(place)?.get(u) === entry && entry.lost) hub.voiceLeave(u);
+    }, voiceGraceMs);
+    voiceChanged(place);
+    return true;
+  };
+  // Whether this person's slot is being held after a drop (and where).
+  hub.voiceHeld = (u) => { const p = voiceOf.get(u); return p && voiceRooms.get(p)?.get(u)?.lost ? p : null; };
   hub.voiceState = (u, s) => {
     const room = voiceOf.get(u);
     const entry = room && voiceRooms.get(room)?.get(u);
@@ -250,7 +293,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
   hub.voiceUsers = (place) => [...(voiceRooms.get(place)?.keys() || [])];
   hub.voiceStateOf = (u) => {
     const e = voiceOf.has(u) && voiceRooms.get(voiceOf.get(u))?.get(u);
-    return e ? { muted: !!e.muted, deaf: !!e.deaf, smute: !!e.smute, sdeaf: !!e.sdeaf } : null;
+    return e ? { muted: !!e.muted, deaf: !!e.deaf, smute: !!e.smute, sdeaf: !!e.sdeaf, camera: !!e.camera, screen: !!e.screen, lost: !!e.lost } : null;
   };
   hub.leaveVoiceInHouse = (u, houseId) => {
     const room = voiceOf.get(u);
@@ -298,8 +341,9 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
     if (calls.get(call.dm) !== call) return;
     calls.delete(call.dm);
     for (const u of [...call.ringing.keys()]) stopRing(call, u, 'ended');
-    for (const u of [...(voiceRooms.get(call.dm)?.keys() || [])]) voiceOf.delete(u);
-    voiceRooms.delete(call.dm);
+    clearTimeout(call.silentTimer);
+    for (const [u, e] of voiceRooms.get(call.dm) || []) { clearTimeout(e.lostTimer); voiceOf.delete(u); fireVoice('left', u, call.dm); }
+    if (voiceRooms.delete(call.dm)) fireVoice('empty', call.dm);
     const members = dmMembers(call.dm);
     hub.toUsers(members, 'call.ended', { dm: call.dm, call: call.id, reason });
     voiceChanged(call.dm);
@@ -340,6 +384,9 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
     try { peers = hub.voiceJoin(c, dm); } catch (e) { calls.delete(dm); throw e; }
     // Nobody who blocked the caller (or hasn't accepted their message request) is rung (server/safety.js).
     for (const u of members) if (u !== c.user && !M.ringBlocked?.(c.user, u, dm)) ring(call, u);
+    // Nobody could be rung (blocked, or they only take calls from friends):
+    // it looks the same to the caller, and ends as unanswered when a ring would.
+    if (!call.ringing.size && !call.group) call.silentTimer = setTimeout(() => { if (calls.get(dm) === call && !call.answered) endCall(call, 'no-answer'); }, ringMs);
     voiceChanged(dm);
     return { peers, call: call.id };
   };
@@ -366,7 +413,19 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
     else voiceChanged(dm);
   };
   hub.callOf = (dm) => callView(calls.get(dm)) || null;
+  // Ring someone in the conversation again (server/activities.js checks who may).
+  hub.callRing = (dm, u) => {
+    const call = calls.get(dm);
+    if (!call || call.ringing.has(u) || voiceRooms.get(dm)?.has(u)) return false;
+    call.declined.delete(u);
+    ring(call, u);
+    voiceChanged(dm);
+    return true;
+  };
+  hub.callRingingOf = (dm, u) => !!calls.get(dm)?.ringing.has(u);
 
+  // ICE servers for one person: a list, or (short-lived TURN credentials, server/index.js) a function of who asks.
+  hub.iceFor = (u) => (typeof ice === 'function' ? ice(u) : ice);
   const ops = createOps({ db, M, hub });
 
   // Connections
@@ -397,7 +456,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
     if (!socks.has(user)) socks.set(user, new Set());
     socks.get(user).add(ws);
     if (first) presenceChanged(user);
-    send(ws, { t: 'hello', d: { ...hub.snapshotFor(user), ice } });
+    send(ws, { t: 'hello', d: { ...hub.snapshotFor(user), ice: hub.iceFor(user) } });
     log('connect', user);
 
     ws.on('pong', () => { ws.alive = true; });
@@ -423,11 +482,13 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
       }
       return undefined;
     });
-    ws.on('close', () => {
+    ws.on('close', (code) => {
       if (closed) return;
       socks.get(user)?.delete(ws);
-      const room = voiceOf.get(user);
-      if (room && voiceRooms.get(room)?.get(user)?.ws === ws) hub.voiceLeave(user);
+      // A tab closed or reloaded (1001), a clean close (1000) or a session
+      // ended (4001) leaves voice now. Anything else is a dropped connection:
+      // the voice slot is held for a while, to come back to (hub.voiceLost).
+      if (code === 1000 || code === 1001 || code === 4001) { if (voiceRooms.get(voiceOf.get(user))?.get(user)?.ws === ws) hub.voiceLeave(user); } else hub.voiceLost(user, ws);
       if (!socks.get(user)?.size) {
         socks.delete(user);
         // A reload or a short drop should not flash "offline" to everyone.
@@ -456,7 +517,8 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
     closed = true;
     clearInterval(beat);
     for (const t of offlineTimers.values()) clearTimeout(t);
-    for (const call of calls.values()) for (const r of call.ringing.values()) clearTimeout(r.timer);
+    for (const call of calls.values()) { clearTimeout(call.silentTimer); for (const r of call.ringing.values()) clearTimeout(r.timer); }
+    for (const m of voiceRooms.values()) for (const e of m.values()) clearTimeout(e.lostTimer);
     for (const set of socks.values()) for (const ws of set) ws.terminate();
     wss.close();
   };

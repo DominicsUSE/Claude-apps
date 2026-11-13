@@ -2,17 +2,18 @@
 // adding someone by username. Rows, not cards. Favourites sit on top.
 // Arrow keys move through the rows, Enter opens a profile.
 import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
-import { S, go, back, startDm, openConv, acceptFriend, declineFriend, removeFriend } from '../store.js';
+import { S, go, back, startDm, openConv, acceptFriend, declineFriend, removeFriend, emit as emitNow } from '../store.js';
 import { call } from '../server.js';
 import { friendsOnline, friendsList, friendRequests, isFriend } from '../lib/social.js';
-import { plural } from '../lib/util.js';
+import { plural, fold } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Empty } from '../ui/kit.js';
+import { toast } from '../store.js';
 import { Doing, doingOf, FavButton, SharedTiles, friendMenu, openPerson, lastActive, ago } from './people.js';
 import { PeopleYouMightKnow } from './discover.js';
 
 const Back = () => S.ui.phone && S.ui.depth > 0 && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
-const TABS = ['online', 'all', 'requests', 'add'];
+const TABS = ['online', 'all', 'requests', 'blocked', 'add'];
 const RECENT = 3 * 86_400_000;
 
 // ---------- Rows ----------
@@ -87,27 +88,49 @@ function Group({ title, count, note, ids, render, start }) {
 
 const friendRow = (id, first) => html`<${Row} key=${id} id=${id} first=${first}><${FriendActions} id=${id} /><//>`;
 
+// ---------- Filter (Online and All) ----------
+// One box above the list; Escape clears it. Matches names and usernames.
+const matches = (id) => {
+  const q = fold(S.ui.friendQ || '').trim();
+  if (!q) return true;
+  const u = S.users[id];
+  return !!u && fold(`${u.name} ${u.handle}`).includes(q.replace(/^@/, ''));
+};
+function FilterBox() {
+  const set = (v) => { S.ui.friendQ = v; emitNow(); };
+  return html`<div class="f-filter">
+    <label class="sr" for="f-filter">Filter friends</label>
+    <span class="f-filter-ic" aria-hidden="true"><${Icon} name="search" size=${16} /></span>
+    <input id="f-filter" class="field" type="search" placeholder="Filter by name or username" autocomplete="off" value=${S.ui.friendQ || ''}
+      onInput=${(e) => set(e.target.value)} onKeyDown=${(e) => { if (e.key === 'Escape' && e.target.value) { e.preventDefault(); e.stopPropagation(); set(''); } }} />
+  </div>`;
+}
+const NoMatch = () => html`<${Empty} icon="search" title="Nobody by that name" text="Check the spelling, or clear the filter to see everyone.">
+  <button class="btn" onClick=${() => { S.ui.friendQ = ''; emitNow(); }}>Clear filter</button>
+<//>`;
+
 // ---------- Tabs ----------
 
 function OnlineTab() {
-  const online = friendsOnline(S);
+  const online = friendsOnline(S).filter(matches);
   const favs = online.filter((id) => S.friends[id].favorite);
   const rest = online.filter((id) => !S.friends[id].favorite);
   const now = Date.now();
   const recent = friendsList(S)
     .filter((id) => S.users[id]?.presence === 'offline')
     .map((id) => [id, lastActive(id)])
-    .filter(([, t]) => t && now - t < RECENT)
+    .filter(([id, t]) => t && now - t < RECENT && matches(id))
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
     .map(([id]) => id);
   if (!friendsList(S).length) return html`<${NoFriends} />`;
+  if (S.ui.friendQ && !online.length && !recent.length) return html`<${FilterBox} /><${NoMatch} />`;
   if (!online.length && !recent.length) {
     return html`<${Empty} icon="people" title="Nobody’s around right now" text="Friends show up here when they’re online, with what they’re up to.">
       <button class="btn" onClick=${() => go({ type: 'friends', tab: 'all' })}>See all friends</button>
     <//>`;
   }
-  return html`<div class="f-list" onKeyDown=${onListKey}>
+  return html`<${FilterBox} /><div class="f-list" onKeyDown=${onListKey}>
     <${Group} title="Favourites" ids=${favs} render=${friendRow} start=${0} />
     <${Group} title=${favs.length ? 'Also online' : 'Online'} count=${rest.length} ids=${rest} render=${friendRow} start=${favs.length ? 1 : 0} />
     ${!online.length && html`<p class="f-quiet">No friends online right now.</p>`}
@@ -120,11 +143,13 @@ const NoFriends = () => html`<${AddTab} title="No friends here yet" focus=${fals
   lead="Add someone by their username, or pick from people you already share a house with. You’ll see when they’re around." />`;
 
 function AllTab() {
-  const all = friendsList(S);
-  if (!all.length) return html`<${NoFriends} />`;
+  const everyone = friendsList(S);
+  if (!everyone.length) return html`<${NoFriends} />`;
+  const all = everyone.filter(matches);
+  if (!all.length) return html`<${FilterBox} /><${NoMatch} />`;
   const favs = all.filter((id) => S.friends[id].favorite);
   const rest = all.filter((id) => !S.friends[id].favorite);
-  return html`<div class="f-list" onKeyDown=${onListKey}>
+  return html`<${FilterBox} /><div class="f-list" onKeyDown=${onListKey}>
     <${Group} title="Favourites" count=${favs.length} ids=${favs} render=${friendRow} start=${0} />
     <${Group} title="Everyone" count=${rest.length} ids=${rest} render=${friendRow} start=${favs.length ? 1 : 0} />
   </div>`;
@@ -143,6 +168,36 @@ function RequestsTab() {
       render=${(id, first) => html`<${Row} key=${id} id=${id} first=${first} kind="incoming"><${RequestActions} id=${id} incoming /><//>`} />
     <${Group} title="Sent" count=${outgoing.length} note="Waiting for them to say yes. Cancel any time." ids=${outgoing} start=${incoming.length ? 1 : 0}
       render=${(id, first) => html`<${Row} key=${id} id=${id} first=${first} kind="outgoing"><${RequestActions} id=${id} /><//>`} />
+  </div>`;
+}
+
+// People you blocked: they can't message you, ring you or see you. Unblock here.
+function BlockedTab() {
+  const ids = S.safety?.blocks || [];
+  const [busy, setBusy] = useState(null);
+  if (!ids.length) {
+    return html`<${Empty} icon="shield" title="You haven’t blocked anyone" text="Block someone from their profile or a message’s menu. They can’t message you, ring you or see when you’re around." />`;
+  }
+  const unblock = (id) => {
+    setBusy(id);
+    call('block.set', { user: id, on: false }).then(() => {
+      if (S.safety) S.safety.blocks = S.safety.blocks.filter((x) => x !== id);
+      toast(`${S.users[id]?.name || 'They'} can reach you again.`);
+    }, (err) => toast(err.offline ? 'You’re offline. Try again once you’re back.' : err.message)).finally(() => setBusy(null));
+  };
+  return html`<div class="f-list" onKeyDown=${onListKey}>
+    <section class="f-group" aria-label="Blocked">
+      <h2 class="f-head">Blocked <span class="count num">${ids.length}</span></h2>
+      <p class="f-note">They can’t message you, ring you or see when you’re around. Unblocking doesn’t tell them.</p>
+      <ul class="f-list-part">${ids.map((id, i) => {
+        const u = S.users[id] || { id, name: 'Someone', handle: id, hue: 165 };
+        return html`<li key=${id} class="f-row" data-id=${id} tabindex=${i === 0 ? '0' : '-1'} aria-label=${`${u.name}, blocked`}>
+          <${Avatar} user=${u} />
+          <span class="f-text"><span class="f-name"><span class="trunc">${u.name}</span><span class="f-handle trunc">@${u.handle}</span></span></span>
+          <span class="f-acts"><button class="btn" disabled=${busy === id} aria-busy=${busy === id ? 'true' : undefined} aria-label=${`Unblock ${u.name}`} onClick=${() => unblock(id)}>Unblock</button></span>
+        </li>`;
+      })}</ul>
+    </section>
   </div>`;
 }
 
@@ -215,6 +270,7 @@ export function Friends() {
     { id: 'online', label: 'Online', count: online },
     { id: 'all', label: 'All', count: all },
     { id: 'requests', label: 'Requests', count: incoming, badge: true, more: outgoing },
+    { id: 'blocked', label: 'Blocked', count: (S.safety?.blocks || []).length },
     { id: 'add', label: 'Add friend', icon: 'user-plus' },
   ];
   const pick = (id) => go({ type: 'friends', tab: id });
@@ -227,7 +283,7 @@ export function Friends() {
       requestAnimationFrame(() => document.getElementById(`f-tab-${next}`)?.focus());
     }
   };
-  const Body = { online: OnlineTab, all: AllTab, requests: RequestsTab, add: AddTab }[tab];
+  const Body = { online: OnlineTab, all: AllTab, requests: RequestsTab, blocked: BlockedTab, add: AddTab }[tab];
   return html`<section class="main view friends-view" aria-label="Friends">
     <header class="bar">
       <${Back} />

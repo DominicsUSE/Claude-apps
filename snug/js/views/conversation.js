@@ -24,6 +24,11 @@ import { PinsButton } from './media.js'; // pinned messages
 import { ForumView, StageRoom, RoomPlaces } from './places.js'; // forum and stage rooms; access, follows and nicknames in details
 import { CallButtons, CallStrip, CallEndNote } from './calls.js'; // calls in direct conversations and groups
 import { PersonExtras, RoomLimit, VoiceExtras, PopOut } from './voiceopts.js'; // per-person volume, room limit, soundboard and options, picture in picture
+// Activities, reactions, the muted note, the call clock, connection quality, ringing again (voice and calls track).
+import { ActivityButtons, ActivityTile, ReactionFloat, ActivityAnnouncer, MutedBanner, CallTimer, ConnHeader, RingAgain, Bars, qualityOf, QLABEL } from './activities.js';
+import { videoBlocked } from '../voice.js';
+import { vp } from '../voiceopts.js';
+import { DmHeaderButtons } from './dm-manage.js'; // Add people and the members of a group (server/dms.js)
 
 const Back = () => S.ui.phone && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
 
@@ -35,13 +40,17 @@ export function VoiceControls({ compact }) {
     <button class=${`ib vc${c.muted ? ' on' : ''}`} aria-pressed=${String(c.muted)} aria-label=${c.muted ? 'Unmute' : 'Mute'} data-tip=${c.muted ? 'Unmute' : 'Mute'} onClick=${toggleMute}><${Icon} name=${c.muted ? 'mic-off' : 'mic'} size=${size} /></button>
     <button class=${`ib vc${c.deaf ? ' on' : ''}`} aria-pressed=${String(c.deaf)} aria-label=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} data-tip=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} onClick=${toggleDeaf}><${Icon} name=${c.deaf ? 'ear-off' : 'ear'} size=${size} /></button>
     <${MediaControls} c=${c} size=${size} compact=${compact} />
+    <${ActivityButtons} compact=${compact} />
     <${VoiceExtras} compact=${compact} />
     <button class="ib vc danger leave" aria-label=${leave} data-tip=${c.dm ? 'Hang up' : 'Leave'} onClick=${leaveVoice}><${Icon} name="leave" size=${size} /></button>`;
 }
 
 // Each person's line says what is really happening with their audio.
 function peerNote(id, inCall) {
-  if (!inCall || id === S.me) return null;
+  if (!inCall) return null;
+  // Their connection dropped; the server holds their place for a while.
+  if (S.voiceState[S.call?.room]?.[id]?.reconnecting) return 'Reconnecting\u2026';
+  if (id === S.me) return null;
   const st = S.peers[id];
   if (st === 'connected') return null;
   if (st === 'failed') return 'Can\u2019t connect';
@@ -51,12 +60,11 @@ function peerNote(id, inCall) {
 
 // How the line to each person is doing, from the live connection state.
 // Only shown once you are in the room: before that there is no connection.
+// Connected lines show their measured quality (js/lib/netquality.js): good, fair or poor.
 function Quality({ id, inCall }) {
   if (!inCall || id === S.me) return null;
-  const st = S.peers[id];
-  const q = st === 'connected' ? 'good' : st === 'disconnected' ? 'weak' : st === 'failed' ? 'bad' : 'wait';
-  const label = { good: 'Connected', weak: 'Connection is weak, reconnecting', bad: 'Can\u2019t connect', wait: 'Connecting' }[q];
-  return html`<span class=${`stage-q ${q}`} role="img" aria-label=${label} data-tip=${label}><i></i><i></i><i></i></span>`;
+  const q = qualityOf(id);
+  return html`<${Bars} q=${q} label=${S.peers[id] === 'failed' ? 'Can\u2019t connect' : QLABEL[q]} />`;
 }
 
 // Faces get smaller as the room fills, so everyone fits without scrolling.
@@ -66,12 +74,14 @@ const faceSize = (n) => (n <= 2 ? 96 : n <= 6 ? 64 : 48);
 // Controls: camera and screen sit between deafen and leave. In the compact
 // dock they only appear while on, so you can stop them from anywhere.
 function MediaControls({ c, size, compact }) {
-  const camLabel = c.cameraBusy ? 'Starting your camera…' : c.camera ? 'Turn camera off' : 'Turn camera on';
+  // A voice room may keep cameras and screens to some people ("Share camera and screen").
+  const blocked = !c.camera && !c.screen ? videoBlocked(c.room) : null;
+  const camLabel = blocked || (c.cameraBusy ? 'Starting your camera…' : c.camera ? 'Turn camera off' : 'Turn camera on');
   const canShare = canShareScreen();
-  const scrLabel = !canShare ? 'This browser can’t share a screen' : c.screenBusy ? 'Choosing what to share…' : c.screen ? 'Stop sharing your screen' : 'Share your screen';
+  const scrLabel = blocked || (!canShare ? 'This browser can’t share a screen' : c.screenBusy ? 'Choosing what to share…' : c.screen ? 'Stop sharing your screen' : 'Share your screen');
   return html`
-    ${(!compact || c.camera) && html`<button class=${`ib vc cam${c.camera ? ' live' : ''}`} aria-pressed=${String(!!c.camera)} aria-busy=${String(!!c.cameraBusy)} aria-label=${camLabel} data-tip=${camLabel} onClick=${toggleCamera}><${Icon} name=${c.camera ? 'camera' : 'camera-off'} size=${size} /></button>`}
-    ${(!compact || c.screen) && html`<button class=${`ib vc scr${c.screen ? ' live' : ''}${canShare ? '' : ' unavailable'}`} aria-pressed=${String(!!c.screen)} aria-busy=${String(!!c.screenBusy)} aria-disabled=${canShare ? null : 'true'} aria-label=${scrLabel} data-tip=${scrLabel} onClick=${canShare ? toggleScreen : null}><${Icon} name=${c.screen ? 'screen-off' : 'screen'} size=${size} /></button>`}`;
+    ${(!compact || c.camera) && html`<button class=${`ib vc cam${c.camera ? ' live' : ''}${blocked ? ' unavailable' : ''}`} aria-pressed=${String(!!c.camera)} aria-busy=${String(!!c.cameraBusy)} aria-disabled=${blocked ? 'true' : null} aria-label=${camLabel} data-tip=${camLabel} onClick=${blocked ? null : toggleCamera}><${Icon} name=${c.camera ? 'camera' : 'camera-off'} size=${size} /></button>`}
+    ${(!compact || c.screen) && html`<button class=${`ib vc scr${c.screen ? ' live' : ''}${canShare && !blocked ? '' : ' unavailable'}`} aria-pressed=${String(!!c.screen)} aria-busy=${String(!!c.screenBusy)} aria-disabled=${canShare && !blocked ? null : 'true'} aria-label=${scrLabel} data-tip=${scrLabel} onClick=${canShare && !blocked ? toggleScreen : null}><${Icon} name=${c.screen ? 'screen-off' : 'screen'} size=${size} /></button>`}`;
 }
 
 // Small marks beside a name for people watching from outside the call.
@@ -139,7 +149,7 @@ function MediaTile({ t, roomId, focused, small }) {
   const videoLabel = screenTile ? what : `${mine ? 'Your' : `${first}’s`} camera`;
   return html`<div class=${`vt vt-${t.kind}${talking ? ' talking' : ''}${focused ? ' focused' : ''}${small ? ' small' : ''}`} data-tile=${t.key} data-user=${t.id} role="group" aria-label=${what}>
     ${t.stream
-      ? html`<${Video} stream=${t.stream} mirror=${mine && t.kind === 'camera'} contain=${screenTile} label=${videoLabel} />`
+      ? html`<${Video} stream=${t.stream} mirror=${mine && t.kind === 'camera' && vp().mirror} contain=${screenTile} label=${videoLabel} />`
       : html`<span class="vt-face"><${Avatar} user=${u} size=${small ? 40 : 64} speaking=${talking} dim=${!!note} /></span>`}
     <button class="vt-hit" aria-pressed=${String(!!focused)} aria-label=${focused ? `Show everyone again` : `Make ${what} large`} onClick=${() => setFocus(t.key, focused)}></button>
     <span class="vt-label">
@@ -152,6 +162,7 @@ function MediaTile({ t, roomId, focused, small }) {
     ${screenTile && t.stream && html`<button class="ib vt-full" aria-label=${full ? 'Exit full screen' : 'Show full screen'} data-tip=${full ? 'Exit full screen' : 'Show full screen'} onClick=${toggleFullscreen}><${Icon} name=${full ? 'shrink' : 'expand'} size=${18} /></button>`}
     ${t.kind !== 'face' && html`<${PopOut} t=${t} />`}
     ${!screenTile && html`<span class="vt-extras"><${PersonExtras} id=${t.id} room=${roomId} /></span>`}
+    ${!screenTile && html`<${ReactionFloat} id=${t.id} room=${roomId} />`}
   </div>`;
 }
 
@@ -177,20 +188,25 @@ function MediaStage({ tiles, roomId }) {
 function Stage({ roomId, dm }) {
   const ids = (S.voice[roomId] || []).filter((id) => S.users[id]);
   const inCall = S.call?.room === roomId;
-  const starting = inCall && S.call.status !== 'live';
+  // Reconnecting after a dropped connection: still in the call, controls and all.
+  const reconnecting = inCall && S.call.status === 'reconnecting';
+  const starting = inCall && S.call.status !== 'live' && !reconnecting;
   // A call that is still ringing people shows them, waiting, beside the people in it.
   const meta = dm ? S.calls[roomId] : null;
   const ringingIds = inCall && !starting && meta ? meta.ringing.filter((id) => S.users[id] && !ids.includes(id)) : [];
   const alone = dm && inCall && !starting && ids.length <= 1 && !ringingIds.length;
-  const size = faceSize(ids.length + ringingIds.length);
+  // Faces make room for an activity (the whiteboard or a game) when one is running.
+  const size = inCall && S.activity?.[roomId] ? 48 : faceSize(ids.length + ringingIds.length);
   const ringNames = nameList(ringingIds.map((id) => S.users[id].name.split(' ')[0]));
   const status = !inCall ? null : starting
     ? html`<span class="stage-conn wait" role="status">${S.call.status === 'mic' ? 'Waiting for your microphone\u2026' : dm ? 'Calling\u2026' : 'Joining\u2026'}</span>`
-    : ringingIds.length && ids.length <= 1
-      ? html`<span class="stage-conn ring" role="status"><i aria-hidden="true"></i>Ringing ${ringNames}\u2026</span>`
-      : alone
-        ? html`<span class="stage-conn wait" role="status">${meta?.answered ? 'Everyone else left' : 'Nobody has picked up yet'}</span>`
-        : html`<span class="stage-conn ok" role="status"><i aria-hidden="true"></i>Connected</span>`;
+    : reconnecting
+      ? html`<span class="stage-conn act-reconn" role="status"><i aria-hidden="true"></i>Reconnecting\u2026</span>`
+      : ringingIds.length && ids.length <= 1
+        ? html`<span class="stage-conn ring" role="status"><i aria-hidden="true"></i>Ringing ${ringNames}\u2026</span>`
+        : alone
+          ? html`<span class="stage-conn wait" role="status">${meta?.answered ? 'Everyone else left' : 'Nobody has picked up yet'}</span>`
+          : html`<${ConnHeader} room=${roomId} />`;
   // Once someone in the call shows a camera or a screen, the stage becomes tiles.
   const tiles = inCall && !starting ? mediaTiles(ids, roomId) : [];
   const media = tiles.some((t) => t.kind !== 'face');
@@ -198,7 +214,11 @@ function Stage({ roomId, dm }) {
     <div class="stage-top">
       <span class="stage-count"><${Icon} name=${dm ? 'phone' : 'voice'} size=${16} />${ids.length ? `${ids.length} in ${dm ? 'the call' : 'voice'}` : dm ? 'Call' : 'Voice'}<${RoomLimit} room=${roomId} n=${ids.length} /></span>
       ${status}
+      ${inCall && !starting && html`<${CallTimer} room=${roomId} />`}
     </div>
+    ${inCall && html`<${MutedBanner} />`}
+    ${inCall && html`<${ActivityAnnouncer} />`}
+    <${ActivityTile} room=${roomId} />
     ${media ? html`<${MediaStage} tiles=${tiles} roomId=${roomId} />` : ids.length
       ? html`<div class="stage-people" style=${`--face:${size}px`}>
           ${ids.map((id) => {
@@ -218,6 +238,7 @@ function Stage({ roomId, dm }) {
               ${note && html`<span class="stage-note">${note}</span>`}
               <${StageMod} id=${id} room=${roomId} />
               <${PersonExtras} id=${id} room=${roomId} />
+              <${ReactionFloat} id=${id} room=${roomId} />
             </div>`;
           })}
           ${ringingIds.map((id) => html`<div class="stage-person ringing" key=${id}>
@@ -227,6 +248,7 @@ function Stage({ roomId, dm }) {
           </div>`)}
         </div>`
       : html`<p class="stage-empty">${starting ? 'Starting your microphone\u2026' : 'Nobody\u2019s in here yet. Join, and the room shows as live to everyone.'}</p>`}
+    ${dm && html`<${RingAgain} room=${roomId} />`}
     <div class="stage-acts">
       ${inCall && !starting
         ? html`<${VoiceControls} />`
@@ -307,6 +329,7 @@ export function Conversation({ conv }) {
           ${inVoice > 0 && html`<span class="bar-voice"><${Icon} name="voice" size=${16} /><span class="num">${inVoice}</span> in voice</span>`}
         </span>`}
         ${meta.dm && html`<${CallButtons} conv=${conv} />`}
+        ${meta.dm && html`<${DmHeaderButtons} conv=${conv} />`}
         <${PinsButton} conv=${conv} />
         <${JumpToDate} conv=${conv} />
         <button class="ib" aria-label=${`Search in ${meta.title}`} data-tip="Search here" onClick=${() => go({ type: 'search', q: `in:"${meta.title.toLowerCase()}" ` })}><${Icon} name="search" /></button>

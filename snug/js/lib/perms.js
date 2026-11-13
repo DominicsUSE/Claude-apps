@@ -33,6 +33,14 @@ PERMS.push(
   { id: 'soundboard', label: 'Use the soundboard', hint: 'Play this house’s sounds in its voice rooms, even when the house keeps the soundboard to some roles.' },
   { id: 'sounds', label: 'Manage sounds', hint: 'Add, rename and remove this house’s soundboard sounds, and choose who may play them.' },
 );
+// Houses and community (server/community.js). Existing roles got these once,
+// from the permission each one replaces (server/community.js migrateCommunity).
+PERMS.push(
+  { id: 'house', label: 'Manage the house', hint: 'Change its name, pictures, colour, screening, welcome, soundboard settings, verification and invitation pause.' },
+  { id: 'events', label: 'Plan events', hint: 'Create events, and edit or cancel anyone’s.' },
+  { id: 'hooks', label: 'Manage webhooks', hint: 'Make, renew and remove webhooks and followed notice rooms in rooms they manage.' },
+  { id: 'react', label: 'Add reactions', hint: 'React to messages. Anyone can always take back their own reaction.' },
+);
 
 export function roleOf(S, houseId, userId = S.me) {
   const house = S.houses[houseId];

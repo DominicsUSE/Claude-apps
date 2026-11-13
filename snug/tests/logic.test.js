@@ -400,14 +400,14 @@ test('messaging: search filters for mentions, dates and pins', async () => {
 test('places: the room resolver: defaults, overrides in order, managers and owners, voice kinds', async () => {
   const { resolveRoom } = await import('../js/lib/places.js');
   const P = (...p) => new Set(p);
-  const all = { view: true, send: true, connect: true, speak: true, manage: true };
-  const none = { view: false, send: false, connect: false, speak: false, manage: false };
+  const all = { view: true, send: true, connect: true, speak: true, manage: true, video: true };
+  const none = { view: false, send: false, connect: false, speak: false, manage: false, video: false };
   // Defaults come from the house-wide permissions.
-  assert.deepEqual(resolveRoom({ housePerms: P('post'), kind: 'text', userId: 'u' }), { view: true, send: true, connect: false, speak: false, manage: false });
+  assert.deepEqual(resolveRoom({ housePerms: P('post'), kind: 'text', userId: 'u' }), { view: true, send: true, connect: false, speak: false, manage: false, video: false });
   assert.equal(resolveRoom({ housePerms: P(), kind: 'text', userId: 'u' }).send, false, 'no "post", no sending');
   assert.equal(resolveRoom({ housePerms: P('post'), kind: 'news', userId: 'u' }).send, false, 'notice rooms need "announce"');
   assert.equal(resolveRoom({ housePerms: P('announce'), kind: 'news', userId: 'u' }).send, true);
-  assert.deepEqual(resolveRoom({ housePerms: P('post'), kind: 'voice', userId: 'u' }), { view: true, send: true, connect: true, speak: true, manage: false });
+  assert.deepEqual(resolveRoom({ housePerms: P('post'), kind: 'voice', userId: 'u' }), { view: true, send: true, connect: true, speak: true, manage: false, video: true });
   const stage = resolveRoom({ housePerms: P('post'), kind: 'stage', userId: 'u' });
   assert.equal(stage.connect, true); assert.equal(stage.speak, false, 'on a stage the audience does not speak by default');
   assert.equal(resolveRoom({ housePerms: P('rooms'), kind: 'stage', userId: 'u' }).speak, true, 'people who run rooms speak on stages');

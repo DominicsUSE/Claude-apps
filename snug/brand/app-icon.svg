@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <title>Snug</title>
-  <!-- Charcoal platform square (radius 22.5%), the Nook at 11x the 64 grid,
-       centred: doorway 440 x 616, person r99 in off-white. -->
+  <!-- Charcoal platform square (radius 22.5%), the Doorstep at 11x the 64 grid,
+       centred: archway 572 x 594, person r99 in off-white on the threshold. -->
   <rect width="1024" height="1024" rx="230" fill="#141516"/>
-  <path fill="#F05A47" d="M292 776V424a220 220 0 0 1 440 0v352a44 44 0 0 1-44 44H336a44 44 0 0 1-44-44Z"/>
-  <circle cx="512" cy="622" r="99" fill="#F4F1ED"/>
+  <path fill="#F05A47" d="M226 765V501a286 286 0 0 1 572 0v264a44 44 0 0 1-44 44H666V501a154 154 0 0 0-308 0v308H270a44 44 0 0 1-44-44Z"/>
+  <circle cx="512" cy="710" r="99" fill="#F4F1ED"/>
 </svg>

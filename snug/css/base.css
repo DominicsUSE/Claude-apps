@@ -57,9 +57,9 @@ a:hover { text-decoration-color: currentColor; }
 }
 .btn:hover { background: var(--btn2-hover); }
 .btn:active { background: var(--btn2-press); }
-.btn.primary { background: var(--brand); color: var(--on-brand); font-weight: var(--w-semibold); }
-.btn.primary:hover { background: var(--brand-hover); }
-.btn.primary:active { background: var(--brand-press); }
+.btn.primary { background: var(--accent); color: var(--on-accent); font-weight: var(--w-semibold); }
+.btn.primary:hover { background: var(--accent-hover); }
+.btn.primary:active { background: var(--accent-press); }
 .btn.primary:focus-visible { outline-color: var(--text-1); }
 .btn.danger { background: transparent; color: var(--error); border-color: color-mix(in srgb, var(--error) 55%, transparent); }
 .btn.danger:hover { background: var(--error-soft); border-color: var(--error); }
@@ -97,7 +97,7 @@ a:hover { text-decoration-color: currentColor; }
 textarea.field { height: auto; padding: var(--s-2) var(--s-3); resize: vertical; line-height: var(--lh-body); display: block; }
 .field::placeholder { color: var(--text-3); }
 .field:hover { border-color: var(--line-strong); }
-.field:focus, .field:focus-visible { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand); outline: none; background: var(--bg-2); }
+.field:focus, .field:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); outline: none; background: var(--bg-2); }
 .field.bad, .field[aria-invalid="true"] { border-color: var(--error); }
 .field.bad:focus { box-shadow: 0 0 0 1px var(--error); }
 .field[disabled] { background: var(--bg-3); color: var(--text-disabled); border-color: transparent; }
@@ -129,8 +129,8 @@ textarea.field { height: auto; padding: var(--s-2) var(--s-3); resize: vertical;
   transition: transform var(--m-standard) var(--ease-in-out), background var(--m-standard) var(--ease-in-out);
 }
 .switch:hover::after { background: var(--text-1); }
-.switch[aria-checked="true"] { background: var(--brand); box-shadow: none; }
-.switch[aria-checked="true"]::after { transform: translateX(16px); background: var(--on-brand); }
+.switch[aria-checked="true"] { background: var(--accent); box-shadow: none; }
+.switch[aria-checked="true"]::after { transform: translateX(16px); background: var(--on-accent); }
 .switch[disabled] { opacity: 0.5; pointer-events: none; }
 
 /* Counts and dots: two levels of unread. Counts are coral: they need you. */

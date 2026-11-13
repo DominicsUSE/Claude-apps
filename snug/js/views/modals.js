@@ -104,6 +104,7 @@ export function Invite({ house }) {
       <button class="btn primary" data-autofocus disabled=${!link} onClick=${() => copyText(link)}><${Icon} name="copy" size=${16} />Copy link</button>
     </div>
     ${linkError && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${linkError}</div>`}
+    ${link && html`<div class="invite-app"><button class="btn quiet" onClick=${() => copyText(`snug://join/${link.split('/join/')[1]}`)}><${Icon} name="link" size=${16} />Copy app link</button><span class="hint">Opens straight in the Snug desktop app.</span></div>`}
     <form class="form invite-by-name" onSubmit=${byName} novalidate>
       <div>
         <label class="label" for="invite-handle">Or invite someone already on Snug</label>
@@ -134,9 +135,12 @@ export function JoinByLink({ code }) {
   if (!info) return html`<div class="join-card" aria-busy="true"><div class="join-head"><span class="skel join-skel-tile"></span><div class="join-id"><span class="skel join-skel-line"></span><span class="skel join-skel-line short"></span></div></div></div>`;
   const h = info.house;
   const already = S.houseOrder.some((id) => S.houses[id]?.name === h.name && S.houses[id]?.joined);
-  return html`<div class="join-card">
+  // The house's invitation background and icon (server/community.js), shown to whoever holds the link.
+  const pic = (id) => `/api/housepics/${id}?invite=${encodeURIComponent(code)}`;
+  return html`<div class=${`join-card${h.splash ? ' has-splash' : ''}`} style=${h.splash ? `--splash:url("${pic(h.splash)}")` : ''}>
+    ${info.paused && html`<div class="join-paused" role="status">This house has paused new members for now. Try again later.</div>`}
     <div class="join-head" style=${`--hue:${hueOf(h.hue)}`}>
-      <span class="tile xl">${h.mark}</span>
+      <span class=${`tile xl${h.icon ? ' pic' : ''}`}>${h.mark}${h.icon ? html`<img src=${pic(h.icon)} alt="" onError=${(e) => e.currentTarget.remove()} />` : null}</span>
       <div class="join-id">
         ${info.by && html`<span class="join-kicker">${info.by} invited you</span>`}
         <h2>${h.name}</h2>
@@ -160,7 +164,7 @@ export function JoinPreview({ house }) {
   const inv = S.invites.find((i) => i.house === house);
   return html`<div class="join-card">
     <div class="join-head" style=${`--hue:${hueOf(h.hue)}`}>
-      <span class="tile xl">${h.mark}</span>
+      <span class=${`tile xl${h.icon ? ' pic' : ''}`}>${h.mark}${h.icon ? html`<img src=${`/api/housepics/${h.icon}`} alt="" onError=${(e) => e.currentTarget.remove()} />` : null}</span>
       <div class="join-id">
         ${inv && html`<span class="join-kicker">${(S.users[inv.from]?.name || 'Someone').split(' ')[0]} invited you</span>`}
         <h2>${h.name}</h2>

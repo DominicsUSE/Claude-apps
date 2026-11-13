@@ -1,5 +1,5 @@
 /*
-  Brand: the Nook, the wordmark and lockup, the loading mark, and the two
+  Brand: the Doorstep (the Nook component), the wordmark and lockup, the loading mark, and the two
   screens the brand owns outright (sign in, splash). Geometry lives in
   js/ui/brand.js and brand/*.svg; docs/brand/BRAND.md explains it.
   Rule: places are arches, people are circles, controls are rectangles.
@@ -7,7 +7,7 @@
 
 .nook, .lockup, .wordmark { display: block; flex: none; }
 
-/* Loading: the person settles into the doorway. One 240ms move inside a
+/* Loading: the person steps onto the threshold. One 240ms move inside a
    1.2s cycle reads as "arriving", not as a spinner. */
 .loading { display: inline-flex; flex-direction: column; align-items: center; gap: var(--s-3); color: var(--text-3); font-size: var(--t-13); line-height: var(--lh-ui); }
 .loading.quiet .loading-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

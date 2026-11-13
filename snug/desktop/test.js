@@ -448,3 +448,226 @@ test("push to talk: a global key is held only while in voice in push-to-talk mod
   assert.equal(await app.evaluate(() => globalThis.snugPushToTalk()), null, "leaving voice lets the key go");
 });
 // ---------- end push to talk ----------
+
+// ---------- Desktop shell (inbox track) ----------
+// The unread number on the icon and a flash for a mention while unfocused,
+// the window colour following the theme, desktop settings (open at login,
+// minimise to tray), global mute and deafen keys while in voice, snug:// links
+// from a second launch, the update check against a local stand-in, and the
+// window's size and place kept across launches.
+const shellDir = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-shell-"));
+let updateReply = { status: 200, body: { tag_name: "v9.9.9", html_url: "https://github.com/DominicsUSE/Claude-apps/releases/tag/v9.9.9" } };
+const updateStub = require("http").createServer((req, res) => {
+  if (updateReply.status === 0) { req.socket.destroy(); return; }
+  res.writeHead(updateReply.status, { "content-type": "application/json" });
+  res.end(JSON.stringify(updateReply.body));
+});
+const stubReady = new Promise((r) => updateStub.listen(0, "127.0.0.1", r));
+test.after(() => { updateStub.close(); fs.rmSync(shellDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); });
+async function launchShell(extra = []) {
+  await stubReady;
+  const bin = process.env.SNUG_BIN && path.resolve(process.env.SNUG_BIN);
+  const app = await electron.launch({
+    executablePath: bin || require("electron"),
+    args: [...(bin ? [] : [__dirname]), "--no-sandbox", `--user-data-dir=${shellDir}`, "--use-fake-device-for-media-stream", ...extra],
+    cwd: __dirname,
+    env: { ...process.env, SNUG_UPDATE_URL: `http://127.0.0.1:${updateStub.address().port}/latest` },
+  });
+  const page = await app.firstWindow();
+  page.setDefaultTimeout(20000);
+  return { app, page };
+}
+const mainWin = (app, fn, arg) => app.evaluate(({ BrowserWindow }, [src, a]) => {
+  const w = BrowserWindow.getAllWindows().find((x) => !x.isDestroyed() && x.webContents.getURL().startsWith("http"));
+  return new Function("w", "a", `return (${src})(w, a);`)(w, a);
+}, [fn.toString(), arg]);
+
+test("desktop shell: badge and flash, theme colour, settings, global voice keys, snug:// links, update check", async (t) => {
+  const WebSocket = require("ws");
+  const { spawn } = require("child_process");
+  const { app, page } = await launchShell();
+  let other = null;
+  t.after(async () => { other?.terminate(); await app.close().catch(() => {}); });
+  await page.waitForSelector("#setup");
+  await page.click("#go");
+  await page.waitForSelector(".auth-form");
+  const origin = new URL(page.url()).origin;
+  await page.click('.auth-link:has-text("Create an account")');
+  await page.fill("#auth-handle", "nia");
+  await page.fill("#auth-name", "Nia Shell");
+  await page.fill("#auth-pass", "a long password");
+  await page.click(".auth-form button[type=submit]");
+  await page.waitForSelector(".nav");
+  await page.waitForFunction(() => window.snug.S.conn.socket === "open");
+  for (const fn of ["setBadge", "setThemeColor", "getDesktopSettings", "setDesktopSettings", "setVoiceKeys", "voiceActive", "onVoiceToggle", "onSystemIdle", "onDeepLink", "onUpdate"]) {
+    assert.equal(await page.evaluate((f) => typeof window.snugApp[f], fn), "function", fn);
+  }
+  await page.click(".rail-add");
+  await page.fill("#house-name", "Shell House");
+  await page.click(".modal button[type=submit]");
+  await page.waitForSelector('.main .bar-title:has-text("Lounge")');
+  const lounge = await page.evaluate(() => window.snug.S.ui.view.id);
+  await page.click('.rail-house:has-text("Shell House")', { button: "right" });
+  await page.click('.menu-item:has-text("Invite people")');
+  await page.waitForFunction(() => /\/join\//.test(document.querySelector(".copy-row input")?.value || ""));
+  const code = (await page.locator(".copy-row input").first().inputValue()).split("/join/")[1];
+  await page.keyboard.press("Escape");
+
+  // A second person mentions Nia while the window isn't focused: the badge count goes up and the window flashes.
+  const reg = await fetch(`${origin}/api/register`, { method: "POST", headers: { "content-type": "application/json", origin }, body: JSON.stringify({ handle: "oto", name: "Oto Second", password: "a long password" }) });
+  assert.equal(reg.status, 201);
+  const cookie = reg.headers.get("set-cookie").split(";")[0];
+  other = new WebSocket(`${origin.replace("http", "ws")}/ws`, { headers: { cookie, origin } });
+  let seq = 0;
+  const acks = new Map();
+  await new Promise((resolve, reject) => { other.on("error", reject); other.on("message", (b) => { const m = JSON.parse(b); if (m.t === "hello") resolve(); else if (m.t === "ack") acks.get(m.id)?.(m); }); });
+  const op = (name, d) => new Promise((resolve, reject) => { const id = ++seq; acks.set(id, (m) => (m.ok ? resolve(m.d) : reject(new Error(m.error)))); other.send(JSON.stringify({ t: "op", id, op: name, d })); });
+  await op("invite.accept", { code });
+  await page.click(".rail-home"); // away from the Lounge, so the mention stays unread
+  await page.waitForFunction(() => window.snug.desktop.badgeCount() === 0);
+  // Another window takes the focus.
+  await app.evaluate(({ BrowserWindow }) => { const w = new BrowserWindow({ width: 200, height: 200, show: true }); w.focus(); globalThis.__focusThief = w; });
+  await new Promise((r) => setTimeout(r, 300));
+  const focused = await mainWin(app, (w) => w.isFocused());
+  await op("msg.send", { conv: lounge, id: "m_shelltest0001", text: "@nia the kiln is ready" });
+  await page.waitForFunction(() => window.snug.desktop.badgeCount() === 1);
+  await app.evaluate(async () => { for (let i = 0; i < 50 && !globalThis.snugBadgeLog.some((b) => b.n === 1); i++) await new Promise((r) => setTimeout(r, 100)); });
+  const log = await app.evaluate(() => globalThis.snugBadgeLog);
+  assert.deepEqual(log.at(-1), { n: 1, method: process.platform === "win32" ? "overlay" : "count" });
+  if (!focused) assert.deepEqual(await app.evaluate(() => globalThis.snugFlashLog), [1], "flashed while not focused");
+  else t.diagnostic("this display gave the focus back to Snug; the flash was not checked");
+  assert.ok((await app.evaluate(() => globalThis.snugBadgeImage(3))) === 16 * 16 * 4, "the Windows overlay is drawn at run time");
+  await app.evaluate(() => globalThis.__focusThief.destroy());
+  // The bridge clamps whatever it is given.
+  await page.evaluate(() => window.snugApp.setBadge(5000));
+  await app.evaluate(async () => { for (let i = 0; i < 20 && globalThis.snugBadgeLog.at(-1).n !== 999; i++) await new Promise((r) => setTimeout(r, 50)); });
+  assert.equal((await app.evaluate(() => globalThis.snugBadgeLog.at(-1))).n, 999);
+  await page.evaluate(() => window.snugApp.setBadge(1));
+
+  // The window colour follows the theme; anything but #rrggbb is refused.
+  assert.equal(await page.evaluate(() => window.snugApp.setThemeColor("#123456")), true);
+  assert.equal((await mainWin(app, (w) => w.getBackgroundColor())).toLowerCase(), "#123456");
+  for (const bad of ["red", "#12345", "url(x)", "#1234567"]) assert.equal(await page.evaluate((b) => window.snugApp.setThemeColor(b), bad), false, bad);
+  assert.equal((await mainWin(app, (w) => w.getBackgroundColor())).toLowerCase(), "#123456");
+
+  // Settings: open at login, minimise to tray; unknown names refused.
+  let r = await page.evaluate(() => window.snugApp.setDesktopSettings({ openAtLogin: true, minimizeToTray: true }));
+  assert.equal(r.settings.openAtLogin, true);
+  assert.equal(await app.evaluate(() => globalThis.snugLoginItem), true);
+  if (process.platform === "win32" || process.platform === "darwin") assert.equal(await app.evaluate(({ app: a }) => a.getLoginItemSettings().openAtLogin), true);
+  const cfg = JSON.parse(fs.readFileSync(path.join(shellDir, "desktop.json"), "utf8"));
+  assert.equal(cfg.openAtLogin, true);
+  assert.equal(cfg.minimizeToTray, true);
+  assert.equal(cfg.themeColor, "#123456");
+  assert.match((await page.evaluate(() => window.snugApp.setDesktopSettings({ evil: true }))).error, /isn’t a desktop setting/);
+  await mainWin(app, (w) => w.minimize());
+  await new Promise((res) => setTimeout(res, 400));
+  // Without a window manager (xvfb) nothing minimises: send the window the event a manager would.
+  await mainWin(app, (w) => { if (w.isVisible() && !w.isMinimized()) w.emit("minimize", { preventDefault() {} }); });
+  await page.waitForFunction(() => window.snugApp.hidden());
+  assert.equal(await mainWin(app, (w) => w.isVisible()), false, "minimising hides it to the tray");
+  await mainWin(app, (w) => { w.show(); w.focus(); });
+  await page.waitForFunction(() => !window.snugApp.hidden());
+  r = await page.evaluate(() => window.snugApp.setDesktopSettings({ openAtLogin: false, minimizeToTray: false }));
+  assert.equal(await app.evaluate(() => globalThis.snugLoginItem), false);
+  // The Snug menu mirrors them.
+  const labels = await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.find((i) => i.label === "Snug").submenu.items.map((i) => i.label));
+  for (const l of ["Open Snug at login", "Start minimised", "Minimise to the tray", "Check for a newer Snug"]) assert.ok(labels.includes(l), l);
+
+  // Settings > Desktop app is there in the desktop app.
+  await page.click(".self");
+  await page.click(".me-pop >> text=Settings");
+  await page.click(".layer-nav >> text=Desktop app");
+  await page.locator('.layer-body [aria-label="Open Snug when you sign in to your computer"]').waitFor();
+  await page.keyboard.press("Escape");
+
+  // Global mute and deafen keys: bad ones refused, good ones held only in voice; a press toggles mute.
+  assert.equal((await page.evaluate(() => window.snugApp.setVoiceKeys({ mute: "M" }))).ok, false, "a key needs a modifier");
+  assert.equal((await page.evaluate(() => window.snugApp.setVoiceKeys({ mute: "Ctrl+Alt+Shift+M" }))).ok, false, "at most two modifiers");
+  assert.equal((await page.evaluate(() => window.snugApp.setVoiceKeys({ mute: "CommandOrControl+C" }))).ok, false, "never a shortcut other apps rely on");
+  assert.equal((await page.evaluate(() => window.snugApp.setVoiceKeys({ mute: "Alt+F4" }))).ok, false, "never Alt+F4");
+  assert.match((await page.evaluate(() => window.snugApp.setVoiceKeys({ mute: "CommandOrControl+Shift+F9", deafen: "CommandOrControl+Shift+F9" }))).errors.deafen, /different/);
+  r = await page.evaluate(() => window.snugApp.setVoiceKeys({ mute: "CommandOrControl+Shift+F9", deafen: "CommandOrControl+Shift+F10" }));
+  assert.equal(r.ok, true);
+  assert.deepEqual(await app.evaluate(() => globalThis.snugVoiceKeys()), {}, "not held outside voice");
+  await page.click('.rail-house:has-text("Shell House")');
+  await page.click('.nav .row:has-text("Hangout")');
+  await page.click('.stage .btn.primary:has-text("Join voice")');
+  await page.locator('.stage [aria-label="Leave voice"]').waitFor();
+  await app.evaluate(async () => { for (let i = 0; i < 50 && !globalThis.snugVoiceKeys().mute; i++) await new Promise((res) => setTimeout(res, 100)); });
+  assert.deepEqual(await app.evaluate(() => globalThis.snugVoiceKeys()), { mute: "CommandOrControl+Shift+F9", deafen: "CommandOrControl+Shift+F10" });
+  const muted = await page.evaluate(() => !!window.snug.S.call.muted);
+  await mainWin(app, (w) => w.webContents.send("voice:toggle", "mute"));
+  await page.waitForFunction((m) => !!window.snug.S.call.muted !== m, muted);
+  await mainWin(app, (w) => w.webContents.send("voice:toggle", "deafen"));
+  await page.waitForFunction(() => window.snug.S.call.deaf === true);
+  await page.click('.stage [aria-label="Leave voice"]');
+  await app.evaluate(async () => { for (let i = 0; i < 50 && globalThis.snugVoiceKeys().mute; i++) await new Promise((res) => setTimeout(res, 100)); });
+  assert.deepEqual(await app.evaluate(() => globalThis.snugVoiceKeys()), {}, "leaving voice lets them go");
+
+  // The computer going idle reports Away (auto-idle on the server).
+  await app.evaluate(() => globalThis.snugTellIdle("locked"));
+  await page.waitForFunction(() => window.snug.S.users[window.snug.S.me].presence === "away", null, { timeout: 5000 });
+  await app.evaluate(() => globalThis.snugTellIdle("unlocked"));
+  await page.waitForFunction(() => window.snug.S.users[window.snug.S.me].presence === "around", null, { timeout: 5000 });
+
+  // snug:// links: a second launch with a join link shows the join preview; a malformed one does nothing.
+  const linksBefore = (await app.evaluate(() => globalThis.snugLinks)).length;
+  const bin = process.env.SNUG_BIN && path.resolve(process.env.SNUG_BIN);
+  const second = (link) => new Promise((res) => spawn(bin || require("electron"), [...(bin ? [] : [__dirname]), "--no-sandbox", `--user-data-dir=${shellDir}`, link], { cwd: __dirname, stdio: "ignore" }).on("exit", res));
+  assert.equal(await second("snug://join/../../etc/passwd"), 0);
+  await new Promise((res) => setTimeout(res, 500));
+  assert.equal((await app.evaluate(() => globalThis.snugLinks)).length, linksBefore, "a malformed link goes nowhere");
+  assert.equal(await page.locator(".modal").count(), 0);
+  assert.equal(await second(`snug://join/${code}`), 0);
+  await page.locator(".modal").waitFor();
+  assert.match(await page.locator(".modal").textContent(), /Shell House/);
+  assert.equal((await app.evaluate(() => globalThis.snugLinks)).at(-1), `snug://join/${code}`);
+  assert.equal(await app.evaluate(() => globalThis.snugParseLink("snug://open/r_abc/m_def")), "snug://open/r_abc/m_def");
+  assert.equal(await app.evaluate(() => globalThis.snugParseLink("snug://open/a/b/c")), null);
+  await page.keyboard.press("Escape");
+
+  // A newer Snug: a strip with its version; the same version, or a failure, says nothing.
+  updateReply = { status: 200, body: { tag_name: "v9.9.9", html_url: "https://github.com/DominicsUSE/Claude-apps/releases/tag/v9.9.9" } };
+  assert.equal((await app.evaluate(() => globalThis.snugCheckUpdate())).version, "9.9.9");
+  await page.locator('.update-strip:has-text("Snug 9.9.9 is out")').waitFor();
+  const version = await app.evaluate(({ app: a }) => a.getVersion());
+  updateReply = { status: 200, body: { tag_name: `v${version}`, html_url: "https://github.com/x" } };
+  assert.equal(await app.evaluate(() => globalThis.snugCheckUpdate()), null, "the same version is not news");
+  updateReply = { status: 0 };
+  assert.equal(await app.evaluate(() => globalThis.snugCheckUpdate()), null, "a failed check is silent");
+  updateReply = { status: 500, body: {} };
+  assert.equal(await app.evaluate(() => globalThis.snugCheckUpdate()), null);
+  await page.click('.update-strip [aria-label="Dismiss"]');
+  await page.locator(".update-strip").waitFor({ state: "detached" });
+
+  // Leave a known size and place for the next test.
+  await mainWin(app, (w) => { w.unmaximize(); w.setBounds({ x: 60, y: 40, width: 900, height: 700 }); });
+  await new Promise((res) => setTimeout(res, 900));
+});
+
+test("desktop shell: the window opens where it was; a place off every screen falls back to the centre", async (t) => {
+  let { app, page } = await launchShell();
+  await page.waitForSelector(".nav");
+  const b = await mainWin(app, (w) => w.getBounds());
+  assert.deepEqual({ w: b.width, h: b.height }, { w: 900, h: 700 }, "size kept");
+  assert.ok(Math.abs(b.x - 60) <= 40 && Math.abs(b.y - 40) <= 60, `place kept (${b.x}, ${b.y})`);
+  assert.equal(await app.evaluate(() => globalThis.snugPlaceRestored), true);
+  await app.close();
+  // A screen that is gone: the saved place is far off.
+  const file = path.join(shellDir, "desktop.json");
+  const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
+  fs.writeFileSync(file, JSON.stringify({ ...cfg, bounds: { x: -9000, y: -9000, width: 900, height: 700 }, maximized: false, themeColor: "#123456" }));
+  ({ app, page } = await launchShell());
+  t.after(() => app.close().catch(() => {}));
+  await page.waitForSelector(".nav");
+  assert.equal(await app.evaluate(() => globalThis.snugPlaceRestored), false);
+  const c = await mainWin(app, (w) => w.getBounds());
+  const area = await app.evaluate(({ screen }) => screen.getPrimaryDisplay().workArea);
+  assert.ok(c.x >= area.x - 1 && c.y >= area.y - 1 && c.x < area.x + area.width && c.y < area.y + area.height, `back on screen (${c.x}, ${c.y})`);
+  // The theme colour from last time is the window's colour from the start (the page then sets its own).
+  assert.equal(await app.evaluate(() => globalThis.snugStartColor), "#123456");
+  for (let i = 0; i < 50 && JSON.parse(fs.readFileSync(file, "utf8")).themeColor === "#123456"; i++) await new Promise((r) => setTimeout(r, 100));
+  const now = JSON.parse(fs.readFileSync(file, "utf8")).themeColor;
+  assert.match(now, /^#[0-9a-fA-F]{6}$/, "the page told the app its theme colour");
+});

@@ -1,7 +1,7 @@
 // Settings > Voice and video (this device), and House settings > Voice
 // (the soundboard, and each voice room's user limit and bitrate).
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
-import { S, toast, openModal, person } from '../store.js';
+import { S, toast, openModal, person, emit } from '../store.js';
 import { call } from '../server.js';
 import { can } from '../lib/perms.js';
 import { Icon } from '../ui/icons.js';
@@ -10,8 +10,9 @@ import { Confirm } from './modals.js';
 import { restartMic, restartCamera, recapBitrates } from '../voice.js';
 import {
   vp, setVoice, micConstraints, cameraConstraints, audioCtx, meter, canPickSpeaker, preview, setPersonVolume, setPersonMuted,
-  RESOLUTIONS, FRAME_RATES,
+  RESOLUTIONS, FRAME_RATES, CAM_RES, CAM_FPS,
 } from '../voiceopts.js';
+import { RINGTONES, previewRingtone } from '../calls.js'; // ringtones (voice and calls track)
 import { setCapturingKey } from './voiceopts.js';
 
 function Row({ label, hint, children, top }) {
@@ -248,6 +249,20 @@ export function VoiceSettings() {
       ${canPickSpeaker() && html`<button class="btn quiet" onClick=${() => playTestTone()}>Play a test sound</button>`}
     <//>
     <${Row} label="Microphone check" hint="See how loud you are, and hear yourself through your speaker." top><${MicTest} /><//>
+    <${Row} label="Microphone volume" hint="How loud you are to everyone else, before voice activity decides when to send." top>
+      <label class="vo-range-row wide">
+        <span class="vo-range-label"><span class="num">${Math.round(v.inputGain * 100)}%</span></span>
+        <input class="vo-range" type="range" min="0" max="200" step="5" value=${Math.round(v.inputGain * 100)} aria-label="Microphone volume" aria-valuetext=${`${Math.round(v.inputGain * 100)}%`}
+          onInput=${(e) => setVoice({ inputGain: Number(e.target.value) / 100 })} />
+      </label>
+    <//>
+    <${Row} label="Output volume" hint="Everything you hear in calls, on top of each person’s own volume." top>
+      <label class="vo-range-row wide">
+        <span class="vo-range-label"><span class="num">${Math.round(v.outputVolume * 100)}%</span></span>
+        <input class="vo-range" type="range" min="0" max="200" step="5" value=${Math.round(v.outputVolume * 100)} aria-label="Output volume" aria-valuetext=${`${Math.round(v.outputVolume * 100)}%`}
+          onInput=${(e) => setVoice({ outputVolume: Number(e.target.value) / 100 })} />
+      </label>
+    <//>
 
     <div class="set-head">Input mode</div>
     <${Row} label="How your microphone opens">
@@ -295,6 +310,15 @@ export function VoiceSettings() {
     <${Row} label="Camera">
       <${DeviceSelect} kind="videoinput" list=${devices} value=${v.camera} label="Camera" onChange=${async (id) => { setVoice({ camera: id }); await restartCamera(); }} />
     <//>
+    <${Row} label="Camera quality" hint="Higher looks sharper and uses more of everyone’s connection.">
+      <${Seg} label="Camera resolution" value=${v.camRes} onChange=${async (r) => { setVoice({ camRes: r }); await restartCamera(); }} options=${Object.keys(CAM_RES).map((r) => [r, `${r}p`])} />
+    <//>
+    <${Row} label="Camera frame rate">
+      <${Seg} label="Camera frame rate" value=${v.camFps} onChange=${async (f) => { setVoice({ camFps: f }); await restartCamera(); }} options=${CAM_FPS.map((f) => [f, `${f} fps`])} />
+    <//>
+    <${Row} label="Mirror my camera" hint="Show your own picture as in a mirror. Others always see it the right way round.">
+      <${Switch} on=${v.mirror} label="Mirror my camera" onChange=${(on) => setVoice({ mirror: on })} />
+    <//>
     <${Row} label="Camera check" top><${CameraTest} /><//>
 
     <div class="set-head">Screen share</div>
@@ -322,6 +346,31 @@ export function VoiceSettings() {
       <select class="field" aria-label="Leave voice rooms when alone" value=${v.afk} onChange=${(e) => setVoice({ afk: Number(e.target.value) })}>
         ${AFK.map(([n, t]) => html`<option value=${n}>${t}</option>`)}
       </select>
+    <//>
+
+    <div class="set-head">Calls</div>
+    <${Row} label="Who can ring you" hint="Calls from anyone else don’t ring or notify you. They still show as missed in the conversation.">
+      <${Seg} label="Who can ring you" value=${S.prefs.whoCanRing || 'everyone'} onChange=${(w) => { S.prefs.whoCanRing = w; emit(); }}
+        options=${[['everyone', 'Everyone'], ['friends', 'Friends'], ['nobody', 'Nobody']]} />
+    <//>
+    <${Row} label="Ringtone">
+      <select class="field vo-ringtone" aria-label="Ringtone" value=${v.ringtone} onChange=${(e) => { setVoice({ ringtone: e.target.value }); previewRingtone(e.target.value); }}>
+        ${Object.entries(RINGTONES).map(([k, r]) => html`<option value=${k}>${r.label}</option>`)}
+      </select>
+      <button class="btn quiet vo-ring-preview" onClick=${() => previewRingtone(v.ringtone)}><${Icon} name="play" size=${16} />Play</button>
+    <//>
+    <${Row} label="Ring volume" top>
+      <label class="vo-range-row wide">
+        <span class="vo-range-label"><span class="num">${Math.round(v.ringVolume * 100)}%</span></span>
+        <input class="vo-range vo-ring-volume" type="range" min="0" max="100" step="5" value=${Math.round(v.ringVolume * 100)} aria-label="Ring volume" aria-valuetext=${`${Math.round(v.ringVolume * 100)}%`}
+          onInput=${(e) => setVoice({ ringVolume: Number(e.target.value) / 100 })} onChange=${() => previewRingtone(vp().ringtone)} />
+      </label>
+    <//>
+    ${typeof AudioContext !== 'undefined' && 'setSinkId' in AudioContext.prototype && html`<${Row} label="Ring on" hint="Ring through your speakers while your headset is on, for example.">
+      <${DeviceSelect} kind="audiooutput" list=${devices} value=${v.ringOutput} label="Ring on" onChange=${(id) => setVoice({ ringOutput: id })} />
+    <//>`}
+    <${Row} label="Tell me when I’m muted" hint="If you talk while muted, a note offers to unmute you. Nothing is sent.">
+      <${Switch} on=${S.prefs.mutedWarning !== false} label="Tell me when I’m muted" onChange=${(on) => { S.prefs.mutedWarning = on; emit(); }} />
     <//>
 
     ${tuned.length > 0 && html`<div class="set-head">People you’ve adjusted</div>

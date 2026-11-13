@@ -13,6 +13,12 @@ import { createMessagingOps } from './messaging.js'; // polls, link previews, fo
 import { createPlacesOps } from './places.js'; // room permissions, forums, stages, webhooks, folders, onboarding, templates, insights
 import { createVoiceOptsOps } from './voiceopts.js'; // soundboard, voice room limits and bitrate
 import { createAccountOps } from './account.js'; // settings sync, custom status, auto-idle, notes, sessions, two-factor, profile fields
+import { createAppearanceOps } from './appearance.js'; // profile pictures, decorations, name styles, profile colours, custom themes
+import { createChatOps } from './chat.js'; // silent messages, reply mentions, spoiler and alt text, /roll, message links
+import { createCommunityOps } from './community.js'; // categories, house pictures, delete and transfer, events, spam rules, verification, custom links
+import { createActivitiesOps } from './activities.js'; // whiteboard, games, voice reactions, ring again, who can ring, TURN refresh
+import { createInboxOps } from './inbox.js'; // unread counts, mentions inbox, timed mutes, presence for a while, mutual friends, username change
+import { createDmOps } from './dms.js'; // close, pin, rename, icon, add, leave and remove in direct conversations and groups
 
 export class UserError extends Error {}
 const fail = (msg) => { throw new UserError(msg); };
@@ -33,6 +39,11 @@ const bool = (v) => v === true;
 const oneOf = (v, list, name) => (list.includes(v) ? v : fail(`${name} isn’t one of the choices.`));
 const MSG_ID = /^m_[a-z0-9]{8,40}$/;
 const EMOJI = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|‍|️|⃣|[#*0-9])+$/u;
+// Reactions also take subdivision flags (England's is 14 units long: a black
+// flag, tag characters, then the cancel tag); tags go nowhere else. Each one
+// needs something you can see: a pictograph, a flag letter or a keycap.
+const REACTION = /^(?:\u{1F3F4}[\u{E0020}-\u{E007E}]+\u{E007F}|\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|‍|️|⃣|[#*0-9])+$/u;
+const VISIBLE = /\p{Extended_Pictographic}|\p{Regional_Indicator}|[#*0-9]\u{FE0F}?\u{20E3}/u;
 const PRESENCE = ['open', 'around', 'focus', 'away', 'offline'];
 const LEVELS = ['all', 'mentions', 'muted'];
 const KINDS = ['text', 'voice', 'news', 'forum', 'stage']; // forum and stage: server/places.js
@@ -311,7 +322,8 @@ export function createOps({ db, M, hub }) {
       readable(c.user, conv);
       const row = M.liveMsg(id(d.id, 'message'));
       if (!row || row.conv !== conv) fail('That message was deleted.');
-      const emoji = typeof d.emoji === 'string' && d.emoji.length <= 16 && EMOJI.test(d.emoji) ? d.emoji : fail('Reactions are emoji only.');
+      // 32 fits the longest emoji in js/lib/emoji-data.js with skin tones on every person.
+      const emoji = typeof d.emoji === 'string' && d.emoji.length <= 32 && REACTION.test(d.emoji) && VISIBLE.test(d.emoji) ? d.emoji : fail('Reactions are emoji only.');
       if (bool(d.on)) {
         const kinds = db.get('SELECT COUNT(DISTINCT emoji) n FROM reactions WHERE msg = ?', row.id).n;
         const has = db.get('SELECT 1 FROM reactions WHERE msg = ? AND emoji = ?', row.id, emoji);
@@ -415,7 +427,7 @@ export function createOps({ db, M, hub }) {
       const kind = oneOf(d.kind, ['house', 'room', 'dm'], 'Where');
       const place = id(d.id, kind);
       // A one-to-one conversation is always for you; a group can narrow to mentions and replies.
-      const group = kind === 'dm' && db.get('SELECT COUNT(*) AS n FROM dm_members WHERE dm = ?', place).n > 2;
+      const group = kind === 'dm' && (M.isGroupDm ? M.isGroupDm(place) : db.get('SELECT COUNT(*) AS n FROM dm_members WHERE dm = ?', place).n > 2);
       const level = oneOf(d.level, kind === 'dm' && !group ? ['all', 'muted'] : LEVELS, 'That level');
       const put = (p, l) => db.run('INSERT INTO notify (user, place, level) VALUES (?, ?, ?) ON CONFLICT (user, place) DO UPDATE SET level = excluded.level', c.user, p, l);
       const drop = (p) => db.run('DELETE FROM notify WHERE user = ? AND place = ?', c.user, p);
@@ -685,7 +697,8 @@ export function createOps({ db, M, hub }) {
       for (const u of others) if (!peers.has(id(u, 'person'))) fail('You can only message friends and people you share a house with.');
       const want = [c.user, ...others].sort();
       const existing = db.all('SELECT dm FROM dm_members WHERE user = ?', c.user).map((r) => r.dm)
-        .find((dm) => db.all('SELECT user FROM dm_members WHERE dm = ? ORDER BY user', dm).map((r) => r.user).join() === want.join());
+        .find((dm) => db.all('SELECT user FROM dm_members WHERE dm = ? ORDER BY user', dm).map((r) => r.user).join() === want.join()
+          && !(want.length === 2 && M.isGroupDm?.(dm))); // a group that shrank to two stays a group, not their conversation
       if (existing) return { id: existing };
       const dmId = newId('d');
       db.tx(() => {
@@ -956,6 +969,13 @@ export function createOps({ db, M, hub }) {
   Object.assign(ops, createVoiceOptsOps({ db, M, hub, fail, ops }));
   // Account (server/account.js): settings that follow you, custom status, auto-idle, notes, sessions, two-factor, profile fields.
   Object.assign(ops, createAccountOps({ db, M, hub, fail, ops }));
+  Object.assign(ops, createAppearanceOps({ db, M, hub, fail, ops })); // customisation (server/appearance.js): wraps me.update and prefs.set
+  // Text and messages (server/chat.js): silent, replyPing, per-file spoiler and alt, cmd.roll, msg.peek.
+  Object.assign(ops, createChatOps({ db, M, hub, fail, ops }));
+  Object.assign(ops, createActivitiesOps({ db, M, hub, fail, ops })); // voice and calls (server/activities.js)
+  Object.assign(ops, createCommunityOps({ db, M, hub, fail, ops })); // houses and community (server/community.js)
+  Object.assign(ops, createInboxOps({ db, M, hub, fail, ops })); // inbox and notifications (server/inbox.js)
+  Object.assign(ops, createDmOps({ db, M, hub, fail, ops })); // managing direct conversations and groups (server/dms.js)
   // Changes made through the ops above go in the house log too (server/safety.js).
   M.auditLate?.();
 

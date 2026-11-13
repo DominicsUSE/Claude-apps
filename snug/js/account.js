@@ -8,10 +8,12 @@
 // - auto-idle, notification sounds (made with WebAudio, no files), quiet
 //   hours, highlight words and @everyone, streamer mode, reading messages
 //   aloud, and the recent places the quick switcher offers first.
-import { S, emit, subscribe, toast, convMeta, signOutHooks } from './store.js';
+import { S, emit, subscribe, toast, convMeta, signOutHooks, applyPrefs } from './store.js';
 import { call, on, notifyFilters } from './server.js';
-import { PREF_RULES, PREF_DEFAULTS, cleanPrefs, inQuiet, hasKeyword, everyonePing } from './lib/account.js';
-import { forMeHooks, needsMe, levelOf } from './lib/attention.js';
+import { PREF_RULES, PREF_DEFAULTS, cleanPrefs, inQuiet, hasKeyword, everyonePing, soundKind, soundFor } from './lib/account.js';
+import { THEME_PRESETS, customId, deriveTheme, accentTokens } from './lib/theme.js';
+import { parseHex } from './lib/colour.js';
+import { forMeHooks, needsMe, levelOf, forMe } from './lib/attention.js';
 import { can } from './lib/perms.js';
 import { plain } from './lib/format.js';
 import { setClock } from './lib/util.js';
@@ -49,6 +51,10 @@ function forget() {
   for (const k of SYNCED) S.prefs[k] = structuredClone(PREF_DEFAULTS[k]);
   setSent(null);
   local.del(OWNER);
+  // This device's own look and the saved first paint were the last person's too.
+  local.del(DEVICE);
+  try { localStorage.removeItem('snug.paint'); } catch { /* storage blocked */ }
+  applied = '';
   applyAppearance();
 }
 // Whose settings are on this device: the person recorded, or for settings
@@ -113,34 +119,132 @@ on('account', (d) => {
 });
 
 // ---------- Applying them ----------
+// Appearance settings this device can keep for itself ("Use these settings on
+// this device only"): read from and written to localStorage, over the synced ones.
+export const DEVICE_KEYS = ['theme', 'zoom', 'fontScale', 'density', 'display', 'sidebarW'];
+const DEVICE = 'snug.deviceLook';
+export function deviceLook() { const v = local.get(DEVICE); return v && v.on ? v : null; }
+// The settings in force on this device.
+export function effectivePrefs(p = S.prefs) {
+  const d = deviceLook();
+  if (!d) return p;
+  const out = { ...p };
+  for (const k of DEVICE_KEYS) if (d.values && k in d.values) out[k] = d.values[k];
+  return out;
+}
+export function setDeviceOnly(on) {
+  if (on) local.set(DEVICE, { on: true, values: Object.fromEntries(DEVICE_KEYS.map((k) => [k, S.prefs[k]])) });
+  else local.del(DEVICE);
+  applied = '';
+  applyAppearance();
+  emit();
+}
+// Change a look setting: on this device only when that's on, else for every device.
+export function setLook(key, val) {
+  const d = deviceLook();
+  if (d && DEVICE_KEYS.includes(key)) { d.values = { ...d.values, [key]: val }; local.set(DEVICE, d); applied = ''; applyAppearance(); emit(); return; }
+  S.prefs[key] = val;
+  applyPrefs();
+  emit();
+}
+
+const darkDevice = () => typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches;
+// The theme in force: a built-in, or a saved custom one (else the default).
+export function resolveTheme(p = effectivePrefs()) {
+  const id = customId(p.theme);
+  const custom = id ? (p.customThemes || []).find((t) => t.id === id) : null;
+  if (custom) return { id: p.theme, custom, base: custom.base, bg1: custom.bg, attr: custom.base };
+  const name = THEME_PRESETS[p.theme] ? p.theme : 'system';
+  const preset = THEME_PRESETS[name === 'system' ? (darkDevice() ? 'dark' : 'light') : name];
+  return { id: name, base: preset.base, bg1: preset.bg1, bg0: preset.bg0, attr: name === 'system' ? null : name };
+}
+
+// Tiny patterns for the chat background, drawn in the theme's faintest line colour.
+const PATTERNS = {
+  dots: [16, (c) => `<circle cx="8" cy="8" r="1" fill="${c}"/>`],
+  grid: [24, (c) => `<path d="M24 .5H.5V24" fill="none" stroke="${c}"/>`],
+  arches: [32, (c) => `<path d="M11 24v-7a5 5 0 0 1 10 0v7" fill="none" stroke="${c}" stroke-width="1.25"/>`],
+  grain: [48, (c) => [[5, 7], [19, 3], [33, 11], [44, 6], [9, 22], [27, 19], [40, 27], [14, 36], [31, 33], [46, 42], [3, 44], [22, 45]].map(([x, y]) => `<rect x="${x}" y="${y}" width="1.2" height="1.2" fill="${c}"/>`).join('')],
+};
+function patternUrl(kind, colour) {
+  const p = PATTERNS[kind];
+  if (!p || !/^(#[0-9a-f]{3,8}|rgba?\([\d\s.,/%]+\)|color\([\w\s.%-]+\))$/i.test(colour)) return null;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${p[0]}" height="${p[0]}">${p[1](colour)}</svg>`;
+  return [`url("data:image/svg+xml,${encodeURIComponent(svg)}")`, `${p[0]}px ${p[0]}px`];
+}
+
 let applied = '';
+// Custom properties this function set on <html> (js/boot.js may have set some
+// from last time's look before this module ran; they count as ours too).
+let inline = new Set(typeof document === 'undefined' ? [] : [...document.documentElement.style].filter((k) => k.startsWith('--') && !k.startsWith('--chat-pattern') && k !== '--ctx-w'));
+const looks = new Set();  // the data-* attributes this function owns
 export function applyAppearance() {
-  const p = S.prefs;
-  const key = JSON.stringify(pick(p));
+  const p = effectivePrefs();
+  const root = document.documentElement;
+  const attr = (name, val) => { looks.add(name); return val == null || val === false ? root.removeAttribute(name) : root.setAttribute(name, val === true ? '' : val); };
+  const th = resolveTheme(p);
+  // Always (cheap): store.js applyPrefs may have just written the raw setting.
+  attr('data-theme', th.attr);
+  attr('data-density', p.density !== 'regular' ? p.density : null);
+  const key = JSON.stringify([pick(p), th.attr, th.bg1]);
   if (key === applied) return;
   applied = key;
-  const root = document.documentElement;
-  const attr = (name, val) => (val == null || val === false ? root.removeAttribute(name) : root.setAttribute(name, val === true ? '' : val));
-  if (p.theme && p.theme !== 'system') root.setAttribute('data-theme', p.theme); else root.removeAttribute('data-theme');
-  attr('data-tone', p.tone !== 'coral' ? p.tone : null);
+  attr('data-tone', p.tone !== 'coral' && (!p.accent || p.accent === 'coral') ? p.tone : null);
   attr('data-display', p.display === 'compact' ? 'compact' : null);
   attr('data-compact-avatars', p.display === 'compact' && p.compactAvatars);
   attr('data-lh', p.lineHeight !== 'normal' ? p.lineHeight : null);
   attr('data-font', p.font !== 'inter' ? p.font : null);
+  attr('data-code-font', p.codeFont === 'system-mono' ? 'system-mono' : null);
   attr('data-underline', !!p.underlineLinks);
   attr('data-focus', p.focusAlways ? 'always' : null);
   attr('data-role-colors', p.roleColors === false ? 'off' : null);
   attr('data-streamer', !!p.streamer);
   attr('data-motion', p.motion === 'reduced' ? 'off' : null);
   attr('data-contrast', p.contrast !== 'system' ? p.contrast : null);
-  attr('data-density', p.density !== 'regular' ? p.density : null);
+  // Chat display (css/appearance.css).
+  attr('data-times', p.showTimes === 'hover' ? 'hover' : null);
+  attr('data-jumbo', p.jumboEmoji === false ? 'off' : null);
+  attr('data-emoji-size', p.emojiSize && p.emojiSize !== 'm' ? p.emojiSize : null);
+  attr('data-reactions', p.showReactions === false ? 'off' : null);
+  attr('data-spoilers', p.spoilers === 'always' ? 'always' : null);
+  attr('data-name-styles', p.showNameStyles === false ? 'off' : null);
+  attr('data-gif', p.gifAutoplay && p.gifAutoplay !== 'auto' ? p.gifAutoplay : null);
   root.removeAttribute('data-text');
   root.style.fontSize = p.fontScale && p.fontScale !== 16 ? `${p.fontScale}px` : '';
   root.style.zoom = p.zoom && p.zoom !== 100 ? `${p.zoom}%` : '';
   root.style.filter = p.saturation < 100 ? `saturate(${p.saturation}%)` : '';
   root.style.setProperty('--ctx-w', `${p.sidebarW || 264}px`);
+  // Colours: a custom theme's tokens, or the accent ramp for this theme's surface.
+  // Values come from js/lib/theme.js (hex and rgb() only), set one property at a time.
+  const props = {};
+  if (th.custom) Object.assign(props, deriveTheme(th.custom).tokens);
+  else {
+    const ramp = accentTokens(p.accent, th.bg1, th.base);
+    if (ramp) { Object.assign(props, ramp); const [r, g, b] = parseHex(ramp['--accent']); props['--selection'] = `rgb(${r} ${g} ${b} / 0.32)`; }
+  }
+  attr('data-accent', th.custom || (p.accent && p.accent !== 'coral') ? '' : null);
+  for (const k of inline) if (!(k in props)) root.style.removeProperty(k);
+  for (const [k, v] of Object.entries(props)) root.style.setProperty(k, v);
+  inline = new Set(Object.keys(props));
+  // Chat background, from the theme's faintest line once the colours above are in.
+  const bgKind = p.chatBg && p.chatBg !== 'plain' ? p.chatBg : null;
+  attr('data-chat-bg', bgKind);
+  const pat = bgKind ? patternUrl(bgKind, props['--line-subtle'] || getComputedStyle(root).getPropertyValue('--line-subtle').trim()) : null;
+  if (pat) { root.style.setProperty('--chat-pattern', pat[0]); root.style.setProperty('--chat-pattern-size', pat[1]); }
+  else { root.style.removeProperty('--chat-pattern'); root.style.removeProperty('--chat-pattern-size'); }
   setClock(p.clock);
+  // What js/boot.js puts on <html> before the next first paint, so a custom
+  // theme, accent or this device's own look never flashes the default colours.
+  try {
+    const attrs = {};
+    for (const name of looks) if (root.hasAttribute(name)) attrs[name] = root.getAttribute(name);
+    localStorage.setItem('snug.paint', JSON.stringify({ attrs, props, fontSize: root.style.fontSize, zoom: root.style.zoom }));
+  } catch { /* storage full or blocked: the first paint uses the raw setting */ }
+  // The desktop app colours its title bar to match (optional bridge).
+  try { window.snugApp?.setThemeColor?.(props['--bg-0'] || th.bg0 || getComputedStyle(root).getPropertyValue('--bg-0').trim()); } catch { /* no bridge */ }
 }
+// The device switching between light and dark changes a "Match device" theme.
+try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { applied = ''; applyAppearance(); }); } catch { /* no matchMedia */ }
 subscribe(() => { applyAppearance(); if (sent) push(); trackRecent(); speakNew(); favouriteRings(); });
 
 // While Focused, a call from a favourite friend may still ring out loud
@@ -178,7 +282,7 @@ forMeHooks.push((St, conv, m) => {
   if (!m.text || m.author === St.me) return false;
   if (hasKeyword(m.text, St.prefs?.keywords)) return true;
   const ping = everyonePing(m.text);
-  if (!ping) return false;
+  if (!ping || m.noPing) return false; // noPing: sent by someone who may not post notices (server/chat.js)
   const roomId = conv.startsWith('t:') ? St.threads?.[conv]?.conv : conv;
   const house = St.rooms?.[roomId]?.house;
   return !!house && !St.prefs?.everyoneOff?.[house] && can(St, house, 'announce', m.author);
@@ -194,36 +298,49 @@ export const soundMuted = (conv) => {
   const house = S.rooms[p]?.house;
   return !!(S.prefs.mutedSounds?.[p] || (house && S.prefs.mutedSounds?.[house]));
 };
-notifyFilters.push((conv) => {
+// A sound per kind (mention, direct message, other message), at the chosen
+// volume. Quiet hours, Focused (js/server.js) and each house's sound switch still win.
+notifyFilters.push((conv, m) => {
   if (inQuiet(S.prefs.quiet)) return false;
-  if (!soundMuted(conv)) playSound(S.prefs.sound);
+  if (!soundMuted(conv)) playSound(soundFor(S.prefs, soundKind({ dm: !!S.dms[conv], forMe: !!m && forMe(S, conv, m) })), { volume: S.prefs.soundVolume ?? 80 });
   return true;
 });
 
 let ctx = null;
-// Each sound is a few notes made here: [frequency Hz, start s, length s, gain].
+// Each sound is a few notes made here: [frequency Hz, start s, length s, gain, wave?].
 const SOUNDS = {
   soft: [[660, 0, 0.14, 0.18], [880, 0.09, 0.2, 0.14]],
   bell: [[988, 0, 0.6, 0.16], [1976, 0, 0.35, 0.05]],
   pop: [[420, 0, 0.07, 0.22], [640, 0.05, 0.08, 0.16]],
   drop: [[1200, 0, 0.12, 0.14], [600, 0.08, 0.22, 0.14]],
+  wood: [[320, 0, 0.06, 0.26, 'triangle'], [480, 0.07, 0.06, 0.18, 'triangle']],
+  glass: [[1568, 0, 0.4, 0.09], [2352, 0.02, 0.3, 0.04], [1175, 0.12, 0.35, 0.07]],
+  chime: [[784, 0, 0.18, 0.14], [1047, 0.1, 0.18, 0.13], [1319, 0.2, 0.32, 0.11]],
+  tick: [[1800, 0, 0.03, 0.12, 'triangle']],
 };
+export const SOUND_LIST = Object.keys(SOUNDS);
 export let soundsPlayed = 0;
-export function playSound(name) {
+// The names of the sounds played, newest last (the end-to-end checks read it).
+export const soundLog = [];
+export function playSound(name, { volume = 100 } = {}) {
   const notes = SOUNDS[name];
   if (!notes) return;
+  const scale = Math.max(0, Math.min(100, volume)) / 100;
   soundsPlayed++;
+  soundLog.push(name);
+  if (soundLog.length > 50) soundLog.shift();
+  if (scale <= 0) return;
   try {
     ctx ||= new AudioContext();
     const t0 = ctx.currentTime + 0.01;
-    for (const [f, at, len, g] of notes) {
+    for (const [f, at, len, g, wave] of notes) {
       const o = ctx.createOscillator();
       const v = ctx.createGain();
-      o.type = 'sine';
+      o.type = wave || 'sine';
       o.frequency.setValueAtTime(f, t0 + at);
       if (name === 'drop') o.frequency.exponentialRampToValueAtTime(f / 2, t0 + at + len);
       v.gain.setValueAtTime(0.0001, t0 + at);
-      v.gain.exponentialRampToValueAtTime(g, t0 + at + 0.01);
+      v.gain.exponentialRampToValueAtTime(Math.max(0.0002, g * scale), t0 + at + 0.01);
       v.gain.exponentialRampToValueAtTime(0.0001, t0 + at + len);
       o.connect(v).connect(ctx.destination);
       o.start(t0 + at);

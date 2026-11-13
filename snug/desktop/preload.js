@@ -35,5 +35,39 @@ if (location.protocol === "http:" || location.protocol === "https:") {
     // Push to talk while another app is in front: one plain key, or null to let it go.
     setPushToTalk: (key) => ipcRenderer.invoke("ptt:set", key == null ? null : String(key).slice(0, 16)),
     onPushToTalk: (fn) => { if (typeof fn === "function") ipcRenderer.on("ptt:press", () => fn()); },
+    // ---------- Desktop shell (desktop/main.js checks everything again) ----------
+    // The unread number on the icon: a whole number, 0 to 999.
+    setBadge: (n) => ipcRenderer.send("badge:set", Math.max(0, Math.min(999, Math.floor(Number(n)) || 0))),
+    // The window's colour behind the page, following the Snug theme: #rrggbb only.
+    setThemeColor: (hex) => ipcRenderer.invoke("theme:color", typeof hex === "string" && hex.length <= 16 ? hex.trim() : ""),
+    // Desktop settings: open at login, start minimised, minimise to tray, hardware acceleration, update check.
+    getDesktopSettings: () => ipcRenderer.invoke("desktop:get"),
+    setDesktopSettings: (patch) => {
+      const clean = {};
+      for (const [k, v] of Object.entries(patch && typeof patch === "object" ? patch : {}).slice(0, 10)) clean[String(k).slice(0, 40)] = v === true;
+      return ipcRenderer.invoke("desktop:set", clean);
+    },
+    restart: () => ipcRenderer.send("app:restart"),
+    // Global mute and deafen keys: saved here, held only while in voice.
+    setVoiceKeys: (keys) => ipcRenderer.invoke("voicekeys:set", {
+      mute: typeof keys?.mute === "string" ? keys.mute.slice(0, 60) : null,
+      deafen: typeof keys?.deafen === "string" ? keys.deafen.slice(0, 60) : null,
+    }),
+    voiceActive: (on) => ipcRenderer.invoke("voicekeys:active", on === true),
+    onVoiceToggle: (fn) => { if (typeof fn === "function") ipcRenderer.on("voice:toggle", (_e, which) => fn(which === "deafen" ? "deafen" : "mute")); },
+    // The computer going idle, locking, sleeping, and coming back.
+    onSystemIdle: (fn) => {
+      if (typeof fn !== "function") return;
+      ipcRenderer.on("system:idle", (_e, s) => { if (["idle", "active", "locked", "unlocked", "suspend", "resume"].includes(s)) fn(s); });
+    },
+    // snug:// links opened while Snug runs (or that started it).
+    onDeepLink: (fn) => {
+      if (typeof fn !== "function") return;
+      ipcRenderer.on("deeplink", (_e, raw) => fn(String(raw || "").slice(0, 300)));
+      ipcRenderer.send("deeplink:ready");
+    },
+    // A newer Snug is out: its version, and opening its page in the browser.
+    onUpdate: (fn) => { if (typeof fn === "function") ipcRenderer.on("update:available", (_e, info) => fn({ version: String(info?.version || "").slice(0, 20) })); },
+    openUpdate: () => ipcRenderer.send("update:open"),
   });
 }

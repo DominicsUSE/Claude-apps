@@ -1,7 +1,7 @@
 {
   "name": "snug-desktop",
   "productName": "Snug",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "A calm place for your people",
   "author": "Snug",
   "main": "main.js",
@@ -26,6 +26,14 @@
       "output": "dist",
       "buildResources": "build"
     },
+    "protocols": [
+      {
+        "name": "Snug link",
+        "schemes": [
+          "snug"
+        ]
+      }
+    ],
     "files": [
       "main.js",
       "preload.js",

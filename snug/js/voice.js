@@ -20,8 +20,10 @@ import { call, on } from './server.js';
 // Devices, input mode, processing, per-person volume, soundboard mixing (js/voiceopts.js).
 import {
   getMic, outgoing, swapMic, stopOutgoing, gate, micOpen, tuneAudio, forgetAudio, boostOf, onRetune, cue, vp,
-  cameraConstraints, screenConstraints, screenBitrate, roomBitrate,
+  cameraConstraints, screenConstraints, screenBitrate, roomBitrate, audioCtx, meter, cameraBase,
 } from './voiceopts.js';
+// Connection quality from WebRTC's statistics (js/lib/netquality.js).
+import { summarize, uplinkPoor } from './lib/netquality.js';
 
 // user -> { pc, audio, screenAudio, queue, stopLevel, polite, makingOffer,
 //           ignoreOffer, settingAnswer, chain, kinds, video, tx }
@@ -250,14 +252,19 @@ on('rtc', ({ from, data }) => {
     return;
   }
   if (!data.sdp && !data.candidate) return;
+  // A fresh offer on a connection that already failed: they came back, start again.
+  const old = peers.get(from);
+  if (old && data.sdp?.type === 'offer' && ['failed', 'closed'].includes(old.pc.connectionState)) dropPeer(from);
   const p = peer(from, false);
   p.chain = p.chain.then(() => handleSignal(from, p, data));
 });
 
-// Someone left the room: close their connection.
-on('voice', ({ room, users }) => {
+// Someone left the room: close their connection. Someone whose connection
+// dropped (held by the server, shown as reconnecting) is closed too: they
+// call everyone again when they are back.
+on('voice', ({ room, users, state }) => {
   if (S.call?.room !== room) return;
-  for (const u of [...peers.keys()]) if (!users.includes(u)) dropPeer(u);
+  for (const u of [...peers.keys()]) if (!users.includes(u) || state?.[u]?.reconnecting) dropPeer(u);
   for (const u of [...pendingKinds.keys()]) if (!users.includes(u)) pendingKinds.delete(u);
 });
 on('voice.kicked', ({ room, reason } = {}) => {
@@ -274,15 +281,50 @@ on('call.ended', ({ dm, reason }) => {
   S.callEnd = { dm, reason, at: Date.now() };
   emit();
 });
-// The server drops you from voice when the connection goes; say so instead of pretending.
+// ---------- Reconnecting after a dropped connection ----------
+// The server holds my place for a while (server/hub.js voiceLost). Here the
+// call stays, with my microphone, camera and screen, while the connections to
+// the others close; when the socket is back I join the same place again and
+// call everyone afresh. If that fails, or takes too long, the call ends.
+export const RECONNECT_MS = 20_000;
+let reconnectTimer = null;
+const droppedText = (dm) => (dm ? 'The call dropped because the connection did. Call again when you’re back.' : 'Voice disconnected because the connection dropped. Join again when you’re back.');
 on('close', () => {
   if (!S.call) return;
-  const dm = S.call.dm;
-  stop();
-  toast(dm ? 'The call dropped because the connection did. Call again when you’re back.' : 'Voice disconnected because the connection dropped. Join again when you’re back.');
+  const c = S.call;
+  if (c.status !== 'live' && c.status !== 'reconnecting') { stop(); toast(droppedText(c.dm)); return; }
+  c.status = 'reconnecting';
+  for (const u of [...peers.keys()]) dropPeer(u);
+  pendingKinds.clear();
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => { if (S.call === c && c.status === 'reconnecting') { stop(); toast(droppedText(c.dm)); } }, RECONNECT_MS);
+  emit();
+});
+on('open', async () => {
+  const c = S.call;
+  if (!c || c.status !== 'reconnecting') return;
+  try {
+    const r = c.dm ? await call('call.join', { dm: c.room }) : await call('voice.join', { room: c.room });
+    if (S.call !== c) return;
+    clearTimeout(reconnectTimer);
+    c.status = 'live';
+    if (r.call) c.id = r.call;
+    emit();
+    pushState();
+    for (const u of r.peers) peer(u, true);
+  } catch (e) {
+    if (S.call !== c) return;
+    if (e.offline) return; // dropped again: the next 'open' tries once more, until the timer runs out
+    clearTimeout(reconnectTimer);
+    const dm = c.dm;
+    stop();
+    toast(dm ? `Couldn’t get back into the call. ${e.message}` : `Couldn’t get back into voice. ${e.message}`);
+  }
 });
 
 function stop() {
+  clearTimeout(reconnectTimer);
+  stopMutedWatch();
   for (const u of [...peers.keys()]) dropPeer(u);
   stopMyLevel?.();
   stopMyLevel = null;
@@ -300,6 +342,8 @@ function stop() {
   S.call = null;
   S.peers = {};
   S.speaking = {};
+  S.netq = {};
+  S.mutedWarn = 0;
   emit();
 }
 
@@ -333,6 +377,7 @@ export async function joinVoice(room, { start = false, video = false } = {}) {
     return 'mic';
   }
   stopMyLevel = watchLevel(S.me, mic);
+  watchMic(mic);
   try {
     S.call.status = 'joining';
     emit();
@@ -342,6 +387,7 @@ export async function joinVoice(room, { start = false, video = false } = {}) {
     if (S.call?.room !== room) return 'ok';
     S.call.status = 'live';
     S.call.id = r.call || null;
+    S.call.joinedAt = Date.now(); // the call clock in a voice room (js/views/activities.js CallTimer)
     emit();
     cue('join');
     for (const u of r.peers) peer(u, true);
@@ -421,6 +467,9 @@ export async function restartMic() {
   // Chromium gives a second capture of a device the processing of the first
   // one still open, so the old capture stops first (a moment of silence).
   const before = mic.getAudioTracks()[0]?.getConstraints?.() || {};
+  // The muted-note listener holds a copy of the old capture: let it go too, or
+  // the new capture would inherit the old one's processing.
+  stopMutedWatch();
   mic.getTracks().forEach((t) => t.stop());
   let next;
   try { next = await getMic(); } catch (e) {
@@ -453,6 +502,7 @@ export async function restartMic() {
   }
   stopMyLevel?.();
   stopMyLevel = watchLevel(S.me, mic);
+  watchMic(mic);
   old.getTracks().forEach((t) => t.stop());
   return true;
 }
@@ -496,16 +546,27 @@ function shareSlot(slot, track, stream) {
 
 export const canShareScreen = () => !!navigator.mediaDevices?.getDisplayMedia;
 
+// A voice room may keep cameras and screens to some people (its "Share camera
+// and screen" permission, checked again on the server).
+export const videoBlocked = (room = S.call?.room) => (S.rooms[room]?.perms?.video === false ? `You can’t share your camera or screen in ${S.rooms[room].name}.` : null);
+on('voice.media.off', ({ room } = {}) => {
+  if (!S.call || S.call.room !== room) return;
+  const had = S.call.camera || S.call.screen;
+  stopCamera(); stopScreen();
+  if (had) toast(`Your camera and screen were turned off: sharing them isn’t allowed in ${S.rooms[room]?.name || 'this room'} any more.`);
+});
+
 export async function toggleCamera() {
   const c = S.call;
   if (!c || c.status !== 'live' || c.cameraBusy) return;
   if (c.camera) { stopCamera(); return; }
+  if (videoBlocked()) { toast(videoBlocked()); return; }
   if (!navigator.mediaDevices?.getUserMedia) { toast('This browser can’t use a camera here.'); return; }
   c.cameraBusy = true;
   emit();
   let stream = null;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(CAMERA) });
+    stream = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(cameraBase(CAMERA)) });
   } catch (e) {
     // A camera that can't do 640x360 still beats no camera.
     if (e?.name === 'OverconstrainedError' || (e?.name === 'NotFoundError' && vp().camera)) {
@@ -541,6 +602,7 @@ export async function toggleScreen() {
   const c = S.call;
   if (!c || c.status !== 'live' || c.screenBusy) return;
   if (c.screen) { stopScreen(); return; }
+  if (videoBlocked()) { toast(videoBlocked()); return; }
   if (!canShareScreen()) { toast('This browser can’t share a screen.'); return; }
   c.screenBusy = true;
   emit();
@@ -611,7 +673,130 @@ export async function voiceStats() {
       energy, volume: p.audio ? p.audio.volume : null, muted: p.audio ? p.audio.muted : null, boost: p.audio ? boostOf(p.audio) : 0,
       // The ceiling on my voice to this person (the room's bitrate).
       voiceMax: (() => { const s = p.pc.getSenders().find((x) => x.track && x.track.kind === 'audio' && send && send.getAudioTracks().includes(x.track)); try { return s?.getParameters().encodings?.[0]?.maxBitrate ?? null; } catch { return null; } })(),
+      // Connection quality, as last measured (js/lib/netquality.js).
+      rtt: p.q?.rtt ?? null, loss: p.q?.loss ?? null, jitter: p.q?.jitter ?? null, sendKbps: p.q?.sendKbps ?? null, relay: p.q ? p.q.relay : null, quality: p.q?.quality ?? null,
     };
   }
   return out;
 }
+
+// ---------- The microphone going away, and devices coming and going ----------
+// The microphone's track ends (unplugged, or taken by the system): capture
+// again, falling back to the default device (getMic says so in a toast).
+function watchMic(stream) {
+  const t = stream?.getAudioTracks()[0];
+  if (!t) return;
+  t.onended = () => {
+    if (mic !== stream || !S.call) return;
+    const chosen = !!vp().input;
+    restartMic().then((ok) => { if (ok && !chosen) toast('Your microphone stopped, so Snug started it again.'); });
+  };
+  startMutedWatch(stream);
+}
+// For the end-to-end checks: the microphone's track ending as if unplugged.
+export function simulateMicEnded() { mic?.getAudioTracks()[0]?.dispatchEvent(new Event('ended')); }
+
+let lastDefault = null; // the system default microphone, to notice it changing
+async function defaultMic() {
+  try {
+    const list = await navigator.mediaDevices.enumerateDevices();
+    const d = list.find((x) => x.kind === 'audioinput' && x.deviceId === 'default');
+    return { list, def: d ? `${d.groupId}|${d.label}` : null };
+  } catch { return { list: [], def: null }; }
+}
+navigator.mediaDevices?.addEventListener?.('devicechange', async () => {
+  const { list, def } = await defaultMic();
+  const before = lastDefault;
+  lastDefault = def;
+  const c = S.call;
+  if (!c || !mic || c.status !== 'live') return;
+  const v = vp();
+  // The chosen microphone vanished: back to the default one.
+  if (v.input && !list.some((x) => x.kind === 'audioinput' && x.deviceId === v.input)) { restartMic(); return; }
+  // Following the system default, and it changed: follow it.
+  if (!v.input && before && def && before !== def) { await restartMic(); toast('Snug switched to your new default microphone.'); }
+  // The chosen camera vanished while it was on.
+  if (c.camera && v.camera && !list.some((x) => x.kind === 'videoinput' && x.deviceId === v.camera)) restartCamera();
+});
+defaultMic().then(({ def }) => { lastDefault = def; });
+
+// ---------- "You're muted" ----------
+// While muted, a copy of the raw microphone (never sent anywhere) is listened
+// to; talking over the voice threshold for about 1.5 seconds shows a note
+// with Unmute, at most once a minute. Off with the mutedWarning setting.
+export const MUTED_TALK_MS = 1500;
+export const MUTED_WARN_EVERY = 60_000;
+let mw = null; // { track, src, an, buf, timer, talk }
+let lastWarn = 0;
+function stopMutedWatch() {
+  if (!mw) return;
+  clearInterval(mw.timer);
+  try { mw.src.disconnect(); } catch { /* gone */ }
+  mw.track.stop();
+  mw = null;
+}
+function startMutedWatch(stream) {
+  stopMutedWatch();
+  const raw = stream.getAudioTracks()[0];
+  const c = audioCtx();
+  if (!raw || !c) return;
+  try {
+    const track = raw.clone();
+    track.enabled = true;
+    const src = c.createMediaStreamSource(new MediaStream([track]));
+    const an = c.createAnalyser();
+    an.fftSize = 1024;
+    src.connect(an);
+    mw = { track, src, an, buf: new Float32Array(an.fftSize), talk: 0, timer: null };
+    mw.timer = setInterval(mutedTick, 100);
+  } catch { mw = null; }
+}
+function mutedTick() {
+  const call = S.call;
+  if (!mw || !call) return;
+  const mod = S.voiceState[call.room]?.[S.me];
+  if (!call.muted || call.status !== 'live' || mod?.smute || mod?.sdeaf || S.prefs.mutedWarning === false) { mw.talk = 0; return; }
+  mw.an.getFloatTimeDomainData(mw.buf);
+  let sum = 0;
+  for (const v of mw.buf) sum += v * v;
+  const level = sum > 0 ? 20 * Math.log10(Math.sqrt(sum / mw.buf.length)) : -100;
+  mw.level = level;
+  // Speech has gaps: quiet only lets the count fall back slowly.
+  mw.talk = level > Math.max(-60, meter.threshold) ? mw.talk + 100 : Math.max(0, mw.talk - 50);
+  if (mw.talk >= MUTED_TALK_MS && Date.now() - lastWarn >= MUTED_WARN_EVERY) {
+    lastWarn = Date.now();
+    mw.talk = 0;
+    S.mutedWarn = lastWarn;
+    emit();
+  }
+}
+export const mutedWatch = () => (mw ? { on: true, talk: mw.talk, level: mw.level ?? null } : { on: false });
+export function dismissMutedWarn() { S.mutedWarn = 0; emit(); }
+// For the end-to-end checks: allow the note again straight away.
+export function resetMutedWarn() { lastWarn = 0; S.mutedWarn = 0; }
+
+// ---------- Connection quality ----------
+// Every 2 seconds in a call: each connection's round trip, loss, jitter, what
+// I send and whether it is relayed, into S.netq (js/lib/netquality.js).
+async function pollQuality() {
+  if (!S.call || S.call.status !== 'live' || !peers.size) { if (S.netq && Object.keys(S.netq).length && !S.call) S.netq = {}; return; }
+  const next = {};
+  for (const [u, p] of peers) {
+    if (p.pc.connectionState !== 'connected') continue;
+    try { p.q = summarize(await p.pc.getStats(), p.q); next[u] = p.q; } catch { /* closed meanwhile */ }
+  }
+  const sum = (k) => Object.values(next).reduce((n, q) => n + (q[k] || 0), 0);
+  next[S.me] = { sendKbps: Object.keys(next).length ? sum('sendKbps') : null, uplinkPoor: uplinkPoor(Object.values(next)) };
+  const was = JSON.stringify(S.netq || {});
+  S.netq = next;
+  if (JSON.stringify(next) !== was) emit();
+}
+setInterval(pollQuality, 2000);
+
+// Short-lived TURN credentials (server/voiceopts.js iceConfig) run out after
+// 12 hours; a long call asks for fresh ones every 6, for the connections it
+// makes from then on. Every new socket's hello brings fresh ones too.
+setInterval(() => {
+  if (!S.call || !(S.ice || []).some((s) => typeof s.username === 'string' && /^\d+:/.test(s.username))) return;
+  call('ice.refresh').then((r) => { if (Array.isArray(r?.ice)) S.ice = r.ice; }).catch(() => {});
+}, 6 * 3600_000);

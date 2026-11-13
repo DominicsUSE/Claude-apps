@@ -6,7 +6,9 @@ import {
   closeQuick, closeLightbox, openQuick, openLayer, openModal, openPop, markHouseRead, markConvRead, applyPrefs, convMeta, isOnline, loadCache,
 } from './store.js';
 import { api, startTransport } from './server.js';
-import { voiceStats } from './voice.js';
+import { voiceStats, toggleMute, toggleDeaf, toggleCamera, leaveVoice } from './voice.js';
+import { incoming, acceptCall } from './calls.js';
+import { actionFor, actionById } from './lib/keys.js'; // changeable shortcuts (Settings > Keyboard)
 import { attention, houseAttention, totalNeeds, roomIds } from './lib/attention.js';
 import { friendRequests } from './lib/social.js';
 import { Icon } from './ui/icons.js';
@@ -30,8 +32,13 @@ import { IncomingCall } from './views/calls.js'; // calls in direct conversation
 import { ringtonePlaying } from './calls.js';
 import { MiniCall, afkCheck } from './views/voiceopts.js'; // the floating call while you look elsewhere
 import { voiceDebug } from './voiceopts.js';
-import { applyAppearance, goIdle, soundsPlayed } from './account.js'; // settings that follow you, auto-idle, sounds (js/account.js)
+import { applyAppearance, goIdle, soundsPlayed, soundLog } from './account.js'; // settings that follow you, auto-idle, sounds (js/account.js)
 import { openShortcuts, toggleStreamer } from './views/account.js'; // Ctrl+/ and Ctrl+Shift+S
+import { openMessageLink } from './views/chat.js'; // message links: /m/<conversation>/<message>
+import './inbox.js'; // server unread counts, groups leaving, timed mutes (js/inbox.js)
+import './landmarks.js'; // Skip to messages, F6 between regions
+import { desktopTest } from './desktop.js'; // the desktop app's badge, global voice keys, idle, snug:// links
+import { UpdateStrip } from './views/desktop-settings.js'; // a newer Snug is out
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 
@@ -96,7 +103,7 @@ function Desktop() {
   const pane = PaneView();
   return html`<div class=${`app${pane ? ' has-pane' : ''}`}>
     <${Nav} />
-    <${MainView} />
+    <main id="main" class="main-land" aria-label="Main"><${MainView} /></main>
     ${pane}
   </div>`;
 }
@@ -167,7 +174,7 @@ function Phone() {
         </button>`)}
       </nav>
     </div>
-    ${S.ui.depth > 0 && html`<div class="screen push" key=${v.type === 'conv' || v.type === 'house' || v.type === 'person' ? `${v.type}${v.id}` : v.type}><${MainView} /></div>`}
+    ${S.ui.depth > 0 && html`<div class="screen push" key=${v.type === 'conv' || v.type === 'house' || v.type === 'person' ? `${v.type}${v.id}` : v.type}><main id="main" class="main-land" aria-label="Main"><${MainView} /></main></div>`}
     ${pane && html`<div class="screen push" key=${`${S.ui.pane.type}${S.ui.pane.id || ''}`}>${pane}</div>`}
   </div>`;
 }
@@ -183,6 +190,7 @@ function Overlays() {
     <${Lightbox} />
     <${IncomingCall} />
     <${MiniCall} />
+    <${UpdateStrip} />
     <${Toasts} />`;
 }
 
@@ -227,6 +235,9 @@ function App() {
   useEffect(() => {
     if (inside && S.ui.joinCode && !S.ui.modal) openModal(JoinByLink, { code: S.ui.joinCode });
   }, [inside, S.ui.joinCode]);
+  useEffect(() => {
+    if (inside && S.ui.msgLink) { const { conv, id } = S.ui.msgLink; S.ui.msgLink = null; openMessageLink(conv, id); }
+  }, [inside, S.ui.msgLink]);
   if (!inside) {
     document.title = 'Snug';
     if (S.auth === 'out') return html`<${Auth} /><${Toasts} />`;
@@ -284,14 +295,49 @@ function closeTop() {
   return false;
 }
 
+// What each changeable shortcut does (js/lib/keys.js names them and holds
+// the defaults; Settings > Keyboard changes them). `typing` actions work while
+// writing; the rest wait until no layer is open.
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform || '');
+const here = () => (S.ui.view.type === 'conv' ? S.ui.view.id : null);
+const inCall = () => !!S.call;
+const RUN = {
+  quick: () => (S.ui.quick ? closeQuick() : openQuick()),
+  search: () => go({ type: 'search', q: '' }),
+  shortcuts: () => openShortcuts(), // js/views/account.js
+  streamer: () => toggleStreamer(),
+  prevPlace: () => step(-1, false), nextPlace: () => step(1, false),
+  prevUnread: () => step(-1, true), nextUnread: () => step(1, true),
+  markRead: () => { const c = here(); if (c && (attention(S, c).soft || attention(S, c).needs)) markConvRead(c); },
+  markHouseRead: () => { const h = S.rooms[here()]?.house; if (h && (houseAttention(S, h).soft || houseAttention(S, h).needs)) markHouseRead(h); },
+  mute: () => { toggleMute(); if (S.call) announce(S.call.muted ? 'Muted' : 'Unmuted'); },
+  deafen: () => { toggleDeaf(); if (S.call) announce(S.call.deaf ? 'Deafened' : 'Hearing again'); },
+  camera: () => { toggleCamera()?.then?.(() => S.call && announce(S.call.camera ? 'Camera on' : 'Camera off')); },
+  hangup: () => { leaveVoice(); announce('Left the call'); },
+  answer: () => { const r = incoming(); if (r) { acceptCall(r.dm); announce('Answered'); } },
+};
+const READY = { mute: inCall, deafen: inCall, camera: inCall, hangup: inCall, answer: () => !!incoming() };
+// A polite live region for what a shortcut just did.
+let liveEl = null;
+function announce(text) {
+  if (!liveEl) { liveEl = document.createElement('div'); liveEl.className = 'sr'; liveEl.setAttribute('role', 'status'); liveEl.setAttribute('aria-live', 'polite'); liveEl.id = 'key-announce'; document.body.append(liveEl); }
+  liveEl.textContent = '';
+  setTimeout(() => { liveEl.textContent = text; }, 30);
+}
+
 function onKey(e) {
   if (S.auth !== 'in' || !S.ready) return undefined;
   const mod = e.metaKey || e.ctrlKey;
   const k = e.key;
-  if (mod && !e.shiftKey && k.toLowerCase() === 'k') { e.preventDefault(); return S.ui.quick ? closeQuick() : openQuick(); }
-  if (mod && e.shiftKey && k.toLowerCase() === 'f') { e.preventDefault(); return go({ type: 'search', q: '' }); }
-  if (mod && !e.shiftKey && (k === '/' || e.code === 'Slash')) { e.preventDefault(); return openShortcuts(); } // js/views/account.js
-  if (mod && e.shiftKey && k.toLowerCase() === 's') { e.preventDefault(); return toggleStreamer(); }
+  const act = e.isComposing ? null : actionFor(e, S.prefs.keys, isMac);
+  const layer = S.ui.modal || S.ui.layer || S.ui.quick || S.ui.menu || S.ui.pop || S.ui.lightbox;
+  if (act && (!READY[act] || READY[act]())) {
+    const a = actionById(act);
+    const writing = typing(e.target) && !!e.target.value;
+    if ((a.global || !layer) && (a.typing || !writing)) {
+      if (act !== 'markHouseRead' || !S.ui.hold[here()]) { e.preventDefault(); RUN[act](); return undefined; }
+    }
+  }
   // Esc closes the top layer; with nothing to close it marks the open place read,
   // as people expect from other chat apps. Shift+Esc marks the whole house read.
   // Marking everything read is a button in Catch up, never a stray key.
@@ -302,14 +348,11 @@ function onKey(e) {
     if (!conv || S.ui.modal || S.ui.layer || S.ui.quick || S.ui.menu || S.ui.pop || S.ui.lightbox) return undefined;
     // Not while writing a draft, and not over an unread mark you just set yourself.
     if ((typing(e.target) && e.target.value) || S.ui.hold[conv]) return undefined;
-    const house = S.rooms[conv]?.house;
-    if (e.shiftKey && house) {
-      if (houseAttention(S, house).soft || houseAttention(S, house).needs) { e.preventDefault(); markHouseRead(house); }
-    } else if (attention(S, conv).soft || attention(S, conv).needs) { e.preventDefault(); markConvRead(conv); }
+    if (!e.shiftKey && (attention(S, conv).soft || attention(S, conv).needs)) { e.preventDefault(); markConvRead(conv); }
     return undefined;
   }
   if (S.ui.modal || S.ui.layer || S.ui.quick || S.ui.menu || S.ui.pop) return undefined;
-  if (e.altKey && (k === 'ArrowUp' || k === 'ArrowDown')) { e.preventDefault(); return step(k === 'ArrowUp' ? -1 : 1, e.shiftKey); }
+  // Alt+arrows (places) and the other changeable keys run above (js/lib/keys.js).
   // Back to the previous view: Alt+Left, or Cmd+[ on a Mac. Not while writing,
   // where those keys move the caret.
   if (!S.ui.phone && !typing(e.target) && ((e.altKey && !mod && k === 'ArrowLeft') || (e.metaKey && k === '['))) {
@@ -352,8 +395,11 @@ render(html`<${App} />`, document.getElementById('app'));
 // it is instant), no session shows sign-in, and no network opens the device
 // copy if there is one.
 async function boot() {
-  const link = /^\/join\/([\w-]{6,40})$/.exec(location.pathname);
+  const link = /^\/join\/([\w-]{3,40})$/.exec(location.pathname); // 3: a house's own link (server/community.js)
   if (link) { S.ui.joinCode = link[1]; history.replaceState(history.state, '', '/'); }
+  // A message link, /m/<conversation>/<message>: opened once signed in (js/views/chat.js).
+  const ml = /^\/m\/([\w:.-]{1,80})\/([\w.-]{1,80})\/?$/.exec(location.pathname);
+  if (ml) { S.ui.msgLink = { conv: ml[1], id: ml[2] }; history.replaceState(history.state, '', '/'); }
   S.auth = 'checking';
   emit();
   try {
@@ -373,6 +419,15 @@ boot();
 // Exposed for the end-to-end checks and for poking at state in the console.
 window.snug = { S, emit, voiceStats, ringtone: ringtonePlaying };
 window.snug.voiceDebug = voiceDebug; // voice options (js/voiceopts.js)
-window.snug.account = { goIdle, sounds: () => soundsPlayed }; // js/account.js
+window.snug.account = { goIdle, sounds: () => soundsPlayed, soundLog }; // js/account.js
 window.snug.toggleStreamer = toggleStreamer; // the desktop app's View > Streamer mode
+window.snug.desktop = desktopTest; // js/desktop.js
 window.snug.voiceAfk = afkCheck; // leaving a voice room after a while alone (js/views/voiceopts.js)
+// Voice and calls track: dropping the socket as a lost connection would, a microphone unplugging,
+// the muted note, and the last ringtone played (js/voice.js, js/calls.js).
+import('./voice.js').then((v) => import('./calls.js').then((c) => import('./server.js').then((srv) => {
+  window.snug.voiceTest = {
+    dropSocket: srv.dropSocket, endMic: v.simulateMicEnded, mutedWatch: v.mutedWatch, resetMutedWarn: v.resetMutedWarn,
+    lastRing: () => c.lastRing, previewRingtone: c.previewRingtone,
+  };
+})));

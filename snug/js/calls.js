@@ -9,6 +9,7 @@
 import { S, emit, subscribe, convMeta, openConv, toast, person, openModal } from './store.js';
 import { call, on } from './server.js';
 import { joinVoice } from './voice.js';
+import { vp } from './voiceopts.js'; // ringtone, its volume and output device (voice and calls track)
 import { Confirm } from './views/modals.js';
 
 const END_NOTE_MS = 8000;
@@ -99,40 +100,66 @@ on('call.ring.stop', ({ dm, reason }) => {
 });
 
 // ---------- Ringtone ----------
-// Two soft notes, a pause, again: built from oscillators each time it rings.
+// A few notes, a pause, again: built from oscillators each time it rings.
+// Four patterns to pick from (Settings > Voice and video > Calls), at the
+// chosen volume, on the chosen output where the browser allows it.
 // A conversation set to Nothing (muted), or being Focused, rings quietly: the
 // call shows, but makes no sound.
+// Each pattern: [frequency Hz, start s, length s] notes, the wave, and how often it repeats (ms).
+export const RINGTONES = {
+  chime: { label: 'Chime', wave: 'sine', every: 2600, notes: [[659.25, 0, 0.38], [554.37, 0.42, 0.38], [659.25, 0.84, 0.38]] },
+  bells: { label: 'Bells', wave: 'triangle', every: 2800, notes: [[880, 0, 0.5], [698.46, 0.25, 0.5], [523.25, 0.5, 0.7]] },
+  pulse: { label: 'Pulse', wave: 'sine', every: 2000, notes: [[440, 0, 0.18], [440, 0.26, 0.18], [440, 0.52, 0.18]] },
+  rise: { label: 'Rise', wave: 'sine', every: 3000, notes: [[392, 0, 0.25], [493.88, 0.25, 0.25], [587.33, 0.5, 0.25], [783.99, 0.75, 0.45]] },
+};
+const PEAK = 0.22; // the loudest a ring gets, at 100%
 let ctx = null;
 let ringLoop = null;
 let ringing = false;
-function tone(at, freq, len) {
+export let lastRing = null; // for the end-to-end checks: { pattern, peak, at }
+const patternOf = (name = vp().ringtone) => (RINGTONES[name] ? name : 'chime');
+function ringCtx() {
+  ctx ||= new AudioContext();
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  // The ring's own output device, where the browser can choose one.
+  const out = vp().ringOutput || '';
+  if (typeof ctx.setSinkId === 'function' && (ctx.sinkId || '') !== out) ctx.setSinkId(out).catch(() => {});
+  return ctx;
+}
+function tone(at, freq, len, wave, peak) {
   const o = ctx.createOscillator();
   const g = ctx.createGain();
-  o.type = 'sine';
+  o.type = wave;
   o.frequency.value = freq;
   g.gain.setValueAtTime(0, at);
-  g.gain.linearRampToValueAtTime(0.18, at + 0.03);
-  g.gain.setValueAtTime(0.18, at + len - 0.08);
+  g.gain.linearRampToValueAtTime(peak, at + 0.03);
+  g.gain.setValueAtTime(peak, at + Math.max(0.04, len - 0.08));
   g.gain.linearRampToValueAtTime(0, at + len);
   o.connect(g).connect(ctx.destination);
   o.start(at);
   o.stop(at + len + 0.02);
 }
-function burst() {
+function burst(name = patternOf()) {
   if (!ctx) return;
+  const p = RINGTONES[name];
+  const v = vp().ringVolume;
+  const peak = PEAK * Math.max(0, Math.min(1, typeof v === 'number' ? v : 0.8));
   const t = ctx.currentTime + 0.02;
-  tone(t, 659.25, 0.38);
-  tone(t + 0.42, 554.37, 0.38);
-  tone(t + 0.84, 659.25, 0.38);
+  for (const [f, at, len] of p.notes) tone(t + at, f, len, p.wave, peak);
+  lastRing = { pattern: name, peak, at: Date.now() };
+}
+// Hear a ringtone once, in settings.
+export function previewRingtone(name) {
+  try { ringCtx(); burst(patternOf(name)); } catch { /* no audio here */ }
 }
 function startRingtone() {
   if (ringing) return;
   ringing = true;
   try {
-    ctx ||= new AudioContext();
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-    burst();
-    ringLoop = setInterval(burst, 2600);
+    ringCtx();
+    const name = patternOf();
+    burst(name);
+    ringLoop = setInterval(() => burst(name), RINGTONES[name].every);
   } catch { /* no audio here: the call still shows */ }
 }
 function stopRingtone() {

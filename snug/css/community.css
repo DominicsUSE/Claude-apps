@@ -1,0 +1,141 @@
+/*
+  Houses and community: house pictures in the arch, the sidebar banner,
+  categories you can drag, join lines, the newcomer wait, event covers and
+  the settings pieces (Overview, Danger zone, verification, spam rules).
+  Tokens only. Places are arches, people are circles, controls are rectangles.
+*/
+
+/* ---------- A house's icon, clipped to the arch ---------- */
+.tile.pic, .arch.pic, .pl-arch.pic { position: relative; overflow: hidden; }
+.tile.pic > img, .arch.pic > img, .pl-arch.pic > img {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  background: oklch(var(--house-l) var(--house-c) var(--hue, 60));
+}
+
+/* ---------- Banners ---------- */
+.ctx-banner { height: 72px; flex: none; overflow: hidden; background: var(--bg-3); border-bottom: 1px solid var(--line); }
+.ctx-banner img, .d-banner img, .cm-pic-preview img, .ev-cover img, .ev-cover-edit img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.d-banner { overflow: hidden; background: var(--bg-3); }
+.d-feature-banner { height: 96px; border-radius: var(--r-lg) var(--r-lg) 0 0; margin-bottom: var(--s-3); grid-column: 1 / -1; }
+.hp-banner { height: 112px; margin: calc(var(--s-6) * -1) calc(var(--s-6) * -1) var(--s-4); border-radius: var(--r-lg) var(--r-lg) 0 0; }
+
+/* ---------- The invitation background ---------- */
+.join-card.has-splash { position: relative; }
+.join-card.has-splash .join-head {
+  background-image: var(--splash); background-size: cover; background-position: center;
+  position: relative; isolation: isolate; min-height: 160px;
+}
+/* A flat veil keeps the name readable on any picture (no gradients). */
+.join-card.has-splash .join-head::before {
+  content: ''; position: absolute; inset: auto 0 0 0; height: 72px; z-index: -1;
+  background: color-mix(in srgb, var(--bg-2) 82%, transparent);
+}
+.join-paused {
+  padding: var(--s-2) var(--s-3); border-radius: var(--r-sm); font-size: var(--t-13);
+  background: var(--amber-soft); color: var(--text-1); border: 1px solid color-mix(in srgb, var(--amber) 40%, var(--line));
+}
+
+/* ---------- Categories in the sidebar ---------- */
+.sect .sect-more { opacity: 0; }
+.sect:hover .sect-more, .sect:focus-within .sect-more, .sect-more[aria-expanded="true"] { opacity: 1; }
+.sect[draggable="true"] { cursor: grab; }
+.room-dnd { border-radius: var(--r-sm); }
+.room-dnd[draggable="true"] { cursor: grab; }
+.room-dnd:active, .sect[draggable="true"]:active { cursor: grabbing; }
+.drop-before { box-shadow: inset 0 2px 0 var(--cyan); }
+.drop-into { outline: 2px dashed var(--cyan); outline-offset: -2px; border-radius: var(--r-sm); }
+.group-empty { margin: 0 var(--s-2) var(--s-1); padding: var(--s-2); border: 1px dashed var(--line-strong); border-radius: var(--r-sm); font-size: var(--t-12); }
+@media (hover: none) { .sect .sect-more { opacity: 1; } }
+
+/* ---------- A newcomer arrives ---------- */
+.joinline {
+  display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap;
+  margin: var(--s-1) 0; padding: var(--s-1) var(--s-4) var(--s-1) calc(var(--avatar) + var(--s-4) - 20px);
+  font-size: var(--t-14); color: var(--text-2);
+}
+.joinline-ic { color: var(--mint); display: inline-flex; }
+.joinline-text b { color: var(--text-1); font-weight: var(--w-medium); }
+.joinline-time { font-size: var(--t-12); color: var(--text-3); }
+.joinline-hi { margin-left: var(--s-1); }
+
+/* ---------- The newcomer wait ---------- */
+.waitnote {
+  display: flex; align-items: center; gap: var(--s-2); margin: 0 0 var(--s-2); padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-sm); background: var(--amber-soft); color: var(--text-1); font-size: var(--t-13);
+  border: 1px solid color-mix(in srgb, var(--amber) 35%, var(--line));
+}
+.waitnote svg { color: var(--amber); flex: none; }
+
+/* ---------- Events: cover, place, interested ---------- */
+/* .ev-row is a grid (css/places.css): the cover spans every column above the date. */
+.ev-cover { grid-column: 1 / -1; height: 96px; overflow: hidden; border-radius: var(--r-md); margin-bottom: var(--s-2); background: var(--bg-3); }
+.ev-loc a { color: var(--link, var(--cyan)); display: inline-flex; align-items: center; gap: var(--s-1); text-decoration: none; }
+.ev-loc a:hover { text-decoration: underline; }
+.ev-loc a:focus-visible { outline: var(--focus-w) solid var(--focus); outline-offset: 2px; border-radius: var(--r-xs); }
+.ev-keen { font-size: var(--t-12); }
+.ev-keen-btn { gap: var(--s-1); padding: 0 var(--s-3) 0 var(--s-2); }
+.ev-row.compact .ev-keen-btn { height: 28px; font-size: var(--t-13); }
+.ev-keen-btn.on { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, var(--line)); }
+.ev-cover-edit { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+.ev-cover-edit img { width: 160px; height: 72px; border-radius: var(--r-md); }
+.ev-cover-none { width: 160px; height: 72px; display: grid; place-items: center; border-radius: var(--r-md); border: 1px dashed var(--line-strong); color: var(--text-3); font-size: var(--t-12); }
+.ev-cover-edit label.btn { cursor: pointer; }
+.ev-cover-edit label.btn:focus-within { outline: var(--focus-w) solid var(--focus); outline-offset: 2px; }
+
+/* ---------- Settings: pictures ---------- */
+.cm-pic { display: grid; gap: var(--s-2); justify-items: start; }
+.cm-pic-preview { display: grid; place-items: center; }
+.cm-pic-banner .cm-pic-preview, .cm-pic-splash .cm-pic-preview { width: 280px; max-width: 100%; height: 96px; overflow: hidden; border-radius: var(--r-md); background: var(--bg-3); border: 1px solid var(--line); }
+.cm-pic-empty { color: var(--text-3); font-size: var(--t-12); }
+.cm-pic-acts { display: flex; gap: var(--s-2); }
+
+/* ---------- Settings: the house's own link ---------- */
+.cm-vanity { display: grid; gap: var(--s-1); max-width: 420px; }
+.cm-vanity-row { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+.cm-vanity-row .field { width: 160px; }
+.cm-vanity-pre { font-size: var(--t-13); font-variant-numeric: tabular-nums; }
+
+/* ---------- Settings: Danger zone ---------- */
+.cm-danger-head { color: var(--error); }
+.cm-danger { border: 1px solid color-mix(in srgb, var(--error) 40%, var(--line)); border-radius: var(--r-lg); padding: 0 var(--s-4); }
+.cm-danger .set-row:last-child { border-bottom: 0; }
+.cm-pick { list-style: none; margin: var(--s-2) 0 0; padding: 0; max-height: 240px; overflow: auto; border: 1px solid var(--line); border-radius: var(--r-md); }
+.cm-pick .row { width: 100%; }
+.cm-pick-none { padding: var(--s-3); }
+
+/* ---------- Settings: verification, pause, spam rules ---------- */
+.cm-radios { display: grid; gap: var(--s-2); max-width: 420px; }
+.cm-radio { display: flex; gap: var(--s-2); align-items: flex-start; padding: var(--s-2) var(--s-3); border: 1px solid var(--line); border-radius: var(--r-sm); cursor: pointer; }
+.cm-radio:hover { background: var(--bg-3); }
+.cm-radio.on { border-color: var(--text-2); background: var(--bg-3); }
+.cm-radio input { accent-color: var(--text-1); }
+.cm-radio:focus-within { outline: var(--focus-w) solid var(--focus); outline-offset: 2px; }
+.cm-radio > span { display: grid; gap: 2px; }
+.cm-radio b { font-weight: var(--w-medium); }
+.cm-chips { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+.cm-rule { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+.cm-num { display: inline-flex; align-items: center; gap: var(--s-1); }
+.cm-num .field { width: 72px; }
+
+/* ---------- Settings: rooms and categories ---------- */
+.cm-set-head { display: flex; align-items: center; gap: var(--s-1); }
+.cm-set-head[draggable="true"] { cursor: grab; }
+.cm-grip { color: var(--text-3); cursor: grab; }
+.cm-grip:hover { color: var(--text-1); }
+.cm-set-empty { margin: 0 0 var(--s-2); padding: var(--s-2) var(--s-3); border: 1px dashed var(--line-strong); border-radius: var(--r-sm); }
+.cm-set-add { margin-top: var(--s-4); }
+
+/* ---------- Phones: 44px targets ---------- */
+@media (max-width: 759px), (pointer: coarse) {
+  .sect .sect-more, .cm-grip, .cm-set-head .ib, .joinline-hi { min-width: 44px; min-height: 44px; }
+  .sect .sect-more { opacity: 1; }
+  .cm-radio { min-height: 44px; }
+  .ev-keen-btn, .ev-row.compact .ev-keen-btn { height: 44px; }
+  /* With Interested and Going both shown, a short row has no room beside the
+     title on a phone: the buttons go under it, as in the full rows. */
+  .ev-row.compact { grid-template-columns: auto minmax(0, 1fr); align-items: start; }
+  .ev-row.compact .ev-side { grid-column: 2; grid-row: auto; flex-wrap: wrap; }
+  .ctx-banner { height: 56px; }
+  .hp-banner { margin: calc(var(--s-4) * -1) calc(var(--s-4) * -1) var(--s-4); }
+}
+@media (prefers-reduced-motion: reduce) { .drop-before, .drop-into { transition: none; } }

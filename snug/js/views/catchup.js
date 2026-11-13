@@ -2,7 +2,7 @@
 // badges everywhere. Saved: the messages you chose to keep.
 import { html, useRef } from '../../vendor/preact-htm.js';
 import {
-  S, person, back, me, convMeta, findMsg, jumpToMsg, openConv, openModal, openQuick, declineInvite, markAllRead,
+  S, emit, person, back, me, convMeta, findMsg, jumpToMsg, openConv, openModal, openQuick, declineInvite, markAllRead,
   markConvRead, markManyRead, toggleSave, setSavedNote, setPresence, setRead, toast,
 } from '../store.js';
 import { needsMe, levelOf, threadsOf, roomIds, isThread } from '../lib/attention.js';
@@ -11,6 +11,7 @@ import { fmtWhen, plural, nameList } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Tile, RoomIcon, Rich, Empty } from '../ui/kit.js';
 import { JoinPreview } from './modals.js';
+import { Mentions } from './mentions.js'; // the Mentions tab (server/inbox.js mentions.list)
 
 const Back = () => S.ui.phone && S.ui.depth > 0 && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
 
@@ -130,7 +131,33 @@ function TriageItem({ conv, m, count }) {
   </div>`;
 }
 
+// Two tabs: what's unread and for you, and every mention of the last 30 days.
+function CatchTabs({ tab }) {
+  const pick = (t) => { S.ui.catchTab = t; emit(); requestAnimationFrame(() => document.getElementById(`cu-tab-${t}`)?.focus()); };
+  const onKey = (e) => {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    e.preventDefault();
+    pick(tab === 'mentions' ? 'you' : 'mentions');
+  };
+  return html`<div class="f-tabs cu-tabs" role="tablist" aria-label="Catch up" onKeyDown=${onKey}>
+    ${[['you', 'For you'], ['mentions', 'Mentions']].map(([id, label]) => html`<button key=${id} id=${`cu-tab-${id}`} class="f-tab" role="tab"
+      aria-selected=${String(tab === id)} aria-controls="cu-panel" tabindex=${tab === id ? '0' : '-1'} onClick=${() => pick(id)}><span class="f-tab-label">${label}</span></button>`)}
+  </div>`;
+}
+
 export function CatchUp() {
+  const tab = S.ui.catchTab === 'mentions' ? 'mentions' : 'you';
+  if (tab === 'mentions') {
+    return html`<section class="main view catchup" aria-label="Catch up">
+      <header class="bar">
+        <${Back} />
+        <h1 class="bar-title"><${Icon} name="tray" />Catch up</h1>
+        <span class="bar-sub trunc">Mentions and replies from the last 30 days</span>
+      </header>
+      <${CatchTabs} tab=${tab} />
+      <div class="view-body" id="cu-panel" role="tabpanel" aria-labelledby="cu-tab-mentions"><${Mentions} /></div>
+    </section>`;
+  }
   const { needs, news } = gather();
   const forYou = needs.reduce((n, it) => n + it.count, 0) + S.invites.length;
   const focused = me().presence === 'focus';
@@ -143,7 +170,8 @@ export function CatchUp() {
       ${!nothing && html`<span class="bar-sub trunc">${forYou} for you, ${plural(news.length, 'room')} with news</span>`}
       <div class="bar-end">${(needs.length > 0 || news.length > 0) && html`<button class="btn quiet" onClick=${markAllRead}><${Icon} name="check" size=${16} />Mark all read</button>`}</div>
     </header>
-    <div class="view-body">
+    <${CatchTabs} tab=${tab} />
+    <div class="view-body" id="cu-panel" role="tabpanel" aria-labelledby="cu-tab-you">
       ${focused && html`<div class="banner"><i class="pres inline focus"></i><span><b>You’re focused.</b> Nothing pops up. It collects here until you’re back.</span>
         <button class="btn quiet" style="margin-left:auto" onClick=${() => setPresence('around')}>I’m back</button></div>`}
       ${nothing

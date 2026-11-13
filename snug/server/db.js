@@ -5,8 +5,13 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, chmodSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { migrateMessaging } from './messaging.js'; // polls, link previews, edit history, scheduled messages, stickers
+import { migrateAppearance } from './appearance.js'; // profile pictures and styling (server/appearance.js)
 import { migrateAccount } from './account.js'; // profile fields, settings sync, notes, two-factor, session devices (server/account.js)
 import { migratePlaces } from './places.js'; // room overrides, extra roles, forums, webhooks, folders, onboarding (server/places.js)
+import { migrateChat } from './chat.js'; // silent messages, reply mentions, @everyone without the right, dice rolls (server/chat.js)
+import { migrateCommunity } from './community.js'; // pictures, verification, custom links, event covers, spam rules, new permissions (server/community.js)
+import { migrateInbox } from './inbox.js'; // timed mutes, presence for a while, dismissed mentions, held usernames (server/inbox.js)
+import { migrateDms } from './dms.js'; // closed, pinned and named conversations, group owners and icons (server/dms.js)
 
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
@@ -231,6 +236,11 @@ export function migrate(db) {
   migratePlaces(db); // places, structure and community (server/places.js)
   migrateVoiceOpts(db); // soundboard, voice room limits and bitrate (server/voiceopts.js)
   migrateAccount(db); // profile fields, settings sync, notes, two-factor, session devices (server/account.js)
+  migrateAppearance(db); // profile pictures and styling (server/appearance.js)
+  migrateChat(db); // text and messages (server/chat.js)
+  migrateCommunity(db); // houses and community (server/community.js)
+  migrateInbox(db); // inbox and notifications (server/inbox.js)
+  migrateDms(db); // direct conversations and groups (server/dms.js)
 }
 
 // --- Voice options (server/voiceopts.js) ----------------------------------------
@@ -426,14 +436,24 @@ export function openDb(path) {
     if (!s) { s = db.prepare(sql); cache.set(sql, s); }
     return s;
   };
+  let depth = 0;
   return {
     raw: db,
     get: (sql, ...p) => stmt(sql).get(...p),
     all: (sql, ...p) => stmt(sql).all(...p),
     run: (sql, ...p) => stmt(sql).run(...p),
+    // One transaction; a tx inside another becomes a savepoint, so an op that
+    // wraps another (and both use tx) still rolls back as one.
     tx(fn) {
+      if (depth > 0) {
+        const sp = `tx${depth}`;
+        db.exec(`SAVEPOINT ${sp}`);
+        depth++;
+        try { const r = fn(); db.exec(`RELEASE ${sp}`); return r; } catch (e) { db.exec(`ROLLBACK TO ${sp}`); db.exec(`RELEASE ${sp}`); throw e; } finally { depth--; }
+      }
       db.exec('BEGIN');
-      try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; }
+      depth++;
+      try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } finally { depth--; }
     },
     close: () => db.close(),
   };

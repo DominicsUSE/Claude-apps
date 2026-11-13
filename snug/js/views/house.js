@@ -29,8 +29,11 @@ const first = (name) => (name || '').split(' ')[0];
 
 // ---------- Pieces shared by the member and visitor pages ----------
 
+// The house's icon clipped to the arch when it has one (server/community.js),
+// over its mark and hue, which show if the picture can't load.
 function Arch({ house }) {
-  return html`<span class="pl-arch" style=${`--hue:${hueOf(house.hue)}`} aria-hidden="true">${house.mark}</span>`;
+  return html`<span class=${`pl-arch${house.icon ? ' pic' : ''}`} style=${`--hue:${hueOf(house.hue)}`} aria-hidden="true">${house.mark}${house.icon
+    ? html`<img src=${`/api/housepics/${house.icon}`} alt="" decoding="async" onError=${(e) => e.currentTarget.remove()} />` : null}</span>`;
 }
 
 // "here" never counts you. At zero there is no green dot: nobody else is around.

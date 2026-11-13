@@ -3,7 +3,9 @@
 A calm place for your people. Houses (communities) hold rooms, rooms hold
 conversations, and any message can grow a thread. Direct messages, groups,
 voice rooms, roles, search, saved messages and a single place to catch up.
-Real accounts, a real database, live delivery between people.
+Make it yours: profile pictures and decorations, themes and a theme
+builder, your own accent, fonts, chat display, sounds and keyboard
+shortcuts. Real accounts, a real database, live delivery between people.
 
 ![Snug on desktop: a room with a thread open beside it](docs/preview.png)
 
@@ -105,6 +107,50 @@ shows a system notification ("Lou Brandt is calling") that closes when the
 ring stops; the window then shows the incoming-call screen. Tested under Xvfb (the hidden
 window comes back, the notification is recorded, the screen shows and goes
 when the caller gives up); the banner itself was not seen.
+
+**Desktop settings** (Settings > Desktop app, mirrored in the Snug menu, kept
+in `desktop.json`): open Snug when you sign in to your computer (it starts in
+the tray), start minimised, minimise to the tray, hardware acceleration
+(applies after **Restart now**), and checking for a newer Snug. The window
+opens where you left it (size, place, maximised), unless that place is no
+longer on any screen, and its background follows your Snug theme.
+
+**The unread number on the icon**: the same number as the tab title, as the
+app's badge (macOS, Linux) or a taskbar overlay drawn by the app (Windows,
+"3 unread"), and in the tray tooltip ("Snug: 3 for you"). A new mention while
+the window isn't focused flashes it. Settings > Desktop app turns the number
+off; an installed web app shows it too.
+
+**Global mute and deafen keys**: two shortcuts (two of Ctrl, Alt and Shift
+with one key, or one of them with an F key, so nothing other apps rely on,
+like Ctrl+C or Alt+F4, is taken) that work while you are in a voice room or
+call, even when another app is in front. They are held only while you are in voice;
+clashes and keys another app has taken are reported.
+
+**snug:// links**: `snug://join/<code>` opens the invitation in the app
+(**Copy app link** in the invite box) and `snug://open/<place>[/<message>]`
+opens a room or conversation, from a click, a second launch or macOS's
+open-url. Anything else is ignored; the server still refuses what you may not
+read. **Away** follows the computer: locked, asleep or idle for five
+minutes, and back when it is unlocked or used again.
+
+**A newer Snug**: once a day the installed app asks GitHub for the latest
+release (10 seconds, 1 MB at most) and shows a strip with **Get it** (opens
+the release page in your browser). Nothing downloads. Off in settings or with
+`SNUG_UPDATE_CHECK=0`; running from source doesn't ask.
+
+Tested by `desktop/test.js` under Xvfb: the badge count and the flash when a
+second person mentions you while another window has the focus, the overlay
+image drawn, the theme colour (and bad colours refused), open at login and
+minimise to tray, the Snug menu entries, the global keys held only in voice
+and their press toggling mute and deafen, a second launch with a join link
+showing the invitation and a malformed link doing nothing, locking the
+computer (as the app reports it) turning you Away and unlocking back, the update check
+against a local stand-in (newer shows, the same version and failures stay
+silent), and the window's place kept across launches with an off-screen
+place falling back to the centre. Not seen: the real taskbar overlay, the
+macOS dock badge, login items (Linux has none; the setting is recorded),
+Windows' protocol registration, and the computer really locking.
 
 To work on the app:
 
@@ -245,11 +291,16 @@ Real, and covered by tests with separate users:
 
 - **Settings in one structure** (`js/views/settings.js`): personal settings
   in two sections (You: Profile, Account and security, Privacy and safety,
-  Your data; App: Notifications, Voice and video, Appearance, Accessibility,
-  Streamer mode, Keyboard) and house settings in four (House; Rooms and
-  newcomers; Moderation; Owners). Each house page shows only to people with
-  its permission; "Find a setting" matches what is on each page and stays
-  first in the row of tabs on a phone. Each room's slowmode, user limit and
+  Your data; App: Notifications, Voice and video, Appearance, Text and
+  messages, Accessibility, Streamer mode, Keyboard, and Desktop app inside
+  the desktop app) and house settings in four (House; Rooms and newcomers;
+  Moderation; Owners). Each house page shows only to people with its
+  permission; "Find a setting" matches the words on each page (the whole
+  phrase, or every word as the start of one of the page's words; loose
+  letter-by-letter matching only on page names) and stays first in the row
+  of tabs on a phone. The integration test searches for an option from each
+  track (ringtone, theme builder, skin tone, decoration, rebind) and expects
+  exactly the page it lives on. Each room's slowmode, user limit and
   bitrate sit with its Access button on Rooms and access. Covered by `npm run
   test:e2e:integration` (2 tests, one on a 390px phone), and by one server
   test (the "integration" block at the end of `tests/server.test.js`) for
@@ -438,6 +489,86 @@ Real, and covered by tests with separate users:
   peer-to-peer call a modified client could still send sound, which every
   other Snug ignores because the server marks it muted.
 
+- **Houses and community** (`server/community.js`, `js/lib/community.js`,
+  `js/views/community*.js`, `css/community.css`):
+  - **Categories and room order**: make, rename, reorder and delete
+    categories (a category's rooms move to the one you pick; the last one
+    stays). Drag rooms between categories and drag categories, in the sidebar
+    and in House settings > Rooms and access; there, focus a room's or a
+    category's grip and press **Alt and an arrow** (across categories at the
+    ends; a live region says where it landed). In the sidebar a room's menu
+    has Move up, Move down and Move to, so the keyboard works there too
+    without taking over Alt and an arrow, which already moves between places.
+    Needs *Manage rooms* (and managing that room); ids from another house are
+    refused, positions are renumbered in one transaction, and each change is
+    in the house log.
+  - **House pictures**: an **icon** (square PNG, JPEG, WebP or GIF, up to 1 MB
+    and 512 px) drawn inside the arch wherever the house appears, with the
+    letter and colour behind it if it can't load; a **banner** (2 MB) at the
+    top of the house's sidebar and on Discover cards for public houses; an
+    **invitation background** (2 MB) behind the card a link opens. The type
+    comes from the bytes. Members always see them; the icon and background
+    also go to anyone holding a valid invitation link (or a personal
+    invitation) and to everyone for a public house; the banner to members and
+    public previews; anyone else gets 404. *Manage the house*, audited and rate-limited.
+  - **Danger zone** (House settings > Overview, owners): **transfer
+    ownership** to a member, optionally stepping down one role, and **delete
+    the house**: its exact name. Both need a two-factor code when the owner
+    uses two-factor sign-in. Rooms, messages, threads, files, webhooks, events and
+    the house log go in one transaction; voice rooms close and every member's
+    devices hear that it's gone.
+  - **Finer permissions**: *Manage the house* (settings, pictures,
+    screening, welcome, soundboard settings), *Plan events* (create, and edit
+    or cancel anyone's), *Manage webhooks* and *Add reactions* (taking back
+    your own reaction always works). The role newcomers join with stays with
+    *Manage roles and members*: below an owner, a role under your own that
+    manages nothing. Each role got them once from what they
+    replace (*Manage roles and members* gives the house and webhooks, *Post
+    notices* or *Manage rooms* give events, *Manage rooms* webhooks too, and
+    every role reactions), so nobody lost anything; after that they are
+    separate switches in the role editor.
+  - **Events**: the planner, or a role that plans events, **edits** an event
+    live for everyone; **Somewhere else** (up to 100 characters, an https link
+    shown as text and never fetched); a **cover** (PNG, JPEG or WebP up to
+    2 MB, members only); **Interested** beside **Going**, counted apart.
+    **Reminders** 15 minutes before and at the start, in the app and as a
+    push to closed devices (never for a muted house, while Focused or in
+    quiet hours), with Join for a voice or stage room.
+  - **Spam rules** (Filter and screening): too many distinct mentions (3 to
+    50), flooding (the same words N times in 30 seconds, or more than 2N
+    messages in 10), invitation links to other houses, and shouting (over
+    70% capitals in more than 20 letters). Each has its own action (block,
+    flag to Reports, or block and time out), checked before a message is
+    stored, in the same place as the word filter; hits go in the house log.
+    Rooms can be exempted, besides the roles the filter already skips.
+  - **Verification and pausing**: a verification level (none; an account
+    older than 5 minutes; older than a day and in the house for 10 minutes)
+    that stops newcomers writing, reacting and joining voice until then, with
+    a countdown above the message box; moderators and owners never wait.
+    **Pause invitations** for 1, 6 or 24 hours or until lifted: links, open
+    joining and personal invitations are refused with a note. **Moderators
+    need two-factor sign-in** (owners): removing, banning, timing out and
+    deleting others' messages are refused without it. *Manage the house* or
+    *Ban people*; audited.
+  - **The house's own link**: owners set `/join/<word>` (3 to 32 of a-z, 0-9
+    and dashes, unique ignoring case, a few words kept for Snug, a few changes
+    an hour). It joins like an invitation, so bans, the pause and screening
+    still apply; clearing it frees the word.
+  - **Newcomers**: *Announce newcomers in* a room writes "Name joined the
+    house." (a line from the server, with **Say hi**), seen only by people who
+    can see that room, a few at most per minute during a rush of joins.
+    *Notifications for new members* starts them on Everything or Only mentions.
+  Covered by `npm test` (`tests/logic-community.test.js`: 10 tests of the
+  shared rules, the permission list and the backfill; `tests/server-community.test.js`:
+  22 server tests with real sockets) and `npm run test:e2e:community` (5
+  tests, two people in two browsers; the icon test also checks the house's
+  own page and the sign-up page a link opens before an account exists). Not
+  built: the invitation background on that sign-up page (the icon shows
+  there; the join card after sign-in shows the background), and a banner on
+  the phone's house screen. Not tested: dragging on a touch screen (the menus
+  and keys do the same), and a reminder push through a real push service (who
+  would get one is tested).
+
 - **Voice and video options** (`server/voiceopts.js`, `js/voiceopts.js`,
   `js/views/voiceopts*.js`, `css/voiceopts.css`):
   - **Devices**: choose the microphone, the speaker (where the browser can
@@ -509,13 +640,57 @@ Real, and covered by tests with separate users:
     characters with message formatting, and **private notes** on people that
     only your own devices ever receive. Per-house names and pictures are the
     nicknames in Places.
-  - **Appearance**, saved on the server and applied at once on every device:
-    Dark, Light, **Midnight** (true black) or match the device; a selection
-    tone (coral stays the brand); **cozy or compact** messages, pictures in
-    compact; text size 12 to 20 px; zoom 80 to 150%; spacing; line height;
-    saturation; 12 or 24-hour clock; role colours on names;
-    the sidebar's width (drag its edge, or arrow keys on the grip). No custom
-    CSS: every setting is a value from a fixed list the server checks.
+  - **Appearance** (`server/appearance.js`, `js/lib/colour.js`,
+    `js/lib/theme.js`, `js/views/appearance.js`, `css/appearance.css`),
+    saved on the server and applied at once on every device, with a sticky
+    **live preview** drawn with the real message component:
+    - **Themes** as named cards: match the device, Dark, Light, **Midnight**
+      (true black), **Ash**, **Slate**, **Moss**, **Paper**, **Sepia** and
+      **Contrast dark**; also in the quick switcher by name. Every preset's
+      text reaches 4.5:1 on its surfaces (checked from the CSS by a test).
+    - **Theme builder**: four colours (background, panels, text, accent) and
+      a dark or light base. Every other token is derived, with live contrast
+      badges; up to 5 saved themes. Share one as a code
+      (`snug-theme:1:` and base64url JSON) and import it on any account.
+    - **Accent**: coral (Snug's own), cyan, mint, amber, rose, neutral, or any
+      hex colour, for the primary button, switches, the selected row, the
+      active tab and the focus ring. It is nudged per theme so fills reach
+      3:1 and accent text 4.5:1; a colour that would need more than a small
+      nudge on any built-in theme is refused. Coral stays the brand and "for
+      you" (mentions, the New line, badges) whatever the accent.
+    - **Chat**: times always or on hover, big emoji on or off, emoji size,
+      reactions shown or hidden, GIFs and animated custom emoji (match
+      motion, always, on hover, never: a still frame until pointed at),
+      spoilers on click or always shown (text and attachments alike), other people's name styles on or
+      off, and a faint chat background (dots, grid, arches, grain; off with
+      high contrast).
+    - **Text**: Inter, the device's own sans or serif, Atkinson Hyperlegible
+      or Atkinson Hyperlegible Mono, and a code font; text size 12 to 20 px;
+      zoom 80 to 150%; 12 or 24-hour clock. **Cozy or compact** messages,
+      pictures in compact, spacing, line height, saturation, role colours on
+      names, and the sidebar's width (drag its edge, or arrow keys on the grip).
+    - **This device only**: theme, zoom, text size, spacing, display and
+      sidebar width can stay on one device (kept in its browser), with
+      Reset to synced.
+    - **No flash on opening**: the look last applied on a device (custom
+      theme and accent colours included) is put on the page by `js/boot.js`
+      before anything else runs; only plain attribute values and hex or
+      `rgb()` colours are accepted from that copy.
+    - No custom CSS. Every setting is a value from a fixed list, a number in
+      a range, or (custom themes, accents, profile colours) a `#rrggbb` hex
+      colour that the server runs through the same contrast checks before
+      it keeps it. The page applies colours one custom property at a time,
+      never as CSS text.
+  - **Profile picture and style**: upload a picture (PNG, JPEG, GIF or WebP,
+    up to 2 MB, 64 to 2048 px, read from its bytes), cropped square with zoom
+    in the browser, previewed at 24, 40 and 96 px. It is served only while
+    it is your current picture and only to people who may see you (a
+    stranger, someone you blocked, or a missing file all get the same 404).
+    GIF pictures stay still until pointed at, and always under reduced
+    motion. **Decorations** around the circle (ring, double ring, dotted,
+    arch halo, leaves, stars) in a theme-safe hue, **name styles** (font,
+    weight, hue; role colours still win) and two **profile colours** for your
+    card, each refused unless dark or light text reads 4.5:1 on it.
   - **Accessibility**: Atkinson Hyperlegible (shipped in `fonts/`, OFL),
     underlined links, contrast (standard, high or match the device), a focus
     ring that always shows, motion (reduced or match the device), and reading new messages aloud with the browser's own voice (off
@@ -525,8 +700,11 @@ Real, and covered by tests with separate users:
     (mute or mark this place read, mark everything read, themes, presence,
     invisible, set or clear a status, streamer mode). `Ctrl`/`⌘ /` opens the
     keyboard shortcuts sheet.
-  - **Notifications**: a sound made with WebAudio (soft, bell, pop, drop or
-    off), sounds off per house, message text in notifications on or off,
+  - **Notifications**: sounds made with WebAudio, one each for mentions,
+    direct messages and other messages, from nine built-in sounds or five
+    packs (Snug soft, Bell, Wood, Glass, Minimal), with a volume and a play
+    button per row (the older single sound still applies until you pick);
+    sounds off per house, message text in notifications on or off,
     **quiet hours** (no sounds, pop-ups or pushes; the server checks them for
     pushes in your time zone), **highlight words** that count as mentions
     (also for pushes), and **@everyone and @here** (from people who may post
@@ -567,6 +745,179 @@ Real, and covered by tests with separate users:
   option on a phone (only Appearance was looked at, at 390px). The desktop
   app has **View > Streamer mode** (`Ctrl`/`⌘ Shift S`), checked by one
   desktop test.
+- Text and messages (`server/chat.js`, `js/views/chat.js`, `js/lib/emojis.js`,
+  `js/lib/commands.js`, `js/views/viewer.js`):
+  - **Every emoji.** The full Unicode set (1,898 emoji, generated once and
+    offline into `js/lib/emoji-data.js`, nothing fetched) in nine categories
+    with a tab row, search by name then keyword, a skin tone picked once (it
+    follows you, and goes on every emoji that takes one, in the picker,
+    autocomplete and `:shortcodes:`), and **Frequently used** from your own
+    counts. `:wave:` becomes 👋 when sent; unknown names stay as typed.
+    Reactions take skin tones, ZWJ families and subdivision flags.
+  - **Mentions.** `@` suggests people, the house's mentionable roles (with
+    their colour) and, only for people who may post notices, `@everyone` and
+    `@here` with how many people each notifies. A non-announcer's `@everyone`
+    is stored as such and lights up nobody. `#` suggests rooms you can see and
+    sends a room link (`<#id>`) that shows as a pill and opens the room, or
+    reads **#unknown room** to someone who can't see it: names come only from
+    the reader's own app, never the server.
+  - **Message links.** **Copy message link** on any message
+    (`https://<snug>/m/<conversation>/<message>`), and **Copy ID** with
+    Settings > Text and messages. A link pasted into text shows as a quote card
+    (who, where, the first 200 characters, Jump) for people who can read it,
+    and is never fetched as a preview. Opening one after signing in lands on
+    the message. `msg.peek` answers the same for missing and forbidden.
+  - **Attachments.** Each one can be marked as a spoiler and given a
+    description (alt text, up to 1,024 characters, through the house word
+    filter). Spoilers stay covered, without even loading, until clicked or
+    Entered; descriptions are the picture's alt text and open from an
+    **ALT** badge. Forwarding keeps both; spoiler GIFs never become
+    favourites or "recent". Uploads are typed by their bytes (PNG, JPEG, GIF,
+    WebP, MP4, QuickTime, WebM, MP3, Ogg, M4A); anything mislabelled, and
+    every SVG, only downloads.
+  - **Players.** Videos play inline with their first frame as a poster, our
+    own controls (play, a keyboard seek slider, time, mute, volume, full
+    screen, picture in picture, download) and 44px targets on a phone. A
+    sound file shows its name, length and a seek bar; only recordings are
+    "Voice message". Text and code files up to 100 KB show their first ten
+    lines, highlighted, with Expand, Copy and Download.
+  - **The media viewer.** A dialog that keeps focus and gives it back to the
+    thumbnail: `←`/`→` (or a swipe) through the message's pictures and videos
+    and then the conversation's, "3 of 8", zoom by click, `+`/`-`, the wheel
+    or a pinch, drag to pan, Open original, Download with the file's name,
+    the description, and Jump.
+  - **Slash commands** with argument chips: `/me`, `/shrug`, `/tableflip`,
+    `/unflip`, `/lenny`, `/spoiler`, `/silent`, `/nick`, `/poll q | a | b`
+    (opens the poll prefilled), `/giphy q` (opens the GIF picker with the
+    words), `/status`, `/open`, `/around`, `/focus`, `/away`, and
+    `/roll 2d6` (up to 20 dice of 2 to 1,000 sides): the server rolls with
+    `crypto.randomInt` from the spec alone and posts "rolled 2d6: 3 + 5 = 8",
+    which can't be edited, under slowmode and timeouts like any message.
+    An unknown command says so instead of sending.
+  - **Silent messages and reply mentions.** `@silent ` (or `/silent`) sends
+    without a sound or a push; it still counts as unread and carries a
+    bell-off mark. The reply banner's **@ On/Off** decides whether the
+    person replied to is notified (remembered on this device); an `@mention`
+    in the text still notifies.
+  - **Quick edits.** **Quote** in the message menu; `s/old/new` edits your
+    last message; `+:emoji:` reacts to the last one; `//text` sends "/text".
+    A counter appears from 3,500 characters, Send turns off past 4,000, and
+    pasting more offers **Send as a file** (`message.txt`).
+  Tested by `tests/logic-chat.test.js` (10), `tests/server-chat.test.js` (7)
+  and `tests/e2e-chat.test.js` (10 tests in two browsers). Not tested: the
+  pinch and swipe gestures (no touch in the test browser), full screen and
+  picture in picture (headless), and an Ogg or QuickTime video playing.
+
+- **Voice and calls: reconnect, devices, quality, activities, ringing**
+  (`server/activities.js`, `server/hub.js`, `js/voice.js`, `js/activities.js`,
+  `js/views/activities.js`, `js/lib/netquality.js`, `js/lib/games.js`):
+  - **Reconnect.** A connection that drops (anything but a tab closing or
+    reloading) keeps its voice place for 20 seconds, shown to others as
+    *Reconnecting…* in amber. The browser keeps the microphone, camera and
+    screen, joins the same room or call again as soon as the socket is back
+    and calls everyone afresh, with mute and deafen as they were. Every
+    permission check runs again on the way back (a ban, a timeout or a lost
+    "Join voice" refuses it and frees the place at once); only the full-room
+    check is skipped for the held place. A one-to-one call is not ended by a
+    drop, only by the grace running out.
+  - **Devices in the call.** The call's options menu lists microphones,
+    speakers and cameras and switches at once. A chosen microphone that is
+    unplugged falls back to the default with a toast; a new system default is
+    followed when none was chosen; a microphone whose track ends is captured
+    again. **You're muted**: talking while muted for about 1.5 seconds shows
+    an amber note with Unmute, at most once a minute (a copy of the raw
+    microphone is listened to; nothing is sent). Settings > Voice and video >
+    Calls turns it off.
+  - **Connection quality** from WebRTC's statistics every 2 seconds: round
+    trip on the connection in use, packets lost since the last poll, jitter,
+    what you send, direct or relayed. Good (under 150 ms and 2%), fair, poor
+    (over 400 ms or 8%), in mint, amber and rose bars beside each person and
+    in *Voice connected*, which opens everyone's numbers and a hint when your
+    own uplink is struggling.
+  - **Activities.** A shared whiteboard (five token colours, four pen sizes,
+    undo your own last stroke, clear by the starter or a voice moderator,
+    export as PNG), tic-tac-toe and Connect Four, in the call's focus slot.
+    The server keeps the board, the seats and whose turn it is, refuses
+    moves out of turn or into a full column, and sends them only to the people
+    in that voice place; it all ends when the place empties. At most 256
+    points a stroke and 2,000 strokes; drawing is rate limited (20 at once,
+    then 5 a second, and per room).
+  - **Voice reactions** float up from your tile (static under reduced
+    motion): eight fixed emoji or the house's own, one a second and eight in
+    ten seconds.
+  - **Ring again** in a group call: a Ring button beside people who declined
+    or didn't answer (once every 30 seconds per person).
+  - **Ringing settings:** four ringtones with a preview, ring volume, the
+    device the ring plays on (where the browser allows), and **who can ring
+    me** (everyone, friends, nobody), enforced on the server where every ring
+    and its push start; an unrung call still ends as missed after the usual
+    ring time.
+  - Also: a call clock (mm:ss, then h:mm:ss) in the stage, the floating call
+    and the dock; the room permission **Share camera and screen** (on by
+    default; refused on the server and turned off mid-call when taken away);
+    camera resolution and frame rate, mirror, microphone volume and output
+    volume; and short-lived TURN credentials (below).
+  Tested by `tests/logic-voice.test.js` (5), `tests/server-voice.test.js`
+  (13), `tests/e2e-voice-extra.test.js` (8) and `tests/e2e-activities.test.js`
+  (4, in two browsers). Not tested: a real network drop (the tests close the
+  socket without a clean goodbye), a real device being unplugged (the track's
+  end is simulated), the ring's output device, and TURN through a real relay.
+
+- **Inbox, groups and notifications** (`server/inbox.js`, `server/dms.js`,
+  `js/inbox.js`, `js/views/mentions.js`, `js/views/dm-manage.js`):
+  - **Unread counts from the server.** `unread.counts` (also in the snapshot,
+    and sent with a house's content when you join) counts every conversation
+    you may read (private rooms included only if you can see them) since your
+    read point, in SQL: how many, how many need you, the first unread message.
+    "Needs you" follows the browser's rules: your @username, a mentionable
+    role you hold, @everyone/@here from someone who may post notices (unless
+    turned off for that house), highlight words, replies to you (not when the
+    reply's mention was turned off), threads you follow, direct messages.
+    Blocked people, unaccepted message requests and muted places don't count.
+    The browser takes the larger of its own count and the server's, so a
+    mention older than the 60 messages a device loaded still shows on the
+    badge, the tab title and the room.
+  - **Catch up > Mentions**: mentions and replies from the last 30 days, read
+    or not, each checked against what you may read; filter by house, leave
+    out @role or @everyone, **Jump** (loading the history between), and
+    **Dismiss** (kept on the server, with undo). J and K move, E dismisses,
+    Enter jumps.
+  - **Direct conversations and groups**: **Close** (it leaves your list, its
+    messages stay, and a new message brings it back), **Pin to top** (up to
+    10), and for groups **Rename** (1 to 40 characters), **Change icon** (an
+    emoji and one of the eight colours), **Add people** (up to 10 in all; only
+    friends or people you share a house with, nobody blocked either way, and
+    their message privacy is respected; adding to a one-to-one conversation
+    starts a new group) and **Leave group** (you lose its history). The owner
+    can remove people from the header's members list; when the owner leaves,
+    the longest member takes over. Each change writes a line in the
+    conversation.
+  - **Timed mutes**: *Mute for…* 15 minutes, 1, 8 or 24 hours, or until you
+    turn it back on, from a house's, room's or conversation's menu, which then
+    says "Muted until 14:30". The server works out the time and refuses other
+    values; an expired mute counts as unset everywhere (badges, push, rings),
+    and the server tells your devices when it ends.
+  - **Suppress @role mentions** per house (its menu): role mentions there no
+    longer count or push.
+  - **Presence for a while**: Focused (or any presence) *for* 30 minutes, 1,
+    2, 4 or 8 hours or today, from the presence menu, which says "Focused
+    until 15:00". The server returns you to Around when it ends and tells
+    everyone; Focused stops pushes only until then.
+  - **Friends**: a **Blocked** tab with Unblock, a filter box above Online and
+    All (Escape clears), and **mutual friends** on a profile (a count that
+    opens into their circles; the server answers only for people you may see).
+  - **Change your username** (Settings > Profile): the usual rules, your
+    password (and two-factor code when on), two changes an hour, and your old
+    username held for you for 7 days (your last two old names at most).
+  - **Landmarks**: *Skip to messages* is the first Tab stop; F6 and Shift+F6
+    move between places, the sidebar, the main view, the side pane and the
+    call dock; the main view is the page's one `<main>`.
+  Tested by `tests/logic-shell.test.js` (7), `tests/server-shell.test.js`
+  (10) and `tests/e2e-shell.test.js` (6, two browsers for groups). Not
+  tested: the Catch up *For you* list itself shows only what this device has
+  loaded (the old mention shows in Mentions and on the badges). The quick
+  switcher also has *Focused for 30 minutes … the rest of today* and
+  *Mentions*.
 
 Not built yet, on purpose, because each needs outside infrastructure:
 
@@ -574,8 +925,10 @@ Not built yet, on purpose, because each needs outside infrastructure:
   owner of the server resets a password in the database.
 - **A TURN relay for voice.** Voice connects directly between people. People
   behind strict company or mobile networks need a relay; set the `SNUG_TURN_*`
-  variables below once you run one (coturn is the usual choice). Only direct
-  connections have been tested.
+  variables below once you run one (coturn is the usual choice). With
+  `SNUG_TURN_SECRET` each person gets their own 12-hour credential; the
+  credential itself is tested, but only direct connections have been tested,
+  never a call through a real relay.
 - **More than one server process.** Presence, voice membership and rate
   limits live in memory, so Snug runs as a single process. That is fine for
   communities in the thousands; beyond that it needs a shared message bus.
@@ -611,6 +964,7 @@ behind a reverse proxy that terminates TLS and passes WebSocket upgrades on
 | `SNUG_ORIGINS` | Extra allowed page origins, comma separated | none |
 | `SNUG_STUN` | STUN servers for voice | Google's public server |
 | `SNUG_TURN_URL`, `SNUG_TURN_USER`, `SNUG_TURN_PASS` | TURN relay for voice | none |
+| `SNUG_TURN_SECRET` | Shared secret of the TURN server's REST API (coturn `use-auth-secret`): each person gets their own credential, `<expiry>:<user id>` with a base64 HMAC-SHA1, valid 12 hours and refreshed by the `ice.refresh` op. When set, `SNUG_TURN_USER`/`SNUG_TURN_PASS` are never sent | none |
 | `SNUG_PUSH_CONTACT` | Contact the push services see in each VAPID token (`mailto:` or `https:`); Apple's requires a real one | `mailto:snug@example.invalid` |
 | `SNUG_DEMO_PASSWORD` | Password for the sample accounts when seeding | `snug-demo-1` |
 | `SNUG_GIF_PROVIDER=tenor`, `SNUG_TENOR_KEY` | Turn on GIF search through Tenor (v2 API). Searches and previews go through the server; media is fetched only from Tenor's media hosts, at most 10 MB, GIF, WebP or MP4 by content | off: no Search tab |
@@ -704,9 +1058,10 @@ the filter chips write those words for you. No promotions anywhere.
 
 ## Design system
 
-The idea is *a place with someone in it*. The symbol, the Nook, is a
-doorway with a person (the presence dot) inside it; the brand sheet is in
-`docs/brand/BRAND.md`. All tokens are in `css/tokens.css`. The rules, briefly:
+The idea is *a place with someone in it*. The symbol, the Doorstep, is an
+open archway with a person (the presence dot) standing on its threshold; the
+brand sheet is in `docs/brand/BRAND.md` and the reasons for it are in
+`docs/direction/README.md` section 2. All tokens are in `css/tokens.css`. The rules, briefly:
 
 - **Layout.** Three levels, always visible: the rail (Home, Messages,
   Discover, then your communities), the context column for the place you
@@ -761,6 +1116,17 @@ server/
                     forums, stages, webhooks, rail, welcome, templates, insights
   voiceopts.js      soundboard, voice room limit and bitrate
   account.js        settings sync, status, idle, notes, sessions, two-factor, your data
+  appearance.js     profile pictures, decorations, name styles, profile colours, saved
+                    themes and the accent (checked for contrast on the server)
+  chat.js           silent messages, reply mentions, per-file spoiler and alt text,
+                    /roll, message links (msg.peek)
+  activities.js     whiteboard, tic-tac-toe and Connect Four in voice, voice reactions,
+                    ring again, who can ring you, short-lived TURN credentials
+  community.js      categories and room order, house pictures, delete and transfer,
+                    events, spam rules, verification, paused invitations, custom links
+  inbox.js          unread counts and mentions from the server, timed mutes,
+                    presence for a while, @role suppression, username changes
+  dms.js            closing, pinning and managing groups (rename, icon, add, leave, remove)
                     (ops.js merges each one in, in that order; M.auditLate() then logs
                     the later modules' changes)
 js/
@@ -771,9 +1137,16 @@ js/
                     share, peer connections (perfect negotiation), who is speaking
   calls.js          calls in direct messages and groups: start, accept, decline,
                     the WebAudio ringtone, notifications for a ring
+  activities.js     the whiteboard and games inside a voice place
+  inbox.js          server unread counts merged with the device's, timed mutes, groups
+  desktop.js        the desktop app bridge: badge, theme colour, global keys, deep links
+  landmarks.js      skip link and F6 order between the parts of the screen
   lib/              pure rules with tests: format, group, attention, search, perms,
                     social (friends, happening now, events, topics), safety
-                    (hierarchy, filter), places (resolveRoom), account, highlight, qr
+                    (hierarchy, filter), places (resolveRoom), account, highlight, qr,
+                    theme and colour (contrast), keys (shortcuts), emojis and
+                    emoji-data, commands (slash commands), community, games,
+                    netquality, inbox
   ui/               icons, shared pieces (avatar, presence, rich text), overlays
   views/            auth, nav, stream (messages and composer), conversation, catch up,
                     search and quick jump, people, settings (one layer, pages in
@@ -800,6 +1173,15 @@ and immediately when the network or the tab comes back. Every connect
 begins with a full picture from the server, so nothing is missed.
 
 ## Keyboard
+
+Settings > Keyboard lists every shortcut you can change: press Record, then
+the keys. It says when the browser keeps a combination (`Ctrl W`, `T`, `N`,
+`L` and the like), when Snug uses it for something fixed, or when another
+shortcut has it, and each can be reset (or all at once). The server checks
+every saved combination. Voice shortcuts work while you type, in a call:
+`Ctrl/Cmd Shift M` mute, `Ctrl/Cmd Shift D` deafen, `Ctrl/Cmd Shift V`
+camera, `Ctrl/Cmd Shift H` leave or hang up, `Ctrl/Cmd Shift Enter` answer
+a ringing call; each is announced to screen readers. The defaults:
 
 `Ctrl/Cmd K` jump anywhere or search. `Alt ↑/↓` previous or next place in
 the column, `Alt Shift ↓` next place with news, `Alt ←` (`Cmd [` on a Mac)

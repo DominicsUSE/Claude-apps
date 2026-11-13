@@ -12,9 +12,11 @@ import { Avatar, Tile, RoomIcon, Rich, Empty } from '../ui/kit.js';
 import { Settings } from './settings.js';
 import { searchMessages } from '../server.js';
 import { openHouse } from './nav.js';
+import { THEME_ACTIONS } from './appearance.js'; // themes by name
 import { ACCOUNT_ACTIONS } from './account.js'; // mute, mark read, themes, presence, status, streamer mode, shortcuts
 import { withRecent } from '../account.js'; // recent places come first
 import { SearchDateFilter, SearchSuggest, dateChipLabel } from './messaging.js'; // date filter, mentions, pinned, suggestions while typing
+import { INBOX_ACTIONS } from '../inbox.js'; // presence for a while and the Mentions inbox
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 
@@ -151,6 +153,8 @@ const ACTIONS = [
   { label: 'Set presence to Open to talk', icon: 'voice', words: 'open to talk available', run: () => setPresence('open') },
 ];
 ACTIONS.push(...ACCOUNT_ACTIONS);
+ACTIONS.push(...INBOX_ACTIONS); // Focused for a while, Mentions (js/inbox.js)
+ACTIONS.push(...THEME_ACTIONS); // every built-in theme by name (js/views/appearance.js)
 
 function candidates(q) {
   const out = [];

@@ -65,7 +65,7 @@ const prefsOf = (handle) => JSON.parse(srv.db.get('SELECT prefs FROM user_prefs 
 test('appearance: theme, compact display, text size and font apply at once and follow the person to another browser', async () => {
   const a = await person('robin');
   await settings(a, 'Appearance');
-  await a.click('.seg[aria-label="Theme"] button:has-text("Midnight")');
+  await a.click('.ap-card[data-theme-id="midnight"]'); // theme cards (js/views/appearance.js)
   assert.equal(await attr(a, 'data-theme'), 'midnight');
   assert.equal(await a.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bg-1').trim().toUpperCase()), '#000000', 'true black');
   assert.equal(await a.evaluate(() => getComputedStyle(document.body).backgroundColor), 'rgb(0, 0, 0)');
@@ -75,8 +75,7 @@ test('appearance: theme, compact display, text size and font apply at once and f
   await a.locator('#acc-font').fill('18');
   await a.waitForFunction(() => document.documentElement.style.fontSize === '18px');
   await a.click('.seg[aria-label="Clock"] button:has-text("24-hour")');
-  await a.click('.layer-nav .row:has-text("Accessibility")');
-  await a.click('.seg[aria-label="Font"] button:has-text("Atkinson Hyperlegible")');
+  await a.click('.seg[aria-label="Font"] button:has-text("Atkinson Hyperlegible")'); // fonts are on Appearance
   assert.equal(await attr(a, 'data-font'), 'hyperlegible');
   assert.match(await a.evaluate(() => getComputedStyle(document.body).fontFamily), /Atkinson Hyperlegible/);
   // Stored on the server, for this person.
@@ -100,11 +99,11 @@ test('appearance: theme, compact display, text size and font apply at once and f
   assert.match(await b.locator('.main .msg-time').first().innerText(), /^\d{2}:\d{2}$/, '24-hour clock');
   // A change on the second browser reaches the first at once, without a reload.
   await settings(b, 'Appearance');
-  await b.click('.seg[aria-label="Theme"] button:has-text("Light")');
+  await b.click('.ap-card[data-theme-id="light"]');
   await a.waitForFunction(() => document.documentElement.getAttribute('data-theme') === 'light');
   // Back to defaults for the other tests.
   await b.click('.seg[aria-label="Message display"] button:has-text("Cozy")');
-  await b.click('.seg[aria-label="Theme"] button:has-text("Match device")');
+  await b.click('.ap-card[data-theme-id="system"]');
   await b.locator('#acc-font').fill('16');
   await a.waitForFunction(() => !document.documentElement.getAttribute('data-display') && !document.documentElement.style.fontSize);
   await close(a); await close(b);

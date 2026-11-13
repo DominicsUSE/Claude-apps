@@ -52,7 +52,12 @@ function loadPreview(id, fresh) {
 
 // ---------- Small pieces ----------
 
-const ArchTile = ({ house, size = 'md' }) => html`<span class=${`arch arch-${size}`} style=${`--hue:${hueOf(house.hue)}`} aria-hidden="true">${house.mark}</span>`;
+// The house's icon clipped to the arch when it has one (server/community.js), its mark and hue otherwise.
+const ArchTile = ({ house, size = 'md' }) => html`<span class=${`arch arch-${size}${house.icon ? ' pic' : ''}`} style=${`--hue:${hueOf(house.hue)}`} aria-hidden="true">${house.mark}${house.icon
+  ? html`<img src=${`/api/housepics/${house.icon}`} alt="" loading="lazy" decoding="async" onError=${(e) => e.currentTarget.remove()} />` : null}</span>`;
+// A public house's banner across the top of its card.
+const Banner = ({ house, cls = '' }) => (house.banner
+  ? html`<div class=${`d-banner ${cls}`} aria-hidden="true"><img src=${`/api/housepics/${house.banner}`} alt="" loading="lazy" onError=${(e) => { e.currentTarget.parentNode.hidden = true; }} /></div>` : null);
 
 function LiveLine({ h }) {
   const bits = [];
@@ -87,7 +92,8 @@ export function openPreview(id) { openModal(HousePreview, { house: id, wide: tru
 // ---------- The stage: one community, big ----------
 
 function Featured({ h }) {
-  return html`<section class="d-feature" style=${`--hue:${hueOf(h.hue)}`} aria-labelledby=${`feat-${h.id}`}>
+  return html`<section class=${`d-feature${h.banner ? ' has-banner' : ''}`} style=${`--hue:${hueOf(h.hue)}`} aria-labelledby=${`feat-${h.id}`}>
+    <${Banner} house=${h} cls="d-feature-banner" />
     <button class="d-feature-art" onClick=${() => openPreview(h.id)} aria-label=${`Take a look at ${h.name}`} tabindex="-1">
       <${ArchTile} house=${h} size="xl" />
     </button>
@@ -372,6 +378,7 @@ export function HousePreview({ house }) {
   const rules = (h.rules || '').split('\n').map((l) => l.replace(/^\s*(\d+[.)]|[-*•])\s*/, '').trim()).filter(Boolean);
   const events = (h.events || []).filter((e) => eventState(e, now) !== 'past');
   return html`<div class="hp" style=${`--hue:${hueOf(h.hue)}`}>
+    <${Banner} house=${h} cls="hp-banner" />
     <div class="hp-head">
       <${ArchTile} house=${h} size="lg" />
       <div class="hp-id">

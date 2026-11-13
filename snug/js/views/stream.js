@@ -14,11 +14,22 @@ import { fmtTime, fmtDay, fmtFull, fmtWhen, plural, fileSize, fuzzy, nameList, h
 import { plain, isJumbo } from '../lib/format.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Rich, Stack, PRESENCE, copyText } from '../ui/kit.js';
+import { nameAttrs } from '../ui/kit.js'; // people's name styles (css/appearance.css)
 import { showProfile } from './people.js';
-import { EmojiPicker, EMOJI, QUICK } from './emoji.js';
+import { EmojiPicker, QUICK, toned, countUse } from './emoji.js';
+import { resolveShortcodes } from '../lib/emojis.js'; // :wave: -> 👋 on send
+import { emoticons, silentPrefix } from '../lib/commands.js';
+import { openViewer } from './viewer.js'; // the media viewer
+import {
+  chatMenuItems, suggest, SuggestRow, ArgsRow, runSlash, quickEdit, ReplyPing, replyPingOn, AttachmentEdit, LengthNote, tooLong, textFile,
+  RollLine, isTextFile, TextPreview,
+} from './chat.js'; // mentions, slash commands, quick edits, reply mention, spoilers and alt text, message links, dice
+import { CodeBlock } from './rich.js';
 import { CustomEmoji, asTyped, customSuggest, parseKey, reactionFace, reactionLabel, resolveEmoji } from './emoji-custom.js'; // custom emoji per house
 import { mediaFile, pinMenuItem, PinnedMark, withPinLines, PinLine, VoiceButton, GifButton } from './media.js'; // voice messages, pins, GIFs
 import { CallLine } from './calls.js'; // call records, written by the server
+import { JoinLine, WaitNote } from './community.js'; // newcomers' join lines; the verification wait
+import { DmLine } from './dm-manage.js'; // a group renamed, people added or gone (server/dms.js)
 import { msgFace, colourRole, BotBadge, PostTitle, RoleIconMark } from './places.js'; // nicknames, bots, role colours and icons, forum post titles
 import { messageItems, hiddenBlocked, BlockedLine, composerGate, GateNote, SlowNote, slowLeft } from './safety.js'; // blocks, reports, moderation, slowmode
 import { MessageExtras, ownsFiles, messagingMenuItems, PlusMenu, FormatBar, formatKey, ScheduledNote, UnreadBar } from './messaging.js'; // polls, previews, forwarding, stickers, formatting, scheduling
@@ -56,6 +67,7 @@ export function messageMenu(conv, m, pos) {
       { label: saved ? 'Remove from Saved' : 'Save', icon: saved ? 'saved' : 'save', hint: 'S', onSelect: () => toggleSave(conv, m.id) },
       { sep: true },
       { label: 'Copy text', icon: 'copy', onSelect: () => copyText(asTyped(m.text)) },
+      ...chatMenuItems(conv, m), // quote, copy message link, copy ID (js/views/chat.js)
       !mine && { label: 'Mark unread from here', icon: 'eye', onSelect: () => markUnreadFrom(conv, m) },
       room && can(S, meta.house, 'highlight') && {
         label: room.highlights.includes(m.id) ? 'Remove from highlights' : 'Add to room highlights', icon: 'pin',
@@ -64,7 +76,7 @@ export function messageMenu(conv, m, pos) {
       pinMenuItem(conv, m),
       ...messagingMenuItems(conv, m), // forward, edit history, previews, end a poll
       (mine || mod) && { sep: true },
-      mine && { label: 'Edit', icon: 'edit', hint: 'E', onSelect: () => setEditing(m.id) },
+      mine && !m.cmd && { label: 'Edit', icon: 'edit', hint: 'E', onSelect: () => setEditing(m.id) },
       (mine || mod) && { label: 'Delete', icon: 'trash', danger: true, onSelect: () => deleteMsg(conv, m.id) },
       ...messageItems(conv, m), // report, block, and a moderator's actions on the author
     ],
@@ -87,7 +99,7 @@ function EditBox({ conv, m }) {
   }, []);
   useLayoutEffect(() => grow(ref.current), [text]);
   const onKey = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); editMsg(conv, m.id, resolveEmoji(conv, text, m.text)); focusComposer(conv); }
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); editMsg(conv, m.id, resolveShortcodes(resolveEmoji(conv, text, m.text), S.prefs.skinTone || 0)); focusComposer(conv); } // a house's own :name: wins over Unicode
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setEditing(null); focusComposer(conv); }
   };
   return html`<div class="msg-edit">
@@ -96,25 +108,49 @@ function EditBox({ conv, m }) {
   </div>`;
 }
 
-function Files({ files }) {
+// One attachment. A spoiler stays covered (and its picture isn't even
+// fetched) until it is clicked or Entered; a description shows behind ALT.
+function FileItem({ f, i, conv, m }) {
+  // Settings > Appearance > Spoilers: "Always show" uncovers files as well as text.
+  const [opened, setShown] = useState(false);
+  const shown = opened || S.prefs?.spoilers === 'always';
+  const [altOpen, setAltOpen] = useState(false);
+  const url = f.id ? `/api/files/${f.id}` : null;
+  const src = f.src || url;
+  const visual = f.kind === 'image' || f.kind === 'video' || f.gif;
+  if (f.spoiler && !shown && visual) {
+    const what = f.kind === 'video' ? 'video' : f.gif ? 'GIF' : 'image';
+    const w = f.w || 320, h = f.h || 200;
+    return html`<button class="spoiler-file" style=${`aspect-ratio:${w}/${h};width:${Math.min(420, Math.max(160, w))}px`}
+      aria-label=${`Spoiler ${what}. Select to show it.`} onClick=${() => setShown(true)}>
+      <span class="spoiler-tag">Spoiler</span>
+    </button>`;
+  }
+  const alt = f.alt ? html`<button class=${`alt-badge${altOpen ? ' on' : ''}`} aria-expanded=${String(altOpen)} aria-label="Description" data-tip="Description"
+      onClick=${() => setAltOpen(!altOpen)}>ALT</button>` : null;
+  const altText = f.alt && altOpen ? html`<p class="alt-text" role="note">${f.alt}</p>` : null;
+  const ctx = m ? { conv, m } : {};
+  const media = mediaFile(f, src, i, ctx);
+  if (media) return f.alt ? html`<div class="file-wrap">${media}${alt}${altText}</div>` : media;
+  if (f.kind === 'image' && src) {
+    return html`<div class="file-wrap">
+      <button class="img" style=${`aspect-ratio:${f.w}/${f.h};width:${Math.min(420, f.w)}px`}
+        aria-label=${`Open image ${f.alt || f.name}`} onClick=${() => (m && f.id ? openViewer(conv, m, f) : openLightbox(src, f.alt || f.name))}>
+        <img src=${src} alt=${f.alt || f.name} />
+      </button>${alt}${altText}
+    </div>`;
+  }
+  if (isTextFile(f) && url && !f.spoiler) return html`<${TextPreview} f=${f} url=${url} CodeBlock=${CodeBlock} />`;
+  const body = html`<${Icon} name=${f.kind === 'image' ? 'image' : 'file'} />
+    <span class="trunc"><span class="file-name trunc" style="display:block">${f.spoiler && !shown ? 'Spoiler file' : f.name}</span><span class="file-size">${fileSize(f.size || 0)}${url ? ', download' : ''}</span></span>`;
+  return url
+    ? html`<a class="file" href=${url} download=${f.name}>${body}</a>`
+    : html`<div class="file">${body}</div>`;
+}
+
+function Files({ files, conv, m }) {
   return html`<div class="files">
-    ${files.map((f, i) => {
-      const url = f.id ? `/api/files/${f.id}` : null;
-      const src = f.src || url;
-      const media = mediaFile(f, src, i);
-      if (media) return media;
-      if (f.kind === 'image' && src) {
-        return html`<button key=${i} class="img" style=${`aspect-ratio:${f.w}/${f.h};width:${Math.min(420, f.w)}px`}
-          aria-label=${`Open image ${f.name}`} onClick=${() => openLightbox(src, f.name)}>
-          <img src=${src} alt=${f.name} />
-        </button>`;
-      }
-      const body = html`<${Icon} name=${f.kind === 'image' ? 'image' : 'file'} />
-        <span class="trunc"><span class="file-name trunc" style="display:block">${f.name}</span><span class="file-size">${fileSize(f.size || 0)}${url ? ', download' : ''}</span></span>`;
-      return url
-        ? html`<a key=${i} class="file" href=${url} download=${f.name}>${body}</a>`
-        : html`<div key=${i} class="file">${body}</div>`;
-    })}
+    ${files.map((f, i) => html`<${FileItem} key=${f.id || i} f=${f} i=${i} conv=${conv} m=${m} />`)}
   </div>`;
 }
 
@@ -163,7 +199,7 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
     </div>
     <div class="msg-body">
       ${!grouped && html`<div class="msg-head">
-        <button class=${`msg-name${role?.hue != null ? ' hued' : ''}`} style=${role?.hue != null ? `--hue:${hueOf(role.hue)}` : ''} onClick=${profile(u)}>${u.name}</button>
+        <button class=${`msg-name${role?.hue != null ? ' hued' : ''}`} style=${role?.hue != null ? `--hue:${hueOf(role.hue)}` : ''} ...${nameAttrs(u)} onClick=${profile(u)}>${u.name}</button>
         ${meta?.house && !m.bot && html`<${RoleIconMark} house=${meta.house} uid=${m.author} />`}<${BotBadge} m=${m} />
         <time class="msg-time" datetime=${new Date(m.ts).toISOString()} data-tip=${fmtFull(m.ts)}>${fmtTime(m.ts)}</time>
       </div>`}
@@ -171,11 +207,13 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
       <${PostTitle} m=${m} />
       ${S.ui.editing === m.id
         ? html`<${EditBox} conv=${conv} m=${m} />`
+        : m.cmd?.roll ? html`<${RollLine} m=${m} />` // a dice roll the server wrote (js/views/chat.js)
         : m.text && !m.poll && html`<div class=${`msg-text${isJumbo(m.text) ? ' jumbo' : ''}`}>
             <${Rich} m=${m} onMention=${(who, e) => showProfile(who, e.target.getBoundingClientRect(), meta?.house)} />
             ${m.edited && html`<span class="edited" data-tip=${`Edited ${fmtFull(m.edited)}`}>(edited)</span>`}
+            ${m.silent && html`<span class="silent-mark" role="img" aria-label="Sent silently" data-tip="Sent silently: no sound, no notification"><${Icon} name="bell-off" size=${14} /></span>`}
           </div>`}
-      ${m.files?.length > 0 && !ownsFiles(m) && html`<${Files} files=${m.files} />`}
+      ${m.files?.length > 0 && !ownsFiles(m) && html`<${Files} files=${m.files} conv=${conv} m=${m} />`}
       <${MessageExtras} conv=${conv} m=${m} Files=${Files} />
       ${reactions.length > 0 && html`<div class="reactions">
         ${reactions.map(([e, who]) => {
@@ -209,46 +247,7 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
   </div>`;
 }
 
-// Composer
-const COMMANDS = [
-  { name: 'status', hint: 'Set your status line, or clear it' },
-  { name: 'open', hint: 'Show that you are open to talk' },
-  { name: 'around', hint: 'Show that you are around' },
-  { name: 'focus', hint: 'Hold notifications while you work' },
-  { name: 'away', hint: 'Show that you are away' },
-  { name: 'shrug', hint: 'Add ¯\\_(ツ)_/¯ to your message' },
-];
-
-function runCommand(conv, body) {
-  const [, name, rest = ''] = /^\/(\w+)\s*([\s\S]*)$/.exec(body) || [];
-  if (name === 'status') { setStatus(rest); toast(rest.trim() ? `Status set to “${rest.trim()}”` : 'Status cleared'); return true; }
-  if (PRESENCE[name] && name !== 'offline') { setPresence(name); toast(`You’re shown as ${PRESENCE[name].label.toLowerCase()}`); return true; }
-  if (name === 'shrug') { sendMessage(conv, `${rest} ¯\\_(ツ)_/¯`.trim()); return true; }
-  return false;
-}
-
-function suggest(value, caret, conv) {
-  const before = value.slice(0, caret);
-  let m;
-  if ((m = /(?:^|\s)@([\w.-]*)$/.exec(before))) {
-    const q = m[1];
-    const items = membersOf(conv).filter((id) => id !== S.me).map((id) => S.users[id])
-      .map((u) => ({ u, s: Math.max(fuzzy(q, u.name), fuzzy(q, u.handle)) }))
-      .filter((x) => x.s >= 0).sort((a, b) => b.s - a.s).slice(0, 6).map((x) => x.u);
-    if (items.length) return { kind: 'at', from: caret - q.length - 1, items, i: 0 };
-  }
-  if ((m = /(?:^|\s):([a-z0-9_+-]{2,})$/i.exec(before))) {
-    const q = m[1].toLowerCase();
-    const items = [...customSuggest(q, conv), ...EMOJI.filter(([, names]) => names.includes(q))].slice(0, 6);
-    if (items.length) return { kind: 'emoji', from: caret - q.length - 1, items, i: 0 };
-  }
-  if ((m = /^\/(\w*)$/.exec(before))) {
-    const items = COMMANDS.filter((c) => c.name.startsWith(m[1].toLowerCase()));
-    if (items.length) return { kind: 'cmd', from: 0, items, i: 0 };
-  }
-  return null;
-}
-
+// Composer. Suggestions, slash commands and quick edits are in js/views/chat.js.
 const MAX_FILE = 10 * 1024 * 1024;
 
 // Photos are scaled down to 1600px and re-encoded before upload: smaller to
@@ -272,15 +271,33 @@ function readImage(file) {
   });
 }
 
+// A video's size and length, for its poster frame before it plays.
+function readVideo(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    const done = (d) => { URL.revokeObjectURL(url); resolve(d); };
+    v.preload = 'metadata';
+    v.muted = true;
+    v.onloadedmetadata = () => done({ w: v.videoWidth || undefined, h: v.videoHeight || undefined, duration: Number.isFinite(v.duration) && v.duration > 0 ? v.duration : undefined });
+    v.onerror = () => done({});
+    setTimeout(() => done({}), 4000);
+    v.src = url;
+  });
+}
+
 export function Composer({ conv, placeholder }) {
   const [text, setText] = useState(S.drafts[conv] || '');
   const [files, setFiles] = useState([]);
   const [ac, setAc] = useState(null);
+  const [editing, setEditingFile] = useState(null); // the attachment whose spoiler and description are open
+  const [longPaste, setLongPaste] = useState(null);  // text over the limit, waiting for "Send as a file"
   const ta = useRef();
   const fileIn = useRef();
   // Custom emoji chosen in the picker, by name: when two houses both have
-  // :party:, the one picked is the one sent.
+  // :party:, the one picked is the one sent. Rooms picked with # likewise.
   const picked = useRef(new Map());
+  const rooms = useRef(new Map());
   const gate = canPost(S, conv);
   const replyId = S.ui.reply[conv];
   const replyTo = replyId ? findMsg(conv, replyId) : null;
@@ -293,6 +310,18 @@ export function Composer({ conv, placeholder }) {
     if (v) S.drafts[conv] = v; else delete S.drafts[conv];
     persist();
   };
+  // Quote (js/views/chat.js) puts text here.
+  useEffect(() => {
+    const on = (e) => {
+      if (e.detail?.conv !== conv) return;
+      const cur = S.drafts[conv] || '';
+      const next = `${e.detail.text}${cur}`;
+      update(next);
+      requestAnimationFrame(() => { const el = ta.current; if (el) { el.focus(); el.setSelectionRange(next.length, next.length); } });
+    };
+    window.addEventListener('snug:compose', on);
+    return () => window.removeEventListener('snug:compose', on);
+  }, [conv]);
   const onInput = (e) => {
     update(e.target.value);
     if (e.target.value.trim() && !e.target.value.startsWith('/')) sendTyping(conv);
@@ -305,42 +334,71 @@ export function Composer({ conv, placeholder }) {
     update(next);
     setAc(null);
     requestAnimationFrame(() => { el.focus(); el.setSelectionRange(a + str.length, a + str.length); });
+    return next;
   };
   const accept = (item) => {
     const to = ta.current.selectionStart;
-    if (ac.kind === 'at') insert(`@${item.handle} `, ac.from, to);
-    else if (ac.kind === 'emoji') {
+    if (ac.kind === 'at') {
+      if (item.type === 'role') insert(`@${item.r.name} `, ac.from, to);
+      else if (item.type === 'everyone') insert(`@${item.v} `, ac.from, to);
+      else insert(`@${item.u.handle} `, ac.from, to);
+    } else if (ac.kind === 'room') {
+      rooms.current.set(item.name, item.id);
+      insert(`#${item.name} `, ac.from, to);
+    } else if (ac.kind === 'emoji') {
       if (item[2]?.id) picked.current.set(item[1], `<:${item[1]}:${item[2].id}>`); // a custom emoji suggestion
+      else countUse(item[0]);
       insert(`${item[0]} `, ac.from, to);
+    } else if (ac.kind === 'cmd') {
+      const next = insert(`/${item.name} `, 0, to);
+      // Straight on to the command's arguments.
+      if (item.args.length) setTimeout(() => setAc(suggest(next, next.length, conv)), 0);
     }
-    else insert(`/${item.name} `, 0, to);
   };
   const uploading = files.some((f) => f.status === 'uploading');
+  const clear = () => { picked.current.clear(); rooms.current.clear(); update(''); setFiles([]); setAc(null); setEditingFile(null); };
   const submit = () => {
     if (slowLeft(conv)) { toast('Slowmode is on here. Wait for the countdown, then send.'); return; }
-    const body = text.trim();
+    let body = text.trim();
     const ready = files.filter((f) => f.status === 'ready');
     if (uploading || (!body && !ready.length)) return;
-    if (files.some((f) => f.status === 'error')) { toast('Remove the attachment that didn\u2019t upload, or attach it again.'); return; }
-    const out = ready.map(({ id, kind, name, size, w, h, src }) => ({ id, kind, name, size, w, h, src }));
-    if (!(body.startsWith('/') && runCommand(conv, body))) sendMessage(conv, resolveEmoji(conv, body, [...picked.current.values()].join(' ')), { replyTo: replyTo?.id, files: out });
-    picked.current.clear();
-    update('');
-    setFiles([]);
-    setAc(null);
+    if (files.some((f) => f.status === 'error')) { toast('Remove the attachment that didn’t upload, or attach it again.'); return; }
+    if (tooLong(body)) { toast('That’s more than 4,000 characters. Shorten it, or send it as a file.'); return; }
+    let silent = false;
+    if (body.startsWith('//')) body = body.slice(1); // "//text" sends "/text"
+    else if (body.startsWith('/')) {
+      const r = runSlash(conv, body, { anchor: ta.current?.getBoundingClientRect() });
+      if (r?.keep) return;
+      if (r?.done) { update(''); setAc(null); return; }
+      if (r?.send != null) { body = r.send; silent = !!r.silent; }
+    }
+    if (!ready.length && quickEdit(conv, body)) { clear(); return; } // s/old/new and +:emoji:
+    const sp = silentPrefix(body);
+    if (sp.silent) { silent = true; body = sp.text; }
+    if (S.prefs.textEmoticons) body = emoticons(body);
+    for (const [name, id] of [...rooms.current].sort((a, b) => b[0].length - a[0].length)) {
+      body = body.split(`#${name}`).join(`<#${id}>`);
+    }
+    const out = ready.map(({ id, kind, name, size, w, h, src, duration, spoiler, alt }) => ({ id, kind, name, size, w, h, src, duration, spoiler: spoiler || undefined, alt: alt || undefined }));
+    // A house's custom :name: wins over the Unicode emoji of the same name.
+    body = resolveShortcodes(resolveEmoji(conv, body, [...picked.current.values()].join(' ')), S.prefs.skinTone || 0);
+    sendMessage(conv, body, {
+      replyTo: replyTo?.id, files: out, silent, replyPing: replyTo && replyTo.author !== S.me ? replyPingOn() : undefined,
+    });
+    clear();
   };
   const onKey = (e) => {
     if (formatKey(e, ta.current, text, update)) return; // Ctrl+B, I, U, E, K, Shift+X (js/views/messaging.js)
-    if (ac) {
+    if (ac && ac.kind !== 'args') {
       const n = ac.items.length;
       if (e.key === 'ArrowDown') { e.preventDefault(); return setAc({ ...ac, i: (ac.i + 1) % n }); }
       if (e.key === 'ArrowUp') { e.preventDefault(); return setAc({ ...ac, i: (ac.i - 1 + n) % n }); }
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); return accept(ac.items[ac.i]); }
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); return setAc(null); }
     }
+    if (ac && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); return setAc(null); }
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
     else if (e.key === 'ArrowUp' && !text) {
-      const mine = (S.msgs[conv] || []).filter((m) => m.author === S.me && !m.state).pop();
+      const mine = (S.msgs[conv] || []).filter((m) => m.author === S.me && !m.state && !m.cmd && !m.call).pop();
       if (mine) { e.preventDefault(); setEditing(mine.id); }
     } else if (e.key === 'Escape' && replyTo) { e.preventDefault(); e.stopPropagation(); setReply(conv, null); }
   };
@@ -351,20 +409,26 @@ export function Composer({ conv, placeholder }) {
       if (f.size > MAX_FILE) { toast(`${f.name} is ${fileSize(f.size)}. Files can be up to 10 MB.`); continue; }
       const key = Math.random().toString(36).slice(2);
       const image = /^image\/(png|jpeg|gif|webp)$/.test(f.type);
-      setFiles((cur) => [...cur, { key, kind: image ? 'image' : 'file', name: f.name, size: f.size, status: 'uploading' }]);
+      const video = /^video\/(mp4|webm|quicktime)$/.test(f.type);
+      setFiles((cur) => [...cur, { key, kind: image ? 'image' : video ? 'video' : f.type.startsWith('audio/') ? 'audio' : 'file', name: f.name, size: f.size, status: 'uploading' }]);
       try {
         let blob = f, extra = {};
         if (image) { const r = await readImage(f); blob = r.blob; extra = { w: r.w, h: r.h, src: r.src }; patch(key, { src: r.src }); }
+        if (video) extra = await readVideo(f);
         const up = await uploadFile(conv, blob, f.name);
-        patch(key, { ...extra, id: up.id, size: up.size, status: 'ready' });
+        // The server's word on what it is (its bytes), not the browser's guess.
+        patch(key, { ...extra, id: up.id, size: up.size, kind: up.kind || undefined, status: 'ready' });
       } catch (err) {
-        patch(key, { status: 'error', error: err.message === 'unreadable' ? `Couldn\u2019t read ${f.name}.` : err.message });
+        patch(key, { status: 'error', error: err.message === 'unreadable' ? `Couldn’t read ${f.name}.` : err.message });
       }
     }
   };
   const onPaste = (e) => {
     const list = [...(e.clipboardData?.files || [])];
-    if (list.length) { e.preventDefault(); addFiles(list); }
+    if (list.length) { e.preventDefault(); addFiles(list); return; }
+    // More than a message can hold: offer it as a file instead.
+    const pasted = e.clipboardData?.getData('text/plain') || '';
+    if (text.length + pasted.length > 4000 && pasted.length > 0) { e.preventDefault(); setLongPaste(pasted); }
   };
 
   if (!gate.ok) {
@@ -373,33 +437,48 @@ export function Composer({ conv, placeholder }) {
   // Timed out, house rules not yet accepted, or a blocked person (js/views/safety.js).
   const safetyGate = composerGate(conv);
   if (safetyGate) return html`<${GateNote} gate=${safetyGate} />`;
-  const canSend = !uploading && (text.trim() || files.some((f) => f.status === 'ready'));
+  const over = tooLong(text.trim());
+  const canSend = !uploading && !over && (text.trim() || files.some((f) => f.status === 'ready'));
+  const replyWho = replyTo ? person(replyTo.author).name.split(' ')[0] : '';
   return html`<div class="composer" data-composer=${conv}
     onDragOver=${(e) => e.preventDefault()} onDrop=${(e) => { e.preventDefault(); addFiles([...e.dataTransfer.files]); }}>
-    ${ac && html`<div class="ac float" role="listbox" aria-label="Suggestions">
+    ${ac && ac.kind === 'args' && html`<div class="ac float args"><${ArgsRow} ac=${ac} /></div>`}
+    ${ac && ac.kind !== 'args' && html`<div class="ac float" role="listbox" aria-label="Suggestions">
       ${ac.items.map((it, i) => html`<button key=${i} role="option" aria-selected=${String(i === ac.i)} class=${`menu-item${i === ac.i ? ' act' : ''}`}
         onMouseDown=${(e) => { e.preventDefault(); accept(it); }}>
-        ${ac.kind === 'at' && html`<${Avatar} user=${it} presence /><span class="grow trunc">${it.name}</span><span class="end">@${it.handle}</span>`}
-        ${ac.kind === 'emoji' && html`${it[2] ? html`<span class="emo"><${CustomEmoji} e=${it[2]} /></span>` : html`<span class="emo">${it[0]}</span>`}<span class="grow trunc">${it[1].split(' ')[0]}</span>${it[2] && html`<span class="end">${S.houses[it[2].house]?.name}</span>`}`}
-        ${ac.kind === 'cmd' && html`<span class="grow trunc">/${it.name}</span><span class="end">${it.hint}</span>`}
+        ${ac.kind === 'emoji'
+          ? html`${it[2] ? html`<span class="emo"><${CustomEmoji} e=${it[2]} /></span>` : html`<span class="emo">${it[0]}</span>`}<span class="grow trunc">:${it[1].split(' ')[0]}:</span>${it[2] && html`<span class="end">${S.houses[it[2].house]?.name}</span>`}`
+          : html`<${SuggestRow} ac=${ac} it=${it} />`}
       </button>`)}
     </div>`}
     <div class="composer-box">
       ${replyTo && html`<div class="composer-banner">
         <${Icon} name="reply" size=${16} />
-        <span class="trunc grow">Replying to <b>${person(replyTo.author).name}</b> ${plain(replyTo.text)}</span>
+        <span class="trunc grow">Replying to <b>${person(replyTo.author).name}</b> ${plain(replyTo.text)}</span>
+        ${replyTo.author !== S.me && html`<${ReplyPing} who=${replyWho} />`}
         <button class="ib sm" aria-label="Cancel reply" data-tip="Cancel reply" data-key="Esc" onClick=${() => setReply(conv, null)}><${Icon} name="x" size=${16} /></button>
       </div>`}
+      ${longPaste != null && html`<div class="composer-banner long-paste" role="alert">
+        <${Icon} name="file" size=${16} />
+        <span class="grow">That’s ${longPaste.length.toLocaleString()} characters, more than a message can hold.</span>
+        <button class="btn sm primary" onClick=${() => { addFiles([textFile(longPaste)]); setLongPaste(null); }}>Send as a file</button>
+        <button class="btn sm quiet" onClick=${() => { insert(longPaste); setLongPaste(null); }}>Paste anyway</button>
+      </div>`}
       ${files.length > 0 && html`<div class="composer-files">
-        ${files.map((f, i) => html`<div class="pending-file" key=${i}>
-          ${f.kind === 'image' && f.src ? html`<img src=${f.src} alt="" />` : html`<${Icon} name=${f.status === 'error' ? 'alert' : 'file'} />`}
+        ${files.map((f, i) => html`<div class=${`pending-file${f.spoiler ? ' spoiler' : ''}`} key=${f.key}>
+          ${f.kind === 'image' && f.src ? html`<img src=${f.src} alt="" />` : html`<${Icon} name=${f.status === 'error' ? 'alert' : f.kind === 'image' ? 'image' : 'file'} />`}
           <span class="pending-name"><span class="trunc">${f.name}</span>
-            <span class=${`pending-state${f.status === 'error' ? ' bad' : ''}`}>${f.status === 'uploading' ? 'Uploading\u2026' : f.status === 'error' ? f.error : fileSize(f.size)}</span></span>
+            <span class=${`pending-state${f.status === 'error' ? ' bad' : ''}`}>${f.status === 'uploading' ? 'Uploading…' : f.status === 'error' ? f.error : fileSize(f.size)}${f.spoiler ? ' · Spoiler' : ''}${f.alt ? ' · ALT' : ''}</span></span>
+          ${f.status !== 'error' && html`<button class="ib sm pf-edit" aria-label=${`Edit ${f.name}: spoiler and description`} aria-expanded=${String(editing === f.key)} data-tip="Spoiler and description"
+            onClick=${() => setEditingFile(editing === f.key ? null : f.key)}><${Icon} name="edit" size=${16} /></button>`}
           <button class="ib sm" aria-label=${`Remove ${f.name}`} onClick=${() => setFiles(files.filter((x) => x.key !== f.key))}><${Icon} name="x" size=${16} /></button>
         </div>`)}
+        ${(() => { const f = files.find((x) => x.key === editing); return f && html`<${AttachmentEdit} key=${f.key} f=${f} onChange=${(d) => patch(f.key, d)} onClose=${() => { setEditingFile(null); ta.current?.focus(); }} />`; })()}
       </div>`}
       <${SlowNote} conv=${conv} />
+      <${WaitNote} conv=${conv} />
       <${ScheduledNote} conv=${conv} />
+      <${LengthNote} n=${text.trim().length} />
       <${FormatBar} ta=${ta} text=${text} update=${update} />
       <div class="composer-row">
         <button class="ib" aria-label="Attach a file" data-tip="Attach a file" onClick=${() => fileIn.current.click()}><${Icon} name="clip" /></button>
@@ -410,7 +489,7 @@ export function Composer({ conv, placeholder }) {
         <button class="ib" aria-label="Insert an emoji" data-tip="Emoji"
           onClick=${(e) => openPop({ anchor: rectOf(e), align: 'end', label: 'Insert an emoji', C: EmojiPicker, props: { onPick: (c) => { closePop(); const k = parseKey(c); if (k) picked.current.set(k.name, c); insert(asTyped(c)); } } })}><${Icon} name="smile" /></button>
         <${VoiceButton} conv=${conv} />
-        <button class="ib send" aria-label="Send message" data-tip="Send" data-key="Enter" disabled=${!canSend} onClick=${submit}><${Icon} name="send" /></button>
+        <button class="ib send" aria-label=${over ? 'Send message: too long to send' : 'Send message'} data-tip=${over ? 'Too long to send' : 'Send'} data-key="Enter" disabled=${!canSend} onClick=${submit}><${Icon} name="send" /></button>
       </div>
     </div>
     <input type="file" hidden multiple ref=${fileIn} onChange=${(e) => { addFiles([...e.target.files]); e.target.value = ''; }} />
@@ -519,6 +598,9 @@ export function Stream({ conv, intro, placeholder }) {
 
   const onScroll = () => {
     const el = scroller.current;
+    // A queued scroll event can land after the list has unmounted (switching
+    // conversations mid-scroll), when the ref is already cleared.
+    if (!el) return;
     stick.current = atBottom(el);
     const away = el.scrollHeight - el.scrollTop - el.clientHeight > 600;
     if (away !== far) setFar(away);
@@ -531,6 +613,7 @@ export function Stream({ conv, intro, placeholder }) {
   };
   const toBottom = () => {
     const el = scroller.current;
+    if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
   };
 
@@ -552,7 +635,7 @@ export function Stream({ conv, intro, placeholder }) {
     else if (k === 'r' && !m.state) { setReply(c, m.id); focusComposer(c); }
     else if (k === 't' && !isThread(c) && !m.state) openThread(c, m.id);
     else if (k === 's') toggleSave(c, m.id);
-    else if (k === 'e' && m.author === S.me) setEditing(m.id);
+    else if (k === 'e' && m.author === S.me && !m.cmd) setEditing(m.id);
     else if (k === 'Enter') messageMenu(c, m, { anchor: el.getBoundingClientRect() });
     else if (k === 'Escape') focusComposer(conv);
     else return;
@@ -584,6 +667,8 @@ export function Stream({ conv, intro, placeholder }) {
               if (it.type === 'new') { lit = false; return html`<div class="newline" key="new" role="separator" aria-label="New messages"><span>New</span></div>`; }
               if (it.type === 'pin') return html`<${PinLine} key=${it.key} conv=${conv} pin=${it.pin} />`;
               if (it.m.call) { lit = false; return html`<${CallLine} key=${it.key} conv=${conv} m=${it.m} />`; }
+              if (it.m.join) { lit = false; return html`<${JoinLine} key=${it.key} conv=${conv} m=${it.m} />`; }
+              if (it.m.dmLine) { lit = false; return html`<${DmLine} key=${it.key} m=${it.m} />`; }
               const toMe = forMe(S, conv, it.m);
               const cont = !toMe && it.grouped && lit;
               lit = toMe || cont;

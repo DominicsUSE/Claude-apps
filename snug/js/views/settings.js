@@ -9,7 +9,7 @@ import { api, stopTransport } from '../server.js';
 import { leaveVoice } from '../voice.js';
 import { LEVEL_LABEL, levelOf, roomIds } from '../lib/attention.js';
 import { can } from '../lib/perms.js';
-import { fuzzy, HUES, hueOf } from '../lib/util.js';
+import { fuzzy, fold, HUES, hueOf } from '../lib/util.js';
 import { LIMITS, cleanInterests, safeLink } from '../lib/social.js';
 import { Icon } from '../ui/icons.js';
 import { Nook } from '../ui/brand.js';
@@ -26,10 +26,12 @@ import { PLACES_PAGES, PLACES_VIEWS, WelcomePage } from './places-settings.js'; 
 import { VoiceSettings, HouseVoice } from './voiceopts-settings.js'; // Voice and video; House settings > Voice
 import { setVoiceSettingsOpener, setHouseVoiceOpener } from './voiceopts.js';
 import { openLayer as openVoiceLayer } from '../store.js';
-import { registerAccountPages } from './account.js'; // appearance, accessibility, streamer mode, security, your data, profile extras
+import { registerAccountPages } from './account.js';
+import { KeysEditor, setMessageComponent } from './appearance.js'; // Settings > Keyboard: change any shortcut; the Appearance preview // appearance, accessibility, streamer mode, security, your data, profile extras
+import { ChatSettings } from './chat.js'; // Settings > Text and messages
+import { CommunityOverview } from './community-settings.js'; // House settings > Overview: pictures, own link, newcomers, Danger zone
+import { registerDesktopPage } from './desktop-settings.js'; // the desktop app's settings, and changing your username
 
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
-const MOD = isMac ? '⌘' : 'Ctrl';
 
 function Row({ label, hint, children, top }) {
   return html`<div class=${`set-row${top ? ' top' : ''}`}>
@@ -49,9 +51,23 @@ function groups(pages) {
   return out;
 }
 
+// A page matches when the words typed appear on it: the whole phrase, or every
+// word as the start of one of its words. Loose letter-by-letter matching is
+// only tried on the page's name, because every page lists dozens of words and
+// almost any query is spread somewhere through them.
+export function settingMatches(query, page) {
+  const q = fold(query).trim();
+  if (!q) return true;
+  const text = fold(`${page.label} ${page.words || ''}`);
+  if (text.includes(q)) return true;
+  const words = text.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (q.split(/\s+/).every((t) => words.some((w) => w.startsWith(t)))) return true;
+  return fuzzy(q, page.label) >= 0;
+}
+
 function Layer({ title, icon, pages, page, setPage, children, foot }) {
   const [q, setQ] = useState('');
-  const shown = q ? pages.filter((p) => fuzzy(q, `${p.label} ${p.words || ''}`) >= 0) : pages;
+  const shown = q ? pages.filter((p) => settingMatches(q, p)) : pages;
   return html`<div class="layer" role="dialog" aria-modal="true" aria-label=${title}>
     <nav class="layer-nav" aria-label=${`${title} sections`}>
       <h2>${icon}${title}</h2>
@@ -77,10 +93,10 @@ function Layer({ title, icon, pages, page, setPage, children, foot }) {
 }
 
 const PAGES = [
-  { id: 'profile', label: 'Profile', icon: 'user', words: 'name avatar about emoji colour' },
-  { id: 'notify', label: 'Notifications', icon: 'bell', words: 'mute quiet alerts pop-ups focus' },
+  { id: 'profile', label: 'Profile', icon: 'user', words: 'name avatar about emoji colour username handle' },
+  { id: 'notify', label: 'Notifications', icon: 'bell', words: 'mute quiet alerts pop-ups focus badge unread count role mentions everyone' },
   { id: 'look', label: 'Appearance', icon: 'eye', words: 'theme dark light density compact text size motion animation contrast accessibility' },
-  { id: 'keys', label: 'Keyboard', icon: 'keys', words: 'shortcuts keys hotkeys' },
+  { id: 'keys', label: 'Keyboard', icon: 'keys', words: 'shortcuts keys hotkeys record rebind change mute deafen camera hang up answer' },
   { id: 'account', label: 'Account', icon: 'shield', words: 'account password sign out log out devices sessions connection' },
 ];
 
@@ -209,41 +225,9 @@ function Notify() {
     <//>`;
 }
 
-const KEYS = [
-  [[MOD, 'K'], 'Jump to a room or person, or search'],
-  [[MOD, 'Shift', 'F'], 'Search messages'],
-  [['Alt', '↑'], 'Previous place in the column'],
-  [['Alt', '↓'], 'Next place in the column'],
-  [['Alt', 'Shift', '↓'], 'Next conversation with something new, anywhere'],
-  [MOD === '⌘' ? ['⌘', '['] : ['Alt', '←'], 'Back to where you were'],
-  [['Esc'], 'Close the top layer, then the side pane. With nothing open, mark this place read'],
-  [['Shift', 'Esc'], 'Mark this whole house read'],
-  [['↑'], 'In an empty message box: edit your last message'],
-  [['Shift', 'Tab'], 'From the message box: go up into the messages'],
-  [['↑', '↓'], 'On a message: move between messages'],
-  [['R'], 'On a message: reply'],
-  [['T'], 'On a message: open or start its thread'],
-  [['S'], 'On a message: save it'],
-  [['E'], 'On your message: edit it'],
-  [['Enter'], 'On a message: all actions'],
-  [['J', 'K'], 'In Catch up: move between items'],
-  [['E'], 'In Catch up: mark the item done'],
-  [['?'], 'Show this list'],
-];
-// Formatting in the message box (js/views/messaging.js).
-KEYS.push(
-  [[MOD, 'B'], 'In the message box: bold the selection'], [[MOD, 'I'], 'Italic'], [[MOD, 'U'], 'Underline'],
-  [[MOD, 'Shift', 'X'], 'Strikethrough'], [[MOD, 'E'], 'Code'], [[MOD, 'K'], 'Make the selection a link'],
-);
-
-function Keys() {
-  return html`
-    <h1>Keyboard</h1>
-    <p class="lead">Everything works without a mouse. These make the common things faster.</p>
-    <div class="keys">
-      ${KEYS.map(([keys, what]) => html`<div>${what}</div><div>${keys.map((k) => html`<span class="kbd">${k}</span>`)}</div>`)}
-    </div>`;
-}
+// The shortcut editor (js/views/appearance.js): record, conflicts, reset.
+const Keys = () => html`<${KeysEditor} />`;
+setMessageComponent(Message); // the live preview on Appearance draws real messages
 
 // Desktop notifications appear while Snug is open in a background tab.
 const desktopHint = () => {
@@ -275,10 +259,15 @@ const VIEWS = { profile: Profile, notify: Notify, keys: Keys };
 PAGES.splice(PAGES.findIndex((p) => p.id === 'account'), 0, { id: 'privacy', label: 'Privacy and safety', icon: 'eye', words: 'privacy block blocked unblock messages requests friend requests dm safety' });
 VIEWS.privacy = PrivacyPage;
 // Voice and video (js/views/voiceopts-settings.js), after Notifications.
-PAGES.splice(PAGES.findIndex((p) => p.id === 'notify') + 1, 0, { id: 'voice', label: 'Voice and video', icon: 'voice', words: 'voice video microphone mic speaker headphones camera webcam push to talk ptt sensitivity noise suppression echo gain volume screen share quality sounds afk deafen' });
+PAGES.splice(PAGES.findIndex((p) => p.id === 'notify') + 1, 0, { id: 'voice', label: 'Voice and video', icon: 'voice', words: 'voice video microphone mic speaker headphones camera webcam push to talk ptt sensitivity noise suppression echo gain volume screen share quality sounds afk deafen calls ringtone ring volume ring on who can ring muted warning camera quality resolution frame rate mirror microphone volume output volume reconnect' });
 VIEWS.voice = VoiceSettings;
 // Account (js/views/account.js): Appearance in full, Accessibility, Streamer mode, more Notifications and Profile, Account and security, Your data.
-registerAccountPages({ PAGES, VIEWS, Row, signOut, Settings, KEYS });
+registerAccountPages({ PAGES, VIEWS, Row, signOut, Settings });
+// Text and messages (js/views/chat.js): skin tone, frequently used emoji, emoticons, message IDs.
+PAGES.push({ id: 'chat', label: 'Text and messages', icon: 'quote', words: 'emoji skin tone frequently used emoticons smiley message id copy link developer slash commands reply mention ping @ on off shortcodes' });
+VIEWS.chat = () => html`<${ChatSettings} Row=${Row} />`;
+// Desktop app (js/views/desktop-settings.js): its page in the desktop app only, and the Username row on Profile.
+registerDesktopPage({ PAGES, VIEWS, Row });
 
 // One structure for every settings layer: pages in sections, in this order.
 // Pages other modules add land in the section named here; anything unnamed
@@ -290,14 +279,14 @@ function arrange(pages, plan) {
 }
 arrange(PAGES, [
   ['You', ['profile', 'account', 'privacy', 'data']],
-  ['App', ['notify', 'voice', 'look', 'a11y', 'streamer', 'keys']],
+  ['App', ['notify', 'voice', 'look', 'chat', 'a11y', 'streamer', 'keys', 'desktop']],
 ]);
 
 export function Settings({ page: start = 'profile' }) {
   const [page, setPage] = useState(start);
   const V = VIEWS[page];
   return html`<${Layer} title="Settings" icon=${html`<${Icon} name="sliders" />`} pages=${PAGES} page=${page} setPage=${setPage}
-    foot=${html`<${Nook} size=${16} /><span>Snug 0.6</span>`}>
+    foot=${html`<${Nook} size=${16} /><span>Snug 0.7</span>`}>
     <${V} />
   <//>`;
 }
@@ -365,7 +354,7 @@ function HouseWelcome({ house }) {
     <h1>Newcomers</h1>
     <p class="lead">New people see only these rooms, plus a welcome with one first step. The rest of the house opens after their first message. The welcome text and the interests that give roles are further down.</p>
     <${Row} label="Newcomers join as">
-      <select class="field" aria-label="Role for newcomers" value=${h.joinRole} onChange=${(e) => updateHouse(house, { joinRole: e.target.value })}>
+      <select class="field" aria-label="Role for newcomers" value=${h.joinRole} disabled=${!can(S, house, 'roles')} title=${can(S, house, 'roles') ? undefined : 'Only people who manage roles choose this.'} onChange=${(e) => updateHouse(house, { joinRole: e.target.value })}>
         ${h.roles.map((r) => html`<option value=${r.id}>${r.name}</option>`)}
       </select>
     <//>
@@ -378,6 +367,9 @@ function HouseWelcome({ house }) {
 // Roles is drawn by js/views/places-settings.js (PLACES_VIEWS below).
 const HOUSE_VIEWS = { about: HouseAbout, members: HouseMembers, welcome: HouseWelcome };
 HOUSE_VIEWS.emoji = withStickers(HouseEmoji); // custom emoji, and the house's stickers below them
+// Overview (js/views/community-settings.js): the fields above plus pictures, the house's own link, newcomers and the Danger zone. 'house' opens it.
+HOUSE_VIEWS.about = CommunityOverview;
+Object.assign(HOUSE_PAGES[0], { need: (h) => can(S, h, 'roles') || can(S, h, 'house'), words: `${HOUSE_PAGES[0].words} icon banner picture invitation background link vanity delete transfer owner danger announce newcomers` });
 // Moderation pages, each opened by its own permission (js/views/safety-settings.js).
 HOUSE_PAGES.push(...SAFETY_PAGES);
 Object.assign(HOUSE_VIEWS, SAFETY_VIEWS);

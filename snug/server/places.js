@@ -32,11 +32,11 @@ import {
 
 const json = (s, f) => { try { return s == null ? f : JSON.parse(s); } catch { return f; } };
 const DAY = 86_400_000;
-const NONE = Object.freeze({ view: false, send: false, connect: false, speak: false, manage: false });
+const NONE = Object.freeze({ view: false, send: false, connect: false, speak: false, manage: false, video: false });
 const EMOJI = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|‍|️|⃣|[#*0-9])+$/u;
 const MSG_ID = /^m_[a-z0-9]{8,40}$/;
 // Roles an interest may hand out: none that can manage or moderate anything.
-const MANAGING = ['rooms', 'roles', 'kick', 'ban', 'timeout', 'voicemod', 'audit', 'moderate', 'emoji', 'nicks'];
+export const MANAGING = ['rooms', 'roles', 'kick', 'ban', 'timeout', 'voicemod', 'audit', 'moderate', 'emoji', 'nicks', 'house', 'events', 'hooks'];
 const sha = (s) => createHash('sha256').update(s).digest('hex');
 
 // --- Schema (called from server/db.js migrate) ---------------------------
@@ -419,6 +419,9 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
     const vm = db.get('SELECT mute FROM voice_mod WHERE house = ? AND user = ?', room.house, user);
     if (!speaker) hub.voiceState(user, { smute: true, muted: true, camera: false, screen: false });
     else if (!vm?.mute && (room.kind === 'stage' || P.restricted(room))) hub.voiceState(user, { smute: false });
+    // No "Share camera and screen" here (any more): the server turns both off (voice and calls track).
+    const st = hub.voiceStateOf?.(user);
+    if (!p.video && st && (st.camera || st.screen)) { hub.voiceState(user, { camera: false, screen: false }); hub.toUser(user, 'voice.media.off', { room: room.id }); }
   }
   const canSpeak = (user, room, p = M.roomPerms(user, room)) => p.speak || (room.kind === 'stage' && !!stages.get(room.id)?.speakers.has(user));
   const stageChanged = (room) => hub.toUsers(M.audience(room), 'stage', { room, ...stageView(room) });
@@ -443,6 +446,8 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
     if (room && VOICE_KINDS.includes(room.kind) && !canSpeak(c.user, room)) {
       if (d.muted === false || d.camera === true || d.screen === true) fail(room.kind === 'stage' ? 'You’re in the audience. Raise your hand to ask to speak.' : `You can’t speak in ${room.name}.`);
     }
+    // Camera and screen need "Share camera and screen" in this room (voice and calls track).
+    if (room && VOICE_KINDS.includes(room.kind) && (d.camera === true || d.screen === true) && !M.roomPerms(c.user, room).video) fail(`You can’t share your camera or screen in ${room.name}.`);
     return base(c, d);
   });
   wrap('voice.leave', (c, d, base) => {

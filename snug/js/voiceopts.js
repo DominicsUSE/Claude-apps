@@ -36,7 +36,29 @@ export const VOICE_DEFAULTS = {
   afk: 0,                              // minutes alone in a voice room before leaving; 0 never
   screenRes: '1080', screenFps: 30, screenAudio: true,
   mini: null,                          // { x, y } where the floating call was left
+  // --- voice and calls track ---
+  camRes: '720', camFps: 24,           // camera quality: 360/720/1080, 15/24/30 frames a second
+  mirror: true,                        // my own camera shown as in a mirror (only to me)
+  inputGain: 1,                        // my microphone's volume, 0..2, before the gate
+  outputVolume: 1,                     // everything I hear, 0..2
+  ringtone: 'chime', ringVolume: 0.8,  // the ringtone (js/calls.js RINGTONES) and its volume 0..1
+  ringOutput: '',                      // the device the ringtone plays on; '' is the system default
 };
+export const CAM_RES = { 360: { width: 640, height: 360 }, 720: { width: 1280, height: 720 }, 1080: { width: 1920, height: 1080 } };
+export const CAM_FPS = [15, 24, 30];
+// The camera's constraints from the quality settings, never above what was asked for.
+export function cameraBase(base) {
+  const v = vp();
+  const res = CAM_RES[v.camRes] || CAM_RES[720];
+  const fps = CAM_FPS.includes(v.camFps) ? v.camFps : 24;
+  return {
+    ...base,
+    width: { min: Math.min(640, res.width), ideal: res.width, max: res.width },
+    height: { min: Math.min(360, res.height), ideal: res.height, max: res.height },
+    frameRate: { ideal: fps, max: fps },
+  };
+}
+const clamp2 = (n, d = 1) => (typeof n === 'number' && Number.isFinite(n) ? Math.max(0, Math.min(2, n)) : d);
 export const RESOLUTIONS = { 720: { width: 1280, height: 720 }, 1080: { width: 1920, height: 1080 }, source: null };
 export const FRAME_RATES = [15, 30, 60];
 
@@ -50,7 +72,8 @@ export function setVoice(patch) {
   const v = vp();
   if ('mode' in patch || 'threshold' in patch || 'autoSense' in patch) gate();
   if ('output' in patch && patch.output !== before.output) applyOutput();
-  if ('volumes' in patch || 'muted' in patch || 'output' in patch) retune();
+  if ('volumes' in patch || 'muted' in patch || 'output' in patch || 'outputVolume' in patch) retune();
+  if ('inputGain' in patch) applyInputGain();
   return v;
 }
 
@@ -58,6 +81,8 @@ export const volumeOf = (user) => {
   const n = vp().volumes[user];
   return typeof n === 'number' && n >= 0 && n <= 2 ? n : 1;
 };
+// What I really play someone at: their volume times the master output volume (up to 400%, capped at 200%).
+const playedAt = (user) => Math.min(2, volumeOf(user) * clamp2(vp().outputVolume));
 export const mutedForMe = (user) => !!vp().muted[user];
 export function setPersonVolume(user, n) {
   const volumes = { ...vp().volumes };
@@ -159,7 +184,11 @@ export async function outgoing(mic) {
     const gateNode = c.createGain();
     gateNode.gain.value = 0;
     gateNode.connect(mix);
-    g = { raw: false, mix, gate: gateNode, out: mix.stream, track: mix.stream.getAudioTracks()[0], src: null, analyser: null, timer: null };
+    // My microphone's volume, before the gate (voice and calls track).
+    const inGain = c.createGain();
+    inGain.gain.value = clamp2(vp().inputGain);
+    inGain.connect(gateNode);
+    g = { raw: false, mix, gate: gateNode, inGain, out: mix.stream, track: mix.stream.getAudioTracks()[0], src: null, analyser: null, timer: null };
     attach(mic);
   }
   if (g.raw) { attachAnalyser(mic); vadOpen = true; }
@@ -185,7 +214,7 @@ function attach(mic) {
   if (!g || g.raw) return;
   try { g.src?.disconnect(); } catch { /* already */ }
   g.src = ctx.createMediaStreamSource(mic);
-  g.src.connect(g.gate);
+  g.src.connect(g.inGain || g.gate);
   attachAnalyser(mic);
 }
 
@@ -205,10 +234,14 @@ export function swapMic(mic) {
   return g.out;
 }
 
+function applyInputGain() {
+  if (g?.inGain) g.inGain.gain.value = clamp2(vp().inputGain);
+}
+
 export function stopOutgoing() {
   if (!g) return;
   clearInterval(g.timer);
-  try { g.src?.disconnect(); g.levelSrc?.disconnect(); g.gate?.disconnect(); } catch { /* gone */ }
+  try { g.src?.disconnect(); g.levelSrc?.disconnect(); g.gate?.disconnect(); g.inGain?.disconnect(); } catch { /* gone */ }
   if (!g.raw) g.track?.stop();
   g = null;
   playing = 0;
@@ -287,7 +320,7 @@ export const pttHeld = () => pttDown;
 const boosts = new Map(); // element -> { src, gain }
 export function tuneAudio(user, el, heard) {
   if (!el) return;
-  const vol = volumeOf(user);
+  const vol = playedAt(user);
   const on = heard && !mutedForMe(user);
   el.volume = Math.min(1, vol);
   const boost = on && vol > 1 && el.srcObject;
@@ -418,5 +451,8 @@ export function voiceDebug() {
     // The captured microphone's processing as the browser applied it, and the track that is sent (it never changes in a call).
     mic: (() => { const t = (g?.raw ? g.out : g?.src?.mediaStream)?.getAudioTracks()[0]; const st = t?.getSettings?.() || {}; return t ? { id: t.id, noise: st.noiseSuppression, echo: st.echoCancellation, agc: st.autoGainControl } : null; })(),
     sent: g?.track?.id || null, cue: lastCue,
+    // Voice and calls track: the chosen input and the device really captured, and my microphone's volume.
+    input: vp().input || '', device: (() => { const t = (g?.raw ? g.out : g?.src?.mediaStream)?.getAudioTracks()[0]; return t?.getSettings?.().deviceId || null; })(),
+    inputGain: g?.inGain ? g.inGain.gain.value : null, outputVolume: clamp2(vp().outputVolume),
   };
 }

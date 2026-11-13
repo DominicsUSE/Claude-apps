@@ -15,8 +15,9 @@ import { seedDatabase } from '../server/seed.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'snug-test-'));
 let srv, base;
-// Calls ring for 1.5 seconds here instead of 30 seconds (see the calls tests at the end).
-const boot = async () => { srv = await startServer({ port: 0, dataDir: dir, quiet: true, ringMs: 1500 }); base = `http://127.0.0.1:${srv.port}`; };
+// Calls ring for 1.5 seconds here instead of 30 seconds (see the calls tests at the end),
+// and a dropped connection's voice slot is held for 0.3 seconds instead of 20 (tests/server-voice.test.js).
+const boot = async () => { srv = await startServer({ port: 0, dataDir: dir, quiet: true, ringMs: 1500, voiceGraceMs: 300 }); base = `http://127.0.0.1:${srv.port}`; };
 test.before(boot);
 test.beforeEach(() => srv.resetLimits());
 test.after(async () => { await srv.close(); rmSync(dir, { recursive: true, force: true }); });
@@ -214,7 +215,7 @@ test('permissions are enforced by the server, not the screen', async () => {
   await ada.next('msg.del', (d) => d.id === id);
   // But a non-owner can never hand out the owner role.
   const ownerRole = view.house.roles[0].id;
-  await ada.ok('role.update', { house, role, perms: ['post', 'moderate', 'roles'] });
+  await ada.ok('role.update', { house, role, perms: ['post', 'moderate', 'roles', 'react'] }); // react: its own permission (server/community.js)
   assert.match(await bo.refused('member.role', { house, user: cy.id, role: ownerRole }), /isn’t in this house/);
   assert.match(await bo.refused('role.update', { house, role: ownerRole, name: 'Mine now' }), /Only an owner/);
   ada.events.length = 0; bo.events.length = 0;
@@ -617,7 +618,7 @@ test('discover: only public houses, never private ones, whatever the search', as
   const card = d.houses.find((x) => x.id === kitchen);
   assert.ok(card, 'the public house is listed');
   assert.equal(d.houses.some((x) => x.id === lab), false, 'the private house is not');
-  assert.deepEqual(Object.keys(card).sort(), ['about', 'created', 'friends', 'hue', 'id', 'inVoice', 'mark', 'members', 'name', 'online', 'rooms', 'talking', 'topic'].sort());
+  assert.deepEqual(Object.keys(card).sort(), ['about', 'banner', 'created', 'friends', 'hue', 'icon', 'id', 'inVoice', 'mark', 'members', 'name', 'online', 'rooms', 'splash', 'talking', 'topic'].sort()); // pictures: server/community.js
   assert.equal(card.members, 1);
   assert.equal(card.online, 1);
   assert.deepEqual(card.rooms.map((r) => r.kind), ['news', 'text', 'text', 'voice']);
@@ -748,10 +749,10 @@ test('events: planned by the right roles, answered by members, live to the whole
   assert.equal(srv.db.get('SELECT COUNT(*) n FROM event_rsvps WHERE event = ?', party).n, 0);
 });
 
-test('events: a role with the rooms permission can plan; a finished event takes no answers', async () => {
+test('events: a role with the events permission can plan; a finished event takes no answers', async () => {
   const h = (await kay.ok('sync')).houses[kitchen];
   const { id: role } = await kay.ok('role.create', { house: kitchen });
-  await kay.ok('role.update', { house: kitchen, role, perms: ['post', 'rooms'] });
+  await kay.ok('role.update', { house: kitchen, role, perms: ['post', 'rooms', 'events'] }); // 'events' replaced 'rooms' for this (server/community.js)
   await kay.ok('member.role', { house: kitchen, user: lou.id, role });
   const { id: chat } = await lou.ok('event.create', { house: kitchen, title: 'Tasting', starts: Date.now() + 86_400_000 });
   await kay.ok('event.delete', { event: chat });
@@ -3024,7 +3025,7 @@ const settle = () => new Promise((r) => setTimeout(r, 120));
 test('places: the room resolver: owners, managers, private rooms, role and member overrides, voice kinds', async () => {
   const { resolveRoom } = await import('../js/lib/places.js');
   const base = { housePerms: new Set(['post']), kind: 'text', roleIds: ['r1'], userId: 'u1' };
-  assert.deepEqual(resolveRoom(base), { view: true, send: true, connect: false, speak: false, manage: false });
+  assert.deepEqual(resolveRoom(base), { view: true, send: true, connect: false, speak: false, manage: false, video: false });
   assert.equal(resolveRoom({ ...base, isPrivate: true }).view, false);
   assert.equal(resolveRoom({ ...base, isPrivate: true }).send, false, 'no view, nothing else');
   assert.equal(resolveRoom({ ...base, isPrivate: true, overrides: [{ type: 'role', target: 'r1', allow: ['view'] }] }).view, true);
@@ -3042,7 +3043,7 @@ test('places: the room resolver: owners, managers, private rooms, role and membe
   const mgr = resolveRoom({ ...base, housePerms: new Set(['rooms']), isPrivate: true, overrides: [{ type: 'member', target: 'u1', deny: ['view', 'manage'] }] });
   assert.equal(mgr.view && mgr.manage, true);
   // Voice: connect and speak; a stage lets only its managers speak uninvited.
-  assert.deepEqual(resolveRoom({ ...base, kind: 'voice' }), { view: true, send: true, connect: true, speak: true, manage: false });
+  assert.deepEqual(resolveRoom({ ...base, kind: 'voice' }), { view: true, send: true, connect: true, speak: true, manage: false, video: true });
   assert.equal(resolveRoom({ ...base, kind: 'stage' }).speak, false);
   assert.equal(resolveRoom({ ...base, kind: 'stage', housePerms: new Set(['rooms']) }).speak, true);
   assert.equal(resolveRoom({ ...base, kind: 'voice', overrides: [{ type: 'role', target: 'r1', deny: ['connect'] }] }).speak, false, 'no connect, no speaking');
@@ -3466,7 +3467,7 @@ test('places: the resolver reaches highlights, events, pins and forum titles; th
   const s = await placesHouse('rx');
   const { ow, mm, m2, house, crew } = s;
   // Crew can highlight, plan events and pin, house-wide; mm has Crew.
-  await ow.ok('role.update', { house, role: crew, perms: ['post', 'highlight', 'announce', 'pin'] });
+  await ow.ok('role.update', { house, role: crew, perms: ['post', 'highlight', 'announce', 'pin', 'events'] });
   await ow.ok('member.roles', { house, user: mm.id, roles: [crew] });
   const { id: back } = await ow.ok('room.create', { house, name: 'Backroom', kind: 'text', private: true });
   const secret = mid();
@@ -4033,7 +4034,7 @@ test('security: Manage roles can’t hand out permissions you lack, or change yo
   // A role of their own making can only carry what they have.
   const { id: evil } = await mm.ok('role.create', { house });
   assert.match(await mm.refused('role.update', { house, role: evil, perms: ['post', 'ban', 'kick', 'timeout', 'audit', 'voicemod', 'moderate', 'rooms'] }), /permissions you have yourself/);
-  assert.deepEqual(JSON.parse(srv.db.get('SELECT perms FROM roles WHERE id = ?', evil).perms), ['post'], 'nothing changed');
+  assert.deepEqual(JSON.parse(srv.db.get('SELECT perms FROM roles WHERE id = ?', evil).perms), ['post', 'react'], 'nothing changed'); // new roles can react (server/community.js)
   await mm.ok('role.update', { house, role: evil, perms: ['post', 'roles'] });
   // Never onto themselves, even a role below them.
   assert.match(await mm.refused('member.roles', { house, user: mm.id, roles: [evil] }), /your own roles/);
@@ -4159,7 +4160,7 @@ test('security: a timeout stops editing too; a banned person’s webhook address
   await ow.ok('mod.timeout', { house, user: mm.id, ms: 0 });
   await mm.ok('msg.edit', { conv: lounge, id: m3, text: 'edited after' });
   // Webhooks: m2 makes one, then is banned.
-  await ow.ok('role.update', { house, role: memberRole, perms: ['post', 'rooms'] });
+  await ow.ok('role.update', { house, role: memberRole, perms: ['post', 'rooms', 'hooks'] });
   const { url } = await m2.ok('hook.create', { room: lounge, name: 'Kiln sensor' });
   const { url: ownUrl } = await ow.ok('hook.create', { room: lounge, name: 'Owner’s' });
   const hit = (u) => fetch(base + u, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'kiln at 1200' }) });
@@ -4238,7 +4239,7 @@ test('security: a timeout takes away pinning, managing and moderating too, not j
   const mine = mid(), theirs = mid();
   await mm.ok('msg.send', { conv: lounge, id: mine, text: 'mine' });
   await m2.ok('msg.send', { conv: lounge, id: theirs, text: 'theirs' });
-  await ow.ok('role.update', { house, role: memberRole, perms: ['post', 'pin', 'rooms', 'announce', 'highlight', 'invite', 'emoji', 'moderate'] });
+  await ow.ok('role.update', { house, role: memberRole, perms: ['post', 'pin', 'rooms', 'announce', 'highlight', 'invite', 'emoji', 'moderate', 'hooks', 'events'] });
   const forum = await ow.ok('room.create', { house, name: 'Forum', kind: 'forum' });
   const post = mid();
   await mm.ok('forum.post', { room: forum.id, id: post, title: 'My post', text: 'body' });

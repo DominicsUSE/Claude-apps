@@ -8,14 +8,16 @@ import { join, normalize, extname, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './db.js';
 import { createModel, newId } from './model.js';
-import { createHub, ringMsFrom } from './hub.js';
-import { AUDIO_TYPES, uploadType, fileKind, parseRange, createMediaHttp } from './media.js'; // voice messages, GIFs
+import { createHub, ringMsFrom, voiceGraceFrom } from './hub.js';
+import { AUDIO_TYPES, VIDEO_TYPES, uploadType, fileKind, parseRange, createMediaHttp } from './media.js'; // voice messages, GIFs, video
 import { createEmojiHttp, emojiReads } from './emoji.js'; // custom emoji per house
 import { createMessagingHttp } from './messaging.js'; // sticker uploads and images; link previews and the scheduler are configured below
-import { createVoiceOptsHttp } from './voiceopts.js'; // soundboard uploads and sound files
+import { createVoiceOptsHttp, iceConfig } from './voiceopts.js'; // soundboard uploads and sound files; STUN and TURN (short-lived TURN credentials)
 import { createPush } from './push.js'; // notifications when Snug is closed (Web Push)
 import { createPlacesHttp } from './places.js'; // webhook deliveries: POST /api/hooks/<id>/<token>
 import { createAccountHttp } from './account.js'; // two-factor sign-in, export, deactivate, delete, banners
+import { createAppearanceHttp } from './appearance.js'; // profile pictures: POST /api/files?avatar, GET /api/avatars/<file>
+import { createCommunityHttp } from './community.js'; // house pictures, event covers, invitation previews with custom links
 import { HUES } from '../js/lib/util.js';
 import {
   hashPassword, checkPassword, burnPasswordCheck, createSession, sessionUser, endSession, endAllSessions,
@@ -30,10 +32,11 @@ const TYPES = {
   '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json',
 };
 // Uploaded images shown inline. Anything else downloads.
-const INLINE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml']);
-// Voice messages play inline too (their type is checked against the bytes at upload),
-// and so do GIFs the server fetched as video.
-for (const t of [...AUDIO_TYPES, 'video/mp4']) INLINE.add(t);
+// SVG is not among them: it can carry script and links, so it always downloads.
+const INLINE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+// Voice messages, sound files and videos play inline too (their type is checked
+// against the bytes at upload), and so do GIFs the server fetched as video.
+for (const t of [...AUDIO_TYPES, ...VIDEO_TYPES]) INLINE.add(t);
 const MAX_FILE = 10 * 1024 * 1024;
 const HANDLE = /^[a-z0-9](?:[a-z0-9_.-]{0,22}[a-z0-9])?$/;
 
@@ -55,6 +58,10 @@ export async function startServer({
   pushAllowLocal = process.env.SNUG_PUSH_ALLOW_LOCAL === '1',
   // How long a call rings before it counts as missed. Tests shorten it.
   ringMs = ringMsFrom(),
+  // How long a dropped connection's voice slot is held. Tests shorten it.
+  voiceGraceMs = voiceGraceFrom(),
+  // Where STUN and TURN settings come from (SNUG_STUN, SNUG_TURN_*). Tests pass their own.
+  iceEnv = process.env,
   // Link previews (server/messaging.js). SNUG_LINK_PREVIEWS=0 turns them off.
   linkPreviews = process.env.SNUG_LINK_PREVIEWS !== '0',
   // Tests only: let previews fetch a local stand-in site on 127.0.0.1 (every other private address stays refused).
@@ -66,10 +73,8 @@ export async function startServer({
   const M = createModel(db);
   const log = quiet ? () => {} : (...a) => console.log(new Date().toISOString(), ...a);
 
-  const ice = [{ urls: (process.env.SNUG_STUN || 'stun:stun.l.google.com:19302').split(',') }];
-  if (process.env.SNUG_TURN_URL) {
-    ice.push({ urls: process.env.SNUG_TURN_URL.split(','), username: process.env.SNUG_TURN_USER, credential: process.env.SNUG_TURN_PASS });
-  }
+  // STUN, and TURN with a static login or (SNUG_TURN_SECRET) short-lived credentials per person (server/voiceopts.js).
+  const ice = iceConfig(iceEnv);
 
   const authLimit = limiter({ capacity: 10, perSecond: 10 / 900 });   // 10 tries per 15 minutes
   const uploadLimit = limiter({ capacity: 20, perSecond: 0.2 });
@@ -81,7 +86,7 @@ export async function startServer({
   };
 
   const server = createServer(handle);
-  const hub = createHub({ db, M, server, origins, ice, log, ringMs });
+  const hub = createHub({ db, M, server, origins, ice, log, ringMs, voiceGraceMs });
   // --- push notifications (server/push.js) ---
   // A new message that needs someone with no Snug open anywhere goes to their devices.
   const push = createPush({ db, M, hub, origins, log, allowLocal: pushAllowLocal });
@@ -97,6 +102,7 @@ export async function startServer({
   hub.hooks.ring = (user, ring) => push.onRing(user, ring).catch((e) => log('push', e));
   hub.hooks.ringStop = (user, ring) => push.onRingStop(user, ring).catch((e) => log('push', e));
   hub.hooks.message = (conv, id) => push.onMessage(conv, id).catch((e) => log('push', e));
+  hub.hooks.note = (user, note) => push.onNote(user, note).catch((e) => log('push', e)); // event reminders (server/community.js)
   // --- end push notifications ---
 
   // Deleted messages can be restored for ten minutes; after that their content is gone for good.
@@ -149,6 +155,8 @@ export async function startServer({
   hub.messaging?.configure({ filesDir, previews: linkPreviews, allowLoopback: linkAllowLocal });
   const placesHttp = createPlacesHttp({ db, M, hub, sendJson, error, jsonBody, ipOf }); // webhooks (server/places.js)
   const accountHttp = createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonBody, body, headers, ipOf, secure, authLimit, uploadLimit, log }); // server/account.js
+  const appearanceHttp = createAppearanceHttp({ db, M, hub, filesDir, sendJson, error, body, headers, uploadLimit }); // server/appearance.js
+  const communityHttp = createCommunityHttp({ db, M, hub, filesDir, sendJson, error, body, headers, uploadLimit, userOf: (req) => userOf(req) }); // server/community.js
 
   async function handle(req, res) {
     let url, path;
@@ -167,7 +175,8 @@ export async function startServer({
   async function staticFile(res, path) {
     // /join/<code> and every other app path load the app itself.
     // Web addresses always use forward slashes, whatever this machine's file paths look like.
-    let rel = path === '/' || path.startsWith('/join/') ? 'index.html' : posix.normalize(path.replace(/\\/g, '/')).replace(/^\/+/, '');
+    // /m/<conversation>/<message> is a message link (js/app.js opens it after sign-in).
+    let rel = path === '/' || path.startsWith('/join/') || path.startsWith('/m/') ? 'index.html' : posix.normalize(path.replace(/\\/g, '/')).replace(/^\/+/, '');
     if (rel.includes('..') || !PUBLIC.some((p) => (p.endsWith('/') ? rel.startsWith(p) : rel === p))) {
       if (extname(rel)) return error(res, 404, 'Not found');
       rel = 'index.html';
@@ -202,6 +211,7 @@ export async function startServer({
       if (!name || name.length > 40) return error(res, 400, 'Your name can be 1 to 40 characters.');
       if (password.length < 8 || password.length > 200) return error(res, 400, 'Passwords need at least 8 characters.');
       if (db.get('SELECT 1 FROM users WHERE handle = ?', handleV)) return error(res, 409, `@${handleV} is taken. Try another username.`);
+      if (M.handleHeld?.(handleV)) return error(res, 409, `@${handleV} is taken. Try another username.`); // given up in the last 7 days (server/inbox.js)
       const id = newId('u');
       const hue = HUES[Math.floor(Math.random() * HUES.length)][0];
       db.run('INSERT INTO users (id, handle, name, pass, hue, created) VALUES (?, ?, ?, ?, ?, ?)', id, handleV, name, hashPassword(password), hue, Date.now());
@@ -231,6 +241,8 @@ export async function startServer({
       return sendJson(res, 200, {}, { 'Set-Cookie': sessionCookie('', { secure, clear: true }) });
     }
 
+    // House pictures an invitation may show, and invitation previews with custom links (server/community.js).
+    if (await communityHttp.open(req, res, path, url)) return undefined;
     // Invitation previews are public, so a link can show what you are joining before you sign in.
     const invite = /^\/api\/invite\/([\w-]{6,40})$/.exec(path);
     if (req.method === 'GET' && invite) {
@@ -249,10 +261,12 @@ export async function startServer({
     const user = userOf(req);
     if (!user) return error(res, 401, 'Sign in first.');
     if (await accountHttp.authed(req, res, path, url, user)) return undefined; // export, deactivate, delete, banners
+    if (await appearanceHttp(req, res, path, url, user)) return undefined; // profile pictures (server/appearance.js)
+    if (await communityHttp.authed(req, res, path, url, user)) return undefined; // house pictures and event covers (server/community.js)
 
     if (req.method === 'GET' && path === '/api/me') {
       const row = M.userRow(user);
-      return sendJson(res, 200, { user: M.userView(row, row.presence, true), ice });
+      return sendJson(res, 200, { user: M.userView(row, row.presence, true), ice: hub.iceFor(user) });
     }
     if (post && path === '/api/logout-all') {
       const token = readCookie(req.headers.cookie, COOKIE);

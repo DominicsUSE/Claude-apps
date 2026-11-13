@@ -225,6 +225,8 @@ export function createAccountOps({ db, M, hub, fail, ops = {} }) {
   // words off the lock screen) and calls (server/hub.js: quiet hours ring quietly).
   M.prefsOf = (user) => R.prefs(user);
   M.quietHours = (user) => inQuiet(R.prefs(user).quiet);
+  // Deleting a house and two-factor for moderators (server/community.js) ask for the same second factor.
+  M.totpOn = R.totpOn; M.verifySecond = R.verifySecond;
   const baseForMe = M.forMeExtra; // role mentions (server/places.js)
   M.forMeExtra = (user, row, w) => {
     if (baseForMe?.(user, row, w)) return true;
@@ -541,6 +543,7 @@ export function createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonB
         twoFactor: R.totpOn(user),
       },
       settings: R.prefs(user),
+      ...(M.exportExtra?.(user) || {}), // more parts of the account (server/appearance.js: picture and styling)
       notes: Object.entries(R.notes(user)).map(([id, note]) => ({ person: handleOf(id), note })),
       friends: db.all('SELECT other, state, favorite, since FROM friends WHERE user = ?', user).map((f) => ({ person: handleOf(f.other), state: f.state, favorite: !!f.favorite, since: f.since ? new Date(f.since).toISOString() : null })),
       houses,

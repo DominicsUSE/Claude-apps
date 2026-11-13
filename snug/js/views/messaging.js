@@ -120,9 +120,10 @@ export function Poll({ conv, m }) {
   </div>`;
 }
 
-function PollModal({ conv }) {
-  const [q, setQ] = useState('');
-  const [answers, setAnswers] = useState([{ text: '' }, { text: '' }]);
+// question and answers: prefilled by /poll (js/views/chat.js).
+export function PollModal({ conv, question = '', answers: given = [] }) {
+  const [q, setQ] = useState(question);
+  const [answers, setAnswers] = useState(() => [...given, '', ''].slice(0, Math.max(2, given.length)).map((text) => ({ text })));
   const [hours, setHours] = useState(24);
   const [multi, setMulti] = useState(false);
   const [hidden, setHidden] = useState(false);

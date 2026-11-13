@@ -13,6 +13,8 @@ import { Confirm } from './modals.js';
 import { act, rolesOf } from './places.js';
 import { SLOWMODES, spell, roleBelow } from '../lib/safety.js';
 import { VOICE_LIMITS, BITRATES } from './voiceopts-settings.js';
+import { roomDrag, groupDrag, stepMove, stepGroup, groupMenu, GroupForm, mayArrange } from './community.js'; // categories and room order
+import { RoomForm } from './modals.js';
 
 function Row({ label, hint, children, top }) {
   return html`<div class=${`set-row${top ? ' top' : ''}`}>
@@ -21,7 +23,7 @@ function Row({ label, hint, children, top }) {
   </div>`;
 }
 const isOwner = (house) => { const h = S.houses[house]; return !!h && roleOf(S, house)?.id === h.roles[0].id; };
-const MANAGING = ['rooms', 'roles', 'kick', 'ban', 'timeout', 'voicemod', 'audit', 'moderate', 'emoji', 'nicks'];
+const MANAGING = ['rooms', 'roles', 'kick', 'ban', 'timeout', 'voicemod', 'audit', 'moderate', 'emoji', 'nicks', 'house', 'events', 'hooks'];
 
 // ---------- Roles ----------
 function moveRole(house, id, index) {
@@ -122,16 +124,39 @@ export function RoomsPage({ house }) {
   const h = S.houses[house];
   const open = (id) => import('./places-access.js').then((m) => openModal(m.RoomAccess, { room: id }));
   const manage = can(S, house, 'rooms');
+  const arrange = mayArrange(house);
+  const [said, setSaid] = useState('');
   const set = (op, d) => call(op, d).catch((e) => toast(e.offline ? 'You’re offline. Try again when you’re back.' : e.message));
+  // Alt and an arrow moves the focused room (across categories at the ends) or category, as on Roles.
+  const keyRoom = (r) => (e) => {
+    if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+    e.preventDefault(); e.stopPropagation();
+    const text = stepMove(house, r, e.key === 'ArrowUp' ? -1 : 1);
+    if (text) { setSaid(text); requestAnimationFrame(() => document.querySelector(`[data-move-room="${r}"]`)?.focus()); }
+  };
+  const keyGroup = (g) => (e) => {
+    if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+    e.preventDefault(); e.stopPropagation();
+    const text = stepGroup(house, g, e.key === 'ArrowUp' ? -1 : 1);
+    if (text) { setSaid(text); requestAnimationFrame(() => document.querySelector(`[data-move-group="${g}"]`)?.focus()); }
+  };
   return html`
     <h1>Rooms and access</h1>
-    <p class="lead">Who can see, write, join and speak in each room, and how fast or full each one can get. Private rooms show only to the roles and people you allow.</p>
-    ${h.groups.map((g) => html`<div key=${g.id}>
-      <div class="set-head">${g.name}</div>
+    <p class="lead">Who can see, write, join and speak in each room, and how fast or full each one can get. Private rooms show only to the roles and people you allow.${arrange ? ' Drag rooms and categories to change the order, or focus one and press Alt and an arrow key.' : ''}</p>
+    <div class="sr" role="status" aria-live="polite">${said}</div>
+    ${h.groups.map((g) => html`<div key=${g.id} class="cm-set-group">
+      <div class="set-head cm-set-head" ...${groupDrag(house, g.id)}>
+        ${arrange && html`<button class="ib sm cm-grip" data-move-group=${g.id} aria-label=${`Move category ${g.name}`} aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" data-tip="Drag, or Alt and an arrow key" onKeyDown=${keyGroup(g.id)}><${Icon} name="grip" size=${14} /></button>`}
+        <span class="grow">${g.name}</span>
+        ${arrange && html`<button class="ib sm" aria-label=${`New room in ${g.name}`} data-tip="New room" onClick=${() => openModal(RoomForm, { house, group: g.id })}><${Icon} name="plus" size=${16} /></button>
+          <button class="ib sm" aria-label=${`${g.name} category options`} aria-haspopup="menu" data-tip="Category" onClick=${(e) => groupMenu(house, g.id, { anchor: e.currentTarget.getBoundingClientRect(), align: 'end' })}><${Icon} name="more" size=${16} /></button>`}
+      </div>
+      ${!g.rooms.some((r) => S.rooms[r]) && html`<p class="hint cm-set-empty">No rooms in ${g.name} yet. Drag one here, or add one with the plus.</p>`}
       ${g.rooms.filter((r) => S.rooms[r]).map((r) => {
         const room = S.rooms[r];
         const voice = room.kind === 'voice' || room.kind === 'stage';
-        return html`<div class="member-row room-set-row" key=${r}>
+        return html`<div class="member-row room-set-row" key=${r} ...${roomDrag(house, r)}>
+          ${arrange && room.perms?.manage && html`<button class="ib sm cm-grip" data-move-room=${r} aria-label=${`Move ${room.name}`} aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" data-tip="Drag, or Alt and an arrow key" onKeyDown=${keyRoom(r)}><${Icon} name="grip" size=${14} /></button>`}
           <${RoomIcon} kind=${room.kind} />
           <span class="grow"><b style="font-weight:500">${room.name}</b>
             ${room.private ? html` <span class="pill"><${Icon} name="lock" size=${12} />Private</span>` : room.restricted ? html` <span class="pill">Custom access</span>` : null}
@@ -152,7 +177,8 @@ export function RoomsPage({ house }) {
           ${room.perms?.manage && html`<button class="btn sm" aria-label=${`Access for ${room.name}`} onClick=${() => open(r)}>Access</button>`}
         </div>`;
       })}
-    </div>`)}`;
+    </div>`)}
+    ${arrange && html`<div class="cm-set-add"><button class="btn" onClick=${() => openModal(GroupForm, { house })}><${Icon} name="plus" size=${16} />New category</button></div>`}`;
 }
 
 // ---------- Welcome and interests ----------

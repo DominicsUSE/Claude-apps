@@ -10,6 +10,7 @@ import { roleOf } from '../lib/perms.js';
 import { mutualHouses, friendState, safeLink } from '../lib/social.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Pres, Tile, PRESENCE, presenceLabel } from '../ui/kit.js';
+import { nameAttrs, profileColours } from '../ui/kit.js'; // name styles and profile colours (css/appearance.css)
 import { Settings } from './settings.js';
 import { Confirm } from './modals.js';
 import { hueOf, MIN, DAY, plural } from '../lib/util.js';
@@ -17,6 +18,7 @@ import { personItems } from './safety.js'; // block, report, moderate
 import { houseFace, colourRole, rolesOf, RoleIconMark } from './places.js'; // nicknames, role colours and icons, every role
 import { memberGroups } from '../lib/places.js'; // groups by roles shown separately
 import { ProfileBanner, AboutText, Pronouns, PrivateNote, StatusEmoji, openCustomStatus } from './account.js'; // banner, pronouns, rich About, notes, custom status
+import { setPresenceFor, presenceUntilNote, PRESENCE_TIMES } from '../inbox.js'; // presence for a while (server/inbox.js)
 
 export function showProfile(user, anchor, house) {
   openPop({ anchor, label: `${user.name}, profile`, C: ProfileCard, props: { id: user.id, house } });
@@ -215,14 +217,15 @@ function ProfileCard({ id, house }) {
   const role = house ? roleOf(S, house, id) : null;
   const d = doingOf(u);
   const mine = id === S.me;
-  return html`<div class="pcard" style=${`--hue:${hueOf(u.hue)}`}>
+  const pc = profileColours(u);
+  return html`<div class=${`pcard${pc.cls}`} style=${`--hue:${hueOf(u.hue)}${pc.style}`}>
     <${ProfileBanner} u=${u} />
     <div class="pcard-body">
       <div class="pcard-top">
         <button class="pcard-av" aria-label=${`Open ${u.name}’s profile`} onClick=${() => openPerson(id)}><${Avatar} user=${u} presence size=${64} /></button>
         <${FavButton} id=${id} sm />
       </div>
-      <button class="pcard-name" onClick=${() => openPerson(id)}>${u.name}</button>
+      <button class="pcard-name" ...${nameAttrs(u)} onClick=${() => openPerson(id)}>${u.name}</button>
       <div class="pcard-handle"><span class="secret">@${u.handle}</span><${Pronouns} u=${u} /></div>
       <div class="pcard-line"><${Pres} user=${u} inline /><${Doing} u=${u} /></div>
       <${AboutText} u=${u} />
@@ -253,14 +256,23 @@ function ProfileCard({ id, house }) {
 export function MePop() {
   const u = me();
   const [status, setText] = useState(u.status);
+  const [forKey, setForKey] = useState(null); // the presence whose "for…" times are open
   const save = () => { if (status.trim() !== u.status) setStatus(status); };
+  const until = presenceUntilNote(u); // "until 15:00" (js/inbox.js)
   return html`<div class="me-pop" role="menu">
-    ${Object.entries(PRESENCE).map(([key, p]) => html`<button key=${key} class="menu-item pres-opt" role="menuitemradio" aria-checked=${String(u.presence === key)}
-      onClick=${() => { setPresence(key); closePop(); }}>
-      <i class=${`pres inline ${key}`}></i>
-      <span class="grow">${p.label}<small>${p.hint}</small></span>
-      ${u.presence === key && html`<span class="end"><${Icon} name="check" size=${16} /></span>`}
-    </button>`)}
+    ${Object.entries(PRESENCE).map(([key, p]) => html`<div key=${key} class="pres-row">
+      <button class="menu-item pres-opt" role="menuitemradio" aria-checked=${String(u.presence === key)}
+        onClick=${() => { setPresenceFor(key); closePop(); }}>
+        <i class=${`pres inline ${key}`}></i>
+        <span class="grow">${p.label}<small>${u.presence === key && until ? `${p.label} ${until}` : p.hint}</small></span>
+        ${u.presence === key && html`<span class="end"><${Icon} name="check" size=${16} /></span>`}
+      </button>
+      ${key !== 'around' && html`<button class=${`menu-item pres-for${forKey === key ? ' on' : ''}`} role="menuitem" aria-expanded=${String(forKey === key)}
+        aria-label=${`${p.label} for a while`} onClick=${() => setForKey(forKey === key ? null : key)}>for…</button>`}
+      ${forKey === key && html`<div class="pres-times" role="group" aria-label=${`${p.label} for how long`}>
+        ${PRESENCE_TIMES.map(([c, label]) => html`<button key=${c} class="chip" onClick=${() => { setPresenceFor(key, c); closePop(); }}>${label.replace(/^For /, '')}</button>`)}
+      </div>`}
+    </div>`)}
     <div class="menu-sep"></div>
     <button class="menu-item" role="menuitem" onClick=${() => { closePop(); openCustomStatus(); }}><${Icon} name="smile" /><span class="grow">${u.status || u.statusEmoji ? 'Change status' : 'Set a status'}<small>An emoji, and when it clears</small></span>${u.statusEmoji && html`<span class="end">${u.statusEmoji}</span>`}</button>
     <div class="status-in">
@@ -286,7 +298,7 @@ function PersonRow({ u: real, house }) {
   return html`<button class="person" onClick=${(e) => showProfile(u, e.currentTarget.getBoundingClientRect(), house)}>
     <${Avatar} user=${u} presence dim=${u.presence === 'offline'} speaking=${!!S.speaking[u.id]} />
     <span class="grow">
-      <span class=${`person-name trunc${role?.hue != null ? ' role-name' : ''}`} style=${`display:block${role?.hue != null ? `;--hue:${hueOf(role.hue)}` : ''}`}>${u.name}${u.id === S.me ? ' (you)' : ''}${house ? html` <${RoleIconMark} house=${house} uid=${u.id} />` : null}</span>
+      <span class=${`person-name trunc${role?.hue != null ? ' role-name' : ''}`} style=${`display:block${role?.hue != null ? `;--hue:${hueOf(role.hue)}` : ''}`} ...${nameAttrs(u)}>${u.name}${u.id === S.me ? ' (you)' : ''}${house ? html` <${RoleIconMark} house=${house} uid=${u.id} />` : null}</span>
       <span class=${`person-sub trunc${live ? ' is-live' : ''}`} style="display:block">${live ? `In ${S.rooms[live].name}` : u.status || PRESENCE[u.presence].label}</span>
     </span>
     ${fav && html`<span class="person-fav" role="img" aria-label="Favourite"><${Icon} name="starred" size=${14} /></span>`}

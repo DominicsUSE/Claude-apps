@@ -27,14 +27,27 @@ const json = (s, f) => { try { return s == null ? f : JSON.parse(s); } catch { r
 export function sniff(buf) {
   if (!buf || buf.length < 4) return null;
   const s = (a, b) => buf.toString('latin1', a, b);
+  if (buf[0] === 0x89 && s(1, 4) === 'PNG') return 'image/png';
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
   if (s(0, 6) === 'GIF87a' || s(0, 6) === 'GIF89a') return 'image/gif';
   if (buf.length >= 12 && s(0, 4) === 'RIFF' && s(8, 12) === 'WEBP') return 'image/webp';
-  if (buf.length >= 12 && s(4, 8) === 'ftyp') return s(8, 11) === 'M4A' ? 'audio/mp4' : 'mp4';
+  if (buf.length >= 12 && s(4, 8) === 'ftyp') {
+    const brand = s(8, 12);
+    if (brand.startsWith('M4A') || brand.startsWith('M4B')) return 'audio/mp4';
+    if (brand === 'qt  ') return 'quicktime';
+    return 'mp4';
+  }
   if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return 'webm';
   if (s(0, 4) === 'OggS') return 'audio/ogg';
   if (s(0, 3) === 'ID3' || (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0)) return 'audio/mpeg';
   return null;
 }
+
+// Pictures, video and sound are only ever stored as what their bytes say they
+// are; anything claiming to be one but holding something else (an HTML page
+// named photo.png) is stored as application/octet-stream and only downloads.
+export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+export const VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime'];
 
 // The type an upload is stored with. Audio may arrive with codec parameters
 // ("audio/webm;codecs=opus"); it keeps its audio type only if the bytes agree.
@@ -42,19 +55,31 @@ export function uploadType(header, data) {
   const t = String(header || '').split(';')[0].trim().toLowerCase();
   if (!/^[\w.+-]+\/[\w.+-]+$/.test(t)) return 'application/octet-stream';
   const real = sniff(data);
-  if (t === 'video/mp4') return real === 'mp4' ? t : 'application/octet-stream';
-  if (!AUDIO_TYPES.includes(t)) return t;
-  const ok = (t === 'audio/webm' && real === 'webm')
-    || (t === 'audio/ogg' && real === 'audio/ogg')
-    || (t === 'audio/mp4' && (real === 'audio/mp4' || real === 'mp4'))
-    || (t === 'audio/mpeg' && real === 'audio/mpeg');
-  return ok ? t : 'application/octet-stream';
+  const octet = 'application/octet-stream';
+  if (t === 'image/jpg' || t === 'image/pjpeg') return real === 'image/jpeg' ? 'image/jpeg' : octet;
+  if (IMAGE_TYPES.includes(t)) return real === t ? t : octet;
+  if (t === 'video/mp4') return real === 'mp4' ? t : octet;
+  if (t === 'video/quicktime') return real === 'quicktime' || real === 'mp4' ? t : octet;
+  if (t === 'video/webm') return real === 'webm' ? t : octet;
+  if (AUDIO_TYPES.includes(t)) {
+    const ok = (t === 'audio/webm' && real === 'webm')
+      || (t === 'audio/ogg' && real === 'audio/ogg')
+      || (t === 'audio/mp4' && (real === 'audio/mp4' || real === 'mp4'))
+      || (t === 'audio/mpeg' && real === 'audio/mpeg');
+    return ok ? t : octet;
+  }
+  if (t === 'audio/mp3' || t === 'audio/x-m4a') return real === 'audio/mpeg' && t === 'audio/mp3' ? 'audio/mpeg' : (real === 'audio/mp4' || real === 'mp4') && t === 'audio/x-m4a' ? 'audio/mp4' : octet;
+  // SVG is kept as SVG (it downloads, never shows inline); any other picture,
+  // video or sound type Snug can't check is just bytes.
+  if (t === 'image/svg+xml') return t;
+  if (/^(image|video|audio)\//.test(t)) return octet;
+  return t;
 }
 
 export function fileKind(type, meta) {
   if (AUDIO_TYPES.includes(type)) return 'audio';
-  if (type === 'video/mp4' && meta?.gif) return 'video';
-  return type.startsWith('image/') ? 'image' : 'file';
+  if (VIDEO_TYPES.includes(type)) return 'video';
+  return IMAGE_TYPES.includes(type) ? 'image' : 'file';
 }
 const isGif = (row) => row.type === 'image/gif' || !!json(row.meta, {})?.gif;
 
@@ -76,8 +101,14 @@ export function decorateFile(out, row, f, fail) {
       out.peaks = f.peaks;
     }
   }
+  // A recorded voice message (VoiceButton) says so; any other sound file shows as a file with a player.
+  if (out.kind === 'audio' && f.voice === true) out.voice = true;
+  if (out.kind === 'video' && f.duration != null) {
+    if (typeof f.duration !== 'number' || !Number.isFinite(f.duration) || f.duration <= 0 || f.duration > 86400) fail('That video’s length isn’t valid.');
+    out.duration = Math.round(f.duration * 10) / 10;
+  }
   if (isGif(row)) out.gif = true;
-  if (out.kind === 'video' || (out.gif && out.kind === 'image')) {
+  if (out.kind === 'video' || out.kind === 'image') {
     const w = Number.isInteger(f.w) ? f.w : meta.w, h = Number.isInteger(f.h) ? f.h : meta.h;
     if (Number.isInteger(w) && Number.isInteger(h)) { out.w = Math.min(8000, Math.max(1, w)); out.h = Math.min(8000, Math.max(1, h)); }
   }
@@ -204,6 +235,7 @@ export function createMediaOps({ db, M, hub, fail, ops = {} }) {
         const row = db.get('SELECT * FROM files WHERE id = ?', file);
         if (!row || !readableFile(M, c.user, row)) fail('That GIF is no longer here.');
         if (!isGif(row)) fail('Only GIFs can be saved to your GIFs.');
+        if (json(row.meta, {})?.spoiler) fail('A GIF sent as a spoiler can’t be saved to your GIFs.');
         if (!db.get('SELECT 1 FROM gif_favs WHERE user = ? AND file = ?', c.user, file)) {
           if (db.get('SELECT COUNT(*) n FROM gif_favs WHERE user = ?', c.user).n >= MAX_GIF_FAVS) fail(`You can keep up to ${MAX_GIF_FAVS} GIFs. Remove one first.`);
           const dim = (v) => (Number.isInteger(v) && v > 0 && v <= 8000 ? v : null);
@@ -227,7 +259,7 @@ export function createMediaOps({ db, M, hub, fail, ops = {} }) {
           for (const f of json(r.files, [])) {
             const gif = f.gif || (f.kind === 'image' && /\.gif$/i.test(f.name || ''));
             const key = `${f.size}:${f.name}`;
-            if (!gif || !f.id || seen.has(key)) continue;
+            if (!gif || !f.id || f.spoiler || seen.has(key)) continue; // spoilers stay where they were sent
             seen.add(key);
             out.push({ id: f.id, name: f.name, size: f.size, w: f.w, h: f.h, kind: f.kind, by: r.author, conv: r.conv, ts: r.ts });
           }

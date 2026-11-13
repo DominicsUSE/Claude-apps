@@ -4,11 +4,14 @@
 // highlight words, @everyone). The server validates every change with
 // cleanPrefs before it stores it, so a settings blob from a modified client
 // can never hold anything this file does not describe.
+import { validThemeName, accentProblem, cleanTheme, MAX_THEMES } from './theme.js';
+import { cleanKeys } from './keys.js';
 
 // Settings that follow the person to every device (stored on the server).
 // [kind, choices or range, default]
 export const PREF_RULES = {
-  theme: ['enum', ['system', 'dark', 'light', 'midnight'], 'system'],
+  // A built-in theme (js/lib/theme.js THEMES) or "custom:<id>" of a saved one.
+  theme: ['fn', (v, fail) => (validThemeName(v) ? v : fail('That isn’t one of the choices for theme.')), 'system'],
   // The selection tone (selected text, the selected row's edge). Coral stays
   // the brand: it is the default. Cyan and neutral are offered; mint and rose
   // are still accepted from older Snugs and show as neutral (css/account.css).
@@ -25,7 +28,7 @@ export const PREF_RULES = {
   clock: ['enum', ['auto', '12', '24'], 'auto'],
   roleColors: ['bool', null, true],
   sidebarW: ['int', [200, 420], 264],
-  font: ['enum', ['inter', 'hyperlegible'], 'inter'],
+  font: ['enum', ['inter', 'system', 'hyperlegible', 'serif', 'mono'], 'inter'],
   underlineLinks: ['bool', null, false],
   focusAlways: ['bool', null, false],
   tts: ['bool', null, false],
@@ -40,7 +43,104 @@ export const PREF_RULES = {
   streamer: ['bool', null, false],
   favCalls: ['bool', null, false],
   autoIdle: ['enum', [0, 5, 10, 15, 30, 60], 10],
+  // --- Text and messages (js/views/emoji.js, js/views/stream.js) ---
+  skinTone: ['int', [0, 5], 0], // 0 default yellow, 1-5 light to dark
+  emojiUse: ['fn', cleanEmojiUse, {}], // emoji -> times used, for "Frequently used" (at most 40)
+  showIds: ['bool', null, false], // "Copy ID" on messages
+  textEmoticons: ['bool', null, false], // :) becomes 🙂 when sent
+  // --- end text and messages ---
+  // --- Customisation (js/lib/theme.js, js/lib/keys.js, js/views/appearance.js) ---
+  // Accent: a preset name or a hex colour that stays readable on every built-in theme.
+  accent: ['fn', (v, fail) => { const why = accentProblem(v); return why ? fail(why) : (v.startsWith('#') ? v.toUpperCase() : v); }, 'coral'],
+  // Up to 5 saved themes, each checked with deriveTheme (contrast rules) before it is kept.
+  customThemes: ['fn', cleanThemes, []],
+  codeFont: ['enum', ['mono', 'system-mono'], 'mono'],
+  showTimes: ['enum', ['always', 'hover'], 'always'],
+  jumboEmoji: ['bool', null, true],
+  emojiSize: ['enum', ['s', 'm', 'l'], 'm'],
+  showReactions: ['bool', null, true],
+  // auto: moves unless motion is reduced; always: moves even then; hover: on hover or focus.
+  gifAutoplay: ['enum', ['auto', 'always', 'hover', 'never'], 'auto'],
+  animatedEmoji: ['enum', ['auto', 'always', 'hover', 'never'], 'auto'],
+  spoilers: ['enum', ['click', 'always'], 'click'],
+  showNameStyles: ['bool', null, true],
+  chatBg: ['enum', ['plain', 'dots', 'grid', 'arches', 'grain'], 'plain'],
+  // Shortcuts you changed: action id -> combo ('' for none). Checked by js/lib/keys.js.
+  keys: ['fn', (v, fail) => { try { return cleanKeys(v); } catch (e) { return fail(e.message); } }, {}],
+  // A sound per kind of notification; null follows the older single `sound`.
+  sounds: ['fn', cleanSounds, null],
+  soundVolume: ['int', [0, 100], 80],
+  // --- end customisation ---
+  // --- Voice and calls (server/activities.js, js/views/voiceopts-settings.js) ---
+  // Who may ring you: enforced on the server where every ring and its push start.
+  whoCanRing: ['enum', ['everyone', 'friends', 'nobody'], 'everyone'],
+  // A "You're muted" note when you talk while muted.
+  mutedWarning: ['bool', null, true],
+  // --- end voice and calls ---
+  // --- Inbox and notifications (server/inbox.js, js/views/desktop-settings.js) ---
+  rolesOff: ['set', 300, {}], // houses whose @role mentions don't count as for you
+  showBadge: ['bool', null, true], // the unread count on the app icon (desktop app, installed web app)
+  // --- end inbox and notifications ---
 };
+// customThemes: [{ id, name, base, bg, surface, text, accent }], ids unique.
+function cleanThemes(v, fail) {
+  if (!Array.isArray(v)) fail('Themes are a list.');
+  if (v.length > MAX_THEMES) fail(`You can keep up to ${MAX_THEMES} themes.`);
+  const out = [];
+  for (const t of v) {
+    let c;
+    try { c = cleanTheme(t); } catch (e) { fail(e.message); }
+    if (out.some((x) => x.id === c.id)) fail('Two themes can’t share an id.');
+    out.push(c);
+  }
+  return out;
+}
+export const SOUND_NAMES = ['off', 'soft', 'bell', 'pop', 'drop', 'wood', 'glass', 'chime', 'tick'];
+export const SOUND_KINDS = ['message', 'mention', 'dm'];
+// Packs set all three at once (a pack is just a choice of three sounds).
+export const SOUND_PACKS = {
+  soft: { label: 'Snug soft', sounds: { message: 'soft', mention: 'chime', dm: 'pop' } },
+  bell: { label: 'Bell', sounds: { message: 'tick', mention: 'bell', dm: 'bell' } },
+  wood: { label: 'Wood', sounds: { message: 'tick', mention: 'wood', dm: 'wood' } },
+  glass: { label: 'Glass', sounds: { message: 'glass', mention: 'chime', dm: 'glass' } },
+  minimal: { label: 'Minimal', sounds: { message: 'off', mention: 'tick', dm: 'tick' } },
+};
+// Which kind of notification a message is: something for me (a mention, a
+// highlight word, a reply to me) wins; then a direct message; else a message
+// (a followed thread, say).
+export const soundKind = ({ dm = false, forMe = false } = {}) => (forMe ? 'mention' : dm ? 'dm' : 'message');
+// The sound for that kind: the per-kind choice, or the older single sound.
+export function soundFor(prefs, kind) {
+  const s = prefs?.sounds;
+  if (s && typeof s === 'object') return SOUND_NAMES.includes(s[kind]) ? s[kind] : 'soft';
+  return SOUND_NAMES.includes(prefs?.sound) ? prefs.sound : 'soft';
+}
+export const packOf = (sounds) => Object.keys(SOUND_PACKS).find((k) => SOUND_KINDS.every((x) => SOUND_PACKS[k].sounds[x] === sounds?.[x])) || null;
+function cleanSounds(v, fail) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) fail('Sounds aren’t valid.');
+  if (Object.keys(v).some((k) => !SOUND_KINDS.includes(k))) fail('Sounds aren’t valid.');
+  const out = {};
+  for (const k of SOUND_KINDS) {
+    const s = v[k] ?? 'soft';
+    if (!SOUND_NAMES.includes(s)) fail('That isn’t one of Snug’s sounds.');
+    out[k] = s;
+  }
+  return out;
+}
+// emojiUse: { '👋': 3, '<:party:em_…>': 1 }, at most 40 emoji, whole-number counts.
+function cleanEmojiUse(v, fail) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) fail('emojiUse isn’t valid.');
+  const keys = Object.keys(v);
+  if (keys.length > 40) fail('emojiUse can hold up to 40 emoji.');
+  const out = {};
+  for (const key of keys) {
+    const ok = /^<:[a-z0-9_]{2,32}:em_[a-z0-9]{8,40}>$/.test(key)
+      || (key.length <= 32 && /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|\u200d|\ufe0f|\u20e3|[#*0-9]|[\u{E0020}-\u{E007F}])+$/u.test(key));
+    if (!ok || !Number.isInteger(v[key]) || v[key] < 1 || v[key] > 1e6) fail('emojiUse has an entry that isn’t valid.');
+    out[key] = v[key];
+  }
+  return out;
+}
 export const PREF_DEFAULTS = Object.fromEntries(Object.entries(PREF_RULES).map(([k, r]) => [k, structuredClone(r[2])]));
 export const MAX_PREFS_BYTES = 16 * 1024;
 
@@ -80,6 +180,8 @@ export function cleanPrefs(patch, fail = (m) => { throw new Error(m); }) {
       // offset when it was saved, used if the zone is missing or unknown.
       if (v.zone !== undefined && !validZone(v.zone)) fail('Quiet hours need your time zone.');
       out[k] = { on: v.on, from: v.from, to: v.to, tz: v.tz, ...(v.zone !== undefined ? { zone: v.zone } : {}) };
+    } else if (kind === 'fn') {
+      out[k] = spec(v, fail); // the setting checks itself (emojiUse)
     } else if (kind === 'words') {
       if (!Array.isArray(v)) fail('Highlight words are a list.');
       const words = [];

@@ -137,16 +137,17 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
     // group set to "Only what needs me" (as needsMe says).
     const missed = !!row.sys && missedBy(row, user);
     if (row.sys && !missed) return false;
+    if (row.silent) return false; // a silent message (server/chat.js): unread, never pushed
     const u = M.userRow(user);
     if (!u || u.presence === 'focus') return false;
     const level = levelFor(user, w);
     if (level === 'muted') return false;
     if (missed) return true;
     const forMe = mentions(row.text, u.handle)
-      || (!!row.reply_to && db.get('SELECT author FROM messages WHERE id = ?', row.reply_to)?.author === user)
+      || (!!row.reply_to && row.reply_ping !== 0 && db.get('SELECT author FROM messages WHERE id = ?', row.reply_to)?.author === user)
       || !!M.forMeExtra?.(user, row, w); // role mentions (server/places.js), highlight words and @everyone (server/account.js)
     if (w.type === 'dm') {
-      const group = db.get('SELECT COUNT(*) n FROM dm_members WHERE dm = ?', w.dm).n > 2;
+      const group = M.isGroupDm ? M.isGroupDm(w.dm) : db.get('SELECT COUNT(*) n FROM dm_members WHERE dm = ?', w.dm).n > 2;
       if (!(group && level === 'mentions')) return true;
     }
     if (forMe) return true;
@@ -158,7 +159,7 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
   function missedBy(row, user) {
     let rec = null;
     try { rec = JSON.parse(row.sys); } catch { /* not a call */ }
-    return !!rec && row.author !== user && !rec.joined?.includes(user) && !rec.declined?.includes(user);
+    return !!rec && !!rec.outcome && row.author !== user && !rec.joined?.includes(user) && !rec.declined?.includes(user); // outcome: a call, not a join line (server/community.js)
   }
 
   function noteFor(user, conv, w, row) {
@@ -170,7 +171,7 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
       if (d?.name) return d.name;
       return db.all('SELECT u.name FROM dm_members m JOIN users u ON u.id = m.user WHERE m.dm = ? AND m.user != ? ORDER BY m.rowid', id, user).map((r) => r.name).join(', ');
     };
-    const isGroup = (id) => db.get('SELECT COUNT(*) n FROM dm_members WHERE dm = ?', id).n > 2;
+    const isGroup = (id) => (M.isGroupDm ? M.isGroupDm(id) : db.get('SELECT COUNT(*) n FROM dm_members WHERE dm = ?', id).n > 2);
     if (w.type === 'room') where = `in ${roomName(w.id)}`;
     else if (w.type === 'thread') where = `in a thread in ${w.dm ? dmTitle(w.dm) : roomName(w.parent)}`;
     else if (isGroup(w.dm)) where = `in ${dmTitle(w.dm)}`;
@@ -330,5 +331,22 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
     return true;
   }
 
-  return { http, onMessage, onRing, onRingStop, prune, publicKey: keys.publicKey, stats, reset: () => { rate.reset(); subsLimit.reset(); } };
+  // Anything else worth a note on a closed device: event reminders
+  // (server/community.js, which already left out muted houses, Focused and quiet hours).
+  function onNote(user, note) {
+    if (hub.connected(user)) return Promise.resolve();
+    const subs = db.all('SELECT p.* FROM push_subs p JOIN sessions s ON s.hash = p.session AND s.expires > ? WHERE p.user = ?', Date.now(), user);
+    if (!subs.length || !rate.take(user)) return Promise.resolve();
+    return Promise.all(subs.map((s) => deliver(s, note)));
+  }
+
+  // For the tests (tests/server-shell.test.js): would this stored message be
+  // pushed to this person, by the rules above? An expired timed mute or
+  // presence reads as unset (M.notifyOf, M.userRow in server/inbox.js).
+  const wouldPush = (user, msgId) => {
+    const row = M.msg(msgId);
+    const w = row && M.where(row.conv);
+    return !!w && needs(user, row.conv, w, row);
+  };
+  return { http, onMessage, onRing, onRingStop, onNote, prune, publicKey: keys.publicKey, stats, wouldPush, reset: () => { rate.reset(); subsLimit.reset(); } };
 }
