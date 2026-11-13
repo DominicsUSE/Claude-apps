@@ -135,7 +135,7 @@ export function PinLine({ conv, pin }) {
     if ((S.msgs[conv] || []).some((m) => m.id === pin.id)) { S.ui.jump = { conv, id: pin.id, n: (S.ui.jump?.n || 0) + 1 }; emit(); } else jumpToMsg(conv, pin.id);
   };
   return html`<div class="pinline" role="note">
-    <${Icon} name="pin" size=${14} />
+    <span class="pinline-ic" aria-hidden="true"><${Icon} name="pin" size=${16} /></span>
     <span><b>${who}</b> pinned <button class="pinline-link" onClick=${open}>a message</button></span>
     <span class="pinline-time">${fmtWhen(pin.at)}</span>
   </div>`;

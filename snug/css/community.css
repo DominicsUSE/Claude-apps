@@ -13,7 +13,7 @@
 }
 
 /* ---------- Banners ---------- */
-.ctx-banner { height: 72px; flex: none; overflow: hidden; background: var(--bg-3); border-bottom: 1px solid var(--line); }
+.ctx-banner { height: 72px; flex: none; overflow: hidden; background: var(--surface-hover); border-bottom: 1px solid var(--line-subtle); }
 .ctx-banner img, .d-banner img, .cm-pic-preview img, .ev-cover img, .ev-cover-edit img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .d-banner { overflow: hidden; background: var(--bg-3); }
 .d-feature-banner { height: 96px; border-radius: var(--r-lg) var(--r-lg) 0 0; margin-bottom: var(--s-3); grid-column: 1 / -1; }
@@ -39,24 +39,29 @@
 .sect .sect-more { opacity: 0; }
 .sect:hover .sect-more, .sect:focus-within .sect-more, .sect-more[aria-expanded="true"] { opacity: 1; }
 .sect[draggable="true"] { cursor: grab; }
-.room-dnd { border-radius: var(--r-sm); }
+.room-dnd { border-radius: var(--r-row); }
 .room-dnd[draggable="true"] { cursor: grab; }
 .room-dnd:active, .sect[draggable="true"]:active { cursor: grabbing; }
 .drop-before { box-shadow: inset 0 2px 0 var(--cyan); }
-.drop-into { outline: 2px dashed var(--cyan); outline-offset: -2px; border-radius: var(--r-sm); }
-.group-empty { margin: 0 var(--s-2) var(--s-1); padding: var(--s-2); border: 1px dashed var(--line-strong); border-radius: var(--r-sm); font-size: var(--t-12); }
+.drop-into { outline: 2px dashed var(--cyan); outline-offset: -2px; border-radius: var(--r-row); }
+.group-empty { margin: 0 var(--s-2) var(--s-1); padding: var(--s-1) var(--s-2); border: 1px dashed var(--line); border-radius: var(--r-row); font-size: var(--t-meta); }
 @media (hover: none) { .sect .sect-more { opacity: 1; } }
 
 /* ---------- A newcomer arrives ---------- */
 .joinline {
-  display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap;
-  margin: var(--s-1) 0; padding: var(--s-1) var(--s-4) var(--s-1) calc(var(--avatar) + var(--s-4) - 20px);
-  font-size: var(--t-14); color: var(--text-2);
-}
-.joinline-ic { color: var(--mint); display: inline-flex; }
-.joinline-text b { color: var(--text-1); font-weight: var(--w-medium); }
-.joinline-time { font-size: var(--t-12); color: var(--text-3); }
+  display: flex; align-items: center; column-gap: var(--s-2); row-gap: 2px; flex-wrap: wrap;
+  min-height: 28px; margin-top: var(--s-2); padding: 2px var(--s-4);
+  font-size: var(--t-body); color: var(--text-2); line-height: var(--lh-ui);
+  transition: background var(--m-hover) var(--ease-in-out);
+} /* the system-line pattern: see .callline in css/calls.css */
+.joinline:hover { background: var(--surface-chat-hover); --bg: var(--surface-chat-hover); }
+.joinline-ic { color: var(--mint); display: inline-flex; justify-content: center; width: var(--avatar); margin-right: var(--s-2); flex: none; }
+.joinline-text { min-width: 0; }
+.joinline-text b { color: var(--text-1); font-weight: var(--w-semibold); }
+.joinline-time { font-size: var(--t-meta); color: var(--text-3); }
 .joinline-hi { margin-left: var(--s-1); }
+.joinline + .msg { margin-top: var(--s-2); }
+@media (max-width: 759px) { .joinline { padding: 2px var(--s-3); } .joinline-ic { margin-right: var(--s-1); } }
 
 /* ---------- The newcomer wait ---------- */
 .waitnote {
@@ -83,11 +88,12 @@
 .ev-cover-edit label.btn:focus-within { outline: var(--focus-w) solid var(--focus); outline-offset: 2px; }
 
 /* ---------- Settings: pictures ---------- */
-.cm-pic { display: grid; gap: var(--s-2); justify-items: start; }
+.cm-pic { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3); }
+.cm-pic > .err { flex-basis: 100%; }
 .cm-pic-preview { display: grid; place-items: center; }
-.cm-pic-banner .cm-pic-preview, .cm-pic-splash .cm-pic-preview { width: 280px; max-width: 100%; height: 96px; overflow: hidden; border-radius: var(--r-md); background: var(--bg-3); border: 1px solid var(--line); }
-.cm-pic-empty { color: var(--text-3); font-size: var(--t-12); }
-.cm-pic-acts { display: flex; gap: var(--s-2); }
+.cm-pic-banner .cm-pic-preview, .cm-pic-splash .cm-pic-preview { flex: 0 1 auto; width: 280px; max-width: 100%; height: 96px; overflow: hidden; border-radius: var(--r-media); background: var(--bg-3); }
+.cm-pic-empty { color: var(--text-3); font-size: var(--t-ui); }
+.cm-pic-acts { display: flex; align-items: center; gap: var(--s-2); }
 
 /* ---------- Settings: the house's own link ---------- */
 .cm-vanity { display: grid; gap: var(--s-1); max-width: 420px; }
@@ -106,8 +112,8 @@
 /* ---------- Settings: verification, pause, spam rules ---------- */
 .cm-radios { display: grid; gap: var(--s-2); max-width: 420px; }
 .cm-radio { display: flex; gap: var(--s-2); align-items: flex-start; padding: var(--s-2) var(--s-3); border: 1px solid var(--line); border-radius: var(--r-sm); cursor: pointer; }
-.cm-radio:hover { background: var(--bg-3); }
-.cm-radio.on { border-color: var(--text-2); background: var(--bg-3); }
+.cm-radio:hover { background: var(--surface-hover); }
+.cm-radio.on { border-color: var(--text-2); background: var(--surface-sel); }
 .cm-radio input { accent-color: var(--text-1); }
 .cm-radio:focus-within { outline: var(--focus-w) solid var(--focus); outline-offset: 2px; }
 .cm-radio > span { display: grid; gap: 2px; }

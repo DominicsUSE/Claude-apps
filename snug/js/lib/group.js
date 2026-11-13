@@ -2,7 +2,8 @@
 // dividers, the "New" line, and messages flagged as grouped under the one above.
 import { sameDay, MIN } from './util.js';
 
-export const GROUP_WINDOW = 5 * MIN;
+// A run breaks after seven quiet minutes, another author, a reply or a system line.
+export const GROUP_WINDOW = 7 * MIN;
 
 export function buildItems(list, { marker = null, me = null } = {}) {
   const items = [];
@@ -19,7 +20,7 @@ export function buildItems(list, { marker = null, me = null } = {}) {
       marked = true;
       broke = true;
     }
-    const grouped = !broke && prev && prev.author === m.author && !m.replyTo && !m.sys && !prev.sys && !m.call && !prev.call && !m.join && !prev.join // join lines (server/community.js)
+    const grouped = !broke && prev && prev.author === m.author && !m.replyTo && !m.sys && !prev.sys && !m.call && !prev.call && !m.join && !prev.join && !m.dmLine && !prev.dmLine // join lines (server/community.js), group changes (server/dms.js)
       && m.ts - prev.ts < GROUP_WINDOW;
     items.push({ type: 'msg', m, grouped: !!grouped, key: m.id });
     prev = m;

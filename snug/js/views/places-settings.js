@@ -79,7 +79,7 @@ export function PlacesRoles({ house }) {
         <button class="row" onClick=${() => addRole(house).then((rid) => rid && setSel(rid))}><span class="row-ic"><${Icon} name="plus" size=${16} /></span><span class="grow">New role</span></button>
       </div>
       <div>
-        <${Row} label="Name"><input class="field" style="width:200px" key=${role.id} value=${role.name} maxlength="24" aria-label="Role name" onChange=${(e) => e.target.value.trim() && updateRole(house, role.id, { name: e.target.value.trim() })} /><//>
+        <${Row} label="Name"><input class="field set-field narrow" key=${role.id} value=${role.name} maxlength="24" aria-label="Role name" onChange=${(e) => e.target.value.trim() && updateRole(house, role.id, { name: e.target.value.trim() })} /><//>
         <${Row} label="Name colour" hint="People with this role show their name in it, unless a higher role has a colour too." top>
           <div class="swatches" role="group" aria-label="Role colour">
             <button class="swatch" style="--hue:0;--tile-c:0" aria-pressed=${String(role.hue == null)} aria-label="No colour" onClick=${() => updateRole(house, role.id, { hue: null })}></button>
@@ -189,6 +189,8 @@ export function WelcomePage({ house, embedded }) {
   const [error, setError] = useState('');
   const safe = h.roles.slice(1).filter((r) => !r.perms.some((p) => MANAGING.includes(p)));
   const upd = (i, patch) => setList(list.map((x, j) => (i === j ? { ...x, ...patch } : x)));
+  const norm = (l) => JSON.stringify(l.filter((x) => x.label.trim()).map((x) => [x.id || null, x.label.trim(), x.emoji || '', x.roles]));
+  const dirty = welcome.trim() !== (h.welcome || '').trim() || norm(list) !== norm(h.interests || []);
   const save = () => call('onboard.set', { house, welcome: welcome.trim(), interests: list.filter((x) => x.label.trim()).map((x) => ({ ...(x.id ? { id: x.id } : {}), label: x.label.trim(), ...(x.emoji ? { emoji: x.emoji } : {}), roles: x.roles })) })
     .then(() => { setError(''); toast('Welcome saved.'); }, (e) => setError(e.message));
   return html`
@@ -208,7 +210,11 @@ export function WelcomePage({ house, embedded }) {
     </div>`)}
     <button class="btn" disabled=${list.length >= L.interests} onClick=${() => setList([...list, { label: '', roles: [] }])}><${Icon} name="plus" size=${16} />Add an interest</button>
     ${error && html`<p class="err" role="alert"><${Icon} name="alert" size=${14} />${error}</p>`}
-    <div style="margin-top:24px"><button class="btn primary" onClick=${save}>Save welcome</button></div>`;
+    <div class=${`set-savebar${dirty ? ' dirty' : ''}`} role="region" aria-label="Save the welcome">
+      <span class="set-savebar-note" aria-live="polite">${dirty ? 'You have changes that aren’t saved yet.' : 'The welcome is up to date.'}</span>
+      ${dirty && html`<button class="btn quiet" onClick=${() => { setWelcome(h.welcome || ''); setList((h.interests || []).map((i) => ({ ...i, roles: [...i.roles] }))); }}>Undo changes</button>`}
+      <button class="btn primary" onClick=${save}>Save welcome</button>
+    </div>`;
 }
 
 // ---------- Insights (owners) ----------

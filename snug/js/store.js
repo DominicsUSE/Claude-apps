@@ -295,6 +295,9 @@ function leave() {
 export function go(view) {
   leave();
   S.ui.view = view;
+  // On a phone Home is a tab, never a screen pushed on top with a Back arrow.
+  // A thread, the people sheet and the drawer belonged to the place left behind.
+  if (S.ui.phone && view.type === 'home') { S.ui.tab = 'home'; S.ui.depth = 0; S.ui.pane = null; S.ui.drawer = null; remember(view); emit(); return; }
   S.ui.depth = 1;
   if (S.ui.pane?.type === 'thread') S.ui.pane = null;
   remember(view);

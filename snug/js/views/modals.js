@@ -17,7 +17,7 @@ export function Confirm({ title, text, action, danger, onConfirm }) {
     <p class="modal-lead">${text}</p>
     <div class="modal-foot">
       <button class="btn" data-autofocus onClick=${closeModal}>Cancel</button>
-      <button class=${`btn ${danger ? 'danger' : 'primary'}`} onClick=${() => { closeModal(); onConfirm(); }}>${action}</button>
+      <button class=${`btn ${danger ? 'danger solid' : 'primary'}`} onClick=${() => { closeModal(); onConfirm(); }}>${action}</button>
     </div>`;
 }
 

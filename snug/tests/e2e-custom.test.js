@@ -204,7 +204,7 @@ test('accent: a custom colour with a contrast badge; another browser on the same
   const primary = b.locator('.ap-preview .btn.primary');
   assert.equal(await css(primary, 'backgroundColor'), rgb(want), 'the second browser shows the new accent on primary buttons');
   // Violet stays the brand for what needs you.
-  assert.equal(await rootVar(b, '--brand'), base === 'dark' ? '#996FF7' : '#763FF4');
+  assert.equal(await rootVar(b, '--brand'), base === 'dark' ? '#8656F0' : '#763FF4');
   await b.click('.ap-accent[data-accent="violet"]');
   await syncedPrefs('robin', (p) => !p.accent || p.accent === 'violet');
   await b.waitForFunction(() => !document.documentElement.hasAttribute('data-accent'));
@@ -218,7 +218,7 @@ test('accent: a custom colour with a contrast badge; another browser on the same
   await c.reload();
   await c.waitForFunction(() => window.snug?.S?.prefs?.accent === 'violet' && window.snug.S.prefs.tone === 'violet');
   assert.equal(await c.evaluate(() => ['data-accent', 'data-tone'].some((n) => document.documentElement.hasAttribute(n))), false);
-  assert.equal(await rootVar(c, '--accent'), base === 'dark' ? '#996FF7' : '#763FF4', 'the brand tokens paint the controls');
+  assert.equal(await rootVar(c, '--accent'), base === 'dark' ? '#8656F0' : '#763FF4', 'the brand tokens paint the controls');
   await settings(c, 'Appearance');
   assert.equal(await c.locator('.ap-accent[data-accent="violet"]').getAttribute('aria-checked'), 'true');
   await closeLayer(c);
@@ -346,7 +346,7 @@ test('chat display: big emoji, times on hover, reactions, GIFs still until hover
   await say(ines, 'Display check 3');
   const jumbo = ines.locator('.main .msg-text.jumbo').last();
   await jumbo.waitFor();
-  assert.equal(await css(jumbo, 'fontSize'), '16px', 'big emoji off: normal size');
+  assert.equal(await css(jumbo, 'fontSize'), '15px', 'big emoji off: normal message size (15px, --t-msg in Regular density)');
   const head = msg(ines, 'Display check 3').locator('.msg-time');
   assert.equal(await css(head, 'visibility'), 'hidden', 'times wait for hover');
   await msg(ines, 'Display check 3').hover();
@@ -365,7 +365,7 @@ test('chat display: big emoji, times on hover, reactions, GIFs still until hover
   await ines2.waitForFunction(() => document.documentElement.getAttribute('data-font') === 'serif');
   await go(ines2, 'Glaze lab');
   assert.match(await css(msg(ines2, 'Display check 3').locator('.msg-text'), 'fontFamily'), /Georgia|Palatino|Iowan/);
-  assert.equal(await css(ines2.locator('.main .msg-text.jumbo').last(), 'fontSize'), '16px');
+  assert.equal(await css(ines2.locator('.main .msg-text.jumbo').last(), 'fontSize'), '15px');
   await setPrefs(ines2, { jumboEmoji: true, showTimes: 'always', showReactions: true, gifAutoplay: 'auto', chatBg: 'plain', font: 'inter' });
   await syncedPrefs('ines', (p) => !p.font && !p.chatBg);
   await close(robin); await close(ines); await close(ines2);

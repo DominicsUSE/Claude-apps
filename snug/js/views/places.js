@@ -217,7 +217,7 @@ export function RailHouses({ sp, RailItem, houseMenu, openSpace, houseAttention 
         <${RailItem} label=${`${label} folder, ${plural(it.houses.length, 'house')}, ${it.open ? 'open' : 'closed'}`} cls=${`rail-folder${it.hue != null ? ' hued' : ''}`}
           attn=${it.open ? { needs: 0 } : { needs, soft }} onClick=${toggle} onMenu=${(pos) => folderMenu(it, pos)}>
           ${it.open
-            ? html`<${Icon} name="folder" size=${22} />`
+            ? html`<${Icon} name="folder" size=${20} />`
             : html`<span class="folder-minis">${it.houses.slice(0, 4).map((h) => html`<${Tile} key=${h} house=${S.houses[h]} />`)}</span>`}
         <//>
       </div>

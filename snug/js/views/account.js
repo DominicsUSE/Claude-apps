@@ -529,7 +529,7 @@ export function ProfileMore() {
     <${ProfileStyle} Row=${Row} />
     <div class="set-head">More about you</div>
     <${Row} label="Pronouns" hint="Shown next to your name on your profile.">
-      <input class="field" style="width:260px" maxlength="40" placeholder="they/them" aria-label="Pronouns" value=${u.pronouns || ''} onChange=${(e) => updateMe({ pronouns: e.target.value.trim() })} />
+      <input class="field set-field" maxlength="40" placeholder="they/them" aria-label="Pronouns" value=${u.pronouns || ''} onChange=${(e) => updateMe({ pronouns: e.target.value.trim() })} />
     <//>
     <${Row} label="Accent" hint="The colour across the top of your profile when there’s no banner and no profile colours (above). Every choice stays readable in every theme." top>
       <div class="swatches" role="radiogroup" aria-label="Profile accent">
@@ -641,18 +641,18 @@ export const ACCOUNT_ACTIONS = [
   } },
   { label: 'Mark this place read', icon: 'check', words: 'mark read seen clear unread', run: () => (here() ? markConvRead(here()) : toast('Open a room or conversation first.')) },
   { label: 'Mark everything read', icon: 'tray', words: 'mark all read everything clear', run: () => markAllRead() },
-  { label: 'Switch to midnight theme', icon: 'eye', words: 'midnight black oled theme dark', run: () => setLook('theme', 'midnight') },
-  { label: 'Match the device’s theme', icon: 'eye', words: 'system device auto theme', run: () => setLook('theme', 'system') },
-  { label: 'Toggle theme', icon: 'eye', words: 'toggle theme switch dark light', run: () => setLook('theme', (S.prefs.theme === 'light' || (S.prefs.theme === 'system' && !matchMedia('(prefers-color-scheme: dark)').matches)) ? 'dark' : 'light') },
+  { label: 'Switch to midnight theme', icon: 'palette', words: 'midnight black oled theme dark', run: () => setLook('theme', 'midnight') },
+  { label: 'Match the device’s theme', icon: 'palette', words: 'system device auto theme', run: () => setLook('theme', 'system') },
+  { label: 'Toggle theme', icon: 'palette', words: 'toggle theme switch dark light', run: () => setLook('theme', (S.prefs.theme === 'light' || (S.prefs.theme === 'system' && !matchMedia('(prefers-color-scheme: dark)').matches)) ? 'dark' : 'light') },
   { label: 'Set presence to Around', icon: 'user', words: 'around available online present', run: () => setPresence('around') },
   { label: 'Set presence to Away', icon: 'clock', words: 'away idle afk', run: () => setPresence('away') },
-  { label: 'Go invisible', icon: 'eye', words: 'invisible offline hide appear offline', run: () => setPresence('offline') },
+  { label: 'Go invisible', icon: 'spoiler', words: 'invisible offline hide appear offline', run: () => setPresence('offline') },
   { label: 'Set a status', icon: 'smile', words: 'status custom emoji mood', run: openCustomStatus },
   { label: 'Clear your status', icon: 'x', words: 'clear status remove', run: () => call('status.set', { text: '', emoji: null, clear: 'never' }).catch((e) => toast(e.message)) },
   { label: 'Streamer mode on or off', icon: 'screen', words: 'streamer stream hide private screen share', run: toggleStreamer },
   { label: 'Keyboard shortcuts', icon: 'keys', words: 'keyboard shortcuts keys hotkeys help', run: openShortcuts },
-  { label: 'Appearance settings', icon: 'eye', words: 'appearance theme font size zoom compact density', run: () => SettingsC && openLayer({ C: SettingsC, props: { page: 'look' } }) },
-  { label: 'Accessibility settings', icon: 'eye', words: 'accessibility dyslexia font contrast focus speech read aloud', run: () => SettingsC && openLayer({ C: SettingsC, props: { page: 'a11y' } }) },
+  { label: 'Appearance settings', icon: 'palette', words: 'appearance theme font size zoom compact density', run: () => SettingsC && openLayer({ C: SettingsC, props: { page: 'look' } }) },
+  { label: 'Accessibility settings', icon: 'access', words: 'accessibility dyslexia font contrast focus speech read aloud', run: () => SettingsC && openLayer({ C: SettingsC, props: { page: 'a11y' } }) },
   { label: 'Security settings', icon: 'shield', words: 'security password two factor 2fa devices sessions', run: () => SettingsC && openLayer({ C: SettingsC, props: { page: 'account' } }) },
 ];
 
@@ -660,7 +660,7 @@ export const ACCOUNT_ACTIONS = [
 
 export function SidebarGrip() {
   const [drag, setDrag] = useState(null);
-  const w = S.prefs.sidebarW || 264;
+  const w = S.prefs.sidebarW || 240;
   const clamp = (v) => Math.max(200, Math.min(420, Math.round(v / 4) * 4));
   const down = (e) => {
     e.preventDefault();
@@ -681,11 +681,11 @@ export function SidebarGrip() {
     const step = e.shiftKey ? 32 : 8;
     if (e.key === 'ArrowLeft') { e.preventDefault(); setLook('sidebarW', clamp(w - step)); }
     if (e.key === 'ArrowRight') { e.preventDefault(); setLook('sidebarW', clamp(w + step)); }
-    if (e.key === 'Home') { e.preventDefault(); setLook('sidebarW', 264); }
+    if (e.key === 'Home') { e.preventDefault(); setLook('sidebarW', 240); }
   };
   return html`<div class=${`ctx-grip${drag ? ' dragging' : ''}`} role="separator" aria-orientation="vertical" aria-label="Sidebar width"
     aria-valuemin="200" aria-valuemax="420" aria-valuenow=${w} tabindex="0" data-tip="Drag to resize"
-    onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} onKeyDown=${key} onDblClick=${() => setLook('sidebarW', 264)}></div>`;
+    onPointerDown=${down} onPointerMove=${move} onPointerUp=${up} onPointerCancel=${up} onKeyDown=${key} onDblClick=${() => setLook('sidebarW', 240)}></div>`;
 }
 
 // ---------- Registration (called once by js/views/settings.js) ----------
@@ -701,8 +701,8 @@ export function registerAccountPages({ PAGES, VIEWS, Row: R, signOut, Settings }
   const look = PAGES[at('look')];
   if (look) look.words = `${look.words} midnight black oled tone accent zoom font scale line height saturation 24 hour clock role colours sidebar width compact cozy ash slate moss paper sepia custom theme builder import export preview emoji gif reactions spoilers serif mono code font background pattern device`;
   PAGES.splice(at('look') + 1, 0,
-    { id: 'a11y', label: 'Accessibility', icon: 'eye', words: 'accessibility dyslexia dyslexic font hyperlegible underline links contrast focus ring motion speech read aloud tts screen reader keyboard' },
-    { id: 'streamer', label: 'Streamer mode', icon: 'screen', words: 'streamer stream hide handles invite codes privacy screen share' });
+    { id: 'a11y', label: 'Accessibility', icon: 'access', words: 'accessibility dyslexia dyslexic font hyperlegible underline links contrast focus ring motion speech read aloud tts screen reader keyboard' },
+    { id: 'streamer', label: 'Streamer mode', icon: 'spoiler', words: 'streamer stream hide handles invite codes privacy screen share' });
   VIEWS.a11y = A11yPage;
   VIEWS.streamer = StreamerPage;
   // Notifications: the original page, then sounds, previews, quiet hours, words and each house.

@@ -3,8 +3,7 @@
    Mint means live: the recording dot and level meter. Violet stays on Send. */
 
 /* Voice message: one compact row. Played bars take the text colour. */
-.voice { height: var(--h-lg); display: inline-flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-2) 0 6px; max-width: min(100%, 380px); width: 380px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-md); }
-.msg:hover .voice, .msg:focus-within .voice { background: var(--bg-1); }
+.voice { height: var(--h-lg); display: inline-flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-2) 0 6px; max-width: min(100%, 380px); width: 380px; background: var(--surface-2); border: 1px solid var(--line-subtle); border-radius: var(--r-lg); }
 .voice-play { flex: none; width: var(--h-sm); height: var(--h-sm); border-radius: var(--r-sm); display: grid; place-items: center; background: var(--btn2); color: var(--text-1); transition: background var(--m-fast) var(--ease-in-out); }
 .voice-play:hover { background: var(--btn2-hover); }
 .voice-play:active { background: var(--btn2-press); }
@@ -21,7 +20,7 @@
 /* Recording: the bar covers the composer row while it is on. */
 .composer-row { position: relative; }
 .ib.mic { touch-action: none; user-select: none; -webkit-user-select: none; }
-.rec { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; gap: var(--s-2); padding: var(--s-1); background: var(--bg-2); border-radius: var(--r-md); }
+.rec { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; gap: var(--s-2); padding: var(--s-1); background: var(--surface-2); border-radius: var(--r-input); }
 .rec-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--mint); animation: rec-blink 1.6s var(--ease-in-out) infinite; }
 .rec.starting .rec-dot, .rec.sending .rec-dot { background: var(--text-3); animation: none; }
 @keyframes rec-blink { 50% { opacity: 0.35; } }
@@ -44,17 +43,21 @@
 
 /* Pins: a mark on the message, a line in the stream, a list in the pane. */
 .msg-pin { display: flex; align-items: center; gap: 4px; font-size: var(--t-12); color: var(--text-3); line-height: var(--lh-ui); margin: 1px 0 2px; }
-.pinline { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-1) var(--s-4); padding-left: calc(var(--s-4) + var(--avatar) + var(--s-3)); margin-top: var(--s-2); font-size: var(--t-13); color: var(--text-2); }
-.pinline .ic { color: var(--text-3); margin-left: calc(-1 * (14px + var(--s-2))); }
+.pinline { display: flex; align-items: center; flex-wrap: wrap; column-gap: var(--s-2); min-height: 28px; padding: 2px var(--s-4); margin-top: var(--s-2); font-size: var(--t-body); line-height: var(--lh-ui); color: var(--text-2); transition: background var(--m-hover) var(--ease-in-out); } /* the system-line pattern: see .callline */
+.pinline:hover { background: var(--surface-chat-hover); }
+.pinline-ic { display: inline-flex; justify-content: center; width: var(--avatar); margin-right: var(--s-2); flex: none; color: var(--text-3); }
 .pinline b { font-weight: var(--w-semibold); color: var(--text-1); }
-.pinline-link { color: var(--link); text-decoration: underline; text-underline-offset: 3px; border-radius: var(--r-xs); }
-.pinline-time { font-size: var(--t-12); color: var(--text-3); }
+.pinline-link { color: var(--text-1); font-weight: var(--w-semibold); border-radius: var(--r-row); }
+.pinline-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.pinline-time { font-size: var(--t-meta); color: var(--text-3); }
+.pinline + .msg { margin-top: var(--s-2); }
+@media (max-width: 759px) { .pinline { padding: 2px var(--s-3); } .pinline-ic { margin-right: var(--s-1); } }
 .ib.pins-btn { width: auto; display: inline-flex; align-items: center; padding: 0 var(--s-2); gap: 4px; }
 .ib.pins-btn .num { font-size: var(--t-13); font-weight: var(--w-semibold); font-variant-numeric: tabular-nums; }
 .pins-count { font-size: var(--t-12); font-weight: var(--w-semibold); color: var(--text-3); margin: 0 0 var(--s-2); }
 .pins-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .pin-row { display: flex; align-items: flex-start; gap: var(--s-1); margin: 0 calc(var(--s-2) * -1); border-radius: var(--r-sm); transition: background var(--m-fast) var(--ease-in-out); }
-.pin-row:hover, .pin-row:focus-within { background: var(--bg-3); }
+.pin-row:hover, .pin-row:focus-within { background: var(--surface-hover); }
 .pin-open { flex: 1; min-width: 0; display: grid; gap: 4px; padding: var(--s-2); text-align: left; border-radius: var(--r-sm); }
 .pin-head { display: flex; align-items: center; gap: var(--s-2); min-width: 0; }
 .pin-head b { font-weight: var(--w-medium); }
@@ -64,7 +67,7 @@
 .pins-empty p { margin: 0 0 var(--s-1); }
 
 /* GIFs in messages: media with a small tag, a star to keep it, and play when paused. */
-.gif { position: relative; max-width: min(100%, 320px); border-radius: var(--r-md); overflow: hidden; background: var(--bg-3); }
+.gif { position: relative; max-width: min(100%, 320px); border-radius: var(--r-lg); overflow: hidden; background: var(--bg-3); }
 .gif-open { display: block; width: 100%; height: 100%; cursor: zoom-in; }
 .gif-open img, .gif-open video, .gif-open canvas { display: block; width: 100%; height: 100%; object-fit: cover; }
 .gif-tag { position: absolute; left: var(--s-2); bottom: var(--s-2); padding: 0 4px; border-radius: var(--r-xs); background: color-mix(in srgb, var(--bg-0) 80%, transparent); color: var(--text-1); font-size: var(--t-11); font-weight: var(--w-bold); letter-spacing: 0.04em; line-height: 16px; pointer-events: none; }

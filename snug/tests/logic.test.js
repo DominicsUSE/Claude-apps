@@ -39,7 +39,7 @@ test('jumbo emoji and plain previews', () => {
   assert.equal(mentions('hey @robinson', 'robin'), false);
 });
 
-test('grouping: same author within five minutes groups; days, replies and the new line break it', () => {
+test('grouping: same author within seven minutes groups; days, replies and the new line break it', () => {
   const t0 = new Date(2026, 10, 11, 23, 58).getTime();
   const list = [
     { id: 'a', author: 'x', ts: t0, text: '1' },
@@ -52,6 +52,14 @@ test('grouping: same author within five minutes groups; days, replies and the ne
   const items = buildItems(list, { marker: t0 + 16 * MIN, me: 'x' });
   const shape = items.map((i) => (i.type === 'msg' ? `${i.m.id}${i.grouped ? '+' : ''}` : i.type));
   assert.deepEqual(shape, ['day', 'a', 'b+', 'day', 'c', 'd', 'e', 'new', 'f']);
+  // The window: six minutes apart still groups, seven does not.
+  const t1 = new Date(2026, 10, 12, 10, 0).getTime();
+  const gap = buildItems([
+    { id: 'p', author: 'x', ts: t1, text: '1' },
+    { id: 'q', author: 'x', ts: t1 + 6 * MIN, text: '2' },
+    { id: 'r', author: 'x', ts: t1 + 13 * MIN, text: '3' },
+  ]).map((i) => (i.type === 'msg' ? `${i.m.id}${i.grouped ? '+' : ''}` : i.type));
+  assert.deepEqual(gap, ['day', 'p', 'q+', 'r']);
 });
 
 test('the new line never sits above your own message', () => {

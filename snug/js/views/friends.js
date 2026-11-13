@@ -4,12 +4,14 @@
 import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { S, go, back, startDm, openConv, acceptFriend, declineFriend, removeFriend, emit as emitNow } from '../store.js';
 import { call } from '../server.js';
+import { startCall, leavingCall } from '../calls.js';
+import { joinVoice } from '../voice.js';
 import { friendsOnline, friendsList, friendRequests, isFriend } from '../lib/social.js';
 import { plural, fold } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Empty } from '../ui/kit.js';
 import { toast } from '../store.js';
-import { Doing, doingOf, FavButton, SharedTiles, friendMenu, openPerson, lastActive, ago } from './people.js';
+import { Doing, doingOf, SharedTiles, friendMenu, openPerson, lastActive, ago } from './people.js';
 import { PeopleYouMightKnow } from './discover.js';
 
 const Back = () => S.ui.phone && S.ui.depth > 0 && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
@@ -44,7 +46,7 @@ function Row({ id, first, kind = 'friend', children }) {
   return html`<li class=${`f-row${u.presence === 'offline' ? ' is-off' : ''}`} data-id=${id} tabindex=${first ? '0' : '-1'} aria-label=${`${u.name}, ${d.text}${f?.favorite ? ', favourite' : ''}`}
       onClick=${(e) => { if (!e.target.closest('button')) openPerson(id); }}
       onFocus=${(e) => { if (e.target === e.currentTarget) e.currentTarget.closest('.f-list')?.querySelectorAll('.f-row').forEach((r) => r.setAttribute('tabindex', r === e.currentTarget ? '0' : '-1')); }}>
-      <${Avatar} user=${u} presence speaking=${!!S.speaking[id]} />
+      <${Avatar} user=${u} presence speaking=${!!S.speaking[id]} dim=${u.presence === 'offline'} />
       <span class="f-text">
         <span class="f-name"><span class="trunc">${u.name}</span>${f?.favorite && kind === 'friend' && html`<span class="f-star" aria-hidden="true"><${Icon} name="starred" size=${12} /></span>`}<span class="f-handle trunc">@${u.handle}</span></span>
         ${kind === 'friend' && html`<span class="f-sub"><${Doing} u=${u} /></span>`}
@@ -55,14 +57,22 @@ function Row({ id, first, kind = 'friend', children }) {
   </li>`;
 }
 
+// Ring someone: open (or find) the conversation with them, then call there.
+function ring(id) {
+  call('dm.open', { users: [id] }).then((r) => startCall(r.id), (e) => toast(e.offline ? 'You’re offline, so you can’t call right now.' : e.message));
+}
+
+// Hover actions (always shown on touch and while the row has focus):
+// message, call, join them in voice when they are in a room, and the rest in More.
 function FriendActions({ id }) {
   const u = S.users[id];
   const live = doingOf(u).live;
   return html`
-    <button class="ib" aria-label=${`Message ${u.name}`} data-tip="Message" onClick=${() => startDm([id])}><${Icon} name="room" size=${18} /></button>
-    ${live && html`<button class="ib live" aria-label=${`Join ${u.name} in ${S.rooms[live].name}`} data-tip=${`Join in ${S.rooms[live].name}`} onClick=${() => openConv(live)}><${Icon} name="voice" size=${18} /></button>`}
-    <${FavButton} id=${id} />
-    <button class="ib" aria-label=${`More for ${u.name}`} aria-haspopup="menu" data-tip="More" onClick=${(e) => friendMenu(id, e.currentTarget.getBoundingClientRect())}><${Icon} name="more" size=${18} /></button>`;
+    <button class="ib compact" aria-label=${`Message ${u.name}`} data-tip="Message" onClick=${() => startDm([id])}><${Icon} name="dm" size=${18} /></button>
+    ${live
+      ? html`<button class="ib compact live" aria-label=${`Join ${u.name} in ${S.rooms[live].name}`} data-tip=${`Join in ${S.rooms[live].name}`} onClick=${() => openConv(live)}><${Icon} name="speaker" size=${18} /></button>`
+      : html`<button class="ib compact" aria-label=${`Call ${u.name}`} data-tip="Voice call" onClick=${() => ring(id)}><${Icon} name="phone" size=${18} /></button>`}
+    <button class="ib compact" aria-label=${`More for ${u.name}`} aria-haspopup="menu" data-tip="More" onClick=${(e) => friendMenu(id, e.currentTarget.getBoundingClientRect())}><${Icon} name="more-v" size=${18} /></button>`;
 }
 
 function RequestActions({ id, incoming }) {
@@ -71,16 +81,16 @@ function RequestActions({ id, incoming }) {
   const run = (p) => { setBusy(true); Promise.resolve(p).finally(() => setBusy(false)); };
   if (incoming) {
     return html`
-      <button class="btn primary" disabled=${busy} aria-busy=${busy ? 'true' : undefined} onClick=${() => run(acceptFriend(id))}>Accept</button>
-      <button class="btn" disabled=${busy} aria-label=${`Decline ${u.name}`} onClick=${() => run(declineFriend(id))}>Decline</button>`;
+      <button class="btn sm primary" disabled=${busy} aria-busy=${busy ? 'true' : undefined} onClick=${() => run(acceptFriend(id))}>Accept</button>
+      <button class="btn sm" disabled=${busy} aria-label=${`Decline ${u.name}`} onClick=${() => run(declineFriend(id))}>Decline</button>`;
   }
-  return html`<button class="btn quiet" disabled=${busy} aria-label=${`Cancel request to ${u.name}`} onClick=${() => run(removeFriend(id))}>Cancel</button>`;
+  return html`<button class="btn sm quiet" disabled=${busy} aria-label=${`Cancel request to ${u.name}`} onClick=${() => run(removeFriend(id))}>Cancel</button>`;
 }
 
 function Group({ title, count, note, ids, render, start }) {
   if (!ids.length) return null;
   return html`<section class="f-group" aria-label=${title}>
-    <h2 class="f-head">${title}${count != null && html` <span class="count num">${count}</span>`}</h2>
+    <h2 class="f-head">${title}${count != null && html`<span class="count num"><span aria-hidden="true"> — </span><span class="sr">, </span>${count}</span>`}</h2>
     ${note && html`<p class="f-note">${note}</p>`}
     <ul class="f-list-part">${ids.map((id, i) => render(id, start === 0 && i === 0))}</ul>
   </section>`;
@@ -131,10 +141,10 @@ function OnlineTab() {
     <//>`;
   }
   return html`<${FilterBox} /><div class="f-list" onKeyDown=${onListKey}>
-    <${Group} title="Favourites" ids=${favs} render=${friendRow} start=${0} />
+    <${Group} title="Favourites" count=${favs.length} ids=${favs} render=${friendRow} start=${0} />
     <${Group} title=${favs.length ? 'Also online' : 'Online'} count=${rest.length} ids=${rest} render=${friendRow} start=${favs.length ? 1 : 0} />
     ${!online.length && html`<p class="f-quiet">No friends online right now.</p>`}
-    <${Group} title="Recently active" note="Offline now, but wrote something in the last few days." ids=${recent} render=${friendRow} start=${online.length ? 1 : 0} />
+    <${Group} title="Recently active" count=${recent.length} note="Offline now, but wrote something in the last few days." ids=${recent} render=${friendRow} start=${online.length ? 1 : 0} />
   </div>`;
 }
 
@@ -149,9 +159,13 @@ function AllTab() {
   if (!all.length) return html`<${FilterBox} /><${NoMatch} />`;
   const favs = all.filter((id) => S.friends[id].favorite);
   const rest = all.filter((id) => !S.friends[id].favorite);
+  const off = (id) => (S.users[id]?.presence || 'offline') === 'offline';
+  const on = rest.filter((id) => !off(id));
+  const gone = rest.filter(off);
   return html`<${FilterBox} /><div class="f-list" onKeyDown=${onListKey}>
     <${Group} title="Favourites" count=${favs.length} ids=${favs} render=${friendRow} start=${0} />
-    <${Group} title="Everyone" count=${rest.length} ids=${rest} render=${friendRow} start=${favs.length ? 1 : 0} />
+    <${Group} title="Online" count=${on.length} ids=${on} render=${friendRow} start=${favs.length ? 1 : 0} />
+    <${Group} title="Offline" count=${gone.length} ids=${gone} render=${friendRow} start=${favs.length || on.length ? 1 : 0} />
   </div>`;
 }
 
@@ -187,7 +201,7 @@ function BlockedTab() {
   };
   return html`<div class="f-list" onKeyDown=${onListKey}>
     <section class="f-group" aria-label="Blocked">
-      <h2 class="f-head">Blocked <span class="count num">${ids.length}</span></h2>
+      <h2 class="f-head">Blocked<span class="count num"><span aria-hidden="true"> — </span><span class="sr">, </span>${ids.length}</span></h2>
       <p class="f-note">They can’t message you, ring you or see when you’re around. Unblocking doesn’t tell them.</p>
       <ul class="f-list-part">${ids.map((id, i) => {
         const u = S.users[id] || { id, name: 'Someone', handle: id, hue: 165 };
@@ -257,6 +271,30 @@ function AddTab({ title = 'Add a friend', lead = 'Friends see each other’s pre
   </div>`;
 }
 
+// ---------- Active now (wide screens) ----------
+// Friends in a voice room first (with a Join), then anyone with a status.
+function ActiveNow() {
+  const ids = friendsOnline(S).filter((id) => S.users[id]);
+  const live = ids.filter((id) => doingOf(S.users[id]).live);
+  const said = ids.filter((id) => !live.includes(id) && doingOf(S.users[id]).status);
+  return html`<aside class="f-active" aria-label="Active now">
+    <h2 class="f-active-h">Active now</h2>
+    ${!live.length && !said.length
+      ? html`<p class="f-active-empty">It’s quiet for now. When a friend joins a voice room or sets a status, it shows here.</p>`
+      : html`<ul class="f-active-list">${[...live, ...said].map((id) => {
+          const u = S.users[id];
+          const d = doingOf(u);
+          return html`<li key=${id} class="f-active-row">
+            <button class="f-active-who" onClick=${() => openPerson(id)}>
+              <${Avatar} user=${u} presence size=${32} />
+              <span class="f-active-text"><span class="f-active-name trunc">${u.name}</span><${Doing} u=${u} /></span>
+            </button>
+            ${d.live && S.call?.room !== d.live && html`<button class="btn f-active-join" aria-label=${`Join ${S.rooms[d.live].name}`} onClick=${() => { openConv(d.live); leavingCall(d.live, () => joinVoice(d.live)); }}>Join</button>`}
+          </li>`;
+        })}</ul>`}
+  </aside>`;
+}
+
 // ---------- The page ----------
 
 export function Friends() {
@@ -269,7 +307,7 @@ export function Friends() {
   const tabs = [
     { id: 'online', label: 'Online', count: online },
     { id: 'all', label: 'All', count: all },
-    { id: 'requests', label: 'Requests', count: incoming, badge: true, more: outgoing },
+    { id: 'requests', label: 'Pending', count: incoming, badge: true, more: outgoing },
     { id: 'blocked', label: 'Blocked', count: (S.safety?.blocks || []).length },
     { id: 'add', label: 'Add friend', icon: 'user-plus' },
   ];
@@ -283,23 +321,26 @@ export function Friends() {
       requestAnimationFrame(() => document.getElementById(`f-tab-${next}`)?.focus());
     }
   };
+  const tabBar = html`<div class="f-tabs" role="tablist" aria-label="Friends" onKeyDown=${onTabKey}>
+    ${tabs.map((t) => html`<button key=${t.id} id=${`f-tab-${t.id}`} class=${`f-tab${t.id === 'add' ? ' add' : ''}`} role="tab" aria-selected=${String(tab === t.id)}
+      aria-controls="f-panel" tabindex=${tab === t.id ? '0' : '-1'} onClick=${() => pick(t.id)}
+      aria-label=${t.badge ? `Pending: ${plural(incoming, 'waiting on you', 'waiting on you')}, ${outgoing} sent` : undefined}>
+      ${t.icon && html`<${Icon} name=${t.icon} size=${16} />`}<span class="f-tab-label">${t.label}</span>
+      ${t.badge ? (t.count > 0 && html`<span class="badge">${t.count}</span>`) : t.count != null && html`<span class="f-tab-count num">${t.count}</span>`}
+    </button>`)}
+  </div>`;
   const Body = { online: OnlineTab, all: AllTab, requests: RequestsTab, blocked: BlockedTab, add: AddTab }[tab];
   return html`<section class="main view friends-view" aria-label="Friends">
     <header class="bar">
       <${Back} />
       <h1 class="bar-title"><${Icon} name="people" />Friends</h1>
-      ${online > 0 && html`<span class="bar-sub num">${online} online</span>`}
+      ${S.ui.phone && online > 0 && html`<span class="bar-sub num">${online} online</span>`}
+      ${!S.ui.phone && tabBar}
     </header>
-    <div class="f-tabs" role="tablist" aria-label="Friends" onKeyDown=${onTabKey}>
-      ${tabs.map((t) => html`<button key=${t.id} id=${`f-tab-${t.id}`} class=${`f-tab${t.id === 'add' ? ' add' : ''}`} role="tab" aria-selected=${String(tab === t.id)}
-        aria-controls="f-panel" tabindex=${tab === t.id ? '0' : '-1'} onClick=${() => pick(t.id)}
-        aria-label=${t.badge ? `Requests: ${plural(incoming, 'waiting on you', 'waiting on you')}, ${outgoing} sent` : undefined}>
-        ${t.icon && html`<${Icon} name=${t.icon} size=${16} />`}<span class="f-tab-label">${t.label}</span>
-        ${t.badge ? (t.count > 0 && html`<span class="badge">${t.count}</span>`) : t.count != null && html`<span class="f-tab-count num">${t.count}</span>`}
-      </button>`)}
-    </div>
+    ${S.ui.phone && tabBar}
     <div class="view-body" id="f-panel" role="tabpanel" aria-labelledby=${`f-tab-${tab}`}>
       <div class="f-wrap"><${Body} key=${tab} /></div>
+      ${!S.ui.phone && html`<${ActiveNow} />`}
     </div>
   </section>`;
 }

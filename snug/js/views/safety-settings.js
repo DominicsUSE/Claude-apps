@@ -367,8 +367,8 @@ export function HouseInvites({ house }) {
 // Which of these pages a person may open in a house.
 export const SAFETY_PAGES = [
   { id: 'reports', label: 'Reports', icon: 'alert', words: 'reports moderation queue flagged timeouts', need: (h) => can(S, h, 'moderate') || can(S, h, 'timeout') },
-  { id: 'bans', label: 'Bans', icon: 'shield', words: 'bans banned unban', need: (h) => can(S, h, 'ban') },
-  { id: 'log', label: 'House log', icon: 'eye', words: 'audit log history changes who did what', need: (h) => can(S, h, 'audit') },
+  { id: 'bans', label: 'Bans', icon: 'ban', words: 'bans banned unban', need: (h) => can(S, h, 'ban') },
+  { id: 'log', label: 'House log', icon: 'history', words: 'audit log history changes who did what', need: (h) => can(S, h, 'audit') },
   { id: 'filter', label: 'Filter and screening', icon: 'sliders', words: 'automod word filter links slowmode screening rules spam mentions flood caps raid verification pause lockdown two-factor', need: (h) => can(S, h, 'roles') },
   { id: 'invites', label: 'Invitations', icon: 'link', words: 'invites links expiry uses revoke', need: (h) => can(S, h, 'roles') },
 ];

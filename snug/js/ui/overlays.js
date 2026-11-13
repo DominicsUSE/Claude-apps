@@ -9,10 +9,17 @@ import { Viewer } from '../views/viewer.js'; // the media viewer
 
 const EDGE = 8;
 
-function place(el, anchor, { x, y, align } = {}) {
-  const r = el.getBoundingClientRect();
+function place(el, anchor, { x, y, align, side } = {}) {
+  // Layout size, not the box on screen: the opening animation scales it.
+  const r = { width: el.offsetWidth, height: el.offsetHeight };
   let left, top;
-  if (anchor) {
+  if (anchor && side === 'right') {
+    // Beside what opened it (a name or a face), top edges aligned; the left
+    // side when the right has no room. It never covers the row it came from.
+    left = anchor.right + 8;
+    if (left + r.width > innerWidth - EDGE) left = anchor.left - r.width - 8;
+    top = anchor.top;
+  } else if (anchor) {
     left = align === 'end' ? anchor.right - r.width : anchor.left;
     top = anchor.bottom + 4;
     if (top + r.height > innerHeight - EDGE && anchor.top - r.height - 4 > EDGE) top = anchor.top - r.height - 4;
@@ -50,8 +57,11 @@ export function Menu({ menu }) {
   const ref = useRef();
   const [pos, setPos] = useState(null);
   const [act, setAct] = useState(-1);
-  // No separator at either end, and never two in a row.
-  const items = menu.items.filter(Boolean).filter((it, i, all) => !it.sep || (i > 0 && i < all.length - 1 && !all[i + 1].sep));
+  // A separator before the first destructive item (brief 19), none at either
+  // end, and never two in a row.
+  const given = menu.items.filter(Boolean);
+  const withSep = given.flatMap((it, i) => (it.danger && i > 0 && !given[i - 1].sep && !given[i - 1].danger && !given[i - 1].heading ? [{ sep: true }, it] : [it]));
+  const items = withSep.filter((it, i, all) => !it.sep || (i > 0 && i < all.length - 1 && !all[i + 1].sep));
   const live = items.map((it, i) => (it.label && !it.disabled ? i : -1)).filter((i) => i >= 0);
 
   useReturnFocus();
@@ -72,6 +82,8 @@ export function Menu({ menu }) {
     else if (e.key === 'Tab') { e.preventDefault(); closeMenu(); }
   };
 
+  // One icon column: rows without an icon keep its space when others have one.
+  const anyIcon = items.some((x) => x && x.icon);
   return html`
     <div class="menu-scrim" onClick=${closeMenu}></div>
     <div class="menu float" role="menu" tabindex="-1" ref=${ref} onKeyDown=${onKey}
@@ -86,7 +98,7 @@ export function Menu({ menu }) {
         return html`<button key=${i} class=${`menu-item${it.danger ? ' danger' : ''}${act === i ? ' act' : ''}`}
           role=${radio ? 'menuitemradio' : 'menuitem'} aria-checked=${radio ? String(it.checked) : undefined}
           disabled=${it.disabled} tabindex="-1" onMouseMove=${() => act !== i && setAct(i)} onClick=${() => run(it)}>
-          ${it.icon && html`<${Icon} name=${it.icon} />`}
+          ${it.icon ? html`<${Icon} name=${it.icon} size=${18} />` : anyIcon && html`<span class="mi-pad" aria-hidden="true"></span>`}
           <span class="grow trunc">${it.label}</span>
           ${(it.checked || it.hint) && html`<span class="end">${it.hint && html`<span class="key-hint">${it.hint}</span>`}${it.checked && html`<${Icon} name="check" size=${16} />`}</span>`}
         </button>`;
@@ -103,6 +115,19 @@ export function Pop({ pop }) {
     setPos(place(ref.current, pop.anchor, pop));
     const target = ref.current.querySelector('[data-autofocus]') || ref.current;
     target.focus({ preventScroll: true });
+    // A card that grows once its details arrive (a banner, a bio) is placed
+    // again, so it keeps its 8px from the window's edge.
+    if (typeof ResizeObserver !== 'function') return undefined;
+    let last = null;
+    const ro = new ResizeObserver(() => {
+      const el = ref.current; if (!el) return;
+      const key = `${el.offsetWidth}x${el.offsetHeight}`;
+      if (key === last) return;
+      last = key;
+      setPos(place(el, pop.anchor, pop));
+    });
+    ro.observe(ref.current);
+    return () => ro.disconnect();
   }, []);
   return html`<div class="pop float" ref=${ref} tabindex="-1" role="dialog" aria-label=${pop.label}
     style=${pos ? `left:${pos.left}px;top:${pos.top}px` : 'visibility:hidden'}>
@@ -195,7 +220,7 @@ export function initTooltips() {
     const el = e.target.closest?.('[data-tip]');
     if (el === owner) return;
     hide();
-    if (el) timer = setTimeout(() => show(el), 450);
+    if (el) timer = setTimeout(() => show(el), 350);
   });
   document.addEventListener('focusin', (e) => {
     const el = e.target.closest?.('[data-tip]');

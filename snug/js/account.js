@@ -216,7 +216,7 @@ export function applyAppearance() {
   root.style.fontSize = p.fontScale && p.fontScale !== 16 ? `${p.fontScale}px` : '';
   root.style.zoom = p.zoom && p.zoom !== 100 ? `${p.zoom}%` : '';
   root.style.filter = p.saturation < 100 ? `saturate(${p.saturation}%)` : '';
-  root.style.setProperty('--ctx-w', `${p.sidebarW || 264}px`);
+  root.style.setProperty('--ctx-w', `${p.sidebarW || 240}px`);
   // Colours: a custom theme's tokens, or the accent ramp for this theme's surface.
   // Values come from js/lib/theme.js (hex and rgb() only), set one property at a time.
   const props = {};

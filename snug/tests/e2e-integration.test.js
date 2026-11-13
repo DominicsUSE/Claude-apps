@@ -116,18 +116,43 @@ test('settings: one structure in sections with a search; each room’s pace and 
 test('settings on a phone: the search and every section stay reachable, with 44px targets and no sideways scroll', async () => {
   const robin = await person('robin', { viewport: { width: 390, height: 844 } });
   await robin.evaluate(() => import('/js/views/settings.js').then((m) => import('/js/store.js').then((s) => s.openLayer({ C: m.HouseSettings, props: { house: 'kiln' } }))));
-  await robin.locator('.layer-body h1').waitFor();
+  // List first: every section as a full-width row, the search on its own row above them.
+  await robin.locator('.layer-nav .row').first().waitFor();
   const search = robin.locator('.layer-nav input[type=search]');
   assert.equal(await search.isVisible(), true);
-  assert.ok((await search.boundingBox()).height >= 44);
-  for (const box of await robin.locator('.layer-nav .row').evaluateAll((rows) => rows.map((r) => r.getBoundingClientRect().height))) assert.ok(box >= 44, `tab height ${box}`);
+  const sb = await search.boundingBox();
+  assert.ok(sb.height >= 44);
+  const rows = await robin.locator('.layer-nav .row').evaluateAll((rs) => rs.map((r) => { const b = r.getBoundingClientRect(); return { h: b.height, w: b.width, top: b.top }; }));
+  for (const r of rows) assert.ok(r.h >= 44 && r.w >= 390 - 40, `row ${JSON.stringify(r)}`);
+  assert.ok(rows.every((r) => r.top >= sb.y + sb.height), 'the search sits above the sections');
   await search.fill('bans');
   await robin.click('.layer-nav .row:has-text("Bans")');
   await robin.locator('.layer-body h1:has-text("Bans")').waitFor();
+  // A page has Back to the list, a 44px target.
+  const back = robin.locator('.layer-top .layer-back');
+  assert.ok((await back.boundingBox()).height >= 44);
+  await back.click();
   await search.fill('');
   await robin.click('.layer-nav .row:has-text("Rooms and access")');
   await robin.locator('select[aria-label="Slowmode in Glaze lab"]').waitFor();
   assert.ok((await robin.locator('select[aria-label="Slowmode in Glaze lab"]').boundingBox()).height >= 44);
   assert.equal(await robin.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'no sideways scroll');
+  // Focus follows the list and the page as they take turns on screen: Back on
+  // a page, the page's own row on the list. Escape on a page goes back to the
+  // list; on the list it closes the layer.
+  const focused = () => robin.evaluate(() => { const a = document.activeElement; return a?.matches('.layer-back') ? 'back' : a?.matches('.layer-nav .row') ? `row:${a.textContent.trim()}` : a === document.body ? 'body' : a?.tagName; });
+  assert.equal(await focused(), 'back', 'choosing a section puts focus on Back');
+  await robin.keyboard.press('Escape');
+  await robin.locator('.layer.phone-list').waitFor();
+  assert.equal(await robin.evaluate(() => !!window.snug.S.ui.layer), true, 'Escape on a page goes back to the list, not out');
+  assert.equal(await focused(), 'row:Rooms and access');
+  await robin.keyboard.press('Enter');
+  await robin.locator('select[aria-label="Slowmode in Glaze lab"]').waitFor();
+  assert.equal(await focused(), 'back');
+  await robin.keyboard.press('Enter');
+  await robin.locator('.layer.phone-list').waitFor();
+  assert.equal(await focused(), 'row:Rooms and access', 'Back returns focus to the row');
+  await robin.keyboard.press('Escape');
+  await robin.waitForFunction(() => !window.snug.S.ui.layer);
   await robin.context().close();
 });

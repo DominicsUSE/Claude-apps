@@ -7,10 +7,10 @@
 // house id. It follows the view (opening a room puts you in its house, a
 // direct message in Messages) and is remembered on this device with the last
 // view in each place, so coming back to a place reopens where you were.
-import { html } from '../../vendor/preact-htm.js';
+import { html, useEffect } from '../../vendor/preact-htm.js';
 import {
   S, me, go, openConv, openThread, openPop, openMenu, openModal, openQuick, openLayer, toggleGroup,
-  setNotify, markConvRead, markHouseRead, leaveHouse, deleteRoom, convMeta, isOnline, toast, person,
+  setNotify, markConvRead, markHouseRead, leaveHouse, deleteRoom, convMeta, isOnline, toast, person, voiceRoomOf, emit,
 } from '../store.js';
 import { attention, houseAttention, levelOf, unreadOf, threadsOf, roomIds, levelsFor, LEVEL_LABEL } from '../lib/attention.js';
 import { can } from '../lib/perms.js';
@@ -19,16 +19,16 @@ import { plain } from '../lib/format.js';
 import { TOPICS, friendRequests, upcomingEvents, eventState } from '../lib/social.js';
 import { Icon } from '../ui/icons.js';
 import { Nook } from '../ui/brand.js';
-import { Avatar, Stack, Tile, RoomIcon, PRESENCE, presenceLabel } from '../ui/kit.js';
+import { Avatar, Stack, RoomIcon, PRESENCE, presenceLabel } from '../ui/kit.js';
 import { StatusEmoji, SidebarGrip } from './account.js'; // custom status emoji; dragging the column wider
-import { MePop } from './people.js';
+import { MePop, showProfile, lastActive, ago } from './people.js'; // presence menu, profile card, last seen
 import { RoomForm, Confirm, Invite, AddHouse, NewMessage, RoomBrowser } from './modals.js';
 import { Settings, HouseSettings } from './settings.js';
 import { modPages, requestOf } from './safety.js'; // moderation entry in the house menu; message requests
 import { VoiceControls } from './conversation.js';
 import { CallTimer } from './activities.js'; // the call clock in the dock (voice and calls track)
 import { RailHouses } from './places.js'; // the rail's folders and house order
-import { joinVoice } from '../voice.js';
+import { joinVoice, toggleMute, toggleDeaf } from '../voice.js';
 import { leavingCall } from '../calls.js';
 import { groupMenu, roomMoveItems, roomDrag, groupDrag, mayArrange, GroupForm, HouseBanner } from './community.js'; // categories, moving rooms, the house banner
 import { muteItems, rolesOff, setRolesOff, orderDms } from '../inbox.js'; // timed mutes, @role suppression, pinned and closed conversations
@@ -149,12 +149,18 @@ function Marker({ attn }) {
   return null;
 }
 
-function Row({ icon, label, hint, sel, attn, muted, sub, live, end, onClick, onMenu }) {
-  const cls = `row${sel ? ' sel' : ''}${attn?.soft || attn?.needs ? ' unread' : ''}${muted ? ' muted' : ''}${sub ? ' nested' : ''}${live ? ' live' : ''}`;
-  return html`<button class=${cls} aria-current=${sel ? 'page' : undefined} onClick=${onClick}
+// `line`: a second line under the name (what a person is doing, when they
+// were last around); the row grows to 42px for it (css/nav.css .two-line).
+function Row({ icon, label, hint, line, lineLive, sel, held, attn, muted, sub, live, end, onClick, onMenu, place }) {
+  // held: the room whose thread is open beside it. Bright text, no background:
+  // only the thread row is selected.
+  const cls = `row${sel ? ' sel' : ''}${held ? ' sel-parent' : ''}${attn?.soft || attn?.needs ? ' unread' : ''}${muted ? ' muted' : ''}${sub ? ' nested' : ''}${live ? ' live' : ''}${line ? ' two-line' : ''}${place ? ' row-place' : ''}`;
+  return html`<button class=${cls} aria-current=${sel ? 'page' : held ? 'location' : undefined} onClick=${onClick}
     onContextMenu=${onMenu && ((e) => { e.preventDefault(); onMenu({ x: e.clientX, y: e.clientY }); })}>
     <span class="row-ic">${icon}</span>
-    <span class="trunc grow">${label}${hint && html`<span class="row-hint">${hint}</span>`}</span>
+    ${line
+      ? html`<span class="grow row-text"><span class="trunc">${label}${hint && html`<span class="row-hint">${hint}</span>`}</span><span class=${`row-line trunc${lineLive ? ' is-live' : ''}`}>${line}</span></span>`
+      : html`<span class="trunc grow">${label}${hint && html`<span class="row-hint">${hint}</span>`}</span>`}
     <span class="row-end">${end}<${Marker} attn=${attn} /></span>
   </button>`;
 }
@@ -174,13 +180,21 @@ function notifyItems(kind, id, level, pos) {
   ];
 }
 
-function roomMenu(id, pos) {
+// The header's bell (js/views/conversation.js): how loudly this place calls you.
+export function notifyMenu(id, pos) {
+  const kind = S.rooms[id] ? 'room' : 'dm';
+  openMenu({ ...pos, items: notifyItems(kind, id, levelOf(S, id), pos) });
+}
+
+// extra: items the conversation header adds at the top (Go to a date, Details).
+export function roomMenu(id, pos, extra = []) {
   const room = S.rooms[id];
   const manage = can(S, room.house, 'rooms');
   const a = attention(S, id);
   openMenu({
     ...pos,
     items: [
+      ...extra,
       { label: 'Mark read', icon: 'check', disabled: !a.soft && !a.needs, onSelect: () => markConvRead(id) },
       ...notifyItems('room', id, levelOf(S, id), pos),
       manage && { sep: true },
@@ -198,11 +212,12 @@ function roomMenu(id, pos) {
   });
 }
 
-function dmMenu(id, pos) {
+export function dmMenu(id, pos, extra = []) {
   const a = attention(S, id);
   openMenu({
     ...pos,
     items: [
+      ...extra,
       { label: 'Mark read', icon: 'check', disabled: !a.soft && !a.needs, onSelect: () => markConvRead(id) },
       ...notifyItems('dm', id, levelOf(S, id), pos),
       ...dmManageItems(id), // js/views/dm-manage.js
@@ -287,23 +302,24 @@ function onRailKey(e) {
   list[n].focus();
 }
 
-export function Rail() {
-  const sp = S.ui.space;
+// `sp` and `pick`: the phone's drawer shows the rail for the place it is
+// browsing, which is not always where you are (js/app.js PhoneDrawer).
+export function Rail({ sp = S.ui.space, pick = openSpace } = {}) {
   return html`<nav class="rail" aria-label="Places" onKeyDown=${onRailKey}>
     <div class="rail-scroll">
-      <${RailItem} label="Home" cls="rail-home" sel=${sp === 'home'} attn=${{ needs: 0, soft: homeNeeds() > 0 }} onClick=${() => openSpace('home')}>
-        <${Nook} size=${32} />
+      <${RailItem} label="Home" cls="rail-home" sel=${sp === 'home'} attn=${{ needs: 0, soft: homeNeeds() > 0 }} onClick=${() => pick('home')}>
+        <${Nook} size=${28} />
       <//>
-      <${RailItem} label="Messages" sel=${sp === 'messages'} attn=${dmAttention()} onClick=${() => openSpace('messages')}>
-        <${Icon} name="room" size=${22} />
+      <${RailItem} label="Messages" sel=${sp === 'messages'} attn=${dmAttention()} onClick=${() => pick('messages')}>
+        <${Icon} name="dm" size=${20} />
       <//>
-      <${RailItem} label="Discover" sel=${sp === 'discover'} onClick=${() => openSpace('discover')}>
-        <${Icon} name="compass" size=${22} />
+      <${RailItem} label="Discover" sel=${sp === 'discover'} onClick=${() => pick('discover')}>
+        <${Icon} name="compass" size=${20} />
       <//>
       <div class="rail-sep" role="separator"></div>
-      <${RailHouses} sp=${sp} RailItem=${RailItem} houseMenu=${houseMenu} openSpace=${openSpace} houseAttention=${houseAttention} />
+      <${RailHouses} sp=${sp} RailItem=${RailItem} houseMenu=${houseMenu} openSpace=${pick} houseAttention=${houseAttention} />
       <${RailItem} label="Create or join a community" cls="rail-add" attn=${{ needs: 0 }} onClick=${() => openModal(AddHouse)}>
-        <${Icon} name="plus" size=${22} />
+        <${Icon} name="plus" size=${20} />
       <//>
     </div>
   </nav>`;
@@ -332,28 +348,54 @@ function recentConvs(n = 8) {
 const callLive = (id) => (S.voice[id] || []).length > 0;
 const CallMark = () => html`<span class="call-mark" role="img" aria-label="Call in progress" data-tip="Call in progress"><${Icon} name="phone" size=${14} /></span>`;
 
-function convIcon(id) {
+function convIcon(id, size) {
   const meta = convMeta(id);
-  if (meta.user) return html`<${Avatar} user=${meta.user} presence />`;
-  if (meta.dm) return groupFace(id) || html`<span class="avatar" style="--tile-c:0;--tile-ink-c:0">${meta.dm.members.length}</span>`;
+  if (meta.user) return html`<${Avatar} user=${meta.user} size=${size} presence />`;
+  if (meta.dm) return groupFace(id, size) || html`<span class="avatar" style=${`${size ? `--sz:${size}px;` : ''}--tile-c:0;--tile-ink-c:0`}>${meta.dm.members.length}</span>`;
   return html`<${RoomIcon} kind=${meta.kind} size=${18} />`;
 }
 
+// Home's voice list: rooms with people in them right now, in any of your houses.
+const liveRooms = () => S.houseOrder.flatMap((h) => roomIds(S, h))
+  .filter((r) => roomVisible(r) && (S.rooms[r].kind === 'voice' || S.rooms[r].kind === 'stage') && (S.voice[r] || []).length > 0);
+const homeEvents = (now) => upcomingEvents(S, now).slice(0, 3);
+const eventWhen = (e, now) => (eventState(e, now) === 'now' ? 'Happening now'
+  : new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(e.starts));
+const openCatch = (tab) => { S.ui.catchTab = tab; go({ type: 'catchup' }); };
+
+// Home's column (brief 6): Snug's own places first, then what is live now
+// (voice rooms with people in them, events coming up), then where you were.
 function HomeCtx() {
   const v = S.ui.view;
   const cur = current();
   const requests = friendRequests(S, 'incoming').length;
   const catchNeeds = S.invites.length + S.houseOrder.reduce((n, h) => n + houseAttention(S, h).needs, 0) + dmAttention().needs;
   const recent = recentConvs();
+  const voice = liveRooms();
+  const now = Date.now();
+  const events = homeEvents(now);
   return html`
-    <${CtxHead}><${JumpButton} label="Find or start a conversation" /><//>
+    <${CtxHead}><${JumpButton} label="Find a conversation" /><//>
     <div class="nav-scroll">
       <div class="nav-group">
         <${Row} icon=${html`<${Icon} name="house" />`} label="Home" sel=${v.type === 'home'} onClick=${() => go({ type: 'home' })} />
-        <${Row} icon=${html`<${Icon} name="tray" />`} label="Catch up" sel=${v.type === 'catchup'} attn=${{ needs: catchNeeds }} onClick=${() => go({ type: 'catchup' })} />
-        <${Row} icon=${html`<${Icon} name="people" />`} label="Friends" sel=${v.type === 'friends'} attn=${{ needs: requests }} onClick=${() => go({ type: 'friends' })} />
+        <${Row} icon=${html`<${Icon} name="tray" />`} place label="Catch up" sel=${v.type === 'catchup'} attn=${{ needs: catchNeeds }} onClick=${() => openCatch(v.type === 'catchup' ? S.ui.catchTab : 'you')} />
+        <${Row} icon=${html`<${Icon} name="people" />`} place label="Friends" sel=${v.type === 'friends'} attn=${{ needs: requests }} onClick=${() => go({ type: 'friends' })} />
+        <${Row} icon=${html`<${Icon} name="dm" />`} place label="Messages" attn=${quietAttn(dmAttention())} onClick=${() => openSpace('messages')} />
         <${Row} icon=${html`<${Icon} name="save" />`} label="Saved" sel=${v.type === 'saved'} end=${S.saved.length ? html`<span class="num faint">${S.saved.length}</span>` : null} onClick=${() => go({ type: 'saved' })} />
       </div>
+      ${voice.length > 0 && html`<div class="nav-group">
+        <div class="sect"><span>Voice</span></div>
+        ${voice.map((r) => html`<${RoomRow} key=${r} id=${r} hint=${S.houses[S.rooms[r].house].name} />`)}
+      </div>`}
+      ${events.length > 0 && html`<div class="nav-group">
+        <div class="sect"><span>Events</span>
+          <button class="ib sm" aria-label="All events" data-tip="All events" onClick=${() => go({ type: 'discover', section: 'events' })}><${Icon} name="chev-r" size=${16} /></button>
+        </div>
+        ${events.map((e) => html`<${Row} key=${e.id} icon=${html`<${Icon} name="calendar" />`} label=${e.title}
+          line=${`${eventWhen(e, now)} \u00b7 ${S.houses[e.house].name}`} lineLive=${eventState(e, now) === 'now'}
+          onClick=${() => go({ type: 'house', id: e.house, about: true, events: true })} />`)}
+      </div>`}
       ${recent.length > 0 && html`<div class="nav-group">
         <div class="sect"><span>Recent</span></div>
         ${recent.map((id) => {
@@ -366,7 +408,22 @@ function HomeCtx() {
     </div>`;
 }
 
-export function NavDirect() {
+// What a direct conversation's second line says: where the person is, their
+// status, or when they were last around; a group says how many are in it.
+function dmLine(id, meta) {
+  if (callLive(id)) return { text: 'In a call now', live: true };
+  const u = meta.user;
+  if (!u) return { text: plural(meta.dm.members.length, 'member') };
+  const room = u.presence !== 'offline' && voiceRoomOf(u.id);
+  if (room) return { text: `In ${S.rooms[room].name}`, live: true };
+  if (u.presence === 'offline') {
+    const t = lastActive(u.id);
+    return { text: t ? `Last active ${ago(t)}` : 'Offline' };
+  }
+  return { text: u.status || PRESENCE[u.presence]?.label || '' };
+}
+
+export function NavDirect({ drawer } = {}) {
   const cur = current();
   return html`<div class="nav-group">
     <div class="sect"><span>Direct messages</span>
@@ -374,8 +431,10 @@ export function NavDirect() {
     </div>
     ${orderDms().filter((id) => !requestOf(id)).map((id) => {
       const meta = convMeta(id);
-      if (S.ui.phone) return html`<${DmRow} key=${id} id=${id} />`;
-      return html`<${Row} key=${id} icon=${convIcon(id)} label=${meta.title} sel=${cur === id} attn=${attention(S, id)} muted=${levelOf(S, id) === 'muted'}
+      if (S.ui.phone && !drawer) return html`<${DmRow} key=${id} id=${id} />`;
+      const line = dmLine(id, meta);
+      return html`<${Row} key=${id} icon=${convIcon(id, 32)} label=${meta.title} line=${line.text} lineLive=${line.live}
+        sel=${cur === id} attn=${attention(S, id)} muted=${levelOf(S, id) === 'muted'}
         end=${callLive(id) ? html`<${CallMark} />` : null}
         onClick=${() => openConv(id)} onMenu=${(pos) => dmMenu(id, pos)} />`;
     })}
@@ -439,21 +498,45 @@ function DiscoverCtx() {
     </div>`;
 }
 
-function RoomRow({ id }) {
+// One person inside a voice room, under its row: face (a thin mint ring while
+// they talk), name, and marks for a closed mic, a closed ear, camera, screen.
+function VoicePerson({ u, room }) {
+  const mine = u.id === S.me;
+  const st = mine ? (S.call?.room === room ? S.call : {}) : (S.voiceState[room]?.[u.id] || {});
+  const talking = !!S.speaking[u.id] && !st.muted;
+  const state = st.deaf ? ', not listening' : st.muted ? ', muted' : talking ? ', talking' : '';
+  return html`<button class=${`vroom-person${talking ? ' talking' : ''}`} aria-label=${`${u.name}${state}`}
+    onClick=${(e) => showProfile(u, e.currentTarget.getBoundingClientRect(), S.rooms[room]?.house)}>
+    <${Avatar} user=${u} size=${20} speaking=${talking} />
+    <span class="vroom-name trunc">${u.name}</span>
+    <span class="vroom-marks" aria-hidden="true">
+      ${st.screen && html`<${Icon} name="screen" size=${14} />`}
+      ${st.camera && html`<${Icon} name="camera" size=${14} />`}
+      ${st.deaf ? html`<span class="is-off"><${Icon} name="headphones-off" size=${14} /></span>` : st.muted ? html`<span class="is-off"><${Icon} name="mic-off" size=${14} /></span>` : null}
+    </span>
+  </button>`;
+}
+
+function RoomRow({ id, hint }) {
   const room = S.rooms[id];
   const cur = current();
   const voice = room.kind === 'voice' || room.kind === 'stage'; // stage: js/views/places.js
   const inside = voice ? (S.voice[id] || []).map((u) => S.users[u]).filter(Boolean) : [];
-  const end = inside.length ? html`<${Stack} users=${inside} max=${3} />${inside.length > 3 ? html`<span class="num faint">${inside.length}</span>` : null}` : null;
-  const row = html`<${Row} icon=${html`<${RoomIcon} kind=${room.kind} size=${18} />`} label=${room.name} sel=${cur === id}
-    attn=${attention(S, id)} muted=${levelOf(S, id) === 'muted'} live=${inside.length > 0} end=${end}
-    onClick=${() => openConv(id)} onMenu=${(pos) => roomMenu(id, pos)} />`;
+  // Who is inside is listed under the row; the row itself carries the count.
+  const end = inside.length ? html`<span class="vroom-count num" aria-label=${`${plural(inside.length, 'person', 'people')} inside`}>${inside.length}</span>` : null;
   const pane = S.ui.pane?.type === 'thread' ? S.ui.pane.id : null;
   const threads = threadsOf(S, id).filter((t) => (S.followed[t] && unreadOf(S, t).count > 0) || t === pane);
+  const threadSel = cur === id && !!pane && threads.includes(pane);
+  const row = html`<${Row} icon=${html`<${RoomIcon} kind=${room.kind} size=${16} />`} label=${room.name} hint=${hint} sel=${cur === id && !threadSel} held=${threadSel}
+    attn=${attention(S, id)} muted=${levelOf(S, id) === 'muted'} live=${inside.length > 0} end=${end}
+    onClick=${() => openConv(id)} onMenu=${(pos) => roomMenu(id, pos)} />`;
   return html`
     ${voice && S.call?.room !== id
-      ? html`<div class="row-wrap">${row}<div class="row-acts"><button class="ib sm" aria-label=${`Join ${room.name}`} data-tip="Join" onClick=${() => leavingCall(id, () => joinVoice(id))}><${Icon} name="plus" size=${16} /></button></div></div>`
+      ? html`<div class="row-wrap">${row}<div class="row-acts"><button class="ib sm" aria-label=${`Join ${room.name}`} data-tip="Join" onClick=${() => leavingCall(id, () => joinVoice(id))}><${Icon} name="join" size=${16} /></button></div></div>`
       : row}
+    ${inside.length > 0 && html`<div class="vroom-people" role="group" aria-label=${`In ${room.name}`}>
+      ${inside.map((u) => html`<${VoicePerson} key=${u.id} u=${u} room=${id} />`)}
+    </div>`}
     ${threads.map((t) => {
       const u = unreadOf(S, t);
       return html`<${Row} key=${t} sub icon=${html`<${Icon} name="thread" size=${16} />`} label=${convMeta(t).title} sel=${pane === t}
@@ -509,8 +592,7 @@ function HouseHead({ id }) {
   return html`<button class="house-row ctx-house" aria-label=${`${h.name}, house menu`} aria-haspopup="menu"
     onClick=${(e) => houseMenu(id, { anchor: rectOf(e) })}
     onContextMenu=${(e) => { e.preventDefault(); houseMenu(id, { x: e.clientX, y: e.clientY }); }}>
-    <${Tile} house=${h} />
-    <span class="grow">
+    <span class="grow" style="min-width:0">
       <span class="ctx-name trunc">${h.name}</span>
       <span class="ctx-meta"><span class="num">${plural(members, 'member')}</span><${OnlineCount} n=${online} cls="ctx-online" /></span>
     </span>
@@ -538,19 +620,50 @@ export function LiveDock() {
   const users = (S.voice[c.room] || []).map((id) => S.users[id]).filter(Boolean);
   const sub = c.status === 'reconnecting' ? html`<span class="act-reconn-sm">Reconnecting\u2026</span>` // voice and calls track
     : room ? S.houses[room.house].name : c.status !== 'live' ? 'Calling\u2026' : (S.calls[c.room]?.ringing.length && users.length <= 1 ? 'Ringing\u2026' : 'Call');
+  const state = c.status === 'reconnecting' ? 'Reconnecting\u2026' : c.status !== 'live' ? (room ? 'Joining\u2026' : 'Calling\u2026')
+    : room ? 'Voice connected' : 'Call connected';
   return html`<div class=${`dock${meta ? ' call' : ''}`} role="region" aria-label=${room ? 'Voice room you are in' : 'Call you are in'}>
+    <div class=${`dock-state${c.status === 'live' ? '' : ' wait'}`} aria-hidden="true"><${Icon} name="voice" size=${14} />${state}</div>
     <button class="dock-head" onClick=${() => openConv(c.room)} aria-label=${room ? `Back to ${room.name}` : `Back to the call with ${meta.title}`}>
       <${Icon} name=${room ? 'voice' : 'phone'} size=${16} />
-      <span class="trunc"><span class="dock-name">${room ? room.name : meta.title}</span> <span class="faint">${sub}</span></span>
+      <span class="trunc"><span class="dock-name">${room ? room.name : meta.title}</span><span class="faint"><span class="dock-sep" aria-hidden="true"> · </span>${sub}</span></span>
       ${c.status === 'live' && html`<${CallTimer} room=${c.room} />`}
     </button>
     <div class="dock-row"><${Stack} users=${users} max=${4} size=${24} /><${VoiceControls} compact /></div>
   </div>`;
 }
 
+// Your mic and ear, from your panel. In a room or a call they are the call's
+// own (js/voice.js); outside one they are what you want when you next join,
+// kept on this device and applied once the line is up.
+const PRE_KEY = 'snug.premute';
+let pre = (() => { try { return JSON.parse(localStorage.getItem(PRE_KEY)) || {}; } catch { return {}; } })();
+const keepPre = () => { try { localStorage.setItem(PRE_KEY, JSON.stringify(pre)); } catch { /* blocked */ } };
+let preFor = null;
+function applyPre() {
+  const c = S.call;
+  if (!c || c.status !== 'live') { if (!c) preFor = null; return; }
+  if (preFor === c.room) return;
+  preFor = c.room;
+  if (pre.deaf && !c.deaf) toggleDeaf();
+  else if (pre.muted && !c.muted) toggleMute();
+}
+function panelMic() {
+  if (S.call) { toggleMute(); pre = { muted: !!S.call?.muted, deaf: !!S.call?.deaf }; } else { pre = pre.muted || pre.deaf ? {} : { muted: true }; emit(); }
+  keepPre();
+}
+function panelEar() {
+  if (S.call) { toggleDeaf(); pre = { muted: !!S.call?.muted, deaf: !!S.call?.deaf }; } else { pre = { ...pre, deaf: !pre.deaf }; emit(); }
+  keepPre();
+}
+
 export function SelfPanel() {
+  useEffect(applyPre);
   // While Snug can't be reached, nobody sees you as here: say so.
   const u = isOnline() ? me() : { ...me(), presence: 'offline' };
+  const c = S.call;
+  const deaf = c ? !!c.deaf : !!pre.deaf;
+  const muted = c ? !!c.muted : !!(pre.muted || pre.deaf);
   return html`<div class="me-panel">
     <${LiveDock} />
     <div class="me-row">
@@ -561,7 +674,9 @@ export function SelfPanel() {
           <span class="self-status trunc">${(u.status || u.statusEmoji) && u.presence !== 'offline' ? html`<${StatusEmoji} u=${u} />` : ''}${u.status || PRESENCE[u.presence].label}</span>
         </span>
       </button>
-      <button class="ib" aria-label="Settings" data-tip="Settings" onClick=${() => openLayer({ C: Settings, props: {} })}><${Icon} name="sliders" /></button>
+      <button class=${`ib${muted ? ' alert' : ''}`} aria-pressed=${String(muted)} aria-label="Mute microphone" data-tip=${muted ? 'Unmute' : 'Mute'} onClick=${panelMic}><${Icon} name=${muted ? 'mic-off' : 'mic'} /></button>
+      <button class=${`ib${deaf ? ' alert' : ''}`} aria-pressed=${String(deaf)} aria-label="Deafen" data-tip=${deaf ? 'Undeafen' : 'Deafen'} onClick=${panelEar}><${Icon} name=${deaf ? 'headphones-off' : 'headphones'} /></button>
+      <button class="ib" aria-label="Settings" data-tip="Settings" onClick=${() => openLayer({ C: Settings, props: {} })}><${Icon} name="gear" /></button>
     </div>
   </div>`;
 }
@@ -576,9 +691,12 @@ export function contextPlaces() {
   if (sp === 'home') {
     return [
       view({ type: 'home' }, v.type === 'home'),
-      view({ type: 'catchup' }, v.type === 'catchup'),
+      { sel: v.type === 'catchup', run: () => openCatch(v.type === 'catchup' ? S.ui.catchTab : 'you') },
       view({ type: 'friends' }, v.type === 'friends'),
+      { sel: false, run: () => openSpace('messages') },
       view({ type: 'saved' }, v.type === 'saved'),
+      ...liveRooms().map(conv),
+      ...homeEvents(Date.now()).map((e) => view({ type: 'house', id: e.house, about: true, events: true }, false)),
       ...recentConvs().map(conv),
     ];
   }
@@ -600,21 +718,51 @@ export function contextPlaces() {
 
 // ---------- The whole navigation (desktop) ----------
 
+function ctxFor(sp) {
+  if (sp === 'messages') return html`<${MessagesCtx} />`;
+  if (sp === 'discover') return html`<${DiscoverCtx} />`;
+  if (isHouseSpace(sp) && S.houses[sp]) return html`<${HouseCtx} key=${sp} id=${sp} />`;
+  return html`<${HomeCtx} />`;
+}
+const ctxLabel = (sp) => (sp === 'messages' ? 'Messages' : sp === 'discover' ? 'Discover' : isHouseSpace(sp) ? S.houses[sp]?.name : 'Home');
+
 export function Nav() {
   const sp = S.ui.space;
-  let ctx;
-  if (sp === 'messages') ctx = html`<${MessagesCtx} />`;
-  else if (sp === 'discover') ctx = html`<${DiscoverCtx} />`;
-  else if (isHouseSpace(sp) && S.houses[sp]) ctx = html`<${HouseCtx} key=${sp} id=${sp} />`;
-  else ctx = html`<${HomeCtx} />`;
-  const label = sp === 'messages' ? 'Messages' : sp === 'discover' ? 'Discover' : isHouseSpace(sp) ? S.houses[sp]?.name : 'Home';
   return html`<div class="nav">
     <${Rail} />
-    <nav class="ctx" aria-label=${label}>
-      ${ctx}
+    <nav class="ctx" aria-label=${ctxLabel(sp)}>
+      ${ctxFor(sp)}
       ${!isOnline() && S.ui.view.type !== 'conv' && html`<div class="conn" role="status"><${Icon} name="offline" size=${16} />Can’t reach Snug. Trying again…</div>`}
       <${SelfPanel} />
       <${SidebarGrip} />
     </nav>
   </div>`;
+}
+
+// ---------- The phone's drawer (brief: drawer navigation) ----------
+// From a room, the rail and a place's rooms slide in from the left, so you
+// can hop rooms or communities without backing out. Choosing a place in the
+// drawer's rail shows its rooms there; choosing a room goes and closes it.
+export function openDrawer() {
+  const v = S.ui.view;
+  const sp = (v.type === 'conv' && spaceOf(v)) || S.ui.space || 'home';
+  S.ui.drawer = { sp, at: v };
+  emit();
+}
+export function closeDrawer() { if (S.ui.drawer) { S.ui.drawer = null; emit(); } }
+
+export function PhoneDrawer() {
+  const d = S.ui.drawer;
+  if (!d) return null;
+  // Going anywhere closes it.
+  if (S.ui.view !== d.at) { S.ui.drawer = null; return null; }
+  const pick = (sp) => { S.ui.drawer = { ...d, sp }; emit(); };
+  const ctx = d.sp === 'messages'
+    ? html`<div class="ctx-head ctx-title"><h2 class="ctx-name">Messages</h2></div><div class="nav-scroll"><${NavDirect} drawer /></div>`
+    : ctxFor(d.sp);
+  return html`<div class="drawer-scrim" onClick=${closeDrawer}></div>
+    <div class="drawer" role="dialog" aria-modal="true" aria-label="Rooms and places">
+      <${Rail} sp=${d.sp} pick=${pick} />
+      <nav class="ctx" aria-label=${ctxLabel(d.sp)}>${ctx}</nav>
+    </div>`;
 }

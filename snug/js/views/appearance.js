@@ -64,7 +64,7 @@ export function AppearancePreview() {
     <div class="ap-preview-body" aria-hidden="true" inert>
       ${list.map((m, i) => html`<${Message} key=${m.id} conv=${PV} m=${m} grouped=${i > 0 && list[i - 1].author === m.author && m.id !== 'pv3'} />`)}
     </div>
-    <div class="ap-preview-foot" aria-hidden="true"><span class="btn primary">Send</span><span class="btn">Cancel</span><button class="switch" role="switch" aria-checked="true" tabindex="-1"></button></div>
+    <div class="ap-preview-foot" aria-hidden="true"><span class="ap-sample-label">Controls</span><span class="btn primary">Send</span><span class="btn">Cancel</span><button class="switch" role="switch" aria-checked="true" tabindex="-1"></button></div>
   </section>`;
 }
 
@@ -638,6 +638,6 @@ export function KeysEditor() {
 
 // Quick switcher actions (js/views/search.js): themes by name.
 export const THEME_ACTIONS = Object.entries(THEME_PRESETS).map(([id, t]) => ({
-  label: `Switch to ${t.label} theme`, icon: 'eye', words: `theme ${id} ${t.label} ${t.base} colours appearance`, run: () => setLook('theme', id),
+  label: `Switch to ${t.label} theme`, icon: 'palette', words: `theme ${id} ${t.label} ${t.base} colours appearance`, run: () => setLook('theme', id),
 }));
 

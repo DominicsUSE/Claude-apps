@@ -14,10 +14,10 @@ import { friendRequests } from './lib/social.js';
 import { Icon } from './ui/icons.js';
 import { Avatar, Pres, Tile, Empty, presenceLabel } from './ui/kit.js';
 import { Menu, Pop, ModalFrame, Toasts, Lightbox, initTooltips } from './ui/overlays.js';
-import { Nav, NavDirect, HouseRooms, LiveDock, houseMenu, syncSpace, goBack, contextPlaces, dmAttention, homeNeeds } from './views/nav.js';
+import { Nav, NavDirect, HouseRooms, LiveDock, houseMenu, syncSpace, goBack, contextPlaces, dmAttention, homeNeeds, PhoneDrawer, openDrawer, closeDrawer } from './views/nav.js';
 import { Conversation, ThreadPane, DetailsPane } from './views/conversation.js';
 import { PinsPane } from './views/media.js'; // pinned messages
-import { PeoplePane, MePop } from './views/people.js';
+import { PeoplePane, MePop, peopleWanted } from './views/people.js';
 import { CatchUp, Saved } from './views/catchup.js';
 import { Search, QuickJump } from './views/search.js';
 import { Settings } from './views/settings.js';
@@ -99,9 +99,21 @@ function PaneView() {
   return null;
 }
 
+// The member list comes back as you left it last time, once, on the first
+// room you open (js/views/people.js remembers the toggle).
+let peopleRestored = false;
+function restorePeople() {
+  const v = S.ui.view;
+  if (peopleRestored || v.type !== 'conv' || !convMeta(v.id)) return;
+  peopleRestored = true;
+  if (!S.ui.pane && peopleWanted() && !convMeta(v.id).user && innerWidth >= 1180) S.ui.pane = { type: 'people' };
+}
+
 function Desktop() {
+  if (S.ui.drawer) S.ui.drawer = null; // the phone's drawer, left open while the window grew
+  restorePeople();
   const pane = PaneView();
-  return html`<div class=${`app${pane ? ' has-pane' : ''}`}>
+  return html`<div class=${`app${pane ? ` has-pane pane-${S.ui.pane.type}` : ''}`}>
     <${Nav} />
     <main id="main" class="main-land" aria-label="Main"><${MainView} /></main>
     ${pane}
@@ -140,7 +152,7 @@ function YouTab() {
       ${row('save', 'Saved messages', () => go({ type: 'saved' }), S.saved.length ? html`<span class="faint num">${S.saved.length}</span>` : '')}
       ${row('search', 'Search messages', () => go({ type: 'search', q: '' }))}
       ${row('bell', 'Notifications', () => openLayer({ C: Settings, props: { page: 'notify' } }))}
-      ${row('eye', 'Appearance', () => openLayer({ C: Settings, props: { page: 'look' } }))}
+      ${row('palette', 'Appearance', () => openLayer({ C: Settings, props: { page: 'look' } }))}
       ${row('sliders', 'All settings', () => openLayer({ C: Settings, props: {} }))}
     </div>
   </div>`;
@@ -162,21 +174,36 @@ function Phone() {
   else if (tab === 'catchup') body = html`<${CatchUp} />`;
   else body = html`<${TabHead} title="You" /><${YouTab} />`;
 
-  return html`<div class="phone">
+  return html`<div class="phone" onTouchStart=${edgeStart} onTouchEnd=${edgeEnd}>
     <div class="screen root" aria-hidden=${S.ui.depth > 0 ? 'true' : undefined}>
       <div class="tab-body">${body}</div>
       ${!isOnline() && html`<div class="conn" role="status"><${Icon} name="offline" size=${16} />Can\u2019t reach Snug. Messages wait and send when it\u2019s back.</div>`}
       ${tab !== 'you' && html`<${LiveDock} />`}
       <nav class="tabs" role="tablist" aria-label="Sections">
         ${TABS.map((t) => html`<button key=${t.id} class="tab" role="tab" aria-selected=${String(tab === t.id)} onClick=${() => setTab(t.id)}>
-          <${Icon} name=${t.icon} size=${22} />${t.label}
+          <${Icon} name=${t.icon} size=${24} />${t.label}
           ${counts[t.id] > 0 && html`<span class="badge" aria-label=${`${counts[t.id]} for you`}>${counts[t.id] > 99 ? '99+' : counts[t.id]}</span>`}
         </button>`)}
       </nav>
     </div>
     ${S.ui.depth > 0 && html`<div class="screen push" key=${v.type === 'conv' || v.type === 'house' || v.type === 'person' ? `${v.type}${v.id}` : v.type}><main id="main" class="main-land" aria-label="Main"><${MainView} /></main></div>`}
-    ${pane && html`<div class="screen push" key=${`${S.ui.pane.type}${S.ui.pane.id || ''}`}>${pane}</div>`}
+    ${pane && S.ui.pane.type === 'people' && html`<div class="sheet-scrim" onClick=${closePane}></div>`}
+    ${pane && html`<div class=${`screen push${S.ui.pane.type === 'people' ? ' sheet' : ''}`} key=${`${S.ui.pane.type}${S.ui.pane.id || ''}`}>${pane}</div>`}
+    <${PhoneDrawer} />
   </div>`;
+}
+
+// A swipe in from the left edge of a room opens the drawer (the button in
+// the room's header does the same).
+let edge = null;
+function edgeStart(e) {
+  const t = e.touches[0];
+  edge = t && t.clientX < 24 && S.ui.depth > 0 && S.ui.view.type === 'conv' && !S.ui.pane ? { x: t.clientX, y: t.clientY } : null;
+}
+function edgeEnd(e) {
+  const t = e.changedTouches[0];
+  if (edge && t && t.clientX - edge.x > 60 && Math.abs(t.clientY - edge.y) < 60) openDrawer();
+  edge = null;
 }
 
 function Overlays() {
@@ -200,7 +227,7 @@ function Overlays() {
 let pushed = 0;
 function layers() {
   const u = S.ui;
-  return (u.phone && u.depth > 0 ? 1 : 0) + (u.pane ? 1 : 0)
+  return (u.phone && u.depth > 0 ? 1 : 0) + (u.pane ? 1 : 0) + (u.phone && u.drawer ? 1 : 0)
     + (u.lightbox || u.menu || u.pop || u.quick || u.modal || u.layer ? 1 : 0);
 }
 function syncHistory() {
@@ -290,6 +317,7 @@ function closeTop() {
   if (u.quick) return closeQuick();
   if (u.modal) return closeModal();
   if (u.layer) return closeLayer();
+  if (u.drawer) return closeDrawer();
   if (u.pane) return closePane();
   if (u.phone && u.depth > 0) return back();
   return false;

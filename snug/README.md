@@ -503,7 +503,7 @@ Real, and covered by tests with separate users:
     refused, positions are renumbered in one transaction, and each change is
     in the house log.
   - **House pictures**: an **icon** (square PNG, JPEG, WebP or GIF, up to 1 MB
-    and 512 px) drawn inside the arch wherever the house appears, with the
+    and 512 px) drawn inside the circle wherever the house appears, with the
     letter and colour behind it if it can't load; a **banner** (2 MB) at the
     top of the house's sidebar and on Discover cards for public houses; an
     **invitation background** (2 MB) behind the card a link opens. The type
@@ -1065,39 +1065,70 @@ two people sitting close in one place. It is Brand Violet `#8B5CF6`; the
 brand sheet is in `docs/brand/BRAND.md` and the reasons for it are in
 `docs/direction/README.md` section 2. All tokens are in `css/tokens.css`. The rules, briefly:
 
-- **Layout.** Three levels, always visible: the rail (Home, Messages,
-  Discover, then your communities), the context column for the place you
-  are in (Home's Catch up, Friends and Saved; your conversations; Discover's
-  sections; a community's rooms and events), then the content. Your own
-  panel sits at the bottom of the column. People, details and threads open
-  in a side pane only when asked for. Below 1180px the pane lies over the
-  conversation instead of squeezing it.
+- **Layout.** Four levels, like a communication app rather than a
+  dashboard: a 72px rail (Home, Messages, Discover, your communities as
+  48px circles, Create or join), a 240px context column for the place you
+  are in (Home, Catch up, Mentions, Friends, Messages, Saved, live voice,
+  events and recent conversations; your conversations; Discover's sections;
+  a community's rooms by category, with everyone in a voice room listed
+  under it), the conversation, then people or a thread in a side pane when
+  asked for (member list 248px, thread 320 to 400px). A 52px panel at the
+  bottom of the column holds your face, status, mute, deafen and settings;
+  the voice strip sits above it while you are in a call. Headers are 48px:
+  name, topic, then icon buttons (pins, notifications, members, details,
+  search). Below 1180px the pane lies over the conversation.
 - **Phone.** Its own product, not a squeezed desktop: tabs at the bottom
-  (Home, Messages, Discover, Catch up, You), communities reached from Home
-  and Discover, one screen at a time pushed from the right, menus and
-  dialogs as bottom sheets, long-press for message actions, 44px targets.
-- **Shape.** Places are arches, people are circles, controls are
-  rectangles. Buttons and inputs 6px, menus 8px, dialogs 12px.
-- **Colour.** Dark is the default, warm paper is the light theme; depth
-  comes from five surface steps, and only floating layers cast the single
-  shadow. Violet is the brand and means *for you*: the main button, the
-  selected place's bar, count badges, the New line, mentions, selection
-  (`#996FF7` with near-black text in dark themes, `#763FF4` with white text
-  in light ones, so text on it reaches 4.5:1). Mint means
-  online or connected, amber idle or happening soon, cyan links, rose your
-  own reactions, red destructive or failed. People, roles and houses choose
-  a hue only; the theme owns lightness and chroma, and the offered hues stay
-  clear of the semantic ones. No gradients.
+  (Home, Messages, Discover, Catch up, You), a drawer (rail plus rooms)
+  from the left edge in a community, the member list as a bottom sheet,
+  one screen at a time pushed from the right, menus and dialogs as bottom
+  sheets, long-press for message actions, 44px targets.
+- **Messages.** One continuous stream, no cards. A run from one person
+  shows the 40px avatar, name (14px, 600, role colour) and time once;
+  follow-ups are compact and show their time in the gutter on hover. Runs
+  break after 7 minutes, another author, a reply or a system line. Hover
+  shows a small toolbar (react, reply, thread, more; edit and delete on your
+  own). Reactions are small 24px chips; yours are violet-tinted. One
+  composer: + (upload, poll, more), text, GIF, emoji, voice message, and
+  Send once there is something to send; drop files anywhere on the
+  conversation.
+- **Shape.** People and communities are circles, controls are compact
+  rectangles: nav and menu rows 4px, buttons and menus 6px, dialogs and
+  inputs 8px, large media 12px. Full rounding only for avatars, count
+  badges and true pills. Rows are 32px (42px with a second line), buttons
+  32px (28 in dense rows, 36 to 40 for a dialog's main action), icon
+  buttons 32px.
+- **Colour.** Dark is the default, warm paper is the light theme. Depth
+  comes from surface steps, not borders or shadows: rail and conversation
+  `#0E0F10`, navigation `#141516`, secondary and menus `#1A1C1D`, hover
+  `#212324`, selected `#292B2D` (light themes flip so the conversation is
+  the brightest). Only floating layers cast a shadow. Violet is used
+  sparingly and means *for you*: the one primary button in a view, the 3px
+  bar beside the selected place, count badges, the edge of a message that
+  mentions you, your own reactions (`#996FF7` with near-black text in dark
+  themes, `#763FF4` with white text in light ones, so text on it reaches
+  4.5:1). A selected row is a neutral surface, never violet. Unread is
+  neutral: bold text and a short white pip. Mint means online, connected or
+  speaking, amber idle or happening soon, cyan links, red busy, destructive
+  or failed. People, roles and houses choose a hue only; the theme owns
+  lightness and chroma. No gradients.
 - **Type.** Inter (bundled, OFL) for everything, Atkinson Hyperlegible Mono
-  for code. Weights 400 reading, 500 names, 600 emphasis. Messages are
-  16px (14px in Compact) with a line cap.
-- **Space.** 4px base: 4, 8, 12, 16, 20, 24, 32, 40, 48, 64, 80. Three
+  for code. 20px page and dialog titles, 16px section headings, 14px body
+  and controls, 13px secondary, 12px metadata, 11px badges. Messages are
+  15px (14px in Compact, 16px in Roomy).
+- **Icons.** One line set on a 20-unit grid that draws about 1.5px at any
+  size: 16px in rows, 18px in menus, 20px for controls, 24px for major
+  marks. Text rooms show `#`, voice rooms a speaker.
+- **Space.** 4px base. 4 to 8px between messages, 8 to 12px between
+  controls, 16px between sections, 24px between major regions. Three
   densities: Compact, Regular, Roomy.
-- **Motion.** 100ms for hover and press, 160 to 240ms for things that
-  enter. Position and opacity only. Off when the system asks for reduced
+- **Motion.** 100ms for hover, 150ms for buttons and menus, 220ms for
+  panels. Position and opacity only. Off when the system asks for reduced
   motion.
-- **Cards.** Only for things that are separate objects: attachments, events
-  you can act on, community previews and floating layers. Lists are rows.
+- **Cards.** Only for separate objects: attachments, events you can act on,
+  Discover's community previews and floating layers. Everything else is a
+  row with a hover state.
+
+The full reference is `docs/direction/README.md`.
 
 ## How it is built
 

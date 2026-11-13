@@ -46,6 +46,19 @@ function Counts({ here, voice, members, member }) {
   </p>`;
 }
 
+// The events page's side column: the last few that are over, compact.
+function PastEvents({ house }) {
+  const now = useNow();
+  const past = Object.values(S.events || {}).filter((e) => e.house === house && eventState(e, now) === 'past')
+    .sort((a, b) => b.starts - a.starts).slice(0, 5);
+  return html`<section class="pl-sect" aria-labelledby="pl-past">
+    <div class="pl-head"><h2 id="pl-past">Past</h2>${past.length > 0 && html`<span class="count num">${past.length}</span>`}</div>
+    ${past.length
+      ? html`<div class="ev-rows">${past.map((e) => html`<${EventRow} key=${e.id} ev=${e} compact />`)}</div>`
+      : html`<p class="pl-note">Finished events show up here.</p>`}
+  </section>`;
+}
+
 function Band({ house, topic, isPublic, here, voice, members, member, children }) {
   return html`<header class="pl-band" style=${`--hue:${hueOf(house.hue)}`}>
     <${Arch} house=${house} />
@@ -57,8 +70,8 @@ function Band({ house, topic, isPublic, here, voice, members, member, children }
       <h1 class="pl-name">${house.name}</h1>
       ${house.about && html`<p class="pl-about">${house.about}</p>`}
       <${Counts} here=${here} voice=${voice} members=${members} member=${member} />
-      ${children && html`<div class="pl-acts">${children}</div>`}
     </div>
+    ${children && html`<div class="pl-acts">${children}</div>`}
   </header>`;
 }
 
@@ -238,9 +251,10 @@ function MemberPage({ id, events }) {
   if (events) {
     return html`<section class="main view pl-page" aria-label=${`Events in ${h.name}`}>
       <${Bar} house=${h} title=${html`<${Icon} name="calendar" />Events`}>${actions}<//>
-      <div class="view-body"><div class="pl-col">
-        <p class="pl-lead">${canPlan(id) ? `Plan something and everyone in ${h.name} can say they’re coming.` : `What’s planned in ${h.name}. Say you’re going and the people running it know who to expect.`}</p>
-        <${EventList} house=${id} title="Coming up" />
+      <div class="view-body"><div class="pl-cols pl-events">
+        <p class="pl-lead pl-span">${canPlan(id) ? `Plan something and everyone in ${h.name} can say they’re coming.` : `What’s planned in ${h.name}. Say you’re going and the people running it know who to expect.`}</p>
+        <div class="pl-main"><${EventList} house=${id} title="Coming up" /></div>
+        <aside class="pl-aside" aria-label="Past events"><${PastEvents} house=${id} /></aside>
       </div></div>
     </section>`;
   }

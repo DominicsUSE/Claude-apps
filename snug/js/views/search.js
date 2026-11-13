@@ -36,6 +36,46 @@ function examples() {
   ];
 }
 
+// People, rooms and communities whose name matches the words typed: found on
+// this device, shown above the messages so search covers places too.
+function placeHits(words) {
+  const w = words.trim();
+  if (w.length < 2) return [];
+  const good = (n) => fuzzy(w, n || '') >= 60;
+  const out = [];
+  for (const u of Object.values(S.users)) {
+    if (u.id !== S.me && (good(u.name) || good(u.handle))) out.push({ kind: 'People', key: `u${u.id}`, label: u.name, hint: `@${u.handle}`, icon: html`<${Avatar} user=${u} presence size=${24} />`, run: () => go({ type: 'person', id: u.id }) });
+  }
+  for (const d of S.dmOrder) {
+    const meta = convMeta(d);
+    if (meta && !meta.user && good(meta.title)) out.push({ kind: 'Conversations', key: d, label: meta.title, hint: 'Group', icon: html`<${Icon} name="people" size=${16} />`, run: () => openConv(d) });
+  }
+  for (const h of S.houseOrder) {
+    if (good(S.houses[h].name)) out.push({ kind: 'Communities', key: `h${h}`, label: S.houses[h].name, hint: 'Community', icon: html`<${Tile} house=${S.houses[h]} />`, run: () => openHouse(h) });
+    for (const id of roomIds(S, h)) {
+      const r = S.rooms[id];
+      if (good(r.name)) out.push({ kind: 'Rooms', key: id, label: r.name, hint: S.houses[h].name, icon: html`<${RoomIcon} kind=${r.kind} size=${16} />`, run: () => openConv(id) });
+    }
+  }
+  const order = ['People', 'Rooms', 'Communities', 'Conversations'];
+  return order.flatMap((k) => out.filter((x) => x.kind === k).slice(0, 4));
+}
+
+function PlaceHits({ items }) {
+  if (!items.length) return null;
+  return html`<div class="search-places" role="group" aria-label="People and places">
+    ${['People', 'Rooms', 'Communities', 'Conversations'].map((k) => {
+      const list = items.filter((x) => x.kind === k);
+      return list.length > 0 && html`<section class="search-group" key=${k} aria-label=${k}>
+        <h3 class="search-group-h">${k}<span class="num"><span aria-hidden="true"> — </span><span class="sr">, </span>${list.length}</span></h3>
+        <div class="search-place-list">${list.map((x) => html`<button class="search-place" key=${x.key} onClick=${x.run}>
+          <span class="search-place-ic">${x.icon}</span><span class="trunc">${x.label}</span><span class="search-place-hint trunc">${x.hint}</span>
+        </button>`)}</div>
+      </section>`;
+    })}
+  </div>`;
+}
+
 export function Search() {
   const q = S.ui.view.q || '';
   const input = useRef();
@@ -105,6 +145,7 @@ export function Search() {
       </div>
     </div>
     <div class="view-body">
+      ${!empty && html`<${PlaceHits} items=${placeHits(p.terms.join(' '))} />`}
       ${empty
         ? html`<div class="ops">
             <p class="sub">Type a word, or narrow it down. The filters above write these for you.</p>
@@ -120,7 +161,7 @@ export function Search() {
               ${filtered && html`<button class="btn" onClick=${() => set(p.terms.join(' '))}>Clear filters</button>`}
             <//>`
           : html`<div class="col search-results">
-              <div class="view-note">${hits.length === 80 ? 'First 80 messages' : plural(hits.length, 'message')}, newest first${res.local ? '. You\u2019re offline, so this only covers messages already on this device.' : ''}</div>
+              <div class="view-note search-group-h">${hits.length === 80 ? 'First 80 messages' : plural(hits.length, 'message')}, newest first${res.local ? '. You\u2019re offline, so this only covers messages already on this device.' : ''}</div>
               ${hits.map(({ conv, m }) => {
                 const meta = convMeta(conv);
                 const who = S.users[m.author];
@@ -147,8 +188,8 @@ const ACTIONS = [
   { label: 'Saved messages', icon: 'save', words: 'saved bookmarks kept', run: () => go({ type: 'saved' }) },
   { label: 'Settings', icon: 'sliders', words: 'settings preferences options', run: () => openLayer({ C: Settings, props: {} }) },
   { label: 'Notification settings', icon: 'bell', words: 'notifications mute alerts', run: () => openLayer({ C: Settings, props: { page: 'notify' } }) },
-  { label: 'Switch to dark theme', icon: 'eye', words: 'dark theme night appearance', run: () => setPref('theme', 'dark') },
-  { label: 'Switch to light theme', icon: 'eye', words: 'light theme day appearance', run: () => setPref('theme', 'light') },
+  { label: 'Switch to dark theme', icon: 'palette', words: 'dark theme night appearance', run: () => setPref('theme', 'dark') },
+  { label: 'Switch to light theme', icon: 'palette', words: 'light theme day appearance', run: () => setPref('theme', 'light') },
   { label: 'Set presence to Focused', icon: 'bell-off', words: 'focus focused do not disturb quiet', run: () => setPresence('focus') },
   { label: 'Set presence to Open to talk', icon: 'voice', words: 'open to talk available', run: () => setPresence('open') },
 ];
@@ -163,14 +204,14 @@ function candidates(q) {
     for (const id of roomIds(S, h)) {
       const r = S.rooms[id];
       const a = attention(S, id);
-      add(withRecent(fuzzy(q, r.name), id, q) + (a.needs ? 5 : 0), { key: id, label: r.name, hint: S.houses[h].name, icon: html`<${RoomIcon} kind=${r.kind} />`, run: () => openConv(id) });
+      add(withRecent(fuzzy(q, r.name), id, q) + (a.needs ? 5 : 0), { group: 'Rooms', key: id, label: r.name, hint: S.houses[h].name, icon: html`<${RoomIcon} kind=${r.kind} />`, run: () => openConv(id) });
     }
   }
   for (const d of S.dmOrder) {
     const meta = convMeta(d);
     const a = attention(S, d);
     add(withRecent(fuzzy(q, meta.title), d, q) + (a.needs ? 5 : 0) + 1, {
-      key: d, label: meta.title, hint: meta.user ? 'Direct' : 'Group',
+      group: meta.user ? 'People' : 'Conversations', key: d, label: meta.title, hint: meta.user ? 'Direct' : 'Group',
       icon: meta.user ? html`<${Avatar} user=${meta.user} presence />` : html`<${Icon} name="people" />`, run: () => openConv(d),
     });
   }
@@ -178,13 +219,19 @@ function candidates(q) {
     const direct = new Set(S.dmOrder.map((d) => convMeta(d).user?.id).filter(Boolean));
     for (const u of Object.values(S.users)) {
       if (u.id === S.me || direct.has(u.id)) continue;
-      add(Math.max(fuzzy(q, u.name), fuzzy(q, u.handle)) - 1, { key: `u${u.id}`, label: u.name, hint: 'Start a conversation', icon: html`<${Avatar} user=${u} presence />`, run: () => startDm([u.id]) });
+      add(Math.max(fuzzy(q, u.name), fuzzy(q, u.handle)) - 1, { group: 'People', key: `u${u.id}`, label: u.name, hint: 'Start a conversation', icon: html`<${Avatar} user=${u} presence />`, run: () => startDm([u.id]) });
     }
-    for (const h of S.houseOrder) add(withRecent(fuzzy(q, S.houses[h].name), `h:${h}`, q) - 2, { key: `h${h}`, label: S.houses[h].name, hint: 'Community', icon: html`<${Tile} house=${S.houses[h]} />`, run: () => openHouse(h) });
-    for (const a of ACTIONS) add(Math.max(fuzzy(q, a.label), ...a.words.split(' ').map((w) => (w.startsWith(q.toLowerCase()) ? 50 : -1))) - 3, { key: a.label, label: a.label, hint: 'Action', icon: html`<${Icon} name=${a.icon} />`, run: a.run });
+    for (const h of S.houseOrder) add(withRecent(fuzzy(q, S.houses[h].name), `h:${h}`, q) - 2, { group: 'Communities', key: `h${h}`, label: S.houses[h].name, hint: 'Community', icon: html`<${Tile} house=${S.houses[h]} />`, run: () => openHouse(h) });
+    for (const a of ACTIONS) add(Math.max(fuzzy(q, a.label), ...a.words.split(' ').map((w) => (w.startsWith(q.toLowerCase()) ? 50 : -1))) - 3, { group: 'Actions', key: a.label, label: a.label, hint: 'Action', icon: html`<${Icon} name=${a.icon} />`, run: a.run });
   }
   out.sort((a, b) => b.score - a.score);
-  return out.slice(0, q ? 7 : 8);
+  const top = out.slice(0, q ? 9 : 8);
+  if (!q) return top;
+  // Typed: the best matches, grouped by kind. Groups keep the order of their
+  // best match, so the best match overall stays first (and selected).
+  const order = [];
+  for (const r of top) if (!order.includes(r.group)) order.push(r.group);
+  return order.flatMap((g) => top.filter((r) => r.group === g));
 }
 
 export function QuickJump() {
@@ -195,7 +242,7 @@ export function QuickJump() {
   useLayoutEffect(() => field.current.focus(), []);
   const term = q.trim();
   const rows = candidates(term);
-  if (term) rows.push({ key: 'search', label: `Search messages for “${term}”`, hint: '', icon: html`<${Icon} name="search" />`, run: () => go({ type: 'search', q: term }) });
+  if (term) rows.push({ group: 'Messages', key: 'search', label: `Search messages for “${term}”`, hint: 'Messages and files', icon: html`<${Icon} name="search" />`, run: () => go({ type: 'search', q: term }) });
   else rows.push({ key: 'search', label: 'Search messages', hint: '', icon: html`<${Icon} name="search" />`, run: () => go({ type: 'search', q: '' }) });
   const at = Math.min(i, rows.length - 1);
   const run = (row) => { closeQuick(); row.run(); };
@@ -216,10 +263,13 @@ export function QuickJump() {
       </div>
       <div class="quick-list" id="quick-list" role="listbox" ref=${list}>
         ${!term && html`<div class="menu-label">Go to</div>`}
-        ${rows.map((row, n) => html`<button key=${row.key} role="option" aria-selected=${String(n === at)} class=${`menu-item${n === at ? ' act' : ''}`}
-          onMouseMove=${() => n !== at && setI(n)} onClick=${() => run(row)}>
-          ${row.icon}<span class="grow trunc">${row.label}</span><span class="end">${row.hint}</span>
-        </button>`)}
+        ${rows.flatMap((row, n) => [
+          term && row.group && row.group !== rows[n - 1]?.group && html`<div class="menu-label quick-group" role="presentation" key=${`g-${row.group}`}>${row.group}</div>`,
+          html`<button key=${row.key} role="option" aria-selected=${String(n === at)} class=${`menu-item${n === at ? ' act' : ''}`}
+            onMouseMove=${() => n !== at && setI(n)} onClick=${() => run(row)}>
+            ${row.icon}<span class="grow trunc">${row.label}</span><span class="end">${row.hint}</span>
+          </button>`,
+        ].filter(Boolean))}
       </div>
       <div class="quick-foot">
         <span><span class="kbd">↑</span><span class="kbd">↓</span> to move</span>

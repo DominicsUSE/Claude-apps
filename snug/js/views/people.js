@@ -1,11 +1,12 @@
 // People: the hover card, your own presence menu, the people pane, and the
 // pieces every people view shares (what someone is doing, the friend button,
 // interests, links, communities in common).
-import { html, useState } from '../../vendor/preact-htm.js';
+import { html, useState, useEffect } from '../../vendor/preact-htm.js';
 import {
   S, me, openPop, closePop, startDm, setPresence, setStatus, openLayer, convMeta, membersOf, voiceRoomOf, openConv, closePane,
   go, openMenu, openModal, sendFriendRequest, acceptFriend, declineFriend, removeFriend, setFavoriteFriend,
 } from '../store.js';
+import { togglePane } from '../store.js'; // the member list toggle (shell track)
 import { roleOf } from '../lib/perms.js';
 import { mutualHouses, friendState, safeLink } from '../lib/social.js';
 import { Icon } from '../ui/icons.js';
@@ -21,7 +22,7 @@ import { ProfileBanner, AboutText, Pronouns, PrivateNote, StatusEmoji, openCusto
 import { setPresenceFor, presenceUntilNote, PRESENCE_TIMES } from '../inbox.js'; // presence for a while (server/inbox.js)
 
 export function showProfile(user, anchor, house) {
-  openPop({ anchor, label: `${user.name}, profile`, C: ProfileCard, props: { id: user.id, house } });
+  openPop({ anchor, side: S.ui.phone ? undefined : 'right', label: `${user.name}, profile`, C: ProfileCard, props: { id: user.id, house } });
 }
 export const openPerson = (id) => { closePop(); go({ type: 'person', id }); };
 export const editProfile = () => { closePop(); openLayer({ C: Settings, props: { page: 'profile' } }); };
@@ -222,7 +223,7 @@ function ProfileCard({ id, house }) {
     <${ProfileBanner} u=${u} />
     <div class="pcard-body">
       <div class="pcard-top">
-        <button class="pcard-av" aria-label=${`Open ${u.name}’s profile`} onClick=${() => openPerson(id)}><${Avatar} user=${u} presence size=${64} /></button>
+        <button class="pcard-av" aria-label=${`Open ${u.name}’s profile`} onClick=${() => openPerson(id)}><${Avatar} user=${u} presence size=${56} /></button>
         <${FavButton} id=${id} sm />
       </div>
       <button class="pcard-name" ...${nameAttrs(u)} onClick=${() => openPerson(id)}>${u.name}</button>
@@ -268,7 +269,7 @@ export function MePop() {
         ${u.presence === key && html`<span class="end"><${Icon} name="check" size=${16} /></span>`}
       </button>
       ${key !== 'around' && html`<button class=${`menu-item pres-for${forKey === key ? ' on' : ''}`} role="menuitem" aria-expanded=${String(forKey === key)}
-        aria-label=${`${p.label} for a while`} onClick=${() => setForKey(forKey === key ? null : key)}>for…</button>`}
+        aria-label=${`${p.label} for a while`} data-tip="For how long" onClick=${() => setForKey(forKey === key ? null : key)}><${Icon} name="clock" size=${16} /><${Icon} name=${forKey === key ? 'chev-u' : 'chev-d'} size=${14} /></button>`}
       ${forKey === key && html`<div class="pres-times" role="group" aria-label=${`${p.label} for how long`}>
         ${PRESENCE_TIMES.map(([c, label]) => html`<button key=${c} class="chip" onClick=${() => { setPresenceFor(key, c); closePop(); }}>${label.replace(/^For /, '')}</button>`)}
       </div>`}
@@ -295,17 +296,33 @@ function PersonRow({ u: real, house }) {
   const role = house ? colourRole(house, u.id) : null;
   const live = u.presence !== 'offline' && voiceRoomOf(u.id);
   const fav = S.friends[u.id]?.favorite;
-  return html`<button class="person" onClick=${(e) => showProfile(u, e.currentTarget.getBoundingClientRect(), house)}>
+  return html`<button class=${`person${u.presence === 'offline' ? ' is-off' : ''}`} onClick=${(e) => showProfile(u, e.currentTarget.getBoundingClientRect(), house)}>
     <${Avatar} user=${u} presence dim=${u.presence === 'offline'} speaking=${!!S.speaking[u.id]} />
     <span class="grow">
       <span class=${`person-name trunc${role?.hue != null ? ' role-name' : ''}`} style=${`display:block${role?.hue != null ? `;--hue:${hueOf(role.hue)}` : ''}`} ...${nameAttrs(u)}>${u.name}${u.id === S.me ? ' (you)' : ''}${house ? html` <${RoleIconMark} house=${house} uid=${u.id} />` : null}</span>
-      <span class=${`person-sub trunc${live ? ' is-live' : ''}`} style="display:block">${live ? `In ${S.rooms[live].name}` : u.status || PRESENCE[u.presence].label}</span>
+      <span class=${`person-sub trunc${live ? ' is-live' : ''}`} style="display:block">${live ? `In ${S.rooms[live].name}` : u.presence === 'offline' ? (u.status ? `${u.status} · ${offlineLine(u.id)}` : offlineLine(u.id)) : u.status || PRESENCE[u.presence].label}</span>
     </span>
     ${fav && html`<span class="person-fav" role="img" aria-label="Favourite"><${Icon} name="starred" size=${14} /></span>`}
   </button>`;
 }
 
+// ---------- The member list (shell track) ----------
+// Offline people say when they were last around ("Last active 2 h ago").
+const offlineLine = (id) => { const t = lastActive(id); return t ? `Last active ${ago(t)}` : 'Offline'; };
+
+// The member list toggle remembers itself on this device: shown or hidden,
+// it comes back that way next time (js/app.js restores it once at start).
+const PEOPLE_KEY = 'snug.people';
+const keepPeople = (on) => { try { localStorage.setItem(PEOPLE_KEY, on ? '1' : '0'); } catch { /* blocked */ } };
+export const peopleWanted = () => { try { return localStorage.getItem(PEOPLE_KEY) === '1'; } catch { return false; } };
+export function togglePeople() {
+  togglePane('people');
+  keepPeople(S.ui.pane?.type === 'people');
+}
+
 export function PeoplePane({ conv }) {
+  // Closed by Esc or the close button (not replaced by a thread or details): remember that.
+  useEffect(() => () => { if (!S.ui.pane) keepPeople(false); }, []);
   const meta = convMeta(conv);
   const ids = membersOf(conv);
   const users = ids.map((id) => S.users[id]).sort((a, b) => a.name.localeCompare(b.name));

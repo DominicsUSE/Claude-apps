@@ -252,7 +252,11 @@ test('message requests on a phone: a conversation from a non-friend waits behind
     await robin.click('.switch[aria-label="Message requests for people who aren’t friends"]');
     await robin.waitForFunction(() => window.snug.S.safety.privacy.requests === true);
     assert.equal(await srv.db.get("SELECT requests FROM privacy WHERE user = 'robin'").requests, 1);
+    // On a phone, Escape on a page goes back to the list of sections; on the list it closes Settings.
     await robin.keyboard.press('Escape');
+    await robin.locator('.layer.phone-list').waitFor();
+    await robin.keyboard.press('Escape');
+    await robin.waitForFunction(() => !window.snug.S.ui.layer);
 
     // Sunniva (a housemate, not a friend) opens a conversation from Robin's profile.
     await go(sunniva, 'The floor');

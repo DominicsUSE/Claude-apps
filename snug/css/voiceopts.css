@@ -33,17 +33,17 @@
 
 .stage-person .vo-vol, .vt-extras .vo-vol { color: var(--text-3); opacity: 0; transition: opacity var(--m-fast) var(--ease-in-out); }
 .stage-person:hover .vo-vol, .stage-person:focus-within .vo-vol, .vt:hover .vo-vol, .vt:focus-within .vo-vol, .vo-vol.on { opacity: 1; }
-.vo-vol.on { color: var(--cyan); }
+.vo-vol.on { color: var(--cyan); opacity: 1; }
 @media (hover: none) { .stage-person .vo-vol, .vt-extras .vo-vol { opacity: 1; } }
 .vt-extras { position: absolute; top: var(--s-2); right: var(--s-2); display: flex; align-items: center; gap: var(--s-1); z-index: 2; }
-.vt-extras .vo-vol { background: color-mix(in srgb, var(--bg-0) 70%, transparent); color: var(--text-1); }
-.vo-played { display: inline-flex; align-items: center; max-width: 100%; padding: 0 var(--s-2); height: 20px; border-radius: var(--r-full); background: var(--amber-soft, var(--bg-3)); color: var(--text-1); font-size: var(--t-12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: fade-in var(--m-standard) var(--ease-out); }
+.vt-extras .vo-vol { background: color-mix(in srgb, var(--bg-0) 76%, transparent); color: var(--text-1); }
+.vo-played { display: inline-flex; align-items: center; max-width: 100%; padding: 0 6px; height: 22px; border-radius: var(--r-row); background: var(--amber-soft, var(--bg-3)); color: var(--text-1); font-size: var(--t-12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: fade-in var(--m-standard) var(--ease-out); }
 
 .vo-limit { margin-left: var(--s-1); color: var(--text-3); font-weight: var(--w-regular); }
 .vo-limit.full { color: var(--amber); font-weight: var(--w-semibold); }
 
 /* ---------- Extra stage controls ---------- */
-.stage-acts .vo-hold { height: var(--h-md); padding: 0 var(--s-4); touch-action: none; user-select: none; -webkit-user-select: none; }
+.stage-acts .vo-hold { height: var(--h-md); padding: 0 var(--s-3); touch-action: none; user-select: none; -webkit-user-select: none; }
 .stage-acts .vo-hold.live { background: var(--mint-soft, var(--bg-3)); color: var(--mint-ink, var(--mint)); border-color: var(--mint); }
 
 /* ---------- Soundboard ---------- */
@@ -52,46 +52,49 @@
 .vo-board-head b { font-weight: var(--w-semibold); }
 .vo-board-head .faint { font-size: var(--t-12); }
 .vo-board-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-2); max-height: 288px; overflow: auto; }
-.vo-snd { display: flex; align-items: center; gap: var(--s-2); min-height: var(--touch); padding: 0 var(--s-3); border-radius: var(--r-sm); background: var(--bg-3); color: var(--text-1); border: 1px solid transparent; font: inherit; font-size: var(--t-14); text-align: left; cursor: pointer; transition: background var(--m-fast) var(--ease-in-out); }
-.vo-snd:hover { background: var(--bg-4); }
-.vo-snd:active { background: var(--press); }
+.vo-snd { display: flex; align-items: center; gap: var(--s-2); min-height: var(--h-36); padding: 0 var(--s-3); border-radius: var(--r-btn); background: var(--surface-hover); color: var(--text-1); border: 1px solid transparent; font: inherit; font-size: var(--t-14); text-align: left; cursor: pointer; transition: background var(--m-fast) var(--ease-in-out); }
+.vo-snd:hover { background: var(--surface-sel); }
+.vo-snd:active { background: var(--btn2-press); }
 .vo-snd:focus-visible { outline: var(--focus-w, 2px) solid var(--focus); outline-offset: 2px; }
-.vo-snd[disabled] { color: var(--text-disabled); background: var(--bg-3); cursor: not-allowed; }
+.vo-snd[disabled] { color: var(--text-disabled); background: var(--surface-hover); cursor: not-allowed; }
 .vo-snd-emo { flex: none; width: 20px; display: grid; place-items: center; font-size: 1.125rem; line-height: 1; }
 .vo-snd-emo.lg { width: 40px; height: 40px; font-size: 1.5rem; border-radius: var(--r-sm); background: var(--bg-3); }
 .vo-board-empty { display: grid; justify-items: center; gap: var(--s-1); padding: var(--s-4) var(--s-2); text-align: center; color: var(--text-3); font-size: var(--t-13); }
 .vo-board-empty b { color: var(--text-1); font-weight: var(--w-semibold); font-size: var(--t-14); }
 
-/* ---------- Floating call ---------- */
-.vo-mini { position: fixed; right: var(--s-4); bottom: calc(var(--s-20) + var(--s-4)); z-index: 30; width: 288px; display: grid; gap: var(--s-2); padding: var(--s-2); border-radius: var(--r-lg); animation: rise-in var(--m-smooth) var(--ease-out); }
-.vo-mini-head { display: flex; align-items: center; gap: var(--s-1); min-width: 0; }
-.vo-mini-grip { flex: none; width: 32px; height: 32px; display: grid; place-items: center; border-radius: var(--r-sm); background: transparent; border: 0; color: var(--text-3); cursor: grab; touch-action: none; }
-.vo-mini-grip:hover { background: var(--hover); color: var(--text-1); }
-.vo-mini-grip:active { cursor: grabbing; background: var(--press); }
+/* ---------- Floating call ----------
+   A small panel on the floating surface: a 32px head (grip, the room, the
+   clock, hide), faces or the shared picture, and 32px controls with leave
+   in red. */
+.vo-mini { position: fixed; right: var(--s-4); bottom: calc(var(--s-20) + var(--s-4)); z-index: 30; width: 280px; display: grid; gap: var(--s-2); padding: var(--s-2); border-radius: var(--r-modal); background: var(--surface-float); --bg: var(--surface-float); animation: rise-in var(--m-panel) var(--ease-out); }
+.vo-mini-head { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.vo-mini-grip { flex: none; width: var(--h-28); height: var(--h-sm); display: grid; place-items: center; border-radius: var(--r-btn); background: transparent; border: 0; color: var(--text-3); cursor: grab; touch-action: none; }
+.vo-mini-grip:hover { background: var(--surface-hover); color: var(--text-1); }
+.vo-mini-grip:active { cursor: grabbing; background: var(--surface-sel); }
 .vo-mini-grip:focus-visible, .vo-mini-title:focus-visible { outline: var(--focus-w, 2px) solid var(--focus); outline-offset: 1px; }
-.vo-mini-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--s-2); height: 32px; padding: 0 var(--s-2); border-radius: var(--r-sm); background: transparent; border: 0; color: var(--text-1); font: inherit; font-size: var(--t-14); font-weight: var(--w-semibold); cursor: pointer; text-align: left; }
-.vo-mini-title .ic { color: var(--mint); flex: none; }
-.vo-mini-title:hover { background: var(--hover); }
-.vo-mini-title .faint { font-weight: var(--w-regular); margin-left: auto; }
-.vo-mini-media { position: relative; border-radius: var(--r-md); overflow: hidden; background: var(--bg-0); aspect-ratio: 16 / 9; }
+.vo-mini-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: var(--h-sm); padding: 0 var(--s-2); border-radius: var(--r-btn); background: transparent; border: 0; color: var(--text-1); font: inherit; font-size: var(--t-body); font-weight: var(--w-semibold); cursor: pointer; text-align: left; }
+.vo-mini-title .ic { color: var(--online); flex: none; }
+.vo-mini-title:hover { background: var(--surface-hover); }
+.vo-mini-title .faint { font-weight: var(--w-regular); font-size: var(--t-meta); }
+.vo-mini-media { position: relative; border-radius: var(--r-lg); overflow: hidden; background: var(--bg-0); aspect-ratio: 16 / 9; }
 .vo-mini-video { width: 100%; height: 100%; object-fit: contain; display: block; }
 .vo-mini-media .vt-pip { position: absolute; right: var(--s-1); bottom: var(--s-1); background: color-mix(in srgb, var(--bg-0) 70%, transparent); color: var(--text-1); }
 .vo-mini-faces { display: flex; flex-wrap: wrap; gap: var(--s-2); padding: var(--s-1) var(--s-2); }
 .vo-mini-face { position: relative; display: inline-grid; }
-.vo-mini-face .avatar.speaking { box-shadow: 0 0 0 2px var(--bg-2), 0 0 0 4px var(--mint); }
-.vo-mini-muted { position: absolute; right: -2px; bottom: -2px; width: 16px; height: 16px; border-radius: var(--r-full); display: grid; place-items: center; background: var(--bg-2); color: var(--error); }
-.vo-mini-more { align-self: center; color: var(--text-3); font-size: var(--t-13); }
+.vo-mini-face .avatar.speaking { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--online); }
+.vo-mini-muted { position: absolute; right: -3px; bottom: -3px; width: 16px; height: 16px; border-radius: var(--r-full); display: grid; place-items: center; background: var(--bg); color: var(--error); }
+.vo-mini-more { align-self: center; color: var(--text-3); font-size: var(--t-ui); }
 .vo-mini-acts { display: flex; align-items: center; gap: var(--s-1); }
 .vo-mini-acts .vc { width: var(--h-sm); height: var(--h-sm); background: var(--btn2); color: var(--text-1); }
 .vo-mini-acts .vc:hover { background: var(--btn2-hover); }
-.vo-mini-acts .vc.on { background: var(--error-soft); color: var(--error); }
-.vo-mini-acts .vc.danger { color: var(--error); }
-.vo-mini-acts .vc.danger:hover { background: var(--error); color: var(--text-inverse); }
+.vo-mini-acts .vc.on, .vo-mini-acts .vc.on:hover { background: var(--error-soft); color: var(--error); }
+.vo-mini-acts .vc.danger { width: 44px; background: var(--error); color: var(--on-error); }
+.vo-mini-acts .vc.danger:hover { background: var(--error-hover); color: var(--on-error); }
 .vo-mini-acts .grow { flex: 1; }
+.vo-mini-acts .btn { height: var(--h-sm); }
 
 /* Picture in picture on a video tile, beside full screen. */
 .vt .vt-pip { position: absolute; right: var(--s-2); bottom: var(--s-2); background: color-mix(in srgb, var(--bg-0) 70%, transparent); color: var(--text-1); opacity: 0; transition: opacity var(--m-fast) var(--ease-in-out); z-index: 2; }
-.vt-screen .vt-pip { right: calc(var(--s-2) + var(--h-sm) + var(--s-1)); }
 .vt:hover .vt-pip, .vt:focus-within .vt-pip { opacity: 1; }
 @media (hover: none) { .vt .vt-pip { opacity: 1; } }
 
@@ -134,6 +137,7 @@
 @media (max-width: 759px) {
   .vo-mini { left: var(--s-4); right: var(--s-4); width: auto; bottom: calc(64px + var(--s-4) + env(safe-area-inset-bottom, 0px)); }
   .vo-mini-acts .vc, .vo-mini-grip, .vo-mini-title { min-height: var(--touch); min-width: var(--touch); }
+  .vo-snd { min-height: var(--touch); }
   .vo-snd-row { flex-wrap: wrap; }
   .vo-snd-row .vo-range-row.sm { width: 100%; order: 3; }
   .vo-drop { flex-wrap: wrap; }
@@ -141,6 +145,7 @@
   .vo-add-acts .btn { flex: 1; }
   .vo-dev { min-width: 0; width: 100%; }
 }
+@media (pointer: coarse) { .vo-snd { min-height: var(--touch); } .vo-mini-acts .vc, .vo-mini-acts .btn { min-height: var(--touch); min-width: var(--touch); } }
 @media (prefers-reduced-motion: reduce) {
   .vo-mini, .vo-played { animation: none; }
   .vo-meter-fill { transition: none; }

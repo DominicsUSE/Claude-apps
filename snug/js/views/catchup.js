@@ -152,9 +152,10 @@ export function CatchUp() {
       <header class="bar">
         <${Back} />
         <h1 class="bar-title"><${Icon} name="tray" />Catch up</h1>
+        ${!S.ui.phone && html`<${CatchTabs} tab=${tab} />`}
         <span class="bar-sub trunc">Mentions and replies from the last 30 days</span>
       </header>
-      <${CatchTabs} tab=${tab} />
+      ${S.ui.phone && html`<${CatchTabs} tab=${tab} />`}
       <div class="view-body" id="cu-panel" role="tabpanel" aria-labelledby="cu-tab-mentions"><${Mentions} /></div>
     </section>`;
   }
@@ -167,10 +168,11 @@ export function CatchUp() {
     <header class="bar">
       <${Back} />
       <h1 class="bar-title"><${Icon} name="tray" />Catch up</h1>
+      ${!S.ui.phone && html`<${CatchTabs} tab=${tab} />`}
       ${!nothing && html`<span class="bar-sub trunc">${forYou} for you, ${plural(news.length, 'room')} with news</span>`}
       <div class="bar-end">${(needs.length > 0 || news.length > 0) && html`<button class="btn quiet" onClick=${markAllRead}><${Icon} name="check" size=${16} />Mark all read</button>`}</div>
     </header>
-    <${CatchTabs} tab=${tab} />
+    ${S.ui.phone && html`<${CatchTabs} tab=${tab} />`}
     <div class="view-body" id="cu-panel" role="tabpanel" aria-labelledby="cu-tab-you">
       ${focused && html`<div class="banner"><i class="pres inline focus"></i><span><b>You’re focused.</b> Nothing pops up. It collects here until you’re back.</span>
         <button class="btn quiet" style="margin-left:auto" onClick=${() => setPresence('around')}>I’m back</button></div>`}

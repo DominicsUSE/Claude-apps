@@ -360,7 +360,9 @@ test('first unread and going to a date', async () => {
   await ines.click('.unread-bar .unread-done').catch(() => {});
   // Going to a date: the seeded history starts days ago.
   const first = await ines.evaluate(() => window.snug.S.msgs.k_glaze.find((m) => m.seq != null));
-  await ines.click('.main .bar button[aria-label="Go to a date"]');
+  // Go to a date lives in the header's More menu.
+  await ines.click('.main .bar .bar-more');
+  await ines.locator('[role=menu] [role=menuitem]:has-text("Go to a date")').click();
   const day = new Date(first.ts - 86_400_000 * 30);
   await ines.fill('#jump-date', `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`);
   await ines.click('.date-pop button:has-text("Go")');

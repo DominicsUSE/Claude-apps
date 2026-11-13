@@ -293,3 +293,97 @@ test('presence for a while: Focused for 1 hour from the presence menu shows "Foc
   await page.waitForFunction(() => window.snug.S.users.robin.presence === 'around');
   await page.context().close();
 });
+
+test('the shell: the header bell, the member list remembered, who is inside a voice room, the panel mic', async () => {
+  const page = await person('robin');
+  await page.click('.rail-house:has-text("Kiln & Co.")');
+  await page.click('.nav .row:has-text("The floor")');
+  await page.locator('.main .bar-title:has-text("The floor")').waitFor();
+  // The bell opens this room's notification levels.
+  await page.click('.main .bar button[aria-label="Notifications"]');
+  await page.locator('.menu .menu-label:has-text("Notify me about")').waitFor();
+  await page.locator('.menu .menu-item:has-text("Only what needs me")').waitFor();
+  await page.keyboard.press('Escape');
+  // The member list: 248px wide, and it comes back after a reload until it is closed.
+  await page.click('.main .bar button[aria-label^="People,"]');
+  const pane = page.locator('.pane[aria-label="People"]');
+  await pane.waitFor();
+  assert.equal(Math.round((await pane.boundingBox()).width), 248);
+  await pane.locator('.pane-sect').first().waitFor();
+  assert.ok(await pane.locator('.person').count() >= 2, 'the members are listed');
+  await page.reload();
+  await page.waitForSelector('.nav');
+  await pane.waitFor();
+  await page.click('.pane button[aria-label="Close people"]');
+  await pane.waitFor({ state: 'detached' });
+  await page.reload();
+  await page.locator('.main .bar-title:has-text("The floor")').waitFor();
+  assert.equal(await pane.count(), 0, 'closed stays closed');
+  // Someone joins the Wheel room: they are listed under it with their mic state, and the row counts them.
+  const ines = await socket('ines');
+  await ines.op('voice.join', { room: 'k_wheel' });
+  await ines.op('voice.state', { muted: true });
+  await page.locator('.nav .vroom-person[aria-label="Ines Carvalho, muted"]').waitFor();
+  assert.equal(await page.locator('.nav .row:has-text("Wheel room") .vroom-count').textContent(), '1');
+  assert.equal(await page.locator('.nav .row:has-text("Ines Carvalho")').count(), 0, 'people inside are not rows');
+  await ines.op('voice.leave');
+  await page.locator('.nav .vroom-person').waitFor({ state: 'detached' });
+  ines.close();
+  // The panel's mic, outside a call, is what you want next time, kept on this device.
+  const mic = page.locator('.me-row button[aria-label="Mute microphone"]');
+  assert.equal(await mic.getAttribute('aria-pressed'), 'false');
+  await mic.click();
+  assert.equal(await mic.getAttribute('aria-pressed'), 'true');
+  await page.reload();
+  await page.waitForSelector('.nav');
+  assert.equal(await mic.getAttribute('aria-pressed'), 'true');
+  await mic.click();
+  assert.equal(await mic.getAttribute('aria-pressed'), 'false');
+  await page.context().close();
+});
+
+test('phone: the drawer hops communities and rooms from a room, and the member list is a sheet', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const page = await ctx.newPage();
+  page.setDefaultTimeout(10000);
+  page.on('pageerror', (e) => errors.push(`phone: ${e.message}`));
+  await page.goto(url);
+  await page.fill('#auth-handle', 'robin');
+  await page.fill('#auth-pass', PASSWORD);
+  await page.click('.auth-form button[type=submit]');
+  await page.waitForSelector('.tabs');
+  await page.click('.home-house:has-text("Kiln & Co.")');
+  await page.click('.screen.push .row:has-text("The floor")');
+  await page.locator('.screen.push .main .bar-title:has-text("The floor")').waitFor();
+  await page.click('.screen.push .main .bar button[aria-label="Rooms and places"]');
+  const drawer = page.locator('.drawer[role="dialog"]');
+  await drawer.waitFor();
+  assert.equal(await drawer.locator('.rail-house[aria-current="page"]:has-text("Kiln & Co.")').count(), 1);
+  // Another community's rooms, without leaving the room.
+  await drawer.locator('.rail-house:has-text("Ridgeline Riders")').click();
+  await drawer.locator('.ctx-house:has-text("Ridgeline Riders")').waitFor();
+  assert.equal(await page.locator('.screen.push .main .bar-title:has-text("The floor")').count(), 1);
+  const row = drawer.locator('.row:has-text("Ride plans")');
+  assert.ok((await row.boundingBox()).height >= 44, 'drawer rows are 44px targets');
+  await row.click();
+  await page.locator('.screen.push .main .bar-title:has-text("Ride plans")').waitFor();
+  assert.equal(await drawer.count(), 0, 'going somewhere closes the drawer');
+  // Esc closes it too.
+  await page.click('.screen.push .main .bar button[aria-label="Rooms and places"]');
+  await drawer.waitFor();
+  await page.keyboard.press('Escape');
+  await drawer.waitFor({ state: 'detached' });
+  // The member list rises as a sheet over the room.
+  await page.click('.screen.push .main .bar button[aria-label^="People,"]');
+  const sheet = page.locator('.screen.push.sheet .pane[aria-label="People"]');
+  await sheet.waitFor();
+  await page.waitForFunction(() => document.querySelector('.screen.push.sheet').getAnimations().length === 0);
+  const box = await sheet.boundingBox();
+  assert.ok(box.y > 40 && box.y + box.height <= 845, `a sheet from the bottom: ${JSON.stringify(box)}`);
+  const first = await sheet.locator('.person').first().boundingBox();
+  assert.ok(first.height >= 44, 'member rows are 44px targets');
+  await page.click('.sheet-scrim', { position: { x: 200, y: 20 } });
+  await sheet.waitFor({ state: 'detached' });
+  await page.locator('.screen.push .main .bar-title:has-text("Ride plans")').waitFor();
+  await ctx.close();
+});

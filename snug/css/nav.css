@@ -1,187 +1,266 @@
 /* Navigation: rail -> context column -> content, your panel at the bottom of
    the column, the Home view, and the nav agent's touches to Catch up and
    Search. Tokens only (1px lines excepted).
-   Places are arches, people are circles, controls are rectangles. */
+   Communities and people are circles; controls are 6px rectangles; nav rows
+   are 4px. Neutral first: violet only marks where you are (--indicator) and
+   what needs you (--attention). */
 
-/* ---------- Frame ----------
+/* ---------- Frame (shell track) ----------
    The navigation column of shell.css becomes rail + context column. Every
-   shell rule that measures --nav-w (pane overlay at medium widths) follows. */
-.app { --nav-w: calc(var(--rail-w) + var(--ctx-w)); }
-.app > .nav { flex-direction: row; background: var(--bg-0); --bg: var(--bg-0); border-right: 0; }
+   shell rule that measures --nav-w (pane overlay at medium widths) follows.
+   The rail is a 72px strip of 48px circles (brief 5). */
+.app { --rail-w: 72px; --rail-ic: 48px; --nav-w: calc(var(--rail-w) + var(--ctx-w)); }
+.app > .nav { flex-direction: row; background: var(--surface-rail); --bg: var(--surface-rail); }
 
 /* ---------- Rail ---------- */
-.rail { width: var(--rail-w); flex: none; min-height: 0; display: flex; flex-direction: column; background: var(--bg-0); --bg: var(--bg-0); }
+.rail { width: var(--rail-w); flex: none; min-height: 0; display: flex; flex-direction: column; background: var(--surface-rail); --bg: var(--surface-rail); }
 .rail-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; padding: var(--s-3) 0 var(--s-4); display: flex; flex-direction: column; align-items: center; gap: var(--s-2); }
 .rail-scroll::-webkit-scrollbar { display: none; }
 .rail-item { position: relative; width: 100%; display: flex; justify-content: center; flex: none; }
 
 /* The left edge says what an item is to you: a violet bar where you are, a
-   small light dot where something is new, a hint of it on hover. */
+   short light pip where something is new, a hint of it on hover. */
 .rail-item::before {
   /* Full height once, scaled per state: transform animates without layout work. */
-  content: ""; position: absolute; left: 0; top: 50%; width: 3px; height: var(--s-6); margin-top: calc(var(--s-6) / -2);
-  border-radius: 0 var(--r-full) var(--r-full) 0; background: var(--text-1);
-  transform: scaleY(0);
-  transition: transform var(--m-standard) var(--ease-out), background var(--m-standard) var(--ease-in-out);
+  content: ""; position: absolute; left: 0; top: 50%; width: 4px; height: 40px; margin-top: -20px;
+  border-radius: 0 4px 4px 0; background: var(--text-1);
+  transform: scaleY(0); transform-origin: left center;
+  transition: transform var(--m-control) var(--ease-out), background var(--m-control) var(--ease-in-out);
 }
-.rail-item.unread::before { transform: scaleY(0.34); }
-.rail-item:hover::before { transform: scaleY(0.67); background: var(--text-3); }
+.rail-item.unread::before { transform: scaleY(0.2); }
+.rail-item:hover::before { transform: scaleY(0.5); background: var(--text-2); }
 .rail-item.unread:hover::before { background: var(--text-1); }
-.rail-item.sel::before { transform: scaleY(1); background: var(--brand); }
+.rail-item.sel::before { transform: scaleY(1); background: var(--indicator); }
 
 .rail-btn {
-  position: relative; width: var(--av-md); height: var(--av-md);
-  display: grid; place-items: center; border-radius: var(--r-sm); color: var(--text-2);
-  transition: transform var(--m-fast) var(--ease-in-out), opacity var(--m-fast) var(--ease-in-out);
+  position: relative; width: var(--rail-ic); height: var(--rail-ic);
+  display: grid; place-items: center; border-radius: 50%; color: var(--text-2);
+  transition: transform var(--m-hover) var(--ease-in-out);
 }
 .rail-btn:active { transform: translateY(1px); }
-.rail-btn:focus-visible { outline-offset: 3px; border-radius: var(--r-md); }
-.rail-face { width: 100%; height: 100%; display: grid; place-items: center; border-radius: inherit; transition: background var(--m-fast) var(--ease-in-out), color var(--m-fast) var(--ease-in-out); }
+.rail-btn:focus-visible { outline-offset: 3px; }
+.rail-face { width: 100%; height: 100%; display: grid; place-items: center; border-radius: 50%; transition: background var(--m-hover) var(--ease-in-out), color var(--m-hover) var(--ease-in-out); }
 
-/* Messages, Discover, Create or join: controls, so rectangles on a quiet step. */
-.rail-item:not(:has(.rail-home, .rail-house)) .rail-face { background: var(--bg-2); color: var(--text-2); }
-.rail-item:not(:has(.rail-home, .rail-house)) .rail-btn:hover .rail-face { background: var(--bg-3); color: var(--text-1); }
-.rail-item:not(:has(.rail-home, .rail-house)) .rail-btn:active .rail-face { background: var(--bg-4); }
-.rail-item.sel:not(:has(.rail-home, .rail-house)) .rail-face { background: var(--bg-3); color: var(--text-1); }
-.rail-add .rail-face { border: 1px dashed var(--line-strong); background: transparent !important; }
-.rail-add:hover .rail-face { border-color: var(--text-3); }
+/* Home, Messages, Discover, Create or join: neutral circles on a quiet step. */
+.rail-item:not(:has(.rail-house)) .rail-face { background: var(--surface-2); color: var(--text-2); }
+.rail-item:not(:has(.rail-house)) .rail-btn:hover .rail-face { background: var(--surface-sel); color: var(--text-1); }
+.rail-item:not(:has(.rail-house)) .rail-btn:active .rail-face { background: var(--surface-hover); }
+.rail-item.sel:not(:has(.rail-house)) .rail-face { background: var(--surface-sel); color: var(--text-1); }
+.rail-add .rail-face { color: var(--text-2) !important; }
+.rail-add:hover .rail-face { color: var(--text-1) !important; }
 
-/* Home is the Nook itself. */
-.rail-home .nook { transition: transform var(--m-standard) var(--ease-out); }
+/* Home is the Nook itself, on its circle. */
+.rail-home .nook { transition: transform var(--m-control) var(--ease-out); }
 .rail-home:hover .nook { transform: translateY(-1px); }
 
-/* Communities are arches; the one you are in is at full strength. */
-.rail .tile { --sz: var(--av-md); font-size: var(--t-16); }
-.rail-house .rail-face { opacity: 0.8; transition: opacity var(--m-fast) var(--ease-in-out); }
-.rail-house:hover .rail-face, .rail-item.sel .rail-house .rail-face, .rail-item.unread .rail-house .rail-face { opacity: 1; }
-.rail-house:focus-visible { border-radius: var(--r-md); }
+/* Communities are circles at full strength; hover lifts them a touch. */
+.rail .tile { --sz: var(--rail-ic); font-size: var(--t-16); font-weight: var(--w-semibold); }
+.rail-house .rail-face { transition: filter var(--m-hover) var(--ease-in-out); }
+.rail-house:hover .rail-face { filter: brightness(1.08); }
 
-.rail-badge { position: absolute; right: calc(var(--s-1) * -1.5); top: calc(var(--s-1) * -1); box-shadow: 0 0 0 3px var(--bg-0); pointer-events: none; }
-.rail-sep { width: var(--s-8); height: 1px; flex: none; background: var(--line); margin: var(--s-1) 0; }
+/* Mentions and requests: a violet count at the bottom right, cut out of the rail. */
+.rail-badge { position: absolute; right: -4px; bottom: -4px; top: auto; box-shadow: 0 0 0 3px var(--surface-rail); pointer-events: none; }
+.rail-sep { width: 32px; height: 2px; flex: none; border-radius: 1px; background: var(--line); margin: 0; }
 
-/* ---------- Context column ---------- */
-.ctx { width: var(--ctx-w); flex: none; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg-2); --bg: var(--bg-2); border-right: 1px solid var(--line-subtle); border-radius: var(--r-md) 0 0 0; }
-.ctx-head { height: var(--bar-h); flex: none; display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-2); border-bottom: 1px solid var(--line-subtle); }
-.ctx-head .jump-btn { background: var(--bg-0); border-color: transparent; }
-.ctx-head .jump-btn:hover { border-color: var(--line-strong); }
+/* ---------- Context column (brief 6, 7) ---------- */
+.ctx { width: var(--ctx-w); flex: none; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; background: var(--surface-nav); --bg: var(--surface-nav); }
+.ctx-head { height: var(--bar-h); flex: none; display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-2) 0 var(--s-3); border-bottom: 1px solid var(--line-subtle); }
+.ctx-head .jump-btn { height: var(--h-28); background: var(--surface-rail); border-color: transparent; border-radius: var(--r-row); }
+.ctx-head .jump-btn:hover { color: var(--text-2); border-color: transparent; }
 .ctx-head .jump-btn .kbd { white-space: nowrap; flex: none; }
 .ctx-title { padding: 0 var(--s-4); }
-.ctx-title .ctx-name { font-size: var(--t-16); font-weight: var(--w-semibold); letter-spacing: -0.01em; }
-.ctx-house-head { padding: 0 var(--s-1); }
-.ctx-house { width: 100%; height: var(--h-md); padding: 0 var(--s-2); display: flex; align-items: center; gap: var(--s-2); border-radius: var(--r-sm); text-align: left; transition: background var(--m-fast) var(--ease-in-out); }
-.ctx-house:hover { background: var(--bg-3); --bg: var(--bg-3); }
-.ctx-house:active { background: var(--bg-4); --bg: var(--bg-4); }
-.ctx-house .tile { --sz: 28px; }
-.ctx-house > .ic { color: var(--text-3); }
-.ctx-house .ctx-name { display: block; font-size: var(--t-14); font-weight: var(--w-semibold); line-height: var(--lh-ui); color: var(--text-1); }
-.ctx-meta { display: flex; gap: var(--s-2); font-size: var(--t-12); font-weight: var(--w-regular); color: var(--text-3); line-height: var(--lh-ui); }
+.ctx-title .ctx-name { font-size: var(--t-section); font-weight: var(--w-semibold); letter-spacing: -0.005em; }
+/* A house: its name across the top is the house menu (brief 6). */
+.ctx-house-head { padding: 0; }
+.ctx-house { width: 100%; height: 100%; padding: 0 var(--s-3) 0 var(--s-4); display: flex; align-items: center; gap: var(--s-2); border-radius: 0; text-align: left; transition: background var(--m-hover) var(--ease-in-out); }
+.ctx-house:hover { background: var(--surface-hover); --bg: var(--surface-hover); }
+.ctx-house:active, .ctx-house[aria-expanded="true"] { background: var(--surface-sel); --bg: var(--surface-sel); }
+.ctx-house > .ic { color: var(--text-2); }
+.ctx-house .ctx-name { display: block; font-size: var(--t-body); font-weight: var(--w-semibold); line-height: 18px; color: var(--text-1); }
+.ctx-meta { display: flex; gap: var(--s-2); font-size: var(--t-meta); font-weight: var(--w-regular); color: var(--text-3); line-height: 16px; }
 .ctx-online { display: inline-flex; align-items: center; gap: var(--s-1); }
 .ctx-online .pres, .home-online .pres { width: 6px; height: 6px; }
-.ctx .nav-scroll { padding-top: var(--s-2); }
-.ctx .nav-group { margin-top: var(--s-3); }
+.ctx .nav-scroll { padding: var(--s-2) var(--s-2) var(--s-4); }
+.ctx .nav-group { margin-top: var(--s-2); }
 .ctx .nav-group:first-child { margin-top: 0; }
-.row-hint { margin-left: var(--s-2); font-size: var(--t-12); font-weight: var(--w-regular); color: var(--text-3); }
+/* Category labels: small uppercase, the chevron says open or shut; the
+   category's own buttons stay quiet until you point at it. */
+.ctx .sect { text-transform: uppercase; letter-spacing: 0.04em; font-size: var(--t-micro); padding-left: var(--s-1); margin-top: var(--s-3); }
+.ctx .nav-group:first-child > .sect:first-child { margin-top: var(--s-1); }
+.ctx .sect .sect-name { text-transform: inherit; letter-spacing: inherit; font-size: inherit; }
+.ctx .sect .ib { color: var(--text-3); }
+.ctx .sect .ib:hover { color: var(--text-1); }
+.row-hint { margin-left: var(--s-2); font-size: var(--t-meta); font-weight: var(--w-regular); color: var(--text-3); }
 .row.sel .row-hint { color: var(--text-2); }
-.topic-mark { font-size: var(--t-14); font-weight: var(--w-semibold); color: var(--text-3); line-height: 1; }
-.ctx-note { padding: var(--s-1) var(--s-2); font-size: var(--t-13); color: var(--text-3); line-height: var(--lh-body); }
-.ev-live { font-size: var(--t-11); font-weight: var(--w-semibold); color: var(--brand-ink); }
+.topic-mark { font-size: var(--t-body); font-weight: var(--w-semibold); color: var(--text-3); line-height: 1; }
+.ctx-note { padding: var(--s-1) var(--s-2); font-size: var(--t-ui); color: var(--text-3); line-height: var(--lh-body); }
+.ev-live { font-size: var(--t-micro); font-weight: var(--w-semibold); color: var(--brand-ink); }
 
-/* ---------- Your panel ---------- */
-.me-panel { flex: none; background: var(--bg-1); --bg: var(--bg-1); border-top: 1px solid var(--line-subtle); }
-.me-panel .dock { margin: var(--s-2) var(--s-2) 0; background: var(--bg-2); --bg: var(--bg-2); }
-.me-row { display: flex; align-items: center; gap: var(--s-1); padding: var(--s-2); }
-.me-row .self { flex: 1; min-width: 0; width: auto; padding: 0 var(--s-1); }
+/* Two-line rows (direct messages): a 32px face with its presence, the name,
+   then what they are doing or when they were last around (brief 16, 17). */
+.row.two-line { height: 42px; }
+.row.two-line .row-ic { width: 32px; }
+.row.two-line .row-ic .avatar { --sz: 32px; }
+.row.two-line .row-ic .pres { width: 10px; height: 10px; right: -2px; bottom: -2px; }
+.row-text { display: grid; min-width: 0; line-height: 18px; text-align: left; }
+.row-line { display: block; font-size: var(--t-meta); font-weight: var(--w-regular); color: var(--text-3); line-height: 16px; }
+.row-line.is-live { color: var(--mint-ink); }
+.row.sel .row-line, .row:hover .row-line { color: var(--text-2); }
+.row.sel .row-line.is-live, .row:hover .row-line.is-live { color: var(--mint-ink); }
+
+/* Voice rooms are rooms: who is inside sits under the row, one line each,
+   with a thin mint ring while they talk and their mic/ear state (brief 18).
+   Not .row: tests and the keyboard treat rows as places. */
+.vroom-people { display: grid; padding: 0 0 var(--s-1) 28px; }
+.vroom-person {
+  width: 100%; height: 28px; padding: 0 var(--s-2) 0 var(--s-1); display: flex; align-items: center; gap: var(--s-2);
+  border-radius: var(--r-row); color: var(--text-3); font-size: var(--t-ui); font-weight: var(--w-medium); text-align: left;
+  transition: background var(--m-hover) var(--ease-in-out), color var(--m-hover) var(--ease-in-out);
+}
+.vroom-person:hover { background: var(--surface-hover); --bg: var(--surface-hover); color: var(--text-1); }
+.vroom-person .avatar { --sz: 20px; font-size: 8px; }
+.vroom-person.talking { color: var(--text-1); }
+.vroom-person .avatar.speaking { box-shadow: 0 0 0 1.5px var(--bg), 0 0 0 3px var(--mint); }
+.vroom-name { flex: 1; min-width: 0; }
+.vroom-marks { display: flex; align-items: center; gap: 2px; color: var(--text-3); flex: none; }
+.vroom-marks .is-off { color: var(--error); }
+.vroom-count { font-variant-numeric: tabular-nums; }
+
+/* ---------- Your panel (brief 4): who you are, mic, ear, settings ---------- */
+.me-panel { flex: none; background: var(--surface-rail); --bg: var(--surface-rail); }
+.me-row { display: flex; align-items: center; gap: 0; height: var(--panel-h); padding: 0 var(--s-1) 0 var(--s-2); }
+.me-row .self { flex: 1; min-width: 0; width: auto; height: 40px; padding: 0 var(--s-1) 0 2px; margin-right: 2px; border-radius: var(--r-row); }
+.me-row .self:hover { background: var(--surface-hover); --bg: var(--surface-hover); }
+.me-row .self:active { background: var(--surface-sel); --bg: var(--surface-sel); }
+.me-row .ib { flex: none; }
 .self-text { display: grid; text-align: left; }
 .self-text .self-name, .self-text .self-status { display: block; }
 
-/* ---------- Home ---------- */
-.home-col { width: 100%; max-width: 72rem; padding: var(--s-6) var(--s-8) var(--s-12); container-type: inline-size; }
-.home-hello { margin-bottom: var(--s-6); }
-.home-greet { font-size: var(--t-24); font-weight: var(--w-semibold); line-height: var(--lh-heading); letter-spacing: -0.015em; }
-.home-summary { margin-top: var(--s-2); display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-3); color: var(--text-2); font-size: var(--t-14); line-height: var(--lh-ui); }
-.home-foryou { display: inline-flex; align-items: center; gap: var(--s-2); height: var(--av-xs); padding: 0 var(--s-2) 0 var(--s-1); margin-left: calc(var(--s-1) * -1); border-radius: var(--r-sm); color: var(--text-1); font-weight: var(--w-medium); transition: background var(--m-fast) var(--ease-in-out); }
-.home-foryou:hover { background: var(--hover); }
-.home-foryou:active { background: var(--press); }
+/* The voice strip above your panel while you are in a room or a call:
+   where you are, how the line is, and a way out. Mic and ear live in your
+   panel, so the strip does not repeat them. */
+.me-panel .dock { margin: 0; padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3); background: transparent; --bg: var(--surface-rail); border: 0; border-bottom: 1px solid var(--line-subtle); border-radius: 0; gap: var(--s-1); animation: none; }
+.dock-state { display: flex; align-items: center; gap: var(--s-1); font-size: var(--t-ui); font-weight: var(--w-semibold); color: var(--mint-ink); line-height: 18px; }
+.dock-state.wait { color: var(--amber-ink); }
+.dock-state .ic { color: currentColor !important; }
+.me-panel .dock-head { gap: var(--s-1); padding: 0; border-radius: var(--r-row); font-size: var(--t-meta); color: var(--text-3); text-align: left; }
+.me-panel .dock-head:hover .dock-name { text-decoration: underline; }
+.me-panel .dock-head .dock-name { color: var(--text-2); font-weight: var(--w-medium); }
+.me-panel .dock-head > .ic { display: none; }
+.me-panel .dock-row { gap: 2px; }
+.me-panel .dock-row .ib { width: var(--h-sm); height: var(--h-sm); }
+.me-panel .dock .vc[aria-label="Mute"], .me-panel .dock .vc[aria-label="Unmute"],
+.me-panel .dock .vc[aria-label="Stop hearing the room"], .me-panel .dock .vc[aria-label="Hear the room again"] { display: none; }
 
-.home-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-8); align-items: start; }
-@container (min-width: 880px) {
-  .home-grid { grid-template-columns: minmax(0, 1fr) 18.5rem; gap: var(--s-10); }
+/* ---------- Home ----------
+   What is happening, as lists: voice rooms and conversations in the main
+   column; who is around, your communities and suggestions beside it.
+   Section labels are small caps with a count (brief 16); rows are dense and
+   hover on a surface step; no borders between sections. */
+.home-col { width: 100%; max-width: 70rem; padding: var(--s-4) var(--s-6) var(--s-8); container-type: inline-size; }
+.home-hello { margin-bottom: var(--gap-major); }
+.home-greet { font-size: var(--t-section); font-weight: var(--w-semibold); line-height: var(--lh-heading); letter-spacing: -0.01em; }
+.home-summary { margin-top: var(--s-1); display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-3); color: var(--text-2); font-size: var(--t-ui); line-height: var(--lh-ui); }
+.home-foryou { display: inline-flex; align-items: center; gap: var(--s-2); height: var(--h-xs); padding: 0 var(--s-2) 0 var(--s-1); margin-left: calc(var(--s-1) * -1); border-radius: var(--r-btn); color: var(--text-1); font-weight: var(--w-medium); transition: background var(--m-hover) var(--ease-in-out); }
+.home-foryou:hover { background: var(--surface-hover); }
+.home-foryou:active { background: var(--surface-sel); }
+
+.home-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap-major); align-items: start; }
+@container (min-width: 820px) {
+  .home-grid { grid-template-columns: minmax(0, 1fr) var(--people-w); gap: var(--s-8); }
 }
-.home-main, .home-side { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-8); align-content: start; }
+.home-main, .home-side { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap-major); align-content: start; }
 .home-sect { min-width: 0; }
+/* One column: who is around comes first, then the rest in reading order. */
+@container (max-width: 819px) {
+  .home-main, .home-side { display: contents; }
+  .home-sect[aria-labelledby="home-friends"], .home-sect[aria-labelledby="home-recent"] { order: -1; }
+}
 
-.home-h { display: flex; align-items: baseline; gap: var(--s-2); padding-bottom: var(--s-2); margin-bottom: var(--s-2); border-bottom: 1px solid var(--line-subtle); }
-.home-h h3 { font-size: var(--t-14); font-weight: var(--w-semibold); color: var(--text-1); }
-.home-count { font-size: var(--t-13); color: var(--text-3); }
-.home-more { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; font-size: var(--t-13); color: var(--text-2); border-radius: var(--r-xs); padding: 0 var(--s-1); transition: color var(--m-fast) var(--ease-in-out); }
-.home-more:hover { color: var(--text-1); }
-.home-more:active { color: var(--text-3); }
+.home-h { display: flex; align-items: center; gap: var(--s-2); height: var(--h-xs); margin-bottom: var(--s-1); }
+.home-h h3 { font-size: var(--t-meta); font-weight: var(--w-semibold); text-transform: uppercase; letter-spacing: 0.02em; color: var(--text-3); }
+.home-count { font-weight: var(--w-semibold); color: var(--text-3); }
+.home-more { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; height: var(--h-xs); font-size: var(--t-meta); color: var(--text-3); border-radius: var(--r-row); padding: 0 var(--s-1); transition: color var(--m-hover) var(--ease-in-out), background var(--m-hover) var(--ease-in-out); }
+.home-more:hover { color: var(--text-1); background: var(--surface-hover); }
+.home-more:active { background: var(--surface-sel); }
 
-/* Friends online: a row of people, each saying what they are doing. */
-.home-friends { list-style: none; margin: 0 calc(var(--s-2) * -1); padding: 0; display: flex; gap: var(--s-1); overflow-x: auto; scrollbar-width: none; }
-.home-friends::-webkit-scrollbar { display: none; }
-.home-friends li { flex: none; }
-.home-friend { width: 96px; padding: var(--s-2) var(--s-1); display: grid; justify-items: center; gap: 2px; border-radius: var(--r-md); text-align: center; transition: background var(--m-fast) var(--ease-in-out); }
-.home-friend:hover { background: var(--bg-2); --bg: var(--bg-2); }
-.home-friend:active { background: var(--bg-3); --bg: var(--bg-3); }
-.home-friend .avatar { margin-bottom: var(--s-1); }
-.home-friend-name { max-width: 100%; font-size: var(--t-13); font-weight: var(--w-semibold); color: var(--text-1); }
-.home-friend-doing { font-size: var(--t-12); color: var(--text-3); line-height: var(--lh-ui); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-.is-live { color: var(--brand-ink); }
+/* Online now: one dense line per person, saying what they are doing. */
+.home-friends { list-style: none; margin: 0 calc(var(--s-2) * -1); padding: 0; display: grid; gap: 1px; }
+.home-friend {
+  width: 100%; min-height: 42px; padding: 0 var(--s-2); display: flex; align-items: center; gap: var(--s-3);
+  border-radius: var(--r-row); text-align: left; transition: background var(--m-hover) var(--ease-in-out);
+}
+.home-friend:hover { background: var(--surface-hover); --bg: var(--surface-hover); }
+.home-friend:active { background: var(--surface-sel); --bg: var(--surface-sel); }
+.home-friend-text { min-width: 0; flex: 1; display: grid; line-height: 18px; }
+.home-friend-name { font-size: var(--t-body); font-weight: var(--w-medium); color: var(--text-1); }
+.home-friend-doing { display: flex; align-items: center; gap: var(--s-1); font-size: var(--t-meta); color: var(--text-3); line-height: 16px; }
+.home-friend-doing .ic { flex: none; }
+.home-friend:hover .home-friend-doing:not(.is-live) { color: var(--text-2); }
+
+.is-live { color: var(--mint-ink); }
 .is-typing { font-style: italic; color: var(--text-2); }
 
 /* Rows: icon, what and where, how alive, who. */
-.home-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.home-list { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
 .home-row {
-  width: calc(100% + var(--s-4)); margin: 0 calc(var(--s-2) * -1); padding: var(--s-2);
-  display: flex; align-items: center; gap: var(--s-3); text-align: left; border-radius: var(--r-sm);
-  transition: background var(--m-fast) var(--ease-in-out);
+  width: calc(100% + var(--s-4)); margin: 0 calc(var(--s-2) * -1); padding: var(--s-1) var(--s-2); min-height: 44px;
+  display: flex; align-items: center; gap: var(--s-3); text-align: left; border-radius: var(--r-row);
+  transition: background var(--m-hover) var(--ease-in-out);
 }
-button.home-row:hover, .home-voice:hover { background: var(--bg-2); --bg: var(--bg-2); }
-button.home-row:active { background: var(--bg-3); --bg: var(--bg-3); }
-.home-row-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--s-3); text-align: left; border-radius: var(--r-sm); }
-.home-row-ic { width: var(--av-sm); height: var(--av-sm); flex: none; display: grid; place-items: center; border-radius: var(--r-sm); background: var(--bg-2); color: var(--text-2); }
+button.home-row:hover, .home-voice:hover { background: var(--surface-hover); --bg: var(--surface-hover); }
+button.home-row:active { background: var(--surface-sel); --bg: var(--surface-sel); }
+.home-row-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--s-3); text-align: left; border-radius: var(--r-row); }
+.home-row-ic { width: var(--av-sm); height: var(--av-sm); flex: none; display: grid; place-items: center; border-radius: var(--r-btn); background: var(--surface-2); color: var(--text-2); }
 .home-row-ic:has(> .avatar, > .tile) { background: none; }
-button.home-row:hover .home-row-ic:not(:has(> .avatar, > .tile)) { background: var(--bg-3); }
-.home-row-ic.is-live { background: var(--brand-soft); color: var(--brand-ink); }
+button.home-row:hover .home-row-ic:not(:has(> .avatar, > .tile)) { background: var(--surface-sel); }
+.home-row-ic.is-live { background: var(--surface-2); color: var(--mint-ink); }
 .home-row-ic .tile { --sz: var(--av-sm); }
-.home-row-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
-.home-row-title { display: flex; align-items: baseline; gap: var(--s-2); min-width: 0; font-size: var(--t-14); font-weight: var(--w-semibold); color: var(--text-1); line-height: var(--lh-ui); }
-.home-row-where { flex: none; max-width: 50%; font-size: var(--t-12); font-weight: var(--w-regular); color: var(--text-3); }
-.home-row-sub { display: flex; align-items: center; gap: var(--s-1); font-size: var(--t-12); color: var(--text-2); line-height: var(--lh-ui); }
+.home-row-text { flex: 1; min-width: 0; display: grid; gap: 0; }
+.home-row-title { display: flex; align-items: baseline; gap: var(--s-2); min-width: 0; font-size: var(--t-body); font-weight: var(--w-semibold); color: var(--text-1); line-height: 20px; }
+.home-row-title > .trunc:first-child { flex: 0 0 auto; max-width: 100%; }
+.home-row-where { flex: 0 1 auto; min-width: 0; max-width: 50%; font-size: var(--t-meta); font-weight: var(--w-regular); color: var(--text-3); }
+.home-row-sub { display: flex; align-items: center; gap: var(--s-1); font-size: var(--t-meta); font-weight: var(--w-regular); color: var(--text-3); line-height: 18px; }
+/* One line of inline bits so a long one ends in an ellipsis, never mid-word. */
+.home-row-bits { flex: 0 100 auto; min-width: 0; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: inherit; }
+.home-row-bits > span { display: inline; }
+.home-row-bits > .sep { margin: 0 var(--s-1); }
+/* A phone keeps the live bits (typing, in voice) and drops the head count. */
+@media (max-width: 759px) { .home-row-bits > .talking, .home-row-bits > .sep:has(+ .talking) { display: none; } }
+@media (max-width: 759px) { .home-friend { min-height: var(--touch); } }
 .home-row-sub .sep { color: var(--text-3); }
-.home-row-quote { font-size: var(--t-13); color: var(--text-2); line-height: var(--lh-ui); }
+.home-row-quote { font-size: var(--t-ui); color: var(--text-2); line-height: 18px; }
 .home-row-quote b { font-weight: var(--w-medium); color: var(--text-1); }
 .home-row-end { flex: none; display: flex; align-items: center; gap: var(--s-2); }
-.home-new { font-size: var(--t-12); font-weight: var(--w-semibold); color: var(--text-1); }
+.home-new { font-size: var(--t-meta); font-weight: var(--w-semibold); color: var(--text-1); }
 .home-online { display: inline-flex; align-items: center; gap: var(--s-1); }
 .home-voice { padding-right: var(--s-2); }
 .home-voice .btn { flex: none; }
 .home-pick-about { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.home-skel-ic { width: var(--av-sm); height: var(--av-sm); flex: none; border-radius: var(--r-sm); }
+.home-skel-ic { width: var(--av-sm); height: var(--av-sm); flex: none; border-radius: var(--r-btn); }
 .home-skel .home-row-text { gap: var(--s-2); }
+.home-events .ev-row { margin: 0 calc(var(--s-2) * -1); }
 
-.home-empty { color: var(--text-2); font-size: var(--t-14); line-height: var(--lh-body); padding: var(--s-1) 0; }
+.home-empty { color: var(--text-2); font-size: var(--t-ui); line-height: var(--lh-body); padding: var(--s-1) 0; }
 .home-quiet { color: var(--text-3); }
-.home-link { color: var(--text-1); font-weight: var(--w-medium); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; border-radius: var(--r-xs); }
+.home-link { color: var(--text-1); font-weight: var(--w-medium); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; border-radius: var(--r-row); }
 .home-link:hover { text-decoration-color: currentColor; }
 
 /* A brand-new account: one warm sentence, two ways in. */
-.home-start { padding: var(--s-6) 0 var(--s-10); display: grid; gap: var(--s-3); justify-items: start; max-width: 34rem; }
-.home-start h3 { font-size: var(--t-20); font-weight: var(--w-semibold); line-height: var(--lh-heading); letter-spacing: -0.01em; margin-top: var(--s-2); }
-.home-start p { color: var(--text-2); font-size: var(--t-16); line-height: var(--lh-body); }
+.home-start { padding: var(--s-4) 0 var(--s-8); display: grid; gap: var(--s-2); justify-items: start; max-width: 34rem; }
+.home-start h3 { font-size: var(--t-section); font-weight: var(--w-semibold); line-height: var(--lh-heading); margin-top: var(--s-2); }
+.home-start p { color: var(--text-2); font-size: var(--t-body); line-height: var(--lh-body); }
 .home-start-acts { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-2); }
 .home-fresh-picks { max-width: 34rem; }
 
 /* ---------- Phone ---------- */
 .phone .home-col { padding: var(--s-4) var(--s-4) var(--s-8); }
-.phone .home-greet { font-size: var(--t-20); }
-.phone .home-friends { margin: 0 calc(var(--s-4) * -1); padding: 0 var(--s-3); }
+.phone .home-greet { font-size: var(--t-section); }
 .phone .home-row { min-height: var(--touch); }
 .phone .home .bar-end .btn { padding: 0 var(--s-2); }
 .phone .tab { min-width: 0; }
 .you-card { width: 100%; padding: var(--s-2); margin: calc(var(--s-2) * -1); width: calc(100% + var(--s-4)); border-radius: var(--r-md); text-align: left; transition: background var(--m-fast) var(--ease-in-out); }
-.you-card:hover { background: var(--bg-2); --bg: var(--bg-2); }
+.you-card:hover { background: var(--surface-hover); --bg: var(--bg-2); }
 .you-card:active { background: var(--bg-3); --bg: var(--bg-3); }
 .you-card > .ic { color: var(--text-3); }
 .you-status { justify-content: flex-start; }
@@ -190,12 +269,10 @@ button.home-row:hover .home-row-ic:not(:has(> .avatar, > .tile)) { background: v
 .phone-house .nav-scroll { padding-top: var(--s-2); }
 
 /* ---------- Catch up and Search (views owned by the nav agent) ----------
-   Rows with quiet separators; violet marks what is for you. */
+   Rows separated by spacing and hover, not rules; violet marks what is for you. */
 .catchup .view-sect, .saved .view-sect { gap: var(--s-2); }
-.catchup .col > div + div > .view-sect, .catchup .col > .view-sect:not(:first-child) { border-top: 1px solid var(--line-subtle); margin-top: var(--s-4); padding-top: var(--s-4); }
+.catchup .col > div + div > .view-sect, .catchup .col > .view-sect:not(:first-child) { margin-top: var(--s-3); }
 .catchup .view-sect .tile { --sz: 20px; }
 .catchup .view-sect.for-you .badge { margin-left: 0; }
-.catchup .item[data-triage]::before { content: ""; position: absolute; left: 0; top: var(--s-2); bottom: var(--s-2); width: 2px; border-radius: 0 var(--r-full) var(--r-full) 0; background: var(--line-strong); }
-.catchup .swipe + .swipe .item, .catchup .news + .news, .saved .item + .item, .search-results .item + .item { box-shadow: inset 0 1px 0 var(--line-subtle); }
-.catchup .swipe + .swipe .item:hover, .catchup .news + .news:hover, .saved .item + .item:hover, .search-results .item + .item:hover { box-shadow: none; }
+/* No rule between rows: spacing and the hover step separate them (brief 2). */
 .catchup .invite { box-shadow: inset 2px 0 0 var(--brand); }

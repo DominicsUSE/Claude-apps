@@ -199,6 +199,16 @@ export function DmHeaderButtons({ conv }) {
       onClick=${(e) => openPop({ anchor: rectOf(e), label: 'Members', C: MembersPop, props: { dm: conv } })}><${Icon} name="people" /></button>`}`;
 }
 
+// The same, as menu items for the phone's header menu (js/views/conversation.js).
+export function dmHeaderItems(conv, anchor) {
+  const dm = S.dms[conv];
+  if (!dm) return [];
+  return [
+    { label: 'Add people', icon: 'user-plus', onSelect: () => openModal(AddPeople, { dm: conv }) },
+    isGroupDm(conv) && { label: `Members (${dm.members.length})`, icon: 'people', onSelect: () => setTimeout(() => openPop({ anchor, label: 'Members', C: MembersPop, props: { dm: conv } }), 0) },
+  ];
+}
+
 // ---------- The line a change writes ----------
 export function DmLine({ m }) {
   const l = m.dmLine || {};

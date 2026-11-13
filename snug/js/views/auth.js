@@ -5,11 +5,8 @@ import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { S, emit, loadCache } from '../store.js';
 import { api, startTransport } from '../server.js';
 import { Icon } from '../ui/icons.js';
-import { Lockup, Loading, Nook } from '../ui/brand.js';
+import { Lockup, Loading } from '../ui/brand.js';
 
-// The brand idea on the sign-in panel: a doorway with someone in it, and a
-// few people around it, each in their own hue, some of them here now.
-const SCENE = [[142, 14, 30, 40, 'open'], [200, 76, 18, 32, 'around'], [335, 82, 62, 44, 'open'], [106, 20, 72, 28, 'away'], [228, 58, 84, 24, 'offline']];
 import { TotpStep } from './account.js'; // two-factor sign-in, the second step
 import { Tile } from '../ui/kit.js'; // the house's icon in its arch (server/community.js)
 
@@ -77,22 +74,18 @@ export function Auth() {
   const isNew = mode === 'new';
 
   return html`<div class="auth">
-    <aside class="auth-side">
-      <${Lockup} size=${32} />
-      <div class="auth-scene" aria-hidden="true">
-        <${Nook} size=${240} class="auth-nook" />
-        ${SCENE.map(([hue, x, y, sz, pres]) => html`<i class="auth-person" style=${`--hue:${hue};left:${x}%;top:${y}%;--d:${sz}px`}><i class=${`pres ${pres}`}></i></i>`)}
-      </div>
-      <p class="auth-line">Your people are here.</p>
-    </aside>
     <main class="auth-main">
       <div class="auth-panel">
+        <div class="auth-brand"><${Lockup} size=${24} /></div>
         ${invite && html`<div class="auth-invite">
           <${Tile} house=${invite.house} lg invite=${S.ui.joinCode} />
           <div><b>${invite.by ? `${invite.by} invited you to ${invite.house.name}` : `You’re invited to ${invite.house.name}`}</b>
           <span>${isNew ? 'Create an account to join.' : 'Sign in to join.'}</span></div>
         </div>`}
-        <h1 id="auth-title">${isNew ? 'Make yourself at home' : 'Welcome back'}</h1>
+        <div class="auth-head">
+          <h1 id="auth-title">${isNew ? 'Make yourself at home' : 'Welcome back'}</h1>
+          <p class="auth-sub">${isNew ? 'One account for every house you’re part of.' : 'Your people are here.'}</p>
+        </div>
         ${ticket && html`<${TotpStep} ticket=${ticket} onDone=${entered} onBack=${() => { setTicket(null); setPassword(''); }} />`}
         <form class="form auth-form" hidden=${!!ticket} onSubmit=${submit} novalidate aria-labelledby="auth-title" aria-busy=${busy ? 'true' : undefined}>
           <div class="auth-field">

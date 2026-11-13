@@ -95,7 +95,7 @@ function Featured({ h }) {
   return html`<section class=${`d-feature${h.banner ? ' has-banner' : ''}`} style=${`--hue:${hueOf(h.hue)}`} aria-labelledby=${`feat-${h.id}`}>
     <${Banner} house=${h} cls="d-feature-banner" />
     <button class="d-feature-art" onClick=${() => openPreview(h.id)} aria-label=${`Take a look at ${h.name}`} tabindex="-1">
-      <${ArchTile} house=${h} size="xl" />
+      <${ArchTile} house=${h} size="lg" />
     </button>
     <div class="d-feature-text">
       <div class="d-kicker">${h.inVoice || h.talking ? 'Lively right now' : 'Worth a look'}</div>
@@ -160,8 +160,8 @@ function Happening({ houses, events, limit }) {
 
 // ---------- Lists ----------
 
-function HouseRow({ h }) {
-  return html`<li class="d-house" style=${`--hue:${hueOf(h.hue)}`}>
+function HouseRow({ h, card }) {
+  return html`<li class=${`d-house${card ? ' d-card' : ''}`} style=${`--hue:${hueOf(h.hue)}`}>
     <button class="d-house-main" onClick=${() => openPreview(h.id)}>
       <${ArchTile} house=${h} size="md" />
       <span class="d-house-text">
@@ -273,7 +273,7 @@ export function Discover() {
   if (state.status === 'loading') body = html`<div class="d-state"><${Loading} label="Looking around" /></div>`;
   else if (state.status === 'error') {
     body = html`<div class="empty error" role="alert">
-      <${Icon} name="offline" size=${28} />
+      <${Icon} name="offline" size=${24} />
       <h2>Discover didn’t load</h2>
       <p>Snug couldn’t reach the server just now. Your houses and messages are fine.</p>
       <button class="btn" onClick=${() => { force.current = true; setTries((t) => t + 1); }}>Try again</button>
@@ -297,10 +297,20 @@ export function Discover() {
     body = html`<${Happening} houses=${houses} events=${events} />
       ${!houses.some((h) => h.inVoice || h.talking) && !events.length && html`<${Empty} icon="calendar" title="It’s quiet out there" text="Live voice rooms and events in public communities show up here." />`}`;
   } else if (section === 'communities') {
-    body = html`<section class="d-sect" aria-labelledby="d-all">
-      <h2 class="d-head" id="d-all">${topic || 'All communities'} <span class="count num">${houses.length}</span></h2>
-      <ul class="d-houses">${houses.map((h) => html`<${HouseRow} key=${h.id} h=${h} />`)}</ul>
-    </section>`;
+    // Cards for the communities (brief 22), with what is live and who you
+    // might know beside them.
+    body = html`<div class="d-cols">
+      <div class="d-col-main">
+        <section class="d-sect" aria-labelledby="d-all">
+          <h2 class="d-head" id="d-all">${topic || 'All communities'} <span class="count num">${houses.length}</span></h2>
+          <ul class="d-houses d-cards">${houses.map((h) => html`<${HouseRow} key=${h.id} h=${h} card />`)}</ul>
+        </section>
+      </div>
+      <div class="d-col-side">
+        <${Happening} houses=${houses} events=${events} limit=${4} />
+        <${PeopleYouMightKnow} people=${data.people} limit=${5} />
+      </div>
+    </div>`;
   } else {
     body = html`
       ${featured && html`<${Featured} h=${featured} />`}
@@ -327,7 +337,6 @@ export function Discover() {
     <div class="view-body">
       <div class="d-wrap">
         <div class="d-top">
-          <p class="d-intro">${topic ? `Places for ${topic.toLowerCase()}, with people in them.` : 'Places with people in them.'}</p>
           <label class="d-search">
             <${Icon} name="search" size=${18} />
             <input type="search" placeholder="Search communities, people, interests" aria-label="Search communities and people" value=${q}

@@ -38,6 +38,14 @@ const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 const atBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 48;
 const coarse = () => matchMedia('(pointer: coarse)').matches;
 
+// Holding Shift over a message shows the extra actions in its hover toolbar.
+if (typeof document !== 'undefined') {
+  const shift = (e) => document.documentElement.classList.toggle('shift-held', !!e.shiftKey);
+  addEventListener('keydown', shift);
+  addEventListener('keyup', shift);
+  addEventListener('blur', () => document.documentElement.classList.remove('shift-held'));
+}
+
 // Focus now if the box exists, and again after the next render in case it
 // is about to appear (for example right after opening a room).
 export function focusComposer(conv) {
@@ -47,7 +55,7 @@ export function focusComposer(conv) {
 }
 
 function pickReaction(conv, m, anchor) {
-  openPop({ anchor, align: 'end', label: 'Add a reaction', C: EmojiPicker, props: { onPick: (e) => { closePop(); react(conv, m.id, e); } } });
+  openPop({ anchor, align: 'end', owner: m.id, label: 'Add a reaction', C: EmojiPicker, props: { onPick: (e) => { closePop(); react(conv, m.id, e); } } });
 }
 
 // The same actions, in the same order, wherever a message appears.
@@ -70,7 +78,7 @@ export function messageMenu(conv, m, pos) {
       ...chatMenuItems(conv, m), // quote, copy message link, copy ID (js/views/chat.js)
       !mine && { label: 'Mark unread from here', icon: 'eye', onSelect: () => markUnreadFrom(conv, m) },
       room && can(S, meta.house, 'highlight') && {
-        label: room.highlights.includes(m.id) ? 'Remove from highlights' : 'Add to room highlights', icon: 'pin',
+        label: room.highlights.includes(m.id) ? 'Remove from highlights' : 'Add to room highlights', icon: 'star',
         onSelect: () => toggleHighlight(conv, m.id),
       },
       pinMenuItem(conv, m),
@@ -163,6 +171,7 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
   const replies = isThread(conv) ? [] : S.msgs[`t:${m.id}`] || [];
   const quoted = m.replyTo ? findMsg(conv, m.replyTo) : null;
   const saved = isSaved(m.id);
+  const mine = m.author === S.me;
   const press = useRef();
   if (hiddenBlocked(m)) return html`<${BlockedLine} m=${m} />`; // from someone I blocked: folded away until shown
   const profile = (who) => (e) => showProfile(who, rectOf(e), meta?.house);
@@ -180,7 +189,7 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
   };
   const cancel = () => clearTimeout(press.current);
 
-  const cls = `msg${grouped ? ' grouped' : ''}${toMe ? ' mention' : lit ? ' mention lit' : ''}${pending ? ' pending' : ''}${quoted ? ' has-ref' : ''}${S.ui.menu?.owner === m.id ? ' menu-open' : ''}`;
+  const cls = `msg${grouped ? ' grouped' : ''}${toMe ? ' mention' : lit ? ' mention lit' : ''}${pending ? ' pending' : ''}${quoted ? ' has-ref' : ''}${S.ui.menu?.owner === m.id || S.ui.pop?.owner === m.id ? ' menu-open' : ''}${S.ui.reply[conv] === m.id ? ' replying' : ''}`;
   const reactions = Object.entries(m.reactions || {});
   const threadUnread = replies.length ? unreadOf(S, `t:${m.id}`).count : 0;
   const authors = [...new Set(replies.map((r) => r.author))].map((id) => person(id));
@@ -240,8 +249,10 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
     ${S.ui.editing !== m.id && html`<div class="msg-actions float" role="toolbar" aria-label="Message actions">
       <button class="ib" aria-label="Add a reaction" data-tip="Add a reaction" onClick=${(e) => pickReaction(conv, m, rectOf(e))}><${Icon} name="react" size=${18} /></button>
       ${!m.state && html`<button class="ib" aria-label="Reply" data-tip="Reply" data-key="R" onClick=${() => { setReply(conv, m.id); focusComposer(conv); }}><${Icon} name="reply" size=${18} /></button>`}
-      ${!isThread(conv) && !inThread && !m.state && html`<button class="ib" aria-label=${replies.length ? 'Open thread' : 'Start a thread'} data-tip=${replies.length ? 'Open thread' : 'Start a thread'} data-key="T" onClick=${() => openThread(conv, m.id)}><${Icon} name="thread" size=${18} /></button>`}
-      <button class=${`ib${saved ? ' on' : ''}`} aria-pressed=${String(saved)} aria-label=${saved ? 'Remove from Saved' : 'Save'} data-tip=${saved ? 'Remove from Saved' : 'Save'} data-key="S" onClick=${() => toggleSave(conv, m.id)}><${Icon} name=${saved ? 'saved' : 'save'} size=${18} /></button>
+      ${!mine && !isThread(conv) && !inThread && !m.state && html`<button class="ib" aria-label=${replies.length ? 'Open thread' : 'Start a thread'} data-tip=${replies.length ? 'Open thread' : 'Start a thread'} data-key="T" onClick=${() => openThread(conv, m.id)}><${Icon} name="thread" size=${18} /></button>`}
+      ${mine && !m.cmd && !m.state && html`<button class="ib" aria-label="Edit" data-tip="Edit" data-key="E" onClick=${() => setEditing(m.id)}><${Icon} name="edit" size=${18} /></button>`}
+      ${mine && !m.state && html`<button class="ib danger" aria-label="Delete message" data-tip="Delete" onClick=${() => deleteMsg(conv, m.id)}><${Icon} name="trash" size=${18} /></button>`}
+      <button class=${`ib ma-shift${saved ? ' on' : ''}`} aria-pressed=${String(saved)} aria-label=${saved ? 'Remove from Saved' : 'Save'} data-tip=${saved ? 'Remove from Saved' : 'Save'} data-key="S" onClick=${() => toggleSave(conv, m.id)}><${Icon} name=${saved ? 'saved' : 'save'} size=${18} /></button>
       <button class="ib" aria-label="More actions" data-tip="More" onClick=${(e) => menu({ anchor: rectOf(e) })}><${Icon} name="more" size=${18} /></button>
     </div>`}
   </div>`;
@@ -299,6 +310,9 @@ export function Composer({ conv, placeholder }) {
   const picked = useRef(new Map());
   const rooms = useRef(new Map());
   const gate = canPost(S, conv);
+  const box = useRef();
+  const addRef = useRef();
+  const [drop, setDrop] = useState(null); // the stream's box while files are dragged over it
   const replyId = S.ui.reply[conv];
   const replyTo = replyId ? findMsg(conv, replyId) : null;
 
@@ -423,6 +437,44 @@ export function Composer({ conv, placeholder }) {
       }
     }
   };
+  addRef.current = addFiles;
+  // Files dragged anywhere over this conversation: an overlay says where they
+  // will go, and dropping them attaches them here.
+  useEffect(() => {
+    const host = box.current?.closest('.stream');
+    if (!host) return undefined;
+    let depth = 0;
+    const isFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+    const enter = (e) => {
+      if (!isFiles(e)) return;
+      e.preventDefault();
+      depth += 1;
+      const r = host.getBoundingClientRect();
+      setDrop({ x: r.left, y: r.top, w: r.width, h: r.height });
+    };
+    const over = (e) => { if (isFiles(e)) e.preventDefault(); };
+    const leave = (e) => { if (!isFiles(e)) return; depth = Math.max(0, depth - 1); if (!depth) setDrop(null); };
+    const dropped = (e) => {
+      if (!isFiles(e)) return;
+      e.preventDefault();
+      depth = 0;
+      setDrop(null);
+      addRef.current?.([...e.dataTransfer.files]);
+    };
+    const end = () => { depth = 0; setDrop(null); };
+    host.addEventListener('dragenter', enter);
+    host.addEventListener('dragover', over);
+    host.addEventListener('dragleave', leave);
+    host.addEventListener('drop', dropped);
+    window.addEventListener('dragend', end);
+    return () => {
+      host.removeEventListener('dragenter', enter);
+      host.removeEventListener('dragover', over);
+      host.removeEventListener('dragleave', leave);
+      host.removeEventListener('drop', dropped);
+      window.removeEventListener('dragend', end);
+    };
+  }, [conv, gate.ok, !!composerGate(conv)]);
   const onPaste = (e) => {
     const list = [...(e.clipboardData?.files || [])];
     if (list.length) { e.preventDefault(); addFiles(list); return; }
@@ -440,8 +492,10 @@ export function Composer({ conv, placeholder }) {
   const over = tooLong(text.trim());
   const canSend = !uploading && !over && (text.trim() || files.some((f) => f.status === 'ready'));
   const replyWho = replyTo ? person(replyTo.author).name.split(' ')[0] : '';
-  return html`<div class="composer" data-composer=${conv}
-    onDragOver=${(e) => e.preventDefault()} onDrop=${(e) => { e.preventDefault(); addFiles([...e.dataTransfer.files]); }}>
+  return html`<div class="composer" data-composer=${conv} ref=${box}>
+    ${drop && html`<div class="drop-over" style=${`left:${drop.x}px;top:${drop.y}px;width:${drop.w}px;height:${drop.h}px`} aria-hidden="true">
+      <div class="drop-card"><${Icon} name="clip" size=${24} /><b>Drop to attach</b><span>Up to 6 files, 10 MB each</span></div>
+    </div>`}
     ${ac && ac.kind === 'args' && html`<div class="ac float args"><${ArgsRow} ac=${ac} /></div>`}
     ${ac && ac.kind !== 'args' && html`<div class="ac float" role="listbox" aria-label="Suggestions">
       ${ac.items.map((it, i) => html`<button key=${i} role="option" aria-selected=${String(i === ac.i)} class=${`menu-item${i === ac.i ? ' act' : ''}`}
@@ -481,8 +535,7 @@ export function Composer({ conv, placeholder }) {
       <${LengthNote} n=${text.trim().length} />
       <${FormatBar} ta=${ta} text=${text} update=${update} />
       <div class="composer-row">
-        <button class="ib" aria-label="Attach a file" data-tip="Attach a file" onClick=${() => fileIn.current.click()}><${Icon} name="clip" /></button>
-        <${PlusMenu} conv=${conv} text=${text} update=${update} insert=${insert} replyTo=${replyTo?.id} />
+        <${PlusMenu} conv=${conv} text=${text} update=${update} insert=${insert} replyTo=${replyTo?.id} onAttach=${() => fileIn.current.click()} />
         <textarea ref=${ta} rows="1" placeholder=${placeholder} aria-label=${placeholder} value=${text}
           onInput=${onInput} onKeyDown=${onKey} onPaste=${onPaste} onBlur=${() => setAc(null)}></textarea>
         <${GifButton} conv=${conv} />
@@ -506,6 +559,15 @@ function Foot({ conv }) {
 const Skeleton = ({ rows }) => html`<div class="older" aria-hidden="true">
   ${rows.map((w, i) => html`<div class="older-row" key=${i}><div class="skel"></div><div class="skel" style=${`width:${w}%`}></div></div>`)}
 </div>`;
+
+// What can take focus inside a message. Out of the tab order (one stop per
+// stream); a message's Right and Left arrows walk them, the toolbar first.
+const MSG_CONTROLS = '.msg a[href], .msg button, .msg [tabindex="0"]:not(.msg), .msg video[controls], .msg audio[controls], .msg summary';
+function msgZone(el) {
+  const all = [...el.querySelectorAll(MSG_CONTROLS)].filter((c) => c.closest('.msg') === el && !c.disabled && c.getClientRects().length);
+  const bar = all.filter((c) => c.closest('.msg-actions'));
+  return [...bar, ...all.filter((c) => !bar.includes(c))];
+}
 
 export function Stream({ conv, intro, placeholder }) {
   const all = S.msgs[conv] || [];
@@ -617,10 +679,47 @@ export function Stream({ conv, intro, placeholder }) {
     el.scrollTo({ top: el.scrollHeight, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
   };
 
+  // One tab stop for the whole stream: the controls inside messages (avatar,
+  // name, the hover toolbar, reactions, links) leave the tab order, so Tab
+  // goes header, the latest message, the composer. Arrow keys reach them.
+  useEffect(() => {
+    const root = inner.current;
+    if (!root) return undefined;
+    const tame = () => root.querySelectorAll(MSG_CONTROLS).forEach((el) => {
+      if (el.closest('.msg-edit') || el.getAttribute('tabindex') === '-1') return;
+      el.setAttribute('tabindex', '-1');
+    });
+    tame();
+    const mo = new MutationObserver(tame);
+    mo.observe(root, { childList: true, subtree: true });
+    return () => mo.disconnect();
+  }, [ready]);
+
   // Keyboard path through messages: arrows move, letters act.
   const onKey = (e) => {
     const el = e.target.closest('.msg');
-    if (!el || e.target !== el || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (!el || e.metaKey || e.ctrlKey || e.altKey) return;
+    // Inside a message: Left and Right walk its controls (the toolbar first),
+    // Home and End jump, Escape (or Up and Down) goes back to the message.
+    if (e.target !== el) {
+      if (e.target.closest('.msg-edit')) return;
+      // A profile card or picker opened from here owns Escape.
+      if (S.ui.pop || S.ui.menu || S.ui.modal) return;
+      if (e.target.closest('textarea, input, [role="slider"]') && e.key !== 'Escape') return;
+      const zone = msgZone(el);
+      const at = zone.indexOf(e.target);
+      let next = null;
+      if (e.key === 'ArrowRight') next = zone[(at + 1) % zone.length];
+      else if (e.key === 'ArrowLeft') next = zone[(at - 1 + zone.length) % zone.length];
+      else if (e.key === 'Home') next = zone[0];
+      else if (e.key === 'End') next = zone[zone.length - 1];
+      else if (e.key === 'Escape' || e.key === 'ArrowUp' || e.key === 'ArrowDown') next = el;
+      if (!next) return;
+      next.focus();
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     const c = el.dataset.conv;
     const m = findMsg(c, el.dataset.id);
     if (!m) return;
@@ -637,6 +736,7 @@ export function Stream({ conv, intro, placeholder }) {
     else if (k === 's') toggleSave(c, m.id);
     else if (k === 'e' && m.author === S.me && !m.cmd) setEditing(m.id);
     else if (k === 'Enter') messageMenu(c, m, { anchor: el.getBoundingClientRect() });
+    else if (k === 'ArrowRight' || k === 'ArrowLeft') { const zone = msgZone(el); if (!zone.length) return; (k === 'ArrowRight' ? zone[0] : zone[zone.length - 1]).focus(); }
     else if (k === 'Escape') focusComposer(conv);
     else return;
     e.preventDefault();
@@ -644,7 +744,7 @@ export function Stream({ conv, intro, placeholder }) {
   };
 
   const lastId = all.filter((m) => !m.call).at(-1)?.id || null;
-  return html`<div class="stream">
+  return html`<div class=${`stream${below > 0 || far ? ' reading-old' : ''}`}>
     ${!isOnline() && html`<div class="banner" role="status">
       <${Icon} name="offline" size=${16} /><span><b>You’re offline.</b> What you write will wait here and send when you’re back.</span>
     </div>`}
@@ -678,9 +778,10 @@ export function Stream({ conv, intro, placeholder }) {
         </div>`}
     </div>
     <div class="jump-wrap">
-      ${(below > 0 || far) && html`<button class="jump" onClick=${toBottom}>
-        <${Icon} name="down" size=${16} />${below > 0 ? plural(below, 'new message') : 'Latest'}
-      </button>`}
+      ${(below > 0 || far) && html`<div class=${`jump-bar${below > 0 ? ' has-new' : ''}`} role="status">
+        <span class="grow">${below > 0 ? `${plural(below, 'new message')} below` : 'You’re viewing older messages'}</span>
+        <button class="jump" onClick=${toBottom}>Jump to present<${Icon} name="down" size=${16} /></button>
+      </div>`}
     </div>
     <${Composer} conv=${conv} placeholder=${placeholder} />
     <${Foot} conv=${conv} />

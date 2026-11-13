@@ -72,9 +72,15 @@ async function newRoom(page, name, kind) {
   await page.click('.modal button[type=submit], .modal .btn.primary');
   await page.locator(`.main .bar-title:has-text("${name}")`).waitFor();
 }
+// A room's details open from the header's More menu.
+async function openDetails(page) {
+  await page.click('.main .bar .bar-more');
+  await page.locator('[role=menu] [role=menuitem]:has-text("Details")').click();
+  await page.locator('.pane[aria-label="Details"]').waitFor();
+}
 async function access(page, room) {
   await go(page, room);
-  if (!(await page.locator('.pane[aria-label="Details"]').count())) await page.click('.main button[aria-label="Details"]');
+  if (!(await page.locator('.pane[aria-label="Details"]').count())) await openDetails(page);
   await page.click('.pane button:has-text("Access and webhooks")');
   await page.locator('.modal .room-access').waitFor();
 }
@@ -216,7 +222,7 @@ test('roles: an icon, not shown separately, ordered by keyboard; a nickname show
     await robin.locator('.pane[aria-label="People"] .person:has-text("Priya") .role-icon').waitFor();
     // Priya's name in this house.
     await go(priya, 'The floor');
-    await priya.click('.main button[aria-label="Details"]');
+    await openDetails(priya);
     await priya.click('.pane button:has-text("Your name in Kiln & Co.")');
     await priya.fill('#nick', 'Pri the glazer');
     await priya.click('.modal button.btn.primary:has-text("Save")');

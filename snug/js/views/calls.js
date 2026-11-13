@@ -127,22 +127,26 @@ function IncomingCard({ r }) {
     };
   }, [r.call]);
   const title = callTitle(r);
+  // Compact and focused: who, what kind of call, and three controls.
+  // Decline and Accept in their colours; video is an icon beside Accept.
   return html`<div class=${`incoming float${r.quiet ? ' quiet' : ''}`} role="alertdialog" aria-modal="false" aria-labelledby="inc-title" aria-describedby="inc-sub" ref=${ref} data-dm=${r.dm}>
     <div class="inc-who">
-      <span class=${`inc-face${r.quiet ? '' : ' ringing'}`}><${Avatar} user=${caller} size=${64} /></span>
+      <span class=${`inc-face${r.quiet ? '' : ' ringing'}`}><${Avatar} user=${caller} size=${48} /></span>
       <div class="inc-text">
         <h2 id="inc-title" class="inc-name trunc">${caller.name}</h2>
         <p id="inc-sub" class="inc-kind">
-          <${Icon} name=${r.video ? 'camera' : 'phone'} size=${16} />${r.video ? 'Video call' : 'Voice call'}${r.group && meta ? html` <span class="faint">in ${meta.title}</span>` : ''}
+          <${Icon} name=${r.video ? 'camera' : 'phone'} size=${14} /><span class="trunc">${r.video ? 'Video call' : 'Voice call'}${r.group && meta ? html` <span class="faint">in ${meta.title}</span>` : ''}</span>
         </p>
-        ${r.quiet && html`<p class="inc-note">No ringtone: ${meta?.kind === 'group' ? 'this group' : 'this conversation'} is muted${S.users[S.me]?.presence === 'focus' ? ', or you’re Focused' : ''}.</p>`}
-        ${busy && html`<p class="inc-note">${busy}</p>`}
       </div>
     </div>
+    ${(r.quiet || busy) && html`<div class="inc-notes">
+      ${r.quiet && html`<p class="inc-note">No ringtone: ${meta?.kind === 'group' ? 'this group' : 'this conversation'} is muted${S.users[S.me]?.presence === 'focus' ? ', or you’re Focused' : ''}.</p>`}
+      ${busy && html`<p class="inc-note">${busy}</p>`}
+    </div>`}
     <div class="inc-acts">
-      <button class="btn inc-decline" onClick=${() => declineCall(r.dm)} aria-keyshortcuts="Escape"><${Icon} name="phone-off" size=${18} />Decline</button>
+      <button class="btn danger solid inc-decline" onClick=${() => declineCall(r.dm)} aria-keyshortcuts="Escape"><${Icon} name="phone-off" size=${18} />Decline</button>
       <button class="btn live inc-accept" onClick=${() => acceptCall(r.dm)} aria-keyshortcuts="Enter"><${Icon} name="phone" size=${18} />Accept</button>
-      <button class="btn live-soft inc-video" onClick=${() => acceptCall(r.dm, { video: true })}><${Icon} name="camera" size=${18} />Accept with video</button>
+      <button class="btn live-soft inc-video" aria-label="Accept with video" data-tip="Accept with video" onClick=${() => acceptCall(r.dm, { video: true })}><${Icon} name="camera" size=${18} /></button>
     </div>
     <p class="inc-keys faint" aria-hidden="true"><kbd>Enter</kbd> accept <kbd>Esc</kbd> decline</p>
     <span class="sr">${title}</span>

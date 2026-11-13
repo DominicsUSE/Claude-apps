@@ -57,16 +57,16 @@ function Picture({ house, kind }) {
   };
   const remove = () => updateHouse(house, { [kind]: null });
   const hint = kind === 'icon'
-    ? `Square, up to ${spec.maxPx} pixels and 1 MB. Shown in the arch wherever ${h.name} appears.`
+    ? `Square, up to ${spec.maxPx} pixels and 1 MB. Shown in the circle wherever ${h.name} appears.`
     : kind === 'banner' ? 'Wide, up to 2 MB. Across the top of the sidebar, and on Discover for a public house.'
       : 'Wide, up to 2 MB. Behind the invitation people see when they follow a link.';
   return html`<${Row} label=${spec.label} hint=${hint} top>
     <div class=${`cm-pic cm-pic-${kind}`}>
-      <div class="cm-pic-preview" aria-hidden="true">
-        ${kind === 'icon' ? html`<${Tile} house=${h} lg />`
-          : id ? html`<img src=${picUrl(id)} alt="" />` : html`<span class="cm-pic-empty" style=${`--hue:${hueOf(h.hue)}`}>No ${spec.label.toLowerCase()}</span>`}
-      </div>
+      ${kind === 'icon' || id ? html`<div class="cm-pic-preview" aria-hidden="true">
+        ${kind === 'icon' ? html`<${Tile} house=${h} lg />` : html`<img src=${picUrl(id)} alt="" />`}
+      </div>` : null}
       <div class="cm-pic-acts">
+        ${kind !== 'icon' && !id && html`<span class="cm-pic-empty">None</span>`}
         <input ref=${input} type="file" accept=${PICTURE_TYPES.join(',')} hidden onChange=${pick} aria-label=${`Upload the ${spec.label.toLowerCase()}`} />
         <button class="btn" disabled=${busy} aria-busy=${busy ? 'true' : undefined} onClick=${() => input.current?.click()}>
           <${Icon} name="image" size=${16} />${busy ? 'Uploading…' : id ? 'Change' : 'Upload'}
@@ -197,10 +197,10 @@ export function CommunityOverview({ house }) {
   return html`
     <h1>${h.name}</h1>
     <p class="lead">What people see before and after they join.</p>
-    <${Row} label="Name"><input class="field" style="width:260px" value=${h.name} maxlength="40" aria-label="House name" disabled=${!manage}
+    <${Row} label="Name"><input class="field set-field" value=${h.name} maxlength="40" aria-label="House name" disabled=${!manage}
       onChange=${(e) => e.target.value.trim() && updateHouse(house, { name: e.target.value.trim(), mark: e.target.value.trim()[0].toUpperCase() })} /><//>
     <${Row} label="About" hint="Shown on invitations and to newcomers." top>
-      <textarea class="field" style="width:260px" rows="3" maxlength="160" aria-label="About this house" disabled=${!manage} onChange=${(e) => updateHouse(house, { about: e.target.value.trim() })}>${h.about}</textarea>
+      <textarea class="field set-field" rows="3" maxlength="160" aria-label="About this house" disabled=${!manage} onChange=${(e) => updateHouse(house, { about: e.target.value.trim() })}>${h.about}</textarea>
     <//>
     <${Row} label="Colour" hint="Behind the house’s letter, and around its icon." top>
       <div class="swatches" role="group" aria-label="House colour">

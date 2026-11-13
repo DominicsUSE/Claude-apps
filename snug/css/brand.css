@@ -32,33 +32,23 @@
 :root[data-motion="off"] .loading-dot { animation: none; }
 
 /* Sign in / create account.
-   Desktop: the deepest surface on the left holds the lockup and one line;
-   the form sits on the primary surface. Phone: one column, top to bottom. */
-.auth { height: 100%; display: grid; grid-template-columns: minmax(320px, 5fr) 7fr; grid-template-rows: none; background: var(--bg-1); color: var(--text-1); }
-.auth-side {
-  background: var(--bg-0); border-right: 1px solid var(--line-subtle);
-  padding: var(--s-10); display: flex; flex-direction: column; justify-content: space-between; gap: var(--s-8);
+   One calm column: the lockup small, one heading, the form. The window is the
+   rail surface; the form sits on the float surface like a dialog. No scene. */
+.auth { height: 100%; display: grid; grid-template-columns: 1fr; background: var(--surface-rail); color: var(--text-1); }
+.auth-main { background: transparent; display: grid; place-items: center; padding: var(--s-6) var(--s-4); overflow-y: auto; }
+.auth-panel {
+  width: 100%; max-width: 420px; display: grid; gap: var(--s-5);
+  padding: var(--s-8); background: var(--surface-float); border-radius: var(--r-modal);
+  border: 1px solid var(--line-subtle);
 }
-.auth-side .auth-line {
-  display: block; margin: 0; max-width: 12ch; text-wrap: balance;
-  font-size: var(--t-32); font-weight: var(--w-semibold); line-height: var(--lh-display); letter-spacing: -0.02em;
-  color: var(--text-1);
-}
-/* The scene fills the panel's middle: the Nook large, people around it. */
-.auth-scene { flex: 1; position: relative; display: grid; place-items: center; min-height: 0; }
-.auth-scene .auth-nook { width: min(70%, 260px); height: auto; }
-.auth-person {
-  position: absolute; width: var(--d); height: var(--d); border-radius: 50%; transform: translate(-50%, -50%);
-  background: oklch(var(--tile-l) var(--tile-c) var(--hue)); --ring: var(--bg-0);
-}
-.auth-person .pres { position: absolute; right: -1px; bottom: -1px; }
-.auth-main { background: var(--bg-1); display: grid; place-items: center; padding: var(--s-10) var(--s-6); overflow-y: auto; }
-.auth-panel { width: 100%; max-width: 360px; display: grid; gap: var(--s-6); }
-.auth-panel h1 { margin: 0; font-size: var(--t-24); font-weight: var(--w-semibold); line-height: var(--lh-heading); letter-spacing: -0.01em; color: var(--text-1); }
+.auth-brand { display: flex; color: var(--text-1); }
+.auth-head { display: grid; gap: var(--s-1); }
+.auth-panel h1 { margin: 0; font-size: var(--t-heading); font-weight: var(--w-semibold); line-height: var(--lh-heading); letter-spacing: -0.01em; color: var(--text-1); }
+.auth-sub { margin: 0; font-size: var(--t-ui); color: var(--text-2); }
 
 .auth-form { max-width: none; gap: var(--s-4); }
 .auth-form .label { font-size: var(--t-13); margin-bottom: var(--s-1); }
-.auth-form .field { height: var(--h-md); border-radius: var(--r-sm); }
+.auth-form .field { height: var(--h-md); border-radius: var(--r-input); }
 .auth-form .hint { font-size: var(--t-12); }
 .auth-form .err { font-size: var(--t-13); line-height: var(--lh-ui); margin-top: var(--s-2); align-items: flex-start; gap: var(--s-2); color: var(--error); }
 .auth-form .err .ic { flex: none; }
@@ -81,19 +71,15 @@
 .auth-link:focus-visible { outline: var(--focus-w) solid var(--focus); outline-offset: 2px; }
 
 /* An invitation is a separate object (a place you are asked into). */
-.auth-invite { display: flex; gap: var(--s-3); align-items: center; padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg-2); }
+.auth-invite { display: flex; gap: var(--s-3); align-items: center; padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-hover); border-color: transparent; }
 .auth-invite b { display: block; font-weight: var(--w-semibold); }
 .auth-invite span:not(.tile) { color: var(--text-2); font-size: var(--t-13); }
 
 @media (max-width: 720px) {
-  .auth { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  .auth-side { background: var(--bg-1); border-right: 0; padding: var(--s-6) var(--s-4) var(--s-2); justify-content: flex-start; gap: var(--s-6); }
-  .auth-side .auth-line { display: block; font-size: var(--t-24); max-width: none; }
-  .auth-scene { display: none; }
-  /* The brand line leads on phone; the form heading steps down beneath it. */
-  .auth-main { place-items: start stretch; padding: var(--s-6) var(--s-4) var(--s-8); }
-  .auth-panel { max-width: none; gap: var(--s-5); }
-  .auth-panel h1 { font-size: var(--t-16); color: var(--text-2); }
+  /* Phone: the form is the page (no card), top-aligned. */
+  .auth { background: var(--surface-chat); }
+  .auth-main { place-items: start stretch; padding: var(--s-8) var(--s-4); }
+  .auth-panel { max-width: none; padding: 0; background: transparent; border: 0; gap: var(--s-5); }
 }
 @media (pointer: coarse) {
   .auth-form .field, .auth-form .auth-submit { height: var(--touch); }

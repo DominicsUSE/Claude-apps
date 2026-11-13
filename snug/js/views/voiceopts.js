@@ -175,19 +175,23 @@ async function optionsMenu(e) {
   });
 }
 
-export function VoiceExtras({ compact }) {
+// Hold to talk, the soundboard and the options menu. The stage's bar places
+// them in its groups one at a time (only: 'hold' | 'board' | 'opts'); with no
+// `only`, all three in that order.
+export function VoiceExtras({ compact, only }) {
   const c = S.call;
-  if (!c || c.status !== 'live') return null;
+  if (!c || c.status !== 'live' || compact) return null;
   const v = vp();
   const house = houseOfCall();
   const ptt = v.mode === 'ptt';
   const held = pttHeld();
+  const want = (k) => !only || only === k;
   return html`
-    ${ptt && !compact && html`<button class=${`btn vo-hold${held ? ' live' : ''}`} aria-pressed=${String(held)} aria-label=${`Hold to talk, or hold ${v.pttLabel}`} ...${holdHandlers()}>
+    ${ptt && want('hold') && html`<button class=${`btn vo-hold${held ? ' live' : ''}`} aria-pressed=${String(held)} aria-label=${`Hold to talk, or hold ${v.pttLabel}`} ...${holdHandlers()}>
       <${Icon} name="vo-talk" size=${16} />${held ? 'Talking' : 'Hold to talk'}</button>`}
-    ${house && !compact && html`<button class="ib vc vo-board-btn" aria-label="Soundboard" data-tip="Soundboard" aria-haspopup="dialog"
+    ${house && want('board') && html`<button class="ib vc vo-board-btn" aria-label="Soundboard" data-tip="Soundboard" aria-haspopup="dialog"
       onClick=${(e) => openPop({ anchor: rectOf(e), label: 'Soundboard', C: Soundboard, props: { house } })}><${Icon} name="vo-board" size=${20} /></button>`}
-    ${!compact && html`<button class="ib vc vo-opts" aria-label="Voice options" data-tip="Voice options" aria-haspopup="menu" onClick=${optionsMenu}><${Icon} name="sliders" size=${20} /></button>`}`;
+    ${want('opts') && html`<button class="ib vc vo-opts" aria-label="Voice options" data-tip="Voice options" aria-haspopup="menu" onClick=${optionsMenu}><${Icon} name="gear" size=${20} /></button>`}`;
 }
 
 // ---------- Picture in picture for a shared screen or a camera ----------
@@ -308,9 +312,9 @@ export function MiniCall() {
     <${MutedBanner} />
     <div class="vo-mini-acts">
       <button class=${`ib vc${c.muted ? ' on' : ''}`} aria-pressed=${String(c.muted)} aria-label=${c.muted ? 'Unmute' : 'Mute'} data-tip=${c.muted ? 'Unmute' : 'Mute'} onClick=${toggleMute}><${Icon} name=${c.muted ? 'mic-off' : 'mic'} size=${18} /></button>
-      <button class=${`ib vc${c.deaf ? ' on' : ''}`} aria-pressed=${String(c.deaf)} aria-label=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} data-tip=${c.deaf ? 'Hear again' : 'Deafen'} onClick=${toggleDeaf}><${Icon} name=${c.deaf ? 'ear-off' : 'ear'} size=${18} /></button>
+      <button class=${`ib vc${c.deaf ? ' on' : ''}`} aria-pressed=${String(c.deaf)} aria-label=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} data-tip=${c.deaf ? 'Hear again' : 'Deafen'} onClick=${toggleDeaf}><${Icon} name=${c.deaf ? 'headphones-off' : 'headphones'} size=${18} /></button>
       <button class="btn quiet grow" onClick=${() => openConv(c.room)}>Back to ${c.dm ? 'call' : 'voice'}</button>
-      <button class="ib vc danger" aria-label=${leave} data-tip=${c.dm ? 'Hang up' : 'Leave'} onClick=${leaveVoice}><${Icon} name="leave" size=${18} /></button>
+      <button class="ib vc danger" aria-label=${leave} data-tip=${c.dm ? 'Hang up' : 'Leave'} onClick=${leaveVoice}><${Icon} name="phone-off" size=${18} /></button>
     </div>
   </div>`;
 }

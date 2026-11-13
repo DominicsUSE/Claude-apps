@@ -1,6 +1,6 @@
 // Settings: a full layer with its own sidebar. Personal settings in one, a
 // house's settings in another. Every change applies at once; nothing to save.
-import { html, useState } from '../../vendor/preact-htm.js';
+import { html, useState, useRef, useEffect, useLayoutEffect } from '../../vendor/preact-htm.js';
 import {
   S, me, closeLayer, setPref, updateMe, setNotify, openModal, updateHouse,
   setMemberRole, leaveHouse, removeMember, signedOut, toast, openMenu,
@@ -65,16 +65,73 @@ export function settingMatches(query, page) {
   return fuzzy(q, page.label) >= 0;
 }
 
-function Layer({ title, icon, pages, page, setPage, children, foot }) {
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+// On a phone the layer is list first: the sections, then a page with Back.
+// Opened at a named page (from a menu or a shortcut) it starts on that page.
+function Layer({ title, icon, pages, page, setPage, children, foot, startOpen }) {
   const [q, setQ] = useState('');
+  const [inPage, setInPage] = useState(!!startOpen || pages.length === 1);
   const shown = q ? pages.filter((p) => settingMatches(q, p)) : pages;
-  return html`<div class="layer" role="dialog" aria-modal="true" aria-label=${title}>
+  const phone = S.ui.phone;
+  const label = pages.find((p) => p.id === page)?.label || title;
+  const ref = useRef();
+  const moved = useRef(false); // the person went between the list and a page
+  const pick = (id) => { moved.current = true; setPage(id); setInPage(true); };
+  const toList = () => { moved.current = true; setInPage(false); };
+  const listed = pages.length > 1;
+  // Focus comes into the layer when it opens and goes back to what opened it
+  // when it closes, like a dialog.
+  useEffect(() => {
+    const prev = document.activeElement;
+    if (ref.current && !ref.current.contains(prev)) ref.current.focus({ preventScroll: true });
+    return () => { if (prev && prev.isConnected && prev !== document.body) prev.focus({ preventScroll: true }); };
+  }, []);
+  // On a phone the list and the page take turns on screen, so focus follows:
+  // to Back on a page, to the page's row back on the list.
+  useLayoutEffect(() => {
+    if (!moved.current || !phone || !ref.current) return;
+    const el = ref.current;
+    const t = inPage ? el.querySelector('.layer-back') : (el.querySelector('.layer-nav .row.sel') || el.querySelector('.layer-nav .row'));
+    t?.focus();
+  }, [inPage]);
+  // On a phone page the top bar already names the page, so a heading that only
+  // repeats it is kept for screen readers but not drawn twice (a house's
+  // Overview keeps its heading: that one is the house's name).
+  useLayoutEffect(() => {
+    const h = ref.current?.querySelector('.layer-col h1');
+    if (h) h.classList.toggle('dup-title', !!(phone && inPage && h.textContent.trim() === label));
+  });
+  const onKey = (e) => {
+    const u = S.ui;
+    if (u.menu || u.pop || u.modal || u.quick || u.lightbox) return;
+    // Escape on a phone page goes back to the list; on the list it closes.
+    if (e.key === 'Escape' && !e.shiftKey && !e.isComposing && phone && inPage && listed) {
+      e.preventDefault(); e.stopPropagation(); toList(); return;
+    }
+    // Tab stays inside, as in every dialog.
+    if (e.key !== 'Tab') return;
+    const list = [...ref.current.querySelectorAll(FOCUSABLE)].filter((x) => x.getClientRects().length);
+    if (!list.length) return;
+    const first = list[0], last = list[list.length - 1];
+    const at = document.activeElement;
+    if (e.shiftKey && (at === first || at === ref.current)) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && at === last) { e.preventDefault(); first.focus(); }
+  };
+  const mode = !phone ? '' : inPage ? ' phone-page' : ' phone-list';
+  return html`<div class=${`layer${mode}`} role="dialog" aria-modal="true" aria-label=${title} tabindex="-1" ref=${ref} onKeyDown=${onKey}>
+    ${phone && inPage && html`<div class="layer-top">
+      <button class="ib layer-back" aria-label=${`All ${title === 'Settings' ? 'settings' : `${title} settings`}`} data-tip="Back" onClick=${toList}><${Icon} name="back" /></button>
+      <span class="layer-top-title trunc">${label}</span>
+    </div>`}
     <nav class="layer-nav" aria-label=${`${title} sections`}>
+      ${phone && html`<div class="layer-nav-title trunc">${title}</div>`}
       <h2>${icon}${title}</h2>
       <input class="field" type="search" placeholder="Find a setting" aria-label="Find a setting" value=${q} onInput=${(e) => setQ(e.target.value)} />
       ${groups(shown).map((g) => {
-        const rows = g.pages.map((p) => html`<button key=${p.id} class=${`row${page === p.id ? ' sel' : ''}`} aria-current=${page === p.id ? 'page' : undefined} onClick=${() => setPage(p.id)}>
+        const rows = g.pages.map((p) => html`<button key=${p.id} class=${`row${page === p.id ? ' sel' : ''}`} aria-current=${page === p.id ? 'page' : undefined} onClick=${() => pick(p.id)}>
           <span class="row-ic"><${Icon} name=${p.icon} size=${18} /></span><span class="grow trunc">${p.label}</span>
+          ${phone && html`<span class="row-go" aria-hidden="true"><${Icon} name="chev-r" size=${16} /></span>`}
         </button>`);
         if (!g.section) return rows;
         // Screen readers hear each section's name with its pages (You, App, Moderation...).
@@ -95,9 +152,9 @@ function Layer({ title, icon, pages, page, setPage, children, foot }) {
 const PAGES = [
   { id: 'profile', label: 'Profile', icon: 'user', words: 'name avatar about emoji colour username handle' },
   { id: 'notify', label: 'Notifications', icon: 'bell', words: 'mute quiet alerts pop-ups focus badge unread count role mentions everyone' },
-  { id: 'look', label: 'Appearance', icon: 'eye', words: 'theme dark light density compact text size motion animation contrast accessibility' },
+  { id: 'look', label: 'Appearance', icon: 'palette', words: 'theme dark light density compact text size motion animation contrast accessibility' },
   { id: 'keys', label: 'Keyboard', icon: 'keys', words: 'shortcuts keys hotkeys record rebind change mute deafen camera hang up answer' },
-  { id: 'account', label: 'Account', icon: 'shield', words: 'account password sign out log out devices sessions connection' },
+  { id: 'account', label: 'Account', icon: 'idcard', words: 'account password sign out log out devices sessions connection' },
 ];
 
 function Profile() {
@@ -105,9 +162,9 @@ function Profile() {
   return html`
     <h1>Profile</h1>
     <p class="lead">How you appear to people in every house and conversation.</p>
-    <${Row} label="Name"><input class="field" style="width:260px" value=${u.name} maxlength="40" aria-label="Name" onChange=${(e) => e.target.value.trim() && updateMe({ name: e.target.value.trim() })} /><//>
+    <${Row} label="Name"><input class="field set-field" value=${u.name} maxlength="40" aria-label="Name" onChange=${(e) => e.target.value.trim() && updateMe({ name: e.target.value.trim() })} /><//>
     <${Row} label="About you" hint="A few lines on your profile. Message formatting works here." top>
-      <textarea class="field" style="width:260px" rows="4" maxlength="400" aria-label="About you" onChange=${(e) => updateMe({ about: e.target.value.trim() })}>${u.about}</textarea>
+      <textarea class="field set-field" rows="4" maxlength="400" aria-label="About you" onChange=${(e) => updateMe({ about: e.target.value.trim() })}>${u.about}</textarea>
     <//>
     <${Row} label="Picture" hint="Your initials on a colour, or an emoji.">
       <${Avatar} user=${u} size=${40} />
@@ -256,7 +313,7 @@ async function signOut(everywhere) {
 // Appearance and Account and security are drawn by js/views/account.js (registerAccountPages below).
 const VIEWS = { profile: Profile, notify: Notify, keys: Keys };
 // Privacy and safety (js/views/safety-settings.js), before Account.
-PAGES.splice(PAGES.findIndex((p) => p.id === 'account'), 0, { id: 'privacy', label: 'Privacy and safety', icon: 'eye', words: 'privacy block blocked unblock messages requests friend requests dm safety' });
+PAGES.splice(PAGES.findIndex((p) => p.id === 'account'), 0, { id: 'privacy', label: 'Privacy and safety', icon: 'shield', words: 'privacy block blocked unblock messages requests friend requests dm safety' });
 VIEWS.privacy = PrivacyPage;
 // Voice and video (js/views/voiceopts-settings.js), after Notifications.
 PAGES.splice(PAGES.findIndex((p) => p.id === 'notify') + 1, 0, { id: 'voice', label: 'Voice and video', icon: 'voice', words: 'voice video microphone mic speaker headphones camera webcam push to talk ptt sensitivity noise suppression echo gain volume screen share quality sounds afk deafen calls ringtone ring volume ring on who can ring muted warning camera quality resolution frame rate mirror microphone volume output volume reconnect' });
@@ -282,11 +339,11 @@ arrange(PAGES, [
   ['App', ['notify', 'voice', 'look', 'chat', 'a11y', 'streamer', 'keys', 'desktop']],
 ]);
 
-export function Settings({ page: start = 'profile' }) {
-  const [page, setPage] = useState(start);
+export function Settings({ page: start }) {
+  const [page, setPage] = useState(start || 'profile');
   const V = VIEWS[page];
-  return html`<${Layer} title="Settings" icon=${html`<${Icon} name="sliders" />`} pages=${PAGES} page=${page} setPage=${setPage}
-    foot=${html`<${Nook} size=${16} /><span>Snug 0.7</span>`}>
+  return html`<${Layer} title="Settings" icon=${html`<${Icon} name="sliders" />`} pages=${PAGES} page=${page} setPage=${setPage} startOpen=${!!start}
+    foot=${html`<${Nook} size=${16} /><span>Snug 0.8</span>`}>
     <${V} />
   <//>`;
 }
@@ -294,9 +351,9 @@ export function Settings({ page: start = 'profile' }) {
 // House settings
 const HOUSE_PAGES = [
   { id: 'about', label: 'Overview', icon: 'house', words: 'name colour about description' },
-  { id: 'roles', label: 'Roles', icon: 'shield', words: 'roles permissions access' },
+  { id: 'roles', label: 'Roles', icon: 'tag', words: 'roles permissions access' },
   { id: 'members', label: 'Members', icon: 'people', words: 'members people role assign' },
-  { id: 'welcome', label: 'Newcomers', icon: 'user', words: 'onboarding welcome starter rooms first step' },
+  { id: 'welcome', label: 'Newcomers', icon: 'user-plus', words: 'onboarding welcome starter rooms first step' },
 ];
 // Custom emoji (js/views/emoji-settings.js). Roles with only Manage emoji see just this page.
 HOUSE_PAGES.push({ id: 'emoji', label: 'Emoji', icon: 'smile', words: 'emoji custom upload images reactions stickers' });
@@ -306,10 +363,10 @@ function HouseAbout({ house }) {
   return html`
     <h1>${h.name}</h1>
     <p class="lead">What people see before and after they join.</p>
-    <${Row} label="Name"><input class="field" style="width:260px" value=${h.name} maxlength="40" aria-label="House name"
+    <${Row} label="Name"><input class="field set-field" value=${h.name} maxlength="40" aria-label="House name"
       onChange=${(e) => e.target.value.trim() && updateHouse(house, { name: e.target.value.trim(), mark: e.target.value.trim()[0].toUpperCase() })} /><//>
     <${Row} label="About" hint="Shown on invitations and to newcomers." top>
-      <textarea class="field" style="width:260px" rows="3" maxlength="160" aria-label="About this house" onChange=${(e) => updateHouse(house, { about: e.target.value.trim() })}>${h.about}</textarea>
+      <textarea class="field set-field" rows="3" maxlength="160" aria-label="About this house" onChange=${(e) => updateHouse(house, { about: e.target.value.trim() })}>${h.about}</textarea>
     <//>
     <${Row} label="Colour" top>
       <div class="swatches" role="group" aria-label="House colour">
@@ -391,8 +448,8 @@ arrange(HOUSE_PAGES, [
   ['Owners', ['insights']],
 ]);
 
-export function HouseSettings({ house, page: start = 'about' }) {
-  const [page, setPage] = useState(start);
+export function HouseSettings({ house, page: start }) {
+  const [page, setPage] = useState(start || 'about');
   const h = S.houses[house];
   // Custom emoji: a role with Manage emoji but not Manage roles gets the Emoji page alone.
   const emojiOnly = !!h && !can(S, house, 'roles') && can(S, house, 'emoji');
@@ -401,7 +458,7 @@ export function HouseSettings({ house, page: start = 'about' }) {
   if (!h || !pages.length) return null;
   const cur = pages.some((p) => p.id === page) ? page : pages[0].id;
   const V = HOUSE_VIEWS[cur];
-  return html`<${Layer} title=${h.name} icon=${html`<${Tile} house=${h} />`} pages=${pages} page=${cur} setPage=${setPage}>
+  return html`<${Layer} title=${h.name} icon=${html`<${Tile} house=${h} />`} pages=${pages} page=${cur} setPage=${setPage} startOpen=${!!start}>
     <${V} house=${house} />
   <//>`;
 }

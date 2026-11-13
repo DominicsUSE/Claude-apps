@@ -1,5 +1,8 @@
-// One icon style: 20px grid, 1.5px stroke, round joins. Icons replace reading;
-// they are never decoration. "f:" marks a filled shape.
+// One icon style: drawn on a 20px grid, round caps and joins, a stroke that
+// stays about 1.5px on screen at every size (16 in rows and menus, 20 on
+// controls, 24 for major marks). Icons replace reading; they are never
+// decoration. "f:" marks a filled shape. Aliases (gear, members, inbox...) let
+// views use the name they think in; scratchpad/ui/system.md lists them.
 import { html } from '../../vendor/preact-htm.js';
 
 const P = {
@@ -89,14 +92,63 @@ const P = {
   spoiler: 'M3 10s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5Z|M3.5 3.5l13 13',
   quote: 'M5 5v10|M9 7h7|M9 10h7|M9 13h5',
   list: 'M8 6h8|M8 10h8|M8 14h8|M4.5 6v.2|M4.5 10v.2|M4.5 14v.2',
+  // Added for the redesign: channel, voice and shell controls.
+  hash: 'M8.2 3.5L6.8 16.5|M13.2 3.5l-1.4 13|M4 7.5h12.5|M3.5 12.5H16',
+  speaker: 'M3.5 8v4h2.8l4.2 3.5v-11L6.3 8Z|M13.3 7.6a3.4 3.4 0 0 1 0 4.8|M15.6 5.3a6.6 6.6 0 0 1 0 9.4',
+  'speaker-off': 'M3.5 8v4h2.8l4.2 3.5v-11L6.3 8Z|M13.5 8l4 4|M17.5 8l-4 4',
+  headphones: 'M3.5 14v-3.5a6.5 6.5 0 0 1 13 0V14|M3.5 12.5h2.2a.8.8 0 0 1 .8.8v3a.8.8 0 0 1-.8.8H5a1.5 1.5 0 0 1-1.5-1.5Z|M16.5 12.5h-2.2a.8.8 0 0 0-.8.8v3a.8.8 0 0 0 .8.8H15a1.5 1.5 0 0 0 1.5-1.5Z',
+  'headphones-off': 'M3.5 14v-3.5a6.5 6.5 0 0 1 1.6-4.3|M7.6 4.6A6.5 6.5 0 0 1 16.5 10.5V14|M3.5 12.5h2.2a.8.8 0 0 1 .8.8v3a.8.8 0 0 1-.8.8H5a1.5 1.5 0 0 1-1.5-1.5Z|M16.5 12.5h-2.2a.8.8 0 0 0-.8.8V15|M3 3l14 14',
+  'chev-u': 'M5 12.5l5-5 5 5',
+  'chev-l': 'M12.5 5l-5 5 5 5',
+  'more-v': 'f:M8.6 5a1.4 1.4 0 1 0 2.8 0 1.4 1.4 0 0 0-2.8 0Z|f:M8.6 10a1.4 1.4 0 1 0 2.8 0 1.4 1.4 0 0 0-2.8 0Z|f:M8.6 15a1.4 1.4 0 1 0 2.8 0 1.4 1.4 0 0 0-2.8 0Z',
+  filter: 'M3.5 5h13|M6 10h8|M8.5 15h3',
+  'arrow-up': 'M10 16V4.5|M5 9.5l5-5 5 5',
+  dm: 'M3.5 6A1.5 1.5 0 0 1 5 4.5h10A1.5 1.5 0 0 1 16.5 6v7a1.5 1.5 0 0 1-1.5 1.5H8.5L5 17v-2.5A1.5 1.5 0 0 1 3.5 13Z|M7 8.5h6|M7 11h3.5',
+  dot: 'f:M10 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z',
+  // Distinct marks so one drawing never means two things (settings pages, voice rows).
+  join: 'M11 4h3.500A1.500 1.500 0 0 1 16 5.500v9a1.500 1.500 0 0 1-1.500 1.500H11|M4 10h8|M9 7l3 3-3 3',
+  ban: 'M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14Z|M5.100 5.100l9.800 9.800',
+  palette: 'M10 3a7 7 0 0 0 0 14c.900 0 1.500-.600 1.500-1.400 0-.500-.300-.900-.300-1.400 0-.800.600-1.400 1.400-1.400H14a3 3 0 0 0 3-3C17 6 13.900 3 10 3Z|f:M6.300 10.600a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z|f:M8.300 7.200a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z|f:M12.200 7.200a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z',
+  access: 'M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14Z|f:M10 7.300a1.100 1.100 0 1 0 0-2.200 1.100 1.100 0 0 0 0 2.200Z|M6.500 8.400l3.500.8 3.500-.8|M10 9.200v2.300l-1.800 3|M10 11.500l1.800 3',
+  tag: 'M3.500 4.500v4.600l7.400 7.400a1 1 0 0 0 1.400 0l4.200-4.200a1 1 0 0 0 0-1.400L9.100 3.500H4.500a1 1 0 0 0-1 1Z|f:M7 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z',
+  idcard: 'M3 5.500h14v9H3z|M7 10.300a1.500 1.500 0 1 0 0-3 1.500 1.500 0 0 0 0 3Z|M4.800 13c.400-1 1.200-1.500 2.200-1.500s1.800.500 2.200 1.500|M11.500 8.500H15|M11.500 11H14',
 };
+
+// A gear drawn from its geometry (8 teeth), so it sits on the same grid.
+function gear(cx = 10, cy = 10, teeth = 8, ro = 7.3, ri = 5.6, tw = 0.42) {
+  const pts = [];
+  const step = (Math.PI * 2) / teeth;
+  for (let i = 0; i < teeth; i += 1) {
+    const a = i * step - Math.PI / 2;
+    const t = step * tw / 2, g = step * (1 - tw) / 2;
+    for (const [ang, r] of [[a - t - g * 0.35, ri], [a - t, ro], [a + t, ro], [a + t + g * 0.35, ri]]) pts.push([cx + r * Math.cos(ang), cy + r * Math.sin(ang)]);
+  }
+  return `M${pts.map(([x, y]) => `${x.toFixed(2)} ${y.toFixed(2)}`).join('L')}Z|M10 12.4a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8Z`;
+}
+P.gear = gear();
+
+// Other names for the same drawings.
+const ALIAS = {
+  settings: 'gear', members: 'people', inbox: 'tray', home: 'house', 'more-h': 'more', 'more-horizontal': 'more',
+  chevron: 'chev-d', 'chev-down': 'chev-d', 'chev-right': 'chev-r', 'chev-left': 'chev-l', 'chev-up': 'chev-u',
+  close: 'x', mention: 'at', emoji: 'smile', attach: 'clip', mute: 'bell-off', deafen: 'headphones-off',
+  undeafen: 'headphones', hangup: 'phone-off', channel: 'hash', 'voice-room': 'speaker', delete: 'trash', notifications: 'bell',
+};
+for (const [k, v] of Object.entries(ALIAS)) if (!P[k]) P[k] = P[v];
 
 // Places (js/views/places.js) and voice options (js/views/voiceopts.js) add their own icons here.
 export const addIcons = (more) => Object.assign(P, more);
 
+// The stroke, in grid units, that draws about the same on-screen weight at
+// every size: 1.5px at 16-18, 1.6px at 20, 1.75px at 24 and up, 1.3px below 16.
+const strokeFor = (size) => {
+  const px = size < 16 ? 1.3 : size <= 18 ? 1.5 : size <= 22 ? 1.6 : 1.75;
+  return +(px * 20 / size).toFixed(3);
+};
+
 export function Icon({ name, size = 20 }) {
   const parts = (P[name] || '').split('|');
-  return html`<svg class="ic" width=${size} height=${size} viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  return html`<svg class="ic" width=${size} height=${size} viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width=${strokeFor(size)} stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     ${parts.map((d) => (d.startsWith('f:')
       ? html`<path d=${d.slice(2)} fill="currentColor" stroke="none" />`
       : html`<path d=${d} />`))}

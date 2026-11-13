@@ -63,8 +63,7 @@ function usePicks() {
 function Sect({ id, title, count, action, children }) {
   return html`<section class="home-sect" aria-labelledby=${id}>
     <div class="home-h">
-      <h3 id=${id}>${title}</h3>
-      ${count != null && html`<span class="home-count num">${count}</span>`}
+      <h3 id=${id}>${title}${count != null && html`<span class="home-count num"><span aria-hidden="true"> — </span><span class="sr">, </span>${count}</span>`}</h3>
       ${action && html`<button class="home-more" onClick=${action.run}>${action.label}<${Icon} name="chev-r" size=${14} /></button>`}
     </div>
     ${children}
@@ -78,9 +77,11 @@ function FriendsStrip({ ids }) {
       const d = doing(u);
       return html`<li key=${id}>
         <button class="home-friend" onClick=${() => go({ type: 'person', id })} aria-label=${`${u.name}, ${d.text}. Open profile`}>
-          <${Avatar} user=${u} presence size=${48} speaking=${!!S.speaking[id]} />
-          <span class="home-friend-name trunc">${first(u.name)}</span>
-          <span class=${`home-friend-doing${d.live ? ' is-live' : ''}${d.typing ? ' is-typing' : ''}`}>${d.text}</span>
+          <${Avatar} user=${u} presence size=${32} speaking=${!!S.speaking[id]} />
+          <span class="home-friend-text">
+            <span class="home-friend-name trunc">${u.name}</span>
+            <span class=${`home-friend-doing trunc${d.live ? ' is-live' : ''}${d.typing ? ' is-typing' : ''}`}>${d.live && html`<${Icon} name="speaker" size=${12} />`}${d.text}</span>
+          </span>
         </button>
       </li>`;
     })}
@@ -112,9 +113,11 @@ function RecentStrip({ items, now }) {
       const where = meta?.kind === 'dm' ? 'Wrote to you' : meta?.title || '';
       return html`<li key=${id}>
         <button class="home-friend" onClick=${() => go({ type: 'person', id })} aria-label=${`${u.name}, wrote in ${where} ${mins} minutes ago. Open profile`}>
-          <${Avatar} user=${u} presence size=${48} />
-          <span class="home-friend-name trunc">${first(u.name)}</span>
-          <span class="home-friend-doing">${where} · ${mins}m</span>
+          <${Avatar} user=${u} presence size=${32} dim />
+          <span class="home-friend-text">
+            <span class="home-friend-name trunc">${u.name}</span>
+            <span class="home-friend-doing trunc">${where} · ${mins}m ago</span>
+          </span>
         </button>
       </li>`;
     })}
@@ -148,7 +151,7 @@ function ConvRow({ conv, talking, typing, inVoice, newCount }) {
   const authors = [...new Set(list.slice(-12).reverse().map((m) => m.author))].filter((u) => u !== S.me).slice(0, 3).map((u) => person(u));
   const typers = (S.typing[conv] || []).filter((u) => u !== S.me).map((u) => first(person(u).name));
   const bits = [];
-  if (talking) bits.push(html`<span>${plural(talking, 'person', 'people')} talking</span>`);
+  if (talking) bits.push(html`<span class="talking">${plural(talking, 'person', 'people')} talking</span>`);
   if (typing) bits.push(html`<span class="is-typing">${typers.length === 1 ? `${typers[0]} is typing` : `${typing} typing`}</span>`);
   // A call in a direct conversation is mint, like every call mark; a voice room keeps its own.
   if (inVoice) bits.push(meta.dm ? html`<span class="call-now">In a call</span>` : html`<span class="is-live">${inVoice} in voice</span>`);
@@ -160,8 +163,8 @@ function ConvRow({ conv, talking, typing, inVoice, newCount }) {
       <span class="home-row-title">
         <span class="trunc">${meta.title}</span>
         <span class="home-row-where trunc">${meta.house ? S.houses[meta.house].name : meta.kind === 'group' ? 'Group' : 'Direct'}</span>
+        <span class="home-row-sub home-row-bits trunc">${bits.map((b, i) => html`<span class="sep" aria-hidden="true">·</span>${b}`)}</span>
       </span>
-      <span class="home-row-sub trunc">${bits.map((b, i) => html`${i > 0 && html`<span class="sep" aria-hidden="true">·</span>`}${b}`)}</span>
       ${last && html`<span class="home-row-quote trunc"><b>${first(person(last.author).name)}</b> ${plain(last.text).slice(0, 140) || (last.files?.length ? 'shared a file' : '')}</span>`}
     </span>
     <span class="home-row-end">
@@ -251,6 +254,10 @@ export function Home() {
   const forYou = (() => { const { needs } = gather(); return needs.reduce((n, it) => n + it.count, 0) + S.invites.length; })();
   const fresh = !allFriends.length && !S.houseOrder.length;
   const quiet = !voice.length && !active.length && !events.length;
+  // On a wide screen the sidebar already lists live voice rooms and events,
+  // and the rail the communities: Home's column keeps the conversations and
+  // the people. A phone has no sidebar beside Home, so it keeps them all.
+  const phone = S.ui.phone;
 
   const summary = [];
   if (online.length) summary.push(`${plural(online.length, 'friend')} around`);
@@ -260,9 +267,9 @@ export function Home() {
   return html`<section class="main view home" aria-label="Home">
     <header class="bar">
       ${S.ui.phone && S.ui.depth > 0 && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`}
-      <h1 class="sr">Home</h1>
+      <h1 class="bar-title"><${Icon} name="house" />Home</h1>
       <div class="bar-end">
-        <button class="btn quiet" onClick=${() => go({ type: 'friends', tab: 'add' })}><${Icon} name="people" size=${16} />Add a friend</button>
+        <button class="btn quiet" onClick=${() => go({ type: 'friends', tab: 'add' })}><${Icon} name="user-plus" size=${16} />Add a friend</button>
       </div>
     </header>
     <div class="view-body">
@@ -280,16 +287,26 @@ export function Home() {
           ? html`<${Welcome} />`
           : html`<div class="home-grid">
             <div class="home-main">
-              ${online.length > 0 && html`<${Sect} id="home-friends" title="Friends online" count=${online.length} action=${{ label: 'All friends', run: () => go({ type: 'friends' }) }}>
-                <${FriendsStrip} ids=${online} />
-              <//>`}
-
-              ${voice.length > 0 && html`<${Sect} id="home-voice" title="Live in voice" count=${voice.length}>
+              ${phone && voice.length > 0 && html`<${Sect} id="home-voice" title="Live in voice" count=${voice.length}>
                 <div class="home-list">${voice.map((x) => html`<${VoiceRow} key=${x.conv} conv=${x.conv} people=${x.people} />`)}</div>
               <//>`}
 
               ${active.length > 0 && html`<${Sect} id="home-active" title="Conversations going">
                 <div class="home-list">${active.map((x) => html`<${ConvRow} key=${x.conv} ...${x} />`)}</div>
+              <//>`}
+
+              ${phone && events.length > 0 && html`<${Sect} id="home-events" title=${happeningNow ? 'Happening now' : 'Coming up'}
+                action=${{ label: 'All events', run: () => go({ type: 'discover', section: 'events' }) }}>
+                <div class="home-list home-events">${events.map((ev) => html`<${EventRow} key=${ev.id} ev=${ev} compact />`)}</div>
+              <//>`}
+
+              ${quiet && html`<p class="home-empty home-quiet">It’s quiet right now. When people start talking or someone opens a voice room, it shows up here.</p>`}
+              ${!phone && !quiet && !active.length && html`<p class="home-empty home-quiet">No one’s talking right now. Voice rooms with people in them and events coming up are in the sidebar.</p>`}
+            </div>
+
+            <aside class="home-side" aria-label=${phone || !S.houseOrder.length ? 'Who’s around, your communities and suggestions' : 'Who’s around and suggestions'}>
+              ${online.length > 0 && html`<${Sect} id="home-friends" title="Online now" count=${online.length} action=${{ label: 'All friends', run: () => go({ type: 'friends' }) }}>
+                <${FriendsStrip} ids=${online} />
               <//>`}
 
               ${!online.length && (recent.length
@@ -298,20 +315,11 @@ export function Home() {
                 <//>`
                 : !allFriends.length && html`<p class="home-empty">No friends on Snug yet. <button class="home-link" onClick=${() => go({ type: 'friends', tab: 'add' })}>Add someone by their handle</button> and you’ll see when they’re around.</p>`)}
 
-              ${events.length > 0 && html`<${Sect} id="home-events" title=${happeningNow ? 'Happening now' : 'Coming up'}
-                action=${{ label: 'All events', run: () => go({ type: 'discover', section: 'events' }) }}>
-                <div class="home-list home-events">${events.map((ev) => html`<${EventRow} key=${ev.id} ev=${ev} compact />`)}</div>
-              <//>`}
-
-              ${quiet && html`<p class="home-empty home-quiet">It’s quiet right now. When people start talking or someone opens a voice room, it shows up here.</p>`}
-            </div>
-
-            <aside class="home-side" aria-label="Your communities and suggestions">
-              <${Sect} id="home-houses" title="Your communities" count=${S.houseOrder.length || null}>
+              ${(phone || !S.houseOrder.length) && html`<${Sect} id="home-houses" title="Your communities" count=${S.houseOrder.length || null}>
                 ${S.houseOrder.length
                   ? html`<ul class="home-list" role="list">${S.houseOrder.map((id) => html`<${CommunityRow} key=${id} id=${id} />`)}</ul>`
                   : html`<p class="home-empty">You’re not in a community yet. <button class="home-link" onClick=${() => go({ type: 'discover', section: 'communities' })}>Find one in Discover</button>.</p>`}
-              <//>
+              <//>`}
               <${Picks} />
             </aside>
           </div>`}

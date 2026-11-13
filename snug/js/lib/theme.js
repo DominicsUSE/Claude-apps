@@ -38,18 +38,18 @@ export const THEME_NOTES = {
 // live, amber idle, cyan info, rose reactions, red errors). A custom theme
 // must keep them readable: 3:1 on its surfaces.
 export const BASE_SEMANTIC = {
-  dark: { brand: '#996FF7', mint: '#58C7A5', amber: '#E8B65A', cyan: '#62B8D8', rose: '#D98598', error: '#E05A5A' },
+  dark: { brand: '#8656F0', mint: '#58C7A5', amber: '#E8B65A', cyan: '#62B8D8', rose: '#D98598', error: '#E05A5A' },
   light: { brand: '#763FF4', mint: '#1F8F6E', amber: '#A86F0D', cyan: '#1F7EA3', rose: '#B24E66', error: '#C93838' },
 };
 
 // ---------- Accents ----------
 // Violet is Snug's own colour and the default (the brand tokens: #8B5CF6, the
-// mark's colour, lifted for dark themes and deepened for light ones so button
-// text passes). Each preset has a value for dark and one for light themes; a
+// mark's colour, deepened a step for dark themes and more for light ones so
+// white button text passes). Each preset has a value for dark and one for light themes; a
 // custom hex is nudged per theme. There is no coral preset any more: it sat
 // next to error red, and a stored 'coral' reads as violet (upgradePrefs).
 export const ACCENT_PRESETS = {
-  violet: { label: 'Violet', dark: '#996FF7', light: '#763FF4' },
+  violet: { label: 'Violet', dark: '#8656F0', light: '#763FF4' },
   cyan: { label: 'Cyan', dark: '#62B8D8', light: '#1F7EA3' },
   mint: { label: 'Mint', dark: '#58C7A5', light: '#1F8F6E' },
   amber: { label: 'Amber', dark: '#E8B65A', light: '#A86F0D' },

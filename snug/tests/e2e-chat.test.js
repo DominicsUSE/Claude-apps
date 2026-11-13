@@ -126,6 +126,22 @@ test('emoji: the full set, a skin tone picked once and used everywhere, frequent
   await ines.keyboard.press('Escape');
 });
 
+test('reaction picker by keyboard: the toolbar stays while it is open and Escape returns focus to Add a reaction', async () => {
+  await ines.mouse.move(0, 0);
+  const m = msg(ines, 'react to this one').last();
+  await m.focus();
+  const add = m.locator('.msg-actions button[aria-label="Add a reaction"]');
+  await add.focus();
+  await ines.keyboard.press('Enter');
+  await ines.locator('.pop .picker').waitFor();
+  assert.equal(await add.isVisible(), true, 'the button that opened the picker stays on screen');
+  assert.notEqual(await ines.evaluate(() => document.activeElement === document.body), true, 'focus is not dropped while the picker is open');
+  await ines.keyboard.press('Escape');
+  await ines.locator('.pop .picker').waitFor({ state: 'detached' });
+  assert.equal(await ines.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Add a reaction');
+  assert.equal(await ines.evaluate(() => !!document.activeElement?.closest('.msg')?.textContent.includes('react to this one')), true, 'on the same message');
+});
+
 test('mentions: role pill with its colour, @everyone only for people who may, # autocomplete and a room link that opens the room', async () => {
   // Ines leads the studio: she may ping everyone, and is told how many.
   await typeIn(ines, '@ever');

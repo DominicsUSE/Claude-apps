@@ -1,22 +1,32 @@
 /*
-  Snug design tokens. Source of truth: the redesign contract.
+  Snug design tokens. Source of truth: the UI brief (scratchpad ui-spec) and
+  scratchpad/ui/system.md, which lists every token and component class.
 
-  Idea: a place with someone in it. Places are arches, people are circles,
-  controls are rectangles.
+  Idea: a believable communication environment. People are circles, houses
+  (communities) are circles in the rail, controls are compact rectangles
+  (6px), nav rows 4px, menus 6px, dialogs and inputs 8px, large media 12px.
+  9999px only for avatars and true pills (count badges, mention pills).
 
   Colour rules
-  - Charcoal depth by surface steps, never by shadow:
-      bg-0 shell and rail, bg-1 conversation and main content, bg-2 context
-      column, panes, menus, message hover, bg-3 hover and inputs, bg-4 strong
-      (selected nav row, popovers, secondary button).
-  - One shadow family, only on floating layers (menus, popovers, dialogs).
-  - Violet (--brand) is the brand and "for you": primary button, the 3px
-    active indicator, count badges, the "New" separator, the edge of a
-    mention. Never a large violet background behind text. The mark itself is
-    #8B5CF6; the token is lifted in dark themes (near-black text on it) and
-    deepened in light ones (white text on it) so button text reaches 4.5:1.
-  - Mint online/success/speaking. Amber idle/warning/events. Cyan info and
-    links. Rose reactions you added. Error red destructive/failed only.
+  - Depth by surface steps, never by shadow. Use the role aliases
+    (--surface-*), not bg-N, in new CSS: they flip correctly between dark
+    and light themes.
+      dark:  rail/shell bg-0, conversation bg-0 (#0E0F10), navigation bg-1
+             (#141516), secondary (panes, menus, dialogs, inputs) bg-2
+             (#1A1C1D), hover bg-3 (#212324), selected/elevated bg-4 (#292B2D).
+      light: rail bg-0, conversation bg-1 (the brightest), navigation bg-2,
+             menus bg-1, hover bg-3, selected bg-4.
+  - Shadows only on floating layers (menus, popovers, dialogs, toasts), and
+    small. No gradients, no glass.
+  - Violet (--brand) is about 10% of the screen: the primary action, the
+    selected indicator, unread/mention marks, important links, the logo.
+    Never a fully violet row or a large violet background behind text. The
+    mark is #8B5CF6 (--violet); the fill token is lifted in dark themes
+    (near-black text on it) and deepened in light ones (white text) so button
+    text reaches 4.5:1.
+  - Presence: online mint #58C7A5, idle amber #E8B65A, busy red #E05A5A,
+    offline grey #686663. Mint also means speaking and success. Amber
+    warnings and events. Cyan info and links. Error red destructive only.
   - People, roles and houses choose a hue only. Lightness and chroma belong to
     the theme (--name-*, --tile-*, --house-*), so every chosen colour stays
     readable in light and dark.
@@ -72,51 +82,78 @@
      Contextual alternates (calt) stay on by default. Not used: ss01 open
      digits (breaks the tabular rhythm of times), cv08 serif I (too bookish). */
   --font-features: "cv11", "cv05", "ss03";
-  /* Sizes (rem, so the Text size setting scales them): 32 24 20 16 14 13 12 11. */
+  /* Raw sizes (rem, so the Text size setting scales them). 24 and 32 are for
+     display glyphs only (jumbo emoji, game boards), never for headings. */
   --t-32: 2rem;
   --t-24: 1.5rem;
   --t-20: 1.25rem;
   --t-16: 1rem;
+  --t-15: 0.9375rem;
   --t-14: 0.875rem;
   --t-13: 0.8125rem;
   --t-12: 0.75rem;
   --t-11: 0.6875rem;
-  --t-msg: var(--t-16);            /* message text; 14px in Compact */
+  /* Roles (brief section 29): use these in new CSS. */
+  --t-heading: var(--t-20);        /* major heading: a page or dialog title */
+  --t-section: var(--t-16);        /* section heading, header title */
+  --t-body: var(--t-14);           /* body and controls */
+  --t-ui: var(--t-13);             /* secondary UI: hints, sub-labels, chips */
+  --t-meta: var(--t-12);           /* metadata: times, counts, section labels */
+  --t-micro: var(--t-12);          /* badges and the smallest labels: 12 is the floor (brief 29) */
+  --t-msg: var(--t-15);            /* message text; 14px in Compact */
+  --t-name: var(--t-14);           /* author names in the stream (600) */
   --w-regular: 400; --w-medium: 500; --w-semibold: 600; --w-bold: 700;
   --lh-display: 1.15; --lh-heading: 1.25; --lh-body: 1.45; --lh-ui: 1.3;
 
   /* ---------- Space (4px base; named by multiple of 4) ----------
      4 8 12 16 20 24 32 40 48 64 80. Nothing outside this list
-     (exceptions: 1px borders, 2px hairline gaps, the 6px message row). */
+     (exceptions: 1px borders, 2px hairline gaps, the 6px message row).
+     Rhythm (brief 28): 4-8 inside a message group, 8-12 between controls,
+     16 between sections, 24 major. Never 64-100px padding in the app. */
   --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
   --s-8: 32px; --s-10: 40px; --s-12: 48px; --s-16: 64px; --s-20: 80px;
+  --gap-msg: var(--s-1); --gap-ctl: var(--s-2); --gap-sect: var(--s-4); --gap-major: var(--s-6);
 
-  /* ---------- Radius by role ---------- */
-  --r-xs: 4px;                     /* tiny marks, arch foot */
-  --r-sm: 6px;                     /* controls: buttons, inputs, rows */
-  --r-md: 8px;                     /* menus, tooltips, attachments */
-  --r-lg: 12px;                    /* modals and the few real cards */
-  --r-xl: 16px;                    /* large media, profile headers */
-  --r-full: 9999px;                /* people, badges, presence, chips */
-  --r-arch: 50% 50% var(--r-xs) var(--r-xs) / 42% 42% var(--r-xs) var(--r-xs); /* houses */
+  /* ---------- Radius by role (brief 27) ---------- */
+  --r-row: 4px;                    /* nav rows, menu rows, list rows, tiny marks */
+  --r-btn: 6px;                    /* buttons, icon buttons, chips, segmented */
+  --r-menu: 6px;                   /* menus, popovers, tooltips, toasts */
+  --r-modal: 8px;                  /* dialogs, the few real cards */
+  --r-input: 8px;                  /* text fields, the composer */
+  --r-media: 12px;                 /* large media: images, video tiles, banners */
+  --r-full: 9999px;                /* avatars, count badges, mention pills only */
+  /* Older names, kept so every file still resolves; each now points one notch
+     smaller than before (no 12-16px corners on controls or cards). */
+  --r-xs: var(--r-row);
+  --r-sm: var(--r-btn);
+  --r-md: var(--r-menu);
+  --r-lg: var(--r-modal);
+  --r-xl: var(--r-media);
+  --r-tile: 50%;                   /* houses are circles */
+  --r-arch: var(--r-tile);         /* legacy name: houses used to be arches */
 
   /* ---------- Sizes ---------- */
-  --h-sm: 32px; --h-md: 40px; --h-lg: 48px; --touch: 44px;
-  --ic-xs: 12px; --ic-sm: 16px; --ic-md: 20px; --ic-lg: 24px; --ic-xl: 32px;
-  --av-xs: 24px; --av-sm: 32px; --av-md: 40px; --av-lg: 48px; --av-xl: 64px; --av-2xl: 96px;
-  --pres: 8px;                     /* presence dot (6px on 24px avatars) */
+  --h-xs: 24px; --h-28: 28px; --h-sm: 32px; --h-36: 36px; --h-md: 40px; --h-lg: 48px; --touch: 44px;
+  --h-field: 36px;                 /* text field (40 with .lg, 32 with .sm) */
+  --ic-xs: 12px; --ic-sm: 16px; --ic-18: 18px; --ic-md: 20px; --ic-lg: 24px; --ic-xl: 32px;
+  --av-2xs: 16px; --av-20: 20px; --av-xs: 24px; --av-sm: 32px; --av-md: 40px; --av-lg: 48px; --av-xl: 64px; --av-2xl: 80px;
+  --pres: 10px;                    /* presence dot on a 32-40px avatar (scales with the avatar) */
 
-  /* ---------- Motion ---------- */
-  --m-fast: 100ms; --m-standard: 160ms; --m-smooth: 240ms; --m-slow: 320ms;
+  /* ---------- Motion (brief 32) ---------- */
+  --m-fast: 100ms; --m-standard: 150ms; --m-smooth: 220ms; --m-slow: 320ms;
+  --m-hover: var(--m-fast);        /* hover colour */
+  --m-control: var(--m-standard);  /* buttons, switches, menus, tooltips */
+  --m-panel: var(--m-smooth);      /* panes and sheets */
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);       /* things entering */
   --ease-in-out: cubic-bezier(0.45, 0, 0.25, 1);    /* state changes */
 
   /* ---------- Frame ---------- */
-  --rail-w: 64px; --ctx-w: 264px;  /* new rail + context column (css/nav.css) */
-  --nav-w: 280px; --pane-w: 384px; --bar-h: 48px; --row-h: 32px;
+  --rail-w: 64px; --rail-ic: 40px; --ctx-w: 240px;  /* rail (40px circles) + context column (css/nav.css) */
+  --nav-w: 280px; --pane-w: 320px; --people-w: 248px; --thread-w: 400px;
+  --bar-h: 48px; --row-h: 32px; --panel-h: 52px;    /* header, nav row, the user panel at the bottom */
 
   /* ---------- Density (Regular) ---------- */
-  --avatar: var(--av-md); --group-gap: 10px; --msg-py: 6px; --line-gap: 2px; --lh: var(--lh-body);
+  --avatar: var(--av-md); --group-gap: 12px; --msg-py: 4px; --line-gap: 1px; --lh: 1.4;   /* brief 11: rows 4-6px 16px */
 
   /* ---------- Colour: dark (default) ---------- */
   --bg-0: #0E0F10;
@@ -126,19 +163,20 @@
   --bg-4: #292B2D;
   --text-1: #F4F1ED;
   --text-2: #B8B4AE;
-  --text-3: #8F8C88;            /* nudged from #85827E: 4.5:1 on bg-2 and bg-3 */
+  --text-3: #96938E;            /* 4.5:1 on bg-1..4 and on the mention tint */
   --text-disabled: #5C5A57;
   --text-inverse: #111211;
   --line: #292B2D;
   --line-strong: #393B3D;
   --line-subtle: #202223;
 
-  --brand: #996FF7;                /* #8B5CF6 (the mark) lifted 4 points: near-black text reads 5.34:1 */
-  --brand-hover: #A37EF8;
-  --brand-press: #9266F7;          /* darker, and on-brand text still passes 4.5:1 (4.89) */
+  --violet: #8B5CF6;               /* the mark itself: logo, thin indicators */
+  --brand: #8656F0;                /* #8B5CF6 deepened a step: white text 4.56:1, 3.1:1 on bg-4 */
+  --brand-hover: #7E4FEC;          /* a step darker (4.98) */
+  --brand-press: #7B4CEA;          /* darker again (5.17) */
   --brand-soft: #2B243C;
   --brand-ink: #B191F9;            /* violet as text, on bg-1..3 and brand-soft */
-  --on-brand: #111211;             /* text on a violet fill (white fails: 3.52) */
+  --on-brand: #FFFFFF;             /* text on a violet fill (white on #8B5CF6 itself fails: 4.23) */
   /* Accent: the person's choice for controls (primary button, selected edge,
      switches, active tab). Violet by default; js/account.js sets these inline
      from accentRamp (js/lib/colour.js) when another accent is picked, so
@@ -153,18 +191,21 @@
   --rose: #D98598;  --rose-soft: #321F26;
   --success: var(--mint); --warning: var(--amber); --error: #E05A5A; --info: var(--cyan);
   --error-soft: #3A1F1F;
+  --on-error: #111211;             /* text on a red fill: 4.8:1 (white would be 3.6) */
+  --error-hover: color-mix(in srgb, var(--error) 88%, #FFFFFF);
   --link: var(--cyan);
   --online: var(--mint); --idle: var(--amber); --busy: var(--error); --offline: #686663;
 
   --btn2: var(--bg-4); --btn2-hover: #343638; --btn2-press: #3B3D3F;
   --hover: rgb(244 241 237 / 0.05);   /* state layer for controls on any surface */
   --press: rgb(244 241 237 / 0.09);
-  --scrim: rgb(0 0 0 / 0.56);
+  --scrim: rgb(0 0 0 / 0.6);
   --selection: rgb(153 111 247 / 0.32);
 
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.18);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.24);
-  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.32);
+  /* Small, and only under floating layers. */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.24);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.36);
 
   /* Chosen hues (people, roles, houses): the theme owns lightness/chroma. */
   --name-l: 0.80; --name-c: 0.10;
@@ -175,12 +216,40 @@
   --focus: var(--text-1);
 }
 
+/* ---------- Surface roles (brief 24) ----------
+   Name the job, not the step. Dark: conversation is the deepest surface and
+   navigation one step up. Light: conversation is the brightest and
+   navigation one step down. Custom themes follow because these only point at
+   bg-N. Set --bg to the same value on any container that holds avatars, so
+   the presence ring cuts out in the right colour. */
+:root {
+  --surface-rail: var(--bg-0);     /* global rail and the window behind everything */
+  --surface-chat: var(--bg-0);     /* the conversation, main content of every view */
+  --surface-chat-hover: var(--bg-1);  /* a message under the pointer */
+  --surface-nav: var(--bg-1);      /* context column (rooms, DMs), user panel, people pane */
+  --surface-2: var(--bg-2);        /* secondary: panes, cards, inputs, composer */
+  --surface-float: var(--bg-2);    /* menus, popovers, dialogs, tooltips */
+  --surface-hover: var(--bg-3);    /* hover on rows and controls */
+  --row-hover: var(--bg-2);        /* hover on a navigation row: one step, clearly short of selected */
+  --surface-sel: var(--bg-4);      /* selected row, pressed, elevated */
+  --surface-input: var(--bg-2);    /* text fields */
+  /* Violet roles: the only places violet appears. */
+  --indicator: var(--accent);      /* the 3px bar on a selected row or rail item, active tab */
+  --unread: var(--text-1);         /* the unread pill on the rail / a dot (neutral) */
+  --attention: var(--brand);       /* count badges and mention pills */
+  --mention-bg: color-mix(in srgb, var(--brand) 9%, var(--surface-chat));    /* a message that mentions you */
+  --mention-edge: var(--brand);
+  --rx-bg: var(--bg-2);            /* a reaction */
+  --rx-mine-bg: var(--brand-soft); /* a reaction you added (was rose) */
+  --rx-mine-edge: color-mix(in srgb, var(--brand) 55%, transparent);
+}
+
 /* ---------- Light: warm paper, same roles ---------- */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
     color-scheme: light;
     --bg-0: #E9E6E1; --bg-1: #FBFAF8; --bg-2: #F3F1ED; --bg-3: #ECE9E4; --bg-4: #E2DED8;
-    --text-1: #1A1817; --text-2: #57534E; --text-3: #6C6762; --text-disabled: #A39E97; --text-inverse: #FBFAF8;
+    --text-1: #1A1817; --text-2: #57534E; --text-3: #66615C; --text-disabled: #A39E97; --text-inverse: #FBFAF8;
     --line: #E2DED8; --line-strong: #CFCAC3; --line-subtle: #ECE9E4;
     --brand: #763FF4; --brand-hover: #6C31F4; --brand-press: #6222F3; --brand-soft: #EBE4F8; --brand-ink: #6D28D9; --on-brand: #FFFFFF;
     --mint: #1F8F6E; --mint-soft: color-mix(in srgb, #1F8F6E 12%, #FBFAF8);
@@ -195,18 +264,18 @@
     --hover: rgb(26 24 23 / 0.05); --press: rgb(26 24 23 / 0.09);
     --scrim: rgb(26 24 23 / 0.36);
     --selection: rgb(118 63 244 / 0.22);
-    --shadow-sm: 0 2px 8px rgba(26, 24, 23, 0.08);
-    --shadow-md: 0 8px 24px rgba(26, 24, 23, 0.12);
-    --shadow-lg: 0 16px 48px rgba(26, 24, 23, 0.18);
+    --shadow-sm: 0 1px 3px rgba(26, 24, 23, 0.1);
+    --shadow-md: 0 4px 14px rgba(26, 24, 23, 0.12);
+    --shadow-lg: 0 8px 28px rgba(26, 24, 23, 0.16);
     --name-l: 0.47; --name-c: 0.12;
-    --tile-l: 0.88; --tile-c: 0.05; --tile-ink-l: 0.36; --tile-ink-c: 0.08;
-    --house-l: 0.56; --house-c: 0.11; --house-ink: #FBFAF8;
+    --tile-l: 0.88; --tile-c: 0.05; --tile-ink-l: 0.34; --tile-ink-c: 0.08;
+    --house-l: 0.52; --house-c: 0.11; --house-ink: #FBFAF8;
   }
 }
 :root[data-theme="light"] {
   color-scheme: light;
   --bg-0: #E9E6E1; --bg-1: #FBFAF8; --bg-2: #F3F1ED; --bg-3: #ECE9E4; --bg-4: #E2DED8;
-  --text-1: #1A1817; --text-2: #57534E; --text-3: #6C6762; --text-disabled: #A39E97; --text-inverse: #FBFAF8;
+  --text-1: #1A1817; --text-2: #57534E; --text-3: #66615C; --text-disabled: #A39E97; --text-inverse: #FBFAF8;
   --line: #E2DED8; --line-strong: #CFCAC3; --line-subtle: #ECE9E4;
   --brand: #763FF4; --brand-hover: #6C31F4; --brand-press: #6222F3; --brand-soft: #EBE4F8; --brand-ink: #6D28D9; --on-brand: #FFFFFF;
   --mint: #1F8F6E; --mint-soft: color-mix(in srgb, #1F8F6E 12%, #FBFAF8);
@@ -221,12 +290,27 @@
   --hover: rgb(26 24 23 / 0.05); --press: rgb(26 24 23 / 0.09);
   --scrim: rgb(26 24 23 / 0.36);
   --selection: rgb(118 63 244 / 0.22);
-  --shadow-sm: 0 2px 8px rgba(26, 24, 23, 0.08);
-  --shadow-md: 0 8px 24px rgba(26, 24, 23, 0.12);
-  --shadow-lg: 0 16px 48px rgba(26, 24, 23, 0.18);
+  --shadow-sm: 0 1px 3px rgba(26, 24, 23, 0.1);
+  --shadow-md: 0 4px 14px rgba(26, 24, 23, 0.12);
+  --shadow-lg: 0 8px 28px rgba(26, 24, 23, 0.16);
   --name-l: 0.47; --name-c: 0.12;
-  --tile-l: 0.88; --tile-c: 0.05; --tile-ink-l: 0.36; --tile-ink-c: 0.08;
-  --house-l: 0.56; --house-c: 0.11; --house-ink: #FBFAF8;
+  --tile-l: 0.88; --tile-c: 0.05; --tile-ink-l: 0.34; --tile-ink-c: 0.08;
+  --house-l: 0.52; --house-c: 0.11; --house-ink: #FBFAF8;
+}
+/* Light surface roles: the conversation is the brightest surface, navigation
+   one step down, menus and dialogs white with a small shadow. Paper and sepia
+   (css/appearance.css) and light custom themes (data-theme="light") share them. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --surface-chat: var(--bg-1); --surface-chat-hover: var(--bg-2); --surface-nav: var(--bg-2);
+    --surface-2: var(--bg-2); --surface-float: var(--bg-1); --surface-input: var(--bg-1); --row-hover: var(--bg-3);
+  --on-error: #FFFFFF; --error-hover: color-mix(in srgb, var(--error) 88%, #000000);
+  }
+}
+:root[data-theme="light"], :root[data-theme="paper"], :root[data-theme="sepia"] {
+  --surface-chat: var(--bg-1); --surface-chat-hover: var(--bg-2); --surface-nav: var(--bg-2);
+  --surface-2: var(--bg-2); --surface-float: var(--bg-1); --surface-input: var(--bg-1); --row-hover: var(--bg-3);
+  --on-error: #FFFFFF; --error-hover: color-mix(in srgb, var(--error) 88%, #000000);
 }
 /* Explicit dark: the values are the :root defaults; this only pins the scheme
    when the device is light. */
@@ -259,8 +343,8 @@
 }
 
 /* ---------- Density: Compact ("snug"), Regular, Roomy ---------- */
-:root[data-density="snug"] { --avatar: var(--av-sm); --group-gap: 4px; --msg-py: 4px; --line-gap: 1px; --lh: 1.35; --t-msg: var(--t-14); }
-:root[data-density="roomy"] { --avatar: var(--av-md); --group-gap: 16px; --msg-py: 8px; --line-gap: 4px; --lh: 1.55; }
+:root[data-density="snug"] { --avatar: var(--av-sm); --group-gap: 6px; --msg-py: 2px; --line-gap: 0px; --lh: 1.35; --t-msg: var(--t-14); --row-h: 30px; }
+:root[data-density="roomy"] { --avatar: var(--av-md); --group-gap: 16px; --msg-py: 6px; --line-gap: 3px; --lh: 1.5; --t-msg: var(--t-16); }
 
 /* Text size scales every rem-based size without touching the layout grid. */
 :root[data-text="s"] { font-size: 14px; }

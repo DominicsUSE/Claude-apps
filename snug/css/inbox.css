@@ -17,11 +17,14 @@
 
 /* ---------- Catch up tabs and the Mentions list ---------- */
 .cu-tabs { margin: 0; }
-.mentions { display: grid; gap: var(--s-3); }
-.mentions-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
-.mentions-house { width: auto; min-width: 180px; max-width: 100%; height: 32px; }
+.mentions { display: grid; gap: var(--s-2); }
+/* One row: the house select and the chips; on a narrow screen the row scrolls rather than wraps. */
+.mentions-filters { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--s-2); padding: var(--s-3) var(--s-4) var(--s-1); overflow-x: auto; scrollbar-width: none; }
+.mentions-filters::-webkit-scrollbar { display: none; }
+.mentions-filters > * { flex: none; }
+.mentions-house { width: auto; min-width: 0; max-width: 200px; height: 32px; }
 .mentions-filters .chip[aria-pressed="false"] { color: var(--text-3); text-decoration: line-through; }
-.mentions-filters .chip[aria-pressed="true"] { background: var(--bg-4); color: var(--text-1); border-color: var(--line-strong); }
+.mentions-filters .chip[aria-pressed="true"] { background: var(--surface-sel); color: var(--text-1); }
 .mentions-list { list-style: none; margin: 0; padding: 0; }
 .mention-row { position: relative; }
 .mention-row:focus-visible { outline-offset: -2px; }
@@ -37,7 +40,7 @@
   border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg-2); color: var(--text-2);
 }
 .dm-icon-opt:hover { background: var(--hover); border-color: var(--line-strong); }
-.dm-icon-opt.on { border-color: var(--text-1); background: var(--bg-4); color: var(--text-1); }
+.dm-icon-opt.on { border-color: var(--text-1); background: var(--surface-sel); color: var(--text-1); }
 .dm-hue-row { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: var(--s-2) 0 var(--s-4); }
 .dm-hue {
   width: 32px; height: 32px; border-radius: var(--r-full); border: 2px solid transparent;
@@ -55,18 +58,21 @@
 .dm-member-main { flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-2); border-radius: var(--r-sm); text-align: left; color: var(--text-1); }
 .dm-member-main:hover { background: var(--hover); }
 .dm-member .tag { font-size: var(--t-12); color: var(--text-2); border: 1px solid var(--line); border-radius: var(--r-xs); padding: 0 var(--s-1); }
-.dmline-ic { color: var(--text-3); display: inline-flex; }
+.dmline-ic { color: var(--text-3); display: inline-flex; justify-content: center; width: var(--avatar); margin-right: var(--s-2); flex: none; }
+@media (max-width: 759px) { .dmline-ic { margin-right: var(--s-1); } }
 
 /* ---------- Presence for a while (the presence menu) ---------- */
 .pres-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; }
-.pres-for { width: auto; padding: 0 var(--s-3); font-size: var(--t-13); color: var(--text-2); justify-content: center; }
-.pres-for.on { color: var(--text-1); background: var(--bg-4); }
+/* A duration picker, not a word: a clock and a chevron that opens the times. */
+.pres-for { width: auto; gap: 2px; padding: 0 var(--s-2); font-size: var(--t-meta); color: var(--text-3); justify-content: center; align-self: center; }
+.pres-for:hover { color: var(--text-1); }
+.pres-for.on { color: var(--text-1); background: var(--surface-sel); }
 .pres-times { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--s-1); padding: var(--s-1) var(--s-3) var(--s-2) calc(var(--s-3) + 20px); }
 
 /* ---------- Friends: filter box; profile: mutual friends ---------- */
 .f-filter { position: relative; margin: 0 0 var(--s-3); }
 .f-filter-ic { position: absolute; left: var(--s-3); top: 50%; transform: translateY(-50%); color: var(--text-3); display: inline-flex; pointer-events: none; }
-.f-filter .field { width: 100%; padding-left: calc(var(--s-3) + 24px); }
+.f-filter .field { width: 100%; height: var(--h-sm); padding-left: calc(var(--s-3) + 20px); }
 .pp-mutual { display: grid; gap: var(--s-2); }
 .pp-mutual-toggle { display: inline-flex; align-items: center; gap: var(--s-2); min-height: 32px; border-radius: var(--r-sm); color: var(--text-2); }
 .pp-mutual-toggle:hover { color: var(--text-1); }

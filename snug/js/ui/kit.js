@@ -92,7 +92,8 @@ export function Stack({ users, max = 3, size }) {
 export const Tile = ({ house, lg, invite }) => html`<span class=${`tile${lg ? ' lg' : ''}${house.icon ? ' pic' : ''}`} style=${`--hue:${hueOf(house.hue)}`}>${house.mark}${house.icon
   ? html`<img src=${`/api/housepics/${house.icon}${invite ? `?invite=${encodeURIComponent(invite)}` : ''}`} alt="" loading="lazy" decoding="async" onError=${(e) => e.currentTarget.remove()} />` : null}</span>`;
 
-export const KIND_ICON = { text: 'room', voice: 'voice', news: 'news', thread: 'thread', forum: 'forum', stage: 'stage' }; // forum, stage: js/views/places.js
+// Text rooms are a hash and voice rooms a speaker, as in every chat app people already know.
+export const KIND_ICON = { text: 'hash', voice: 'speaker', news: 'news', thread: 'thread', forum: 'forum', stage: 'stage' }; // forum, stage: js/views/places.js
 export const RoomIcon = ({ kind, size }) => html`<${Icon} name=${KIND_ICON[kind] || 'room'} size=${size} />`;
 
 export function Seg({ value, options, onChange, label }) {
@@ -104,14 +105,29 @@ export function Seg({ value, options, onChange, label }) {
 export const Switch = ({ on, onChange, label, disabled }) =>
   html`<button type="button" class="switch" role="switch" aria-checked=${String(!!on)} aria-label=${label} disabled=${disabled} onClick=${() => onChange(!on)}></button>`;
 
-export function Empty({ icon, title, text, children }) {
-  return html`<div class="empty">
-    ${icon && html`<${Icon} name=${icon} size=${28} />`}
+export function Empty({ icon, title, text, children, inline }) {
+  return html`<div class=${`empty${inline ? ' inline' : ''}`}>
+    ${icon && html`<${Icon} name=${icon} size=${24} />`}
     <h2>${title}</h2>
     ${text && html`<p>${text}</p>`}
     ${children}
   </div>`;
 }
+
+// An icon-only button: 32x32 (compact 28, sm 24), its name as the aria-label
+// and the tooltip (with an optional shortcut). pressed: a toggle (aria-pressed).
+export function IconButton({ icon, label, onClick, size, iconSize, cls = '', pressed, tip = true, tipKey, tipSide, danger, disabled, busy, ...rest }) {
+  const sz = iconSize || (size === 'sm' ? 16 : size === 'compact' ? 18 : 20);
+  const c = `ib${size === 'sm' ? ' sm' : size === 'compact' ? ' compact' : ''}${danger ? ' danger' : ''}${cls ? ` ${cls}` : ''}`;
+  return html`<button type="button" class=${c} aria-label=${label} data-tip=${tip ? label : undefined} data-key=${tipKey} data-tip-side=${tipSide}
+    aria-pressed=${pressed === undefined ? undefined : String(!!pressed)} aria-busy=${busy ? 'true' : undefined} disabled=${disabled} onClick=${onClick} ...${rest}><${Icon} name=${icon} size=${sz} /></button>`;
+}
+
+// A count: violet when it needs you (mentions, requests), neutral (quiet) when it doesn't.
+export const Badge = ({ n, quiet, alert, label }) => (n > 0
+  ? html`<span class=${`badge${quiet ? ' quiet' : ''}${alert ? ' alert' : ''}`} aria-label=${label}>${n > 99 ? '99+' : n}</span>` : null);
+
+export const Spinner = ({ label = 'Loading' }) => html`<span class="spinner" role="status" aria-label=${label}></span>`;
 
 // Message text
 function marked(text, terms) {

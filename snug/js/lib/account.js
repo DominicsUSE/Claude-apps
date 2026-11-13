@@ -28,7 +28,7 @@ export const PREF_RULES = {
   compactAvatars: ['bool', null, false],
   clock: ['enum', ['auto', '12', '24'], 'auto'],
   roleColors: ['bool', null, true],
-  sidebarW: ['int', [200, 420], 264],
+  sidebarW: ['int', [200, 420], 240],
   font: ['enum', ['inter', 'system', 'hyperlegible', 'serif', 'mono'], 'inter'],
   underlineLinks: ['bool', null, false],
   focusAlways: ['bool', null, false],

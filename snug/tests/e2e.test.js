@@ -374,6 +374,33 @@ test('phone: tabs, a room pushed on top, back button and back gesture return', a
   assert.deepEqual(errors, []);
 });
 
+test('phone: Home from inside a thread shows the Home tab, with nothing left over it', async () => {
+  const phone = await person('robin', { viewport: { width: 390, height: 844 } });
+  await phone.locator('.tab[aria-selected="true"]:has-text("Home")').waitFor();
+  await phone.click('.home-house:has-text("Kiln & Co.")');
+  await phone.click('.screen.push .row:has-text("Glaze lab")');
+  await phone.locator('.screen.push .composer textarea').waitFor();
+  await phone.evaluate(() => {
+    const S = window.snug.S; const c = S.ui.view.id;
+    const m = S.msgs[c].filter((x) => !x.sys && !x.call).at(-1);
+    return import('/js/store.js').then((s) => s.openThread(c, m.id));
+  });
+  await phone.locator('aside[aria-label="Thread"]').waitFor();
+  // Home from the quick switcher.
+  await phone.evaluate(() => import('/js/store.js').then((s) => s.openQuick('')));
+  const q = phone.locator('[role="dialog"][aria-label="Jump to or search"]');
+  await q.locator('input').fill('Home');
+  await q.locator('.menu-item').filter({ has: phone.locator('.grow', { hasText: /^Home$/ }) }).first().click();
+  await phone.waitForFunction(() => window.snug.S.ui.tab === 'home' && window.snug.S.ui.depth === 0);
+  assert.equal(await phone.evaluate(() => window.snug.S.ui.pane), null, 'the thread closed');
+  assert.equal(await phone.locator('aside[aria-label="Thread"]').count(), 0);
+  assert.equal(await phone.locator('.screen.push').count(), 0, 'nothing pushed over the Home tab');
+  await phone.locator('.tab[aria-selected="true"]:has-text("Home")').waitFor();
+  await phone.locator('.home-house:has-text("Kiln & Co.")').waitFor();
+  await phone.context().close();
+  assert.deepEqual(errors, []);
+});
+
 // ---------- The redesigned product: places, friends, discovery, events ----------
 
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -435,7 +462,7 @@ test('a friend request reaches the other person live, and accepting makes both f
   const tomasz = await person('tomasz');
   await home(tomasz);
   await tomasz.click('.nav .row:has-text("Friends")');
-  await tomasz.click('.f-tab:has-text("Requests")');
+  await tomasz.click('.f-tab:has-text("Pending")');
   assert.equal(await tomasz.locator('.f-row:has-text("Robin Hale")').count(), 0);
 
   await home(robin);

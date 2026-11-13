@@ -461,20 +461,22 @@ function StampModal({ onInsert }) {
 }
 
 // ---------- The composer: + menu, formatting bar and shortcuts ----------
-export function PlusMenu({ conv, text, update, insert, replyTo }) {
+export function PlusMenu({ conv, text, update, insert, replyTo, onAttach }) {
   const open = (e) => {
     const anchor = rectOf(e);
     openMenu({
       anchor, align: 'start',
       items: [
+        onAttach && { label: 'Upload a file', icon: 'clip', onSelect: onAttach },
+        onAttach && { sep: true },
         { label: 'Create a poll', icon: 'poll', onSelect: () => openModal(PollModal, { conv }) },
         { label: 'Send a sticker', icon: 'sticker', onSelect: () => openPop({ anchor, align: 'start', label: 'Stickers', C: StickerPicker, props: { conv, replyTo } }) },
         { label: 'Insert a time', icon: 'calendar', onSelect: () => openModal(StampModal, { onInsert: (tok) => insert(`${tok} `) }) },
         { label: 'Schedule a message', icon: 'clock', onSelect: () => openModal(ScheduleModal, { conv, text, replyTo, done: () => update('') }) },
-      ],
+      ].filter(Boolean),
     });
   };
-  return html`<button class="ib plus-btn" aria-label="More: poll, sticker, time, schedule" data-tip="Poll, sticker, time, schedule" aria-haspopup="menu" onClick=${open}><${Icon} name="plus" /></button>`;
+  return html`<button class="ib plus-btn" aria-label=${onAttach ? 'Add: file, poll, sticker, time, schedule' : 'More: poll, sticker, time, schedule'} data-tip=${onAttach ? 'Upload a file, poll, sticker and more' : 'Poll, sticker, time, schedule'} aria-haspopup="menu" onClick=${open}><${Icon} name="plus" /></button>`;
 }
 
 const WRAPS = {

@@ -2,21 +2,23 @@
    up from tiles, the "You're muted" note, the call clock, "Voice connected"
    with real connection quality, Reconnecting, and ringing people again.
    Tokens only. Mint is live, whose turn and the winning line; amber is
-   reconnecting, a weak line and the muted warning; rose is reactions and a
-   poor line; cyan is the first player's pieces. Places are arches, people are
-   circles, controls are rectangles. */
+   reconnecting, a weak line and the muted warning; rose is a poor line and the
+   second player's pieces; cyan is the first player's. Everything else is
+   neutral surfaces (voice track): panels are 8px rectangles on the secondary
+   surface, people are circles, controls are 6px rectangles. */
 
 /* ---------- Header: connection, clock, reconnecting ---------- */
 .act-conn {
   border: 0; background: none; padding: var(--s-1) var(--s-2); margin: calc(-1 * var(--s-1)) 0;
-  border-radius: var(--r-sm); cursor: pointer; font: inherit; font-size: var(--t-13);
+  border-radius: var(--r-row); cursor: pointer; font: inherit; font-size: var(--t-meta); font-weight: var(--w-medium);
+  transition: background var(--m-hover) var(--ease-in-out);
 }
-.act-conn:hover { background: var(--hover); }
-.act-conn:active { background: var(--press); }
+.act-conn:hover { background: var(--surface-hover); }
+.act-conn:active { background: var(--surface-sel); }
 .act-conn:focus-visible { outline: var(--focus-w) solid var(--focus); outline-offset: 2px; }
 .act-conn .act-q { margin-left: var(--s-1); }
 .act-uplink { color: var(--amber-ink); font-weight: var(--w-medium); margin-left: var(--s-2); }
-.act-timer { font-size: var(--t-13); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.act-timer { font-size: var(--t-meta); color: var(--text-3); font-variant-numeric: tabular-nums; }
 .dock-head .act-timer, .vo-mini-title .act-timer { margin-left: auto; padding-left: var(--s-2); flex: none; }
 .act-reconn { color: var(--amber-ink); font-weight: var(--w-medium); }
 .act-reconn i { width: var(--pres); height: var(--pres); border-radius: 50%; background: var(--amber); animation: breathe 1.4s var(--ease-in-out) infinite; }
@@ -40,15 +42,17 @@
 
 /* ---------- "You're muted" ---------- */
 .act-muted-live:empty { display: none; }
+/* One line, like any in-view notice: the warning colour, no border. */
 .act-muted {
-  display: flex; align-items: center; gap: var(--s-3);
-  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3); border-radius: var(--r-md);
-  background: var(--amber-soft); color: var(--amber-ink); font-size: var(--t-14);
-  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
-  animation: drop-in var(--m-smooth) var(--ease-out);
+  display: flex; align-items: center; gap: var(--s-2);
+  min-height: var(--h-md); padding: var(--s-1) var(--s-1) var(--s-1) var(--s-3); border-radius: var(--r-btn);
+  background: var(--amber-soft); color: var(--text-1); font-size: var(--t-ui); line-height: var(--lh-ui);
+  width: 100%; max-width: 640px; justify-self: center;
+  animation: drop-in var(--m-panel) var(--ease-out);
 }
+.act-muted > .ic { color: var(--amber-ink); flex: none; }
 .act-muted b { font-weight: var(--w-semibold); }
-.act-unmute { height: var(--h-sm); padding: 0 var(--s-3); background: var(--amber); color: var(--bg-1); border-color: transparent; font-weight: var(--w-semibold); }
+.act-unmute { height: var(--h-28); padding: 0 var(--s-3); background: var(--amber); color: var(--bg-1); border-color: transparent; font-weight: var(--w-semibold); font-size: var(--t-ui); }
 .act-unmute:hover { background: color-mix(in srgb, var(--amber) 88%, var(--text-1)); }
 .act-unmute:active { background: color-mix(in srgb, var(--amber) 78%, var(--text-1)); }
 .vo-mini .act-muted { margin: 0 var(--s-2); font-size: var(--t-13); }
@@ -60,7 +64,7 @@
   position: absolute; bottom: 0; font-size: 28px; line-height: 1;
   left: calc(50% - 14px + (var(--i) - 1.5) * 14px);
   animation: act-rise 2.4s var(--ease-out) forwards;
-  filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--rose) 35%, transparent));
+  filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--bg-0) 60%, transparent));
 }
 .act-float img { display: block; width: 28px; height: 28px; object-fit: contain; }
 @keyframes act-rise {
@@ -72,63 +76,72 @@
 @keyframes act-hold { 0%, 85% { opacity: 1; } 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .act-float { animation: act-hold 2s linear forwards; } }
 :root[data-motion="off"] .act-float { animation: act-hold 2s linear forwards; }
+@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .act-reconn i { animation: none; } }
+:root[data-motion="off"] .act-reconn i { animation: none; }
 
 /* The reaction picker. */
 .act-react { display: grid; gap: var(--s-2); padding: var(--s-1); }
-.act-react-grid { display: grid; grid-template-columns: repeat(4, 44px); gap: var(--s-1); }
-.act-react-btn { width: 44px; height: 44px; display: grid; place-items: center; font-size: 22px; border: 0; border-radius: var(--r-md); background: none; cursor: pointer; }
-.act-react-btn:hover { background: var(--rose-soft); }
-.act-react-btn:active { background: color-mix(in srgb, var(--rose) 24%, var(--bg-1)); }
+.act-react-grid { display: grid; grid-template-columns: repeat(4, 40px); gap: var(--s-1); }
+.act-react-btn { width: 40px; height: 40px; display: grid; place-items: center; font-size: 22px; border: 0; border-radius: var(--r-btn); background: none; cursor: pointer; transition: background var(--m-hover) var(--ease-in-out), transform var(--m-hover) var(--ease-in-out); }
+.act-react-btn:hover { background: var(--surface-hover); transform: scale(1.08); }
+.act-react-btn:active { background: var(--surface-sel); transform: scale(0.96); }
 .act-react-btn:focus-visible { outline: var(--focus-w) solid var(--focus); outline-offset: 1px; }
 .stage-acts .act-btn.running { color: var(--mint-ink); background: var(--mint-soft); }
 
 /* ---------- Ring again ---------- */
-.act-away { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--s-2) var(--s-4); font-size: var(--t-13); }
+.act-away { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--s-2) var(--s-4); font-size: var(--t-ui); }
 .act-away-label { color: var(--text-3); }
 .act-away-person { display: inline-flex; align-items: center; gap: var(--s-2); min-width: 0; color: var(--text-2); }
-.act-ring { height: var(--h-sm); padding: 0 var(--s-3); gap: var(--s-1); }
+.act-ring { height: var(--h-28); padding: 0 var(--s-2); gap: var(--s-1); font-size: var(--t-ui); }
 
 /* ---------- The activity tile ---------- */
+/* A panel on the secondary surface, like a large tile: no border, 8px. */
 .act-tile {
-  display: grid; gap: var(--s-3); padding: var(--s-3);
-  border: 1px solid var(--line-subtle); border-radius: var(--r-lg); background: var(--bg-2);
+  display: grid; gap: var(--s-2); padding: var(--s-2) var(--s-3) var(--s-3);
+  border-radius: var(--r-lg); background: var(--surface-2); --bg: var(--surface-2);
   width: 100%; max-width: 880px; justify-self: center; min-width: 0;
 }
-.act-head { display: flex; align-items: center; gap: var(--s-2); min-width: 0; font-size: var(--t-14); }
-.act-head .faint { font-size: var(--t-13); }
+.act-head { display: flex; align-items: center; gap: var(--s-2); min-width: 0; min-height: var(--h-sm); font-size: var(--t-body); }
+.act-head > .ic { color: var(--text-3); flex: none; }
+.act-head b { font-weight: var(--w-semibold); }
+.act-head .faint { font-size: var(--t-ui); }
 .act-head .act-stop { margin-left: auto; }
 
 /* Whiteboard */
 .act-board-body { display: grid; gap: var(--s-2); }
-.act-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.act-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-2); }
 .act-swatches, .act-widths { display: flex; gap: var(--s-1); }
 .act-swatch, .act-width, .act-tool {
-  width: 36px; height: 36px; display: grid; place-items: center;
-  border: 1px solid transparent; border-radius: var(--r-md); background: none; cursor: pointer; color: var(--text-2);
+  width: var(--h-sm); height: var(--h-sm); display: grid; place-items: center;
+  border: 0; border-radius: var(--r-btn); background: none; cursor: pointer; color: var(--text-2);
+  transition: background var(--m-hover) var(--ease-in-out);
 }
-.act-swatch:hover, .act-width:hover { background: var(--hover); }
-.act-swatch:active, .act-width:active { background: var(--press); }
-.act-swatch[aria-checked="true"], .act-width[aria-checked="true"] { border-color: var(--line-strong); background: var(--bg-3); }
+.act-swatch:hover, .act-width:hover { background: var(--surface-hover); }
+.act-swatch:active, .act-width:active { background: var(--surface-sel); }
+.act-swatch[aria-checked="true"], .act-width[aria-checked="true"] { background: var(--surface-sel); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .act-swatch:focus-visible, .act-width:focus-visible { outline: var(--focus-w) solid var(--focus); outline-offset: 1px; }
-.act-swatch span { width: 18px; height: 18px; border-radius: 50%; }
+.act-swatch span { width: 16px; height: 16px; border-radius: 50%; }
 .sw-ink span { background: var(--text-1); }
 .sw-mint span { background: var(--mint); }
 .sw-amber span { background: var(--amber); }
 .sw-cyan span { background: var(--cyan); }
 .sw-rose span { background: var(--rose); }
 .act-width span { width: 18px; height: var(--w); border-radius: var(--r-full); background: var(--text-2); }
-.act-canvas-wrap { position: relative; aspect-ratio: 16 / 9; width: 100%; border-radius: var(--r-md); background: var(--bg-1); border: 1px solid var(--line-subtle); overflow: hidden; }
+.act-canvas-wrap { position: relative; aspect-ratio: 16 / 9; width: 100%; border-radius: var(--r-btn); background: var(--surface-chat); overflow: hidden; }
 .act-canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; display: block; }
-.act-empty { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: var(--s-4); text-align: center; color: var(--text-3); font-size: var(--t-14); pointer-events: none; }
+.act-empty { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: var(--s-4); text-align: center; color: var(--text-3); font-size: var(--t-ui); pointer-events: none; }
 
 /* Games */
 .act-game-body { display: grid; gap: var(--s-3); justify-items: center; }
 .act-seats { display: flex; align-items: center; justify-content: center; gap: var(--s-4); flex-wrap: wrap; }
-.act-seat { display: inline-flex; align-items: center; gap: var(--s-2); min-width: 0; font-size: var(--t-14); }
-.act-seat-face { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; box-shadow: 0 0 0 2px transparent; }
-.act-seat.turn .act-seat-face { box-shadow: 0 0 0 2px var(--mint); }
-.act-seat.won .act-seat-face { box-shadow: 0 0 0 2px var(--mint); background: var(--mint-soft); }
+.act-seat { display: inline-flex; align-items: center; gap: var(--s-2); min-width: 0; font-size: var(--t-body); }
+.act-seat-face { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; box-shadow: 0 0 0 2px transparent; }
+.act-seat.turn .act-seat-face { box-shadow: 0 0 0 2px var(--online); }
+.act-seat.won .act-seat-face { box-shadow: 0 0 0 2px var(--online); background: var(--mint-soft); }
 .act-seat.empty .act-seat-face { border: 1px dashed var(--line-strong); width: 32px; height: 32px; }
+/* An empty seat is not base.css's generic .empty state. */
+.act-seat.empty { margin: 0; padding: 0; max-width: none; text-align: initial; display: inline-flex; }
+.act-seat.empty .btn { margin-top: 0; }
 .act-seat-name { max-width: 120px; font-weight: var(--w-medium); }
 .act-turn { color: var(--mint-ink); font-size: var(--t-12); font-weight: var(--w-medium); }
 .act-piece { font-weight: var(--w-bold); font-size: var(--t-14); }
@@ -137,9 +150,9 @@
 .act-game .act-piece:empty { width: 12px; height: 12px; border-radius: 50%; }
 .act-piece.p0:empty { background: var(--cyan); }
 .act-piece.p1:empty { background: var(--rose); }
-.act-sit { height: var(--h-sm); padding: 0 var(--s-3); }
+.act-sit { height: var(--h-28); padding: 0 var(--s-3); font-size: var(--t-ui); }
 .act-vs { font-size: var(--t-12); }
-.act-status { margin: 0; font-size: var(--t-14); color: var(--text-2); min-height: 1.3em; }
+.act-status { margin: 0; font-size: var(--t-body); color: var(--text-2); min-height: 1.3em; }
 .act-status.over { color: var(--text-1); font-weight: var(--w-semibold); }
 .act-game-acts { display: flex; gap: var(--s-2); }
 .act-game-acts:empty { display: none; }
@@ -147,29 +160,29 @@
 .act-grid.ttt { display: grid; grid-template-columns: repeat(3, 64px); gap: var(--s-1); }
 .act-cell {
   width: 64px; height: 64px; display: grid; place-items: center;
-  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg-1);
+  border: 1px solid var(--line-subtle); border-radius: var(--r-btn); background: var(--surface-chat);
   font: inherit; font-size: var(--t-32); font-weight: var(--w-bold); line-height: 1; cursor: pointer; color: var(--text-1);
 }
-.act-cell:hover:not([aria-disabled="true"]) { background: var(--hover); }
-.act-cell:active:not([aria-disabled="true"]) { background: var(--press); }
+.act-cell:hover:not([aria-disabled="true"]) { background: var(--surface-hover); }
+.act-cell:active:not([aria-disabled="true"]) { background: var(--surface-sel); }
 .act-cell[aria-disabled="true"] { cursor: default; }
 .act-cell:focus-visible, .act-drop:focus-visible { outline: var(--focus-w) solid var(--focus); outline-offset: 2px; }
 .act-cell.p0 { color: var(--cyan); }
 .act-cell.p1 { color: var(--rose); }
-.act-cell.win { background: var(--mint-soft); border-color: var(--mint); }
+.act-cell.win { background: var(--mint-soft); border-color: var(--online); }
 .act-cell.last { border-color: var(--line-strong); }
 
 .act-c4 { display: grid; gap: var(--s-1); }
 .act-drops, .act-grid.c4 { display: grid; grid-template-columns: repeat(7, 44px); gap: var(--s-1); }
-.act-drop { width: 44px; height: 32px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--bg-1); color: var(--text-2); cursor: pointer; }
-.act-drop:hover:not([aria-disabled="true"]) { background: var(--hover); color: var(--text-1); }
-.act-drop:active:not([aria-disabled="true"]) { background: var(--press); }
+.act-drop { width: 44px; height: 28px; display: grid; place-items: center; border: 0; border-radius: var(--r-btn); background: var(--surface-chat); color: var(--text-2); cursor: pointer; }
+.act-drop:hover:not([aria-disabled="true"]) { background: var(--surface-hover); color: var(--text-1); }
+.act-drop:active:not([aria-disabled="true"]) { background: var(--surface-sel); }
 .act-drop[aria-disabled="true"] { color: var(--text-disabled); cursor: default; }
-.act-grid.c4 { padding: var(--s-1); border-radius: var(--r-md); background: var(--bg-3); }
-.act-hole { width: 44px; height: 44px; border-radius: 50%; background: var(--bg-1); cursor: pointer; }
+.act-grid.c4 { padding: var(--s-1); border-radius: var(--r-btn); background: var(--surface-sel); }
+.act-hole { width: 44px; height: 44px; border-radius: 50%; background: var(--surface-chat); cursor: pointer; }
 .act-hole.p0 { background: var(--cyan); }
 .act-hole.p1 { background: var(--rose); }
-.act-hole.win { box-shadow: 0 0 0 3px var(--mint); }
+.act-hole.win { box-shadow: 0 0 0 2px var(--online); }
 .act-hole.last:not(.win) { box-shadow: 0 0 0 2px var(--text-2); }
 
 /* ---------- Phone ---------- */
@@ -183,12 +196,17 @@
   .act-swatch, .act-width, .act-tool { width: 44px; height: 44px; }
 }
 
+@media (pointer: coarse) { .act-swatch, .act-width, .act-tool { width: var(--touch); height: var(--touch); } .act-drop { height: var(--touch); } }
+
 /* ---------- With an activity running ----------
    The stage grows to hold it, the board never gets taller than about 40% of
    the window, and the call's controls stay in reach at the bottom. */
 .stage:has(.act-tile) { max-height: 78%; }
-.stage:has(.act-tile) .stage-acts { position: sticky; bottom: calc(-1 * var(--s-5)); padding: var(--s-2) 0 var(--s-3); background: var(--bg-1); z-index: 3; }
+.stage:has(.act-tile) .stage-acts { position: sticky; bottom: calc(-1 * var(--s-3)); padding: var(--s-2) 0 var(--s-3); background: var(--surface-chat); z-index: 3; }
 .act-canvas-wrap { max-width: calc(40vh * 16 / 9); justify-self: center; }
+/* The whiteboard's panel is as wide as its board, so the tools line up with it. */
+.act-tile.act-board { max-width: calc(40vh * 16 / 9 + 2 * var(--s-3)); }
+.act-tile.act-ttt, .act-tile.act-c4 { max-width: 560px; }
 
 /* More controls than fit across a phone: they wrap onto a second row, never off screen. */
 @media (max-width: 759px) { .stage-acts { flex-wrap: wrap; row-gap: var(--s-2); } }

@@ -616,15 +616,15 @@ function badgeImage(n) {
   const size = 16;
   const buf = Buffer.alloc(size * size * 4);
   const put = (x, y, [r, g, b, a]) => { if (x < 0 || y < 0 || x >= size || y >= size) return; const i = (y * size + x) * 4; buf[i] = b; buf[i + 1] = g; buf[i + 2] = r; buf[i + 3] = a; };
-  // A violet disc (Brand Violet, the dark --brand #996FF7: the count is for
-  // you) with near-black digits (5.34:1).
-  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) { const dx = x - 7.5, dy = y - 7.5; if (dx * dx + dy * dy <= 56) put(x, y, [0x99, 0x6F, 0xF7, 255]); }
+  // A violet disc (Brand Violet, the dark --brand #8656F0: the count is for
+  // you) with white digits (4.56:1).
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) { const dx = x - 7.5, dy = y - 7.5; if (dx * dx + dy * dy <= 56) put(x, y, [0x86, 0x56, 0xF0, 255]); }
   const text = n > 9 ? "9+" : String(n);
   const w = text.length * 4 - 1;
   let x0 = Math.floor((size - w) / 2);
   for (const ch of text) {
     const g = DIGITS[ch];
-    for (let i = 0; i < 15; i++) if (g[i] === "1") put(x0 + (i % 3), 5 + Math.floor(i / 3), [0x11, 0x12, 0x11, 255]);
+    for (let i = 0; i < 15; i++) if (g[i] === "1") put(x0 + (i % 3), 5 + Math.floor(i / 3), [0xFF, 0xFF, 0xFF, 255]);
     x0 += 4;
   }
   return nativeImage.createFromBitmap(buf, { width: size, height: size });

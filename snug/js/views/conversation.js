@@ -1,11 +1,11 @@
 // The main column for a room or direct conversation, plus the two context
 // panes that belong to it: a thread, and the room's details.
-import { html } from '../../vendor/preact-htm.js';
+import { html, useState } from '../../vendor/preact-htm.js';
 import {
   S, person, convMeta, membersOf, togglePane, closePane, back, go,
   toggleFollow, setNotify, openModal, jumpToMsg, findMsg, openConv,
 } from '../store.js';
-import { levelOf, levelsFor, LEVEL_LABEL } from '../lib/attention.js';
+import { levelOf, levelsFor, LEVEL_LABEL, isThread } from '../lib/attention.js';
 import { can } from '../lib/perms.js';
 import { fmtWhen, plural, nameList } from '../lib/util.js';
 import { plain } from '../lib/format.js';
@@ -20,29 +20,57 @@ import { toggleCamera, toggleScreen, mediaOf, canShareScreen } from '../voice.js
 import { emit, toast } from '../store.js';
 import { RoomForm, RoomBrowser } from './modals.js';
 import { showProfile } from './people.js';
-import { PinsButton } from './media.js'; // pinned messages
+import { PinsButton, pinsOf } from './media.js'; // pinned messages
 import { ForumView, StageRoom, RoomPlaces } from './places.js'; // forum and stage rooms; access, follows and nicknames in details
 import { CallButtons, CallStrip, CallEndNote } from './calls.js'; // calls in direct conversations and groups
 import { PersonExtras, RoomLimit, VoiceExtras, PopOut } from './voiceopts.js'; // per-person volume, room limit, soundboard and options, picture in picture
 // Activities, reactions, the muted note, the call clock, connection quality, ringing again (voice and calls track).
 import { ActivityButtons, ActivityTile, ReactionFloat, ActivityAnnouncer, MutedBanner, CallTimer, ConnHeader, RingAgain, Bars, qualityOf, QLABEL } from './activities.js';
 import { videoBlocked } from '../voice.js';
+import { notifyMenu, openDrawer, roomMenu, dmMenu } from './nav.js'; // the header's bell, the phone's drawer (shell track)
+import { openMenu } from '../store.js';
+import { togglePeople } from './people.js'; // the member list toggle, remembered (shell track)
 import { vp } from '../voiceopts.js';
-import { DmHeaderButtons } from './dm-manage.js'; // Add people and the members of a group (server/dms.js)
+import { DmHeaderButtons, dmHeaderItems } from './dm-manage.js'; // Add people and the members of a group (server/dms.js)
 
 const Back = () => S.ui.phone && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
 
+// The call's controls. On the stage: one compact bar of icon buttons, in
+// three groups (what you show: camera, screen, activities, reactions,
+// sounds | what you say and hear: mic, deafen | settings and leave, in red).
+// Compact (the shell's dock): mic, deafen, a camera or screen that is on, leave.
 export function VoiceControls({ compact }) {
   const c = S.call;
   const size = compact ? 18 : 20;
   const leave = c.dm ? 'Leave call' : 'Leave voice';
+  const mic = html`<button class=${`ib vc mic${c.muted ? ' on' : ''}`} aria-pressed=${String(c.muted)} aria-label=${c.muted ? 'Unmute' : 'Mute'} data-tip=${c.muted ? 'Unmute' : 'Mute'} onClick=${toggleMute}><${Icon} name=${c.muted ? 'mic-off' : 'mic'} size=${size} /></button>`;
+  const ear = html`<button class=${`ib vc ear${c.deaf ? ' on' : ''}`} aria-pressed=${String(c.deaf)} aria-label=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} data-tip=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} onClick=${toggleDeaf}><${Icon} name=${c.deaf ? 'headphones-off' : 'headphones'} size=${size} /></button>`;
+  const out = html`<button class="ib vc danger leave" aria-label=${leave} data-tip=${c.dm ? 'Hang up' : 'Leave'} onClick=${leaveVoice}><${Icon} name="phone-off" size=${size} /></button>`;
+  if (compact) return html`${mic}${ear}<${MediaControls} c=${c} size=${size} compact />${out}`;
+  // Phone: one row (mic, deafen, camera, screen, More, leave); More opens the
+  // rest (activities, reactions, soundboard, push to talk, options) under it.
+  if (S.ui.phone) return html`<${PhoneControls} mic=${mic} ear=${ear} out=${out} c=${c} size=${size} />`;
   return html`
-    <button class=${`ib vc${c.muted ? ' on' : ''}`} aria-pressed=${String(c.muted)} aria-label=${c.muted ? 'Unmute' : 'Mute'} data-tip=${c.muted ? 'Unmute' : 'Mute'} onClick=${toggleMute}><${Icon} name=${c.muted ? 'mic-off' : 'mic'} size=${size} /></button>
-    <button class=${`ib vc${c.deaf ? ' on' : ''}`} aria-pressed=${String(c.deaf)} aria-label=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} data-tip=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} onClick=${toggleDeaf}><${Icon} name=${c.deaf ? 'ear-off' : 'ear'} size=${size} /></button>
-    <${MediaControls} c=${c} size=${size} compact=${compact} />
-    <${ActivityButtons} compact=${compact} />
-    <${VoiceExtras} compact=${compact} />
-    <button class="ib vc danger leave" aria-label=${leave} data-tip=${c.dm ? 'Hang up' : 'Leave'} onClick=${leaveVoice}><${Icon} name="leave" size=${size} /></button>`;
+    <${MediaControls} c=${c} size=${size} />
+    <${ActivityButtons} />
+    <${VoiceExtras} only="board" />
+    <span class="vc-sep" aria-hidden="true"></span>
+    ${mic}${ear}
+    <${VoiceExtras} only="hold" />
+    <span class="vc-sep" aria-hidden="true"></span>
+    <${VoiceExtras} only="opts" />
+    ${out}`;
+}
+
+function PhoneControls({ mic, ear, out, c, size }) {
+  const [more, setMore] = useState(false);
+  return html`
+    ${mic}${ear}<${MediaControls} c=${c} size=${size} />
+    <button class=${`ib vc vc-more${more ? ' open' : ''}`} aria-expanded=${String(more)} aria-label="More call controls" data-tip="More" onClick=${() => setMore(!more)}><${Icon} name="more" size=${size} /></button>
+    ${out}
+    ${more && html`<div class="vc-more-row" role="group" aria-label="More call controls">
+      <${ActivityButtons} /><${VoiceExtras} only="board" /><${VoiceExtras} only="hold" /><${VoiceExtras} only="opts" />
+    </div>`}`;
 }
 
 // Each person's line says what is really happening with their audio.
@@ -67,8 +95,9 @@ function Quality({ id, inCall }) {
   return html`<${Bars} q=${q} label=${S.peers[id] === 'failed' ? 'Can\u2019t connect' : QLABEL[q]} />`;
 }
 
-// Faces get smaller as the room fills, so everyone fits without scrolling.
-const faceSize = (n) => (n <= 2 ? 96 : n <= 6 ? 64 : 48);
+// Tiles (and the faces in them) get smaller as the room fills, so everyone
+// fits without scrolling. The size also sets the tile width (css/places.css).
+const faceSize = (n) => (n <= 2 ? 80 : n <= 6 ? 64 : 48);
 
 // ---------- Camera and screen sharing (video agent) ----------
 // Controls: camera and screen sit between deafen and leave. In the compact
@@ -153,7 +182,7 @@ function MediaTile({ t, roomId, focused, small }) {
       : html`<span class="vt-face"><${Avatar} user=${u} size=${small ? 40 : 64} speaking=${talking} dim=${!!note} /></span>`}
     <button class="vt-hit" aria-pressed=${String(!!focused)} aria-label=${focused ? `Show everyone again` : `Make ${what} large`} onClick=${() => setFocus(t.key, focused)}></button>
     <span class="vt-label">
-      ${!screenTile && quiet && html`<span class="vt-muted" role="img" aria-label=${deaf ? 'Not listening' : 'Muted'}><${Icon} name=${deaf ? 'ear-off' : 'mic-off'} size=${14} /></span>`}
+      ${!screenTile && quiet && html`<span class="vt-muted" role="img" aria-label=${deaf ? 'Not listening' : 'Muted'}><${Icon} name=${deaf ? 'headphones-off' : 'mic-off'} size=${14} /></span>`}
       ${screenTile && html`<${Icon} name="screen" size=${14} />`}
       <span class="trunc">${screenTile ? what : first}</span>
       ${!screenTile && html`<${Quality} id=${t.id} inCall=${true} />`}
@@ -196,7 +225,9 @@ function Stage({ roomId, dm }) {
   const ringingIds = inCall && !starting && meta ? meta.ringing.filter((id) => S.users[id] && !ids.includes(id)) : [];
   const alone = dm && inCall && !starting && ids.length <= 1 && !ringingIds.length;
   // Faces make room for an activity (the whiteboard or a game) when one is running.
-  const size = inCall && S.activity?.[roomId] ? 48 : faceSize(ids.length + ringingIds.length);
+  const size = inCall && S.activity?.[roomId] ? 40 : faceSize(ids.length + ringingIds.length);
+  // A phone's tiles are half its width: the face stays inside them.
+  const face = S.ui.phone ? Math.min(size, 48) : size;
   const ringNames = nameList(ringingIds.map((id) => S.users[id].name.split(' ')[0]));
   const status = !inCall ? null : starting
     ? html`<span class="stage-conn wait" role="status">${S.call.status === 'mic' ? 'Waiting for your microphone\u2026' : dm ? 'Calling\u2026' : 'Joining\u2026'}</span>`
@@ -212,7 +243,7 @@ function Stage({ roomId, dm }) {
   const media = tiles.some((t) => t.kind !== 'face');
   return html`<div class=${`stage${inCall ? ' in' : ''}${ids.length ? '' : ' empty'}${media ? ' media' : ''}${dm ? ' call' : ''}`} data-size=${size} role="region" aria-label=${dm ? 'Call' : 'Voice'}>
     <div class="stage-top">
-      <span class="stage-count"><${Icon} name=${dm ? 'phone' : 'voice'} size=${16} />${ids.length ? `${ids.length} in ${dm ? 'the call' : 'voice'}` : dm ? 'Call' : 'Voice'}<${RoomLimit} room=${roomId} n=${ids.length} /></span>
+      <span class="stage-count"><${Icon} name=${dm ? 'phone' : 'speaker'} size=${16} />${ids.length ? `${ids.length} in ${dm ? 'the call' : 'voice'}` : dm ? 'Call' : 'Voice'}<${RoomLimit} room=${roomId} n=${ids.length} /></span>
       ${status}
       ${inCall && !starting && html`<${CallTimer} room=${roomId} />`}
     </div>
@@ -220,7 +251,7 @@ function Stage({ roomId, dm }) {
     ${inCall && html`<${ActivityAnnouncer} />`}
     <${ActivityTile} room=${roomId} />
     ${media ? html`<${MediaStage} tiles=${tiles} roomId=${roomId} />` : ids.length
-      ? html`<div class="stage-people" style=${`--face:${size}px`}>
+      ? html`<div class="stage-people" style=${`--face:${face}px`} data-n=${Math.min(ids.length + ringingIds.length, 9)}>
           ${ids.map((id) => {
             const u = S.users[id];
             const st = S.voiceState[roomId]?.[id] || {};
@@ -229,21 +260,22 @@ function Stage({ roomId, dm }) {
             const deaf = mine ? S.call?.deaf : st.deaf;
             const note = peerNote(id, inCall);
             const talking = !!S.speaking[id] && !quiet;
-            return html`<div class=${`stage-person${talking ? ' talking' : ''}`} key=${id}>
-              <span class="stage-face">
-                <${Avatar} user=${u} size=${size} speaking=${talking} dim=${!!note} />
-                ${quiet && html`<span class="muted-ic" role="img" aria-label=${deaf ? 'Not listening' : 'Muted'}><${Icon} name=${deaf ? 'ear-off' : 'mic-off'} size=${size >= 64 ? 16 : 12} /></span>`}
+            // One tile per person: the face in the middle, the name and their
+            // mic bottom left, a note top left, volume and moderation top right.
+            return html`<div class=${`stage-person${talking ? ' talking' : ''}${note ? ' waiting' : ''}`} key=${id}>
+              <span class="stage-face"><${Avatar} user=${u} size=${face} speaking=${talking} dim=${!!note} /></span>
+              <span class="stage-name">
+                ${quiet && html`<span class="muted-ic" role="img" aria-label=${deaf ? 'Not listening' : 'Muted'} data-tip=${deaf ? 'Not listening' : 'Muted'}><${Icon} name=${deaf ? 'headphones-off' : 'mic-off'} size=${14} /></span>`}
+                <span class="trunc">${mine ? 'You' : u.name}</span><${MediaMarks} st=${st} /><${Quality} id=${id} inCall=${inCall && !starting} />
               </span>
-              <span class="stage-name"><span class="trunc">${mine ? 'You' : u.name.split(' ')[0]}</span><${MediaMarks} st=${st} /><${Quality} id=${id} inCall=${inCall && !starting} /></span>
               ${note && html`<span class="stage-note">${note}</span>`}
-              <${StageMod} id=${id} room=${roomId} />
-              <${PersonExtras} id=${id} room=${roomId} />
+              <span class="stage-tools"><${StageMod} id=${id} room=${roomId} /><${PersonExtras} id=${id} room=${roomId} /></span>
               <${ReactionFloat} id=${id} room=${roomId} />
             </div>`;
           })}
-          ${ringingIds.map((id) => html`<div class="stage-person ringing" key=${id}>
-            <span class="stage-face"><${Avatar} user=${S.users[id]} size=${size} dim /></span>
-            <span class="stage-name"><span class="trunc">${S.users[id].name.split(' ')[0]}</span></span>
+          ${ringingIds.map((id) => html`<div class="stage-person ringing waiting" key=${id}>
+            <span class="stage-face"><${Avatar} user=${S.users[id]} size=${face} dim /></span>
+            <span class="stage-name"><span class="trunc">${S.users[id].name}</span></span>
             <span class="stage-note">Ringing\u2026</span>
           </div>`)}
         </div>`
@@ -254,7 +286,7 @@ function Stage({ roomId, dm }) {
         ? html`<${VoiceControls} />`
         : dm
           ? html`<button class="btn live" disabled aria-busy="true"><${Icon} name="phone" size=${16} />${S.call?.status === 'mic' ? 'Starting your microphone\u2026' : 'Calling\u2026'}</button>`
-          : html`<button class="btn primary" disabled=${starting} aria-busy=${String(!!starting)} onClick=${() => leavingCall(roomId, () => joinVoice(roomId))}><${Icon} name="voice" size=${16} />${starting ? 'Joining\u2026' : 'Join voice'}</button>`}
+          : html`<button class="btn primary" disabled=${starting} aria-busy=${String(!!starting)} onClick=${() => leavingCall(roomId, () => joinVoice(roomId))}><${Icon} name="speaker" size=${16} />${starting ? 'Joining\u2026' : 'Join voice'}</button>`}
     </div>
   </div>`;
 }
@@ -292,17 +324,46 @@ function Intro({ conv, meta }) {
     return html`
       ${welcome && html`<${Welcome} house=${meta.house} />`}
       <div class="start">
-        <h2><${RoomIcon} kind=${meta.kind} size=${24} />${meta.title}</h2>
+        <span class="start-mark" aria-hidden="true"><${RoomIcon} kind=${meta.kind} size=${28} /></span>
+        <h2>${meta.title}</h2>
         <p>${meta.topic ? `${meta.topic}. ` : ''}${empty ? 'Nothing has been said here yet.' : `This is where ${meta.title} begins.`}</p>
         ${can(S, meta.house, 'rooms') && empty && html`<div class="acts"><button class="btn" onClick=${() => openModal(RoomForm, { room: conv })}><${Icon} name="edit" size=${16} />Edit room</button></div>`}
       </div>`;
   }
   return html`<div class="start">
-    <h2>${meta.user ? html`<${Avatar} user=${meta.user} />` : null}${meta.title}</h2>
+    ${meta.user && html`<span class="start-mark" aria-hidden="true"><${Avatar} user=${meta.user} size=${56} /></span>`}
+    <h2>${meta.title}</h2>
     <p>${meta.user
       ? `This is the start of your conversation with ${meta.user.name.split(' ')[0]}. Only the two of you can read it.`
       : `A group of ${meta.dm.members.length}. Only the people in it can read it.`}</p>
   </div>`;
+}
+
+// Phone header (shell track): what does not fit beside the title goes here.
+function headerMore(conv, meta, level, anchor) {
+  openMenu({
+    anchor,
+    items: [
+      ...(meta.dm ? dmHeaderItems(conv, anchor) : []),
+      pinsOf(conv).length > 0 && { label: `Pinned messages (${pinsOf(conv).length})`, icon: 'pin', onSelect: () => togglePane('pins') },
+      { label: level === 'muted' ? 'Notifications (muted)' : 'Notifications', icon: level === 'muted' ? 'bell-off' : 'bell', onSelect: () => setTimeout(() => notifyMenu(conv, { anchor }), 0) },
+      // Go to a date opens its own popover from the (hidden) calendar button beside this menu's button.
+      { label: 'Go to a date', icon: 'calendar', onSelect: goToDate },
+      { label: 'Search here', icon: 'search', onSelect: () => go({ type: 'search', q: `in:"${meta.title.toLowerCase()}" ` }) },
+      { label: 'Details', icon: 'info', onSelect: () => togglePane('details') },
+    ],
+  });
+}
+
+// Desktop header: the room's More menu starts with what moved out of the bar
+// (brief 15: notifications, members, search and more stay in it).
+const goToDate = () => setTimeout(() => document.querySelector('.main .bar .bar-date-src button')?.click(), 0);
+function barMoreItems(conv, meta, pane) {
+  return [
+    !isThread(conv) && { label: 'Go to a date', icon: 'calendar', onSelect: goToDate },
+    meta.room && { label: pane === 'details' ? 'Hide details' : 'Details', icon: 'info', onSelect: () => togglePane('details') },
+    { sep: true },
+  ];
 }
 
 export function Conversation({ conv }) {
@@ -313,29 +374,37 @@ export function Conversation({ conv }) {
   const here = members.filter((u) => u.presence !== 'offline' && u.id !== S.me);
   const first = meta.user?.name.split(' ')[0];
   const inVoice = meta.room ? (S.voice[conv] || []).length : 0;
-  return html`<section class=${`main conv kind-${meta.kind}`} aria-label=${meta.title}>
+  const level = levelOf(S, conv);
+  const phone = S.ui.phone;
+  // In a live voice room or call the stage takes the room; an empty chat folds away.
+  const live = S.call?.room === conv && (meta.kind === 'voice' || !!meta.dm);
+  const chatEmpty = !(S.msgs[conv] || []).some((m) => !m.call);
+  return html`<section class=${`main conv kind-${meta.kind}${live ? ' voice-live' : ''}${live && chatEmpty ? ' chat-empty' : ''}`} aria-label=${meta.title}>
     <header class="bar">
       <${Back} />
       <h1 class="bar-title trunc">
         ${meta.user ? html`<${Avatar} user=${meta.user} size=${24} presence />` : meta.room ? html`<${RoomIcon} kind=${meta.kind} />` : html`<${Icon} name="people" />`}
         <span class="trunc">${meta.title}</span>
       </h1>
+      ${phone && meta.house && html`<button class="ib drawer-btn title-switch" aria-label="Rooms and places" data-tip="Rooms and places" onClick=${openDrawer}><${Icon} name="chev-d" size=${16} /></button>`}
       ${meta.topic && html`<span class="bar-sub trunc">${meta.topic}</span>`}
       ${meta.user && html`<span class="bar-sub trunc">${presenceLabel(meta.user)}${meta.user.status ? `. ${meta.user.status}` : ''}</span>`}
       <div class="bar-end">
-        ${!meta.user && html`<span class="bar-live" role="status" aria-label=${`${here.length ? `${plural(here.length, 'other person', 'other people')} here` : 'Just you here'}${inVoice ? `, ${inVoice} in voice` : ''}`}>
-          ${here.length > 0 && html`<${Stack} users=${here} max=${3} size=${20} />`}
-          ${here.length > 0 ? html`<span><i class="pres inline open" aria-hidden="true"></i><span class="num">${here.length}</span> here</span>` : html`<span>Just you</span>`}
-          ${inVoice > 0 && html`<span class="bar-voice"><${Icon} name="voice" size=${16} /><span class="num">${inVoice}</span> in voice</span>`}
-        </span>`}
         ${meta.dm && html`<${CallButtons} conv=${conv} />`}
-        ${meta.dm && html`<${DmHeaderButtons} conv=${conv} />`}
-        <${PinsButton} conv=${conv} />
-        <${JumpToDate} conv=${conv} />
-        <button class="ib" aria-label=${`Search in ${meta.title}`} data-tip="Search here" onClick=${() => go({ type: 'search', q: `in:"${meta.title.toLowerCase()}" ` })}><${Icon} name="search" /></button>
+        ${meta.dm && !phone && html`<${DmHeaderButtons} conv=${conv} />`}
+        ${!phone && html`<${PinsButton} conv=${conv} />`}
+        ${!phone && html`<button class=${`ib${level === 'muted' ? ' is-muted' : ''}`} aria-label="Notifications" aria-haspopup="menu" data-tip=${level === 'muted' ? 'Muted' : 'Notifications'}
+          onClick=${(e) => notifyMenu(conv, { anchor: e.currentTarget.getBoundingClientRect() })}><${Icon} name=${level === 'muted' ? 'bell-off' : 'bell'} /></button>`}
+        <span class="bar-date-src" aria-hidden="true"><${JumpToDate} conv=${conv} /></span>
         ${!meta.user && html`<button class=${`ib${pane === 'people' ? ' on' : ''}`} aria-pressed=${String(pane === 'people')} aria-label=${`People, ${here.length} here`}
-          data-tip="People" onClick=${() => togglePane('people')}><${Icon} name="people" /></button>`}
-        <button class=${`ib${pane === 'details' ? ' on' : ''}`} aria-pressed=${String(pane === 'details')} aria-label="Details" data-tip="Details and notifications" onClick=${() => togglePane('details')}><${Icon} name="info" /></button>
+          data-tip=${pane === 'people' ? 'Hide the member list' : `Show the member list (${here.length} here${inVoice ? `, ${inVoice} in voice` : ''})`} onClick=${togglePeople}><${Icon} name="people" /></button>`}
+        ${phone
+          ? html`<button class="ib" aria-label="More" aria-haspopup="menu" data-tip="More" onClick=${(e) => headerMore(conv, meta, level, e.currentTarget.getBoundingClientRect())}><${Icon} name="more-v" /></button>`
+          : html`${!meta.room && html`<button class=${`ib${pane === 'details' ? ' on' : ''}`} aria-pressed=${String(pane === 'details')} aria-label="Details" data-tip="Details and notifications" onClick=${() => togglePane('details')}><${Icon} name="info" /></button>`}
+            <button class="ib bar-more" aria-label="More options" aria-haspopup="menu" data-tip="More" onClick=${(e) => (meta.room ? roomMenu : dmMenu)(conv, { anchor: e.currentTarget.getBoundingClientRect() }, barMoreItems(conv, meta, pane))}><${Icon} name="more" /></button>
+            <button class="bar-search" aria-label=${`Search in ${meta.title}`} onClick=${() => go({ type: 'search', q: `in:"${meta.title.toLowerCase()}" ` })}>
+              <span class="bar-search-text trunc">Search ${meta.room ? meta.title : ''}</span><${Icon} name="search" size=${16} />
+            </button>`}
       </div>
     </header>
     ${meta.kind === 'voice' && html`<${Stage} roomId=${conv} />`}
@@ -345,7 +414,7 @@ export function Conversation({ conv }) {
       : html`<${CallStrip} conv=${conv} /><${CallEndNote} conv=${conv} />`)}
     ${meta.dm && html`<${RequestBanner} conv=${conv} />`}
     ${meta.kind === 'forum' ? html`<${ForumView} key=${conv} conv=${conv} />` : html`<${Stream} key=${conv} conv=${conv} intro=${html`<${Intro} conv=${conv} meta=${meta} />`}
-      placeholder=${meta.user ? `Message ${first}` : `Message ${meta.title}`} />`}
+      placeholder=${meta.user ? `Message ${first}` : `Message ${meta.room && meta.kind === 'text' ? '#' : ''}${meta.title}`} />`}
   </section>`;
 }
 
@@ -360,7 +429,7 @@ export function ThreadPane({ tid }) {
       ? html`<${Message} conv=${t.conv} m=${meta.root} inThread />`
       : html`<div class="older-msg">The message this thread started from was deleted.</div>`}
     <div class="thread-count">${n ? plural(n, 'reply', 'replies') : 'No replies yet. Yours will be the first.'}</div>`;
-  return html`<aside class="pane" aria-label="Thread">
+  return html`<aside class="pane thread-pane" aria-label="Thread">
     <header class="bar">
       ${S.ui.phone && html`<button class="ib" aria-label="Back" onClick=${closePane}><${Icon} name="back" /></button>`}
       <h1 class="bar-title"><${Icon} name="thread" />Thread</h1>

@@ -219,8 +219,8 @@ function voiceItems(id, house) {
   const others = Object.values(S.rooms).filter((r) => r.house === house && r.kind === 'voice' && r.id !== place).slice(0, 4);
   return [
     { label: st.smute ? 'Unmute in voice' : 'Mute in voice', icon: 'mic', onSelect: () => run('mod.voice', { house, user: id, mute: !st.smute }, `${name} is ${st.smute ? 'unmuted' : 'muted'} in voice.`) },
-    { label: st.sdeaf ? 'Undeafen in voice' : 'Deafen in voice', icon: 'ear', onSelect: () => run('mod.voice', { house, user: id, deaf: !st.sdeaf }, `${name} is ${st.sdeaf ? 'undeafened' : 'deafened'} in voice.`) },
-    ...others.map((r) => ({ label: `Move to ${r.name}`, icon: 'voice', onSelect: () => run('mod.move', { user: id, room: r.id }, `${name} was moved to ${r.name}.`) })),
+    { label: st.sdeaf ? 'Undeafen in voice' : 'Deafen in voice', icon: 'headphones', onSelect: () => run('mod.voice', { house, user: id, deaf: !st.sdeaf }, `${name} is ${st.sdeaf ? 'undeafened' : 'deafened'} in voice.`) },
+    ...others.map((r) => ({ label: `Move to ${r.name}`, icon: 'speaker', onSelect: () => run('mod.move', { user: id, room: r.id }, `${name} was moved to ${r.name}.`) })),
     { label: 'Disconnect from voice', icon: 'leave', danger: true, onSelect: () => run('mod.disconnect', { user: id }, `${name} was disconnected.`) },
   ];
 }
