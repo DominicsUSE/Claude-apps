@@ -73,6 +73,28 @@
     "linux": {
       "target": "dir",
       "icon": "build/icon.png"
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "category": "public.app-category.social-networking",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "identity": "-",
+      "hardenedRuntime": false,
+      "darkModeSupport": true,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Snug uses the microphone for voice calls and voice rooms.",
+        "NSCameraUsageDescription": "Snug uses the camera for video calls."
+      }
+    },
+    "dmg": {
+      "artifactName": "Snug-${version}-mac.dmg"
     }
   }
 }

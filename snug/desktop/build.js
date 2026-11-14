@@ -1,6 +1,7 @@
-// Builds the Snug desktop app into dist/: an installer (Snug-Setup-<version>.exe)
-// and a portable exe that runs without installing.
-//   npm install && node build.js      (run it on Windows; GitHub Actions does)
+// Builds the Snug desktop app into dist/. On Windows: an installer (Snug-Setup-<version>.exe)
+// and a portable exe that runs without installing. On a Mac: Snug-<version>-mac.dmg
+// (universal: Apple silicon and Intel), ad-hoc signed.
+//   npm install && node build.js      (run it on Windows or a Mac; GitHub Actions does)
 //   node build.js --files-only        (just copy the app files, for `npm start`)
 //   node build.js --dir               (an unpacked app for this machine, for testing)
 // The app carries the whole of Snug: the page and the server. Nothing is fetched
@@ -32,6 +33,6 @@ function copyApp() {
   if (process.argv.includes("--files-only")) return;
   const builder = require("electron-builder");
   const dir = process.argv.includes("--dir");
-  const files = await builder.build({ projectDir: ROOT, publish: "never", ...(dir ? { dir: true } : { win: [] }) });
-  for (const f of files.filter((f) => f.endsWith(".exe"))) console.log(`${f}  ${(fs.statSync(f).size / 1e6).toFixed(0)} MB`);
+  const files = await builder.build({ projectDir: ROOT, publish: "never", ...(dir ? { dir: true } : process.platform === "darwin" ? { mac: [] } : { win: [] }) });
+  for (const f of files.filter((f) => /\.(exe|dmg)$/.test(f))) console.log(`${f}  ${(fs.statSync(f).size / 1e6).toFixed(0)} MB`);
 })().catch((e) => { console.error(e); process.exit(1); });
