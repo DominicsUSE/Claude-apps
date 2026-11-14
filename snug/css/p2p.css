@@ -98,3 +98,6 @@
 .msg-wait.held .ic { color: var(--amber); }
 .msg-wait.failed { color: var(--error); }
 .pick-list .menu-item[aria-disabled="true"] { opacity: 0.5; cursor: default; }
+
+/* The GitHub device page, written out so it can be typed or clicked. */
+.auth-device-url { color: var(--link); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; user-select: all; }

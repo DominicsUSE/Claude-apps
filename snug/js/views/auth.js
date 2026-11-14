@@ -149,7 +149,7 @@ export function CodeStep({ step, onCancel }) {
   return html`
     <div class="auth-head">
       <h1 id="auth-title">Type this code on GitHub</h1>
-      <p class="auth-sub">GitHub opens in your browser. Sign in there if it asks, type the code, then come back here.</p>
+      <p class="auth-sub">Go to <a class="auth-device-url" id="auth-device-url" href=${step.uri} target="_blank" rel="noopener noreferrer">${step.uri.replace(/^https:\/\//, '')}</a> in your browser, sign in if it asks, type the code, then come back here.</p>
     </div>
     <div class="auth-code-box">
       <output class="auth-device-code" id="auth-device-code" aria-label=${`Your code: ${step.userCode.split('').join(' ')}`}>${step.userCode}</output>

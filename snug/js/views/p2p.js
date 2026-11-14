@@ -336,6 +336,7 @@ export function DeleteP2p({ onGone }) {
       <div class="hint">To free @${p.username} for anyone, confirm on GitHub first.</div>
       ${!step && html`<div><button type="button" class="btn" onClick=${confirmGh}>Confirm on GitHub</button></div>`}
       ${step && step.state === 'pending' && html`<div class="auth-code-box"><output class="auth-device-code">${step.userCode}</output></div>
+        <div class="hint">Type it at <a class="auth-device-url" href=${step.uri} target="_blank" rel="noopener noreferrer">${step.uri.replace(/^https:\/\//, '')}</a></div>
         <a class="btn" href=${step.uri} target="_blank" rel="noopener noreferrer">Open GitHub</a>
         <div class="auth-warn"><${Icon} name="shield" size=${16} /><span>Only type this code on github.com yourself. Snug will never ask you to send it to anyone.</span></div>`}
       ${step?.state === 'confirmed' && html`<div class="ok-line"><${Icon} name="check" size=${16} /><span>Confirmed. @${p.username} will be free once you delete.</span></div>`}
