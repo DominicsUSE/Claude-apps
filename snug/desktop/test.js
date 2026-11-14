@@ -10,6 +10,8 @@ const os = require("os");
 const path = require("path");
 const { _electron: electron } = require("playwright");
 
+// These tests cover local-only mode; the P2P test below turns P2P back on with a local registry.
+process.env.SNUG_P2P = "off";
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-"));
 const shots = process.env.SNUG_SHOTS;
 const launch = async (userData = dir) => {
@@ -688,6 +690,7 @@ test("p2p: the in-app server uses the registry through net.fetch, the OS key sto
   fs.writeFileSync(path.join(userData, "desktop.json"), JSON.stringify({ mode: "host" }));
   const env = { SNUG_REGISTRY_URL: reg.url, SNUG_GITHUB_CLIENT_ID: reg.github.clientId, SNUG_GITHUB_URL: reg.github.url };
   Object.assign(process.env, env);
+  delete process.env.SNUG_P2P;
   // A packaged build honours the registry variables only with --dev-registry (S20).
   const bin = process.env.SNUG_BIN && path.resolve(process.env.SNUG_BIN);
   let app;
@@ -697,7 +700,7 @@ test("p2p: the in-app server uses the registry through net.fetch, the OS key sto
       args: [...(bin ? [] : [__dirname]), "--no-sandbox", `--user-data-dir=${userData}`, "--dev-registry"],
       cwd: __dirname,
     });
-  } finally { for (const k of Object.keys(env)) delete process.env[k]; }
+  } finally { for (const k of Object.keys(env)) delete process.env[k]; process.env.SNUG_P2P = "off"; }
   const page = await app.firstWindow();
   page.setDefaultTimeout(15000);
   t.after(() => app.close().catch(() => {}));

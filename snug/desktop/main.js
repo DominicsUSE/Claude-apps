@@ -53,9 +53,9 @@ function lanAddress() {
   return null;
 }
 
-// p2p: the Snug registry and GitHub sign-in (snug/server/peer.js). Empty until deployed: empty means P2P is off.
-const DEFAULT_REGISTRY_URL = "";
-const DEFAULT_GITHUB_CLIENT_ID = "";
+// p2p: the Snug registry and GitHub sign-in (snug/server/peer.js). Empty means P2P is off.
+const DEFAULT_REGISTRY_URL = "https://snug-registry.snugapp.workers.dev";
+const DEFAULT_GITHUB_CLIENT_ID = "Ov23liULMWaI5WTLL6vO";
 // Env overrides only for an unpackaged app or with --dev-registry (S20), and only https or this machine.
 function p2pConfig() {
   const dev = !app.isPackaged || process.argv.includes("--dev-registry");
@@ -63,8 +63,10 @@ function p2pConfig() {
   const okUrl = (u) => {
     try { const x = new URL(u); return x.protocol === "https:" || (x.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(x.hostname)) ? x.origin : null; } catch { return null; }
   };
+  // SNUG_P2P=off only turns P2P off (local-only mode), so it is honoured in packaged builds too.
+  const off = process.env.SNUG_P2P === "off";
   return {
-    registryUrl: okUrl(pick("SNUG_REGISTRY_URL", DEFAULT_REGISTRY_URL)),
+    registryUrl: off ? null : okUrl(pick("SNUG_REGISTRY_URL", DEFAULT_REGISTRY_URL)),
     githubClientId: pick("SNUG_GITHUB_CLIENT_ID", DEFAULT_GITHUB_CLIENT_ID) || null,
     githubBase: okUrl(pick("SNUG_GITHUB_URL", "https://github.com")) || "https://github.com",
   };

@@ -12,7 +12,7 @@ enabled = false
 [vars]
 GITHUB_API = "https://api.github.com"
 # The public client id of YOUR GitHub OAuth App (Device Flow enabled). Tokens of other apps are refused.
-GITHUB_CLIENT_ID = "REPLACE_WITH_GITHUB_OAUTH_CLIENT_ID"
+GITHUB_CLIENT_ID = "Ov23liULMWaI5WTLL6vO"
 # Optional Cloudflare TURN key id; empty = /v1/turn answers 404. Its token is the TURN_KEY_TOKEN secret.
 TURN_KEY_ID = "8d4d95f8e798e01d313f8f2374d952ba"
 # Estimated DO requests per UTC day after which the fallback relay is refused (free tier guard).
