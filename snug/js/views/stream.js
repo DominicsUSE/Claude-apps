@@ -33,6 +33,7 @@ import { DmLine } from './dm-manage.js'; // a group renamed, people added or gon
 import { msgFace, colourRole, BotBadge, PostTitle, RoleIconMark } from './places.js'; // nicknames, bots, role colours and icons, forum post titles
 import { messageItems, hiddenBlocked, BlockedLine, composerGate, GateNote, SlowNote, slowLeft } from './safety.js'; // blocks, reports, moderation, slowmode
 import { MessageExtras, ownsFiles, messagingMenuItems, PlusMenu, FormatBar, formatKey, ScheduledNote, UnreadBar } from './messaging.js'; // polls, previews, forwarding, stickers, formatting, scheduling
+import { PeerState } from './p2p.js'; // a message waiting for a friend on another PC, or held after their security code changed
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 const atBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 48;
@@ -245,6 +246,7 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
         <button onClick=${() => retry(conv, m)}>Try again</button>
         <button onClick=${() => deleteMsg(conv, m.id)}>Delete</button>
       </div>`}
+      ${mine && S.p2p && html`<${PeerState} conv=${conv} m=${m} />`}
     </div>
     ${S.ui.editing !== m.id && html`<div class="msg-actions float" role="toolbar" aria-label="Message actions">
       <button class="ib" aria-label="Add a reaction" data-tip="Add a reaction" onClick=${(e) => pickReaction(conv, m, rectOf(e))}><${Icon} name="react" size=${18} /></button>

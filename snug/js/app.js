@@ -6,6 +6,8 @@ import {
   closeQuick, closeLightbox, openQuick, openLayer, openModal, openPop, markHouseRead, markConvRead, applyPrefs, convMeta, isOnline, loadCache,
 } from './store.js';
 import { api, startTransport } from './server.js';
+import { on as onServer } from './server.js'; // p2p: the link host loads on socket open
+import { P2pNotice } from './views/p2p.js'; // p2p: moving here, moved away, a move waiting for an answer
 import { voiceStats, toggleMute, toggleDeaf, toggleCamera, leaveVoice } from './voice.js';
 import { incoming, acceptCall } from './calls.js';
 import { actionFor, actionById } from './lib/keys.js'; // changeable shortcuts (Settings > Keyboard)
@@ -273,7 +275,7 @@ function App() {
   syncSpace();
   const needs = totalNeeds(S);
   document.title = needs ? `(${needs}) Snug` : 'Snug';
-  return html`${S.ui.phone ? html`<${Phone} />` : html`<${Desktop} />`}<${Overlays} />`;
+  return html`${S.ui.phone ? html`<${Phone} />` : html`<${Desktop} />`}<${Overlays} /><${P2pNotice} />`; // p2p: account notice
 }
 
 // Keyboard
@@ -444,6 +446,9 @@ async function boot() {
   emit();
 }
 boot();
+// p2p: the link host (js/peer.js) loads once, when the server says this is the PC's P2P owner.
+let peerHost = null;
+onServer('open', () => { if (S.p2p?.enabled && S.p2p.owner && !peerHost) peerHost = import('./peer.js'); });
 // Exposed for the end-to-end checks and for poking at state in the console.
 window.snug = { S, emit, voiceStats, ringtone: ringtonePlaying };
 window.snug.voiceDebug = voiceDebug; // voice options (js/voiceopts.js)

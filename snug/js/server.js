@@ -38,6 +38,13 @@ export function call(op, d = {}) {
   });
 }
 
+// p2p: fire and forget, no id, no ack, no timer (the link host's frames, js/peer.js, F7).
+export function sendOp(op, d = {}) {
+  if (!ws || ws.readyState !== 1 || S.conn.socket !== 'open') return false;
+  ws.send(JSON.stringify({ t: 'op', op, d }));
+  return true;
+}
+
 // Plain HTTP, for accounts and files.
 export async function api(path, body) {
   let res;

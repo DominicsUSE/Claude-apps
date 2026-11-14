@@ -15,6 +15,7 @@ import { Icon } from '../ui/icons.js';
 import { Avatar, Tile, Seg, Switch } from '../ui/kit.js';
 import { Confirm } from './modals.js';
 import { errText } from './community.js';
+import { LocalNote } from './p2p.js'; // houses live on this PC
 
 function Row({ label, hint, children, top, id }) {
   return html`<div class=${`set-row${top ? ' top' : ''}`} id=${id}>
@@ -197,6 +198,7 @@ export function CommunityOverview({ house }) {
   return html`
     <h1>${h.name}</h1>
     <p class="lead">What people see before and after they join.</p>
+    <${LocalNote} />
     <${Row} label="Name"><input class="field set-field" value=${h.name} maxlength="40" aria-label="House name" disabled=${!manage}
       onChange=${(e) => e.target.value.trim() && updateHouse(house, { name: e.target.value.trim(), mark: e.target.value.trim()[0].toUpperCase() })} /><//>
     <${Row} label="About" hint="Shown on invitations and to newcomers." top>

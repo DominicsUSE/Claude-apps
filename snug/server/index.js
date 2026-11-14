@@ -19,6 +19,8 @@ import { createAccountHttp } from './account.js'; // two-factor sign-in, export,
 import { createAppearanceHttp } from './appearance.js'; // profile pictures: POST /api/files?avatar, GET /api/avatars/<file>
 import { createCommunityHttp } from './community.js'; // house pictures, event covers, invitation previews with custom links
 import { HUES } from '../js/lib/util.js';
+import { createPeer } from './peer.js'; // p2p: friends, DMs, profiles and calls with people on other PCs
+import { createGhAuth } from './ghauth.js'; // p2p: Sign in with GitHub and the Snug username
 import {
   hashPassword, checkPassword, burnPasswordCheck, createSession, sessionUser, endSession, endAllSessions,
   readCookie, sessionCookie, COOKIE, limiter, safeDecode,
@@ -66,6 +68,14 @@ export async function startServer({
   linkPreviews = process.env.SNUG_LINK_PREVIEWS !== '0',
   // Tests only: let previews fetch a local stand-in site on 127.0.0.1 (every other private address stays refused).
   linkAllowLocal = false,
+  // p2p (server/peer.js): the registry, GitHub sign-in, the device key wrapper and link tuning.
+  registryUrl = process.env.SNUG_REGISTRY_URL || null,
+  githubClientId = process.env.SNUG_GITHUB_CLIENT_ID || null,
+  githubBase = process.env.SNUG_GITHUB_URL || 'https://github.com',
+  keyStore = null,
+  fetch: fetchFn = globalThis.fetch,
+  resumeSecret = null,
+  peerIdleMs = 120_000, peerDialMs = 8000, peerCacheMB = 1024, peerDirect = true,
 } = {}) {
   const db = openDb(dataDir === ':memory:' ? ':memory:' : join(dataDir, 'snug.db'));
   const filesDir = join(dataDir === ':memory:' ? join(ROOT, 'data', 'test-files') : dataDir, 'files');
@@ -105,11 +115,18 @@ export async function startServer({
   hub.hooks.note = (user, note) => push.onNote(user, note).catch((e) => log('push', e)); // event reminders (server/community.js)
   // --- end push notifications ---
 
+  // p2p: the peer module wraps the ops last, after push (server/peer.js).
+  const peer = createPeer({
+    db, M, hub, ops: hub.ops, filesDir, log,
+    opts: { dataDir, registryUrl, githubClientId, githubBase, keyStore, fetch: fetchFn, resumeSecret, peerIdleMs, peerDialMs, peerCacheMB, peerDirect },
+  });
+
   // Deleted messages can be restored for ten minutes; after that their content is gone for good.
   const sweep = setInterval(() => {
     db.run("UPDATE messages SET text = '', fold = '', files = NULL WHERE deleted IS NOT NULL AND deleted < ? AND text != ''", Date.now() - 11 * 60_000);
     db.run('DELETE FROM sessions WHERE expires < ?', Date.now());
     push.prune(); // devices whose sign-in expired stop getting notifications
+    peer.housekeep(); // p2p: outbox rows past 30 days, old knock ids
   }, 60_000);
 
   function headers(res, extra = {}) {
@@ -157,6 +174,8 @@ export async function startServer({
   const accountHttp = createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonBody, body, headers, ipOf, secure, authLimit, uploadLimit, log }); // server/account.js
   const appearanceHttp = createAppearanceHttp({ db, M, hub, filesDir, sendJson, error, body, headers, uploadLimit }); // server/appearance.js
   const communityHttp = createCommunityHttp({ db, M, hub, filesDir, sendJson, error, body, headers, uploadLimit, userOf: (req) => userOf(req) }); // server/community.js
+  // p2p: GitHub sign-in, the username picker and the owner's account rules (server/ghauth.js).
+  const gh = createGhAuth({ db, M, hub, peer, opts: { registryUrl, githubClientId, githubBase, fetch: fetchFn, resumeSecret, trustProxy }, secure, log, agentOf: accountHttp.agentOf, userOf });
 
   async function handle(req, res) {
     let url, path;
@@ -254,19 +273,21 @@ export async function startServer({
       return sendJson(res, 200, { house: { ...h, members: count }, by });
     }
 
+    if (await gh.open(req, res, path, url)) return undefined; // p2p: /api/gh/* (server/ghauth.js)
     // Webhooks carry their own secret instead of a session (server/places.js).
     if (await placesHttp(req, res, path)) return undefined;
     if (await accountHttp.open(req, res, path)) return undefined; // POST /api/login/totp
 
     const user = userOf(req);
     if (!user) return error(res, 401, 'Sign in first.');
+    if (await gh.authed(req, res, path, user)) return undefined; // p2p: no password for GitHub accounts; sliding sign-in on /api/me
     if (await accountHttp.authed(req, res, path, url, user)) return undefined; // export, deactivate, delete, banners
     if (await appearanceHttp(req, res, path, url, user)) return undefined; // profile pictures (server/appearance.js)
     if (await communityHttp.authed(req, res, path, url, user)) return undefined; // house pictures and event covers (server/community.js)
 
     if (req.method === 'GET' && path === '/api/me') {
       const row = M.userRow(user);
-      return sendJson(res, 200, { user: M.userView(row, row.presence, true), ice: hub.iceFor(user) });
+      return sendJson(res, 200, { user: M.userView(row, row.presence, true), ice: hub.iceFor(user), p2p: peer.statusFor(user) }); // p2p
     }
     if (post && path === '/api/logout-all') {
       const token = readCookie(req.headers.cookie, COOKIE);
@@ -315,11 +336,13 @@ export async function startServer({
 
     const file = /^\/api\/files\/(f_[a-z0-9]{8,40})$/.exec(path);
     if (req.method === 'GET' && file) {
-      const row = db.get('SELECT * FROM files WHERE id = ?', file[1]);
+      let row = db.get('SELECT * FROM files WHERE id = ?', file[1]);
       // You can fetch a file only if you can read the conversation it was shared in.
       const conv = row && (row.conv.startsWith('t:') && !M.thread(row.conv) ? M.liveMsg(row.conv.slice(2))?.conv : row.conv);
       // Custom emoji images: their house, and readers of conversations they were used in (server/emoji.js).
       if (!row || (!(conv && M.canRead(user, conv)) && !emojiR.fileReadable(user, row))) return error(res, 404, 'Not found');
+      // p2p: a friend's attachment not fetched yet comes from their PC first (or 404 {offline} while they're away).
+      if (peer.missing(row)) { if (await peer.serveMissing(req, res, row, user)) return undefined; row = db.get('SELECT * FROM files WHERE id = ?', row.id); }
       const inline = INLINE.has(row.type);
       // Range requests (206), so a voice message can seek.
       const range = parseRange(req.headers.range, row.size);
@@ -350,10 +373,11 @@ export async function startServer({
   log(`Snug is running at http://${address.address}:${address.port}`);
   return {
     port: address.port, db, M, hub, server,
+    peer, // p2p: srv.peer.stats() for tests, srv.peer.wake() for desktop main
     push, // push notifications: tests read push.stats and push.publicKey
     // For tests: forget every rate limit, the socket ones and the sign-in ones.
     resetLimits: () => { hub.resetLimits(); authLimit.reset(); uploadLimit.reset(); mediaHttp.reset(); accountHttp.reset(); },
-    close: () => new Promise((r) => { clearInterval(sweep); hub.close(); server.close(() => { db.close(); r(); }); server.closeAllConnections?.(); }),
+    close: () => new Promise((r) => { clearInterval(sweep); gh.close(); peer.close(); hub.close(); server.close(() => { db.close(); r(); }); server.closeAllConnections?.(); }),
   };
 }
 

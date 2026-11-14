@@ -465,6 +465,8 @@ export function createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonB
   // Password, typed handle (for delete) and the second factor when it is on.
   function confirm(user, d, { handle = false } = {}) {
     const row = M.userRow(user);
+    // p2p: a GitHub-secured account has no password; typing the username confirms instead (server/ghauth.js).
+    if (M.p2pOwner?.(user)) return String(d.confirm || '').trim().replace(/^@/, '').toLowerCase() === row.handle.toLowerCase() ? null : `Type your username, ${row.handle}, to confirm.`;
     if (!checkPassword(String(d.password || ''), row.pass)) return 'Your password isn’t right.';
     if (handle && String(d.confirm || '').trim().replace(/^@/, '').toLowerCase() !== row.handle.toLowerCase()) return `Type your username, ${row.handle}, to confirm.`;
     if (R.totpOn(user) && !R.verifySecond(user, String(d.code || ''))) return 'Type a code from your authenticator app, or a backup code.';
@@ -591,6 +593,8 @@ export function createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonB
       if (del) {
         const owned = soleOwnerOf(user);
         if (owned.length) { error(res, 409, `You’re the only owner of ${owned.join(', ')}. Give someone else the owner role first, or remove everyone else.`); return true; }
+        // p2p: friends on other PCs hear it first; the username is freed after a fresh GitHub check (server/ghauth.js).
+        if (M.p2pOwner?.(user)) { const r = await M.p2pDelete(user, d, () => deleteAccount(user)); sendJson(res, 200, { released: r.released }, cookieGone()); return true; }
         deleteAccount(user);
       } else {
         db.run('UPDATE users SET deactivated = 1 WHERE id = ?', user);

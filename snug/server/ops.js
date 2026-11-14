@@ -262,7 +262,7 @@ export function createOps({ db, M, hub }) {
         replyTo = r.id;
       }
       const w = M.where(conv);
-      const ts = now();
+      const ts = c.ts ?? now(); // p2p: a message from a friend's PC keeps its sender's time (server/peer.js sets c.ts)
       db.tx(() => {
         db.run('INSERT INTO messages (id, conv, author, ts, text, fold, reply_to, files) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
           mid, conv, c.user, ts, text, M.foldText(text, files), replyTo, files.length ? JSON.stringify(files) : null);

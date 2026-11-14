@@ -677,3 +677,49 @@ test("desktop shell: the window opens where it was; a place off every screen fal
   const now = JSON.parse(fs.readFileSync(file, "utf8")).themeColor;
   assert.match(now, /^#[0-9a-fA-F]{6}$/, "the page told the app its theme colour");
 });
+
+test("p2p: the in-app server uses the registry through net.fetch, the OS key store wraps the device key, and the resume cookie is set", async (t) => {
+  const { pathToFileURL } = require("url");
+  const { startLocalRegistry } = await import(pathToFileURL(path.join(__dirname, "..", "registry", "dev.js")).href);
+  const reg = await startLocalRegistry();
+  t.after(() => reg.close());
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-p2p-"));
+  t.after(() => fs.rmSync(userData, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }));
+  fs.writeFileSync(path.join(userData, "desktop.json"), JSON.stringify({ mode: "host" }));
+  const env = { SNUG_REGISTRY_URL: reg.url, SNUG_GITHUB_CLIENT_ID: reg.github.clientId, SNUG_GITHUB_URL: reg.github.url };
+  Object.assign(process.env, env);
+  // A packaged build honours the registry variables only with --dev-registry (S20).
+  const bin = process.env.SNUG_BIN && path.resolve(process.env.SNUG_BIN);
+  let app;
+  try {
+    app = await electron.launch({
+      executablePath: bin || require("electron"),
+      args: [...(bin ? [] : [__dirname]), "--no-sandbox", `--user-data-dir=${userData}`, "--dev-registry"],
+      cwd: __dirname,
+    });
+  } finally { for (const k of Object.keys(env)) delete process.env[k]; }
+  const page = await app.firstWindow();
+  page.setDefaultTimeout(15000);
+  t.after(() => app.close().catch(() => {}));
+  // With a registry, signing in starts with GitHub (js/views/auth.js); password accounts are one link away.
+  assert.equal((await page.locator("#auth-github").textContent()).trim(), "Continue with GitHub");
+  await page.waitForSelector("#auth-use-password");
+  const token = reg.github.issueToken({ id: 4242 });
+  const r = await app.evaluate(async ({ safeStorage }, token) => {
+    const peer = globalThis.snugHostForTest().peer;
+    const auth = await peer.reg.authGithub(token); // goes out through Electron's net.fetch
+    const { account } = await peer.reg.claim(auth.ticket, "desk_user");
+    const available = safeStorage.isEncryptionAvailable() && (process.platform !== "linux" || safeStorage.getSelectedStorageBackend() !== "basic_text");
+    return { enabled: peer.enabled, status: auth.status, username: account.username, protectedKey: peer.identity.protected, available };
+  }, token);
+  assert.equal(r.enabled, true);
+  assert.equal(r.status, "new");
+  assert.equal(r.username, "desk_user");
+  const file = JSON.parse(fs.readFileSync(path.join(userData, "data", "identity.json"), "utf8"));
+  assert.equal(file.enc, r.available ? "safeStorage" : "none", "wrapped exactly when the OS key store works");
+  assert.equal(r.protectedKey, file.enc === "safeStorage");
+  if (process.platform === "win32") assert.equal(file.enc, "safeStorage", "Windows always has DPAPI");
+  assert.doesNotMatch(fs.readFileSync(path.join(userData, "data", "identity.json"), "utf8"), /PRIVATE KEY/);
+  const [resume] = await app.evaluate(({ session }) => session.defaultSession.cookies.get({ name: "snug_resume" }));
+  assert.ok(resume && resume.httpOnly, "the per-launch resume cookie is set, httpOnly");
+});

@@ -1,0 +1,100 @@
+/* Friends on other PCs (P2P): GitHub sign-in and the username picker, the
+   account notices, Settings > Account rows, the key-change banner and the
+   "on this PC only" notes. Built from the 0.8.0 tokens: 6px controls, 8px
+   inputs and dialogs, surface steps instead of shadows, violet only for the
+   primary action. */
+
+/* ---------- Sign in with GitHub ---------- */
+.auth-gh { display: grid; gap: var(--s-2); }
+.auth-gh .auth-submit { width: 100%; height: var(--h-md); border-radius: var(--r-sm); font-size: var(--t-14); justify-content: center; }
+.auth-panel > .auth-submit { width: 100%; height: var(--h-md); border-radius: var(--r-sm); font-size: var(--t-14); justify-content: center; text-decoration: none; gap: var(--s-2); }
+.auth-gh .err, .auth-panel > .err { font-size: var(--t-13); gap: var(--s-2); align-items: flex-start; }
+.auth-fine { margin: 0; font-size: var(--t-12); line-height: var(--lh-ui); color: var(--text-2); }
+
+/* The device code: big, monospaced, one copy button beside it. */
+.auth-code-box {
+  display: flex; align-items: center; justify-content: center; gap: var(--s-2);
+  padding: var(--s-4) var(--s-3); background: var(--surface-input); border: 1px solid var(--line-subtle); border-radius: var(--r-input);
+}
+.auth-device-code {
+  font: 400 1.75rem/1.2 var(--mono); letter-spacing: 0.12em; color: var(--text-1);
+  user-select: all; font-variant-numeric: tabular-nums;
+}
+.auth-warn {
+  display: flex; gap: var(--s-2); align-items: flex-start; padding: var(--s-2) var(--s-3);
+  background: var(--amber-soft); border-radius: var(--r-sm); font-size: var(--t-13); line-height: var(--lh-ui); color: var(--text-1);
+}
+.auth-warn .ic { flex: none; color: var(--amber); margin-top: 1px; }
+.auth-wait { display: flex; gap: var(--s-2); align-items: center; margin: 0; font-size: var(--t-13); color: var(--text-2); }
+
+/* The username field with its @ in front, like Add friend (css/social.css .f-add-field). */
+.auth-at {
+  display: flex; align-items: center; gap: 2px; height: var(--h-md); padding: 0 var(--s-3);
+  background: var(--surface-input); border: 1px solid var(--line-strong); border-radius: var(--r-input);
+  transition: border-color var(--m-fast) var(--ease-in-out);
+}
+.auth-at:hover { border-color: var(--text-3); }
+.auth-at:focus-within { border-color: var(--accent); }
+.auth-at.bad { border-color: var(--error); }
+.auth-at.ok { border-color: var(--mint); }
+.auth-at > span { color: var(--text-3); font-size: var(--t-14); font-weight: var(--w-medium); }
+.auth-at input { flex: 1; min-width: 0; height: 100%; background: transparent; border: 0; outline: 0; color: var(--text-1); font-size: var(--t-14); }
+.auth-at input:focus-visible { outline: 0; }
+.auth-name-msg { min-height: 0; }
+.auth-name-msg .hint, .auth-name-msg .ok-line { margin-top: var(--s-2); font-size: var(--t-13); }
+.auth-name-msg .err { margin-top: var(--s-2); }
+.auth-facts { margin: 0; padding-left: var(--s-5); display: grid; gap: var(--s-2); font-size: var(--t-14); color: var(--text-2); line-height: var(--lh-ui); }
+@media (pointer: coarse) {
+  .auth-gh .auth-submit, .auth-panel > .auth-submit, .auth-at { height: var(--touch); }
+}
+
+/* ---------- Account notices (moving, moved away, a move waiting) ---------- */
+.p2p-notice {
+  position: fixed; z-index: 40; left: 50%; top: var(--s-3); transform: translateX(-50%);
+  width: min(560px, calc(100vw - 2 * var(--s-4)));
+  display: flex; gap: var(--s-3); align-items: flex-start; padding: var(--s-3) var(--s-4);
+  background: var(--surface-float); border: 1px solid var(--line); border-radius: var(--r-md); box-shadow: var(--shadow-md);
+  font-size: var(--t-14); line-height: var(--lh-ui); color: var(--text-1);
+}
+.p2p-notice > .ic { flex: none; margin-top: 2px; color: var(--amber); }
+.p2p-notice.info > .ic { color: var(--cyan); }
+.p2p-notice-text { flex: 1; min-width: 0; display: grid; gap: var(--s-1); }
+.p2p-notice-text b { font-weight: var(--w-semibold); }
+.p2p-notice-text span { color: var(--text-2); font-size: var(--t-13); }
+.p2p-notice-acts { display: flex; gap: var(--s-2); flex-wrap: wrap; margin-top: var(--s-2); }
+.p2p-notice .ib { margin: -4px -8px 0 0; }
+.p2p-code { font: 400 var(--t-13)/1.5 var(--mono); letter-spacing: 0.04em; color: var(--text-1); overflow-wrap: anywhere; }
+
+/* ---------- Settings > Account ---------- */
+.p2p-name { display: flex; gap: var(--s-2); align-items: center; font-size: var(--t-14); }
+.p2p-name b { font-weight: var(--w-semibold); }
+.p2p-fp { display: grid; grid-template-columns: repeat(4, auto); gap: 2px var(--s-3); justify-content: start; font: 400 var(--t-13)/1.5 var(--mono); letter-spacing: 0.04em; color: var(--text-1); user-select: all; }
+.p2p-tag { display: inline-flex; gap: var(--s-1); align-items: center; height: 22px; padding: 0 var(--s-2); border-radius: var(--r-xs); background: var(--surface-hover); font-size: var(--t-12); color: var(--text-2); }
+.p2p-tag.ok { color: var(--text-1); }
+.p2p-tag.ok .ic { color: var(--mint); }
+.p2p-tag.warn .ic { color: var(--amber); }
+.handle-form .auth-at { height: var(--h-field, var(--h-md)); }
+
+/* ---------- Friends and conversations ---------- */
+.p2p-local { display: flex; gap: var(--s-2); align-items: center; font-size: var(--t-12); color: var(--text-2); }
+.p2p-local .ic { flex: none; color: var(--text-2); }
+.f-add-toggle { display: flex; gap: var(--s-2); align-items: center; margin-top: var(--s-2); font-size: var(--t-13); color: var(--text-2); }
+.f-remote { display: inline-flex; color: var(--text-2); margin-left: var(--s-1); }
+
+/* The DM's key-change banner: persistent, amber, two small buttons. */
+.p2p-key {
+  display: flex; gap: var(--s-3); align-items: flex-start; margin: var(--s-2) var(--s-4) 0; padding: var(--s-3);
+  background: var(--amber-soft); border-radius: var(--r-md); font-size: var(--t-13); line-height: var(--lh-ui); color: var(--text-1);
+}
+.p2p-key > .ic { flex: none; color: var(--amber); margin-top: 1px; }
+.p2p-key-text { flex: 1; min-width: 0; display: grid; gap: var(--s-2); }
+.p2p-key-acts { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+.p2p-key-codes { display: grid; gap: var(--s-2); }
+.p2p-key-codes > div { display: grid; gap: 2px; }
+.p2p-key-codes span { color: var(--text-2); font-size: var(--t-12); }
+.p2p-direct { display: inline-flex; gap: var(--s-1); align-items: center; font-size: var(--t-12); color: var(--text-2); white-space: nowrap; }
+.p2p-direct .ic { color: var(--mint); }
+.msg-wait { display: flex; gap: var(--s-1); align-items: center; margin-top: 2px; font-size: var(--t-12); color: var(--text-2); }
+.msg-wait.held .ic { color: var(--amber); }
+.msg-wait.failed { color: var(--error); }
+.pick-list .menu-item[aria-disabled="true"] { opacity: 0.5; cursor: default; }

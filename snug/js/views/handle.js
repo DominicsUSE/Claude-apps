@@ -1,4 +1,5 @@
 // Settings > Profile > Username: change your @handle (me.handle, server/inbox.js).
+// A GitHub-secured account changes its Snug username instead (id.rename, js/views/p2p.js).
 // The server checks the pattern, that nobody else has it (or gave it up in the
 // last 7 days), your password and your second factor, and allows two changes
 // an hour. Errors sit under the field they are about.
@@ -6,10 +7,16 @@ import { html, useState } from '../../vendor/preact-htm.js';
 import { S, me, toast } from '../store.js';
 import { call } from '../server.js';
 import { Icon } from '../ui/icons.js';
+import { p2pOwner, UsernameRow } from './p2p.js'; // a GitHub-secured account changes its Snug username through the registry
 
 const HANDLE = /^[a-z0-9](?:[a-z0-9_.-]{0,22}[a-z0-9])?$/;
 
 export function HandleRow({ Row }) {
+  if (p2pOwner()) return html`<${UsernameRow} Row=${Row} />`;
+  return html`<${LocalHandleRow} Row=${Row} />`;
+}
+
+function LocalHandleRow({ Row }) {
   const u = me();
   const [open, setOpen] = useState(false);
   const [handle, setHandle] = useState('');

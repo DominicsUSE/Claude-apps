@@ -16,6 +16,7 @@ import {
 import { mutualFriendsOf } from './discover.js';
 import { ProfileBanner, Pronouns, PrivateNote, StatusEmoji } from './account.js'; // banner, pronouns, private notes, status emoji
 import { Rich } from '../ui/kit.js'; // the About with formatting
+import { atName, PeerCode } from './p2p.js'; // a friend on another PC: their Snug username and security code
 
 const Back = () => S.ui.phone && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
 
@@ -111,7 +112,7 @@ export function PersonPage({ id }) {
           <div class="pp-av"><${Avatar} user=${u} presence size=${64} speaking=${!!S.speaking[id]} /></div>
           <div class="pp-id">
             <h2 class="pp-name" ...${nameAttrs(u)}>${u.name}</h2>
-            <div class="pp-handle"><span class="secret">@${u.handle}</span><${Pronouns} u=${u} />${since ? html`<span class="pp-since"> · here since ${since}</span>` : ''}</div>
+            <div class="pp-handle"><span class="secret">@${atName(u)}</span><${Pronouns} u=${u} />${since ? html`<span class="pp-since"> · here since ${since}</span>` : ''}</div>
           </div>
           ${!S.ui.phone && acts}
         </div>
@@ -133,6 +134,7 @@ export function PersonPage({ id }) {
                 : html`<p class="pp-empty">${mine ? 'Nothing here yet. A line or two helps people know who they’re talking to.' : `${first} hasn’t written anything yet.`}</p>`}
             </section>
             ${!mine && !u.deleted && html`<section class="pp-sect"><${PrivateNote} id=${id} /></section>`}
+            ${u.remote && html`<${PeerCode} id=${id} />`}
             ${(u.interests?.length > 0 || mine) && html`<section class="pp-sect" aria-labelledby="pp-int">
               <h3 id="pp-int">Into</h3>
               ${u.interests?.length ? html`<${Interests} list=${u.interests} />` : html`<p class="pp-empty">Add a few interests so people with the same ones can find you.</p>`}

@@ -66,12 +66,15 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
   };
 
   // Inside the grace period after the last socket closes, a person still counts as online.
-  const online = (u) => (socks.get(u)?.size || 0) > 0 || offlineTimers.has(u);
+  // p2p: a friend on another PC is online when the registry says so (server/peer.js sets hub.remoteOnline).
+  const online = (u) => { const r = hub.remoteOnline?.(u); return r !== undefined ? r : (socks.get(u)?.size || 0) > 0 || offlineTimers.has(u); };
   const pref = (u) => M.userRow(u)?.presence || 'offline';
   const presenceOf = (u) => (online(u) && pref(u) !== 'offline' ? pref(u) : 'offline');
 
   const send = (ws, msg) => { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); };
   const hub = {};
+  // p2p: extra per-op token buckets (server/peer.js: the link host's peer.* ops).
+  hub.addLimits = (more) => { for (const [op, l] of Object.entries(more)) { limits[op] = l; (hub.extraLimits ||= []).push(l); } };
   // Set by the server (index.js): a stored message to push, a ring for someone
   // with nothing open, and the end of a ring (so a pushed "is calling" note
   // doesn't stay on their phone).
@@ -178,6 +181,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
     const user = hub.userView(u);
     hub.toUsers(M.contacts(u), 'presence', { user: u, presence: user.presence }, u);
   }
+  hub.presenceChanged = presenceChanged; // p2p: a remote friend came online or went away (server/peer.js)
 
   // Voice: house voice rooms and calls in direct conversations share all of this.
   const dmMembers = (dm) => db.all('SELECT user FROM dm_members WHERE dm = ? ORDER BY rowid', dm).map((r) => r.user);
@@ -362,7 +366,9 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
     const rec = { id: call.id, by: call.by, video: call.video, outcome, joined: [...call.joined], declined: [...call.declined], started: call.started };
     if (call.answered) rec.dur = t - call.answered;
     const text = outcome === 'answered' ? `Call · ${callLength(rec.dur)}` : outcome === 'declined' ? 'Declined call' : 'Missed call';
-    const mid = newId('m');
+    // p2p: with a friend on another PC both sides write the record, under the same id, once.
+    const mid = hub.isRemoteDm?.(call.dm) ? `m_call${call.id.slice(5)}` : newId('m');
+    if (M.msg(mid)) return;
     db.run('INSERT INTO messages (id, conv, author, ts, text, fold, sys) VALUES (?, ?, ?, ?, ?, ?, ?)',
       mid, call.dm, call.by, t, text, M.foldText(text, []), JSON.stringify(rec));
     const [m] = M.withReactions([M.msg(mid)]);
@@ -376,7 +382,8 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
     if (calls.has(dm)) return hub.callJoin(c, dm);
     const members = dmMembers(dm);
     const call = {
-      id: newId('call'), dm, by: c.user, video: !!video, started: Date.now(), answered: null,
+      // p2p: a call started on a friend's PC keeps its id (server/peer.js).
+      id: c.callId || newId('call'), dm, by: c.user, video: !!video, started: Date.now(), answered: null,
       group: members.length > 2, joined: new Set([c.user]), declined: new Set(), ringing: new Map(),
     };
     calls.set(dm, call);
@@ -443,7 +450,11 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
       return socket.destroy();
     }
-    wss.handleUpgrade(req, socket, head, (ws) => connected(ws, user, readCookie(req.headers.cookie, COOKIE)));
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      // p2p: only a page on this machine may host peer links (F6).
+      ws.loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+      connected(ws, user, readCookie(req.headers.cookie, COOKIE));
+    });
     return undefined;
   });
 
@@ -474,12 +485,16 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
         if (msg.op === 'typing') return reply(true, {});
         return reply(false, 'You’re going a little fast. Wait a moment and try again.');
       }
-      try {
-        reply(true, handler({ user, ws }, msg.d && typeof msg.d === 'object' ? msg.d : {}) || {});
-      } catch (e) {
+      const failed = (e) => {
         if (e instanceof UserError) reply(false, e.message);
         else { log('error', msg.op, e); reply(false, 'Something went wrong on the server. Try again.'); }
-      }
+      };
+      try {
+        const r = handler({ user, ws }, msg.d && typeof msg.d === 'object' ? msg.d : {});
+        // p2p: an op that has to ask the registry first (friend.request by a global username) answers later.
+        if (r && typeof r.then === 'function') r.then((v) => reply(true, v || {}), failed);
+        else reply(true, r || {});
+      } catch (e) { failed(e); }
       return undefined;
     });
     ws.on('close', (code) => {

@@ -144,7 +144,11 @@ function addRemoteVideo(p, stream) {
 function peer(user, offering) {
   let p = peers.get(user);
   if (p) return p;
-  const pc = new RTCPeerConnection({ iceServers: S.ice });
+  // p2p: registry TURN credentials near their end are refreshed for the next connection (F10), and with
+  // "Hide my IP" on and a TURN server known, calls go only through the relay (S14).
+  if (S.iceExp && S.iceExp - Date.now() < 600_000) call('ice.refresh').then((r) => { if (Array.isArray(r?.ice)) { S.ice = r.ice; S.iceExp = r.iceExp || null; } }).catch(() => {});
+  const hideIp = !!S.p2p?.hideIp && (S.ice || []).some((s) => [].concat(s.urls || []).some((u) => /^turns?:/.test(u)));
+  const pc = new RTCPeerConnection({ iceServers: S.ice, ...(hideIp ? { iceTransportPolicy: 'relay' } : {}) });
   p = {
     pc, audio: null, screenAudio: null, queue: [], stopLevel: null,
     polite: String(S.me) > String(user), makingOffer: false, ignoreOffer: false, settingAnswer: false,

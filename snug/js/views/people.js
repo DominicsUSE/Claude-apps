@@ -227,7 +227,7 @@ function ProfileCard({ id, house }) {
         <${FavButton} id=${id} sm />
       </div>
       <button class="pcard-name" ...${nameAttrs(u)} onClick=${() => openPerson(id)}>${u.name}</button>
-      <div class="pcard-handle"><span class="secret">@${u.handle}</span><${Pronouns} u=${u} /></div>
+      <div class="pcard-handle"><span class="secret">@${u.remote ? u.username || u.handle : u.handle}</span><${Pronouns} u=${u} /></div>
       <div class="pcard-line"><${Pres} user=${u} inline /><${Doing} u=${u} /></div>
       <${AboutText} u=${u} />
       ${role && html`<div class="profile-roles">

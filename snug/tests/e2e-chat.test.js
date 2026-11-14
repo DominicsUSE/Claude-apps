@@ -330,6 +330,9 @@ test('quick edits: Quote, s/old/new on your last message, and +:emoji: reacts to
   await menuOf(ines, 'the glaze is the best');
   await ines.locator('[role=menu] [role=menuitem]:has-text("Quote")').click();
   assert.equal(await box(ines).inputValue(), '> the glaze is the best\n@robin ');
+  // The composer takes focus on the next frame (js/views/stream.js), and keeps it.
+  await ines.waitForFunction(() => document.activeElement.tagName === 'TEXTAREA', null, { timeout: 2000 });
+  await ines.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
   assert.equal(await ines.evaluate(() => document.activeElement.tagName), 'TEXTAREA');
   await box(ines).pressSequentially('agreed');
   await box(ines).press('Enter');

@@ -13,6 +13,8 @@ import { Avatar, Empty } from '../ui/kit.js';
 import { toast } from '../store.js';
 import { Doing, doingOf, SharedTiles, friendMenu, openPerson, lastActive, ago } from './people.js';
 import { PeopleYouMightKnow } from './discover.js';
+import { p2pOwner, atName } from './p2p.js'; // friends on other PCs: global Snug usernames
+import { Switch } from '../ui/kit.js';
 
 const Back = () => S.ui.phone && S.ui.depth > 0 && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
 const TABS = ['online', 'all', 'requests', 'blocked', 'add'];
@@ -43,12 +45,12 @@ function Row({ id, first, kind = 'friend', children }) {
   if (!u) return null;
   const d = doingOf(u);
   const f = S.friends[id];
-  return html`<li class=${`f-row${u.presence === 'offline' ? ' is-off' : ''}`} data-id=${id} tabindex=${first ? '0' : '-1'} aria-label=${`${u.name}, ${d.text}${f?.favorite ? ', favourite' : ''}`}
+  return html`<li class=${`f-row${u.presence === 'offline' ? ' is-off' : ''}`} data-id=${id} tabindex=${first ? '0' : '-1'} aria-label=${`${u.name}, ${d.text}${u.remote ? ', on another PC' : ''}${f?.favorite ? ', favourite' : ''}`}
       onClick=${(e) => { if (!e.target.closest('button')) openPerson(id); }}
       onFocus=${(e) => { if (e.target === e.currentTarget) e.currentTarget.closest('.f-list')?.querySelectorAll('.f-row').forEach((r) => r.setAttribute('tabindex', r === e.currentTarget ? '0' : '-1')); }}>
       <${Avatar} user=${u} presence speaking=${!!S.speaking[id]} dim=${u.presence === 'offline'} />
       <span class="f-text">
-        <span class="f-name"><span class="trunc">${u.name}</span>${f?.favorite && kind === 'friend' && html`<span class="f-star" aria-hidden="true"><${Icon} name="starred" size=${12} /></span>`}<span class="f-handle trunc">@${u.handle}</span></span>
+        <span class="f-name"><span class="trunc">${u.name}</span>${f?.favorite && kind === 'friend' && html`<span class="f-star" aria-hidden="true"><${Icon} name="starred" size=${12} /></span>`}<span class="f-handle trunc">@${atName(u)}</span>${u.remote && html`<span class="f-remote" data-tip="On another PC" aria-label="On another PC"><${Icon} name="screen" size=${12} /></span>`}</span>
         ${kind === 'friend' && html`<span class="f-sub"><${Doing} u=${u} /></span>`}
         ${kind !== 'friend' && html`<span class="f-sub"><span class="trunc">${kind === 'incoming' ? `Sent you a request ${ago(f.since)}` : `You asked ${ago(f.since)}`}</span></span>`}
       </span>
@@ -104,7 +106,7 @@ const matches = (id) => {
   const q = fold(S.ui.friendQ || '').trim();
   if (!q) return true;
   const u = S.users[id];
-  return !!u && fold(`${u.name} ${u.handle}`).includes(q.replace(/^@/, ''));
+  return !!u && fold(`${u.name} ${u.handle} ${u.username || ''}`).includes(q.replace(/^@/, ''));
 };
 function FilterBox() {
   const set = (v) => { S.ui.friendQ = v; emitNow(); };
@@ -216,6 +218,8 @@ function BlockedTab() {
 }
 
 function AddTab({ title = 'Add a friend', lead = 'Friends see each other’s presence and can message any time, even without a house in common.', focus = true }) {
+  const global = p2pOwner(); // this PC's Snug account: usernames are global unless "On this PC" (S27)
+  const [local, setLocal] = useState(false);
   const [handle, setHandle] = useState('');
   const [st, setSt] = useState({ status: 'idle' });
   const [people, setPeople] = useState(null);
@@ -232,7 +236,7 @@ function AddTab({ title = 'Add a friend', lead = 'Friends see each other’s pre
     if (!v) { setSt({ status: 'error', text: 'Type a username first, like @ines.' }); input.current?.focus(); return; }
     setSt({ status: 'sending' });
     try {
-      const r = await call('friend.request', { handle: v });
+      const r = await call('friend.request', global && local ? { handle: v, local: true } : { handle: v });
       const name = S.users[r.user]?.name || `@${v}`;
       setSt({ status: 'done', user: r.user, friends: r.state === 'friends', name });
       setHandle('');
@@ -246,10 +250,10 @@ function AddTab({ title = 'Add a friend', lead = 'Friends see each other’s pre
     <h2 class="f-add-title">${title}</h2>
     <p class="f-add-lead">${lead}</p>
     <form class="f-add-form" onSubmit=${submit} novalidate>
-      <label class="sr" for="f-add-handle">Username</label>
+      <label class="sr" for="f-add-handle">${global && !local ? 'Their Snug username' : 'Username'}</label>
       <div class=${`f-add-field${bad ? ' bad' : ''}${st.status === 'done' ? ' ok' : ''}`}>
         <span class="f-at" aria-hidden="true">@</span>
-        <input id="f-add-handle" ref=${input} autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="username" maxlength="40"
+        <input id="f-add-handle" ref=${input} autocomplete="off" autocapitalize="none" spellcheck="false" placeholder=${global && !local ? 'their Snug username' : 'username'} maxlength="40"
           value=${handle} aria-invalid=${bad ? 'true' : undefined} aria-describedby="f-add-msg"
           onInput=${(e) => { setHandle(e.target.value); if (st.status !== 'idle' && st.status !== 'sending') setSt({ status: 'idle' }); }} />
         <button class="btn primary" type="submit" disabled=${st.status === 'sending' || !handle.trim()} aria-busy=${st.status === 'sending' ? 'true' : undefined}>
@@ -262,8 +266,12 @@ function AddTab({ title = 'Add a friend', lead = 'Friends see each other’s pre
           ${st.friends ? html`You and <b>${st.name}</b> are friends now.` : html`Request sent to <b>${st.name}</b>. You’ll see it under Requests until they answer.`}
           ${st.user && S.users[st.user] && html`<button class="btn quiet" type="button" onClick=${() => openPerson(st.user)}>View profile</button>`}
         </span>`}
-        ${st.status === 'idle' && html`<span class="f-add-hint">Usernames are on every profile, under the name. Capitals don’t matter.</span>`}
+        ${st.status === 'idle' && html`<span class="f-add-hint">${global && !local
+          ? 'Snug usernames are unique, on every PC. Ask your friend for theirs; it’s in their Settings, under Account. Capitals don’t matter.'
+          : 'Usernames are on every profile, under the name. Capitals don’t matter.'}</span>`}
       </div>
+      ${global && html`<label class="f-add-toggle"><${Switch} on=${local} label="On this PC" onChange=${(v) => { setLocal(v); setSt({ status: 'idle' }); }} />
+        <span>On this PC: someone with a password account here, over your network</span></label>`}
     </form>
     ${people === null
       ? html`<p class="f-quiet">Looking for people you might know…</p>`

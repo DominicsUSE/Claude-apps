@@ -32,6 +32,7 @@ import { openMenu } from '../store.js';
 import { togglePeople } from './people.js'; // the member list toggle, remembered (shell track)
 import { vp } from '../voiceopts.js';
 import { DmHeaderButtons, dmHeaderItems } from './dm-manage.js'; // Add people and the members of a group (server/dms.js)
+import { DirectLine, KeyBanner, remoteOf } from './p2p.js'; // a friend on another PC: how it travels, and a changed security code
 
 const Back = () => S.ui.phone && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
 
@@ -389,6 +390,7 @@ export function Conversation({ conv }) {
       ${phone && meta.house && html`<button class="ib drawer-btn title-switch" aria-label="Rooms and places" data-tip="Rooms and places" onClick=${openDrawer}><${Icon} name="chev-d" size=${16} /></button>`}
       ${meta.topic && html`<span class="bar-sub trunc">${meta.topic}</span>`}
       ${meta.user && html`<span class="bar-sub trunc">${presenceLabel(meta.user)}${meta.user.status ? `. ${meta.user.status}` : ''}</span>`}
+      ${meta.dm && !phone && remoteOf(conv) && html`<${DirectLine} conv=${conv} />`}
       <div class="bar-end">
         ${meta.dm && html`<${CallButtons} conv=${conv} />`}
         ${meta.dm && !phone && html`<${DmHeaderButtons} conv=${conv} />`}
@@ -413,6 +415,7 @@ export function Conversation({ conv }) {
       ? html`<${Stage} roomId=${conv} dm />`
       : html`<${CallStrip} conv=${conv} /><${CallEndNote} conv=${conv} />`)}
     ${meta.dm && html`<${RequestBanner} conv=${conv} />`}
+    ${meta.dm && html`<${KeyBanner} conv=${conv} />`}
     ${meta.kind === 'forum' ? html`<${ForumView} key=${conv} conv=${conv} />` : html`<${Stream} key=${conv} conv=${conv} intro=${html`<${Intro} conv=${conv} meta=${meta} />`}
       placeholder=${meta.user ? `Message ${first}` : `Message ${meta.room && meta.kind === 'text' ? '#' : ''}${meta.title}`} />`}
   </section>`;

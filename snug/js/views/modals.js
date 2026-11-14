@@ -10,6 +10,7 @@ import { Avatar, Tile, RoomIcon, Seg, copyText } from '../ui/kit.js';
 import { TOPICS } from '../lib/social.js';
 import { call, api } from '../server.js';
 import { TemplatePick, startArgs } from './places-start.js'; // start a house from a template or another house
+import { LocalNote, p2pOwner } from './p2p.js'; // houses stay on this PC; groups can't include friends on other PCs yet
 
 export function Confirm({ title, text, action, danger, onConfirm }) {
   return html`
@@ -113,6 +114,7 @@ export function Invite({ house }) {
           <button class="btn" type="submit">Invite</button>
         </div>
         ${error ? html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${error}</div>` : sent ? html`<div class="hint" role="status">${sent}</div>` : null}
+        <${LocalNote} text="Friends on other PCs can’t join houses yet." />
       </div>
     </form>
     <div class="modal-foot"><button class="btn" onClick=${closeModal}>Done</button></div>`;
@@ -214,6 +216,7 @@ export function AddHouse() {
     <div>
       <h2>Start a house</h2>
       <p class="modal-lead" style="margin:0">A place for your people. It starts with three rooms and a voice room.</p>
+      <${LocalNote} />
     </div>
     ${S.invites.length > 0 && html`<div>
       <span class="label">Or accept an invitation</span>
@@ -264,7 +267,9 @@ export function NewMessage() {
   const people = Object.values(S.users).filter((u) => u.id !== S.me)
     .map((u) => ({ u, s: Math.max(fuzzy(q, u.name), fuzzy(q, u.handle)) }))
     .filter((x) => x.s >= 0).sort((a, b) => b.s - a.s || a.u.name.localeCompare(b.u.name)).map((x) => x.u);
-  const toggle = (id) => setPicked(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]);
+  // A friend on another PC can only be messaged one to one for now.
+  const blocked = (u) => !picked.includes(u.id) && picked.length > 0 && (!!u.remote || picked.some((id) => S.users[id]?.remote));
+  const toggle = (id) => { if (!picked.includes(id) && blocked(S.users[id])) return; setPicked(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]); };
   return html`
     <h2>New message</h2>
     <p class="modal-lead">Pick one person, or several for a group.</p>
@@ -274,12 +279,14 @@ export function NewMessage() {
       ${picked.map((id) => html`<button key=${id} class="chip on" onClick=${() => toggle(id)} aria-label=${`Remove ${S.users[id].name}`}>${S.users[id].name}<${Icon} name="x" size=${14} /></button>`)}
     </div>
     <div class="pick-list" role="listbox" aria-multiselectable="true">
-      ${people.map((u) => html`<button key=${u.id} class="menu-item" role="option" aria-selected=${String(picked.includes(u.id))} onClick=${() => toggle(u.id)}>
+      ${people.map((u) => html`<button key=${u.id} class="menu-item" role="option" aria-selected=${String(picked.includes(u.id))} onClick=${() => toggle(u.id)}
+        aria-disabled=${blocked(u) ? 'true' : undefined} data-tip=${blocked(u) ? 'Group chats with friends on other PCs are coming later.' : undefined}>
         <${Avatar} user=${u} presence /><span class="grow trunc">${u.name}</span>
         ${picked.includes(u.id) && html`<span class="end"><${Icon} name="check" size=${16} /></span>`}
       </button>`)}
       ${!people.length && html`<div class="picker-none">Nobody called “${q}”</div>`}
     </div>
+    ${p2pOwner() && picked.length > 0 && people.some(blocked) && html`<${LocalNote} text="Group chats with friends on other PCs are coming later." />`}
     <div class="modal-foot">
       <button class="btn" onClick=${closeModal}>Cancel</button>
       <button class="btn primary" disabled=${!picked.length} onClick=${() => startDm(picked)}>${picked.length > 1 ? 'Start group' : 'Start conversation'}</button>

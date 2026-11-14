@@ -1,0 +1,35 @@
+# Snug registry: one Worker + one SQLite Durable Object instance ("Hub").
+# Deploy: see README.md. Account-specific values are placeholders; secrets are never in this file.
+name = "snug-registry"
+main = "src/worker.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+# No request logs: requests carry GitHub tokens (in bodies) and IP addresses. See README "Logging".
+[observability]
+enabled = false
+
+[vars]
+GITHUB_API = "https://api.github.com"
+# The public client id of YOUR GitHub OAuth App (Device Flow enabled). Tokens of other apps are refused.
+GITHUB_CLIENT_ID = "REPLACE_WITH_GITHUB_OAUTH_CLIENT_ID"
+# Optional Cloudflare TURN key id; empty = /v1/turn answers 404. Its token is the TURN_KEY_TOKEN secret.
+TURN_KEY_ID = ""
+# Estimated DO requests per UTC day after which the fallback relay is refused (free tier guard).
+RELAY_OFF_AT = "60000"
+# Signal keepalive interval sent to clients (seconds).
+PING_SECONDS = "90"
+
+# Secrets (wrangler secret put NAME), never committed:
+#   GH_HMAC_SECRET    required. >= 32 random bytes. NEVER ROTATE (it keys every account's GitHub hash).
+#   GH_CLIENT_SECRET  required. The OAuth App client secret; used only to check and revoke tokens.
+#   OWNER_GITHUB_IDS  required for the owner-only names "1" and "a". Comma-separated numeric GitHub ids.
+#   TURN_KEY_TOKEN    optional. Cloudflare TURN key API token.
+
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "Hub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Hub"]

@@ -23,6 +23,7 @@ import { AppearancePage, ProfileStyle, SoundSettings, setSettingsLayer } from '.
 import { bindings, comboKeys, ACTIONS } from '../lib/keys.js'; // the person's shortcuts in the sheet
 import { setLook } from '../account.js';
 import { Confirm } from './modals.js';
+import { p2pOwner, AccountRows, ConnectRow, DeleteP2p } from './p2p.js'; // GitHub-secured accounts: no password; the Snug username
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
 const MOD = isMac ? '⌘' : 'Ctrl';
@@ -366,7 +367,7 @@ function TotpSetup() {
 }
 
 // Password (and a code) before something that matters.
-function Confirmed({ title, lead, action, danger, needCode, needHandle, run }) {
+function Confirmed({ title, lead, action, danger, needCode, needHandle, run, noPassword }) {
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [handle, setHandle] = useState('');
@@ -383,14 +384,14 @@ function Confirmed({ title, lead, action, danger, needCode, needHandle, run }) {
     <h2>${title}</h2>
     <p class="modal-lead">${lead}</p>
     <div class="form">
-      <div><label class="label" for="cf-pw">Password</label><input id="cf-pw" class="field" type="password" data-autofocus autocomplete="current-password" value=${password} onInput=${(e) => { setPassword(e.target.value); setErr(''); }} /></div>
-      ${needHandle && html`<div><label class="label" for="cf-handle">Type your username, <b class="secret">${me().handle}</b>, to confirm</label><input id="cf-handle" class="field" autocapitalize="none" spellcheck="false" value=${handle} onInput=${(e) => { setHandle(e.target.value); setErr(''); }} /></div>`}
+      ${!noPassword && html`<div><label class="label" for="cf-pw">Password</label><input id="cf-pw" class="field" type="password" data-autofocus autocomplete="current-password" value=${password} onInput=${(e) => { setPassword(e.target.value); setErr(''); }} /></div>`}
+      ${needHandle && html`<div><label class="label" for="cf-handle">Type your username, <b class="secret">${me().handle}</b>, to confirm</label><input id="cf-handle" class="field" autocapitalize="none" spellcheck="false" data-autofocus=${noPassword || undefined} value=${handle} onInput=${(e) => { setHandle(e.target.value); setErr(''); }} /></div>`}
       ${needCode && html`<div><label class="label" for="cf-code">Code from your app, or a backup code</label><input id="cf-code" class="field" autocomplete="one-time-code" value=${code} onInput=${(e) => { setCode(e.target.value); setErr(''); }} /></div>`}
       ${err && html`<${Err} id="cf-err" text=${err} />`}
     </div>
     <div class="modal-foot">
       <button type="button" class="btn" onClick=${closeModal}>Cancel</button>
-      <button type="submit" class=${`btn ${danger ? 'danger' : 'primary'}`} disabled=${busy || !password || (needCode && !code) || (needHandle && !handle)}>${busy ? 'Working…' : action}</button>
+      <button type="submit" class=${`btn ${danger ? 'danger' : 'primary'}`} disabled=${busy || (!noPassword && !password) || (needCode && !code) || (needHandle && !handle)}>${busy ? 'Working…' : action}</button>
     </div>
   </form>`;
 }
@@ -423,6 +424,24 @@ export function SecurityPage() {
     <${Row} label="Connection" hint=${S.conn.socket === 'open' ? 'Connected. Changes reach everyone at once.' : 'Not connected. Changes wait until Snug is back.'}>
       <span class="sub" style="display:flex;gap:8px;align-items:center"><i class=${`pres inline ${S.conn.socket === 'open' ? 'open' : 'offline'}`}></i>${S.conn.socket === 'open' ? 'Online' : 'Offline'}</span>
     <//>
+    ${p2pOwner() ? html`<${AccountRows} Row=${Row} signOut=${baseSignOut} />` : html`<${PasswordSecurity} a=${a} />`}
+    <div class="set-head">Devices</div>
+    <${Sessions} />
+    ${!p2pOwner() && html`<div class="set-head">Sign out</div>
+    <${Row} label="Sign out on this device" hint="Your houses and messages stay on the server.">
+      <button class="btn" onClick=${() => baseSignOut?.(false)}>Sign out</button>
+    <//>`}
+    <${Row} label="Sign out everywhere" hint="Ends every session on every device, including this one.">
+      <button class="btn danger" onClick=${() => openModal(Confirm, {
+        title: 'Sign out everywhere?', text: p2pOwner() ? 'Every device signed in as you will need to sign in with GitHub again.' : 'Every device signed in as you will need your password again.', action: 'Sign out everywhere', danger: true,
+        onConfirm: () => baseSignOut?.(true),
+      })}>Sign out everywhere</button>
+    <//>`;
+}
+
+// Password accounts: the password, two-factor sign-in, and connecting GitHub on the PC's first account.
+function PasswordSecurity({ a }) {
+  return html`
     <div class="set-head">Password</div>
     <div style="padding:16px 0"><${PasswordForm} /></div>
     <div class="set-head">Two-factor sign-in</div>
@@ -442,18 +461,7 @@ export function SecurityPage() {
       : html`<${Row} label="Off" hint="Ask for a code from your phone as well as your password when you sign in.">
           <button class="btn primary" onClick=${() => openModal(TotpSetup)}>Set up</button>
         <//>`}
-    <div class="set-head">Devices</div>
-    <${Sessions} />
-    <div class="set-head">Sign out</div>
-    <${Row} label="Sign out on this device" hint="Your houses and messages stay on the server.">
-      <button class="btn" onClick=${() => baseSignOut?.(false)}>Sign out</button>
-    <//>
-    <${Row} label="Sign out everywhere" hint="Ends every session on every device, including this one.">
-      <button class="btn danger" onClick=${() => openModal(Confirm, {
-        title: 'Sign out everywhere?', text: 'Every device signed in as you will need your password again.', action: 'Sign out everywhere', danger: true,
-        onConfirm: () => baseSignOut?.(true),
-      })}>Sign out everywhere</button>
-    <//>`;
+    ${S.p2p?.enabled && html`<${ConnectRow} Row=${Row} />`}`;
 }
 
 // ---------- Your data ----------
@@ -486,6 +494,7 @@ export function DataPage() {
     setBusy(false);
   };
   const needCode = acc().totp;
+  const p2p = p2pOwner(); // GitHub-secured: typing the username confirms; delete frees the username after a GitHub check
   return html`
     <h1>Your data</h1>
     <p class="lead">What Snug keeps about you, and how to take it with you or end it.</p>
@@ -495,15 +504,15 @@ export function DataPage() {
     <div class="set-head">End your account</div>
     <${Row} label="Deactivate" hint="Signs you out everywhere and shows you as offline. Sign in again any time to come back as you were.">
       <button class="btn" onClick=${() => openModal(Confirmed, {
-        title: 'Deactivate your account?', lead: 'You’ll be signed out on every device. Signing in again brings everything back.', action: 'Deactivate', needCode,
+        title: 'Deactivate your account?', lead: 'You’ll be signed out on every device. Signing in again brings everything back.', action: 'Deactivate', needCode, needHandle: p2p, noPassword: p2p,
         run: async (d) => { await api('/api/account/deactivate', d); await leaveLocally(); },
       })}>Deactivate</button>
     <//>
     <${Row} label="Delete your account" hint="For good. Your messages stay where you wrote them, by “Deleted user”. If you own a house with other people in it, hand it over first.">
-      <button class="btn danger" onClick=${() => openModal(Confirmed, {
+      <button class="btn danger" onClick=${() => (p2p ? openModal(DeleteP2p, { onGone: leaveLocally }) : openModal(Confirmed, {
         title: 'Delete your account?', lead: 'This can’t be undone. Your profile, settings, friends and houses go; your messages stay, by “Deleted user”.', action: 'Delete my account', danger: true, needCode, needHandle: true,
         run: async (d) => { await api('/api/account/delete', d); await leaveLocally(); },
-      })}>Delete account</button>
+      }))}>Delete account</button>
     <//>`;
 }
 

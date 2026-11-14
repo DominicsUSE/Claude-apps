@@ -53,14 +53,49 @@ function lanAddress() {
   return null;
 }
 
+// p2p: the Snug registry and GitHub sign-in (snug/server/peer.js). Empty until deployed: empty means P2P is off.
+const DEFAULT_REGISTRY_URL = "";
+const DEFAULT_GITHUB_CLIENT_ID = "";
+// Env overrides only for an unpackaged app or with --dev-registry (S20), and only https or this machine.
+function p2pConfig() {
+  const dev = !app.isPackaged || process.argv.includes("--dev-registry");
+  const pick = (env, def) => (dev && process.env[env]) || def;
+  const okUrl = (u) => {
+    try { const x = new URL(u); return x.protocol === "https:" || (x.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(x.hostname)) ? x.origin : null; } catch { return null; }
+  };
+  return {
+    registryUrl: okUrl(pick("SNUG_REGISTRY_URL", DEFAULT_REGISTRY_URL)),
+    githubClientId: pick("SNUG_GITHUB_CLIENT_ID", DEFAULT_GITHUB_CLIENT_ID) || null,
+    githubBase: okUrl(pick("SNUG_GITHUB_URL", "https://github.com")) || "https://github.com",
+  };
+}
+// The device keys are wrapped with the OS key store, checked each time it is used (F13).
+const keyStore = {
+  available: () => {
+    const { safeStorage } = require("electron");
+    try { return safeStorage.isEncryptionAvailable() && (process.platform !== "linux" || safeStorage.getSelectedStorageBackend() !== "basic_text"); } catch { return false; }
+  },
+  encrypt: (str) => require("electron").safeStorage.encryptString(str).toString("base64"),
+  decrypt: (b64) => require("electron").safeStorage.decryptString(Buffer.from(b64, "base64")),
+};
+// A per-launch secret in an httpOnly cookie lets this window sign back in after signing out (F5).
+const resumeSecret = require("crypto").randomBytes(32).toString("base64url");
+
 async function startHost(lan) {
   const { startServer } = await import(pathToFileURL(path.join(__dirname, "snug", "server", "index.js")).toString());
-  const opts = { host: lan ? "0.0.0.0" : "127.0.0.1", dataDir: path.join(app.getPath("userData"), "data"), quiet: true };
+  const { net } = require("electron");
+  const opts = {
+    host: lan ? "0.0.0.0" : "127.0.0.1", dataDir: path.join(app.getPath("userData"), "data"), quiet: true,
+    ...p2pConfig(), keyStore, fetch: net.fetch.bind(net), resumeSecret, // p2p
+  };
   // The same address every launch keeps you signed in; fall back to any free port if it is taken.
   try { server = await startServer({ ...opts, port: PORT }); } catch (e) {
     if (e.code !== "EADDRINUSE") throw e;
     server = await startServer({ ...opts, port: 0 });
   }
+  globalThis.snugHostForTest = () => server; // p2p: the desktop test reaches the in-app server's peer module
+  // p2p: the resume cookie for this server's origin, on the window's session.
+  try { await session.defaultSession.cookies.set({ url: `http://127.0.0.1:${server.port}`, name: "snug_resume", value: resumeSecret, httpOnly: true, sameSite: "strict" }); } catch { /* resume just won't be offered */ }
   return `http://127.0.0.1:${server.port}`;
 }
 async function stopHost() {
@@ -724,6 +759,8 @@ function watchIdle() {
   for (const [ev, state] of [["lock-screen", "locked"], ["unlock-screen", "unlocked"], ["suspend", "suspend"], ["resume", "resume"]]) {
     try { powerMonitor.on(ev, () => tellIdle(state)); } catch { /* not on every system */ }
   }
+  // p2p: after sleep or a locked screen, reconnect to the registry at once (F12).
+  for (const ev of ["resume", "unlock-screen"]) { try { powerMonitor.on(ev, () => server?.peer?.wake()); } catch { /* not on every system */ } }
   const t = setInterval(() => {
     let secs = 0;
     try { secs = powerMonitor.getSystemIdleTime(); } catch { return; }
