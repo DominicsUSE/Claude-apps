@@ -211,7 +211,7 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
     const token = createSession(db, user, agentOf(req));
     send(res, 200, { ...body, user: M.userView(M.userRow(user), M.userRow(user).presence, true) }, { 'Set-Cookie': sessionCookie(token, { secure }) });
   }
-  const oldestLocal = () => db.get("SELECT id FROM users WHERE remote IS NOT 1 AND deleted IS NOT 1 AND pass != '!' ORDER BY created, rowid LIMIT 1")?.id;
+  const isLocal = (id) => !!db.get("SELECT 1 FROM users WHERE id=? AND remote IS NOT 1 AND deleted IS NOT 1 AND pass != '!'", id);
   const flowOf = (d) => (typeof d.flow === 'string' ? flows.get(d.flow) : null);
 
   // ---------- Routes with no session ----------
@@ -222,9 +222,9 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
       if (!enabled || !loopback(req)) { send(res, 200, { enabled: false }); return true; }
       const s = self();
       const resumable = s?.user && (s.state === 'ok' || s.state === 'moving') && userRow(s.user) && !userRow(s.user).deleted && resumeOk(req);
-      // A signed-in password account may connect GitHub if it is the PC's first account and the PC has no Snug account (S18).
+      // Any password account on this PC may connect GitHub while the PC has no Snug account yet (S18); first one wins.
       const me = userOf(req);
-      const canLink = !!me && !s?.uid && me === oldestLocal();
+      const canLink = !!me && !s?.uid && isLocal(me);
       send(res, 200, { enabled: true, owner: !!(s?.user && userRow(s.user)), resume: resumable ? s.username : null, ...(canLink ? { canLink } : {}) });
       return true;
     }
@@ -241,7 +241,7 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
           if (!peer.isOwner(user)) { err(res, 403, 'Only this PC’s Snug account can do that.'); return true; }
           f.purpose = 'release';
         } else {
-          if (user !== oldestLocal()) { err(res, 403, 'Only the first account made on this PC can connect GitHub.'); return true; }
+          if (!isLocal(user)) { err(res, 403, 'This account can’t connect GitHub.'); return true; }
           if (self()?.uid) { err(res, 409, 'This PC is linked to another Snug account.'); return true; }
           f.link = user;
         }

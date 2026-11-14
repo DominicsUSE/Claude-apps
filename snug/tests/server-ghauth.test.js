@@ -240,7 +240,7 @@ test('without a registry, GitHub sign-in is off and accounts work as before', as
   assert.equal((await post(srv, '/api/gh/start')).status, 404);
 });
 
-test('the PC’s first password account can connect GitHub and keep everything; others can’t', async () => {
+test('any password account on the PC can connect GitHub and keep everything; once one has, the others can’t', async () => {
   const a = await pc();
   const reg = async (handle) => {
     const r = await post(a, '/api/register', { handle, name: handle, password: 'a long password' });
@@ -250,8 +250,7 @@ test('the PC’s first password account can connect GitHub and keep everything; 
   const first = await reg('olive');
   const second = await reg('pat');
   assert.equal((await get(a, '/api/gh/config', { cookie: first.cookie })).data.canLink, true);
-  assert.equal((await get(a, '/api/gh/config', { cookie: second.cookie })).data.canLink, undefined);
-  assert.equal((await post(a, '/api/gh/start', { link: true }, { cookie: second.cookie })).status, 403);
+  assert.equal((await get(a, '/api/gh/config', { cookie: second.cookie })).data.canLink, true, 'not only the oldest account');
   const w = await githubSignIn(a, 1006, { link: true }, { cookie: first.cookie });
   assert.equal(w.data.state, 'choose-name');
   const c = await post(a, '/api/gh/claim', { flow: w.flow, username: 'olive.p' });
@@ -262,6 +261,9 @@ test('the PC’s first password account can connect GitHub and keep everything; 
   assert.equal(me.data.p2p.owner, true);
   // GitHub-secured now: the old password no longer signs in.
   assert.equal((await post(a, '/api/login', { handle: 'olive.p', password: 'a long password' })).status, 401);
+  // The PC has its Snug account now: the other password account can't connect a second one.
+  assert.equal((await get(a, '/api/gh/config', { cookie: second.cookie })).data.canLink, undefined);
+  assert.equal((await post(a, '/api/gh/start', { link: true }, { cookie: second.cookie })).status, 409);
 });
 
 test('deleted without the GitHub check: signing in again brings the account back on this PC', async () => {
