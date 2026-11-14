@@ -545,7 +545,13 @@ export class Hub {
     const out = res.ok ? await res.json().catch(() => null) : null;
     const ice = out && out.iceServers;
     if (!ice) fail('turn_unavailable');
-    return { iceServers: Array.isArray(ice) ? ice : [ice], ttl };
+    const list = (Array.isArray(ice) ? ice : [ice]).map((s) => {
+      // Cloudflare TURN also answers TLS on 443, the one port strict networks leave open.
+      const urls = [].concat(s.urls || []);
+      if (urls.some((u) => /^turns?:turn\.cloudflare\.com:/.test(u))) urls.push('turns:turn.cloudflare.com:443?transport=tcp');
+      return { ...s, urls: [...new Set(urls)] };
+    });
+    return { iceServers: list, ttl };
   }
 
   // ---------- rebind completion ----------

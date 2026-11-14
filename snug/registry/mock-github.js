@@ -114,7 +114,7 @@ export async function startMockGithub({ port = 0, clientId = 'Iv1.test', clientS
     const turn = /^\/turn\/([^/]+)\/credentials\/generate$/.exec(u.pathname);
     if (turn && req.method === 'POST') {
       if (bearer !== turnToken) return send(401, { success: false });
-      return send(201, { iceServers: { urls: ['turn:127.0.0.1:3478?transport=udp'], username: 'mock-user', credential: 'mock-cred' } });
+      return send(201, { iceServers: { urls: ['stun:stun.cloudflare.com:3478', 'turn:turn.cloudflare.com:3478?transport=udp', 'turn:turn.cloudflare.com:3478?transport=tcp', 'turns:turn.cloudflare.com:5349?transport=tcp'], username: 'mock-user', credential: 'mock-cred' } });
     }
     return send(404, { message: 'Not Found' });
   });

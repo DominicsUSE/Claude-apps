@@ -351,6 +351,8 @@ test('TURN: 404 when not configured; per-call credentials when configured', asyn
     const ok = await turn(r2, x, y.uid);
     assert.equal(ok.status, 200, JSON.stringify(ok.body));
     assert.ok(Array.isArray(ok.body.iceServers));
+    // Same shape as Cloudflare's live answer (checked 2026-11-14); the registry adds TLS on 443.
+    assert.ok(ok.body.iceServers[0].urls.includes('turns:turn.cloudflare.com:443?transport=tcp'));
     assert.ok(ok.body.ttl <= 7200);
     assert.equal((await turn(r2, x, 'aaaaaaaaaaaaaaaa')).status, 404);
     assert.equal((await turn(r2, x, y.uid)).status, 200);
