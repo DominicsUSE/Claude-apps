@@ -1,0 +1,92 @@
+/*
+  Brand: the Huddle (the Nook component), the wordmark and lockup, the loading mark, and the two
+  screens the brand owns outright (sign in, splash). Geometry lives in
+  js/ui/brand.js and brand/*.svg; docs/brand/BRAND.md explains it.
+  Rule: places are arches, people are circles, controls are rectangles.
+*/
+
+.nook, .lockup, .wordmark { display: block; flex: none; }
+
+/* Loading: the two arrive, one after the other. Each cut-out grows from its
+   foot in 240ms within a 1.2s cycle, which reads as "arriving", not as a
+   spinner. The circles live in the mask: scaling them opens the holes. */
+.loading { display: inline-flex; flex-direction: column; align-items: center; gap: var(--s-3); color: var(--text-3); font-size: var(--t-13); line-height: var(--lh-ui); }
+.loading.quiet .loading-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.loading-dot { transform-box: fill-box; transform-origin: 50% 100%; animation: nook-arrive 1200ms var(--ease-out) infinite; }
+.loading-dot.two { animation-name: nook-arrive-two; }
+@keyframes nook-arrive {
+  0% { transform: scale(0); }
+  20% { transform: scale(1); }
+  85% { transform: scale(1); }
+  100% { transform: scale(0); }
+}
+@keyframes nook-arrive-two {
+  0%, 15% { transform: scale(0); }
+  35% { transform: scale(1); }
+  85% { transform: scale(1); }
+  100% { transform: scale(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .loading-dot { animation: none; }
+}
+:root[data-motion="off"] .loading-dot { animation: none; }
+
+/* Sign in / create account.
+   One calm column: the lockup small, one heading, the form. The window is the
+   rail surface; the form sits on the float surface like a dialog. No scene. */
+.auth { height: 100%; display: grid; grid-template-columns: 1fr; background: var(--surface-rail); color: var(--text-1); }
+.auth-main { background: transparent; display: grid; place-items: center; padding: var(--s-6) var(--s-4); overflow-y: auto; }
+.auth-panel {
+  width: 100%; max-width: 420px; display: grid; gap: var(--s-5);
+  padding: var(--s-8); background: var(--surface-float); border-radius: var(--r-modal);
+  border: 1px solid var(--line-subtle);
+}
+.auth-brand { display: flex; color: var(--text-1); }
+.auth-head { display: grid; gap: var(--s-1); }
+.auth-panel h1 { margin: 0; font-size: var(--t-heading); font-weight: var(--w-semibold); line-height: var(--lh-heading); letter-spacing: -0.01em; color: var(--text-1); }
+.auth-sub { margin: 0; font-size: var(--t-ui); color: var(--text-2); }
+
+.auth-form { max-width: none; gap: var(--s-4); }
+.auth-form .label { font-size: var(--t-13); margin-bottom: var(--s-1); }
+.auth-form .field { height: var(--h-md); border-radius: var(--r-input); }
+.auth-form .hint { font-size: var(--t-12); }
+.auth-form .err { font-size: var(--t-13); line-height: var(--lh-ui); margin-top: var(--s-2); align-items: flex-start; gap: var(--s-2); color: var(--error); }
+.auth-form .err .ic { flex: none; }
+.auth-form .err + .hint { display: none; } /* the error replaces the hint while it stands */
+#auth-form-err { margin-top: 0; padding: var(--s-2) var(--s-3); background: var(--error-soft); border-radius: var(--r-sm); color: var(--text-1); }
+#auth-form-err .ic { color: var(--error); }
+
+.auth-form .auth-submit { justify-self: stretch; width: 100%; min-width: 0; height: var(--h-md); margin-top: var(--s-2); border-radius: var(--r-sm); font-size: var(--t-14); }
+/* Busy keeps its colour (it is working, not unavailable). */
+.auth-form .auth-submit[aria-busy="true"] { background: var(--brand); color: var(--on-brand); opacity: 0.72; cursor: progress; }
+
+.auth-swap { margin: 0; font-size: var(--t-14); color: var(--text-2); }
+.auth-link {
+  margin-left: var(--s-1); padding: var(--s-1) 0; color: var(--text-1); font-weight: var(--w-medium);
+  text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px;
+  border-radius: var(--r-xs); transition: text-decoration-color var(--m-fast) var(--ease-in-out);
+}
+.auth-link:hover { text-decoration-color: currentColor; }
+.auth-link:active { color: var(--text-2); }
+.auth-link:focus-visible { outline: var(--focus-w) solid var(--focus); outline-offset: 2px; }
+
+/* An invitation is a separate object (a place you are asked into). */
+.auth-invite { display: flex; gap: var(--s-3); align-items: center; padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-hover); border-color: transparent; }
+.auth-invite b { display: block; font-weight: var(--w-semibold); }
+.auth-invite span:not(.tile) { color: var(--text-2); font-size: var(--t-13); }
+
+@media (max-width: 720px) {
+  /* Phone: the form is the page (no card), top-aligned. */
+  .auth { background: var(--surface-chat); }
+  .auth-main { place-items: start stretch; padding: var(--s-8) var(--s-4); }
+  .auth-panel { max-width: none; padding: 0; background: transparent; border: 0; gap: var(--s-5); }
+}
+@media (pointer: coarse) {
+  .auth-form .field, .auth-form .auth-submit { height: var(--touch); }
+  .auth-link { padding: var(--s-3) 0; }
+}
+
+/* Splash: the lockup on the deepest surface while Snug opens. */
+.splash { height: 100%; display: grid; place-content: center; justify-items: center; gap: var(--s-8); background: var(--bg-0); color: var(--text-1); }
+.splash-down { display: grid; justify-items: center; gap: var(--s-3); text-align: center; }
+.splash-down p { margin: 0; color: var(--text-2); font-size: var(--t-14); max-width: 32ch; }

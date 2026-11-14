@@ -1,0 +1,301 @@
+/* Customisation: theme presets, the accent, chat display, fonts, avatar
+   decorations, name styles, profile colours, chat backgrounds, and the
+   Appearance, Profile and Keyboard settings pages (js/views/appearance.js).
+   Tokens only. Violet (--brand) stays the brand and "for you"; mint, amber,
+   cyan and rose keep their meanings in every theme. js/account.js sets the
+   attributes on <html>; a custom theme and a non-violet accent are inline
+   custom properties computed (and contrast-checked) by js/lib/theme.js. */
+
+/* ---------- Theme presets ----------
+   Each block is complete (same roles as Dark in css/tokens.css), so it wins
+   over the device's light or dark scheme. tests/logic-custom.test.js checks
+   every block: text-1..3 reach 4.5:1 on bg-1..3. */
+:root[data-theme="ash"] {
+  color-scheme: dark;
+  --bg-0: #1B1B1C; --bg-1: #222223; --bg-2: #29292A; --bg-3: #303032; --bg-4: #39393B;
+  --text-1: #F2F0EC; --text-2: #C2BEB8; --text-3: #A29E99; --text-disabled: #6A6865; --text-inverse: #111211;
+  --line: #333335; --line-strong: #47474A; --line-subtle: #2A2A2C;
+  --brand: #996FF7; --brand-hover: #A37EF8; --brand-press: #9266F7; --brand-soft: #362F47; --brand-ink: #B191F9; --on-brand: #111211;
+  --mint: #58C7A5; --mint-soft: #213A33; --amber: #E8B65A; --amber-soft: #3B3222;
+  --mint-ink: var(--mint); --amber-ink: var(--amber);
+  --cyan: #62B8D8; --cyan-soft: #22363D; --rose: #D98598; --rose-soft: #3B2830;
+  --error: #E86666; --error-soft: #432727; --link: var(--cyan); --offline: #77746F;
+  --btn2: var(--bg-4); --btn2-hover: #434346; --btn2-press: #4A4A4D;
+  --hover: rgb(242 240 236 / 0.05); --press: rgb(242 240 236 / 0.09);
+  --scrim: rgb(0 0 0 / 0.56); --selection: rgb(153 111 247 / 0.32);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.24); --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.32); --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.4);
+  --name-l: 0.80; --name-c: 0.10; --tile-l: 0.42; --tile-c: 0.065; --tile-ink-l: 0.93; --tile-ink-c: 0.045; --house-l: 0.66; --house-c: 0.10; --house-ink: #111211;
+}
+:root[data-theme="slate"] {
+  color-scheme: dark;
+  --bg-0: #0F1217; --bg-1: #151A21; --bg-2: #1B2129; --bg-3: #222932; --bg-4: #2B333D;
+  --text-1: #EEF2F6; --text-2: #B3BCC7; --text-3: #8F99A5; --text-disabled: #5A626C; --text-inverse: #10141A;
+  --line: #2B333D; --line-strong: #3A4450; --line-subtle: #1F262E;
+  --brand: #996FF7; --brand-hover: #A37EF8; --brand-press: #9266F7; --brand-soft: #2B2845; --brand-ink: #B191F9; --on-brand: #111211;
+  --mint: #58C7A5; --mint-soft: #17332F; --amber: #E8B65A; --amber-soft: #332B1D;
+  --mint-ink: var(--mint); --amber-ink: var(--amber);
+  --cyan: #62B8D8; --cyan-soft: #172D38; --rose: #D98598; --rose-soft: #31202A;
+  --error: #E05A5A; --error-soft: #3A1F23; --link: var(--cyan); --offline: #66707B;
+  --btn2: var(--bg-4); --btn2-hover: #343D48; --btn2-press: #3B4450;
+  --hover: rgb(238 242 246 / 0.05); --press: rgb(238 242 246 / 0.09);
+  --scrim: rgb(0 0 0 / 0.56); --selection: rgb(153 111 247 / 0.32);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2); --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.28); --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.36);
+  --name-l: 0.80; --name-c: 0.10; --tile-l: 0.40; --tile-c: 0.065; --tile-ink-l: 0.93; --tile-ink-c: 0.045; --house-l: 0.64; --house-c: 0.10; --house-ink: #111211;
+}
+:root[data-theme="moss"] {
+  color-scheme: dark;
+  --bg-0: #0E120F; --bg-1: #141915; --bg-2: #1A201B; --bg-3: #212822; --bg-4: #29312A;
+  --text-1: #F0F3EE; --text-2: #B6BDB2; --text-3: #92998E; --text-disabled: #5C635A; --text-inverse: #111211;
+  --line: #29312A; --line-strong: #384239; --line-subtle: #1E241F;
+  --brand: #996FF7; --brand-hover: #A37EF8; --brand-press: #9266F7; --brand-soft: #2B283B; --brand-ink: #B191F9; --on-brand: #111211;
+  --mint: #58C7A5; --mint-soft: #18332A; --amber: #E8B65A; --amber-soft: #322B19;
+  --mint-ink: var(--mint); --amber-ink: var(--amber);
+  --cyan: #62B8D8; --cyan-soft: #182D31; --rose: #D98598; --rose-soft: #301F24;
+  --error: #E05A5A; --error-soft: #391F1E; --link: var(--cyan); --offline: #676D64;
+  --btn2: var(--bg-4); --btn2-hover: #333C34; --btn2-press: #3A443B;
+  --hover: rgb(240 243 238 / 0.05); --press: rgb(240 243 238 / 0.09);
+  --scrim: rgb(0 0 0 / 0.56); --selection: rgb(153 111 247 / 0.32);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.18); --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.24); --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.32);
+  --name-l: 0.80; --name-c: 0.10; --tile-l: 0.40; --tile-c: 0.065; --tile-ink-l: 0.93; --tile-ink-c: 0.045; --house-l: 0.64; --house-c: 0.10; --house-ink: #111211;
+}
+:root[data-theme="contrast"] {
+  color-scheme: dark;
+  --bg-0: #000000; --bg-1: #000000; --bg-2: #0A0A0A; --bg-3: #141414; --bg-4: #1F1F1F;
+  --text-1: #FFFFFF; --text-2: #E6E6E6; --text-3: #CCCCCC; --text-disabled: #8A8A8A; --text-inverse: #000000;
+  --line: #5C5C5C; --line-strong: #8A8A8A; --line-subtle: #3D3D3D;
+  --brand: #A783F8; --brand-hover: #B191F9; --brand-press: #9C74F7; --brand-soft: #1C162A; --brand-ink: #BBA0FA; --on-brand: #000000;
+  --mint: #6EE0BC; --mint-soft: #0F2A22; --amber: #FFCB6B; --amber-soft: #2E240F;
+  --mint-ink: var(--mint); --amber-ink: var(--amber);
+  --cyan: #7DD3F2; --cyan-soft: #0F242C; --rose: #F0A0B2; --rose-soft: #2E151C;
+  --error: #FF7070; --error-soft: #2E1212; --link: #8FDBF7; --offline: #9A9A9A;
+  --btn2: var(--bg-4); --btn2-hover: #2A2A2A; --btn2-press: #333333;
+  --hover: rgb(255 255 255 / 0.08); --press: rgb(255 255 255 / 0.14);
+  --scrim: rgb(0 0 0 / 0.75); --selection: rgb(167 131 248 / 0.4);
+  --shadow-sm: 0 0 0 1px #5C5C5C; --shadow-md: 0 0 0 1px #8A8A8A, 0 8px 24px rgb(0 0 0 / 0.6); --shadow-lg: 0 0 0 1px #8A8A8A, 0 16px 48px rgb(0 0 0 / 0.7);
+  --name-l: 0.86; --name-c: 0.10; --tile-l: 0.42; --tile-c: 0.07; --tile-ink-l: 0.97; --tile-ink-c: 0.03; --house-l: 0.72; --house-c: 0.11; --house-ink: #000000;
+  --focus-w: 3px;
+}
+:root[data-theme="paper"] {
+  color-scheme: light;
+  --bg-0: #E6E8EA; --bg-1: #FFFFFF; --bg-2: #F5F6F7; --bg-3: #EDEFF1; --bg-4: #E1E4E7;
+  --text-1: #16181A; --text-2: #4F555B; --text-3: #61676E; --text-disabled: #A1A6AC; --text-inverse: #FFFFFF;
+  --line: #E1E4E7; --line-strong: #C9CED3; --line-subtle: #EDEFF1;
+  --brand: #763FF4; --brand-hover: #6C31F4; --brand-press: #6222F3; --brand-soft: #EFE8FE; --brand-ink: #6D28D9; --on-brand: #FFFFFF;
+  --mint: #1F8F6E; --mint-soft: #E2F2EC; --amber: #A86F0D; --amber-soft: #F5EDDF;
+  --mint-ink: #156E54; --amber-ink: #8C5C08;
+  --cyan: #1F7EA3; --cyan-soft: #E2EFF5; --rose: #B24E66; --rose-soft: #F6E6EA;
+  --error: #C93838; --error-soft: #F9E6E6; --link: #1C7397; --offline: #858A90;
+  --btn2: var(--bg-4); --btn2-hover: #D6DADE; --btn2-press: #CCD1D6;
+  --hover: rgb(22 24 26 / 0.05); --press: rgb(22 24 26 / 0.09);
+  --scrim: rgb(22 24 26 / 0.36); --selection: rgb(118 63 244 / 0.22);
+  --shadow-sm: 0 1px 3px rgba(22, 24, 26, 0.1); --shadow-md: 0 4px 14px rgba(22, 24, 26, 0.12); --shadow-lg: 0 8px 28px rgba(22, 24, 26, 0.16);
+  --name-l: 0.47; --name-c: 0.12; --tile-l: 0.88; --tile-c: 0.05; --tile-ink-l: 0.34; --tile-ink-c: 0.08; --house-l: 0.52; --house-c: 0.11; --house-ink: #FFFFFF;
+}
+:root[data-theme="sepia"] {
+  color-scheme: light;
+  --bg-0: #E4D9C6; --bg-1: #F6EEDF; --bg-2: #EFE5D3; --bg-3: #E8DDC9; --bg-4: #DDD0B9;
+  --text-1: #2B2118; --text-2: #574738; --text-3: #665443; --text-disabled: #A8977F; --text-inverse: #F6EEDF;
+  --line: #DDD0B9; --line-strong: #C7B79C; --line-subtle: #E8DDC9;
+  --brand: #763FF4; --brand-hover: #6C31F4; --brand-press: #6222F3; --brand-soft: #E7D9E2; --brand-ink: #6D28D9; --on-brand: #FFFFFF;
+  --mint: #1B8364; --mint-soft: #DFE8D9; --amber: #9A640A; --amber-soft: #EFE1C6;
+  --mint-ink: #12634B; --amber-ink: #7E5206;
+  --cyan: #1B7398; --cyan-soft: #DEE5E0; --rose: #A9475F; --rose-soft: #F0DCD9;
+  --error: #BC3232; --error-soft: #F2D9D2; --link: #18678A; --offline: #8E816F;
+  --btn2: var(--bg-4); --btn2-hover: #D3C5AC; --btn2-press: #CABBA1;
+  --hover: rgb(43 33 24 / 0.05); --press: rgb(43 33 24 / 0.09);
+  --scrim: rgb(43 33 24 / 0.36); --selection: rgb(118 63 244 / 0.22);
+  --shadow-sm: 0 1px 3px rgba(43, 33, 24, 0.1); --shadow-md: 0 4px 14px rgba(43, 33, 24, 0.12); --shadow-lg: 0 8px 28px rgba(43, 33, 24, 0.16);
+  --name-l: 0.45; --name-c: 0.11; --tile-l: 0.86; --tile-c: 0.05; --tile-ink-l: 0.34; --tile-ink-c: 0.08; --house-l: 0.50; --house-c: 0.10; --house-ink: #F6EEDF;
+}
+
+/* ---------- The accent on controls ----------
+   Violet by default (css/tokens.css). Mentions, the New line, badges and
+   live marks stay --brand: they mean "for you", not "your colour". */
+.row.sel::before, .rail-item.sel::before, .tab[aria-selected="true"]::before { background: var(--accent); }
+.composer .send { background: var(--accent); color: var(--on-accent); }
+.composer .send:hover { background: var(--accent-hover); color: var(--on-accent); }
+.composer .send:active { background: var(--accent-press); }
+/* A chosen accent also marks the focus ring (accent-ink reads 4.5:1 on bg-1). */
+:root[data-accent] { --focus: var(--accent-ink); }
+
+/* ---------- Fonts ---------- */
+:root[data-font="system"] { --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; --font-features: normal; }
+:root[data-font="serif"] { --font: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif; --font-features: normal; }
+:root[data-font="mono"] { --font: "Atkinson Hyperlegible Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace; --font-features: normal; }
+:root[data-code-font="system-mono"] { --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, "Liberation Mono", monospace; }
+
+/* ---------- Chat display ---------- */
+:root[data-times="hover"] .msg-head .msg-time { visibility: hidden; }
+:root[data-times="hover"] .msg:hover .msg-head .msg-time, :root[data-times="hover"] .msg:focus-within .msg-head .msg-time { visibility: visible; }
+:root[data-jumbo="off"] .msg-text.jumbo { font-size: var(--t-msg); line-height: var(--lh); }
+:root[data-jumbo="off"] .msg-text.jumbo .cemoji { width: 1.5rem; height: 1.5rem; vertical-align: -0.375rem; }
+:root[data-emoji-size="s"] .msg-text:not(.jumbo) .cemoji { width: 1.25rem; height: 1.25rem; vertical-align: -0.3rem; }
+:root[data-emoji-size="l"] .msg-text:not(.jumbo) .cemoji { width: 2rem; height: 2rem; vertical-align: -0.5rem; }
+:root[data-emoji-size="s"] .msg-text.jumbo { font-size: var(--t-24); }
+:root[data-emoji-size="l"] .msg-text.jumbo { font-size: 2.75rem; }
+:root[data-emoji-size="s"] .msg-text.jumbo .cemoji { width: 2.25rem; height: 2.25rem; }
+:root[data-emoji-size="l"] .msg-text.jumbo .cemoji { width: 4rem; height: 4rem; }
+:root[data-reactions="off"] .msg .reactions { display: none; }
+:root[data-spoilers="always"] .spoiler { background: var(--bg-3); color: inherit; cursor: text; }
+:root[data-spoilers="always"] .spoiler .spoiler-in { visibility: visible; }
+
+/* ---------- Chat background: tiny SVG patterns in the faintest line colour ----------
+   js/account.js builds --chat-pattern from the theme's --line-subtle. Off under high contrast. */
+:root[data-chat-bg] .main .scroller { background-image: var(--chat-pattern, none); background-repeat: repeat; background-size: var(--chat-pattern-size, 24px 24px); }
+:root[data-contrast="high"][data-chat-bg] .main .scroller { background-image: none; }
+@media (prefers-contrast: more) { :root:not([data-contrast="standard"])[data-chat-bg] .main .scroller { background-image: none; } }
+
+/* ---------- Avatar decorations: theme-owned lightness, a chosen hue ---------- */
+.avatar .deco { position: absolute; inset: -4px; pointer-events: none; color: var(--deco, var(--text-2)); border-radius: 50%; }
+.avatar[data-deco-hue] .deco { --deco: oklch(var(--house-l) var(--house-c) var(--deco-hue)); }
+.deco.ring { border: 2px solid currentColor; }
+.deco.double { border: 2px solid currentColor; box-shadow: 0 0 0 2px var(--bg, var(--bg-1)), 0 0 0 4px currentColor; inset: -3px; }
+.deco.dotted { border: 2px dotted currentColor; }
+.deco.halo { inset: auto -4px auto -4px; top: -6px; height: 60%; border: 2px solid currentColor; border-bottom: 0; border-radius: 50% 50% 0 0 / 100% 100% 0 0; }
+.deco svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.deco.leaves, .deco.stars { inset: -6px; }
+.avatar:hover .deco.stars svg, .avatar:focus-visible .deco.stars svg { animation: deco-twinkle var(--m-slow) var(--ease-out) 1; }
+.avatar:hover .deco.leaves svg, .avatar:focus-visible .deco.leaves svg { animation: deco-sway var(--m-slow) var(--ease-out) 1; }
+@keyframes deco-twinkle { 0% { opacity: 0.4; transform: scale(0.9); } 60% { opacity: 1; transform: scale(1.06); } 100% { transform: scale(1); } }
+@keyframes deco-sway { 0% { transform: rotate(-6deg); } 100% { transform: rotate(0); } }
+:root[data-motion="off"] .deco svg { animation: none !important; }
+@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .deco svg { animation: none !important; } }
+/* Small circles (lists, stacks, replies) never carry one. */
+:root[data-display="compact"] .msg-gutter .deco, .row-ic .deco, .stack .deco, .reply-ref .deco, .ac .deco, .quick-list .deco, .pick-list .deco, .menu-item .deco, .call-strip .deco { display: none; }
+.cemoji-still { display: inline-block; }
+.cemoji-still canvas { width: 100%; height: 100%; display: block; }
+.avatar canvas { width: 100%; height: 100%; border-radius: 50%; display: block; object-fit: cover; }
+
+/* ---------- Name styles (people's own choice; viewers can turn them off) ---------- */
+:root:not([data-name-styles="off"]) [data-ns-font="hyperlegible"] { font-family: "Atkinson Hyperlegible", var(--font); }
+:root:not([data-name-styles="off"]) [data-ns-font="mono"] { font-family: var(--mono); }
+:root:not([data-name-styles="off"]) [data-ns-font="serif"] { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; }
+:root:not([data-name-styles="off"]) [data-ns-weight="bold"] { font-weight: var(--w-bold); }
+:root:not([data-name-styles="off"]) [data-ns-hue]:not(.hued):not(.role-name) { color: oklch(var(--name-l) var(--name-c) var(--ns-hue)); }
+[data-ns-hue="106"] { --ns-hue: 106; } [data-ns-hue="142"] { --ns-hue: 142; } [data-ns-hue="200"] { --ns-hue: 200; } [data-ns-hue="228"] { --ns-hue: 228; }
+[data-ns-hue="255"] { --ns-hue: 255; } [data-ns-hue="335"] { --ns-hue: 335; } [data-ns-hue="350"] { --ns-hue: 350; }
+[data-deco-hue="106"] { --deco-hue: 106; } [data-deco-hue="142"] { --deco-hue: 142; } [data-deco-hue="200"] { --deco-hue: 200; } [data-deco-hue="228"] { --deco-hue: 228; }
+[data-deco-hue="255"] { --deco-hue: 255; } [data-deco-hue="335"] { --deco-hue: 335; } [data-deco-hue="350"] { --deco-hue: 350; }
+
+/* ---------- Profile colours: solid fills, text chosen for 4.5:1 ---------- */
+.has-pcolors .acc-banner { background: var(--pc-1); }
+.has-pcolors.pcard, .has-pcolors.pp, .has-pcolors .pc-body { background: var(--pc-2); color: var(--pc-ink-2); --text-1: var(--pc-ink-2); --text-2: var(--pc-ink-2); --text-3: var(--pc-ink-2); --bg: var(--pc-2); }
+.has-pcolors .pcard-av .avatar, .has-pcolors .pp-av .avatar { box-shadow: 0 0 0 4px var(--pc-2); }
+
+/* ---------- Settings: shared pieces ---------- */
+.ap-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: var(--s-2); margin: var(--s-3) 0 var(--s-4); }
+/* Theme options: the swatch and its name, no card around them; hover lifts a
+   surface step, the chosen one carries a ring. */
+.ap-card { display: grid; gap: var(--s-2); padding: var(--s-1); border-radius: var(--r-md); background: transparent; color: var(--text-2); text-align: left; font-size: var(--t-13); min-height: var(--touch); transition: background var(--m-hover) var(--ease-in-out), color var(--m-hover) var(--ease-in-out); }
+.ap-card:hover { background: var(--surface-hover); color: var(--text-1); }
+.ap-card:active { background: var(--bg-4); }
+.ap-card[aria-checked="true"] { color: var(--text-1); }
+.ap-card[aria-checked="true"] .ap-swatch { box-shadow: 0 0 0 2px var(--accent); }
+.ap-card:disabled { opacity: 0.5; cursor: not-allowed; }
+.ap-card-name { display: flex; justify-content: space-between; align-items: center; gap: var(--s-2); font-weight: var(--w-medium); }
+.ap-card-name .ic { color: var(--accent-ink); }
+.ap-swatch { height: var(--s-10); border-radius: var(--r-sm); display: grid; grid-template-columns: 2fr 1fr; overflow: hidden; box-shadow: inset 0 0 0 1px var(--line-subtle); }
+.ap-swatch span { display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 0 var(--s-2); }
+.ap-swatch i { display: block; height: 4px; border-radius: 2px; width: 70%; }
+.ap-swatch i + i { width: 45%; opacity: 0.6; }
+.ap-swatch b { display: block; width: var(--s-3); height: var(--s-3); border-radius: var(--r-xs); margin: auto; }
+.ap-accents { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: flex-end; }
+.ap-accent { display: inline-flex; align-items: center; gap: var(--s-2); height: var(--h-sm); padding: 0 var(--s-3); border-radius: var(--r-sm); background: var(--bg-3); color: var(--text-2); font-size: var(--t-13); }
+.ap-accent:hover { background: var(--bg-4); color: var(--text-1); }
+.ap-accent:active { background: var(--btn2-press); }
+.ap-accent[aria-checked="true"] { background: var(--bg-4); color: var(--text-1); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.ap-accent i { width: var(--s-3); height: var(--s-3); border-radius: var(--r-xs); background: var(--c); }
+.ap-custom { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); justify-content: flex-end; margin-top: var(--s-2); }
+.ap-hex { width: 7.5rem; font-family: var(--mono); text-transform: uppercase; }
+.ap-color { width: var(--h-md); height: var(--h-md); padding: 2px; border-radius: var(--r-sm); border: 1px solid var(--line-strong); background: var(--bg-3); cursor: pointer; }
+.ap-color::-webkit-color-swatch-wrapper { padding: 0; }
+.ap-color::-webkit-color-swatch { border: 0; border-radius: var(--r-xs); }
+.ap-color:focus-visible { outline: var(--focus-w) solid var(--focus); outline-offset: 2px; }
+.ap-badge { display: inline-flex; align-items: center; gap: var(--s-1); height: var(--s-6); padding: 0 var(--s-2); border-radius: var(--r-row); font-size: var(--t-12); font-weight: var(--w-medium); font-variant-numeric: tabular-nums; background: var(--mint-soft); color: var(--mint-ink); white-space: nowrap; }
+.ap-badge.bad { background: var(--error-soft); color: var(--error); }
+.ap-msg { flex-basis: 100%; text-align: right; font-size: var(--t-13); }
+.ap-msg.err { color: var(--error); }
+
+/* ---------- Live preview (sticky at the top of Appearance) ---------- */
+/* A surface step, not a floating card: no shadow. */
+.ap-preview { position: sticky; top: calc(var(--s-4) * -1); z-index: 2; margin: var(--s-3) 0 var(--s-4); border-radius: var(--r-lg); background: var(--bg-2); overflow: hidden; }
+.ap-preview-head { display: flex; align-items: center; justify-content: space-between; padding: var(--s-1) var(--s-1) 0 var(--s-3); font-size: var(--t-12); color: var(--text-3); }
+.ap-preview-body { padding: var(--s-2) 0; max-height: 18rem; overflow: hidden; pointer-events: none; }
+.ap-preview-body .msg-actions { display: none !important; }
+.ap-preview-foot { display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-3) var(--s-2); }
+.ap-sample-label { margin-right: auto; font-size: var(--t-12); color: var(--text-3); }
+.ap-preview-body .msg-text code { white-space: nowrap; }
+.ap-preview-foot .btn { pointer-events: none; }
+.ap-preview.collapsed .ap-preview-body, .ap-preview.collapsed .ap-preview-foot { display: none; }
+
+/* ---------- Theme builder ---------- */
+.ap-builder { display: grid; gap: var(--s-4); grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+.ap-fields { display: grid; gap: var(--s-3); }
+/* Label, hex, picker, contrast badge on one line when they fit; where the
+   column is narrow (the theme builder beside its preview) the badge wraps
+   under them on the right, and the label never shrinks past its words. */
+.ap-field { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; }
+.ap-field label { flex: 1 0 5.5rem; }
+.ap-field > .ap-badge { margin-left: auto; }
+.ap-field label { font-size: var(--t-13); color: var(--text-2); }
+.ap-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-1); font-size: var(--t-12); }
+.ap-checks li { display: flex; justify-content: space-between; gap: var(--s-2); align-items: center; }
+.ap-mini { border-radius: var(--r-md); overflow: hidden; border: 1px solid var(--tb-line); background: var(--tb-bg); color: var(--tb-text); font-size: var(--t-13); }
+.ap-mini-side { background: var(--tb-surface); padding: var(--s-2) var(--s-3); display: grid; gap: var(--s-1); }
+.ap-mini-side span { color: var(--tb-text2); }
+.ap-mini-side .on { color: var(--tb-text); position: relative; padding-left: var(--s-2); }
+.ap-mini-side .on::before { content: ""; position: absolute; left: 0; top: 2px; bottom: 2px; width: 3px; border-radius: 0 2px 2px 0; background: var(--tb-accent); }
+.ap-mini-main { padding: var(--s-3); display: grid; gap: var(--s-2); }
+.ap-mini-main small { color: var(--tb-text3); }
+.ap-mini-btn { justify-self: start; height: var(--h-sm); padding: 0 var(--s-3); border-radius: var(--r-sm); background: var(--tb-accent); color: var(--tb-on); font-weight: var(--w-semibold); display: inline-flex; align-items: center; }
+.ap-code { display: flex; gap: var(--s-2); flex-wrap: wrap; margin-top: var(--s-2); }
+.ap-code input { flex: 1; min-width: 12rem; font-family: var(--mono); font-size: var(--t-12); }
+.ap-mythemes { display: grid; gap: var(--s-2); }
+.ap-mytheme { display: flex; gap: var(--s-2); align-items: center; padding: var(--s-2) var(--s-3); border-radius: var(--r-md); background: var(--bg-2); }
+.ap-mytheme .grow { flex: 1 1 auto; min-width: 0; }
+.ap-dot { width: var(--s-4); height: var(--s-4); border-radius: var(--r-xs); border: 1px solid var(--line); flex: none; }
+
+/* ---------- Profile picture editor ---------- */
+.ap-avatar { display: grid; gap: var(--s-3); }
+.ap-avatar-now { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
+.ap-crop { display: grid; gap: var(--s-3); justify-items: start; }
+.ap-crop-stage { width: 240px; height: 240px; border-radius: var(--r-md); overflow: hidden; position: relative; background: var(--bg-3); touch-action: none; cursor: grab; }
+.ap-crop-stage:active { cursor: grabbing; }
+.ap-crop-stage canvas { width: 100%; height: 100%; display: block; }
+.ap-crop-stage::after { content: ""; position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 999px rgb(0 0 0 / 0.5); pointer-events: none; }
+.ap-crop-stage:focus-visible { outline: var(--focus-w) solid var(--focus); outline-offset: 2px; }
+.ap-sizes { display: flex; align-items: flex-end; gap: var(--s-3); }
+.ap-sizes > span { display: grid; justify-items: center; gap: var(--s-1); font-size: var(--t-12); color: var(--text-3); }
+.ap-decos { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: flex-start; }
+.ap-deco { display: grid; justify-items: center; gap: var(--s-1); padding: var(--s-2); border-radius: var(--r-md); background: transparent; font-size: var(--t-12); color: var(--text-2); min-width: var(--s-16); transition: background var(--m-hover) var(--ease-in-out); }
+.ap-deco:hover { background: var(--surface-hover); color: var(--text-1); }
+.ap-deco[aria-checked="true"] { box-shadow: inset 0 0 0 2px var(--accent); color: var(--text-1); }
+.ap-namepv { font-size: var(--t-16); font-weight: var(--w-semibold); }
+.ap-card-pv { width: 17.5rem; border-radius: var(--r-lg); overflow: hidden; border: 1px solid var(--line); background: var(--bg-2); }
+.ap-card-pv .acc-banner { height: var(--s-12); }
+.ap-card-pv .pc-body { padding: var(--s-3); display: grid; gap: var(--s-1); }
+
+/* ---------- Keyboard editor ---------- */
+.kb-list { display: grid; gap: 0; }
+.kb-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--s-2); align-items: center; padding: var(--s-2) 0; border-bottom: 1px solid var(--line-subtle); font-size: var(--t-14); }
+.kb-row .kb-keys { display: flex; gap: var(--s-1); flex-wrap: wrap; justify-content: flex-end; min-width: 6rem; }
+.kb-row .kb-none { color: var(--text-3); font-size: var(--t-13); }
+.kb-rec { min-width: 6.5rem; justify-content: center; }
+.kb-rec.listening { box-shadow: inset 0 0 0 1px var(--accent); color: var(--text-1); }
+.kb-err { grid-column: 1 / -1; color: var(--error); font-size: var(--t-13); }
+.kb-changed { color: var(--accent-ink); font-size: var(--t-12); margin-left: var(--s-2); }
+
+@media (max-width: 759px) {
+  .ap-builder { grid-template-columns: 1fr; }
+  .ap-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ap-accent, .ap-deco, .kb-rec { min-height: var(--touch); }
+  .kb-row { grid-template-columns: 1fr auto; }
+  .kb-row .kb-keys { justify-content: flex-start; grid-column: 1 / -1; }
+  .ap-preview { position: static; }
+  .ap-crop-stage { width: 200px; height: 200px; }
+  /* A saved theme: the name on its own line, its four 44px buttons under it. */
+  .ap-mytheme { flex-wrap: wrap; }
+  .ap-mytheme .grow { flex-basis: calc(100% - 2 * var(--s-4) - 2 * var(--s-2)); }
+}
+/* The font picker shows each face in itself, so it wraps rather than scroll. */
+.seg.ap-fonts { flex-wrap: wrap; justify-content: flex-end; }

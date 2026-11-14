@@ -1,0 +1,354 @@
+// Friends ({ type: 'friends', tab }): who is around, everyone, requests, and
+// adding someone by username. Rows, not cards. Favourites sit on top.
+// Arrow keys move through the rows, Enter opens a profile.
+import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
+import { S, go, back, startDm, openConv, acceptFriend, declineFriend, removeFriend, emit as emitNow } from '../store.js';
+import { call } from '../server.js';
+import { startCall, leavingCall } from '../calls.js';
+import { joinVoice } from '../voice.js';
+import { friendsOnline, friendsList, friendRequests, isFriend } from '../lib/social.js';
+import { plural, fold } from '../lib/util.js';
+import { Icon } from '../ui/icons.js';
+import { Avatar, Empty } from '../ui/kit.js';
+import { toast } from '../store.js';
+import { Doing, doingOf, SharedTiles, friendMenu, openPerson, lastActive, ago } from './people.js';
+import { PeopleYouMightKnow } from './discover.js';
+import { p2pOwner, atName } from './p2p.js'; // friends on other PCs: global Snug usernames
+import { Switch } from '../ui/kit.js';
+
+const Back = () => S.ui.phone && S.ui.depth > 0 && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
+const TABS = ['online', 'all', 'requests', 'blocked', 'add'];
+const RECENT = 3 * 86_400_000;
+
+// ---------- Rows ----------
+
+// Roving tabindex: one row in the tab order, arrows move between rows.
+function onListKey(e) {
+  const row = e.target.closest?.('.f-row');
+  if (!row || e.target !== row) return;
+  const rows = [...e.currentTarget.querySelectorAll('.f-row')];
+  const i = rows.indexOf(row);
+  let next = -1;
+  if (e.key === 'ArrowDown') next = Math.min(rows.length - 1, i + 1);
+  else if (e.key === 'ArrowUp') next = Math.max(0, i - 1);
+  else if (e.key === 'Home') next = 0;
+  else if (e.key === 'End') next = rows.length - 1;
+  else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPerson(row.dataset.id); return; }
+  if (next < 0) return;
+  e.preventDefault();
+  rows.forEach((r, j) => r.setAttribute('tabindex', j === next ? '0' : '-1'));
+  rows[next].focus();
+}
+
+function Row({ id, first, kind = 'friend', children }) {
+  const u = S.users[id];
+  if (!u) return null;
+  const d = doingOf(u);
+  const f = S.friends[id];
+  return html`<li class=${`f-row${u.presence === 'offline' ? ' is-off' : ''}`} data-id=${id} tabindex=${first ? '0' : '-1'} aria-label=${`${u.name}, ${d.text}${u.remote ? ', on another PC' : ''}${f?.favorite ? ', favourite' : ''}`}
+      onClick=${(e) => { if (!e.target.closest('button')) openPerson(id); }}
+      onFocus=${(e) => { if (e.target === e.currentTarget) e.currentTarget.closest('.f-list')?.querySelectorAll('.f-row').forEach((r) => r.setAttribute('tabindex', r === e.currentTarget ? '0' : '-1')); }}>
+      <${Avatar} user=${u} presence speaking=${!!S.speaking[id]} dim=${u.presence === 'offline'} />
+      <span class="f-text">
+        <span class="f-name"><span class="trunc">${u.name}</span>${f?.favorite && kind === 'friend' && html`<span class="f-star" aria-hidden="true"><${Icon} name="starred" size=${12} /></span>`}<span class="f-handle trunc">@${atName(u)}</span>${u.remote && html`<span class="f-remote" data-tip="On another PC" aria-label="On another PC"><${Icon} name="screen" size=${12} /></span>`}</span>
+        ${kind === 'friend' && html`<span class="f-sub"><${Doing} u=${u} /></span>`}
+        ${kind !== 'friend' && html`<span class="f-sub"><span class="trunc">${kind === 'incoming' ? `Sent you a request ${ago(f.since)}` : `You asked ${ago(f.since)}`}</span></span>`}
+      </span>
+      <span class="f-end"><${SharedTiles} id=${id} /></span>
+      <span class="f-acts">${children}</span>
+  </li>`;
+}
+
+// Ring someone: open (or find) the conversation with them, then call there.
+function ring(id) {
+  call('dm.open', { users: [id] }).then((r) => startCall(r.id), (e) => toast(e.offline ? 'You’re offline, so you can’t call right now.' : e.message));
+}
+
+// Hover actions (always shown on touch and while the row has focus):
+// message, call, join them in voice when they are in a room, and the rest in More.
+function FriendActions({ id }) {
+  const u = S.users[id];
+  const live = doingOf(u).live;
+  return html`
+    <button class="ib compact" aria-label=${`Message ${u.name}`} data-tip="Message" onClick=${() => startDm([id])}><${Icon} name="dm" size=${18} /></button>
+    ${live
+      ? html`<button class="ib compact live" aria-label=${`Join ${u.name} in ${S.rooms[live].name}`} data-tip=${`Join in ${S.rooms[live].name}`} onClick=${() => openConv(live)}><${Icon} name="speaker" size=${18} /></button>`
+      : html`<button class="ib compact" aria-label=${`Call ${u.name}`} data-tip="Voice call" onClick=${() => ring(id)}><${Icon} name="phone" size=${18} /></button>`}
+    <button class="ib compact" aria-label=${`More for ${u.name}`} aria-haspopup="menu" data-tip="More" onClick=${(e) => friendMenu(id, e.currentTarget.getBoundingClientRect())}><${Icon} name="more-v" size=${18} /></button>`;
+}
+
+function RequestActions({ id, incoming }) {
+  const [busy, setBusy] = useState(false);
+  const u = S.users[id];
+  const run = (p) => { setBusy(true); Promise.resolve(p).finally(() => setBusy(false)); };
+  if (incoming) {
+    return html`
+      <button class="btn sm primary" disabled=${busy} aria-busy=${busy ? 'true' : undefined} onClick=${() => run(acceptFriend(id))}>Accept</button>
+      <button class="btn sm" disabled=${busy} aria-label=${`Decline ${u.name}`} onClick=${() => run(declineFriend(id))}>Decline</button>`;
+  }
+  return html`<button class="btn sm quiet" disabled=${busy} aria-label=${`Cancel request to ${u.name}`} onClick=${() => run(removeFriend(id))}>Cancel</button>`;
+}
+
+function Group({ title, count, note, ids, render, start }) {
+  if (!ids.length) return null;
+  return html`<section class="f-group" aria-label=${title}>
+    <h2 class="f-head">${title}${count != null && html`<span class="count num"><span aria-hidden="true"> — </span><span class="sr">, </span>${count}</span>`}</h2>
+    ${note && html`<p class="f-note">${note}</p>`}
+    <ul class="f-list-part">${ids.map((id, i) => render(id, start === 0 && i === 0))}</ul>
+  </section>`;
+}
+
+const friendRow = (id, first) => html`<${Row} key=${id} id=${id} first=${first}><${FriendActions} id=${id} /><//>`;
+
+// ---------- Filter (Online and All) ----------
+// One box above the list; Escape clears it. Matches names and usernames.
+const matches = (id) => {
+  const q = fold(S.ui.friendQ || '').trim();
+  if (!q) return true;
+  const u = S.users[id];
+  return !!u && fold(`${u.name} ${u.handle} ${u.username || ''}`).includes(q.replace(/^@/, ''));
+};
+function FilterBox() {
+  const set = (v) => { S.ui.friendQ = v; emitNow(); };
+  return html`<div class="f-filter">
+    <label class="sr" for="f-filter">Filter friends</label>
+    <span class="f-filter-ic" aria-hidden="true"><${Icon} name="search" size=${16} /></span>
+    <input id="f-filter" class="field" type="search" placeholder="Filter by name or username" autocomplete="off" value=${S.ui.friendQ || ''}
+      onInput=${(e) => set(e.target.value)} onKeyDown=${(e) => { if (e.key === 'Escape' && e.target.value) { e.preventDefault(); e.stopPropagation(); set(''); } }} />
+  </div>`;
+}
+const NoMatch = () => html`<${Empty} icon="search" title="Nobody by that name" text="Check the spelling, or clear the filter to see everyone.">
+  <button class="btn" onClick=${() => { S.ui.friendQ = ''; emitNow(); }}>Clear filter</button>
+<//>`;
+
+// ---------- Tabs ----------
+
+function OnlineTab() {
+  const online = friendsOnline(S).filter(matches);
+  const favs = online.filter((id) => S.friends[id].favorite);
+  const rest = online.filter((id) => !S.friends[id].favorite);
+  const now = Date.now();
+  const recent = friendsList(S)
+    .filter((id) => S.users[id]?.presence === 'offline')
+    .map((id) => [id, lastActive(id)])
+    .filter(([id, t]) => t && now - t < RECENT && matches(id))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([id]) => id);
+  if (!friendsList(S).length) return html`<${NoFriends} />`;
+  if (S.ui.friendQ && !online.length && !recent.length) return html`<${FilterBox} /><${NoMatch} />`;
+  if (!online.length && !recent.length) {
+    return html`<${Empty} icon="people" title="Nobody’s around right now" text="Friends show up here when they’re online, with what they’re up to.">
+      <button class="btn" onClick=${() => go({ type: 'friends', tab: 'all' })}>See all friends</button>
+    <//>`;
+  }
+  return html`<${FilterBox} /><div class="f-list" onKeyDown=${onListKey}>
+    <${Group} title="Favourites" count=${favs.length} ids=${favs} render=${friendRow} start=${0} />
+    <${Group} title=${favs.length ? 'Also online' : 'Online'} count=${rest.length} ids=${rest} render=${friendRow} start=${favs.length ? 1 : 0} />
+    ${!online.length && html`<p class="f-quiet">No friends online right now.</p>`}
+    <${Group} title="Recently active" count=${recent.length} note="Offline now, but wrote something in the last few days." ids=${recent} render=${friendRow} start=${online.length ? 1 : 0} />
+  </div>`;
+}
+
+// No friends at all: the honest empty state is the way to add one, right here.
+const NoFriends = () => html`<${AddTab} title="No friends here yet" focus=${false}
+  lead="Add someone by their username, or pick from people you already share a house with. You’ll see when they’re around." />`;
+
+function AllTab() {
+  const everyone = friendsList(S);
+  if (!everyone.length) return html`<${NoFriends} />`;
+  const all = everyone.filter(matches);
+  if (!all.length) return html`<${FilterBox} /><${NoMatch} />`;
+  const favs = all.filter((id) => S.friends[id].favorite);
+  const rest = all.filter((id) => !S.friends[id].favorite);
+  const off = (id) => (S.users[id]?.presence || 'offline') === 'offline';
+  const on = rest.filter((id) => !off(id));
+  const gone = rest.filter(off);
+  return html`<${FilterBox} /><div class="f-list" onKeyDown=${onListKey}>
+    <${Group} title="Favourites" count=${favs.length} ids=${favs} render=${friendRow} start=${0} />
+    <${Group} title="Online" count=${on.length} ids=${on} render=${friendRow} start=${favs.length ? 1 : 0} />
+    <${Group} title="Offline" count=${gone.length} ids=${gone} render=${friendRow} start=${favs.length || on.length ? 1 : 0} />
+  </div>`;
+}
+
+function RequestsTab() {
+  const incoming = friendRequests(S, 'incoming');
+  const outgoing = friendRequests(S, 'outgoing');
+  if (!incoming.length && !outgoing.length) {
+    return html`<${Empty} icon="check" title="No requests waiting" text="When someone asks to be your friend, it shows up here. Requests you send wait here too.">
+      <button class="btn" onClick=${() => go({ type: 'friends', tab: 'add' })}>Add a friend</button>
+    <//>`;
+  }
+  return html`<div class="f-list" onKeyDown=${onListKey}>
+    <${Group} title="Waiting on you" count=${incoming.length} ids=${incoming} start=${0}
+      render=${(id, first) => html`<${Row} key=${id} id=${id} first=${first} kind="incoming"><${RequestActions} id=${id} incoming /><//>`} />
+    <${Group} title="Sent" count=${outgoing.length} note="Waiting for them to say yes. Cancel any time." ids=${outgoing} start=${incoming.length ? 1 : 0}
+      render=${(id, first) => html`<${Row} key=${id} id=${id} first=${first} kind="outgoing"><${RequestActions} id=${id} /><//>`} />
+  </div>`;
+}
+
+// People you blocked: they can't message you, ring you or see you. Unblock here.
+function BlockedTab() {
+  const ids = S.safety?.blocks || [];
+  const [busy, setBusy] = useState(null);
+  if (!ids.length) {
+    return html`<${Empty} icon="shield" title="You haven’t blocked anyone" text="Block someone from their profile or a message’s menu. They can’t message you, ring you or see when you’re around." />`;
+  }
+  const unblock = (id) => {
+    setBusy(id);
+    call('block.set', { user: id, on: false }).then(() => {
+      if (S.safety) S.safety.blocks = S.safety.blocks.filter((x) => x !== id);
+      toast(`${S.users[id]?.name || 'They'} can reach you again.`);
+    }, (err) => toast(err.offline ? 'You’re offline. Try again once you’re back.' : err.message)).finally(() => setBusy(null));
+  };
+  return html`<div class="f-list" onKeyDown=${onListKey}>
+    <section class="f-group" aria-label="Blocked">
+      <h2 class="f-head">Blocked<span class="count num"><span aria-hidden="true"> — </span><span class="sr">, </span>${ids.length}</span></h2>
+      <p class="f-note">They can’t message you, ring you or see when you’re around. Unblocking doesn’t tell them.</p>
+      <ul class="f-list-part">${ids.map((id, i) => {
+        const u = S.users[id] || { id, name: 'Someone', handle: id, hue: 165 };
+        return html`<li key=${id} class="f-row" data-id=${id} tabindex=${i === 0 ? '0' : '-1'} aria-label=${`${u.name}, blocked`}>
+          <${Avatar} user=${u} />
+          <span class="f-text"><span class="f-name"><span class="trunc">${u.name}</span><span class="f-handle trunc">@${u.handle}</span></span></span>
+          <span class="f-acts"><button class="btn" disabled=${busy === id} aria-busy=${busy === id ? 'true' : undefined} aria-label=${`Unblock ${u.name}`} onClick=${() => unblock(id)}>Unblock</button></span>
+        </li>`;
+      })}</ul>
+    </section>
+  </div>`;
+}
+
+function AddTab({ title = 'Add a friend', lead = 'Friends see each other’s presence and can message any time, even without a house in common.', focus = true }) {
+  const global = p2pOwner(); // this PC's Snug account: usernames are global unless "On this PC" (S27)
+  const [local, setLocal] = useState(false);
+  const [handle, setHandle] = useState('');
+  const [st, setSt] = useState({ status: 'idle' });
+  const [people, setPeople] = useState(null);
+  const input = useRef();
+  useEffect(() => {
+    if (focus && !S.ui.phone) input.current?.focus();
+    let live = true;
+    call('discover', { q: '', topic: null }).then((r) => live && setPeople(r.people), () => live && setPeople([]));
+    return () => { live = false; };
+  }, []);
+  const submit = async (e) => {
+    e.preventDefault();
+    const v = handle.trim().replace(/^@/, '');
+    if (!v) { setSt({ status: 'error', text: 'Type a username first, like @ines.' }); input.current?.focus(); return; }
+    setSt({ status: 'sending' });
+    try {
+      const r = await call('friend.request', global && local ? { handle: v, local: true } : { handle: v });
+      const name = S.users[r.user]?.name || `@${v}`;
+      setSt({ status: 'done', user: r.user, friends: r.state === 'friends', name });
+      setHandle('');
+    } catch (err) {
+      setSt({ status: 'error', text: err.offline ? 'You’re offline. Try again once you’re back.' : err.message });
+      input.current?.focus();
+    }
+  };
+  const bad = st.status === 'error';
+  return html`<div class="f-add">
+    <h2 class="f-add-title">${title}</h2>
+    <p class="f-add-lead">${lead}</p>
+    <form class="f-add-form" onSubmit=${submit} novalidate>
+      <label class="sr" for="f-add-handle">${global && !local ? 'Their Snug username' : 'Username'}</label>
+      <div class=${`f-add-field${bad ? ' bad' : ''}${st.status === 'done' ? ' ok' : ''}`}>
+        <span class="f-at" aria-hidden="true">@</span>
+        <input id="f-add-handle" ref=${input} autocomplete="off" autocapitalize="none" spellcheck="false" placeholder=${global && !local ? 'their Snug username' : 'username'} maxlength="40"
+          value=${handle} aria-invalid=${bad ? 'true' : undefined} aria-describedby="f-add-msg"
+          onInput=${(e) => { setHandle(e.target.value); if (st.status !== 'idle' && st.status !== 'sending') setSt({ status: 'idle' }); }} />
+        <button class="btn primary" type="submit" disabled=${st.status === 'sending' || !handle.trim()} aria-busy=${st.status === 'sending' ? 'true' : undefined}>
+          ${st.status === 'sending' ? 'Sending…' : 'Send request'}
+        </button>
+      </div>
+      <div id="f-add-msg" class="f-add-msg" role=${bad ? 'alert' : 'status'} aria-live="polite">
+        ${bad && html`<span class="err-line"><${Icon} name="alert" size=${16} />${st.text}</span>`}
+        ${st.status === 'done' && html`<span class="ok-line"><${Icon} name="check" size=${16} />
+          ${st.friends ? html`You and <b>${st.name}</b> are friends now.` : html`Request sent to <b>${st.name}</b>. You’ll see it under Requests until they answer.`}
+          ${st.user && S.users[st.user] && html`<button class="btn quiet" type="button" onClick=${() => openPerson(st.user)}>View profile</button>`}
+        </span>`}
+        ${st.status === 'idle' && html`<span class="f-add-hint">${global && !local
+          ? 'Snug usernames are unique, on every PC. Ask your friend for theirs; it’s in their Settings, under Account. Capitals don’t matter.'
+          : 'Usernames are on every profile, under the name. Capitals don’t matter.'}</span>`}
+      </div>
+      ${global && html`<label class="f-add-toggle"><${Switch} on=${local} label="On this PC" onChange=${(v) => { setLocal(v); setSt({ status: 'idle' }); }} />
+        <span>On this PC: someone with a password account here, over your network</span></label>`}
+    </form>
+    ${people === null
+      ? html`<p class="f-quiet">Looking for people you might know…</p>`
+      : html`<${PeopleYouMightKnow} people=${people.filter((p) => !isFriend(S, p.user.id))} limit=${6} />`}
+  </div>`;
+}
+
+// ---------- Active now (wide screens) ----------
+// Friends in a voice room first (with a Join), then anyone with a status.
+function ActiveNow() {
+  const ids = friendsOnline(S).filter((id) => S.users[id]);
+  const live = ids.filter((id) => doingOf(S.users[id]).live);
+  const said = ids.filter((id) => !live.includes(id) && doingOf(S.users[id]).status);
+  return html`<aside class="f-active" aria-label="Active now">
+    <h2 class="f-active-h">Active now</h2>
+    ${!live.length && !said.length
+      ? html`<p class="f-active-empty">It’s quiet for now. When a friend joins a voice room or sets a status, it shows here.</p>`
+      : html`<ul class="f-active-list">${[...live, ...said].map((id) => {
+          const u = S.users[id];
+          const d = doingOf(u);
+          return html`<li key=${id} class="f-active-row">
+            <button class="f-active-who" onClick=${() => openPerson(id)}>
+              <${Avatar} user=${u} presence size=${32} />
+              <span class="f-active-text"><span class="f-active-name trunc">${u.name}</span><${Doing} u=${u} /></span>
+            </button>
+            ${d.live && S.call?.room !== d.live && html`<button class="btn f-active-join" aria-label=${`Join ${S.rooms[d.live].name}`} onClick=${() => { openConv(d.live); leavingCall(d.live, () => joinVoice(d.live)); }}>Join</button>`}
+          </li>`;
+        })}</ul>`}
+  </aside>`;
+}
+
+// ---------- The page ----------
+
+export function Friends() {
+  const v = S.ui.view;
+  const tab = TABS.includes(v.tab) ? v.tab : 'online';
+  const online = friendsOnline(S).length;
+  const all = friendsList(S).length;
+  const incoming = friendRequests(S, 'incoming').length;
+  const outgoing = friendRequests(S, 'outgoing').length;
+  const tabs = [
+    { id: 'online', label: 'Online', count: online },
+    { id: 'all', label: 'All', count: all },
+    { id: 'requests', label: 'Pending', count: incoming, badge: true, more: outgoing },
+    { id: 'blocked', label: 'Blocked', count: (S.safety?.blocks || []).length },
+    { id: 'add', label: 'Add friend', icon: 'user-plus' },
+  ];
+  const pick = (id) => go({ type: 'friends', tab: id });
+  const onTabKey = (e) => {
+    const i = TABS.indexOf(tab);
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      const next = TABS[(i + (e.key === 'ArrowRight' ? 1 : -1) + TABS.length) % TABS.length];
+      pick(next);
+      requestAnimationFrame(() => document.getElementById(`f-tab-${next}`)?.focus());
+    }
+  };
+  const tabBar = html`<div class="f-tabs" role="tablist" aria-label="Friends" onKeyDown=${onTabKey}>
+    ${tabs.map((t) => html`<button key=${t.id} id=${`f-tab-${t.id}`} class=${`f-tab${t.id === 'add' ? ' add' : ''}`} role="tab" aria-selected=${String(tab === t.id)}
+      aria-controls="f-panel" tabindex=${tab === t.id ? '0' : '-1'} onClick=${() => pick(t.id)}
+      aria-label=${t.badge ? `Pending: ${plural(incoming, 'waiting on you', 'waiting on you')}, ${outgoing} sent` : undefined}>
+      ${t.icon && html`<${Icon} name=${t.icon} size=${16} />`}<span class="f-tab-label">${t.label}</span>
+      ${t.badge ? (t.count > 0 && html`<span class="badge">${t.count}</span>`) : t.count != null && html`<span class="f-tab-count num">${t.count}</span>`}
+    </button>`)}
+  </div>`;
+  const Body = { online: OnlineTab, all: AllTab, requests: RequestsTab, blocked: BlockedTab, add: AddTab }[tab];
+  return html`<section class="main view friends-view" aria-label="Friends">
+    <header class="bar">
+      <${Back} />
+      <h1 class="bar-title"><${Icon} name="people" />Friends</h1>
+      ${S.ui.phone && online > 0 && html`<span class="bar-sub num">${online} online</span>`}
+      ${!S.ui.phone && tabBar}
+    </header>
+    ${S.ui.phone && tabBar}
+    <div class="view-body" id="f-panel" role="tabpanel" aria-labelledby=${`f-tab-${tab}`}>
+      <div class="f-wrap"><${Body} key=${tab} /></div>
+      ${!S.ui.phone && html`<${ActiveNow} />`}
+    </div>
+  </section>`;
+}

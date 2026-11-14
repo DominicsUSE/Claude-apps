@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- The Huddle redrawn on the 16px grid so every edge lands on a pixel:
+       arch 12 x 13, cut-outs 4px and 3px wide with 1px between them, 2px clear
+       of each side and of the foot, bottoms level. They show the tab colour. -->
+  <path fill="#8B5CF6" fill-rule="evenodd" d="M2 14V8a6 6 0 0 1 12 0v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1ZM4 11a2 2 0 1 0 4 0a2 2 0 1 0-4 0ZM9 11.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0Z"/>
+</svg>

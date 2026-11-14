@@ -1,0 +1,103 @@
+/* Inbox, direct conversations, notifications and the desktop shell
+   (js/inbox.js, js/landmarks.js, js/desktop.js, js/views/mentions.js,
+   js/views/dm-manage.js, js/views/desktop-settings.js, js/views/handle.js). */
+
+/* ---------- The main view is the one <main>; it takes no box of its own ---------- */
+.main-land { display: contents; }
+
+/* ---------- Skip to messages: the first Tab stop, seen only when focused ---------- */
+.skip-link {
+  position: fixed; left: var(--s-2); top: var(--s-2); z-index: 1000;
+  min-height: 44px; padding: 0 var(--s-4); display: inline-flex; align-items: center;
+  background: var(--bg-3); color: var(--text-1); border: 1px solid var(--line-strong); border-radius: var(--r-md);
+  font-weight: var(--w-semibold); text-decoration: none; box-shadow: var(--shadow-md);
+  transform: translateY(-200%);
+}
+.skip-link:focus, .skip-link:focus-visible { transform: none; outline: var(--focus-w) solid var(--focus); outline-offset: 2px; }
+
+/* ---------- Catch up tabs and the Mentions list ---------- */
+.cu-tabs { margin: 0; }
+.mentions { display: grid; gap: var(--s-2); }
+/* One row: the house select and the chips; on a narrow screen the row scrolls rather than wraps. */
+.mentions-filters { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--s-2); padding: var(--s-3) var(--s-4) var(--s-1); overflow-x: auto; scrollbar-width: none; }
+.mentions-filters::-webkit-scrollbar { display: none; }
+.mentions-filters > * { flex: none; }
+.mentions-house { width: auto; min-width: 0; max-width: 200px; height: 32px; }
+.mentions-filters .chip[aria-pressed="false"] { color: var(--text-3); text-decoration: line-through; }
+.mentions-filters .chip[aria-pressed="true"] { background: var(--surface-sel); color: var(--text-1); }
+.mentions-list { list-style: none; margin: 0; padding: 0; }
+.mention-row { position: relative; }
+.mention-row:focus-visible { outline-offset: -2px; }
+.mentions-loading { color: var(--text-3); padding: var(--s-4) 0; }
+.mentions-more { display: flex; justify-content: center; padding: var(--s-2) 0 var(--s-4); }
+.banner.err { color: var(--text-1); border-color: var(--error); background: var(--error-soft); }
+
+/* ---------- Groups: icon, members, the change lines ---------- */
+.dm-icon-preview { display: flex; justify-content: center; padding: var(--s-2) 0 var(--s-4); }
+.dm-icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: var(--s-1); margin: var(--s-2) 0 var(--s-4); }
+.dm-icon-opt {
+  height: 44px; display: inline-flex; align-items: center; justify-content: center; font-size: 22px;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg-2); color: var(--text-2);
+}
+.dm-icon-opt:hover { background: var(--hover); border-color: var(--line-strong); }
+.dm-icon-opt.on { border-color: var(--text-1); background: var(--surface-sel); color: var(--text-1); }
+.dm-hue-row { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: var(--s-2) 0 var(--s-4); }
+.dm-hue {
+  width: 32px; height: 32px; border-radius: var(--r-full); border: 2px solid transparent;
+  background: oklch(var(--tile-l, 0.6) 0.1 var(--hue)); box-shadow: inset 0 0 0 1px var(--line);
+}
+.dm-hue:hover { border-color: var(--line-strong); }
+.dm-hue.on { border-color: var(--text-1); }
+.dm-hue:disabled { opacity: 0.4; cursor: not-allowed; }
+@media (pointer: coarse) { .dm-hue { width: 44px; height: 44px; } }
+
+.dm-members { width: min(320px, calc(100vw - 32px)); padding: var(--s-2); display: grid; gap: var(--s-2); }
+.dm-members-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); padding: 0 var(--s-2); }
+.dm-members-list { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; }
+.dm-member { display: flex; align-items: center; gap: var(--s-1); }
+.dm-member-main { flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-2); border-radius: var(--r-sm); text-align: left; color: var(--text-1); }
+.dm-member-main:hover { background: var(--hover); }
+.dm-member .tag { font-size: var(--t-12); color: var(--text-2); border: 1px solid var(--line); border-radius: var(--r-xs); padding: 0 var(--s-1); }
+.dmline-ic { color: var(--text-3); display: inline-flex; justify-content: center; width: var(--avatar); margin-right: var(--s-2); flex: none; }
+@media (max-width: 759px) { .dmline-ic { margin-right: var(--s-1); } }
+
+/* ---------- Presence for a while (the presence menu) ---------- */
+.pres-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; }
+/* A duration picker, not a word: a clock and a chevron that opens the times. */
+.pres-for { width: auto; gap: 2px; padding: 0 var(--s-2); font-size: var(--t-meta); color: var(--text-3); justify-content: center; align-self: center; }
+.pres-for:hover { color: var(--text-1); }
+.pres-for.on { color: var(--text-1); background: var(--surface-sel); }
+.pres-times { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: var(--s-1); padding: var(--s-1) var(--s-3) var(--s-2) calc(var(--s-3) + 20px); }
+
+/* ---------- Friends: filter box; profile: mutual friends ---------- */
+.f-filter { position: relative; margin: 0 0 var(--s-3); }
+.f-filter-ic { position: absolute; left: var(--s-3); top: 50%; transform: translateY(-50%); color: var(--text-3); display: inline-flex; pointer-events: none; }
+.f-filter .field { width: 100%; height: var(--h-sm); padding-left: calc(var(--s-3) + 20px); }
+.pp-mutual { display: grid; gap: var(--s-2); }
+.pp-mutual-toggle { display: inline-flex; align-items: center; gap: var(--s-2); min-height: 32px; border-radius: var(--r-sm); color: var(--text-2); }
+.pp-mutual-toggle:hover { color: var(--text-1); }
+.pp-mutual-chev { display: inline-flex; transition: transform var(--m-fast) var(--ease-in-out); }
+.pp-mutual-chev.open { transform: rotate(180deg); }
+.pp-mutual-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-1); }
+.pp-mutual-person { width: 100%; min-height: 44px; display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-2); border-radius: var(--r-sm); text-align: left; color: var(--text-1); }
+.pp-mutual-person:hover { background: var(--hover); }
+
+/* ---------- Settings: Desktop app, Username ---------- */
+.ds-key { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.ds-key .err { flex-basis: 100%; }
+.handle-now { font-family: var(--mono); color: var(--text-2); margin-right: var(--s-2); }
+.handle-form { display: grid; gap: var(--s-3); width: min(320px, 100%); }
+.handle-field .field { width: 100%; }
+.handle-acts { display: flex; justify-content: flex-end; gap: var(--s-2); }
+
+/* ---------- A newer Snug (desktop app) ---------- */
+.update-strip {
+  position: fixed; left: 50%; top: var(--s-2); transform: translateX(-50%); z-index: 900;
+  display: flex; align-items: center; gap: var(--s-2); max-width: calc(100vw - 32px);
+  padding: var(--s-1) var(--s-1) var(--s-1) var(--s-3); min-height: 40px;
+  background: var(--bg-2); color: var(--text-1); border: 1px solid var(--cyan); border-radius: var(--r-md); box-shadow: var(--shadow-md);
+}
+.update-strip > svg:first-child { color: var(--cyan); flex: none; }
+
+/* ---------- Invite: the snug:// link for the desktop app ---------- */
+.invite-app { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); margin-top: var(--s-2); }

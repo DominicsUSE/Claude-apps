@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>Snug</title>
+  <!-- Charcoal platform square (radius 22.5%), the Huddle at 11x the 64 grid,
+       centred: arch 528 x 594 (58% of the height), the cut-outs showing the
+       charcoal. -->
+  <rect width="1024" height="1024" rx="230" fill="#141516"/>
+  <path fill="#8B5CF6" fill-rule="evenodd" transform="matrix(11 0 0 11 160 149)" d="M8 56V30a24 24 0 0 1 48 0v26a4 4 0 0 1-4 4H12a4 4 0 0 1-4-4ZM15 46a8 8 0 1 0 16 0a8 8 0 1 0-16 0ZM35 48a6 6 0 1 0 12 0a6 6 0 1 0-12 0Z"/>
+</svg>

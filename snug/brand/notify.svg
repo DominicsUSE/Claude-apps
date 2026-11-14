@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+  <title>Snug</title>
+  <!-- Notification mark: the Huddle on the 24 grid (0.375 of the 64 grid,
+       arch 18 x 20). brand/notify-badge.png is this in white. -->
+  <path fill="#8B5CF6" fill-rule="evenodd" transform="matrix(.375 0 0 .375 0 -.375)" d="M8 56V30a24 24 0 0 1 48 0v26a4 4 0 0 1-4 4H12a4 4 0 0 1-4-4ZM15 46a8 8 0 1 0 16 0a8 8 0 1 0-16 0ZM35 48a6 6 0 1 0 12 0a6 6 0 1 0-12 0Z"/>
+</svg>

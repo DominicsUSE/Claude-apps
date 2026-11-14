@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <title>Snug</title>
+  <!-- The app icon redrawn on the 16px grid for 16, 24 and 32px uses (taskbar,
+       title bar, small .ico entries): the arch fills 12 x 12 so the cut-outs
+       can be 4px and 3px (a 2px one reads as a square), 1px apart, bottoms
+       level 2px above the foot, all on whole pixels. -->
+  <rect width="16" height="16" rx="3.5" fill="#141516"/>
+  <path fill="#8B5CF6" fill-rule="evenodd" d="M2 13V8a6 6 0 0 1 12 0v5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1ZM4 10a2 2 0 1 0 4 0a2 2 0 1 0-4 0ZM9 10.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0Z"/>
+</svg>

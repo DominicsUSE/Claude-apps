@@ -1,0 +1,99 @@
+/* Voice messages, pinned messages and GIFs (js/views/media.js).
+   Attachments are cards (a separate object); pins are quiet lines and marks.
+   Mint means live: the recording dot and level meter. Violet stays on Send. */
+
+/* Voice message: one compact row. Played bars take the text colour. */
+.voice { height: var(--h-lg); display: inline-flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-2) 0 6px; max-width: min(100%, 380px); width: 380px; background: var(--surface-2); border: 1px solid var(--line-subtle); border-radius: var(--r-lg); }
+.voice-play { flex: none; width: var(--h-sm); height: var(--h-sm); border-radius: var(--r-sm); display: grid; place-items: center; background: var(--btn2); color: var(--text-1); transition: background var(--m-fast) var(--ease-in-out); }
+.voice-play:hover { background: var(--btn2-hover); }
+.voice-play:active { background: var(--btn2-press); }
+.voice-play[disabled] { color: var(--text-disabled); }
+.voice-wave { flex: 1; min-width: 0; height: 28px; display: flex; align-items: center; gap: 2px; cursor: pointer; border-radius: var(--r-xs); }
+.voice-wave i { flex: 1; min-width: 1px; max-width: 4px; border-radius: 1px; background: var(--text-3); opacity: 0.55; transition: background var(--m-fast) var(--ease-in-out), opacity var(--m-fast) var(--ease-in-out); }
+.voice-wave i.done { background: var(--text-1); opacity: 1; }
+.voice-time { flex: none; min-width: 34px; font-size: var(--t-12); color: var(--text-2); font-variant-numeric: tabular-nums; text-align: right; }
+.voice-speed { flex: none; height: 24px; min-width: 34px; padding: 0 6px; border-radius: var(--r-xs); font-size: var(--t-12); font-weight: var(--w-semibold); color: var(--text-2); font-variant-numeric: tabular-nums; border: 1px solid var(--line); transition: background var(--m-fast) var(--ease-in-out), color var(--m-fast) var(--ease-in-out); }
+.voice-speed:hover { background: var(--hover); color: var(--text-1); }
+.voice.failed .voice-time { color: var(--error); }
+.voice audio { display: none; }
+
+/* Recording: the bar covers the composer row while it is on. */
+.composer-row { position: relative; }
+.ib.mic { touch-action: none; user-select: none; -webkit-user-select: none; }
+.rec { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; gap: var(--s-2); padding: var(--s-1); background: var(--surface-2); border-radius: var(--r-input); }
+.rec-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--mint); animation: rec-blink 1.6s var(--ease-in-out) infinite; }
+.rec.starting .rec-dot, .rec.sending .rec-dot { background: var(--text-3); animation: none; }
+@keyframes rec-blink { 50% { opacity: 0.35; } }
+.rec-time { flex: none; font-size: var(--t-14); font-weight: var(--w-semibold); font-variant-numeric: tabular-nums; min-width: 36px; }
+.rec-meter { flex: none; display: flex; align-items: center; gap: 2px; height: 24px; width: 96px; }
+.rec-meter i { flex: 1; border-radius: 1px; background: var(--mint); opacity: 0.85; min-height: 2px; }
+.rec.starting .rec-meter i, .rec.sending .rec-meter i { background: var(--text-3); }
+.rec-note { min-width: 0; font-size: var(--t-12); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rec-note.bad { color: var(--error); white-space: normal; }
+.rec-left { color: var(--amber-ink); font-weight: var(--w-semibold); }
+.rec .grow { flex: 1; }
+@media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .rec-dot { animation: none; } }
+:root[data-motion="off"] .rec-dot { animation: none; }
+@media (max-width: 759px) {
+  .rec-meter { width: 56px; }
+  /* A phone row is narrow: while you type, the GIF and microphone buttons step aside for the text. */
+  .composer-row:has(textarea:not(:placeholder-shown)) :is(.gif-btn, .ib.mic:not(.on)) { display: none; }
+  .composer-row textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}
+
+/* Pins: a mark on the message, a line in the stream, a list in the pane. */
+.msg-pin { display: flex; align-items: center; gap: 4px; font-size: var(--t-12); color: var(--text-3); line-height: var(--lh-ui); margin: 1px 0 2px; }
+.pinline { display: flex; align-items: center; flex-wrap: wrap; column-gap: var(--s-2); min-height: 28px; padding: 2px var(--s-4); margin-top: var(--s-2); font-size: var(--t-body); line-height: var(--lh-ui); color: var(--text-2); transition: background var(--m-hover) var(--ease-in-out); } /* the system-line pattern: see .callline */
+.pinline:hover { background: var(--surface-chat-hover); }
+.pinline-ic { display: inline-flex; justify-content: center; width: var(--avatar); margin-right: var(--s-2); flex: none; color: var(--text-3); }
+.pinline b { font-weight: var(--w-semibold); color: var(--text-1); }
+.pinline-link { color: var(--text-1); font-weight: var(--w-semibold); border-radius: var(--r-row); }
+.pinline-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.pinline-time { font-size: var(--t-meta); color: var(--text-3); }
+.pinline + .msg { margin-top: var(--s-2); }
+@media (max-width: 759px) { .pinline { padding: 2px var(--s-3); } .pinline-ic { margin-right: var(--s-1); } }
+.ib.pins-btn { width: auto; display: inline-flex; align-items: center; padding: 0 var(--s-2); gap: 4px; }
+.ib.pins-btn .num { font-size: var(--t-13); font-weight: var(--w-semibold); font-variant-numeric: tabular-nums; }
+.pins-count { font-size: var(--t-12); font-weight: var(--w-semibold); color: var(--text-3); margin: 0 0 var(--s-2); }
+.pins-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.pin-row { display: flex; align-items: flex-start; gap: var(--s-1); margin: 0 calc(var(--s-2) * -1); border-radius: var(--r-sm); transition: background var(--m-fast) var(--ease-in-out); }
+.pin-row:hover, .pin-row:focus-within { background: var(--surface-hover); }
+.pin-open { flex: 1; min-width: 0; display: grid; gap: 4px; padding: var(--s-2); text-align: left; border-radius: var(--r-sm); }
+.pin-head { display: flex; align-items: center; gap: var(--s-2); min-width: 0; }
+.pin-head b { font-weight: var(--w-medium); }
+.pin-when, .pin-by { font-size: var(--t-12); color: var(--text-3); flex: none; }
+.pin-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: var(--lh-body); }
+.pin-row .ib { margin: var(--s-2) var(--s-1) 0 0; flex: none; }
+.pins-empty p { margin: 0 0 var(--s-1); }
+
+/* GIFs in messages: media with a small tag, a star to keep it, and play when paused. */
+.gif { position: relative; max-width: min(100%, 320px); border-radius: var(--r-lg); overflow: hidden; background: var(--bg-3); }
+.gif-open { display: block; width: 100%; height: 100%; cursor: zoom-in; }
+.gif-open img, .gif-open video, .gif-open canvas { display: block; width: 100%; height: 100%; object-fit: cover; }
+.gif-tag { position: absolute; left: var(--s-2); bottom: var(--s-2); padding: 0 4px; border-radius: var(--r-xs); background: color-mix(in srgb, var(--bg-0) 80%, transparent); color: var(--text-1); font-size: var(--t-11); font-weight: var(--w-bold); letter-spacing: 0.04em; line-height: 16px; pointer-events: none; }
+.gif-play { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: var(--h-md); height: var(--h-md); border-radius: var(--r-sm); display: grid; place-items: center; background: color-mix(in srgb, var(--bg-0) 80%, transparent); color: var(--text-1); }
+.gif-play:hover { background: color-mix(in srgb, var(--bg-0) 90%, transparent); }
+.gif-pause, .gif-star { position: absolute; top: var(--s-2); width: 28px; height: 28px; border-radius: var(--r-sm); display: grid; place-items: center; background: color-mix(in srgb, var(--bg-0) 80%, transparent); color: var(--text-1); opacity: 0; transition: opacity var(--m-fast) var(--ease-in-out); }
+.gif-star { right: var(--s-2); }
+.gif-pause { right: calc(var(--s-2) + 28px + var(--s-1)); }
+.gif:hover .gif-star, .gif:hover .gif-pause, .gif:focus-within .gif-star, .gif:focus-within .gif-pause, .gif-star.on { opacity: 1; }
+.gif-star.on { color: var(--amber); }
+@media (pointer: coarse) { .gif-star, .gif-pause { opacity: 1; width: var(--touch); height: var(--touch); top: 0; } .gif-star { right: 0; } .gif-pause { right: var(--touch); } }
+
+/* The GIF picker. */
+.gif-picker { width: 380px; padding: var(--s-2); display: grid; gap: var(--s-2); }
+.gif-tabs { display: flex; gap: 2px; padding: 2px; background: var(--bg-3); border-radius: var(--r-sm); }
+.gif-tabs button { flex: 1; min-width: 0; height: 28px; padding: 0 var(--s-2); border-radius: var(--r-xs); font-size: var(--t-12); font-weight: var(--w-medium); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background var(--m-fast) var(--ease-in-out), color var(--m-fast) var(--ease-in-out); }
+.gif-tabs button:hover { color: var(--text-1); }
+.gif-tabs button.on { background: var(--bg-1); color: var(--text-1); box-shadow: var(--shadow-sm); }
+.gif-body { display: grid; gap: var(--s-2); }
+.gif-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s-1); max-height: 300px; overflow-y: auto; align-items: start; }
+.gif-tile { position: relative; display: block; border-radius: var(--r-sm); overflow: hidden; background: var(--bg-3); }
+.gif-tile img, .gif-tile video, .gif-tile canvas, .gif-tile > span { display: block; width: 100%; object-fit: cover; }
+.gif-tile canvas { height: 100%; }
+.gif-tile:hover { outline: 2px solid var(--line-strong); outline-offset: -2px; }
+.gif-tile[disabled] { opacity: 0.5; }
+.gif-tile-note { position: absolute; inset: auto 0 0 0; padding: 2px var(--s-1); background: color-mix(in srgb, var(--bg-0) 80%, transparent); color: var(--text-1); font-size: var(--t-11); }
+.gif-skel { display: block; aspect-ratio: 4 / 3; }
+.gif-none { margin: 0; padding: var(--s-4) var(--s-2); color: var(--text-3); font-size: var(--t-13); text-align: center; line-height: var(--lh-body); }
+@media (max-width: 759px) { .gif-picker { width: 100%; } .gif-grid { max-height: 50vh; } }

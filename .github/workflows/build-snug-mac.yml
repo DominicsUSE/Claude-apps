@@ -1,0 +1,72 @@
+# Builds the Snug Mac app on a real Mac: one universal .dmg (Apple silicon and Intel), ad-hoc
+# signed (no Apple Developer account). It runs Snug's tests on macOS, builds, uploads the dmg,
+# checks the signature, then drives the packaged app (first run, account, message, reopen).
+# The dmg is attached to every run (Actions > Snug Mac app > Artifacts). On the default branch
+# it is also added to the release for this version.
+name: Snug Mac app
+
+on:
+  push:
+    paths:
+      - "snug/**"
+      - ".github/workflows/build-snug-mac.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Test Snug (rules and server) on macOS
+        working-directory: snug
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+
+      - name: Build the dmg
+        working-directory: snug/desktop
+        run: |
+          npm ci --no-audit --no-fund
+          node build.js
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Snug-Mac
+          path: snug/desktop/dist/Snug-*-mac.dmg
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Check the app's signature and architectures
+        working-directory: snug/desktop
+        run: |
+          codesign --verify --deep --strict --verbose=2 dist/mac-universal/Snug.app
+          lipo -archs dist/mac-universal/Snug.app/Contents/MacOS/Snug
+          /usr/libexec/PlistBuddy -c "Print :NSMicrophoneUsageDescription" dist/mac-universal/Snug.app/Contents/Info.plist
+
+      # After the upload, so a problem here never hides the dmg. A failure still fails the run.
+      - name: Test the packaged app
+        working-directory: snug/desktop
+        timeout-minutes: 8
+        env:
+          SNUG_BIN: dist/mac-universal/Snug.app/Contents/MacOS/Snug
+        run: node --test --test-timeout=120000 --test-force-exit test.js
+
+      - name: Add the dmg to the release (default branch only)
+        if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(node -p "require('./snug/desktop/package.json').version")
+          tag="snug-v$v"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --target "$GITHUB_SHA" --title "Snug $v" --notes "Snug $v."
+          gh release upload "$tag" snug/desktop/dist/Snug-*-mac.dmg --clobber
