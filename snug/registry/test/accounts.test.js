@@ -101,6 +101,9 @@ test('owner names: only OWNER_GITHUB_IDS may claim "1" and "a"', async () => {
   const r = await reg.rename(owner, '1');
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.equal(r.body.account.username, '1');
+  // check tells a held owner name (taken) from a free one (owner_only), so the owner's PC can see its account is gone
+  assert.equal((await reg.call('/v1/check?name=1')).body.error, 'taken');
+  assert.equal((await reg.call('/v1/check?name=a')).body.error, 'owner_only');
   // nobody else, even after "a" was freed by the rename
   const k2 = makeKeys();
   const a2 = await reg.authId(k2, 1301);

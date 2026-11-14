@@ -19,6 +19,9 @@ TURN_KEY_ID = "8d4d95f8e798e01d313f8f2374d952ba"
 RELAY_OFF_AT = "60000"
 # Signal keepalive interval sent to clients (seconds).
 PING_SECONDS = "90"
+# The Durable Object instance holding every account. A new name starts an empty registry (a reset).
+# "hub-2": reset on 2026-11-14 at the owner's request (the old instance's test accounts are abandoned).
+HUB_NAME = "hub-2"
 
 # Secrets (wrangler secret put NAME), never committed:
 #   GH_HMAC_SECRET    required. >= 32 random bytes. NEVER ROTATE (it keys every account's GitHub hash).

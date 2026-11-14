@@ -145,7 +145,22 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
       settle(f, e.code === 'github_unavailable' || e.code === 'rate_limited' ? 'busy' : 'error', { message: regMessage(e) });
       return;
     } finally { token = null; }
+    if (a.status === 'new' && !f.purpose && await accountGone()) {
+      // The registry no longer has this PC's account (it was reset): keep the local account and
+      // its chats, and let this sign-in give it a fresh Snug username.
+      const s = self();
+      log('gh', 'this PC’s account is gone from the registry; starting again');
+      peer.stop();
+      identity.clearSelf();
+      if (!f.link && s.user && userRow(s.user)) f.link = s.user;
+    }
     outcome(f, a);
+  }
+  // True only when the registry answers that this PC's username is free: the account is gone.
+  async function accountGone() {
+    const s = self();
+    if (!s?.uid || !s.username) return false;
+    try { const r = await reg.check(s.username); return r.ok === true || r.error === 'owner_only'; } catch { return false; }
   }
 
   // ---------- Local accounts ----------
@@ -158,6 +173,17 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
       if (!self()?.uid) db.run('DELETE FROM sessions');
       db.run("INSERT INTO app_flags (k) VALUES ('p2p_signout')");
     }
+  }
+  // At start: if the registry no longer has this PC's account (it was reset), stop P2P and sign
+  // everyone out, so the app opens on "Continue with GitHub"; that sign-in reuses the local account.
+  if (enabled && self()?.uid && self().state !== 'gone') {
+    accountGone().then((gone) => {
+      if (!gone) return;
+      log('gh', 'this PC’s account is gone from the registry; signing out');
+      peer.stop();
+      identity.setSelf({ state: 'gone' });
+      db.run('DELETE FROM sessions');
+    }, () => {});
   }
   const userRow = (id) => (id ? M.userRow(id) : null);
   // A password account on this PC (local only, never on the registry) doesn't block a Snug username:
@@ -344,7 +370,10 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
       } else user = ensureOwnerRow(account.uid, account.username);
       identity.setSelf({ uid: account.uid, username: account.username, user, kver: account.kver, state: 'ok', renamedAt: null });
       peer.start();
-      if (f.link) { hub.userChanged(user); send(res, 200, { user: M.userView(M.userRow(user), M.userRow(user).presence, true) }); return true; }
+      // Connecting a signed-in password account keeps its session; reusing the account after a
+      // registry reset happens from the sign-in screen, so sign in here.
+      if (f.link && userOf(req) === user) { hub.userChanged(user); send(res, 200, { user: M.userView(M.userRow(user), M.userRow(user).presence, true) }); return true; }
+      if (f.link) hub.userChanged(user);
       signIn(res, req, user);
       return true;
     }

@@ -316,3 +316,38 @@ test('a password account on this PC doesn’t block its username: claiming it mo
   assert.equal(back.status, 200);
   assert.equal(back.data.user.id, old.data.user.id);
 });
+
+test('after the registry is reset, signing in again keeps this PC’s account and gives it a fresh username', async () => {
+  const saved = registry; // githubSignIn talks to the module's registry
+  const r1 = await startRegistry();
+  registry = r1;
+  const p1 = await startPc(r1, { quiet: true });
+  const w = await githubSignIn(p1, 1011);
+  const c = await post(p1, '/api/gh/claim', { flow: w.flow, username: 'tess' });
+  assert.equal(c.status, 200, JSON.stringify(c.data));
+  const m1 = await get(p1, '/api/me', { cookie: c.cookie });
+  assert.equal(m1.status, 200, JSON.stringify(m1.data) + ' cookie=' + c.cookie);
+  const before = m1.data.user.id;
+  await p1.close(); await r1.close();
+  // A wiped registry: same PC data, nobody registered.
+  const r2 = await startRegistry();
+  registry = r2;
+  const p2 = await startPc(r2, { dataDir: p1.dataDir, quiet: true });
+  try {
+    // Signed out at start, with no "continue as @tess" shortcut to an account that no longer exists.
+    let out = 0;
+    for (let i = 0; i < 40 && out !== 401; i++) { out = (await get(p2, '/api/me', { cookie: c.cookie })).status; if (out !== 401) await new Promise((r) => setTimeout(r, 100)); }
+    assert.equal(out, 401);
+    assert.equal((await get(p2, '/api/gh/config')).data.resume, null);
+    const w2 = await githubSignIn(p2, 1011);
+    assert.equal(w2.data.state, 'choose-name', JSON.stringify(w2.data));
+    const c2 = await post(p2, '/api/gh/claim', { flow: w2.flow, username: 'tess' });
+    assert.equal(c2.status, 200, JSON.stringify(c2.data));
+    const m2 = await get(p2, '/api/me', { cookie: c2.cookie });
+    assert.equal(m2.status, 200, JSON.stringify(m2.data) + ' claim=' + JSON.stringify(c2.data) + ' cookie=' + c2.cookie);
+    const me = m2.data;
+    assert.equal(me.user.id, before, 'the same local account, with its data');
+    assert.equal(me.user.handle, 'tess');
+    assert.equal(me.p2p.owner, true);
+  } finally { registry = saved; await p2.close(); await r2.close(); }
+});

@@ -43,7 +43,7 @@ export default {
     if (path === '/v1/ws') {
       if ((req.headers.get('upgrade') || '').toLowerCase() !== 'websocket') return err(env, 426, 'bad_request');
       if (!UID_RE.test(url.searchParams.get('uid') || '')) return err(env, 400, 'bad_request');
-      return env.HUB.get(env.HUB.idFromName('hub')).fetch(req);
+      return env.HUB.get(env.HUB.idFromName(env.HUB_NAME || 'hub')).fetch(req);
     }
 
     let body;
@@ -53,6 +53,6 @@ export default {
       if (body.byteLength > MAX_BODY) return err(env, 413, 'bad_request');
     }
     const fwd = new Request(url.toString(), { method, headers: req.headers, body });
-    return env.HUB.get(env.HUB.idFromName('hub')).fetch(fwd);
+    return env.HUB.get(env.HUB.idFromName(env.HUB_NAME || 'hub')).fetch(fwd);
   },
 };

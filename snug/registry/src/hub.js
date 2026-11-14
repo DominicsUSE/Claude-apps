@@ -493,8 +493,10 @@ export class Hub {
     if (!rawName(name)) return { ok: false, error: 'invalid_name' };
     const n = normalize(name);
     const ce = check(n);
-    if (ce) return { ok: false, error: ce };
+    if (ce && ce !== 'owner_only') return { ok: false, error: ce };
+    // Taken before owner_only, so the owner's PC can tell whether its own "a"/"1" still exists.
     if (this.row('SELECT 1 AS x FROM accounts WHERE username=? OR skel=?', n, skeleton(n))) return { ok: false, error: 'taken' };
+    if (ce) return { ok: false, error: ce };
     return { ok: true };
   }
 
