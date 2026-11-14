@@ -1,7 +1,7 @@
 {
   "name": "snug-desktop",
   "productName": "Snug",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "description": "A calm place for your people",
   "author": "Snug",
   "main": "main.js",

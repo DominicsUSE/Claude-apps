@@ -149,11 +149,15 @@ export function CodeStep({ step, onCancel }) {
   return html`
     <div class="auth-head">
       <h1 id="auth-title">Type this code on GitHub</h1>
-      <p class="auth-sub">Go to <a class="auth-device-url" id="auth-device-url" href=${step.uri} target="_blank" rel="noopener noreferrer">${step.uri.replace(/^https:\/\//, '')}</a> in your browser, sign in if it asks, type the code, then come back here.</p>
+      <p class="auth-sub">Paste this code on GitHub in your browser, sign in there if it asks, then come back here.</p>
     </div>
     <div class="auth-code-box">
       <output class="auth-device-code" id="auth-device-code" aria-label=${`Your code: ${step.userCode.split('').join(' ')}`}>${step.userCode}</output>
       <button class="ib" type="button" aria-label="Copy the code" data-tip="Copy" onClick=${open}><${Icon} name="copy" size=${18} /></button>
+    </div>
+    <div class="auth-paste-at">
+      <span>Paste it here:</span>
+      <a class="auth-device-url" id="auth-device-url" href=${step.uri} target="_blank" rel="noopener noreferrer">${step.uri}</a>
     </div>
     <a class="btn primary auth-submit" id="auth-open-github" href=${step.uri} target="_blank" rel="noopener noreferrer" onClick=${open}>
       <${Icon} name="external" size=${16} />Copy code and open GitHub
