@@ -150,6 +150,15 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
 
   // ---------- Local accounts ----------
   const self = () => identity.self();
+  // Once, the first time P2P is on and this PC has no Snug account yet: sign every
+  // password account out, so the app opens on "Sign in with GitHub" (upgrade from 0.8).
+  if (enabled) {
+    db.raw.exec('CREATE TABLE IF NOT EXISTS app_flags (k TEXT PRIMARY KEY)');
+    if (!db.get("SELECT 1 FROM app_flags WHERE k = 'p2p_signout'")) {
+      if (!self()?.uid) db.run('DELETE FROM sessions');
+      db.run("INSERT INTO app_flags (k) VALUES ('p2p_signout')");
+    }
+  }
   const userRow = (id) => (id ? M.userRow(id) : null);
   const handleFree = (handle, id) => !db.get('SELECT 1 FROM users WHERE handle = ? AND id != ?', handle, id || '');
   // The owner's local row for a registry account: u_<uid>, created on first sign-in.

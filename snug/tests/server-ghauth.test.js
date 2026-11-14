@@ -280,3 +280,22 @@ test('deleted without the GitHub check: signing in again brings the account back
   assert.equal(again.data.user.name, 'quinn');
   assert.ok(!again.data.user.deleted);
 });
+
+test('upgrading to P2P signs every password account out once, so the app opens on Sign in with GitHub', async () => {
+  // 0.8: P2P off, a password account signed in.
+  const old = await pc({ registryUrl: null });
+  const r = await post(old, '/api/register', { handle: 'rhea', name: 'rhea', password: 'a long password' });
+  assert.equal(r.status, 201);
+  assert.equal((await get(old, '/api/me', { cookie: r.cookie })).status, 200);
+  await old.close(); pcs.splice(pcs.indexOf(old), 1);
+  // 0.9: P2P on, same data: signed out, account kept.
+  const up = await pc({ dataDir: old.dataDir });
+  assert.equal((await get(up, '/api/me', { cookie: r.cookie })).status, 401);
+  assert.equal((await get(up, '/api/gh/config')).data.enabled, true);
+  const again = await post(up, '/api/login', { handle: 'rhea', password: 'a long password' });
+  assert.equal(again.status, 200);
+  await up.close(); pcs.splice(pcs.indexOf(up), 1);
+  // Only once: a later start keeps people signed in.
+  const later = await pc({ dataDir: old.dataDir });
+  assert.equal((await get(later, '/api/me', { cookie: again.cookie })).status, 200);
+});
