@@ -30,12 +30,14 @@ export function createLinks(ctx) {
   } = ctx;
   const idleMs = opts.idleMs ?? 120_000;
   const dialMs = opts.dialMs ?? 8000;
+  const maxLinks = opts.maxLinks ?? MAX_LINKS;
   const links = new Map();         // uid -> link
   const seenSids = new Map();      // sid -> 1, last 1000
   const failures = new Map();      // `${uid}:${seq}` -> count (non-validation apply errors)
   // Data frames that arrive while a handshake is still being verified (hs2 and the
   // first frames often come in one relay batch): kept, then handled once it is up.
   const early = new Map();         // uid -> [frame]
+  const waiting = new Set();       // uids refused a link at the cap, in order: the next free slot goes to them
   const L_frames = limiter({ capacity: 200, perSecond: 50 });
   const L_durable = limiter({ capacity: 20, perSecond: 20 });
   const L_hour = limiter({ capacity: 2000, perSecond: 2000 / 3600 });
@@ -65,11 +67,15 @@ export function createLinks(ctx) {
   function newLink(uid) {
     const p = peerOf(uid);
     if (!p) return null;
-    // Hard cap: the least recently used idle link makes room.
-    if (links.size >= MAX_LINKS) {
-      const victim = [...links.values()].find((x) => x.acked >= x.sentUpTo);
-      if (victim) close(victim, 'cap'); else return null;
+    // Hard cap: the least recently used open link with nothing in flight makes room. A link
+    // still opening is never the victim (that only makes both sides start over); with no
+    // victim the friend waits for the next link to close (see close()).
+    if (links.size >= maxLinks) {
+      const victim = [...links.values()].find((x) => x.state === 'up' && x.acked >= x.sentUpTo && !x.busyBlob);
+      if (!victim) { waiting.delete(uid); waiting.add(uid); if (waiting.size > 1000) waiting.delete(waiting.values().next().value); return null; }
+      close(victim, 'cap');
     }
+    waiting.delete(uid);
     const L = {
       uid, user: p.user, state: 'new', transport: null, sid: null, role: null, eph: null, hs1: null, sess: null,
       peerIk: null, sentUpTo: 0, acked: 0, lastApp: Date.now(), rxSinceAck: 0, ackTimer: null, unackedT: null,
@@ -394,8 +400,17 @@ export function createLinks(ctx) {
     if (links.get(L.uid) === L) links.delete(L.uid);
     for (const w of L.waiters.splice(0)) w(false);
     log('peer', 'link closed', why);
-    if (wasUp) onDown(L.uid, why);
+    onDown(L.uid, why, wasUp);
     if (!links.size && sweep) { clearInterval(sweep); sweep = null; }
+    if (waiting.size && why !== 'stopped') queueMicrotask(nextWaiting);
+  }
+  // A slot is free: the longest-waiting friend who is still online gets it.
+  function nextWaiting() {
+    while (waiting.size && links.size < maxLinks) {
+      const uid = waiting.values().next().value;
+      waiting.delete(uid);
+      if (!links.has(uid) && want(uid)) return;
+    }
   }
 
   return {
@@ -419,7 +434,7 @@ export function createLinks(ctx) {
       });
     },
     close: (uid, why = 'closed') => close(links.get(uid), why),
-    closeAll(why = 'stopped') { for (const L of [...links.values()]) close(L, why); },
+    closeAll(why = 'stopped') { waiting.clear(); for (const L of [...links.values()]) close(L, why); },
     count: () => links.size,
     // ---------- Direct path plumbing (the renderer link host, section 5.2) ----------
     onSig(uid, obj) {

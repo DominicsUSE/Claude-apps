@@ -197,6 +197,28 @@ test('delete with a GitHub check frees the username; loopback only; nothing secr
   for (const call of registry.github.calls) if (call.token) assert.ok(!all.includes(call.token));
 });
 
+// A page on another site whose name is pointed at 127.0.0.1 (DNS rebinding) arrives from loopback,
+// with its own Host and Origin; it must not reach GitHub sign-in (claiming a name on this PC as its owner).
+test('GitHub sign-in refuses a request whose Host is not this machine (DNS rebinding)', async () => {
+  const a = await pc();
+  const { request } = await import('node:http');
+  const raw = (method, path, host, body) => new Promise((resolve, reject) => {
+    const data = body ? JSON.stringify(body) : '';
+    const req = request({
+      host: '127.0.0.1', port: a.port, method, path,
+      headers: { host, origin: `http://${host}`, ...(body ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(data) } : {}) },
+    }, (res) => { let t = ''; res.on('data', (c) => { t += c; }); res.on('end', () => resolve({ status: res.statusCode, data: JSON.parse(t || '{}') })); });
+    req.on('error', reject);
+    req.end(data);
+  });
+  const evil = `rebind.example:${a.port}`;
+  assert.equal((await raw('GET', '/api/gh/config', evil)).data.enabled, false);
+  assert.equal((await raw('POST', '/api/gh/start', evil, {})).status, 403);
+  assert.equal((await raw('POST', '/api/gh/resume', evil, {})).status, 403);
+  // This machine's own names still work.
+  for (const host of [`127.0.0.1:${a.port}`, `localhost:${a.port}`]) assert.equal((await raw('GET', '/api/gh/config', host)).data.enabled, true, host);
+});
+
 test('cancel and an expired or denied flow', async () => {
   const a = await pc();
   const s = await post(a, '/api/gh/start');

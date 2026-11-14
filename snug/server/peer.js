@@ -37,6 +37,8 @@ const FILE_ID = /^f_[a-z0-9]{8,40}$/;
 const MSG_ID = /^m_[a-z0-9]{8,40}$/;
 const CALL_ID = /^call_[a-z0-9]{8,40}$/;
 const HASH = /^[A-Za-z0-9_-]{43}$/;
+// A registry username as stored there (js/lib/usernames.js); "1" and "a" are the owner's one-letter names.
+const isUsername = (s) => typeof s === 'string' && /^[a-z0-9_.]{1,32}$/.test(s);
 const PIC_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 const SHOWN_TYPES = new Set([...PIC_TYPES, ...AUDIO_TYPES, ...VIDEO_TYPES]);
 // Bidi overrides and zero-width characters, stripped from a friend's profile text (S27).
@@ -94,7 +96,9 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
   // Make (or refresh) the local row for a friend on another PC, pinning their key on first sight (TOFU).
   function ensureShadow(info) {
     const { uid, username } = info;
-    if (!isUid(uid) || uid === myUid() || !isKey(info.ik) || !isKey(info.xk)) fail('That person isn’t on Snug.');
+    // The registry is checked too: its answer becomes a local handle and a pinned key (S26).
+    if (!isUid(uid) || uid === myUid() || !isKey(info.ik) || !isKey(info.xk) || !isUsername(username)
+      || !Number.isSafeInteger(info.kver) || info.kver < 1) fail('That person isn’t on Snug.');
     const id = shadowId(uid);
     const t = Date.now();
     db.tx(() => {
@@ -228,6 +232,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       for (const r of rows) if (r.kind === 'dm.msg' && r.ref) toOwner('msg.state', { conv: dm, id: r.ref, state: 'delivered' });
     },
     onUp: (uid, hs) => {
+      retryN.delete(uid);
       const p = peerOf(uid);
       db.run('UPDATE peers SET last_seen = ? WHERE uid = ?', Date.now(), uid);
       // The friend has a newer profile than the one kept here: ask for it.
@@ -235,18 +240,23 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       syncMedia(uid);
       fetchPending(uid);
     },
-    onDown: (uid) => { blobs.peerDown(uid); retrySoon(uid); },
-    opts: { idleMs: opts.peerIdleMs, dialMs: opts.peerDialMs, direct: opts.peerDirect, hideIp: () => !!self?.hideIp },
+    onDown: (uid, why, wasUp) => { if (wasUp) blobs.peerDown(uid); if (why !== 'stopped') retrySoon(uid); },
+    opts: { idleMs: opts.peerIdleMs, dialMs: opts.peerDialMs, maxLinks: opts.peerMaxLinks, direct: opts.peerDirect, hideIp: () => !!self?.hideIp },
   });
 
-  // A link that ended with items still queued for an online friend tries again once, a little later.
+  // A link that ended (or never opened) with items still queued for an online friend tries
+  // again a little later: 5 s, then doubling up to 5 min while it keeps failing. One timer
+  // per such friend at most; a link that comes up resets the wait.
   const retryT = new Map();
+  const retryN = new Map();        // uid -> failed tries in a row
   function retrySoon(uid) {
     if (retryT.has(uid) || !online.has(uid) || !outbox.after(shadowId(uid), 0, 1).length) return;
+    const n = retryN.get(uid) || 0;
+    retryN.set(uid, n + 1);
     const t = setTimeout(() => {
       retryT.delete(uid);
       if (online.has(uid) && outbox.after(shadowId(uid), 0, 1).length) links.want(uid);
-    }, 5000);
+    }, Math.min(300_000, 5000 * 2 ** Math.min(n, 6)));
     t.unref?.();
     retryT.set(uid, t);
   }
@@ -360,7 +370,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     // A new username: believed only if the registry agrees (section 6.2).
     if (typeof pr.username === 'string' && pr.username !== p.username) {
       reg.lookup({ uid }).then((r) => {
-        if (r?.uid === uid && r.username === pr.username) {
+        if (r?.uid === uid && r.username === pr.username && isUsername(r.username)) {
           db.run('UPDATE peers SET username = ? WHERE uid = ?', r.username, uid);
           db.run('UPDATE users SET handle = ? WHERE id = ?', shadowHandle(uid, r.username), shadow);
           hub.userChanged(shadow);
@@ -460,6 +470,9 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       }
       if (!ik) throw new UserError('bad signature');
       const obj = boxOpen(identity.me(), from, b);
+      // The outer id is what replays are remembered by, and nothing signs it: it must be the signed inner id,
+      // or the same box could be replayed under a fresh id (an old "remove" ending a renewed friendship).
+      if (obj.id !== id) throw new UserError('replayed');
       if (obj.from !== from || typeof obj.t !== 'string' || !Number.isSafeInteger(obj.ts) || Math.abs(obj.ts - reg.now()) > 7 * DAY) throw new UserError('stale');
       const fn = Object.hasOwn(KNOCKS, obj.t) ? KNOCKS[obj.t] : null;
       if (!fn) throw new UserError('unknown knock');
@@ -542,7 +555,11 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     const had = online.has(uid);
     if (on) online.add(uid); else online.delete(uid);
     if (had === on) return;
-    if (!on) links.close(uid, 'offline');
+    if (!on) {
+      links.close(uid, 'offline');
+      // Gone: no retry waits for them, and their next visit starts the backoff afresh.
+      clearTimeout(retryT.get(uid)); retryT.delete(uid); retryN.delete(uid);
+    }
     const shadow = shadowId(uid);
     if (remote.has(shadow)) hub.presenceChanged(shadow);
     if (on && (outbox.after(shadow, 0, 1).length)) links.want(uid);
@@ -1100,7 +1117,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       return true;
     },
     stop() { started = false; signal.stop(); links.closeAll('stopped'); for (const uid of [...online]) setOnline(uid, false); },
-    close() { P.stop(); blobs.close(); clearTimeout(watchT); for (const t of retryT.values()) clearTimeout(t); retryT.clear(); for (const v of deferredProfile.values()) clearTimeout(v.timer); deferredProfile.clear(); },
+    close() { P.stop(); blobs.close(); clearTimeout(watchT); for (const t of retryT.values()) clearTimeout(t); retryT.clear(); retryN.clear(); for (const v of deferredProfile.values()) clearTimeout(v.timer); deferredProfile.clear(); },
     wake() { if (started) signal.wake(); },
     isOwner: (u) => !!u && u === owner(),
     isRemote,

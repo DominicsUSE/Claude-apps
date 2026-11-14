@@ -79,7 +79,7 @@ async function house(p) {
 
 test('unread counts: 100 messages with a mention at #10 gives count 100, needs 1, in the snapshot and the op', async () => {
   const s = await house('uc');
-  await s.ow.ok('read.set', { conv: s.room, ts: Date.now() });
+  await s.ow.ok('read.set', { conv: s.room, ts: Date.now() - 1 });
   for (let i = 1; i <= 100; i++) {
     if (i % 12 === 0) srv.resetLimits();
     await say(s.mm, s.room, i === 10 ? `@${s.ow.handle} can you look at this?` : `message ${i}`);
@@ -126,7 +126,7 @@ test('unread counts: a mention in a private room I can’t see never shows in co
 
 test('unread counts: @everyone from someone who may not post notices doesn’t need me; from the owner it does; toggles and dismiss', async () => {
   const s = await house('ev');
-  await s.mm.ok('read.set', { conv: s.room, ts: Date.now() });
+  await s.mm.ok('read.set', { conv: s.room, ts: Date.now() - 1 });
   await say(s.nw, s.room, '@everyone free pizza');
   let { unread } = await s.mm.ok('unread.counts');
   assert.deepEqual({ count: unread[s.room].count, needs: unread[s.room].needs }, { count: 1, needs: 0 });
@@ -282,7 +282,7 @@ test('suppress @role mentions: rolesOff stops a role mention counting and pushin
   const { id: crew } = await s.ow.ok('role.create', { house: s.house });
   await s.ow.ok('role.update', { house: s.house, role: crew, name: 'Crew', perms: ['post', 'react'] });
   await s.ow.ok('member.role', { house: s.house, user: s.mm.id, role: crew });
-  await s.mm.ok('read.set', { conv: s.room, ts: Date.now() });
+  await s.mm.ok('read.set', { conv: s.room, ts: Date.now() - 1 });
   const m = await say(s.ow, s.room, '@Crew kiln at nine');
   assert.equal(srv.push.wouldPush(s.mm.id, m.m.id), true, 'a role I hold pushes');
   assert.equal((await s.mm.ok('unread.counts')).unread[s.room].needs, 1);

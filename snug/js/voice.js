@@ -38,6 +38,7 @@ let screen = null;   // my screen stream, while I share
 // (which tells them camera from screen) stays the same when a camera goes off and on.
 let out = null;
 let ctx = null;
+let watching = 0; // level watchers using ctx
 let stopMyLevel = null;
 
 const errText = (e) => ({
@@ -76,7 +77,10 @@ function watchLevel(user, stream) {
         emit();
       }
     }, 120);
-    return () => { clearInterval(tick); src.disconnect(); };
+    watching++;
+    // With no one left to watch, the context is suspended: a running one keeps the audio thread busy.
+    let done = false;
+    return () => { if (done) return; done = true; clearInterval(tick); src.disconnect(); if (--watching === 0) ctx.suspend().catch(() => {}); };
   } catch { return () => {}; }
 }
 

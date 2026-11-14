@@ -323,6 +323,7 @@ const SOUNDS = {
 };
 export const SOUND_LIST = Object.keys(SOUNDS);
 export let soundsPlayed = 0;
+let quietT = null;
 // The names of the sounds played, newest last (the end-to-end checks read it).
 export const soundLog = [];
 export function playSound(name, { volume = 100 } = {}) {
@@ -335,7 +336,13 @@ export function playSound(name, { volume = 100 } = {}) {
   if (scale <= 0) return;
   try {
     ctx ||= new AudioContext();
+    // A running AudioContext keeps the audio thread busy even when silent: it is
+    // suspended once the last note has played, and woken for the next sound.
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    clearTimeout(quietT);
     const t0 = ctx.currentTime + 0.01;
+    const end = Math.max(...notes.map(([, at, len]) => at + len)) + 0.3;
+    quietT = setTimeout(() => { quietT = null; ctx.suspend().catch(() => {}); }, end * 1000 + 50);
     for (const [f, at, len, g, wave] of notes) {
       const o = ctx.createOscillator();
       const v = ctx.createGain();

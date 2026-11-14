@@ -27,6 +27,7 @@ const DAY = 86_400_000;
 const HOLD_MS = 25_000;      // how long /api/gh/wait holds a request open
 const MAX_FLOWS = 3;
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+const LOCAL_NAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const fail = (m) => { throw new UserError(m); };
 
 // Registry and GitHub trouble, in words (never a code, never a response body).
@@ -54,8 +55,11 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
   const identity = peer?.identity;
   const reg = peer?.reg;
 
+  // From this machine, and addressed to it by name: a site whose name points at 127.0.0.1 (DNS
+  // rebinding) also arrives from loopback, but with its own Host (and a matching Origin).
+  const hostOk = (req) => { try { return LOCAL_NAMES.has(new URL(`http://${req.headers.host}`).hostname); } catch { return false; } };
   const loopback = (req) => LOOPBACK.has(req.socket.remoteAddress) && !trustProxy
-    && !req.headers['x-forwarded-for'] && !req.headers.forwarded;
+    && !req.headers['x-forwarded-for'] && !req.headers.forwarded && hostOk(req);
 
   function send(res, status, body, extra = {}) {
     res.setHeader('X-Content-Type-Options', 'nosniff');

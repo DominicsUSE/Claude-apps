@@ -128,7 +128,8 @@ test('profile: pushed once on change, signed, cached on the friend’s disk; the
   await a.ok('me.update', { avatar: pic2.id });
   await until(() => shadow().avatar && shadow().avatar !== av1, 8000, 'second avatar');
   assert.equal(B.db.get('SELECT 1 FROM files WHERE id = ?', av1), undefined);
-  assert.equal(existsSync(join(B.dataDir, 'files', av1)), false);
+  // The bytes go a moment later: me.update unlinks the old picture asynchronously (server/appearance.js).
+  await until(() => !existsSync(join(B.dataDir, 'files', av1)), 4000, 'old picture bytes removed');
   // A's PC goes away: B still shows the picture from its own disk.
   const av2 = shadow().avatar;
   await A.close(); pcs.splice(pcs.indexOf(A), 1);
@@ -254,6 +255,42 @@ test('replays: a captured relay frame and a captured knock do nothing the second
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(msgs(B, dm).length, 1);
   assert.equal(B.db.get('SELECT state FROM friends WHERE user = ? AND other = ?', b.id, a.id).state, 'friends');
+});
+
+test('replays: a captured knock sent again under a new outer id (by the registry or anyone on the path) does nothing', async () => {
+  const { A, B, a, b } = await friends('alice20', 'bob20');
+  const knocks = [];
+  B.peer._signal.on('knock', (m) => knocks.push(m));
+  const state = () => B.db.get('SELECT state FROM friends WHERE user = ? AND other = ?', b.id, a.id)?.state;
+  // Alice unfriends Bob; later they make up and are friends again.
+  await a.ok('friend.remove', { user: b.id });
+  await until(() => !state(), 8000, 'unfriended on B');
+  const k = knocks.find((m) => m.from === uidOf(a));
+  assert.ok(k, 'the remove knock was seen');
+  await b.ok('friend.request', { handle: 'alice20' });
+  const req = await a.next('friend', (d) => d.id === b.id && d.friend?.state === 'incoming');
+  await a.ok('friend.accept', { user: req.id });
+  await until(() => state() === 'friends', 8000, 'friends again on B');
+  // The old "remove" box, replayed under a fresh outer id, must not end the friendship.
+  const rej = B.peer.stats().rejected;
+  B.peer._signal.emit('knock', { ...k, id: `${k.id}x` });
+  await new Promise((r) => setTimeout(r, 500));
+  assert.equal(state(), 'friends', 'still friends after the replay');
+  assert.ok(B.peer.stats().rejected > rej, 'the replay was refused');
+  assert.ok(A);
+});
+
+test('what the registry says about someone is checked here too: a bad username or key version makes no shadow', async () => {
+  const A = await pc();
+  await signUp(A, registry, ++gh, 'alice21');
+  const { generateKeyPairSync } = await import('node:crypto');
+  const key = (t) => generateKeyPairSync(t).publicKey.export({ format: 'jwk' }).x;
+  const ok = { uid: 'abcdefghijklmnop', username: 'fine.name', ik: key('ed25519'), xk: key('x25519'), kver: 1 };
+  for (const bad of [{ username: '<b>x</b>' }, { username: 'a'.repeat(40) }, { username: 'Has Space' }, { username: 7 }, { kver: '1' }, { kver: 0 }]) {
+    assert.throws(() => A.peer._ensureShadow({ ...ok, ...bad }), /isn’t on Snug/, JSON.stringify(bad));
+  }
+  assert.equal(A.db.get('SELECT 1 FROM users WHERE id = ?', 'u_abcdefghijklmnop'), undefined);
+  assert.equal(A.peer._ensureShadow(ok), 'u_abcdefghijklmnop');
 });
 
 test('a hostile friend: borrowed file ids, unknown kinds and a profile flood change nothing they shouldn’t', async () => {
@@ -414,6 +451,38 @@ test('a restored backup on one side: sequences renumber and messages flow both w
   const reply = mid();
   await bb.ok('msg.send', { conv: dm, id: reply, text: 'restored reply' });
   await a.next('msg', (d) => d.m.id === reply, 10_000);
+});
+
+test('more friends than links: friends refused at the cap get the next free link; every message and profile goes through', async () => {
+  // A allows one link at a time and keeps idle links a long while, so only the cap
+  // (not the idle sweep) can make room. Three friends write at once; A renames once.
+  const A = await pc({ peerMaxLinks: 1, peerIdleMs: 60_000 });
+  const a = await signUp(A, registry, ++gh, 'alice16');
+  const others = [];
+  for (const n of ['bob16', 'carl16', 'dora16']) {
+    const S = await pc();
+    const c = await signUp(S, registry, ++gh, n);
+    await c.ok('friend.request', { handle: 'alice16' });
+    const req = await a.next('friend', (d) => d.friend?.state === 'incoming' && d.id === c.id);
+    await a.ok('friend.accept', { user: req.id });
+    await c.next('friend', (d) => d.friend?.state === 'friends');
+    others.push({ S, c });
+  }
+  await until(() => others.every(({ c }) => A.peer.isOnline(uidOf(c))), 8000, 'presence');
+  const ids = [];
+  await Promise.all(others.map(async ({ c }) => {
+    const dm = (await c.ok('dm.open', { users: [a.id] })).id;
+    const id = mid();
+    ids.push(id);
+    await c.ok('msg.send', { conv: dm, id, text: `hi from ${c.id}` });
+  }));
+  await a.ok('me.update', { name: 'Alice Sixteen' });
+  await until(() => ids.every((id) => A.db.get('SELECT 1 FROM messages WHERE id = ?', id)), 45_000, 'every message reaches A');
+  await until(() => others.every(({ S }) => S.db.get("SELECT 1 FROM users WHERE id = ? AND name = 'Alice Sixteen'", a.id)), 45_000, 'every friend has the new name');
+  await until(() => !A.db.get('SELECT 1 FROM peer_outbox') && others.every(({ S }) => !S.db.get('SELECT 1 FROM peer_outbox')), 20_000, 'every outbox empty');
+  assert.ok(A.peer.stats().links <= 1);
+  for (const { c } of others) await c.close();
+  await a.close();
 });
 
 test('attachments: fetched from the friend’s PC by hash, typed by their bytes, served locally after', async () => {

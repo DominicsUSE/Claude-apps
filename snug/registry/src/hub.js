@@ -659,12 +659,15 @@ export class Hub {
     need(isUid(uid));
     const ip = await this.ipKey(req);
     this.ipLimit('ipWs', ip);
-    let unauth = 0;
+    // At most N sockets waiting to authenticate per uid. A new one pushes out the oldest instead of
+    // being refused: refusing would let anyone who knows a uid hold N silent sockets and lock its owner out.
+    const waiting = [];
     for (const w of this.ctx.getWebSockets(uid)) {
-      const a = w.readyState === 1 && this.att(w);
-      if (a && !a.authed) unauth++;
+      const a = w.readyState === 1 && !this.gone.has(w) && this.att(w);
+      if (a && !a.authed) waiting.push([a.at, w]);
     }
-    if (unauth >= this.L.unauthPerUid[0]) fail('rate_limited', { retryAfter: 10 });
+    waiting.sort((x, y) => x[0] - y[0]);
+    while (waiting.length >= this.L.unauthPerUid[0]) this.closeWs(waiting.shift()[1], 4005, 'auth timeout');
     const p = platform(this.env);
     const { client, server } = p.newPair();
     this.ctx.acceptWebSocket(server, [uid]);

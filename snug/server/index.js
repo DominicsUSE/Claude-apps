@@ -75,7 +75,7 @@ export async function startServer({
   keyStore = null,
   fetch: fetchFn = globalThis.fetch,
   resumeSecret = null,
-  peerIdleMs = 120_000, peerDialMs = 8000, peerCacheMB = 1024, peerDirect = true,
+  peerIdleMs = 120_000, peerDialMs = 8000, peerCacheMB = 1024, peerDirect = true, peerMaxLinks,
 } = {}) {
   const db = openDb(dataDir === ':memory:' ? ':memory:' : join(dataDir, 'snug.db'));
   const filesDir = join(dataDir === ':memory:' ? join(ROOT, 'data', 'test-files') : dataDir, 'files');
@@ -118,7 +118,7 @@ export async function startServer({
   // p2p: the peer module wraps the ops last, after push (server/peer.js).
   const peer = createPeer({
     db, M, hub, ops: hub.ops, filesDir, log,
-    opts: { dataDir, registryUrl, githubClientId, githubBase, keyStore, fetch: fetchFn, resumeSecret, peerIdleMs, peerDialMs, peerCacheMB, peerDirect },
+    opts: { dataDir, registryUrl, githubClientId, githubBase, keyStore, fetch: fetchFn, resumeSecret, peerIdleMs, peerDialMs, peerCacheMB, peerDirect, peerMaxLinks },
   });
 
   // Deleted messages can be restored for ten minutes; after that their content is gone for good.

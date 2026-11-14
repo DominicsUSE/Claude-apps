@@ -69,20 +69,24 @@ export class Windows {
 }
 
 const FLUSH_EVERY = 100;
-// Counters that move in big steps are written less often, so they stay cheap in rows written.
-const FLUSH_EVERY_KIND = { req20: 20 * 100, relayB: 1 << 20 };
+// The global request counter moves in steps of 20 (one per HTTP request), so it is written less often.
+const FLUSH_EVERY_KIND = { req20: 20 * 100 };
 const MEM_MAX = 20_000;
 
 /**
- * Persistent counters. In memory first, written to SQLite every 100 units per counter (bytes: every
- * 1 MB; the global request counter: every 100 requests), on flush() (alarm when dirty, socket close).
- * On wake a counter is read back on first use. Eviction between flushes loses at most one step.
+ * Persistent counters, read back from SQLite on first use after a wake.
+ *  - Caps (take): the stored value runs AHEAD of the count. Whenever the count passes it, a new value
+ *    of count + step - 1 is written (step = 1% of the limit, at least 1; at most 100 writes a counter a
+ *    window). A DO evicted between writes wakes with the stored value, so hibernation can only use up
+ *    allowance, never give it back: pausing until the DO sleeps does not reset anyone's budget.
+ *  - Usage counters (bump): written every 100 units (the global request counter: every 2000), and on
+ *    flush() (alarm when dirty, socket close). They are estimates; eviction loses at most one step.
  */
 export class Budgets {
   constructor(sql, now) {
     this.sql = sql;
     this.now = now;
-    this.m = new Map(); // key -> {uid, win, kind, n, saved}
+    this.m = new Map(); // key -> {uid, win, kind, n, saved, cap}
     this.dirty = false;
   }
   _get(uid, kind, ms) {
@@ -108,7 +112,12 @@ export class Budgets {
   take(uid, kind, [limit, ms], amount = 1) {
     const c = this._get(uid, kind, ms);
     if (c.n + amount > limit) return false;
-    this.add(c, amount);
+    c.n += amount;
+    c.cap = true;
+    if (c.n > c.saved) {
+      const ahead = Math.min(limit, c.n + Math.max(1, Math.floor(limit / 100)) - 1);
+      this._store(c, ahead);
+    }
     return true;
   }
   /** Add without a cap (usage counters). */
@@ -121,17 +130,20 @@ export class Budgets {
     else this.dirty = true;
   }
   _write(c) {
+    this._store(c, c.n);
+  }
+  _store(c, n) {
     this.sql.exec(
       'INSERT INTO budget(uid,win,kind,n) VALUES(?,?,?,?) ON CONFLICT(uid,win,kind) DO UPDATE SET n=excluded.n',
-      c.uid, c.win, c.kind, c.n,
+      c.uid, c.win, c.kind, n,
     );
-    c.saved = c.n;
+    c.saved = n;
   }
   flush() {
     if (!this.dirty) return;
     const old = this.now() - 2 * DAY;
     for (const [k, c] of this.m) {
-      if (c.n !== c.saved) this._write(c);
+      if (!c.cap && c.n !== c.saved) this._write(c); // caps are already stored ahead
       if (c.win < old) this.m.delete(k);
     }
     this.dirty = false;

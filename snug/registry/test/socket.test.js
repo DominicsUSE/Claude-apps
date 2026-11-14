@@ -50,13 +50,16 @@ test('a bad ?uid= is refused by the Worker with 400 and no DO request', async ()
   assert.equal(reg.runtime.stats.doRequests, before);
 });
 
-test('at most 4 unauthenticated sockets per uid', async () => {
+test('at most 4 unauthenticated sockets per uid; a new one pushes out the oldest, so nobody can lock a uid out', async () => {
   const u = await user('uma');
   const open = [];
   for (let i = 0; i < 4; i++) open.push(await reg.connect(u.uid, u.k, { auth: false }));
-  const e = await openSocket(reg.wsUrl(u.uid)).catch((x) => x);
-  assert.equal(e.status, 429);
-  for (const s of open) s.close();
+  // Someone holding 4 silent sockets on uma's uid must not stop uma from connecting.
+  const real = await reg.connect(u.uid, u.k);
+  assert.equal(real.ready.mode, 'normal');
+  assert.equal((await open[0].closed).code, 4005, 'the oldest silent socket made room');
+  for (const s of open.slice(1)) s.close();
+  real.close();
 });
 
 test('a second normal connection replaces the first (4002)', async () => {
@@ -297,6 +300,20 @@ test('knock pair budget: 5 per sender-target per day', async () => {
   }
   s.send({ t: 'knock', id: 'p5', to: b.uid, box: 'x' });
   assert.equal((await s.next((m) => m.id === 'p5')).code, 'rate_limited');
+  s.close();
+});
+
+test('small daily budgets survive hibernation while the socket stays open (no flush on close to save them)', async () => {
+  const a = await user('lia2');
+  const b = await user('max2');
+  const s = await reg.connect(a.uid, a.k);
+  for (let i = 0; i < 5; i++) {
+    s.send({ t: 'knock', id: `h${i}`, to: b.uid, box: 'x' });
+    assert.equal((await s.next((m) => m.id === `h${i}`)).t, 'ok');
+  }
+  reg.runtime.evict(); // the DO goes to sleep with a's socket still open, then wakes for the next frame
+  s.send({ t: 'knock', id: 'h5', to: b.uid, box: 'x' });
+  assert.equal((await s.next((m) => m.id === 'h5')).code, 'rate_limited');
   s.close();
 });
 
