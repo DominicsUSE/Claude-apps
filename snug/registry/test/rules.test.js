@@ -21,9 +21,10 @@ test('invalid names', () => {
   }
 });
 
-test('owner names "1" and "a" are owner-only', () => {
-  assert.deepEqual(OWNER_NAMES, ['1', 'a']);
-  for (const n of ['1', 'a', 'A', ' a ']) {
+test('"a" is owner-only; "1" is the one-character name anyone may take', () => {
+  assert.deepEqual(OWNER_NAMES, ['a']);
+  assert.equal(check('1'), null);
+  for (const n of ['a', 'A', ' a ']) {
     assert.equal(check(n), 'owner_only', n);
     assert.equal(check(n, { owner: true }), null, n);
   }

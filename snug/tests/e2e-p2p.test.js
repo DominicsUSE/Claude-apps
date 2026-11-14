@@ -96,7 +96,7 @@ test('unique names: the owner takes "a"; others get clear errors; Bob is saved a
   const bob = await open('bob', pcs.B);
   await github(bob, 1001);
   await bob.waitForSelector('#auth-username');
-  for (const n of ['a', '1']) {
+  for (const n of ['a']) {
     await typeName(bob, n);
     await bob.locator('#auth-username-err:has-text("That name is reserved")').waitFor();
   }
@@ -121,22 +121,22 @@ test('unique names: the owner takes "a"; others get clear errors; Bob is saved a
   assert.equal((await check('b.o.b')).error, 'taken');
   assert.equal((await check('bob_')).error, 'invalid_name');
   // Names are case-insensitive: "BOB" is Bob's. Claiming it is refused by the registry,
-  // and "1" is refused for anyone but the owner. Then Carol takes her own name.
+  // and "a" is refused for anyone but the owner. Then Carol takes her own name.
   assert.equal((await check('BOB')).error, 'taken');
   const claim = (username) => fetch(`${C.base}/api/gh/claim`, { method: 'POST', headers: { origin: C.base, 'content-type': 'application/json' }, body: JSON.stringify({ flow: start.flow, username }) });
   let r = await claim('BOB');
   assert.equal(r.status, 409);
   assert.equal((await r.json()).code, 'taken');
-  r = await claim('1');
+  r = await claim('a');
   assert.equal(r.status, 400);
   assert.equal((await r.json()).code, 'owner_only');
   r = await claim('Carol');
   assert.equal(r.status, 200, await r.clone().text());
   assert.equal(C.peer.identity.self().username, 'carol');
-  // The registry itself (not just this PC's checks) keeps "a" and "1" for the owner's GitHub id.
+  // The registry itself (not just this PC's checks) keeps "a" for the owner's GitHub id ("1" is open to anyone).
   const X = await pc('X');
   const auth = await X.peer.reg.authGithub(registry.github.issueToken({ id: 1003 }));
-  for (const n of ['a', '1', 'CAROL']) {
+  for (const n of ['a', 'CAROL']) {
     const e = await X.peer.reg.claim(auth.ticket, n).then(() => null, (err) => err);
     assert.ok(e, `${n} should be refused`);
     assert.equal(e.code, n === 'CAROL' ? 'taken' : 'owner_only', `${n}: ${e.code}`);

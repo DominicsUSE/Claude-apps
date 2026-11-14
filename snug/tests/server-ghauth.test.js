@@ -59,7 +59,7 @@ test('sign up: device code, the name rules, claim, and no GitHub identity anywhe
 
   const chk = async (name) => (await get(a, `/api/gh/check?name=${encodeURIComponent(name)}&flow=${w.flow}`)).data;
   assert.equal((await chk('a')).message, 'That name is reserved. Try another.');
-  assert.equal((await chk('1')).error, 'owner_only');
+  assert.equal((await chk('1')).ok, true, 'the one-character name "1" is open to anyone');
   assert.equal((await chk('admin')).error, 'reserved');
   assert.equal((await chk('x')).message, 'Usernames need at least 2 characters.');
   assert.equal((await chk('bob_')).message, 'A username can’t start or end with a dot or an underscore.');

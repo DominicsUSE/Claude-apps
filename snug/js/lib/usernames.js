@@ -3,8 +3,10 @@
 // can never drift apart. The registry is the authority; everyone else uses it
 // for instant feedback only.
 
-/** The only one-character names. Claimable only by the owner's GitHub account. */
-export const OWNER_NAMES = ['1', 'a'];
+/** The only one-character names. */
+export const SHORT_NAMES = ['1', 'a'];
+/** Of those, claimable only by the owner's GitHub account ("1" is open to anyone). */
+export const OWNER_NAMES = ['a'];
 
 export const RESERVED = new Set([
   'admin', 'administrator', 'snug', 'snugapp', 'support', 'system', 'root', 'moderator', 'mod', 'mods',
@@ -43,6 +45,7 @@ const CONTAINS_SKEL = ['admin', 'official', 'moderator', 'support', 'staff'].map
 export function check(name, { owner = false } = {}) {
   const n = normalize(name);
   if (OWNER_NAMES.includes(n)) return owner ? null : 'owner_only';
+  if (SHORT_NAMES.includes(n)) return null;
   if (!NAME_RE.test(n)) return 'invalid_name';
   if (PUNCT_RE.test(n)) return 'invalid_name';
   const sk = skeleton(n);

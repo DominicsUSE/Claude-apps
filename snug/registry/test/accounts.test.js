@@ -68,7 +68,7 @@ test('names are unique case-insensitively and by look-alike skeleton; a failed c
   await reg.signUp(1103, 'bob.x');
   assert.equal((await reg.claim(k, a.body.ticket, 'bob_x')).body.error, 'taken');
   for (const [name, code] of [['bob_', 'invalid_name'], ['b', 'invalid_name'], ['x'.repeat(33), 'invalid_name'], ['bob x', 'invalid_name'],
-    ['bób', 'invalid_name'], ['admin', 'reserved'], ['snug.help', 'reserved'], ['1', 'owner_only'], ['a', 'owner_only']]) {
+    ['bób', 'invalid_name'], ['admin', 'reserved'], ['snug.help', 'reserved'], ['a', 'owner_only']]) {
     const r = await reg.claim(k, a.body.ticket, name);
     assert.equal(r.body.error, code, name);
   }
@@ -109,7 +109,21 @@ test('owner names: only OWNER_GITHUB_IDS may claim "1" and "a"', async () => {
   const a2 = await reg.authId(k2, 1301);
   assert.equal(a2.body.owner, false);
   assert.equal((await reg.claim(k2, a2.body.ticket, 'a')).body.error, 'owner_only');
-  assert.equal((await reg.claim(k2, a2.body.ticket, '1')).body.error, 'owner_only');
+  assert.equal((await reg.claim(k2, a2.body.ticket, '1')).body.error, 'taken', '"1" is open to anyone, but the owner holds it now');
+});
+
+test('"1" can be claimed by anyone', async () => {
+  const r2 = await start();
+  try {
+    const k = makeKeys();
+    const a = await r2.authId(k, 1302);
+    assert.equal(a.body.owner, false);
+    const c = await r2.claim(k, a.body.ticket, '1');
+    assert.equal(c.status, 200, JSON.stringify(c.body));
+    assert.equal(c.body.account.username, '1');
+  } finally {
+    await r2.close();
+  }
 });
 
 test('rename: frees the old name at once, then at most once per 7 days', async () => {

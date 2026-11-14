@@ -4,7 +4,7 @@
 //
 // Concurrency rule: the only awaits are WebCrypto and outbound fetch. Every read-check-write on SQLite
 // happens in one synchronous block after the last await (see signed() / withTicket()).
-import { check, normalize, skeleton, OWNER_NAMES } from '../../js/lib/usernames.js';
+import { check, normalize, skeleton, SHORT_NAMES } from '../../js/lib/usernames.js';
 import { b64u, fromB64u, sha256, hmacHex, verifyEd25519, randomBytes, randomId } from './crypto.js';
 import { checkToken, githubMode, GhError, TOKEN_RE } from './github.js';
 import { DEFAULT_LIMITS, Windows, Budgets, HOUR, DAY } from './limits.js';
@@ -356,7 +356,7 @@ export class Hub {
       const name = normalize(username);
       const ce = check(name, { owner: !!t.owner });
       if (ce) fail(ce);
-      const skel = OWNER_NAMES.includes(name) ? `#${name}` : skeleton(name);
+      const skel = SHORT_NAMES.includes(name) ? `#${name}` : skeleton(name);
       const now = this.now();
       for (let i = 0; ; i++) {
         const uid = randomId(16);
@@ -454,7 +454,7 @@ export class Hub {
       if (acc.renamed_at && now - acc.renamed_at < RENAME_EVERY) fail('rename_too_soon', { retryAt: acc.renamed_at + RENAME_EVERY });
       const ce = check(name, { owner: owners.includes(acc.ghh) });
       if (ce) fail(ce);
-      const skel = OWNER_NAMES.includes(name) ? `#${name}` : skeleton(name);
+      const skel = SHORT_NAMES.includes(name) ? `#${name}` : skeleton(name);
       try {
         this.tx(() => {
           this.sql.exec('UPDATE accounts SET username=?, skel=?, renamed_at=? WHERE uid=?', name, skel, now, uid);
