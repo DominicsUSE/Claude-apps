@@ -160,11 +160,25 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
     }
   }
   const userRow = (id) => (id ? M.userRow(id) : null);
-  const handleFree = (handle, id) => !db.get('SELECT 1 FROM users WHERE handle = ? AND id != ?', handle, id || '');
+  // A password account on this PC (local only, never on the registry) doesn't block a Snug username:
+  // claiming the name moves that account aside to <name>-old. Friends' and the owner's rows do block.
+  const holder = (handle, id) => db.get('SELECT id, remote, pass FROM users WHERE handle = ? AND id != ?', handle, id || '');
+  const movable = (h) => !!h && h.remote !== 1 && h.pass !== '!';
+  const handleFree = (handle, id) => { const h = holder(handle, id); return !h || movable(h); };
+  function clearHandle(handle, id) {
+    const h = holder(handle, id);
+    if (!movable(h)) return;
+    let next;
+    for (let n = 1; ; n++) { next = `${handle}-old${n > 1 ? n : ''}`; if (!db.get('SELECT 1 FROM users WHERE handle = ?', next)) break; }
+    db.run('UPDATE users SET handle = ? WHERE id = ?', next, h.id);
+    hub.userChanged(h.id);
+    log('gh', 'moved a local account aside for its username');
+  }
   // The owner's local row for a registry account: u_<uid>, created on first sign-in.
   function ensureOwnerRow(uid, username) {
     const s = self();
     const id = s?.uid === uid && s.user && userRow(s.user) ? s.user : `u_${uid}`;
+    clearHandle(username, id);
     if (!userRow(id)) {
       const handle = handleFree(username, id) ? username : `${username}.${uid.slice(0, 4)}`.slice(0, 32);
       const hue = HUES[Math.floor(Math.random() * HUES.length)][0];
@@ -324,6 +338,7 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
       if (f.link) {
         // The account is GitHub-secured from now on: no password, no authenticator (section 3.3).
         user = f.link;
+        clearHandle(account.username, user);
         db.run("UPDATE users SET handle = ?, pass = '!' WHERE id = ?", account.username, user);
         try { db.run('DELETE FROM totp WHERE user = ?', user); } catch { /* two-factor not set up */ }
       } else user = ensureOwnerRow(account.uid, account.username);
@@ -436,6 +451,7 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
       let account;
       try { ({ account } = await reg.rename(username)); } catch (e) { log('gh', 'rename', e.code || 'error'); fail(regMessage(e, username)); }
       identity.setSelf({ username: account.username, renamedAt: account.renamedAt || Date.now() });
+      clearHandle(account.username, c.user);
       if (handleFree(account.username, c.user)) db.run('UPDATE users SET handle = ? WHERE id = ?', account.username, c.user);
       hub.userChanged(c.user);
       const status = peer.statusFor(c.user);

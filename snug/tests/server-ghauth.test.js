@@ -299,3 +299,20 @@ test('upgrading to P2P signs every password account out once, so the app opens o
   const later = await pc({ dataDir: old.dataDir });
   assert.equal((await get(later, '/api/me', { cookie: again.cookie })).status, 200);
 });
+
+test('a password account on this PC doesn’t block its username: claiming it moves that account to <name>-old', async () => {
+  const a = await pc();
+  const old = await post(a, '/api/register', { handle: 'sam', name: 'Sam', password: 'a long password' });
+  assert.equal(old.status, 201);
+  const w = await githubSignIn(a, 1010);
+  assert.equal(w.data.state, 'choose-name');
+  const chk = await get(a, `/api/gh/check?name=sam&flow=${w.flow}`);
+  assert.equal(chk.data.ok, true, JSON.stringify(chk.data));
+  const c = await post(a, '/api/gh/claim', { flow: w.flow, username: 'sam' });
+  assert.equal(c.status, 200, JSON.stringify(c.data));
+  assert.equal((await get(a, '/api/me', { cookie: c.cookie })).data.user.handle, 'sam');
+  // The old account and its data are still here, under the new name.
+  const back = await post(a, '/api/login', { handle: 'sam-old', password: 'a long password' });
+  assert.equal(back.status, 200);
+  assert.equal(back.data.user.id, old.data.user.id);
+});
