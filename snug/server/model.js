@@ -308,8 +308,8 @@ export function createModel(db) {
     if (!convs.length) return [];
     // sec-authz: the conversation list goes in as one JSON array, so someone in
     // a great many rooms and threads can't run past SQLite's variable limit.
-    const where = ['conv IN (SELECT value FROM json_each(?))', 'deleted IS NULL'];
-    const params = [JSON.stringify(convs)];
+    const where = ['conv IN (SELECT value FROM json_each(?))', 'deleted IS NULL', '(expires IS NULL OR expires > ?)']; // expires: 0.12 disappearing messages
+    const params = [JSON.stringify(convs), Date.now()];
     const like = (t) => { where.push("fold LIKE ? ESCAPE '\\'"); params.push(`%${t.replace(/[\\%_]/g, (c) => `\\${c}`)}%`); };
     // 0.12: words go to the full-text index (ranked, prefix matches); what it
     // can't serve (one letter, emoji, symbols) keeps the substring scan.

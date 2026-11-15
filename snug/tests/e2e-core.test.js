@@ -31,9 +31,10 @@ test.after(async () => { await browser?.close(); await srv?.close(); rmSync(dir,
 test.beforeEach(() => srv.resetLimits());
 test.afterEach(() => { const seen = errors.splice(0); assert.deepEqual(seen, [], 'page errors'); });
 
-async function person(handle, { viewport = { width: 1280, height: 800 }, phone = false, ctx: given } = {}) {
+async function person(handle, { viewport = { width: 1280, height: 800 }, phone = false, ctx: given, clock = false } = {}) {
   const ctx = given || await browser.newContext(phone ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : { viewport });
   const page = await ctx.newPage();
+  if (clock) await page.clock.install(); // a clock the test can move forward
   page.setDefaultTimeout(10000);
   page.on('pageerror', (e) => errors.push(`${handle}: ${e.message}`));
   page.on('console', (m) => {
@@ -95,4 +96,47 @@ test('quiet hours: one weekday set to quiet all day is saved for every device', 
   assert.equal(q.days[3].from, 13 * 60);
   assert.equal(q.days[1], null);
   await page.context().close();
+});
+
+const dmWith = (page, handle) => page.evaluate((h) => {
+  const S = window.snug.S;
+  const other = Object.values(S.users).find((u) => u.handle === h).id;
+  return Object.keys(S.dms).find((id) => S.dms[id].members.length === 2 && S.dms[id].members.includes(other) && !S.dms[id].group);
+}, handle);
+const openDm = async (page, id) => {
+  await page.evaluate((d) => { window.snug.S.ui.view = { type: 'conv', id: d }; window.snug.S.ui.depth = 1; window.snug.emit(); }, id);
+  await page.locator('.main .composer textarea').waitFor();
+};
+
+test('disappearing messages: set from the header, a line says so, the timer shows, and a message goes on time even offline', async () => {
+  const robin = await person('robin');
+  const ines = await person('ines', { clock: true });
+  const dm = await dmWith(robin, 'ines');
+  assert.ok(dm, 'robin and ines have a conversation in the sample data');
+  await openDm(robin, dm);
+  await openDm(ines, dm);
+  await robin.click('.main .bar-more');
+  await robin.click('.menu [role=menuitem]:has-text("Disappearing messages")');
+  const dialog = robin.locator('.ttl-form');
+  await dialog.waitFor();
+  assert.match(await dialog.innerText(), /copy or screenshot/);
+  assert.match(await dialog.innerText(), /backups/);
+  await dialog.locator('label:has-text("1 hour")').click();
+  await dialog.locator('button[type=submit]').click();
+  await robin.locator('.dmline', { hasText: 'turned on disappearing messages' }).waitFor();
+  await ines.locator('.dmline', { hasText: 'turned on disappearing messages' }).waitFor();
+  assert.match(await ines.locator('.main .ttl-btn').innerText(), /1 hour/);
+  await say(robin, 'this note will vanish');
+  await msg(ines, 'this note will vanish').waitFor();
+  // Ines goes offline; an hour later the message is gone from her screen anyway.
+  await ines.context().setOffline(true);
+  await ines.clock.fastForward('01:00:30');
+  await msg(ines, 'this note will vanish').waitFor({ state: 'detached' });
+  await ines.context().setOffline(false);
+  // The server's sweep removes it everywhere (its own clock, moved forward here).
+  srv.expiry.sweep(Date.now() + 3_600_000 + 60_000);
+  await msg(robin, 'this note will vanish').waitFor({ state: 'detached' });
+  assert.equal(srv.db.get("SELECT text FROM messages WHERE text = 'this note will vanish'"), undefined);
+  await robin.context().close();
+  await ines.context().close();
 });

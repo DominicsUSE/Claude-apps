@@ -44,3 +44,19 @@ test('quiet hours: days are checked when saved', () => {
   assert.throws(() => cleanPrefs({ quiet: { on: true, from: 1, to: 2, tz: 0, days: Array(7).fill('sometimes') } }), /each day/i);
   assert.throws(() => cleanPrefs({ quiet: { on: true, from: 1, to: 2, tz: 0, days: [{ from: 1, to: 9999 }, null, null, null, null, null, null] } }), /each day/i);
 });
+
+import { dropExpired, ttlLabel, TTL_CHOICES } from '../js/lib/expiry.js';
+test('disappearing: this device drops expired messages from its lists and cache, and knows when the next one is due', () => {
+  const S = {
+    msgs: { a: [{ id: '1', expires: 100 }, { id: '2' }, { id: '3', expires: 300 }], b: [{ id: '4' }] },
+    cache: { 5: { id: '5', expires: 50 }, 6: { id: '6', expires: 400 } },
+  };
+  const r = dropExpired(S, 200);
+  assert.equal(r.removed, 2);
+  assert.equal(r.next, 300);
+  assert.deepEqual(S.msgs.a.map((m) => m.id), ['2', '3']);
+  assert.deepEqual(Object.keys(S.cache), ['6']);
+  assert.equal(dropExpired({ msgs: { b: [{ id: '4' }] }, cache: {} }, 1).next, null);
+  assert.deepEqual(TTL_CHOICES.map(([, l]) => l), ['Off', '1 hour', '1 day', '7 days', '30 days']);
+  assert.equal(ttlLabel(86_400_000), '1 day');
+});

@@ -7,6 +7,7 @@ import { isIP } from 'node:net';
 import { join, normalize, extname, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './db.js';
+import { createExpiry } from './expiry.js'; // 0.12: disappearing messages
 import { createModel, newId } from './model.js';
 import { createHub, ringMsFrom, voiceGraceFrom } from './hub.js';
 import { AUDIO_TYPES, VIDEO_TYPES, uploadType, fileKind, parseRange, createMediaHttp, createFileSweep } from './media.js'; // sec-authz: createFileSweep // voice messages, GIFs, video
@@ -178,6 +179,9 @@ export async function startServer({
   hub.hooks.note = (user, note) => push.onNote(user, note).catch((e) => log('push', e)); // event reminders (server/community.js)
   // --- end push notifications ---
 
+  // 0.12: disappearing messages, before the peer module wraps the ops (server/expiry.js).
+  const expiry = createExpiry({ db, M, hub, ops: hub.ops });
+
   // p2p: the peer module wraps the ops last, after push (server/peer.js).
   const peer = createPeer({
     db, M, hub, ops: hub.ops, filesDir, log,
@@ -189,6 +193,7 @@ export async function startServer({
   // Deleted messages can be restored for ten minutes; after that their content is gone for good.
   const sweepFiles = createFileSweep({ db, filesDir, log }); // sec-authz: deleted attachments and never-sent uploads (server/media.js)
   const sweep = setInterval(() => {
+    try { expiry.sweep(); } catch (e) { log('error', 'expiry sweep', e); } // 0.12: disappearing messages, before their files go
     try { sweepFiles(); } catch (e) { log('error', 'file sweep', e); } // sec-authz: before the files column is cleared below
     sec.prune(); // sec-web W4: security events past 90 days, and past 500 per account
     db.run("UPDATE messages SET text = '', fold = '', files = NULL WHERE deleted IS NOT NULL AND deleted < ? AND text != ''", Date.now() - 11 * 60_000);
@@ -455,6 +460,7 @@ export async function startServer({
     port: address.port, db, M, hub, server,
     seclog: sec, // sec-web W4: tests run the security-event sweep and read events
     sweepFiles, // sec-authz: tests run the attachment sweep with their own clock
+    expiry, // 0.12: tests run the disappearing-messages sweep with their own clock
     peer, // p2p: srv.peer.stats() for tests, srv.peer.wake() for desktop main
     vaultBusy: () => vault.busy?.() === true, // desktop main: no update restart during a data-file transfer
     voiceBusy: () => hub.voiceBusy(), // ... or while anyone is in a voice room or a call on this server

@@ -9,6 +9,7 @@ import { uid } from './lib/util.js';
 import { plain } from './lib/format.js';
 import { unreadOf, isThread, roomIds } from './lib/attention.js';
 import { upgradePrefs } from './lib/account.js';
+import { dropExpired } from './lib/expiry.js'; // 0.12: disappearing messages
 
 export const PAGE = 40;
 const KEYS = { prefs: 'snug.prefs', drafts: 'snug.drafts', cache: 'snug.cache', last: 'snug.last' };
@@ -136,9 +137,20 @@ function cacheData() {
   // Local image previews are only valid in this tab.
   return JSON.parse(JSON.stringify(out, (k, v) => (k === 'src' && typeof v === 'string' && v.startsWith('blob:') ? undefined : v)));
 }
+// Disappearing messages (0.12): hidden at their time on this device, even
+// offline, and left out of the device copy. A timer wakes for the next one.
+let expiryTimer;
+export function sweepExpired(now = Date.now()) {
+  clearTimeout(expiryTimer);
+  const { removed, next } = dropExpired(S, now);
+  if (next !== null) expiryTimer = setTimeout(() => { if (sweepExpired()) emit(); }, Math.min(Math.max(0, next - Date.now()) + 50, 2 ** 31 - 1));
+  return removed;
+}
+
 export function persist() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
+    if (sweepExpired()) emit();
     local.set(KEYS.prefs, S.prefs);
     local.set(KEYS.drafts, S.drafts);
     if (S.me && S.ready) local.set(KEYS.cache, cacheData());
@@ -181,6 +193,7 @@ export function loadCache(userId) {
   if (!c || !c.me || (userId && c.me !== userId)) return false;
   Object.assign(S, blank(), c);
   for (const list of Object.values(S.msgs)) for (const m of list) if (m.state === 'sending') m.state = 'queued';
+  sweepExpired(); // what disappeared while this device was off never shows
   S.ready = true;
   checkView();
   const v = S.ui.view;

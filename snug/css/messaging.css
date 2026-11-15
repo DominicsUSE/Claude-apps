@@ -198,3 +198,16 @@ button.poll-a:active { background: var(--bg-4); }
 }
 @media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .poll-bar { transition: none; } }
 :root[data-motion="off"] .poll-bar { transition: none; }
+
+/* Disappearing messages (0.12): the header timer and its dialog (js/views/disappear.js) */
+.ttl-btn { width: auto; gap: var(--s-1); padding: 0 var(--s-2); }
+.ttl-btn-text { font-size: var(--t-12); color: var(--text-2); }
+.ttl-choices { border: 0; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--s-2); }
+.ttl-choices legend { margin-bottom: var(--s-2); }
+.ttl-choice { display: flex; align-items: center; gap: var(--s-2); min-height: max(44px, var(--h-md)); padding: 0 var(--s-3); border: 1px solid var(--line); border-radius: var(--r-sm); cursor: pointer; color: var(--text-1); font-size: var(--t-14); }
+.ttl-choice:hover { background: var(--hover); }
+.ttl-choice.sel { border-color: var(--text-2); background: var(--surface-sel); }
+.ttl-choice:focus-within { outline: var(--focus-w, 2px) solid var(--focus); outline-offset: 1px; }
+.ttl-choice input { accent-color: var(--text-1); margin: 0; }
+.ttl-choices:disabled .ttl-choice { cursor: default; opacity: 0.6; }
+.ttl-limits { margin: var(--s-3) 0 0; padding-left: var(--s-5); color: var(--text-2); font-size: var(--t-14); display: grid; gap: var(--s-1); }

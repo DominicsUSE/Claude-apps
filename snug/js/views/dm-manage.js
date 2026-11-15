@@ -8,6 +8,7 @@ import { fuzzy, HUES } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar } from '../ui/kit.js';
 import { Confirm } from './modals.js';
+import { ttlLabel } from '../lib/expiry.js'; // 0.12: the disappearing-messages line
 import { hideDm, pinDm, renameDm, iconDm, addToDm, leaveDm, kickFromDm, isGroupDm } from '../inbox.js';
 import { isPeerGroup, remoteOf } from './p2p.js'; // groups with friends on other PCs (server/peergroups.js)
 
@@ -230,8 +231,9 @@ export function DmLine({ m }) {
   else if (l.act === 'add') text = html`${name(by.id)} added ${(l.users || []).map((u, i) => html`${i ? ', ' : ''}${name(u)}`)}`;
   else if (l.act === 'leave') text = html`${name(by.id)} left the group`;
   else if (l.act === 'kick') text = html`${name(by.id)} removed ${name(l.user)}`;
+  else if (l.act === 'ttl') text = l.ttl ? html`${name(by.id)} turned on disappearing messages: new messages go after <b>${ttlLabel(l.ttl)}</b>` : html`${name(by.id)} turned off disappearing messages`; // 0.12
   else text = m.text;
-  const icon = l.act === 'add' ? 'user-plus' : l.act === 'leave' || l.act === 'kick' ? 'leave' : 'edit';
+  const icon = l.act === 'add' ? 'user-plus' : l.act === 'leave' || l.act === 'kick' ? 'leave' : l.act === 'ttl' ? 'clock' : 'edit';
   return html`<div class="joinline dmline" role="note" data-mid=${m.id}>
     <span class="dmline-ic" aria-hidden="true"><${Icon} name=${icon} size=${16} /></span>
     <span class="joinline-text">${text}</span>

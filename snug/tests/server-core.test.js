@@ -173,3 +173,96 @@ test('search: without FTS5 (SNUG_FTS=0 or an SQLite built without it) the substr
   assert.deepEqual(M.search('u_a', 'aku').map((h) => h.m.id), ['m_a1'], 'substring, as before');
   db.close();
 });
+
+// ---------- Disappearing messages ----------
+const HOUR = 3_600_000, DAY = 24 * HOUR;
+const upload = (cookie, conv, text, name) => fetch(`${base}/api/files?conv=${encodeURIComponent(conv)}`, {
+  method: 'POST', headers: { cookie, origin: base, 'content-type': 'text/plain', 'x-file-name': name }, body: text,
+});
+
+test('disappearing: only the allowed timers, by the people allowed to set them, with a line saying so', async () => {
+  // A direct conversation: either person.
+  assert.match(await ada.refused('conv.ttl', { conv: dm, ttl: 5 * HOUR }), /off, 1 hour, 1 day, 7 days or 30 days/);
+  assert.match(await cy.refused('conv.ttl', { conv: dm, ttl: DAY }), /access/);
+  await bo.ok('conv.ttl', { conv: dm, ttl: DAY });
+  const line = await ada.next('msg', (d) => d.conv === dm && d.m.dmLine?.act === 'ttl');
+  assert.equal(line.m.dmLine.ttl, DAY);
+  assert.equal(line.m.expires, undefined, 'the line about the timer stays');
+  const view = await ada.next('dm', (d) => d.dm?.id === dm && d.dm.ttl === DAY);
+  assert.equal(view.dm.ttl, DAY);
+  // A room: only someone who may manage rooms.
+  assert.match(await bo.refused('conv.ttl', { conv: lounge, ttl: HOUR }), /can’t/);
+  await ada.ok('conv.ttl', { conv: lounge, ttl: HOUR });
+  const h = await bo.next('house', (d) => d.house.id === house && d.rooms[lounge]?.ttl === HOUR);
+  assert.equal(h.rooms[lounge].ttl, HOUR);
+  await ada.ok('conv.ttl', { conv: lounge, ttl: 0 });
+  await bo.next('house', (d) => d.house.id === house && !d.rooms[lounge]?.ttl);
+  // Threads follow their conversation; they have no timer of their own.
+  assert.match(await ada.refused('conv.ttl', { conv: `t:${mid()}`, ttl: HOUR }), /access|conversation/);
+});
+
+test('disappearing: new messages get an expiry; the sweep (fake clock) removes them, their files, edits and search hits; undo refuses', async () => {
+  const before = await send(ada, lounge, 'not disappearing'); // the room has no timer
+  const t0 = Date.now();
+  const id = await send(ada, dm, 'vanishing ink message');
+  const row = srv.db.get('SELECT ts, expires FROM messages WHERE id = ?', id);
+  assert.equal(row.expires, row.ts + DAY);
+  assert.equal(srv.db.get('SELECT expires FROM messages WHERE id = ?', before).expires, null);
+  const got = await bo.next('msg', (d) => d.m.id === id);
+  assert.equal(got.m.expires, row.expires, 'clients get the expiry, to hide it on time even offline');
+  // A thread reply under it disappears on the same timer.
+  const reply = mid();
+  await bo.ok('msg.send', { conv: `t:${id}`, id: reply, text: 'thread reply ink' });
+  assert.ok(srv.db.get('SELECT expires FROM messages WHERE id = ?', reply).expires > t0);
+  // A file, an edit (history) and a reaction.
+  const f = await (await upload(ada.cookie, dm, 'file body', 'ink.txt')).json();
+  const withFile = mid();
+  await ada.ok('msg.send', { conv: dm, id: withFile, text: 'ink file', files: [{ id: f.id }] });
+  await ada.ok('msg.edit', { conv: dm, id, text: 'vanishing ink message, edited' });
+  await bo.ok('react', { conv: dm, id, emoji: '👍', on: true });
+  assert.deepEqual(await ids(ada, 'vanishing'), [id]);
+
+  // Not yet: an hour later nothing is gone.
+  srv.expiry.sweep(t0 + HOUR);
+  srv.sweepFiles(t0 + HOUR);
+  assert.equal(srv.db.get('SELECT deleted FROM messages WHERE id = ?', id).deleted, null);
+  // A day later: gone right away, no undo window.
+  const later = t0 + DAY + 60_000;
+  srv.expiry.sweep(later);
+  srv.sweepFiles(later);
+  const gone = srv.db.get('SELECT * FROM messages WHERE id = ?', id);
+  assert.ok(gone.deleted);
+  assert.equal(gone.text, '');
+  assert.equal(gone.fold, '');
+  assert.equal(srv.db.get('SELECT COUNT(*) n FROM msg_edits WHERE msg = ?', id).n, 0, 'earlier versions go too');
+  assert.equal(srv.db.get('SELECT COUNT(*) n FROM reactions WHERE msg = ?', id).n, 0);
+  assert.equal(srv.db.get('SELECT text FROM messages WHERE id = ?', reply).text, '');
+  assert.equal(srv.db.get('SELECT files FROM messages WHERE id = ?', withFile).files, null);
+  assert.equal(srv.db.get('SELECT 1 FROM files WHERE id = ?', f.id), undefined, 'the attachment is removed');
+  assert.equal((await fetch(`${base}/api/files/${f.id}`, { headers: { cookie: bo.cookie } })).status, 404);
+  assert.deepEqual(await ids(ada, 'vanishing'), []);
+  await bo.next('msg.del', (d) => d.id === id);
+  assert.match(await ada.refused('msg.restore', { conv: dm, id }), /disappeared/);
+  // History no longer has it.
+  assert.equal((await ada.ok('history', { conv: dm })).msgs.some((m) => m.id === id), false);
+  // The message before the timer was set stays.
+  assert.equal(srv.db.get('SELECT deleted FROM messages WHERE id = ?', before).deleted, null);
+  // Turning it off: new messages stay.
+  await ada.ok('conv.ttl', { conv: dm, ttl: 0 });
+  const keep = await send(ada, dm, 'this one stays');
+  assert.equal(srv.db.get('SELECT expires FROM messages WHERE id = ?', keep).expires, null);
+});
+
+test('disappearing: a database from before 0.12 gains the column and keeps its messages', () => {
+  const d = mkdtempSync(join(tmpdir(), 'snug-ttl-'));
+  try {
+    const path = join(d, 'old.db');
+    openDb(path).close();
+    const raw = new DatabaseSync(path);
+    raw.exec('DROP TRIGGER IF EXISTS messages_ttl_ai; DROP TABLE IF EXISTS conv_ttl; DROP INDEX IF EXISTS messages_expires; ALTER TABLE messages DROP COLUMN expires;');
+    raw.close();
+    const again = openDb(path);
+    assert.ok(again.all('PRAGMA table_info(messages)').some((c) => c.name === 'expires'));
+    again.close();
+  } finally { rmSync(d, { recursive: true, force: true }); }
+});
