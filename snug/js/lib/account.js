@@ -82,6 +82,15 @@ export const PREF_RULES = {
   rolesOff: ['set', 300, {}], // houses whose @role mentions don't count as for you
   showBadge: ['bool', null, true], // the unread count on the app icon (desktop app, installed web app)
   // --- end inbox and notifications ---
+  // --- Privacy (server/privacy.js, js/views/privacy.js) ---
+  // Send my typing notes and show other people's. Off: neither, on every device.
+  typing: ['bool', null, true],
+  // Who sees that I'm online and my "Recently here" / "last wrote" lines:
+  // everyone who shares a house, a conversation or a friendship with me; friends only; nobody.
+  presenceTo: ['enum', ['everyone', 'friends', 'nobody'], 'everyone'],
+  // Desktop: previews for links friends on other PCs send (fetching one shows the site this PC's address).
+  friendPreviews: ['bool', null, false],
+  // --- end privacy ---
 };
 // customThemes: [{ id, name, base, bg, surface, text, accent }], ids unique.
 function cleanThemes(v, fail) {

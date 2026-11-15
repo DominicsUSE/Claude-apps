@@ -24,13 +24,14 @@ import { createGroups } from './peergroups.js'; // v0.10 B: groups across PCs
 import { createGhAuth } from './ghauth.js'; // p2p: Sign in with GitHub and the Snug username
 import { createNotices } from './notices.js'; // v0.10 A: registry notices, bans and admin
 import { createVault } from './vault.js'; // v0.10 C: the account's data file
-import { restoreIfDamaged, scheduleSnapshots } from './dbbackup.js'; // sec-registry REG-L6: database snapshots
+import { restoreIfDamaged, scheduleSnapshots, KEEP as KEEP_SNAPSHOTS } from './dbbackup.js'; // sec-registry REG-L6: database snapshots
 import {
   sessionUser, endAllSessions, readCookie, sessionCookie, COOKIE, limiter, safeDecode,
   clientIp, ipKey, secureCookies, // sec-auth
   loadDataKey, // sec-registry REG-L6: the snapshot key
 } from './auth.js';
 import { createSeclog, redactLog, redact, sendFile } from './seclog.js'; // sec-web: security events, log redaction, safe file sends
+import { createPrivacy, logDaysFrom, iceFacts } from './privacy.js'; // privacy: who sees you online, typing, friends' link previews, erasing, what is kept
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PUBLIC = ['index.html', 'css/', 'js/', 'fonts/', 'vendor/', 'docs/', 'brand/', 'sw.js'];
@@ -97,6 +98,8 @@ export async function startServer({
   linkPreviews = process.env.SNUG_LINK_PREVIEWS !== '0',
   // Tests only: let previews fetch a local stand-in site on 127.0.0.1 (every other private address stays refused).
   linkAllowLocal = false,
+  // privacy: days sign-in history and security events are kept (SNUG_LOG_DAYS, 1 to 365; 30 by default).
+  logDays = logDaysFrom(process.env.SNUG_LOG_DAYS ?? 30),
   // p2p (server/peer.js): the registry, GitHub sign-in, the device key wrapper and link tuning.
   registryUrl = process.env.SNUG_REGISTRY_URL || null,
   githubClientId = process.env.SNUG_GITHUB_CLIENT_ID || null,
@@ -133,7 +136,7 @@ export async function startServer({
   const cspLimit = limiter({ capacity: 30, perSecond: 0.5 });
   const ipOf = (req) => ipKey(clientIp(req, trustProxy)); // sec-auth: the proxy's own entry, IPv4-mapped as IPv4, IPv6 per /64
   // sec-web W4: security events and the suspicious-activity detectors (server/seclog.js).
-  const sec = createSeclog({ db, log, ipOf: (req) => clientIp(req, trustProxy) });
+  const sec = createSeclog({ db, log, ipOf: (req) => clientIp(req, trustProxy), keepDays: logDays });
   // sec-web W2: the Host header must name this server, or a page on a name the
   // attacker controls (re-pointed at 127.0.0.1) would pass every Origin check.
   const hostNames = new Set([...LOCAL_NAMES, ...(hosts || []).map((h) => h.toLowerCase().replace(/:\d+$/, '')),
@@ -185,6 +188,12 @@ export async function startServer({
   });
   // v0.10 B: groups across PCs (server/peergroups.js)
   createGroups({ db, M, hub, ops: hub.ops, peer, log });
+  // privacy: last, so its typing rule covers friends on other PCs too (server/privacy.js).
+  const privacy = createPrivacy({
+    db, M, hub, ops: hub.ops, peer, filesDir, log,
+    facts: { mode: peer.enabled ? 'desktop' : 'host', logDays, linkPreviews, ...iceFacts(ice), backupDays: dbKey ? KEEP_SNAPSHOTS : 0 },
+  });
+  M.eraseAuthored = privacy.eraseAuthored; // account deletion, when asked to erase (server/account.js)
 
   // Deleted messages can be restored for ten minutes; after that their content is gone for good.
   const sweepFiles = createFileSweep({ db, filesDir, log }); // sec-authz: deleted attachments and never-sent uploads (server/media.js)
@@ -245,7 +254,7 @@ export async function startServer({
   const voiceOptsHttp = createVoiceOptsHttp({ db, M, filesDir, sendJson, error, body, headers, uploadLimit });
   hub.messaging?.configure({ filesDir, previews: linkPreviews, allowLoopback: linkAllowLocal });
   const placesHttp = createPlacesHttp({ db, M, hub, sendJson, error, jsonBody, ipOf }); // webhooks (server/places.js)
-  const accountHttp = createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonBody, body, headers, ipOf, secure, authLimit, uploadLimit, log, dataDir, keyStore, dataKey, desktop: !!resumeSecret }); // server/account.js; sec-auth: the data key, sign-up, sign-in, sign-out, new password
+  const accountHttp = createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonBody, body, headers, ipOf, secure, authLimit, uploadLimit, log, dataDir, keyStore, dataKey, desktop: !!resumeSecret, logDays }); // server/account.js; sec-auth: the data key, sign-up, sign-in, sign-out, new password
   const appearanceHttp = createAppearanceHttp({ db, M, hub, filesDir, sendJson, error, body, headers, uploadLimit }); // server/appearance.js
   const communityHttp = createCommunityHttp({ db, M, hub, filesDir, sendJson, error, body, headers, uploadLimit, userOf: (req) => userOf(req) }); // server/community.js
   // p2p: GitHub sign-in, the username picker and the owner's account rules (server/ghauth.js).
@@ -359,6 +368,8 @@ export async function startServer({
       return sendJson(res, 200, { house: { ...h, members: count }, by });
     }
 
+    // privacy: what this Snug keeps and for how long, for the privacy page (no sign-in needed).
+    if (req.method === 'GET' && path === '/api/privacy') return sendJson(res, 200, privacy.about());
     if (await gh.open(req, res, path, url)) return undefined; // p2p: /api/gh/* (server/ghauth.js)
     // Webhooks carry their own secret instead of a session (server/places.js).
     if (await placesHttp(req, res, path)) return undefined;
@@ -455,6 +466,7 @@ export async function startServer({
     port: address.port, db, M, hub, server,
     seclog: sec, // sec-web W4: tests run the security-event sweep and read events
     sweepFiles, // sec-authz: tests run the attachment sweep with their own clock
+    accountPrune: () => accountHttp.prune(), // privacy: tests run the sign-in history sweep now
     peer, // p2p: srv.peer.stats() for tests, srv.peer.wake() for desktop main
     vaultBusy: () => vault.busy?.() === true, // desktop main: no update restart during a data-file transfer
     voiceBusy: () => hub.voiceBusy(), // ... or while anyone is in a voice room or a call on this server

@@ -5,7 +5,7 @@
 //   spotting an attack (a refused cross-site request, a refused Host, a rate
 //   limit hit, an alert). Never a password, code, token or cookie: addresses
 //   are truncated (1.2.3.x, 2001:db8:1::/48), the browser string is cut to 80
-//   characters and details are redacted. Rows go after 90 days, and each
+//   characters and details are redacted. Rows go after 30 days (SNUG_LOG_DAYS), and each
 //   account keeps at most 500. Sign-ins and account changes are kept by the
 //   auth layer (auth_events, server/account.js); its events come here too, so
 //   the detectors see them and the owner sees one list.
@@ -53,7 +53,7 @@ export const redactLog = (fn) => (...a) => fn(...a.map((x) => (typeof x === 'num
 
 // ---------- Events and detectors ----------
 const DAY = 86_400_000;
-const KEEP_MS = 90 * DAY;
+const KEEP_DAYS = 30; // privacy: 90 before 0.12; the server owner sets it with SNUG_LOG_DAYS (server/privacy.js)
 const PER_USER = 500;
 const ANON_ROWS = 20_000;
 // Kinds an attacker can make a lot of: stored at most 10 a minute per address and kind.
@@ -78,7 +78,8 @@ function windows() {
   };
 }
 
-export function createSeclog({ db, log = () => {}, ipOf = (req) => req?.socket?.remoteAddress || '', now = () => Date.now() }) {
+export function createSeclog({ db, log = () => {}, ipOf = (req) => req?.socket?.remoteAddress || '', now = () => Date.now(), keepDays = KEEP_DAYS }) {
+  const KEEP_MS = keepDays * DAY;
   db.raw.exec(`
     CREATE TABLE IF NOT EXISTS security_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -176,7 +177,7 @@ export function createSeclog({ db, log = () => {}, ipOf = (req) => req?.socket?.
     return [...mine, ...auth].sort((a, b) => b.ts - a.ts).slice(0, n);
   }
 
-  // The 60-second sweep: 90 days, 500 rows per account, 20,000 without one.
+  // The 60-second sweep: keepDays (30 by default), 500 rows per account, 20,000 without one.
   function prune(at = now()) {
     try {
       db.run('DELETE FROM security_events WHERE ts < ?', at - KEEP_MS);
