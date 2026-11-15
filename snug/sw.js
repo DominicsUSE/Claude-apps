@@ -19,12 +19,17 @@ async function precache() {
   const { version, files } = await r.json();
   const cache = await caches.open(SHELL);
   if ((await (await cache.match('/__version'))?.text()) === version) return;
-  // One at a time is slow but kind to a small server; a file that fails is fetched on use instead.
-  for (const f of files) {
-    if (typeof f !== 'string' || !f.startsWith('/') || NEVER.test(f)) continue;
-    try { const res = await fetch(f, { cache: 'no-cache' }); if (res.ok) await cache.put(f, res); } catch { /* next time */ }
-  }
-  await cache.put('/__version', new Response(version));
+  // Four at a time, kind to a small server. A file that fails is kept when it's next used instead,
+  // and the version isn't written, so the next visit tries the whole list again.
+  const todo = files.filter((f) => typeof f === 'string' && f.startsWith('/') && !NEVER.test(f));
+  let failed = 0;
+  const worker = async () => {
+    for (let f = todo.shift(); f; f = todo.shift()) {
+      try { const res = await fetch(f, { cache: 'no-cache' }); if (res.ok) await cache.put(f, res); else failed++; } catch { failed++; }
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  if (!failed) await cache.put('/__version', new Response(version));
 }
 
 self.addEventListener('install', (e) => { self.skipWaiting(); e.waitUntil(precache().catch(() => {})); });

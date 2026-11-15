@@ -98,6 +98,15 @@ test('quiet hours: one weekday set to quiet all day is saved for every device', 
   await page.context().close();
 });
 
+// The service worker's copy of the app is complete (it writes its version last).
+// page.evaluate awaits the promise; page.waitForFunction would not wait for it.
+const shellKept = (page) => page.evaluate(async () => {
+  for (let i = 0; i < 300; i++) {
+    if (await (await caches.open('snug-shell-v1')).match('/__version')) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error('the app shell was never kept');
+});
 const dmWith = (page, handle) => page.evaluate((h) => {
   const S = window.snug.S;
   const other = Object.values(S.users).find((u) => u.handle === h).id;
@@ -144,8 +153,7 @@ test('disappearing messages: set from the header, a line says so, the timer show
 test('PWA: the app shell is kept by the service worker and opens with no connection, showing this device’s copy', async () => {
   const page = await person('robin');
   // The worker installs and keeps every file of the app.
-  await page.waitForFunction(() => navigator.serviceWorker?.controller || navigator.serviceWorker?.ready.then(() => true), null, { timeout: 15000 });
-  await page.waitForFunction(async () => (await caches.keys()).includes('snug-shell-v1') && !!(await (await caches.open('snug-shell-v1')).match('/__version')), null, { timeout: 30000, polling: 250 });
+  await shellKept(page);
   const kept = await page.evaluate(async () => (await (await caches.open('snug-shell-v1')).keys()).map((r) => new URL(r.url).pathname));
   assert.ok(kept.includes('/') && kept.includes('/js/app.js') && kept.includes('/css/tokens.css'));
   assert.equal(kept.some((p) => p.startsWith('/api/')), false, 'nothing from the API is kept');
@@ -183,4 +191,74 @@ test('PWA: the manifest is linked and complete enough to install (checked in the
   const r = await cdp.send('Page.getAppManifest');
   assert.deepEqual(r.errors, [], JSON.stringify(r.errors));
   await ctx.close();
+});
+
+test('drafts: the reply target and an uploaded attachment survive a reload, then send together', async () => {
+  const page = await person('priya');
+  await go(page, 'Glaze lab');
+  const target = msg(page, 'keep it off the bottom third');
+  await target.hover();
+  await target.locator('button[aria-label="Reply"]').click();
+  await box(page).fill('draft that replies, with a file');
+  await page.locator('.main .composer input[type=file]').setInputFiles({ name: 'recipe.txt', mimeType: 'text/plain', buffer: Buffer.from('copper green: 2% CuCO3') });
+  await page.locator('.composer-files .pending-file', { hasText: 'recipe.txt' }).waitFor();
+  await page.waitForFunction(() => !document.querySelector('.composer-files')?.textContent.includes('Uploading'));
+  await page.waitForTimeout(600); // the draft is saved shortly after a change
+  await page.reload();
+  await page.waitForFunction(() => window.snug.S.conn.socket === 'open');
+  await page.locator('.main .bar-title:has-text("Glaze lab")').waitFor();
+  assert.equal(await box(page).inputValue(), 'draft that replies, with a file');
+  assert.match(await page.locator('.main .composer').innerText(), /Replying to\s+Tomasz/);
+  await page.locator('.composer-files .pending-file', { hasText: 'recipe.txt' }).waitFor();
+  await box(page).press('Enter');
+  const sent = await page.waitForFunction(() => {
+    const id = Object.values(window.snug.S.msgs).flat().find((m) => m.text === 'draft that replies, with a file' && !m.state)?.id;
+    return id || null;
+  });
+  const id = await sent.jsonValue();
+  const row = srv.db.get('SELECT reply_to, files FROM messages WHERE id = ?', id);
+  assert.ok(row.reply_to, 'sent as a reply');
+  assert.equal(JSON.parse(row.files)[0].name, 'recipe.txt');
+  // Nothing of it is left for the next reload.
+  assert.equal(await page.evaluate(() => JSON.stringify(window.snug.S.ui.reply)), '{}');
+  assert.equal(await page.evaluate(() => Object.keys(window.snug.S.draftFiles).length), 0);
+  await page.context().close();
+});
+
+test('offline: a reaction and an edit made with no connection wait, survive a reload, and are sent when it is back', async () => {
+  const page = await person('robin');
+  await go(page, 'Glaze lab');
+  // The service worker must have the app, so the offline reload below works.
+  await shellKept(page);
+  await page.context().setOffline(true);
+  await page.evaluate(() => window.snug.voiceTest.dropSocket());
+  await page.waitForFunction(() => window.snug.S.conn.socket !== 'open');
+  const tomasz = msg(page, 'keep it off the bottom third');
+  const robinId = srv.db.get("SELECT id FROM users WHERE handle = 'robin'").id;
+  const tm = srv.db.get("SELECT id FROM messages WHERE text LIKE '%keep it off the bottom third%'").id;
+  const emoji = srv.db.get('SELECT emoji FROM reactions WHERE msg = ? LIMIT 1', tm).emoji;
+  const had = !!srv.db.get('SELECT 1 FROM reactions WHERE msg = ? AND user = ? AND emoji = ?', tm, robinId, emoji);
+  await tomasz.locator('.rx:not(.add)').first().click(); // robin's reaction on the one already there, toggled
+  await page.locator('.toast', { hasText: 'kept here' }).waitFor();
+  // Edit robin's own message (the last one robin wrote here): Up arrow in an empty box.
+  await box(page).fill('');
+  await box(page).press('ArrowUp');
+  await page.locator('.msg-edit textarea').fill('Has anyone layered satin white over tenmoku? Edited offline.');
+  await page.locator('.msg-edit textarea').press('Enter');
+  await msg(page, 'Edited offline.').waitFor();
+  // Still there after a reload with no connection.
+  await page.waitForTimeout(600);
+  await page.reload();
+  await page.waitForSelector('.nav', { timeout: 15000 });
+  await msg(page, 'Edited offline.').waitFor();
+  assert.equal(await page.evaluate(() => window.snug.S.conn.socket !== 'open'), true);
+  // Back online: both reach the server, and the screen doesn't flick back.
+  await page.context().setOffline(false);
+  await page.waitForFunction(() => window.snug.S.conn.socket === 'open', null, { timeout: 30000 });
+  for (let i = 0; i < 50 && !srv.db.get("SELECT 1 FROM messages WHERE text LIKE '%Edited offline.%'"); i++) await page.waitForTimeout(100);
+  assert.ok(srv.db.get("SELECT 1 FROM messages WHERE text LIKE '%Edited offline.%'"), 'the edit reached the server');
+  assert.equal(!!srv.db.get('SELECT 1 FROM reactions WHERE msg = ? AND user = ? AND emoji = ?', tm, robinId, emoji), !had, 'the reaction change reached the server');
+  await msg(page, 'Edited offline.').waitFor();
+  assert.equal(await page.evaluate(() => localStorage.getItem('snug.ops')).then((s) => JSON.parse(s).ops.length), 0, 'nothing left waiting');
+  await page.context().close();
 });

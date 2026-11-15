@@ -60,3 +60,39 @@ test('disappearing: this device drops expired messages from its lists and cache,
   assert.deepEqual(TTL_CHOICES.map(([, l]) => l), ['Off', '1 hour', '1 day', '7 days', '30 days']);
   assert.equal(ttlLabel(86_400_000), '1 day');
 });
+
+import { trimForCache, queueOp, replayOp, QUEUED_OPS } from '../js/lib/offline.js';
+test('device copy: at most 40 messages per conversation, never dropping ones still waiting to send, and older ones marked to load', () => {
+  const msgs = Array.from({ length: 100 }, (_, i) => ({ id: `m${i}`, ts: i }));
+  msgs[10].state = 'queued'; // an old unsent one: kept
+  const out = trimForCache({ msgs: { a: msgs, b: msgs.slice(0, 5) }, more: {}, cache: { x: { id: 'x' } } });
+  assert.equal(out.msgs.a.length, 41);
+  assert.equal(out.msgs.a[0].id, 'm10');
+  assert.equal(out.msgs.a.at(-1).id, 'm99');
+  assert.equal(out.more.a, true, 'the rest loads from the server when scrolled to');
+  assert.equal(out.msgs.b.length, 5);
+  assert.equal(out.more.b, undefined);
+  assert.deepEqual(out.cache, {}, 'search hits are not kept');
+  assert.equal(msgs.length, 100, 'the live state is untouched');
+});
+
+test('offline changes: queued once each (the last one wins), and replayed onto a fresh snapshot', () => {
+  assert.ok(['react', 'msg.edit', 'msg.delete', 'msg.restore', 'saved.set', 'saved.note'].every((op) => QUEUED_OPS.has(op)));
+  assert.equal(QUEUED_OPS.has('msg.send'), false, 'messages have their own queue');
+  let q = [];
+  q = queueOp(q, 'react', { conv: 'r', id: 'm1', emoji: '👍', on: true });
+  q = queueOp(q, 'msg.edit', { conv: 'r', id: 'm2', text: 'one' });
+  q = queueOp(q, 'msg.edit', { conv: 'r', id: 'm2', text: 'two' });
+  q = queueOp(q, 'react', { conv: 'r', id: 'm1', emoji: '👍', on: false });
+  q = queueOp(q, 'react', { conv: 'r', id: 'm1', emoji: '🎉', on: true });
+  assert.deepEqual(q.map((x) => [x.op, x.d.text ?? x.d.emoji, x.d.on]), [['msg.edit', 'two', undefined], ['react', '👍', false], ['react', '🎉', true]]);
+  // Replayed onto what the server sent on reconnect, so nothing flickers back.
+  const S = { me: 'u1', msgs: { r: [{ id: 'm1', reactions: { '👍': ['u1', 'u2'] } }, { id: 'm2', text: 'zero' }, { id: 'm3', text: 'bye' }] }, saved: [], cache: {} };
+  for (const x of q) replayOp(S, x.op, x.d);
+  replayOp(S, 'msg.delete', { conv: 'r', id: 'm3' });
+  replayOp(S, 'saved.set', { conv: 'r', id: 'm2', on: true });
+  assert.deepEqual(S.msgs.r[0].reactions, { '👍': ['u2'], '🎉': ['u1'] });
+  assert.equal(S.msgs.r[1].text, 'two');
+  assert.equal(S.msgs.r.length, 2);
+  assert.equal(S.saved[0].id, 'm2');
+});

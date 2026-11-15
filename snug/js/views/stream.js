@@ -301,7 +301,14 @@ function readVideo(file) {
 
 export function Composer({ conv, placeholder }) {
   const [text, setText] = useState(S.drafts[conv] || '');
-  const [files, setFiles] = useState([]);
+  // Attachments already uploaded for this draft come back after a reload (0.12); a picture shows from the server's copy.
+  const [files, setFiles] = useState(() => (S.draftFiles[conv] || []).map((f) => ({ ...f, status: 'ready', ...(f.kind === 'image' ? { src: `/api/files/${f.id}` } : {}) })));
+  useEffect(() => {
+    const ready = files.filter((f) => f.status === 'ready' && f.id).map(({ key, id, kind, name, size, w, h, duration, spoiler, alt }) => ({ key, id, kind, name, size, w, h, duration, spoiler, alt }));
+    const had = !!S.draftFiles[conv];
+    if (ready.length) S.draftFiles[conv] = ready; else delete S.draftFiles[conv];
+    if (ready.length || had) persist();
+  }, [files]);
   const [ac, setAc] = useState(null);
   const [editing, setEditingFile] = useState(null); // the attachment whose spoiler and description are open
   const [longPaste, setLongPaste] = useState(null);  // text over the limit, waiting for "Send as a file"

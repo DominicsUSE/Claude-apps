@@ -10,12 +10,16 @@ import { plain } from './lib/format.js';
 import { unreadOf, isThread, roomIds } from './lib/attention.js';
 import { upgradePrefs } from './lib/account.js';
 import { dropExpired } from './lib/expiry.js'; // 0.12: disappearing messages
+import { trimForCache, queueOp, replayOp, QUEUED_OPS } from './lib/offline.js'; // 0.12: the device copy and offline changes
 
 export const PAGE = 40;
 const KEYS = { prefs: 'snug.prefs', drafts: 'snug.drafts', cache: 'snug.cache', last: 'snug.last' };
+// 0.12: changes waiting for a connection, and what a draft replies to and has attached.
+Object.assign(KEYS, { ops: 'snug.ops', reply: 'snug.reply', files: 'snug.draftFiles' });
 const local = {
   get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
-  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* full or blocked */ } },
+  // true when written; false when the device's storage is full or blocked.
+  set(k, v) { try { localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)); return true; } catch { return false; } },
   del(k) { try { localStorage.removeItem(k); } catch { /* blocked */ } },
 };
 
@@ -54,7 +58,8 @@ function freshUi() {
     pane: null,          // { type: 'thread', id } | { type: 'people' } | { type: 'details' }
     depth: 0,            // phone: 0 shows the tabs, 1 shows the open view
     tab: 'home',
-    marker: {}, hold: {}, win: {}, loaded: {}, reply: {}, jump: null, editing: null,
+    marker: {}, hold: {}, win: {}, loaded: {}, jump: null, editing: null,
+    reply: local.get(KEYS.reply) || {}, // what each draft replies to, kept across a reload (0.12)
     menu: null, pop: null, modal: null, layer: null, quick: null, lightbox: null,
     toasts: [], search: null, joinCode: null,
   };
@@ -66,6 +71,7 @@ export const S = {
   ready: false,          // true once there is data to show, from the server or the device cache
   prefs: { ...DEFAULT_PREFS, ...(upgradePrefs(local.get(KEYS.prefs)) || {}) },
   drafts: local.get(KEYS.drafts) || {},
+  draftFiles: local.get(KEYS.files) || {}, // attachments uploaded for a draft, not sent yet (0.12, js/views/stream.js)
   typing: {}, speaking: {}, call: null, peers: {},
   // Calls in direct conversations (js/calls.js): each live call's details by
   // conversation, the calls ringing for me, and how my last call ended.
@@ -89,11 +95,48 @@ const call = (op, d) => transport.call(op, d);
 export const resync = () => transport.resync();
 
 // Send a change; if it does not go through, say so and fetch the truth again.
+// Offline, reactions, edits, deletes and saves wait on this device and go
+// once the connection is back (0.12), instead of quietly undoing themselves.
+let opQueue = (() => { const q = local.get(KEYS.ops); return Array.isArray(q?.ops) ? q : { user: null, ops: [] }; })();
+const saveQueue = () => { if (!local.set(KEYS.ops, opQueue)) storageFull(); };
+export const queuedChanges = () => (opQueue.user === S.me ? opQueue.ops.length : 0);
 function save(op, d) {
   return call(op, d).catch((e) => {
+    if (e.offline && QUEUED_OPS.has(op) && S.me) {
+      if (opQueue.user !== S.me) opQueue = { user: S.me, ops: [] };
+      const was = opQueue.ops.length;
+      opQueue.ops = queueOp(opQueue.ops, op, d);
+      saveQueue();
+      if (!was) toast('You’re offline. This change is kept here and sent when you’re back.');
+      emit();
+      return;
+    }
     toast(e.offline ? 'You’re offline, so that change wasn’t saved.' : e.message);
     if (!e.offline) transport.resync();
   });
+}
+// After the reconnect snapshot: put the waiting changes back on screen, then send them in order.
+async function flushOps() {
+  if (opQueue.user !== S.me || !opQueue.ops.length) return;
+  for (const x of opQueue.ops) replayOp(S, x.op, x.d);
+  const list = opQueue.ops.slice();
+  for (const x of list) {
+    try {
+      await call(x.op, x.d);
+    } catch (e) {
+      if (e.offline) return; // gone again: the rest waits
+      toast(`A change made offline couldn’t be saved: ${e.message}`);
+    }
+    opQueue.ops = opQueue.ops.filter((y) => y !== x);
+    saveQueue();
+  }
+  emit();
+}
+let fullWarned = false;
+function storageFull() {
+  if (fullWarned) return;
+  fullWarned = true;
+  toast('This device’s storage for Snug is full, so changes made offline may not be kept. Messages still send while you’re online.');
 }
 
 // Background bookkeeping (read markers): nothing to tell the person while
@@ -131,11 +174,12 @@ const subs = new Set();
 let queued = false;
 let saveTimer;
 
+// The device copy as JSON: the last messages of each conversation (js/lib/offline.js).
 function cacheData() {
   const out = {};
   for (const k of DATA) out[k] = S[k];
   // Local image previews are only valid in this tab.
-  return JSON.parse(JSON.stringify(out, (k, v) => (k === 'src' && typeof v === 'string' && v.startsWith('blob:') ? undefined : v)));
+  return JSON.stringify(trimForCache(out), (k, v) => (k === 'src' && typeof v === 'string' && v.startsWith('blob:') ? undefined : v));
 }
 // Disappearing messages (0.12): hidden at their time on this device, even
 // offline, and left out of the device copy. A timer wakes for the next one.
@@ -147,14 +191,32 @@ export function sweepExpired(now = Date.now()) {
   return removed;
 }
 
+// Settings and drafts are small and saved soon after a change. The device copy
+// of the data is bigger: written at most every 2 seconds, only when it changed,
+// and at once when the page is hidden or closed (0.12).
+let cacheTimer = null, cacheAt = 0, lastCache = '';
+function writeCache() {
+  clearTimeout(cacheTimer); cacheTimer = null;
+  if (!S.me || !S.ready) return;
+  cacheAt = Date.now();
+  const json = cacheData();
+  if (json === lastCache) return;
+  if (local.set(KEYS.cache, json)) lastCache = json; else storageFull();
+}
 export function persist() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     if (sweepExpired()) emit();
     local.set(KEYS.prefs, S.prefs);
     local.set(KEYS.drafts, S.drafts);
-    if (S.me && S.ready) local.set(KEYS.cache, cacheData());
+    local.set(KEYS.reply, S.ui.reply);
+    local.set(KEYS.files, S.draftFiles);
+    if (!cacheTimer) cacheTimer = setTimeout(writeCache, Math.max(0, 2000 - (Date.now() - cacheAt)));
   }, 400);
+}
+if (typeof addEventListener === 'function') {
+  addEventListener('pagehide', () => { if (cacheTimer) writeCache(); });
+  addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && cacheTimer) writeCache(); });
 }
 
 export function emit() {
@@ -193,6 +255,7 @@ export function loadCache(userId) {
   if (!c || !c.me || (userId && c.me !== userId)) return false;
   Object.assign(S, blank(), c);
   for (const list of Object.values(S.msgs)) for (const m of list) if (m.state === 'sending') m.state = 'queued';
+  if (opQueue.user === S.me) for (const x of opQueue.ops) replayOp(S, x.op, x.d); // changes made offline still show
   sweepExpired(); // what disappeared while this device was off never shows
   S.ready = true;
   checkView();
@@ -233,6 +296,7 @@ export function applySnapshot(d) {
   }
   S.ready = true;
   flushOfflineReads();
+  flushOps(); // 0.12: changes made offline, replayed now and sent
   checkView();
   const v = S.ui.view;
   if (first && v.type === 'conv') S.ui.marker[v.id] = unreadOf(S, v.id).firstTs;
@@ -244,6 +308,11 @@ export const signOutHooks = [];
 export function signedOut() {
   for (const f of signOutHooks) { try { f(); } catch { /* the rest still runs */ } }
   local.del(KEYS.cache);
+  lastCache = '';
+  // 0.12: the next person on this browser doesn't get these.
+  opQueue = { user: null, ops: [] };
+  for (const k of [KEYS.ops, KEYS.reply, KEYS.files]) local.del(k);
+  S.draftFiles = {};
   Object.assign(S, blank());
   S.ready = false;
   S.auth = 'out';
