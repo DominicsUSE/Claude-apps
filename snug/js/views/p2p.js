@@ -312,7 +312,7 @@ export function AccountRows({ Row, signOut }) {
     <${Row} label="Key protection" hint=${p.keyProtected ? 'This PC’s private keys are encrypted with your OS account.' : 'Your OS didn’t offer a way to encrypt this PC’s private keys, so they’re stored as they are.'}>
       <span class=${`p2p-tag${p.keyProtected ? ' ok' : ' warn'}`}><${Icon} name=${p.keyProtected ? 'lock' : 'alert'} size=${14} />${p.keyProtected ? 'Protected by your OS account' : 'Not protected by the OS'}</span>
     <//>
-    <${Row} label="Hide my IP from friends" hint="Messages go through the Snug relay instead of directly. Calls use a relay server when one is set up; otherwise calls may fail.">
+    <${Row} label="Hide my IP from friends" hint="Messages go through the Snug relay instead of directly. Calls go only through a relay server (Cloudflare’s, which sees that you connected and when, not what you say). When no relay is available, Snug doesn’t connect the call rather than show your IP.">
       <${Switch} on=${!!p.hideIp} label="Hide my IP from friends" onChange=${hideIp} />
     <//>
     <${Row} label="On a new PC" hint=${kindKey

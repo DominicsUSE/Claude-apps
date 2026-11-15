@@ -24,11 +24,15 @@ import {
 } from './voiceopts.js';
 // Connection quality from WebRTC's statistics (js/lib/netquality.js).
 import { summarize, uplinkPoor } from './lib/netquality.js';
+// Send caps, adaptive steps, the relay choice, new connection or renegotiation (js/lib/callnet.js).
+import { sendCaps, adaptStep, hasTurn, relayWanted, relayInsisted, sdpSession } from './lib/callnet.js';
 
 // user -> { pc, audio, screenAudio, queue, stopLevel, polite, makingOffer,
-//           ignoreOffer, settingAnswer, chain, kinds, video, tx }
+//           ignoreOffer, settingAnswer, chain, kinds, video, tx, id, relay,
+//           adapt, wantCamera, restarts, graceTimer }
 const peers = new Map();
 const pendingKinds = new Map(); // user -> what their streams are, heard before the connection
+const pendingWant = new Map();  // user -> whether they want my camera (their data saver), heard before the connection
 let mic = null;
 let micLost = false; // both captures failed in restartMic: muted until a microphone works again
 let send = null;     // what the others receive for my voice: the processed microphone (js/voiceopts.js)
@@ -46,6 +50,13 @@ const errText = (e) => ({
   NotFoundError: 'No microphone found. Connect one and try again.',
   NotReadableError: 'Another app is using your microphone. Close it and try again.',
 }[e?.name] || 'Couldn’t start your microphone.');
+// Joined without a microphone: why, and how to talk later.
+const listenText = (e, dm) => {
+  const why = e === 'insecure' ? 'This page can’t use a microphone (it needs https)'
+    : { NotAllowedError: 'Snug may not use your microphone', NotFoundError: 'No microphone found', NotReadableError: 'Another app is using your microphone' }[e?.name]
+    || 'Your microphone didn’t start';
+  return `${why}, so you joined ${dm ? 'the call' : 'voice'} to listen. Others can’t hear you. Use the microphone button to talk once it works.`;
+};
 
 function setPeerState(user, state) {
   S.peers = { ...S.peers, [user]: state };
@@ -96,22 +107,45 @@ const myKinds = () => ({
 });
 const tellKinds = (user) => signal(user, { kinds: myKinds() });
 
-// Bitrate ceilings, lower as the mesh grows, so twelve cameras still fit.
+// What each connection may send (js/lib/callnet.js sendCaps): the room's
+// bitrate for the voice, lower ceilings as the mesh grows so twelve cameras
+// still fit, data saver, the steps adaptive quality took on this line, and
+// whether that person wants my camera at all (their data saver).
+const encView = (e, slot) => (slot === 'voice' ? [e.maxBitrate] : [e.maxBitrate, e.scaleResolutionDownBy || 1, e.maxFramerate || null, e.active !== false]);
+const voiceSenderOf = (p) => p.pc.getSenders().find((x) => x.track && x.track.kind === 'audio' && send && send.getAudioTracks().includes(x.track));
 function capBitrate(p) {
-  const many = peers.size > 3;
-  // The voice follows the room's bitrate (js/voiceopts.js); a screen share its chosen quality.
-  const voiceSender = p.pc.getSenders().find((x) => x.track && x.track.kind === 'audio' && send && send.getAudioTracks().includes(x.track));
-  for (const [slot, max] of [['camera', many ? 450_000 : 900_000], ['screen', screenBitrate(many)], ['voice', roomBitrate()]]) {
-    const s = slot === 'voice' ? voiceSender : p.tx[slot]?.sender;
+  const v = vp();
+  const caps = sendCaps({
+    roomBps: roomBitrate(), screenBps: screenBitrate(peers.size > 3), many: peers.size > 3,
+    lowData: !!v.lowData, level: p.adapt?.level || 0, cameraWanted: p.wantCamera !== false,
+  });
+  for (const slot of ['camera', 'screen', 'voice']) {
+    const s = slot === 'voice' ? voiceSenderOf(p) : p.tx[slot]?.sender;
     if (!s?.track) continue;
     try {
       const prm = s.getParameters();
-      if (!prm.encodings?.length) continue;
-      if (prm.encodings[0].maxBitrate === max) continue;
-      prm.encodings[0].maxBitrate = max;
+      const enc = prm.encodings?.[0];
+      if (!enc) continue;
+      const want = caps[slot];
+      if (JSON.stringify(encView(enc, slot)) === JSON.stringify(encView(want, slot))) continue;
+      enc.maxBitrate = want.maxBitrate;
+      if (slot !== 'voice') {
+        // Keys a cap leaves out go back to the browser's choice (data saver off, a step back up).
+        enc.scaleResolutionDownBy = want.scaleResolutionDownBy || 1;
+        if (want.maxFramerate) enc.maxFramerate = want.maxFramerate; else delete enc.maxFramerate;
+        enc.active = want.active !== false;
+      }
       s.setParameters(prm).catch(() => {});
     } catch { /* not supported here: the browser picks */ }
   }
+}
+// The mesh crossing 3 others changes everyone's ceilings, not just the newest connection's.
+let wasMany = false;
+function recapIfMeshChanged() {
+  const many = peers.size > 3;
+  if (many === wasMany) return;
+  wasMany = many;
+  for (const p of peers.values()) capBitrate(p);
 }
 
 // Start sending a track in one of the slots (camera, screen, screenAudio).
@@ -145,20 +179,42 @@ function addRemoteVideo(p, stream) {
   emit();
 }
 
+// Should my connection to this person go only through the relay (hiding my
+// IP address from them)? Voice rooms and people who aren't friends do by
+// default, when the server has a relay (js/lib/callnet.js relayWanted).
+function relayFor(user) {
+  const opts = { mode: vp().relay, p2pHide: !!S.p2p?.hideIp, room: !S.call?.dm, friend: S.friends?.[user]?.state === 'friends' };
+  return { want: relayWanted(opts), insist: relayInsisted(opts) };
+}
+let refreshingIce = null;
+function refreshIce() {
+  refreshingIce ||= call('ice.refresh').then((r) => {
+    if (Array.isArray(r?.ice)) { S.ice = r.ice; S.iceExp = r.iceExp || null; }
+  }).catch(() => {}).finally(() => { refreshingIce = null; });
+  return refreshingIce;
+}
+let noRelayToast = 0;
+
+let pcSeq = 0;
 function peer(user, offering) {
   let p = peers.get(user);
   if (p) return p;
-  // p2p: registry TURN credentials near their end are refreshed for the next connection (F10), and with
-  // "Hide my IP" on and a TURN server known, calls go only through the relay (S14).
-  if (S.iceExp && S.iceExp - Date.now() < 600_000) call('ice.refresh').then((r) => { if (Array.isArray(r?.ice)) { S.ice = r.ice; S.iceExp = r.iceExp || null; } }).catch(() => {});
-  const hideIp = !!S.p2p?.hideIp && (S.ice || []).some((s) => [].concat(s.urls || []).some((u) => /^turns?:/.test(u)));
-  const pc = new RTCPeerConnection({ iceServers: S.ice, ...(hideIp ? { iceTransportPolicy: 'relay' } : {}) });
+  // p2p: registry TURN credentials near their end are refreshed for the next connection (F10).
+  if (S.iceExp && S.iceExp - Date.now() < 600_000) refreshIce();
+  const turn = hasTurn(S.ice);
+  const relay = relayFor(user);
+  // Asked outright to hide my IP and no relay is known: relay-only all the
+  // same, which can't connect, rather than quietly going direct (S14).
+  const relayOnly = relay.want && (turn || relay.insist);
+  const pc = new RTCPeerConnection({ iceServers: S.ice, ...(relayOnly ? { iceTransportPolicy: 'relay' } : {}) });
   p = {
     pc, audio: null, screenAudio: null, queue: [], stopLevel: null,
     polite: String(S.me) > String(user), makingOffer: false, ignoreOffer: false, settingAnswer: false,
     chain: Promise.resolve(), kinds: pendingKinds.get(user) || {}, video: {}, tx: {},
+    id: ++pcSeq, relay: relayOnly, noRelay: relayOnly && !turn, adapt: { level: 0, bad: 0, good: 0 }, wantCamera: pendingWant.get(user) ?? true, restarts: [], graceTimer: null,
   };
   pendingKinds.delete(user);
+  pendingWant.delete(user);
   peers.set(user, p);
   pc.onnegotiationneeded = async () => {
     try {
@@ -168,7 +224,12 @@ function peer(user, offering) {
     } catch { /* a newer negotiation replaced this one */ } finally { p.makingOffer = false; }
   };
   tellKinds(user);
-  (send || mic).getTracks().forEach((t) => pc.addTrack(t, send || mic));
+  // Data saver: ask for no camera from them (a tile offers to show it).
+  if (vp().lowData && !S.call?.showCam?.[user]) signal(user, { want: { camera: false } });
+  if (send || mic) (send || mic).getTracks().forEach((t) => pc.addTrack(t, send || mic));
+  // Listening without a microphone: receive their voice all the same. When I
+  // offer, a receive-only line asks for it; when I answer, their offer has one.
+  else if (offering) p.tx.voice = pc.addTransceiver('audio', { direction: 'recvonly' });
   // Late joiners get whatever I am already showing.
   if (cam) sendOn(p, 'camera', cam.getVideoTracks()[0], out.camera);
   if (screen) {
@@ -196,19 +257,75 @@ function peer(user, offering) {
     p.audio = audio;
     p.stopLevel = watchLevel(user, stream);
   };
-  pc.onconnectionstatechange = () => {
-    setPeerState(user, pc.connectionState);
-    if (pc.connectionState === 'connected') capBitrate(p);
-    if (pc.connectionState === 'failed' && offering) pc.restartIce?.();
-  };
-  setPeerState(user, 'connecting');
+  pc.onconnectionstatechange = () => onLineState(user, p);
+  // Some browsers report trouble on the ICE state before the connection state.
+  pc.oniceconnectionstatechange = () => { if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') onLineState(user, p, pc.iceConnectionState); };
+  if (p.noRelay) {
+    setPeerState(user, 'norelay');
+    if (Date.now() - noRelayToast > 30_000) {
+      noRelayToast = Date.now();
+      toast('Snug found no relay to hide your IP address, so it didn’t connect you directly. Turn off “Hide my IP address” in Voice and video settings to connect without one.');
+    }
+    // A relay may be on its way (PC to PC, fetched at the start of a call): try again with it.
+    refreshIce().then(() => { if (peers.get(user) === p && hasTurn(S.ice)) { dropPeer(user); peer(user, true); } });
+  } else setPeerState(user, 'connecting');
+  recapIfMeshChanged();
   return p;
+}
+
+// ---------- A line in trouble ----------
+// 'disconnected' often heals by itself (a Wi-Fi blip): after a short grace,
+// restart ICE (new network paths over the same connection, no new call).
+// 'failed' restarts at once. Either side may restart; crossing offers settle
+// as any other renegotiation. After three restarts in a minute the side that
+// isn't polite builds a new connection, and the other side drops its old one
+// when the new connection's offer arrives (a new SDP session).
+export let ICE_GRACE_MS = 4000;
+const RESTARTS = 3;
+function onLineState(user, p, state = p.pc.connectionState) {
+  if (peers.get(user) !== p) return;
+  const { pc } = p;
+  setPeerState(user, state);
+  if (state === 'connected') {
+    clearTimeout(p.graceTimer);
+    p.graceTimer = null;
+    capBitrate(p);
+    return;
+  }
+  if (state === 'disconnected') {
+    if (p.graceTimer) return;
+    p.graceTimer = setTimeout(() => {
+      p.graceTimer = null;
+      if (peers.get(user) === p && ['disconnected', 'failed'].includes(p.simulated || pc.connectionState)) restartLine(user, p);
+    }, ICE_GRACE_MS);
+    return;
+  }
+  if (state === 'failed') { clearTimeout(p.graceTimer); p.graceTimer = null; restartLine(user, p); }
+}
+function restartLine(user, p) {
+  if (p.noRelay) return;
+  const now = Date.now();
+  p.simulated = null;
+  // The connection and ICE states both report one failure: restart once for it.
+  if (now - (p.restarts.at(-1) || 0) < 1000) return;
+  p.restarts = p.restarts.filter((t) => now - t < 60_000);
+  if (p.restarts.length >= RESTARTS) {
+    if (p.polite) return; // the other side builds the new connection
+    dropPeer(user);
+    peer(user, true);
+    return;
+  }
+  p.restarts.push(now);
+  p.restarted = (p.restarted || 0) + 1;
+  try { p.pc.restartIce(); } catch { /* old browser: wait for the other side */ }
+  setPeerState(user, p.pc.connectionState === 'connected' ? 'connected' : 'reconnecting');
 }
 
 function dropPeer(user) {
   const p = peers.get(user);
   if (!p) return;
   peers.delete(user);
+  clearTimeout(p.graceTimer);
   p.stopLevel?.();
   if (p.audio) { forgetAudio(p.audio); p.audio.srcObject = null; }
   if (p.screenAudio) { forgetAudio(p.screenAudio); p.screenAudio.srcObject = null; }
@@ -217,6 +334,7 @@ function dropPeer(user) {
   delete next[user];
   S.peers = next;
   if (S.speaking[user]) { S.speaking = { ...S.speaking }; delete S.speaking[user]; }
+  recapIfMeshChanged();
   emit();
 }
 
@@ -236,6 +354,8 @@ async function handleSignal(from, p, data) {
       await pc.setRemoteDescription(desc); // a polite peer rolls its own offer back here
       p.settingAnswer = false;
       for (const c of p.queue.splice(0)) await pc.addIceCandidate(c).catch(() => {});
+      // Listening: their voice's line is the one a microphone joins later.
+      if (!send && !p.tx.voice) p.tx.voice = pc.getTransceivers().find((t) => t.mid != null && t.receiver.track?.kind === 'audio') || null;
       if (desc.type === 'offer') {
         await pc.setLocalDescription();
         signal(from, { sdp: pc.localDescription });
@@ -252,29 +372,59 @@ async function handleSignal(from, p, data) {
 }
 
 on('rtc', ({ from, data }) => {
-  if (!S.call || !mic || !data || typeof data !== 'object') return;
+  if (!S.call || !data || typeof data !== 'object') return;
   if (data.kinds) {
     const k = { mic: data.kinds.mic || null, camera: data.kinds.camera || null, screen: data.kinds.screen || null, screenAudio: data.kinds.screenAudio || null };
     const p = peers.get(from);
     if (p) { p.kinds = k; emit(); } else pendingKinds.set(from, k);
     return;
   }
+  // Their data saver: whether they want my camera.
+  if (data.want) {
+    const p = peers.get(from);
+    if (typeof data.want.camera !== 'boolean') return;
+    if (p) { p.wantCamera = data.want.camera; capBitrate(p); } else pendingWant.set(from, data.want.camera);
+    return;
+  }
   if (!data.sdp && !data.candidate) return;
-  // A fresh offer on a connection that already failed: they came back, start again.
+  // A fresh offer on a connection that already failed, or from a brand-new
+  // connection of theirs (a new SDP session): they started again, so do I.
   const old = peers.get(from);
-  if (old && data.sdp?.type === 'offer' && ['failed', 'closed'].includes(old.pc.connectionState)) dropPeer(from);
+  if (old && data.sdp?.type === 'offer') {
+    const theirs = old.pc.remoteDescription && sdpSession(old.pc.remoteDescription);
+    if (['failed', 'closed'].includes(old.pc.connectionState) || (theirs && sdpSession(data.sdp) && sdpSession(data.sdp) !== theirs)) dropPeer(from);
+  }
   const p = peer(from, false);
   p.chain = p.chain.then(() => handleSignal(from, p, data));
 });
 
-// Someone left the room: close their connection. Someone whose connection
-// dropped (held by the server, shown as reconnecting) is closed too: they
-// call everyone again when they are back.
+// Someone left the room: close their connection. Someone whose signalling
+// dropped (held by the server, shown as reconnecting) keeps it: their audio
+// often still flows. When they are back, anything said while they were away
+// (an offer of mine they never got) goes again, and a line that isn't
+// connected restarts.
+const awayNow = new Set();
 on('voice', ({ room, users, state }) => {
   if (S.call?.room !== room) return;
-  for (const u of [...peers.keys()]) if (!users.includes(u) || state?.[u]?.reconnecting) dropPeer(u);
+  for (const u of [...peers.keys()]) if (!users.includes(u)) dropPeer(u);
   for (const u of [...pendingKinds.keys()]) if (!users.includes(u)) pendingKinds.delete(u);
+  for (const u of [...pendingWant.keys()]) if (!users.includes(u)) pendingWant.delete(u);
+  for (const u of users) {
+    if (u === S.me) continue;
+    const away = !!state?.[u]?.reconnecting;
+    if (away) { awayNow.add(u); continue; }
+    if (!awayNow.delete(u)) continue;
+    const p = peers.get(u);
+    if (p && S.call.status === 'live') resumeLine(u, p);
+  }
+  for (const u of [...awayNow]) if (!users.includes(u)) awayNow.delete(u);
 });
+function resumeLine(user, p) {
+  tellKinds(user);
+  if (vp().lowData) signal(user, { want: { camera: !!S.call?.showCam?.[user] } });
+  if (p.pc.signalingState === 'have-local-offer' && p.pc.localDescription) signal(user, { sdp: p.pc.localDescription });
+  else if (p.pc.connectionState !== 'connected') restartLine(user, p);
+}
 on('voice.kicked', ({ room, reason } = {}) => {
   if (!S.call || (room && S.call.room !== room)) return;
   const dm = S.call.dm;
@@ -291,9 +441,12 @@ on('call.ended', ({ dm, reason }) => {
 });
 // ---------- Reconnecting after a dropped connection ----------
 // The server holds my place for a while (server/hub.js voiceLost). Here the
-// call stays, with my microphone, camera and screen, while the connections to
-// the others close; when the socket is back I join the same place again and
-// call everyone afresh. If that fails, or takes too long, the call ends.
+// call stays, with my microphone, camera and screen, and so do the
+// connections to the others: their media goes directly between us, not
+// through the server, so it usually keeps flowing. When the socket is back I
+// join the same place again, say again whatever was lost on the way, and
+// only connections that aren't working start afresh. If getting back in
+// fails, or takes too long, the call ends.
 export const RECONNECT_MS = 20_000;
 let reconnectTimer = null;
 const droppedText = (dm) => (dm ? 'The call dropped because the connection did. Call again when you’re back.' : 'Voice disconnected because the connection dropped. Join again when you’re back.');
@@ -302,8 +455,6 @@ on('close', () => {
   const c = S.call;
   if (c.status !== 'live' && c.status !== 'reconnecting') { stop(); toast(droppedText(c.dm)); return; }
   c.status = 'reconnecting';
-  for (const u of [...peers.keys()]) dropPeer(u);
-  pendingKinds.clear();
   clearTimeout(reconnectTimer);
   reconnectTimer = setTimeout(() => { if (S.call === c && c.status === 'reconnecting') { stop(); toast(droppedText(c.dm)); } }, RECONNECT_MS);
   emit();
@@ -319,7 +470,13 @@ on('open', async () => {
     if (r.call) c.id = r.call;
     emit();
     pushState();
-    for (const u of r.peers) peer(u, true);
+    for (const u of [...peers.keys()]) if (!r.peers.includes(u)) dropPeer(u);
+    for (const u of r.peers) {
+      const p = peers.get(u);
+      if (!p) { peer(u, true); continue; }
+      if (['failed', 'closed'].includes(p.pc.connectionState)) { dropPeer(u); peer(u, true); continue; }
+      resumeLine(u, p);
+    }
   } catch (e) {
     if (S.call !== c) return;
     if (e.offline) return; // dropped again: the next 'open' tries once more, until the timer runs out
@@ -346,6 +503,9 @@ function stop() {
   screen?.getTracks().forEach((t) => t.stop());
   screen = null;
   pendingKinds.clear();
+  pendingWant.clear();
+  awayNow.clear();
+  wasMany = false;
   out = null;
   S.call = null;
   S.peers = {};
@@ -358,54 +518,112 @@ function stop() {
 // Join a voice place. For a direct conversation or group this is a call:
 // { start: true } starts one (and rings the others) unless one is already
 // live there, in which case it joins it; { video: true } turns the camera on
-// once connected. Resolves to how it went: 'ok' (in, or already in),
-// 'mic' (no microphone: the server was told nothing), 'offline' or 'error'
-// (already said in a toast).
-export async function joinVoice(room, { start = false, video = false } = {}) {
+// once connected; { listen: true } joins without a microphone, only hearing.
+// Without a working microphone (none, refused, busy, or a page that can't
+// use one) it joins to listen too and says why; the microphone button adds
+// one later. Resolves to how it went: 'ok' (in, or already in), 'offline' or
+// 'error' (already said in a toast).
+export async function joinVoice(room, { start = false, video = false, listen = false } = {}) {
   if (S.call?.room === room) { if (video && !S.call.camera && S.call.status === 'live') toggleCamera(); return 'ok'; }
   const dm = !!S.dms[room];
   if (S.call) leaveVoice();
   const what = dm ? 'call' : 'join voice';
   if (S.conn.socket !== 'open') { toast(`You’re offline, so you can’t ${what} right now.`); return 'offline'; }
-  if (!navigator.mediaDevices?.getUserMedia) { toast(`This browser can’t use a microphone here. ${dm ? 'Calls need' : 'Voice needs'} a secure (https) page.`); return 'mic'; }
   if (S.callEnd?.dm === room) S.callEnd = null;
-  S.call = { room, dm, muted: false, deaf: false, camera: false, screen: false, status: 'mic', video: !!video };
+  const c = { room, dm, muted: false, deaf: false, camera: false, screen: false, status: 'mic', video: !!video, listen: false };
+  S.call = c;
   // The screen's sound goes in its own stream, so adding it never restarts the picture.
   out = { camera: new MediaStream(), screen: new MediaStream(), screenAudio: new MediaStream() };
   emit();
-  try {
-    mic = await getMic();
-    send = await outgoing(mic);
-  } catch (e) {
-    mic?.getTracks().forEach((t) => t.stop());
-    mic = null;
-    S.call = null;
-    emit();
-    toast(errText(e));
-    return 'mic';
+  let why = listen ? 'chosen' : !navigator.mediaDevices?.getUserMedia ? 'insecure' : null;
+  if (!why) {
+    try {
+      mic = await getMic();
+      send = await outgoing(mic);
+    } catch (e) {
+      mic?.getTracks().forEach((t) => t.stop());
+      mic = null;
+      stopOutgoing();
+      send = null;
+      why = e || 'failed';
+    }
   }
-  stopMyLevel = watchLevel(S.me, mic);
-  watchMic(mic);
+  if (S.call !== c) { mic?.getTracks().forEach((t) => t.stop()); return 'ok'; } // left while the microphone started
+  if (why) {
+    c.listen = true;
+    c.muted = true;
+    if (why !== 'chosen') toast(listenText(why, dm));
+  } else {
+    stopMyLevel = watchLevel(S.me, mic);
+    watchMic(mic);
+  }
   try {
-    S.call.status = 'joining';
+    c.status = 'joining';
     emit();
     const r = dm
       ? await call(start ? 'call.start' : 'call.join', { dm: room, video: !!video })
       : await call('voice.join', { room });
-    if (S.call?.room !== room) return 'ok';
-    S.call.status = 'live';
-    S.call.id = r.call || null;
-    S.call.joinedAt = Date.now(); // the call clock in a voice room (js/views/activities.js CallTimer)
+    if (S.call !== c) return 'ok';
+    c.status = 'live';
+    c.id = r.call || null;
+    c.joinedAt = Date.now(); // the call clock in a voice room (js/views/activities.js CallTimer)
     emit();
     cue('join');
+    if (c.listen) pushState();
     for (const u of r.peers) peer(u, true);
-    if (video) toggleCamera();
+    // Data saver keeps the camera off until you turn it on.
+    if (video && vp().lowData) toast('Data saver is on, so your camera stays off. Turn it on with the camera button if you want it.');
+    else if (video && !c.listen) toggleCamera();
     return 'ok';
   } catch (e) {
     stop();
     toast(e.offline ? `You’re offline, so you can’t ${what} right now.` : e.message);
     return 'error';
   }
+}
+
+// Listening, then a microphone: capture it and start sending it on every
+// connection (on the line that already carries their voice, so each
+// connection renegotiates once). If it still won't start, keep listening.
+let addingMic = false;
+async function addMic() {
+  const c = S.call;
+  if (!c?.listen || addingMic) return false;
+  if (!navigator.mediaDevices?.getUserMedia) { toast(listenText('insecure', c.dm)); return false; }
+  addingMic = true;
+  let m = null, outStream = null;
+  try {
+    m = await getMic();
+    outStream = await outgoing(m);
+  } catch (e) {
+    m?.getTracks().forEach((t) => t.stop());
+    stopOutgoing();
+    toast(`${errText(e).replace(/ to join\./, ' to talk.')} You’re still listening.`);
+    return false;
+  } finally { addingMic = false; }
+  if (S.call !== c || !c.listen) { m.getTracks().forEach((t) => t.stop()); if (!mic) stopOutgoing(); return false; }
+  mic = m;
+  send = outStream;
+  c.listen = false;
+  c.muted = false;
+  const track = send.getAudioTracks()[0];
+  for (const [u, p] of peers) {
+    tellKinds(u);
+    const t = p.tx.voice;
+    if (t && !t.sender.track && t.currentDirection !== 'stopped') {
+      t.sender.replaceTrack(track).catch(() => {});
+      try { t.sender.setStreams?.(send); } catch { /* older browsers: the kinds signal still names it */ }
+      t.direction = 'sendrecv';
+    } else p.pc.addTrack(track, send);
+  }
+  stopMyLevel = watchLevel(S.me, mic);
+  watchMic(mic);
+  gate();
+  cue('unmute');
+  emit();
+  pushState();
+  for (const p of peers.values()) capBitrate(p);
+  return true;
 }
 
 export function leaveVoice() {
@@ -418,7 +636,7 @@ export function leaveVoice() {
 
 function pushState() {
   if (!S.call) return;
-  call('voice.state', { muted: S.call.muted, deaf: S.call.deaf, camera: !!S.call.camera, screen: !!S.call.screen }).catch(() => {});
+  call('voice.state', { muted: S.call.muted, deaf: S.call.deaf, camera: !!S.call.camera, screen: !!S.call.screen, listen: !!S.call.listen }).catch(() => {});
 }
 
 // Whether I should hear this person: not while I'm deafened, and never while a
@@ -438,6 +656,8 @@ export function toggleMute() {
   // A moderator's mute (or deafen) can't be lifted from here.
   const mod = S.voiceState[S.call.room]?.[S.me];
   if (S.call.muted && (mod?.smute || mod?.sdeaf)) { toast('A moderator muted you here.'); return; }
+  // Listening without a microphone: unmuting adds one.
+  if (S.call.listen) { addMic(); return; }
   // The microphone was lost: unmuting tries to capture again first.
   if (S.call.muted && micLost) { restartMic().then((ok) => { if (ok && S.call?.muted) toggleMute(); }); return; }
   S.call.muted = !S.call.muted;
@@ -522,6 +742,37 @@ export async function restartCamera() {
 }
 // Re-apply bitrate ceilings, after the room's bitrate or the screen quality changed.
 export function recapBitrates() { for (const p of peers.values()) capBitrate(p); }
+
+// How the line to one person goes: asked to be relay-only, and the route measured once connected.
+export function lineOf(user) {
+  const p = peers.get(user);
+  return { relay: !!p?.relay, route: p?.q ? (p.q.relay ? 'relayed' : 'direct') : null };
+}
+
+// ---------- Data saver ----------
+// Turned on or off (Settings > Voice and video, or the call's options): tell
+// everyone whether I want their cameras, and re-apply my own send caps.
+export function applyDataSaver() {
+  if (!S.call) return;
+  const low = !!vp().lowData;
+  for (const [u, p] of peers) {
+    signal(u, { want: { camera: !low || !!S.call.showCam?.[u] } });
+    capBitrate(p);
+  }
+  emit();
+}
+// With data saver on, someone's camera is paused until you ask to see it.
+export function cameraPaused(user) {
+  if (!S.call || user === S.me || !vp().lowData || S.call.showCam?.[user]) return false;
+  // Still arriving (their Snug can't pause it): show it rather than pretend.
+  return !((peers.get(user)?.camKbps || 0) > 30);
+}
+export function showCamera(user) {
+  if (!S.call) return;
+  S.call.showCam = { ...(S.call.showCam || {}), [user]: true };
+  signal(user, { want: { camera: true } });
+  emit();
+}
 
 // ---------- Camera and screen ----------
 
@@ -664,7 +915,7 @@ export function mediaOf(user) {
     const s = id && p.video[id];
     return s && s.getVideoTracks().some((t) => t.readyState === 'live') ? s : null;
   };
-  return { camera: pick(p.kinds.camera), screen: pick(p.kinds.screen) };
+  return { camera: cameraPaused(user) ? null : pick(p.kinds.camera), screen: pick(p.kinds.screen) };
 }
 
 // For the end-to-end checks: the live connection states and audio bytes received.
@@ -683,6 +934,12 @@ export async function voiceStats() {
       voiceMax: (() => { const s = p.pc.getSenders().find((x) => x.track && x.track.kind === 'audio' && send && send.getAudioTracks().includes(x.track)); try { return s?.getParameters().encodings?.[0]?.maxBitrate ?? null; } catch { return null; } })(),
       // Connection quality, as last measured (js/lib/netquality.js).
       rtt: p.q?.rtt ?? null, loss: p.q?.loss ?? null, jitter: p.q?.jitter ?? null, sendKbps: p.q?.sendKbps ?? null, relay: p.q ? p.q.relay : null, quality: p.q?.quality ?? null,
+      // Reconnection: which connection this is, its ICE credentials (they change on a restart), restarts so far.
+      pc: p.id, ufrag: /a=ice-ufrag:(\S+)/.exec(p.pc.localDescription?.sdp || '')?.[1] || null, restarts: p.restarted || 0, signaling: p.pc.signalingState,
+      // Hiding my IP: relay-only or not; adaptive quality's step; what my sends are capped at; whether they want my camera.
+      policy: p.pc.getConfiguration().iceTransportPolicy, level: p.adapt.level, wantCamera: p.wantCamera,
+      caps: Object.fromEntries(['camera', 'screen'].map((k) => { try { return [k, p.tx[k]?.sender?.track ? p.tx[k].sender.getParameters().encodings?.[0] || null : null]; } catch { return [k, null]; } })),
+      sending: p.pc.getSenders().some((x) => x.track && x.track.kind === 'audio' && x.track.readyState === 'live'),
     };
   }
   return out;
@@ -701,6 +958,13 @@ function watchMic(stream) {
   };
   startMutedWatch(stream);
 }
+// For the end-to-end checks: a line reported in trouble (as its connection
+// state would), a poll's measured quality, and a shorter grace before a restart.
+export function simulateLine(user, state) { const p = peers.get(user); if (p) { p.simulated = state; onLineState(user, p, state); } }
+export function simulateQuality(user, q) { const p = peers.get(user); if (p) adapt(p, q); }
+export function setIceGrace(ms) { ICE_GRACE_MS = ms; }
+// Where each remote voice plays (the speaker chosen, through setSinkId).
+export const audioSinks = () => [...peers.values()].map((p) => p.audio?.sinkId ?? null).filter((x) => x !== null);
 // For the end-to-end checks: the microphone's track ending as if unplugged.
 export function simulateMicEnded() { mic?.getAudioTracks()[0]?.dispatchEvent(new Event('ended')); }
 
@@ -787,17 +1051,41 @@ export function resetMutedWarn() { lastWarn = 0; S.mutedWarn = 0; }
 // Every 2 seconds in a call: each connection's round trip, loss, jitter, what
 // I send and whether it is relayed, into S.netq (js/lib/netquality.js).
 async function pollQuality() {
-  if (!S.call || S.call.status !== 'live' || !peers.size) { if (S.netq && Object.keys(S.netq).length && !S.call) S.netq = {}; return; }
+  if (!S.call || S.call.status !== 'live' || !peers.size) { if (S.netq && Object.keys(S.netq).length) S.netq = {}; return; }
   const next = {};
   for (const [u, p] of peers) {
     if (p.pc.connectionState !== 'connected') continue;
-    try { p.q = summarize(await p.pc.getStats(), p.q); next[u] = p.q; } catch { /* closed meanwhile */ }
+    try {
+      const report = await p.pc.getStats();
+      p.q = summarize(report, p.q);
+      p.camKbps = cameraKbps(p, report);
+      next[u] = p.q;
+      adapt(p, p.q);
+    } catch { /* closed meanwhile */ }
   }
   const sum = (k) => Object.values(next).reduce((n, q) => n + (q[k] || 0), 0);
   next[S.me] = { sendKbps: Object.keys(next).length ? sum('sendKbps') : null, uplinkPoor: uplinkPoor(Object.values(next)) };
   const was = JSON.stringify(S.netq || {});
   S.netq = next;
   if (JSON.stringify(next) !== was) emit();
+}
+// Adaptive quality: a line losing packets or slow to answer steps its send
+// caps down; a steady one steps back up (js/lib/callnet.js adaptStep).
+function adapt(p, q) {
+  const before = p.adapt.level;
+  p.adapt = adaptStep(p.adapt, q);
+  if (p.adapt.level !== before) capBitrate(p);
+}
+// How fast their camera really arrives here (kbit/s): data saver asked for
+// none, but an older Snug on their side may send it anyway.
+function cameraKbps(p, report) {
+  const track = p.kinds.camera && p.video[p.kinds.camera]?.getVideoTracks()[0];
+  if (!track) { p.camBytes = null; return 0; }
+  let bytes = 0, at = 0;
+  report.forEach((r) => { if (r.type === 'inbound-rtp' && r.kind === 'video' && r.trackIdentifier === track.id) { bytes = r.bytesReceived || 0; at = r.timestamp || 0; } });
+  const prev = p.camBytes;
+  p.camBytes = { bytes, at };
+  return prev && at > prev.at ? Math.round(((bytes - prev.bytes) * 8) / (at - prev.at)) : 0;
 }
 setInterval(pollQuality, 2000);
 

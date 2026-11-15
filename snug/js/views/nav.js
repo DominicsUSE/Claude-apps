@@ -506,7 +506,7 @@ function VoicePerson({ u, room }) {
   const mine = u.id === S.me;
   const st = mine ? (S.call?.room === room ? S.call : {}) : (S.voiceState[room]?.[u.id] || {});
   const talking = !!S.speaking[u.id] && !st.muted;
-  const state = st.deaf ? ', not listening' : st.muted ? ', muted' : talking ? ', talking' : '';
+  const state = st.deaf ? ', not listening' : st.listen ? ', listening without a microphone' : st.muted ? ', muted' : talking ? ', talking' : '';
   return html`<button class=${`vroom-person${talking ? ' talking' : ''}`} aria-label=${`${u.name}${state}`}
     onClick=${(e) => showProfile(u, e.currentTarget.getBoundingClientRect(), S.rooms[room]?.house)}>
     <${Avatar} user=${u} size=${20} speaking=${talking} />
@@ -514,7 +514,7 @@ function VoicePerson({ u, room }) {
     <span class="vroom-marks" aria-hidden="true">
       ${st.screen && html`<${Icon} name="screen" size=${14} />`}
       ${st.camera && html`<${Icon} name="camera" size=${14} />`}
-      ${st.deaf ? html`<span class="is-off"><${Icon} name="headphones-off" size=${14} /></span>` : st.muted ? html`<span class="is-off"><${Icon} name="mic-off" size=${14} /></span>` : null}
+      ${st.deaf ? html`<span class="is-off"><${Icon} name="headphones-off" size=${14} /></span>` : st.listen ? html`<span class="is-listen" title="Listening"><${Icon} name="headphones" size=${14} /></span>` : st.muted ? html`<span class="is-off"><${Icon} name="mic-off" size=${14} /></span>` : null}
     </span>
   </button>`;
 }

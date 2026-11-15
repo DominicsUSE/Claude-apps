@@ -77,10 +77,12 @@ export function turnCredential(secret, user, now = Date.now(), ttl = TURN_TTL_S)
   const username = `${Math.floor(now / 1000) + ttl}:${user}`;
   return { username, credential: createHmac('sha1', secret).update(username).digest('base64') };
 }
+// SNUG_STUN=none leaves STUN out (a STUN server sees each caller's IP
+// address); unset, Google's public one is used.
 export function iceConfig(env = process.env) {
-  // privacy: SNUG_STUN=none asks no STUN server at all (Google's is the default when it isn't set).
+  // privacy: SNUG_STUN=none asks no STUN server at all (Google's is the default when it isn't set; a STUN server sees each caller's IP address).
   const raw = env.SNUG_STUN ? String(env.SNUG_STUN).trim() : 'stun:stun.l.google.com:19302';
-  const urls = raw === 'none' ? [] : raw.split(',').map((u) => u.trim()).filter(Boolean);
+  const urls = /^none$/i.test(raw) ? [] : raw.split(',').map((u) => u.trim()).filter(Boolean);
   const stun = urls.length ? [{ urls }] : [];
   const turnUrls = (env.SNUG_TURN_URL || '').split(',').map((u) => u.trim()).filter(Boolean);
   if (!turnUrls.length) return stun;

@@ -482,6 +482,7 @@ window.snug.voiceAfk = afkCheck; // leaving a voice room after a while alone (js
 import('./voice.js').then((v) => import('./calls.js').then((c) => import('./server.js').then((srv) => {
   window.snug.voiceTest = {
     dropSocket: srv.dropSocket, endMic: v.simulateMicEnded, mutedWatch: v.mutedWatch, resetMutedWarn: v.resetMutedWarn,
+    line: v.simulateLine, quality: v.simulateQuality, iceGrace: v.setIceGrace, sinks: v.audioSinks, // reconnection and adaptive quality (v12)
     lastRing: () => c.lastRing, previewRingtone: c.previewRingtone,
   };
 })));

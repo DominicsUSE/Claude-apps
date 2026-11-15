@@ -338,7 +338,7 @@ test('a ring while typing: the focus stays in the composer, Enter sends the mess
   await robin.locator('.call-strip.ended.declined').waitFor();
 });
 
-test('no microphone: accepting fails, the call still rings here, and can be declined', async () => {
+test('no microphone: accepting joins the call to listen and says why; hanging up ends it', async () => {
   const robin = await person('robin');
   const ines = await person('ines');
   await openDm(robin, 'Ines Carvalho');
@@ -349,14 +349,12 @@ test('no microphone: accepting fails, the call still rings here, and can be decl
   const card = ines.locator('.incoming');
   await card.waitFor();
   await card.locator('.inc-accept').click();
-  await ines.locator('.toast').first().waitFor();
-  // The incoming screen comes back: the server was never told she picked up.
-  await card.waitFor();
-  assert.equal(await ines.evaluate(() => window.snug.S.call), null);
-  assert.equal(await ines.locator('.toast:has-text("ended")').count(), 0, 'no "call ended" toast');
-  await robin.locator('.stage.call .stage-conn.ring:has-text("Ringing Ines")').waitFor();
-  await card.locator('.inc-decline').click();
-  await robin.locator('.call-strip.ended.declined').waitFor();
+  // In the call without a microphone (v12 voice track): she hears Robin, and is told how to talk.
+  await ines.locator('.toast:has-text("so you joined the call to listen")').waitFor();
+  await ines.waitForFunction(() => window.snug.S.call?.status === 'live' && window.snug.S.call.listen === true);
+  await robin.locator('.stage-person:has-text("Ines") .stage-media.listen').waitFor();
+  await ines.click('.stage [aria-label="Leave call"]');
+  await robin.waitForFunction(() => !window.snug.S.call);
 });
 
 test('a group call I declined is a quiet line, not a violet missed call', async () => {

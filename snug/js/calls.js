@@ -67,9 +67,9 @@ export function acceptCall(dm, { video = false } = {}) {
   openConv(dm);
   const a = r ? { call: r.call, stopped: false } : null;
   answering = a;
-  joinVoice(dm, { video: video || false }).then((how) => {
+  // Without a microphone it still picks up, to listen (js/voice.js joinVoice).
+  joinVoice(dm, { video: video || false }).then(() => {
     if (answering === a) answering = null;
-    if (how === 'mic' && a && !a.stopped && !S.ringing[dm] && S.calls[dm]?.id === r.call) { S.ringing[dm] = r; emit(); }
   });
 }
 // From the strip or a header button (not the incoming screen, which says so

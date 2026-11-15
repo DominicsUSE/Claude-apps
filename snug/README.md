@@ -290,8 +290,8 @@ Real, and covered by tests with separate users:
   any outcome, Enter to accept and Esc to decline (outside text fields: a
   ring never takes the focus from the composer, so a message being typed
   keeps its Enter and Esc), announced to screen readers, a bottom sheet on
-  a phone. If the microphone can't start, nothing is sent and the call
-  keeps ringing, so the incoming screen comes back. Picking up on one device stops the
+  a phone. If the microphone can't start, the call is picked up to listen
+  (others see *Listening*), with a toast saying why. Picking up on one device stops the
   ring on the others ("You answered on another device"). A ring lasts 30
   seconds. In a one-to-one call, Decline or no answer ends it for the caller
   with *Declined* or *No answer* and Call again; in a group the others keep
@@ -670,7 +670,11 @@ Real, and covered by tests with separate users:
     on-screen hold button (phones too), and a release delay. In the desktop
     app the key also works while another app is in front (a global shortcut;
     the system only reports presses and their repeats, so the microphone
-    closes shortly after they stop).
+    waits out the system's repeat delay after the first press, up to 1.1
+    seconds, then closes after three missed repeats). While you're in a
+    push-to-talk call that key is taken from other apps, so pick one you don't
+    type with. A key held while Snug loses focus lets go at once and opens
+    again on the next repeat when Snug is back.
   - **Noise suppression, echo cancellation and automatic gain**, changed
     during a call without anyone's connection being renegotiated: what is
     sent goes through one WebAudio graph whose track never changes.
@@ -948,12 +952,45 @@ Real, and covered by tests with separate users:
   - **Reconnect.** A connection that drops (anything but a tab closing or
     reloading) keeps its voice place for 20 seconds, shown to others as
     *Reconnecting…* in amber. The browser keeps the microphone, camera and
-    screen, joins the same room or call again as soon as the socket is back
-    and calls everyone afresh, with mute and deafen as they were. Every
+    screen, and the connections to the others too (their audio goes directly
+    between people, so it usually keeps playing through a signalling drop).
+    When the socket is back it joins the same room or call again, sends any
+    offer lost on the way, and only connections that stopped working start
+    afresh, with mute and deafen as they were. A connection whose own network
+    path breaks restarts ICE (new paths, same call): after 4 seconds of
+    *disconnected*, at once on *failed*, from either side; after three
+    restarts in a minute it is rebuilt. Every
     permission check runs again on the way back (a ban, a timeout or a lost
     "Join voice" refuses it and frees the place at once); only the full-room
     check is skipped for the held place. A one-to-one call is not ended by a
     drop, only by the grace running out.
+  - **Listen only.** *Listen only* beside *Join voice* joins without asking
+    for the microphone; a computer without one, a refused or busy microphone,
+    or a page that can't use one joins to listen too, with a toast saying why.
+    Others see *Listening* (headphones) on the tile and in the sidebar. The
+    microphone button (*Turn on your microphone*) adds one later in the call,
+    on the same connections.
+  - **Data saver** (Settings > Voice and video > Connection and privacy, or
+    the call's options menu): your voice at 24 kbit/s, other people's cameras
+    paused for you until you press *Show video* on their tile (their Snug stops
+    sending it to you; an older Snug that keeps sending it is shown as it
+    arrives), your camera left off when a video call starts, screen shares at
+    720p and 10 frames a second. **Adaptive quality** on every connection:
+    two polls with more than 5% loss or a round trip over 400 ms step that
+    line's voice, camera and screen ceilings down (voice 32, 24, 16 kbit/s;
+    video and screen halved within floors, fewer pixels from the second step);
+    five good polls step back up (`js/lib/callnet.js`).
+  - **Hide my IP address** (Settings > Voice and video, offered only when the
+    server has a TURN relay): connections go only through the relay
+    (`iceTransportPolicy: 'relay'`) in voice rooms and with people who aren't
+    your friends by default, *Always* or *Off*. It can add a little delay;
+    the relay's operator (the server's owner, or Cloudflare for PC-to-PC
+    calls) sees who connected, from where and when, not what is said. Asked
+    outright (*Always*, or PC to PC *Hide my IP from friends*) with no relay
+    known, Snug does not connect rather than going direct. The connection
+    shows *Direct* or *Relayed*, and its details say that calls are encrypted
+    between the people in them (DTLS-SRTP), which is transport encryption,
+    not the end-to-end encryption of private messages.
   - **Devices in the call.** The call's options menu lists microphones,
     speakers and cameras and switches at once. A chosen microphone that is
     unplugged falls back to the default with a toast; a new system default is
@@ -1102,7 +1139,7 @@ behind a reverse proxy that terminates TLS and passes WebSocket upgrades on
 | `SNUG_ORIGINS` | Extra allowed page origins, comma separated | none |
 | `SNUG_RP_ID` | The domain passkeys belong to (for example `example.org` to share them across `snug.example.org` and `chat.example.org`). Without it: the one `SNUG_HOSTS` name, or `localhost` on a server that only listens on this machine. Changing it later stops existing passkeys from working (passwords keep working) | the `SNUG_HOSTS` name |
 | `SNUG_HOSTS` | Host names this server answers to, comma separated (for example `snug.example.org`). Any other `Host` gets 421, which stops DNS-rebinding pages. A server bound to loopback always checks (localhost, IP addresses and `SNUG_ORIGINS` hosts pass). A server bound to a public address checks once this is set, and logs a warning until then | none |
-| `SNUG_STUN` | STUN servers for voice, comma separated; `none` asks no STUN server at all | Google's public server |
+| `SNUG_STUN` | STUN servers for voice, comma separated; `none` asks no STUN server at all (a STUN server sees each caller's IP address) | Google's public server |
 | `SNUG_LOG_DAYS` | Days sign-in history and security events are kept (1 to 365) | `30` |
 | `SNUG_TURN_URL`, `SNUG_TURN_USER`, `SNUG_TURN_PASS` | TURN relay for voice | none |
 | `SNUG_TURN_SECRET` | Shared secret of the TURN server's REST API (coturn `use-auth-secret`): each person gets their own credential, `<expiry>:<user id>` with a base64 HMAC-SHA1, valid 12 hours and refreshed by the `ice.refresh` op. When set, `SNUG_TURN_USER`/`SNUG_TURN_PASS` are never sent | none |

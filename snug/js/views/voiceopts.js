@@ -11,7 +11,8 @@ import { call, on } from '../server.js';
 import { can } from '../lib/perms.js';
 import { Icon, addIcons } from '../ui/icons.js';
 import { Avatar } from '../ui/kit.js';
-import { leaveVoice, toggleMute, toggleDeaf, mediaOf, recapBitrates, restartMic, restartCamera } from '../voice.js';
+import { leaveVoice, toggleMute, toggleDeaf, mediaOf, recapBitrates, restartMic, restartCamera, applyDataSaver } from '../voice.js';
+import { pttGlobalWait } from '../lib/callnet.js'; // how long the desktop app's global key waits between presses
 import { CallTimer, MutedBanner } from './activities.js'; // the call clock and the muted note (voice and calls track)
 import {
   vp, setVoice, volumeOf, mutedForMe, setPersonVolume, setPersonMuted, pttPress, pttRelease, pttHeld,
@@ -170,6 +171,7 @@ async function optionsMenu(e) {
       ...FRAME_RATES.map((f) => ({ label: `${f} frames a second`, checked: v.screenFps === f, onSelect: () => { setVoice({ screenFps: f }); recapBitrates(); } })),
       { label: 'Share sound with the screen', checked: !!v.screenAudio, onSelect: () => setVoice({ screenAudio: !v.screenAudio }) },
       { sep: true },
+      { label: 'Data saver', checked: !!v.lowData, onSelect: () => { setVoice({ lowData: !v.lowData }); applyDataSaver(); } },
       { label: 'Voice and video settings', icon: 'sliders', onSelect: () => openVoiceSettings() },
     ],
   });
@@ -332,7 +334,9 @@ document.addEventListener('keydown', (e) => {
   if (!pttOwns(e)) return;
   e.preventDefault();
   e.stopPropagation();
-  if (!e.repeat) pttPress('key');
+  // Repeats count too: held through a moment away from the window (released
+  // on blur), the key opens the microphone again as soon as Snug has focus.
+  pttPress('key');
 }, true);
 document.addEventListener('keypress', (e) => { if (pttOwns(e)) { e.preventDefault(); e.stopPropagation(); } }, true);
 document.addEventListener('keyup', (e) => {
@@ -345,7 +349,9 @@ addEventListener('blur', () => pttRelease('key', 0));
 
 // The desktop app: a global shortcut, so the key works while another app is in
 // front. The system only reports presses (and repeats while held), so the
-// microphone stays open while presses keep coming and closes shortly after.
+// microphone stays open while presses keep coming and closes shortly after:
+// the first press waits out the system's repeat delay (up to 1.1 s), then
+// three missed repeats close it (js/lib/callnet.js pttGlobalWait).
 const ACCEL = (code) => {
   if (/^Key[A-Z]$/.test(code)) return code.slice(3);
   if (/^Digit\d$/.test(code)) return code.slice(5);
@@ -359,6 +365,7 @@ const ACCEL = (code) => {
 };
 let globalKey = null;
 let globalTimer = null;
+let globalLast = 0;
 function syncGlobal() {
   const app = window.snugApp;
   if (!app?.setPushToTalk) return;
@@ -372,10 +379,12 @@ function syncGlobal() {
 }
 window.snugApp?.onPushToTalk?.(() => {
   if (!pttActive()) return;
+  const now = performance.now();
+  const gap = globalTimer ? now - globalLast : null; // null: a new press, not a repeat
+  globalLast = now;
   pttPress('global');
   clearTimeout(globalTimer);
-  // Long enough to bridge the pause before a held key starts repeating.
-  globalTimer = setTimeout(() => pttRelease('global'), 650);
+  globalTimer = setTimeout(() => { globalTimer = null; pttRelease('global'); }, pttGlobalWait(gap));
 });
 
 // Join and leave sounds for other people; leaving after a while alone.

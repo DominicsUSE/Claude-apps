@@ -26,7 +26,7 @@ import { CallButtons, CallStrip, CallEndNote } from './calls.js'; // calls in di
 import { PersonExtras, RoomLimit, VoiceExtras, PopOut } from './voiceopts.js'; // per-person volume, room limit, soundboard and options, picture in picture
 // Activities, reactions, the muted note, the call clock, connection quality, ringing again (voice and calls track).
 import { ActivityButtons, ActivityTile, ReactionFloat, ActivityAnnouncer, MutedBanner, CallTimer, ConnHeader, RingAgain, Bars, qualityOf, QLABEL } from './activities.js';
-import { videoBlocked } from '../voice.js';
+import { videoBlocked, cameraPaused, showCamera, lineOf } from '../voice.js'; // data saver's paused cameras, how each line goes (relay or not)
 import { notifyMenu, openDrawer, roomMenu, dmMenu } from './nav.js'; // the header's bell, the phone's drawer (shell track)
 import { openMenu } from '../store.js';
 import { togglePeople } from './people.js'; // the member list toggle, remembered (shell track)
@@ -46,9 +46,11 @@ export function VoiceControls({ compact }) {
   const c = S.call;
   const size = compact ? 18 : 20;
   const leave = c.dm ? 'Leave call' : 'Leave voice';
-  const mic = html`<button class=${`ib vc mic${c.muted ? ' on' : ''}`} aria-pressed=${String(c.muted)} aria-label=${c.muted ? 'Unmute' : 'Mute'} data-tip=${c.muted ? 'Unmute' : 'Mute'} onClick=${toggleMute}><${Icon} name=${c.muted ? 'mic-off' : 'mic'} size=${size} /></button>`;
-  const ear = html`<button class=${`ib vc ear${c.deaf ? ' on' : ''}`} aria-pressed=${String(c.deaf)} aria-label=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} data-tip=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} onClick=${toggleDeaf}><${Icon} name=${c.deaf ? 'headphones-off' : 'headphones'} size=${size} /></button>`;
-  const out = html`<button class="ib vc danger leave" aria-label=${leave} data-tip=${c.dm ? 'Hang up' : 'Leave'} onClick=${leaveVoice}><${Icon} name="phone-off" size=${size} /></button>`;
+  // Listening without a microphone: the button adds one.
+  const micLabel = c.listen ? 'Turn on your microphone' : c.muted ? 'Unmute' : 'Mute';
+  const mic = html`<button class=${`ib vc mic${c.muted ? ' on' : ''}${c.listen ? ' listen' : ''}`} aria-pressed=${String(c.muted)} aria-label=${micLabel} data-tip=${micLabel} onClick=${toggleMute}><${Icon} name=${c.muted ? 'mic-off' : 'mic'} size=${size} /><span class="vc-word" aria-hidden="true">${c.listen ? 'Talk' : c.muted ? 'Unmute' : 'Mute'}</span></button>`;
+  const ear = html`<button class=${`ib vc ear${c.deaf ? ' on' : ''}`} aria-pressed=${String(c.deaf)} aria-label=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} data-tip=${c.deaf ? 'Hear the room again' : 'Stop hearing the room'} onClick=${toggleDeaf}><${Icon} name=${c.deaf ? 'headphones-off' : 'headphones'} size=${size} /><span class="vc-word" aria-hidden="true">${c.deaf ? 'Sound off' : 'Sound'}</span></button>`;
+  const out = html`<button class="ib vc danger leave" aria-label=${leave} data-tip=${c.dm ? 'Hang up' : 'Leave'} onClick=${leaveVoice}><${Icon} name="phone-off" size=${size} /><span class="vc-word" aria-hidden="true">${c.dm ? 'Hang up' : 'Leave'}</span></button>`;
   if (compact) return html`${mic}${ear}<${MediaControls} c=${c} size=${size} compact />${out}`;
   // Phone: one row (mic, deafen, camera, screen, More, leave); More opens the
   // rest (activities, reactions, soundboard, push to talk, options) under it.
@@ -69,7 +71,7 @@ function PhoneControls({ mic, ear, out, c, size }) {
   const [more, setMore] = useState(false);
   return html`
     ${mic}${ear}<${MediaControls} c=${c} size=${size} />
-    <button class=${`ib vc vc-more${more ? ' open' : ''}`} aria-expanded=${String(more)} aria-label="More call controls" data-tip="More" onClick=${() => setMore(!more)}><${Icon} name="more" size=${size} /></button>
+    <button class=${`ib vc vc-more${more ? ' open' : ''}`} aria-expanded=${String(more)} aria-label="More call controls" data-tip="More" onClick=${() => setMore(!more)}><${Icon} name="more" size=${size} /><span class="vc-word" aria-hidden="true">More</span></button>
     ${out}
     ${more && html`<div class="vc-more-row" role="group" aria-label="More call controls">
       <${ActivityButtons} /><${VoiceExtras} only="board" /><${VoiceExtras} only="hold" /><${VoiceExtras} only="opts" />
@@ -85,8 +87,10 @@ function peerNote(id, inCall) {
   const st = S.peers[id];
   if (st === 'connected') return null;
   if (st === 'failed') return 'Can\u2019t connect';
-  if (st === 'disconnected') return 'Reconnecting';
-  return 'Connecting';
+  if (st === 'disconnected' || st === 'reconnecting') return 'Reconnecting\u2026';
+  // Asked to hide my IP, and no relay: not connected rather than direct.
+  if (st === 'norelay') return 'Not connected: no relay to hide your IP';
+  return lineOf(id).relay ? 'Connecting through the relay\u2026' : 'Connecting';
 }
 
 // How the line to each person is doing, from the live connection state.
@@ -112,13 +116,14 @@ function MediaControls({ c, size, compact }) {
   const canShare = canShareScreen();
   const scrLabel = blocked || (!canShare ? 'This browser can’t share a screen' : c.screenBusy ? 'Choosing what to share…' : c.screen ? 'Stop sharing your screen' : 'Share your screen');
   return html`
-    ${(!compact || c.camera) && html`<button class=${`ib vc cam${c.camera ? ' live' : ''}${blocked ? ' unavailable' : ''}`} aria-pressed=${String(!!c.camera)} aria-busy=${String(!!c.cameraBusy)} aria-disabled=${blocked ? 'true' : null} aria-label=${camLabel} data-tip=${camLabel} onClick=${blocked ? null : toggleCamera}><${Icon} name=${c.camera ? 'camera' : 'camera-off'} size=${size} /></button>`}
-    ${(!compact || c.screen) && html`<button class=${`ib vc scr${c.screen ? ' live' : ''}${canShare && !blocked ? '' : ' unavailable'}`} aria-pressed=${String(!!c.screen)} aria-busy=${String(!!c.screenBusy)} aria-disabled=${canShare && !blocked ? null : 'true'} aria-label=${scrLabel} data-tip=${scrLabel} onClick=${canShare && !blocked ? toggleScreen : null}><${Icon} name=${c.screen ? 'screen-off' : 'screen'} size=${size} /></button>`}`;
+    ${(!compact || c.camera) && html`<button class=${`ib vc cam${c.camera ? ' live' : ''}${blocked ? ' unavailable' : ''}`} aria-pressed=${String(!!c.camera)} aria-busy=${String(!!c.cameraBusy)} aria-disabled=${blocked ? 'true' : null} aria-label=${camLabel} data-tip=${camLabel} onClick=${blocked ? null : toggleCamera}><${Icon} name=${c.camera ? 'camera' : 'camera-off'} size=${size} /><span class="vc-word" aria-hidden="true">Camera</span></button>`}
+    ${(!compact || c.screen) && html`<button class=${`ib vc scr${c.screen ? ' live' : ''}${canShare && !blocked ? '' : ' unavailable'}`} aria-pressed=${String(!!c.screen)} aria-busy=${String(!!c.screenBusy)} aria-disabled=${canShare && !blocked ? null : 'true'} aria-label=${scrLabel} data-tip=${scrLabel} onClick=${canShare && !blocked ? toggleScreen : null}><${Icon} name=${c.screen ? 'screen-off' : 'screen'} size=${size} /><span class="vc-word" aria-hidden="true">Screen</span></button>`}`;
 }
 
 // Small marks beside a name for people watching from outside the call.
 function MediaMarks({ st }) {
   return html`
+    ${st.listen && html`<span class="stage-media listen" role="img" aria-label="Listening, without a microphone" data-tip="Listening, without a microphone"><${Icon} name="headphones" size=${12} /><span class="listen-word">Listening</span></span>`}
     ${st.screen && html`<span class="stage-media" role="img" aria-label="Sharing their screen" data-tip="Sharing their screen"><${Icon} name="screen" size=${12} /></span>`}
     ${st.camera && html`<span class="stage-media" role="img" aria-label="Camera on" data-tip="Camera on"><${Icon} name="camera" size=${12} /></span>`}`;
 }
@@ -130,7 +135,9 @@ function mediaTiles(ids, roomId) {
     const st = id === S.me ? S.call : (S.voiceState[roomId]?.[id] || {});
     const m = mediaOf(id);
     if (st.screen) tiles.push({ key: `${id}:screen`, id, kind: 'screen', stream: m.screen });
-    tiles.push(st.camera ? { key: `${id}:camera`, id, kind: 'camera', stream: m.camera } : { key: `${id}:face`, id, kind: 'face', stream: null });
+    // Data saver: a camera paused for me shows the face, with a way to see it.
+    if (st.camera && cameraPaused(id)) tiles.push({ key: `${id}:face`, id, kind: 'face', stream: null, paused: true });
+    else tiles.push(st.camera ? { key: `${id}:camera`, id, kind: 'camera', stream: m.camera } : { key: `${id}:face`, id, kind: 'face', stream: null });
   }
   return tiles;
 }
@@ -152,6 +159,9 @@ let watchingFullscreen = false;
 function toggleFullscreen(e) {
   const tile = e.currentTarget.closest('.vt');
   if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return; }
+  // iPhones only let a video element go full screen.
+  const video = tile?.querySelector('video');
+  if (!tile?.requestFullscreen && video?.webkitEnterFullscreen) { video.webkitEnterFullscreen(); return; }
   if (!tile?.requestFullscreen) { toast('Full screen isn’t available here.'); return; }
   tile.requestFullscreen().catch(() => toast('Full screen isn’t available here.'));
 }
@@ -169,7 +179,7 @@ function Video({ stream, mirror, contain, label }) {
 function MediaTile({ t, roomId, focused, small }) {
   const u = S.users[t.id];
   const mine = t.id === S.me;
-  const st = S.voiceState[roomId]?.[t.id] || {};
+  const st = (mine ? S.call : S.voiceState[roomId]?.[t.id]) || {};
   const quiet = mine ? S.call?.muted : st.muted;
   const deaf = mine ? S.call?.deaf : st.deaf;
   const screenTile = t.kind === 'screen';
@@ -188,9 +198,11 @@ function MediaTile({ t, roomId, focused, small }) {
       ${!screenTile && quiet && html`<span class="vt-muted" role="img" aria-label=${deaf ? 'Not listening' : 'Muted'}><${Icon} name=${deaf ? 'headphones-off' : 'mic-off'} size=${14} /></span>`}
       ${screenTile && html`<${Icon} name="screen" size=${14} />`}
       <span class="trunc">${screenTile ? what : first}</span>
+      ${!screenTile && st.listen && html`<span class="vt-listen" role="img" aria-label="Listening, without a microphone" data-tip="Listening"><${Icon} name="headphones" size=${14} /></span>`}
       ${!screenTile && html`<${Quality} id=${t.id} inCall=${true} />`}
     </span>
     ${note && html`<span class="vt-note" role="status">${note}</span>`}
+    ${t.paused && html`<span class="vt-paused"><span>Camera paused to save data</span><button class="btn quiet sm" onClick=${() => showCamera(t.id)}>Show video</button></span>`}
     ${screenTile && t.stream && html`<button class="ib vt-full" aria-label=${full ? 'Exit full screen' : 'Show full screen'} data-tip=${full ? 'Exit full screen' : 'Show full screen'} onClick=${toggleFullscreen}><${Icon} name=${full ? 'shrink' : 'expand'} size=${18} /></button>`}
     ${t.kind !== 'face' && html`<${PopOut} t=${t} />`}
     ${!screenTile && html`<span class="vt-extras"><${PersonExtras} id=${t.id} room=${roomId} /></span>`}
@@ -243,7 +255,7 @@ function Stage({ roomId, dm }) {
           : html`<${ConnHeader} room=${roomId} />`;
   // Once someone in the call shows a camera or a screen, the stage becomes tiles.
   const tiles = inCall && !starting ? mediaTiles(ids, roomId) : [];
-  const media = tiles.some((t) => t.kind !== 'face');
+  const media = tiles.some((t) => t.kind !== 'face' || t.paused);
   return html`<div class=${`stage${inCall ? ' in' : ''}${ids.length ? '' : ' empty'}${media ? ' media' : ''}${dm ? ' call' : ''}`} data-size=${size} role="region" aria-label=${dm ? 'Call' : 'Voice'}>
     <div class="stage-top">
       <span class="stage-count"><${Icon} name=${dm ? 'phone' : 'speaker'} size=${16} />${ids.length ? `${ids.length} in ${dm ? 'the call' : 'voice'}` : dm ? 'Call' : 'Voice'}<${RoomLimit} room=${roomId} n=${ids.length} /></span>
@@ -257,8 +269,8 @@ function Stage({ roomId, dm }) {
       ? html`<div class="stage-people" style=${`--face:${face}px`} data-n=${Math.min(ids.length + ringingIds.length, 9)}>
           ${ids.map((id) => {
             const u = S.users[id];
-            const st = S.voiceState[roomId]?.[id] || {};
             const mine = id === S.me;
+            const st = (mine && inCall ? S.call : S.voiceState[roomId]?.[id]) || {};
             const quiet = mine ? S.call?.muted : st.muted;
             const deaf = mine ? S.call?.deaf : st.deaf;
             const note = peerNote(id, inCall);
@@ -289,7 +301,8 @@ function Stage({ roomId, dm }) {
         ? html`<${VoiceControls} />`
         : dm
           ? html`<button class="btn live" disabled aria-busy="true"><${Icon} name="phone" size=${16} />${S.call?.status === 'mic' ? 'Starting your microphone\u2026' : 'Calling\u2026'}</button>`
-          : html`<button class="btn primary" disabled=${starting} aria-busy=${String(!!starting)} onClick=${() => leavingCall(roomId, () => joinVoice(roomId))}><${Icon} name="speaker" size=${16} />${starting ? 'Joining\u2026' : 'Join voice'}</button>`}
+          : html`<button class="btn primary" disabled=${starting} aria-busy=${String(!!starting)} onClick=${() => leavingCall(roomId, () => joinVoice(roomId))}><${Icon} name="speaker" size=${16} />${starting ? 'Joining\u2026' : 'Join voice'}</button>
+            ${!starting && html`<button class="btn quiet stage-listen" onClick=${() => leavingCall(roomId, () => joinVoice(roomId, { listen: true }))} data-tip="Join without your microphone: you hear everyone, nobody hears you"><${Icon} name="headphones" size=${16} />Listen only</button>`}`}
     </div>
   </div>`;
 }

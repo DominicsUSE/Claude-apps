@@ -7,7 +7,8 @@ import { can } from '../lib/perms.js';
 import { Icon } from '../ui/icons.js';
 import { Seg, Switch } from '../ui/kit.js';
 import { Confirm } from './modals.js';
-import { restartMic, restartCamera, recapBitrates } from '../voice.js';
+import { restartMic, restartCamera, recapBitrates, applyDataSaver } from '../voice.js';
+import { hasTurn } from '../lib/callnet.js'; // whether this server has a relay to hide your IP
 import {
   vp, setVoice, micConstraints, cameraConstraints, audioCtx, meter, canPickSpeaker, preview, setPersonVolume, setPersonMuted,
   RESOLUTIONS, FRAME_RATES, CAM_RES, CAM_FPS,
@@ -291,9 +292,22 @@ export function VoiceSettings() {
               onInput=${(e) => setVoice({ pttDelay: Number(e.target.value) })} />
           </label>
         <//>
-        ${desktop && html`<${Row} label="Works when Snug isn’t in front" hint="The key works in other apps too. Snug can only tell when it’s pressed, so it closes your microphone just after the presses stop.">
+        ${desktop && html`<${Row} label="Works when Snug isn’t in front" hint="The key works in other apps too. Snug can only tell when it’s pressed, so it closes your microphone just after the presses stop. While you’re in a push-to-talk call, other apps can’t use the key (it won’t type there), so pick one you don’t type with, such as F13 or Pause.">
           <${Switch} on=${v.pttGlobal} label="Push to talk works when Snug isn’t in front" onChange=${(on) => setVoice({ pttGlobal: on })} />
         <//>`}`}
+
+    <div class="set-head">Connection and privacy</div>
+    <${Row} label="Data saver" hint="For a weak or metered connection: your voice at 24 kbit/s, other people’s cameras paused until you choose to see them, your camera off when a video call starts, and screen shares at 10 frames a second.">
+      <${Switch} on=${!!v.lowData} label="Data saver" onChange=${(on) => { setVoice({ lowData: on }); applyDataSaver(); }} />
+    <//>
+    ${hasTurn(S.ice)
+      ? html`<${Row} label="Hide my IP address from people in calls (uses a relay)" hint="Your audio and video go through a relay server instead of straight to each person, so they don’t see your IP address. It can add a little delay. The relay’s operator (whoever runs this Snug server, or Cloudflare for PC-to-PC calls) sees that you connected, from where and when, but not what you say: calls are encrypted between the people in them. A change applies to the next call you join." top>
+          <${Seg} label="Hide my IP address" value=${v.relay} onChange=${(r) => setVoice({ relay: r })}
+            options=${[['others', 'Rooms and non-friends'], ['all', 'Always'], ['off', 'Off']]} />
+        <//>`
+      : html`<${Row} label="Hide my IP address from people in calls" hint="This Snug server has no relay, so calls connect straight to each person and they can see your IP address. The server’s owner can add one (a TURN server).">
+          <span class="faint">No relay here</span>
+        <//>`}
 
     <div class="set-head">Voice processing</div>
     <${Row} label="Noise suppression" hint="Filters out steady background sound like fans and traffic.">

@@ -74,6 +74,7 @@ export async function api(path, body) {
 function connect() {
   clearTimeout(timer);
   if (ws && ws.readyState <= 1) return;
+  if (Date.now() < holdUntil) { timer = setTimeout(connect, holdUntil - Date.now()); return; }
   opened = false;
   S.conn.socket = attempt ? 'reconnecting' : 'connecting';
   emit();
@@ -169,7 +170,9 @@ async function closed(e) {
 
 // For the end-to-end checks: the connection dropping without a goodbye (4000 is
 // not a clean close, so the server holds a voice place as it would for a real drop).
-export function dropSocket() { if (ws && ws.readyState === 1) ws.close(4000, 'dropped'); }
+// holdMs keeps it down that long, as a longer outage would.
+let holdUntil = 0;
+export function dropSocket(holdMs = 0) { holdUntil = Date.now() + holdMs; if (ws && ws.readyState === 1) ws.close(4000, 'dropped'); }
 
 export function startTransport() {
   attempt = 0;
