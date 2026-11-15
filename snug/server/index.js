@@ -455,6 +455,7 @@ export async function startServer({
     sweepFiles, // sec-authz: tests run the attachment sweep with their own clock
     peer, // p2p: srv.peer.stats() for tests, srv.peer.wake() for desktop main
     vaultBusy: () => vault.busy?.() === true, // desktop main: no update restart during a data-file transfer
+    voiceBusy: () => hub.voiceBusy(), // ... or while anyone is in a voice room or a call on this server
     push, // push notifications: tests read push.stats and push.publicKey
     // v0.10 A/C: srv.notices, srv.vault
     notices, // v0.10 A: announcements, bans, admin rights (server/notices.js)

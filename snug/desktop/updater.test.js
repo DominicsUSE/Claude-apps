@@ -329,6 +329,29 @@ test("install (for real, spawn stubbed): portable spawns cmd detached and quits;
   assert.deepEqual(spawned[1].args, ["/S", "--updated", "--force-run"]);
   assert.equal(spawned[1].cmd, file);
   assert.equal(quits.length, 2);
+  // The installer leaves no marker of its own. Still on the old version at the next start: that try failed,
+  // said once, so it is never installed again by itself at every start. On the new version: nothing to say.
+  const tempDir = path.dirname(path.dirname(file));
+  assert.equal(updater({ tempDir, env: {} }).takeFailure(), true, "0.10.0 is still running after a try for 0.11.1");
+  assert.equal(updater({ tempDir, env: {} }).takeFailure(), false, "read once");
+  await u.install(file, info);
+  assert.equal(updater({ tempDir, env: {}, current: "0.11.1" }).takeFailure(), false, "the new version is running: it worked");
+});
+
+test("quiet moment: hidden or minimised yes; sound playing no; not in front only after a minute; just opened or idle yes", () => {
+  const q = U.quietWindow;
+  const using = { openMs: 600_000 }; // in front, in use, opened ten minutes ago
+  assert.equal(q(using), false);
+  assert.equal(q({ ...using, hidden: true }), true);
+  assert.equal(q({ ...using, gone: true }), true);
+  assert.equal(q({ ...using, awayMs: 5_000 }), false, "the file picker, a glance at another app");
+  assert.equal(q({ ...using, awayMs: 60_000 }), true);
+  assert.equal(q({ ...using, idleS: 59 }), false);
+  assert.equal(q({ ...using, idleS: 60 }), true);
+  assert.equal(q({ openMs: 19_000 }), true, "only just opened");
+  assert.equal(q({ openMs: 20_000 }), false);
+  assert.equal(q({ ...using, awayMs: 600_000, idleS: 600, audible: true }), false, "a voice message is playing");
+  assert.equal(q({ ...using, hidden: true, audible: true }), true);
 });
 
 test("install (mac, tools stubbed): hdiutil, ditto, detach, version check, then the helper; read-only or translocated → manual", async () => {
@@ -351,6 +374,13 @@ test("install (mac, tools stubbed): hdiutil, ditto, detach, version check, then 
   assert.deepEqual(spawned[0].slice(0, 1), ["/bin/sh"]);
   const script = fs.readFileSync(spawned[0][1], "utf8");
   assert.match(script, new RegExp(`CUR='${path.join(apps, "Snug.app").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}'`));
+  // Snug was in front: it comes back in front. From the tray or behind another app: without taking the keyboard.
+  assert.match(script, /\nopen "\$CUR"\n/);
+  assert.doesNotMatch(script, /open -g/);
+  assert.deepEqual(await u.install(file, info, { background: true }), { ok: true });
+  const quietScript = fs.readFileSync(spawned.at(-1)[1], "utf8");
+  assert.match(quietScript, /\nopen -g "\$CUR"\n/);
+  assert.doesNotMatch(quietScript, /open "\$CUR"/);
 
   // The copy in the dmg says another version: refused before anything is swapped.
   calls.length = 0; spawned.length = 0; plist = "0.9.0";

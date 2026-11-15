@@ -139,6 +139,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
   // Liveness, for discovery: who is connected, and how many people are in these voice rooms.
   hub.isOnline = (u) => presenceOf(u) !== 'offline';
   hub.inVoice = (rooms) => rooms.reduce((n, r) => n + (voiceRooms.get(r)?.size || 0), 0);
+  hub.voiceBusy = () => voiceRooms.size > 0 || calls.size > 0; // anyone in a voice room or a call here (the desktop app won't restart for an update)
   // Push notifications (server/push.js): does this person have any socket open right now?
   hub.connected = (u) => (socks.get(u)?.size || 0) > 0;
 

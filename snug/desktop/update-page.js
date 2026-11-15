@@ -17,7 +17,8 @@ function render(s) {
     : s.phase === "verifying" ? "Checking the download…"
       : s.phase === "installing" ? "Installing…"
         : s.phase === "installed" ? "Installed. Snug is restarting."
-          : working ? "Starting…" : "";
+          : s.phase === "waiting" ? "Ready. Snug installs it as soon as your data file has finished moving."
+            : working ? "Starting…" : "";
   $("error").hidden = s.phase !== "error";
   $("error").textContent = s.phase === "error" ? s.message || "The update didn’t work." : "";
   const go = $("go");

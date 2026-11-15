@@ -512,6 +512,7 @@ test("update during a call: nothing downloads or restarts until the call ends, t
   assert.equal(r.version, "9.9.9");
   await new Promise((res) => setTimeout(res, 800));
   assert.equal(upd.hits, before, "the download waits: the call keeps the connection");
+  assert.ok(!(await app.evaluate(() => globalThis.snugUpdateLog)).includes("downloading"), "nothing started");
   assert.equal(await app.evaluate(() => globalThis.snugUpdateShown()), false, "the call keeps its window");
   assert.doesNotMatch(page.url(), /update\.html$/);
   assert.equal(await app.evaluate(() => globalThis.snugUpdateInstalled ?? null), null);
@@ -825,12 +826,14 @@ test("p2p: the in-app server uses the registry through net.fetch, the OS key sto
 // SNUG_UPDATE_QUIET=0 at start, globalThis.snugUpdateQuiet after). A download left from an earlier run is
 // used again. A bad checksum installs nothing and is tried again later. Only the registry's minimum version
 // puts the update page in the way before the install.
-async function launchUpdate(userData) {
+// The app's own check (3 s after start) stays out of the way unless a test asks for it (auto): the tests call
+// the check themselves, so nothing depends on how long a start takes.
+async function launchUpdate(userData, { auto = false } = {}) {
   await stubReady;
   fs.writeFileSync(path.join(userData, "desktop.json"), JSON.stringify({ mode: "host" }));
   const bin = process.env.SNUG_BIN && path.resolve(process.env.SNUG_BIN);
-  const env = { ...process.env, SNUG_UPDATE_URL: `http://127.0.0.1:${updateStub.address().port}/latest`, SNUG_NOTICES_URL: `http://127.0.0.1:${updateStub.address().port}/notices`, SNUG_UPDATE_KIND: "portable", SNUG_UPDATE_DRY_INSTALL: "1", SNUG_UPDATE_QUIET: "0" };
-  delete env.SNUG_UPDATE_CHECK;
+  const env = { ...process.env, SNUG_UPDATE_URL: `http://127.0.0.1:${updateStub.address().port}/latest`, SNUG_NOTICES_URL: `http://127.0.0.1:${updateStub.address().port}/notices`, SNUG_UPDATE_KIND: "portable", SNUG_UPDATE_DRY_INSTALL: "1", SNUG_UPDATE_QUIET: auto ? "1" : "0", SNUG_UPDATE_CHECK: "manual" };
+  if (auto) delete env.SNUG_UPDATE_CHECK;
   const app = await electron.launch({ executablePath: bin || require("electron"), args: [...(bin ? [] : [__dirname]), "--no-sandbox", `--user-data-dir=${userData}`], cwd: __dirname, env });
   const page = await app.firstWindow();
   page.setDefaultTimeout(20000);
@@ -878,8 +881,23 @@ test("automatic update: downloads while Snug stays in use, installs by itself at
   await app.evaluate(() => { globalThis.snugUpdateQuiet = true; return globalThis.snugCheckUpdate(); });
   assert.equal(await updatePhase(app), "waiting");
   assert.equal(await app.evaluate(() => globalThis.snugUpdateInstalled ?? null), null, "never during a call");
-  // The call ends: it installs by itself, and the window shows the update page meanwhile.
-  await page.evaluate(() => window.snugApp.voiceActive(false)).catch(() => {});
+  // The call ends, but this computer is moving a data file, or someone who joined over the network is in a
+  // call on its server: still not.
+  await app.evaluate(() => { const h = globalThis.snugHostForTest(); h.realVaultBusy = h.vaultBusy; h.vaultBusy = () => true; });
+  await page.evaluate(() => window.snugApp.voiceActive(false));
+  await app.evaluate(() => globalThis.snugCheckUpdate());
+  assert.equal(await updatePhase(app), "waiting");
+  await app.evaluate(() => { const h = globalThis.snugHostForTest(); h.vaultBusy = h.realVaultBusy; h.realVoiceBusy = h.voiceBusy; h.voiceBusy = () => true; });
+  assert.equal(await app.evaluate(() => globalThis.snugHostForTest().vaultBusy()), false, "the real answer: nothing is moving");
+  await app.evaluate(() => globalThis.snugCheckUpdate());
+  assert.equal(await updatePhase(app), "waiting");
+  assert.equal(await app.evaluate(() => globalThis.snugUpdateInstalled ?? null), null, "never during a transfer or a guest's call");
+  await app.evaluate(() => { const h = globalThis.snugHostForTest(); h.voiceBusy = h.realVoiceBusy; });
+  assert.equal(await app.evaluate(() => globalThis.snugHostForTest().voiceBusy()), false, "the real answer: nobody is in voice");
+  // Nothing is in the way now, and the window waits in the tray: it installs by itself, and the window shows
+  // the update page meanwhile.
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].hide());
+  await app.evaluate(() => globalThis.snugCheckUpdate());
   await page.waitForURL(/update\.html$/);
   await page.locator('h1:has-text("Updating to Snug 9.9.9")').waitFor();
   await page.waitForSelector('body[data-phase="installed"]', { timeout: 30000 });
@@ -898,7 +916,7 @@ test("automatic update: downloads while Snug stays in use, installs by itself at
   assert.match(rec.script, /copy \/Y/);
   // How the window was is written down for the next start.
   const note = JSON.parse(fs.readFileSync(path.join(userData, "update-relaunch.json"), "utf8"));
-  assert.ok(["hidden", "inactive", "shown"].includes(note.mode));
+  assert.equal(note.mode, "hidden", "it was in the tray");
   await app.close();
 
   // Snug was closed before it could install: at the next start the finished download is checked and used,
@@ -944,21 +962,43 @@ test("automatic update: downloads while Snug stays in use, installs by itself at
 test("automatic update: a version below the registry's minimum shows the update page at once, and it downloads and installs by itself", async (t) => {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-update-min-"));
   t.after(() => removeDir(userData));
-  upd.badSums = false;
+  upd.badSums = true;
   upd.min = "9.9.9";
-  t.after(() => { upd.min = null; });
+  t.after(() => { upd.min = null; upd.badSums = false; });
   const { app, page } = await launchUpdate(userData);
   t.after(() => app.close().catch(() => {}));
   // Not a quiet moment (SNUG_UPDATE_QUIET=0), and still: this version may not be used.
   await app.evaluate(() => globalThis.snugCheckUpdate());
   await page.waitForURL(/update\.html$/);
   await page.locator('h1:has-text("Updating to Snug 9.9.9")').waitFor();
+  // The release's checksum doesn't match: the page says so and offers its one button. Nothing is installed.
+  await page.waitForSelector('body[data-phase="error"]', { timeout: 30000 });
+  assert.match(await page.locator("#error").textContent(), /didn’t match its checksum/);
+  assert.equal(await page.locator("#go").textContent(), "Try again");
+  assert.ok(await page.locator("#go").isVisible());
+  assert.equal(await app.evaluate(() => globalThis.snugUpdateInstalled ?? null), null, "nothing installed");
+  // The release gets fixed: Try again (the next check would do the same by itself).
+  upd.badSums = false;
+  await page.click("#go");
   await page.waitForSelector('body[data-phase="downloading"]');
   assert.match(await page.locator("#status").textContent(), /of 3\.0 MB/);
   assert.ok(await page.locator("#go").isHidden(), "nothing to press");
   await page.waitForSelector('body[data-phase="installed"]', { timeout: 30000 });
   const log = await app.evaluate(() => globalThis.snugUpdateLog);
   for (const p of ["downloading", "verifying", "verified", "installing", "installed"]) assert.ok(log.includes(p), `phase ${p} (${log.join(", ")})`);
+  const rec = await app.evaluate(() => globalThis.snugUpdateInstalled);
+  assert.equal(rec.kind, "portable");
+  fs.rmSync(path.dirname(rec.file), { recursive: true, force: true });
+});
+
+test("automatic update: the app's own check, a few seconds after starting, does all of it with nobody asking", async (t) => {
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-update-auto-"));
+  t.after(() => removeDir(userData));
+  upd.badSums = false;
+  const { app, page } = await launchUpdate(userData, { auto: true });
+  t.after(() => app.close().catch(() => {}));
+  await page.waitForURL(/update\.html$/, { timeout: 60000 });
+  await page.waitForSelector('body[data-phase="installed"]', { timeout: 30000 });
   const rec = await app.evaluate(() => globalThis.snugUpdateInstalled);
   assert.equal(rec.kind, "portable");
   fs.rmSync(path.dirname(rec.file), { recursive: true, force: true });
@@ -1090,6 +1130,8 @@ test("an installed app ignores planted updater variables without --dev-update (S
     executablePath: path.resolve(process.env.SNUG_BIN), args: ["--no-sandbox", `--user-data-dir=${userData}`], cwd: __dirname, noDevUpdate: true,
     env: (({ SNUG_UPDATE_CHECK, ...rest }) => ({ ...rest, SNUG_UPDATE_URL: `${base}/latest`, SNUG_NOTICES_URL: `${base}/notices`, SNUG_UPDATE_KIND: "portable" }))(process.env),
   });
+  // This launch asks the real GitHub: whatever it finds there is never installed on the test machine.
+  await app.evaluate(() => { globalThis.snugUpdateQuiet = false; });
   const page = await app.firstWindow();
   await page.waitForSelector(".auth-form", { timeout: 20000 });
   // The check asks GitHub, never the planted address (SNUG_UPDATE_CHECK=0 is ignored the same way: updater.test.js).

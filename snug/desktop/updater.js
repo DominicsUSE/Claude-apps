@@ -52,6 +52,16 @@ function needsUpdate({ current, latest, min }) {
   if (semverCmp(latest, current) > 0) return true;
   return !!semver(min) && semverCmp(min, current) > 0 && semverCmp(latest, min) >= 0;
 }
+// Would a restart interrupt the person at the window? (main.js adds: never during a call or a data-file
+// transfer.) Plain numbers in, so the table is tested without a window.
+//   hidden or minimised: no, go ahead. Playing sound (a voice message, a video): yes, wait.
+//   Not in front: go ahead only after a minute, so Snug's own file picker or a glance at another app
+//   doesn't count. Opened under 20 s ago, or the computer untouched for a minute: go ahead.
+function quietWindow({ gone = false, hidden = false, audible = false, awayMs = 0, openMs = Infinity, idleS = 0 } = {}) {
+  if (gone || hidden) return true;
+  if (audible) return false;
+  return awayMs >= 60_000 || openMs < 20_000 || idleS >= 60;
+}
 const SUMS = { portable: "SHA256SUMS-windows.txt", installer: "SHA256SUMS-windows.txt", dmg: "SHA256SUMS-mac.txt" };
 const SIG = (sumsName) => `${sumsName}.sig`;
 const assetName = (kind, v) => ({ portable: `Snug-${v}-portable.exe`, installer: `Snug-Setup-${v}.exe`, dmg: `Snug-${v}-mac.dmg` }[kind] || null);
@@ -186,7 +196,9 @@ function swapScript(kind, o) {
     return `${lines.join("\r\n")}\r\n`;
   }
   if (kind === "dmg") {
-    // o: { pid, curApp, newApp, oldApp }
+    // o: { pid, curApp, newApp, oldApp, background }. background: Snug wasn't in front, so it comes back
+    // without taking the keyboard from whatever is (open -g).
+    const opn = o.background ? "open -g" : "open";
     return [
       "#!/bin/sh",
       "# Snug update: waits for the old Snug to quit, then swaps in the new Snug.app.",
@@ -200,13 +212,13 @@ function swapScript(kind, o) {
       'BID() { /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$1/Contents/Info.plist" 2>/dev/null; }',
       'ID=$(BID "$NEW")',
       'if [ -z "$ID" ] || [ "$(BID "$CUR")" != "$ID" ]; then rm -f "$0"; exit 1; fi',
-      'if ! mv "$CUR" "$OLD"; then open "$CUR"; exit 1; fi',
+      `if ! mv "$CUR" "$OLD"; then ${opn} "$CUR"; exit 1; fi`,
       'if ditto "$NEW" "$CUR"; then',
       '  rm -rf "$OLD" "$NEW"',
       "else",
       '  rm -rf "$CUR"; mv "$OLD" "$CUR"',
       "fi",
-      'open "$CUR"',
+      `${opn} "$CUR"`,
       'rm -f "$0"',
       "",
     ].join("\n");
@@ -400,9 +412,22 @@ function createUpdater(o) {
     const probe = path.win32.join(dir, `.snug-update-${process.pid}.tmp`);
     try { fs.writeFileSync(probe, ""); fs.rmSync(probe, { force: true }); return true; } catch { return false; }
   });
-  // The swap script left a marker: the last update couldn't be installed. Read once.
+  // Every install that hands over to a helper or an installer writes down the version it is putting in.
+  // Still running something older at the next start means it didn't work (the installer and the Mac helper
+  // leave no marker of their own), and installing again by itself would repeat that at every start.
+  const tried = path.join(tempDir, "snug-update-tried.txt");
+  const noteTry = (version) => { try { fs.writeFileSync(tried, String(version)); } catch { /* the marker still covers portable */ } };
+  // The last update couldn't be installed: the swap script's marker, or a try that left this version in place.
+  // Read once.
   function takeFailure() {
-    try { if (!fs.existsSync(marker)) return false; fs.rmSync(marker, { force: true }); return true; } catch { return false; }
+    let failed = false;
+    try { if (fs.existsSync(marker)) { fs.rmSync(marker, { force: true }); failed = true; } } catch { /* unreadable: not a failure */ }
+    try {
+      const v = fs.readFileSync(tried, "utf8").trim();
+      fs.rmSync(tried, { force: true });
+      if (semver(v) && semverCmp(v, o.current) > 0) failed = true;
+    } catch { /* no try on record */ }
+    return failed;
   }
   // Downloads of this version or older (and leftover swap scripts) go at start (review 0.10 #6).
   function cleanup() {
@@ -425,7 +450,7 @@ function createUpdater(o) {
     return at;
   }
   // file: the verified download. Resolves { ok } (the app is quitting), or { manual, message } (can't swap here).
-  async function install(file, info) {
+  async function install(file, info, { background = false } = {}) {
     if (!fs.existsSync(file)) throw err("network", "The download is gone. Try again.");
     if (kind === "portable") {
       const target = env.PORTABLE_EXECUTABLE_FILE || o.exePath;
@@ -436,6 +461,7 @@ function createUpdater(o) {
       const script = swapScript("portable", { pid: o.pid ?? process.pid, newFile: file, target, final, marker });
       const at = swapFile("snug-swap.cmd", script);
       if (dry()) return record({ kind, file, script, final });
+      noteTry(info.version);
       launch(env.ComSpec || "cmd.exe", ["/d", "/c", at]);
       o.quit?.();
       return { ok: true };
@@ -443,6 +469,7 @@ function createUpdater(o) {
     if (kind === "installer") {
       const args = ["/S", "--updated", "--force-run"];
       if (dry()) return record({ kind, file, script: [file, ...args].join(" ") });
+      noteTry(info.version);
       launch(file, args);
       o.quit?.();
       return { ok: true };
@@ -473,9 +500,10 @@ function createUpdater(o) {
         const v = (await run("plutil", ["-extract", "CFBundleShortVersionString", "raw", path.join(newApp, "Contents", "Info.plist")]).catch(() => "")).trim();
         if (v !== info.version) throw err("checksum", `The downloaded Snug says it is ${v || "no version"}, not ${info.version}.`);
       }
-      const script = swapScript("dmg", { pid: o.pid ?? process.pid, curApp, newApp, oldApp: path.join(work, `old-${Date.now()}.app`) });
+      const script = swapScript("dmg", { pid: o.pid ?? process.pid, curApp, newApp, oldApp: path.join(work, `old-${Date.now()}.app`), background });
       const at = swapFile("snug-swap.sh", script, 0o700);
       if (dry()) return record({ kind, file, script });
+      noteTry(info.version);
       launch("/bin/sh", [at]);
       o.quit?.();
       return { ok: true };
@@ -486,4 +514,4 @@ function createUpdater(o) {
   return { kind, testMode, check, download, recheck, install, cleanup, takeFailure };
 }
 
-module.exports = { createUpdater, semverCmp, needsUpdate, pickAssets, pickRelease, parseSums, swapScript, allowedUrl, kindOf, assetName, verifySums, updaterEnvFor, UPDATE_PUBKEYS, RELEASES_LIST };
+module.exports = { createUpdater, quietWindow, semverCmp, needsUpdate, pickAssets, pickRelease, parseSums, swapScript, allowedUrl, kindOf, assetName, verifySums, updaterEnvFor, UPDATE_PUBKEYS, RELEASES_LIST };
