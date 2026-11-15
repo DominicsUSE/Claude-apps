@@ -21,6 +21,7 @@ import { showProfile } from './people.js';
 import { joinVoice } from '../voice.js';
 import { leavingCall } from '../calls.js';
 import { EventList, EventRow, upcomingFor, useNow, canPlan, openCreateEvent } from './events.js';
+import { RoomEncNote } from './e2ee-conv.js'; // rooms aren't end-to-end encrypted (said where encryption is offered)
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 const offline = (e) => (e?.offline ? 'You’re offline. Try again once you’re back.' : e?.message);
@@ -276,6 +277,7 @@ function MemberPage({ id, events }) {
         <aside class="pl-aside" aria-label="About this house">
           <${Rules} text=${h.rules} open=${h.newcomer} />
           <${Members} id=${id} />
+          <${RoomEncNote} />
         </aside>
       </div>
     </div>

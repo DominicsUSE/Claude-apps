@@ -17,6 +17,7 @@ import { ACCOUNT_ACTIONS } from './account.js'; // mute, mark read, themes, pres
 import { withRecent } from '../account.js'; // recent places come first
 import { SearchDateFilter, SearchSuggest, dateChipLabel } from './messaging.js'; // date filter, mentions, pinned, suggestions while typing
 import { INBOX_ACTIONS } from '../inbox.js'; // presence for a while and the Mentions inbox
+import { searchEncrypted, loadEncryptedHistory, hasEncrypted } from '../e2ee/search.js'; // encrypted conversations, searched on this device
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 
@@ -146,6 +147,7 @@ export function Search() {
     </div>
     <div class="view-body">
       ${!empty && html`<${PlaceHits} items=${placeHits(p.terms.join(' '))} />`}
+      ${!empty && hasEncrypted() && html`<${EncryptedHits} p=${p} q=${q} />`}
       ${empty
         ? html`<div class="ops">
             <p class="sub">Type a word, or narrow it down. The filters above write these for you.</p>
@@ -179,6 +181,35 @@ export function Search() {
     </div>
   </section>`;
 }
+
+// End-to-end encrypted conversations: the server can't search them, so this device does,
+// over the messages it has decrypted, and further back when asked.
+function EncryptedHits({ p, q }) {
+  const [deep, setDeep] = useState(null); // null | { done, of } while loading | 'done'
+  const hits = searchEncrypted(p);
+  const more = () => { setDeep({ done: 0, of: 0 }); loadEncryptedHistory((done, of) => setDeep({ done, of })).then(() => setDeep('done'), () => setDeep('done')); };
+  return html`<div class="col search-results e2-search" aria-label="Encrypted conversations">
+    <div class="view-note search-group-h"><${Icon} name="lock" size=${14} /> Encrypted conversations (searched on this device)${hits.length ? `: ${plural(hits.length, 'message')}` : ''}</div>
+    ${hits.map(({ conv, m }) => {
+      const meta = convMeta(conv);
+      const who = S.users[m.author];
+      if (!meta || !who) return null;
+      return html`<div class="item" key=${`e-${m.id}`}>
+        <${Avatar} user=${who} />
+        <button class="item-main" onClick=${() => jumpToMsg(conv, m.id)}>
+          <span class="item-meta"><b>${who.name}</b><span class="where">${isThread(conv) ? `thread in ${meta.where}` : meta.title}</span><span class="num">${fmtWhen(m.ts)}</span></span>
+          <span class="item-text"><${Rich} m=${m} hl=${p.terms} /></span>
+        </button>
+      </div>`;
+    })}
+    ${!hits.length && html`<p class="sub">Nothing here among the encrypted messages on this device.</p>`}
+    ${deep === 'done'
+      ? html`<p class="hint">Searched up to ${DEEP} messages in each encrypted conversation.</p>`
+      : deep ? html`<p class="hint" role="status">Decrypting older messages… ${deep.of ? `${deep.done} of ${deep.of} conversations` : ''}</p>`
+        : html`<div><button class="btn" onClick=${more} data-q=${q}>Search further back in encrypted conversations</button></div>`}
+  </div>`;
+}
+const DEEP = 2000;
 
 const ACTIONS = [
   { label: 'Home', icon: 'house', words: 'home start overview happening', run: () => go({ type: 'home' }) },

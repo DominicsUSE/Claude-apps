@@ -1039,6 +1039,77 @@ before seeding anything that faces the internet, or better, do not seed there.
   people in a conversation can start, join, decline or see its call, and
   its ringing and call state go to them alone.
 
+### End-to-end encrypted conversations (direct messages and groups)
+
+Snug 0.12 can encrypt direct messages and groups end to end. It is off unless the
+server sets `SNUG_E2EE=on` (it stays off by default until this feature has been
+reviewed outside its implementation). With it on, each person turns it on once per
+account (Settings, Encryption) and saves a recovery key.
+
+**What it does.** A conversation is encrypted once everyone in it has turned it on
+(new conversations start encrypted; existing ones switch over by themselves and say
+so with a line: messages above it stay as they were). In an encrypted conversation
+every message, edit, reply, thread reply, attachment (pictures, files, voice and
+video), GIF, sticker and scheduled message is encrypted on the sender's device with
+a fresh key, and that key is sealed to each trusted device of each person in it
+(HPKE, RFC 9180, on the browser's own WebCrypto: X25519, Ed25519, AES-256-GCM). The
+server stores only ciphertext and refuses plain text there, so a stale tab or an old
+version can't quietly send readable messages. Each device signs what it sends; each
+account signs its list of devices; safety numbers (in a conversation's Details) let
+two people check that nobody, the server included, put different keys between them.
+Removed devices and people who leave get nothing sent after that.
+
+**What the server still sees.** Who talks to whom and when, how many messages and
+roughly how long (sizes are padded), who is in each group, group names and icons,
+reactions, read state, typing, presence, pins and saves, which devices each person
+has, IP addresses, the GIF searches and picks you make, which stickers are fetched,
+and call signalling. Push notifications say only "New message".
+
+**What it doesn't protect against.**
+- *Whoever serves the code.* In a browser, Snug's JavaScript comes from the server
+  every time you open it; whoever runs the server could change it to read messages
+  as they are typed or shown. Nothing in a browser prevents that. The Snug desktop
+  app runs its own built-in code on its own server. Encryption in a browser protects
+  against theft of the database, backups and disk, an operator who reads stored data
+  or logs, and server bugs that leak rows; not against an operator who changes the code.
+- *Membership.* The server decides who is in a group (everyone sees the member list
+  and a line when it changes, but a server could show different lists to different
+  people).
+- *History keys.* With "Let my new devices read my encrypted history" on (the
+  default), a new device or the recovery key opens earlier messages too, so someone
+  who later gets an unlocked device of yours, or your recovery key and password, can
+  read that history. There is no per-message forward secrecy: Snug does not use a
+  ratchet. History keys and device prekeys are replaced weekly, so someone who copied
+  a device's keys once and lost access stops reading new messages within about a week.
+- *Endpoints and people.* A compromised device, or anyone in the conversation, can
+  read, copy or screenshot what they receive.
+- *Messages from before.* Messages sent before a conversation turned encrypted stay
+  stored readable on the server (each says so in its menu), and database snapshots
+  taken before keep them until they age out.
+- *Calls* are not end-to-end encrypted by this feature (they use WebRTC's own
+  encryption, but signalling passes the server).
+
+**Not encrypted, by design.** Rooms in houses (their pages say so), reactions,
+group names and pictures. Polls and `/roll` are off in encrypted conversations
+(a fair roll and a vote count need the server to see them), and link previews are
+not made there. Server search can't look inside them; the search page searches
+them on your device instead, and can decrypt further back on request. Your data
+download contains encrypted messages as the encrypted envelopes the server stores.
+
+**Needs a secure page.** Browsers only offer the needed cryptography on `https://`
+pages, `localhost` and the desktop app. A browser joining a desktop host over plain
+`http://` on a LAN can't use encryption there; it says so.
+
+**Conversations with friends on other PCs (P2P mode)** keep their own encryption,
+unchanged in 0.12: encrypted between the two PCs and readable on each PC, labelled
+"Encrypted between your PC and …'s PC. Stored readable on each PC."
+
+**Recovery.** The recovery key (32 letters and digits plus 4 check characters) opens
+a backup of your account keys that the server keeps encrypted. Lose every device and
+the recovery key, and you can reset encryption: you get new keys, older encrypted
+messages can't be read any more, and everyone you talk to sees that your safety
+number changed (a contact who had verified you is asked before sending again).
+
 ## What makes it different
 
 Three things Snug is meant to be known for, chosen from the weak spots of
