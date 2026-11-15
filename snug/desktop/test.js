@@ -116,6 +116,7 @@ test("voice: the camera turns on, and the screen picker shares a screen", async 
   });
   const page = await app.firstWindow();
   page.setDefaultTimeout(20000);
+  const step = (s) => process.env.CI && process.stderr.write(`[voice test] ${s}\n`);
   await page.waitForSelector("#setup");
   await page.click("#go");
   await page.waitForSelector(".auth-form");
@@ -130,6 +131,7 @@ test("voice: the camera turns on, and the screen picker shares a screen", async 
   await page.click(".modal button[type=submit]");
   await page.waitForSelector('.main .bar-title:has-text("Lounge")');
   await page.click('.nav .row:has-text("Hangout")');
+  step("join voice");
   await page.click('.stage .btn.primary:has-text("Join voice")');
   await page.locator('.stage [aria-label="Leave voice"]').waitFor();
   // A video in this kind of tile has a picture and its time moves on.
@@ -148,13 +150,17 @@ test("voice: the camera turns on, and the screen picker shares a screen", async 
     await w.click(sel).catch((e) => { if (!w.isClosed()) throw e; });
     await closed;
   };
+  step("camera on");
   await page.click(".stage .vc.cam");
+  step("camera plays");
   await plays("camera");
 
   // Cancel shares nothing and says nothing.
+  step("open picker");
   let picked = app.waitForEvent("window");
   await page.click(".stage .vc.scr");
   let picker = await picked;
+  step("picker has sources");
   await picker.waitForSelector("button[data-i]", { timeout: 30000 });
   assert.equal(await picker.title(), "Share your screen");
   assert.equal(await picker.evaluate(() => typeof window.snugDesktop), "undefined", "the picker gets no desktop bridge");
