@@ -417,6 +417,7 @@ on('voice', ({ room, users, state }) => {
 });
 function resumeLine(user, p) {
   tellKinds(user);
+  if (vp().lowData) signal(user, { want: { camera: !!S.call?.showCam?.[user] } });
   if (p.pc.signalingState === 'have-local-offer' && p.pc.localDescription) signal(user, { sdp: p.pc.localDescription });
   else if (p.pc.connectionState !== 'connected') restartLine(user, p);
 }

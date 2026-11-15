@@ -185,6 +185,15 @@ test('listen only: a refused microphone joins to listen and says why; a call too
   await ines.locator('.stage-person:has-text("Robin") .stage-media.listen').waitFor();
 });
 
+test('alone in voice: the connection popup says there is nothing to measure, and no half-empty send rate', async () => {
+  const robin = await person('robin');
+  await joinWheel(robin);
+  await robin.click('.stage .act-conn');
+  const pop = robin.locator('.act-qpop');
+  await pop.locator('.act-note:has-text("Nobody else is here yet")').waitFor();
+  assert.doesNotMatch(await pop.textContent(), /sending/);
+});
+
 // ---------- 2. Reconnection ----------
 test('reconnect: a 3-second signalling drop keeps the connection and its audio; the call comes back on the same connection', async () => {
   const robin = await person('robin');
@@ -403,12 +412,13 @@ test('phone 390x844: labelled controls in reach, tiles, a screen share full scre
   await phone.locator('.screen.push .stage [aria-label="Leave voice"]').waitFor();
   await connected(phone, 1);
   // Every control shows its word and sits on screen as a touch target.
-  for (const [sel, word] of [['[aria-label="Mute"]', 'Mute'], ['.vc.ear', 'Sound'], ['.vc.cam', null], ['.vc-more', 'More'], ['[aria-label="Leave voice"]', 'Leave']]) {
+  for (const [sel, word] of [['[aria-label="Mute"]', 'Mute'], ['.vc.ear', 'Sound'], ['.vc.cam', 'Camera'], ['.vc.scr', 'Screen'], ['.vc-more', 'More'], ['[aria-label="Leave voice"]', 'Leave']]) {
     const btn = phone.locator(`.stage .stage-acts ${sel}`);
     const b = await btn.boundingBox();
     assert.ok(b.width >= 44 && b.height >= 44 && b.x >= 0 && b.x + b.width <= 390 && b.y + b.height <= 844, `${sel}: ${JSON.stringify(b)}`);
     if (word) assert.equal((await btn.locator('.vc-word').textContent()).trim(), word);
   }
+  if (process.env.SNUG_SHOTS) await phone.screenshot({ path: join(process.env.SNUG_SHOTS, 'phone-call.png') });
   // The sound toggle (deafen) works from the phone.
   await phone.click('.stage .stage-acts .vc.ear');
   await phone.waitForFunction(() => window.snug.S.call.deaf === true);
@@ -421,6 +431,7 @@ test('phone 390x844: labelled controls in reach, tiles, a screen share full scre
   await phone.waitForFunction(() => { const v = document.querySelector('.stage .vt-screen video'); return v && v.videoWidth > 0; }, null, { timeout: 15000 });
   const tb = await tile.boundingBox();
   assert.ok(tb.width >= 300 && tb.x >= 0 && tb.x + tb.width <= 390, `screen tile: ${JSON.stringify(tb)}`);
+  if (process.env.SNUG_SHOTS) await phone.screenshot({ path: join(process.env.SNUG_SHOTS, 'phone-screen-share.png') });
   await phone.click('.stage .vt-screen .vt-full');
   await phone.waitForFunction(() => document.fullscreenElement?.dataset?.tile?.endsWith(':screen'));
   await phone.evaluate(() => document.exitFullscreen());
@@ -467,14 +478,10 @@ test('mid-call: a speaker chosen in the call’s menu plays every voice there; e
   await joinWheel(ines);
   await connected(robin, 1);
   const outs = await robin.evaluate(async () => (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audiooutput' && d.deviceId !== 'default' && d.deviceId !== 'communications').map((d) => ({ id: d.deviceId, label: d.label })));
-  if (outs.length) {
-    await robin.click('.stage [aria-label="Voice options"]');
-    await robin.click(`.menu [role="menuitemradio"]:has-text("${outs[0].label}")`);
-    await robin.waitForFunction((id) => window.snug.voiceTest.sinks().every((s) => s === id) && window.snug.voiceTest.sinks().length > 0, outs[0].id);
-  } else {
-    // No fake speaker in this Chromium: the pick still reaches every element through setSinkId.
-    await robin.evaluate(() => { window.snug.S.prefs.voice = { ...window.snug.S.prefs.voice, output: '' }; });
-  }
+  assert.ok(outs.length >= 1, `fake speakers: ${JSON.stringify(outs)}`);
+  await robin.click('.stage [aria-label="Voice options"]');
+  await robin.click(`.menu [role="menuitemradio"]:has-text("${outs[0].label}")`);
+  await robin.waitForFunction((id) => { const s = window.snug.voiceTest.sinks(); return s.length > 0 && s.every((x) => x === id); }, outs[0].id);
   await openVoiceSettings(robin);
   await robin.click('button[role="switch"][aria-label="Echo cancellation"]');
   await robin.waitForFunction(() => window.snug.voiceDebug().mic?.echo === false);

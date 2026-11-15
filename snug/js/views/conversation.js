@@ -114,8 +114,8 @@ function MediaControls({ c, size, compact }) {
   const canShare = canShareScreen();
   const scrLabel = blocked || (!canShare ? 'This browser can’t share a screen' : c.screenBusy ? 'Choosing what to share…' : c.screen ? 'Stop sharing your screen' : 'Share your screen');
   return html`
-    ${(!compact || c.camera) && html`<button class=${`ib vc cam${c.camera ? ' live' : ''}${blocked ? ' unavailable' : ''}`} aria-pressed=${String(!!c.camera)} aria-busy=${String(!!c.cameraBusy)} aria-disabled=${blocked ? 'true' : null} aria-label=${camLabel} data-tip=${camLabel} onClick=${blocked ? null : toggleCamera}><${Icon} name=${c.camera ? 'camera' : 'camera-off'} size=${size} /></button>`}
-    ${(!compact || c.screen) && html`<button class=${`ib vc scr${c.screen ? ' live' : ''}${canShare && !blocked ? '' : ' unavailable'}`} aria-pressed=${String(!!c.screen)} aria-busy=${String(!!c.screenBusy)} aria-disabled=${canShare && !blocked ? null : 'true'} aria-label=${scrLabel} data-tip=${scrLabel} onClick=${canShare && !blocked ? toggleScreen : null}><${Icon} name=${c.screen ? 'screen-off' : 'screen'} size=${size} /></button>`}`;
+    ${(!compact || c.camera) && html`<button class=${`ib vc cam${c.camera ? ' live' : ''}${blocked ? ' unavailable' : ''}`} aria-pressed=${String(!!c.camera)} aria-busy=${String(!!c.cameraBusy)} aria-disabled=${blocked ? 'true' : null} aria-label=${camLabel} data-tip=${camLabel} onClick=${blocked ? null : toggleCamera}><${Icon} name=${c.camera ? 'camera' : 'camera-off'} size=${size} /><span class="vc-word" aria-hidden="true">Camera</span></button>`}
+    ${(!compact || c.screen) && html`<button class=${`ib vc scr${c.screen ? ' live' : ''}${canShare && !blocked ? '' : ' unavailable'}`} aria-pressed=${String(!!c.screen)} aria-busy=${String(!!c.screenBusy)} aria-disabled=${canShare && !blocked ? null : 'true'} aria-label=${scrLabel} data-tip=${scrLabel} onClick=${canShare && !blocked ? toggleScreen : null}><${Icon} name=${c.screen ? 'screen-off' : 'screen'} size=${size} /><span class="vc-word" aria-hidden="true">Screen</span></button>`}`;
 }
 
 // Small marks beside a name for people watching from outside the call.
