@@ -5,7 +5,7 @@
 // same policies, or the bundled client would behave differently from the
 // host's own page.
 import { posix } from 'node:path';
-import { CSP, CSP_STRICT, BASE_CSP, SVG_CSP, WORKER_CSP } from './csp.js';
+import { CSP, CSP_STRICT, BASE_CSP, SVG_CSP, WORKER_CSP, DOCS_CSP } from './csp.js';
 
 export const PUBLIC = ['index.html', 'css/', 'js/', 'fonts/', 'vendor/', 'docs/', 'brand/', 'sw.js'];
 export const TYPES = {
@@ -53,6 +53,7 @@ export function staticHeaders(rel, https = false) {
       'Content-Security-Policy-Report-Only': CSP_STRICT, // sec-web
     } : {}),
     ...(ext(rel) === '.svg' ? { 'Content-Security-Policy': SVG_CSP } : {}), // sec-web W6
+    ...(rel.startsWith('docs/') && ext(rel) === '.html' ? { 'Content-Security-Policy': DOCS_CSP } : {}), // help pages: no script
     ...(rel === 'sw.js' ? { 'Service-Worker-Allowed': '/', 'Content-Security-Policy': WORKER_CSP } : {}), // push notifications
   };
 }

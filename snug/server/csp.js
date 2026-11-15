@@ -21,3 +21,6 @@ export const WORKER_CSP = "default-src 'self'; object-src 'none'; base-uri 'none
 // reported to /api/csp-report and kept as a security event, so an injection
 // attempt (or a page change that would break under it) shows up.
 export const CSP_STRICT = `${CSP.replace("style-src 'self' 'unsafe-inline'", "style-src 'self'")}; require-trusted-types-for 'script'; report-uri /api/csp-report`; // report-uri: sent at once by every browser (report-to batches for up to a minute)
+// Help pages (docs/*.html, e.g. docs/install.html): plain reading pages with Snug's own stylesheets, fonts
+// and pictures; no script, no inline style, no frames, no forms.
+export const DOCS_CSP = "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";

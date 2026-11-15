@@ -30,11 +30,39 @@ elif [ "$pinned" != 0 ]; then
 fi
 
 title="Snug $version"
-if [ "$platform" = windows ]; then
-  notes="Download **Snug-Setup-$version.exe** to install Snug (Start menu and desktop shortcuts), or **Snug-$version-portable.exe** to run it without installing. Windows may say it protected your PC because the app is not signed: choose **More info**, then **Run anyway**. Mac: **Snug-$version-mac.dmg**. Snug updates itself from here; the SHA256SUMS files hold each file's checksum."
-else
-  notes="Mac: open **Snug-$version-mac.dmg** and drag Snug to Applications. Windows: **Snug-Setup-$version.exe** or **Snug-$version-portable.exe**. Snug updates itself from here; the SHA256SUMS files hold each file's checksum."
-fi
+# The same notes whichever workflow creates the release (they are set once, at creation). They don't claim the
+# files are signed: the Digital Signatures tab tells, and the steps match docs/install.html (the install page,
+# /docs/install.html on any Snug server).
+notes="$(cat <<EOF
+## Which file?
+
+| You have | Download |
+| --- | --- |
+| Windows, Snug in the Start menu | **Snug-Setup-$version.exe** (installs for you only, no administrator needed) |
+| Windows, nothing installed | **Snug-$version-portable.exe** |
+| Mac (Apple silicon or Intel) | **Snug-$version-mac.dmg**: open it and drag Snug to Applications |
+
+## Check the download
+
+Compare the file's SHA-256 with its line in **SHA256SUMS-windows.txt** or **SHA256SUMS-mac.txt** (download it too):
+
+- Windows (PowerShell, in your Downloads folder): \`Get-FileHash .\\Snug-Setup-$version.exe -Algorithm SHA256\`
+- Mac (Terminal): \`cd ~/Downloads && shasum -a 256 -c SHA256SUMS-mac.txt\` prints OK for a match.
+
+Different? Don't open the file; download it again. Every file here was built by GitHub Actions from this repository; with the GitHub CLI you can check that: \`gh attestation verify Snug-Setup-$version.exe -R DominicsUSE/Claude-apps\`.
+
+## Warnings
+
+- **Windows** may say "Windows protected your PC" (SmartScreen, "Unknown publisher") while Snug's Windows files are not code-signed. Right-click the file > Properties: a signed file has a **Digital Signatures** tab. After checking the download: **More info**, then **Run anyway**.
+- **Mac:** Snug is not notarized by Apple (that needs a paid Apple developer membership), so macOS says it can't verify Snug. Open it once, then System Settings > **Privacy & Security** > **Open Anyway**.
+
+## Updates
+
+Snug updates itself from this page, after checking each file against the checksum file (and its signature, once update signing is on). It never goes back to an older version by itself; every version stays on the releases page if you need to reinstall an older one.
+
+Step by step: the install page, /docs/install.html on any Snug server (snug/docs/install.html in this repository).
+EOF
+)"
 
 # The second view covers the other workflow creating it between our view and create.
 gh release view "$tag" >/dev/null 2>&1 \

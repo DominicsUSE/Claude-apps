@@ -8,6 +8,8 @@
 //   node gate.mjs electronegativity <report.csv>        severity HIGH/CRITICAL, confidence FIRM/CERTAIN
 //   node gate.mjs sarif <file.sarif|dir> [--any]        security-severity >= 7.0 at level error, precision high
 //                                                       (CodeQL); --any: every result blocks (gitleaks)
+//   node gate.mjs zap <zap.json> [--rules <rules.tsv>]  OWASP ZAP baseline (-J): risk High, not a false positive,
+//                                                       and not accepted (IGNORE) in the rules file
 //   node gate.mjs rebase <in.sarif> <out.sarif> <prefix> make a tool's relative paths repository-relative
 //
 // Options: --root <repo> (paths are reported relative to it; default $GITHUB_WORKSPACE or the current folder),
@@ -130,6 +132,34 @@ const modes = {
     }
     finish('sarif', found, seen);
   },
+  // zap-baseline.py -J: site[].alerts[] with riskcode (0 info .. 3 high) and confidence (0 = false positive).
+  // The rules file is ZAP's own (-c): "<id>\t<IGNORE|INFO|WARN|FAIL>\t(<why>)". ZAP still writes ignored
+  // alerts to the JSON report, so the gate honours IGNORE itself; the reason is printed with the alert.
+  zap() {
+    const j = json(input());
+    if (!Array.isArray(j.site)) bad('not a ZAP JSON report');
+    const accepted = new Map();
+    const rulesFile = opt('--rules');
+    if (rulesFile) {
+      for (const l of readFileSync(rulesFile, 'utf8').split(/\r?\n/)) {
+        const [id, action, why] = l.split('\t');
+        if (action === 'IGNORE' && /^\d+$/.test(id)) accepted.set(id, String(why || '').replace(/^\(|\)$/g, ''));
+      }
+    }
+    const found = [];
+    let seen = 0;
+    for (const site of j.site) {
+      for (const a of site.alerts || []) {
+        seen++;
+        if (String(a.riskcode) !== '3' || String(a.confidence) === '0') continue;
+        const id = String(a.pluginid);
+        const where = a.instances?.[0]?.uri || site['@name'] || '';
+        if (accepted.has(id)) console.log(`accepted  ${where}  ${id} ${a.name}: ${accepted.get(id)}`);
+        else found.push({ path: where, rule: id, note: `${a.name} (${a.riskdesc})` });
+      }
+    }
+    finish('zap', found, seen);
+  },
   rebase() {
     const [out, prefix] = rest;
     if (!out || !prefix) bad('usage: rebase <in.sarif> <out.sarif> <prefix>');
@@ -151,5 +181,5 @@ const modes = {
     console.log(`gate rebase: ${out} paths now start with ${prefix}`);
   },
 };
-if (!Object.hasOwn(modes, mode || '')) bad(`unknown mode "${mode}" (osv, semgrep, electronegativity, sarif, rebase)`);
+if (!Object.hasOwn(modes, mode || '')) bad(`unknown mode "${mode}" (osv, semgrep, electronegativity, sarif, zap, rebase)`);
 modes[mode]();

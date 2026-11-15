@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath artifact configuration "snug-app" (build-snug-windows.yml, job sign-app).
+     The GitHub artifact Snug-Windows-Unpacked is a zip of dist/win-unpacked: sign Snug.exe at its root,
+     the program Windows actually runs. Paste into SignPath: Project > Artifact configurations > New, slug snug-app. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="Snug.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

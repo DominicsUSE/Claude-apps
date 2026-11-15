@@ -1,0 +1,4 @@
+10055	WARN	(CSP style-src 'unsafe-inline': known; the stricter policy without it runs report-only, see CSP_STRICT in snug/server/index.js)
+10038	INFO	(CSP Report-Only header found: on purpose, it reports what the stricter policy would block)
+10027	INFO	(Suspicious comments in JavaScript: Snug ships readable, unminified source with comments on purpose)
+10109	INFO	(Modern web application: informational, Snug is a single-page app)

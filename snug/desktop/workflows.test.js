@@ -68,6 +68,10 @@ test("(d) a job that installs npm packages has no write permission; write only w
   }
 });
 
+// Code-signing credentials (Windows): a PFX certificate or a SignPath API token. Only signing jobs may see them.
+const SIGNING_SECRETS = new Set(["WIN_CSC_LINK", "WIN_CSC_KEY_PASSWORD", "SIGNPATH_API_TOKEN"]);
+const isSigningJob = (body) => /sign-windows\.ps1 sign|signpath\/github-action-submit-signing-request@/.test(body);
+
 test("(e) Snug's release jobs run in the protected `release` environment; the signing key is only there; builds skip install scripts", () => {
   for (const name of ["build-snug-windows.yml", "build-snug-mac.yml"]) {
     const f = files.find((x) => x.name === name);
@@ -79,6 +83,12 @@ test("(e) Snug's release jobs run in the protected `release` environment; the si
       if (/release\.sh/.test(body)) {
         assert.match(body, /^ {4}environment:\s*release\s*$/m, `${name} ${job}: environment release`);
         assert.match(body, /SNUG_UPDATE_SIGNING_KEY:\s*\$\{\{\s*secrets\.SNUG_UPDATE_SIGNING_KEY\s*\}\}/, `${name} ${job}: signs the checksums`);
+      } else if (isSigningJob(body)) {
+        // Code signing: in the release environment, nothing installed from npm, only the signing credentials.
+        assert.match(body, /^ {4}environment:\s*release\s*$/m, `${name} ${job}: signing runs in environment release`);
+        assert.doesNotMatch(body, /npm (ci|install)\b|npx /, `${name} ${job}: no packages installed where the certificate is`);
+        for (const m of body.matchAll(/secrets\.(\w+)/g)) assert.ok(SIGNING_SECRETS.has(m[1]), `${name} ${job}: secrets.${m[1]}`);
+        assert.doesNotMatch(permsOf(body, 4) || "", /write/, `${name} ${job}: read-only token`);
       } else {
         assert.doesNotMatch(body, /secrets\./, `${name} ${job}: no secrets outside the release job`);
         for (const m of body.matchAll(/npm ci[^\n]*/g)) assert.match(m[0], /--ignore-scripts/, `${name} ${job}: ${m[0]}`);
@@ -103,6 +113,86 @@ test("(g) no release from another app is ever marked latest", () => {
       assert.match(m[0], /--latest=false/, `${f.name}: ${m[0]}`);
     }
   }
+});
+
+test("(j) Windows code signing switches on with a credential, every signature is checked, unsigned builds still publish", () => {
+  const f = files.find((x) => x.name === "build-snug-windows.yml");
+  const { jobs } = split(f.text);
+  const raw = f.text;
+  const signing = Object.entries(jobs).filter(([, b]) => isSigningJob(b));
+  assert.deepEqual(signing.map(([j]) => j).sort(), ["sign-app", "sign-installers"], "the app, then the installers around it");
+  const on = /vars\.SNUG_WINDOWS_SIGNING == 'signpath' \|\| vars\.SNUG_WINDOWS_SIGNING == 'pfx'/;
+  for (const [job, body] of [...signing, ["package-signed", jobs["package-signed"]]]) {
+    assert.ok(body, job);
+    const cond = /^ {4}if:\s*(.+)$/m.exec(body)?.[1] || "";
+    assert.match(cond, on, `${job}: only when signing is set up`);
+    assert.match(cond, /refs\/heads\//, `${job}: only on the release branches (the release environment allows no others)`);
+  }
+  for (const [job, body] of signing) {
+    // Both kinds of credential: a PFX through signtool, or SignPath (free for qualifying open-source projects).
+    assert.match(body, /if: vars\.SNUG_WINDOWS_SIGNING == 'pfx'[\s\S]*sign-windows\.ps1 sign/, `${job}: PFX`);
+    assert.match(body, /if: vars\.SNUG_WINDOWS_SIGNING == 'signpath'[\s\S]*signpath\/github-action-submit-signing-request@[0-9a-f]{40}/, `${job}: SignPath`);
+    assert.match(body, /api-token: \$\{\{ secrets\.SIGNPATH_API_TOKEN \}\}/);
+    assert.match(body, /sign-windows\.ps1 verify/, `${job}: the signature is checked (Get-AuthenticodeSignature)`);
+    assert.match(permsOf(body, 4) || "", /actions:\s*read/, `${job}: SignPath reads the run's artifact`);
+  }
+  // The signed app is wrapped without touching it: fuses and signature checked again after packaging.
+  const pkg = jobs["package-signed"];
+  assert.match(pkg, /node build\.js --prepackaged dist\/win-unpacked/);
+  assert.match(pkg, /node fuses\.js check dist\/win-unpacked\/Snug\.exe/);
+  assert.match(pkg, /sign-windows\.ps1 verify dist\/win-unpacked\/Snug\.exe/);
+  assert.doesNotMatch(pkg, /secrets\./);
+  // The release takes the signed files when signing is on (and never falls back to unsigned then), else today's.
+  const rel = jobs.release;
+  assert.match(rel, /needs: \[windows, sign-installers\]/);
+  assert.match(rel, /needs\.sign-installers\.result == 'success'/);
+  assert.match(rel, /vars\.SNUG_WINDOWS_SIGNING == '' && needs\.sign-installers\.result == 'skipped'/);
+  assert.match(rel, /name: Snug-Windows-Signed/);
+  assert.match(rel, /name: Snug-Windows-Installer/);
+  assert.match(rel, /attest-build-provenance@[0-9a-f]{40}/, "provenance stays");
+  // A misspelt setting fails the build instead of silently skipping the release.
+  assert.match(jobs.windows, /SNUG_WINDOWS_SIGNING/);
+  const ps = fs.readFileSync(path.join(__dirname, "sign-windows.ps1"), "utf8");
+  assert.match(ps, /Get-AuthenticodeSignature/);
+  assert.match(ps, /TimeStamperCertificate/);
+  assert.match(ps, /\/fd sha256 \/tr http:\/\/timestamp\.digicert\.com \/td sha256/);
+  assert.match(ps, /Remove-Item -LiteralPath \$pfx/, "the certificate file is deleted");
+  assert.match(raw, /Azure Trusted Signing/, "the paid option is named, not used");
+  // The SignPath artifact configurations the workflow names are in the repository, for the owner to paste.
+  for (const slug of ["snug-app", "snug-installers"]) {
+    assert.match(raw, new RegExp(`artifact-configuration-slug: ${slug}\\n`));
+    assert.match(fs.readFileSync(path.join(__dirname, "signpath", `${slug}.xml`), "utf8"), /<authenticode-sign \/>/);
+  }
+});
+
+test("(h) every container image is pinned by digest (workflows and the scripts they run)", () => {
+  const scripts = fs.readdirSync(path.join(dir, "..", "security")).filter((f) => f.endsWith(".sh"))
+    .map((f) => ({ name: `security/${f}`, text: fs.readFileSync(path.join(dir, "..", "security", f), "utf8") }));
+  let seen = 0;
+  for (const f of [...files, ...scripts]) {
+    const t = code(f.text);
+    for (const m of t.matchAll(/(?:^\s*image:|^\s*\w*_IMAGE=)\s*"?([^"\s]+)/gm)) {
+      seen++;
+      assert.match(m[1], /@sha256:[0-9a-f]{64}$/, `${f.name}: ${m[1]}`);
+    }
+    // `docker run` names its image through one of those pinned variables, or pinned in place.
+    for (const m of t.matchAll(/docker run [^\n]*/g)) assert.match(m[0], /"\$\w+_IMAGE"|@sha256:[0-9a-f]{64}/, `${f.name}: ${m[0]}`);
+  }
+  assert.ok(seen >= 2, "found the semgrep and ZAP images");
+});
+
+test("(i) the ZAP baseline scans a seeded server with a read-only token and gates on High only", () => {
+  const sec = files.find((x) => x.name === "security.yml");
+  const job = split(sec.text).jobs["zap-baseline"];
+  assert.ok(job, "security.yml has a zap-baseline job");
+  assert.match(permsOf(job, 4) || "", /contents:\s*read/);
+  assert.doesNotMatch(permsOf(job, 4) || "", /write/);
+  assert.doesNotMatch(job, /secrets\./);
+  assert.match(job, /bash \.github\/security\/zap-baseline\.sh/);
+  const script = fs.readFileSync(path.join(dir, "..", "security", "zap-baseline.sh"), "utf8");
+  assert.match(script, /server\/seed\.js/, "the server has the sample data");
+  assert.match(script, /zap-baseline\.py -t "http:\/\/127\.0\.0\.1:\$port"[^\n]*-c rules\.tsv/);
+  assert.match(script, /gate\.mjs" zap .*--rules/);
 });
 
 test("Dependabot covers Snug's npm folders and the pinned actions", () => {
