@@ -34,7 +34,8 @@ import { DmLine } from './dm-manage.js'; // a group renamed, people added or gon
 import { msgFace, colourRole, BotBadge, PostTitle, RoleIconMark } from './places.js'; // nicknames, bots, role colours and icons, forum post titles
 import { messageItems, hiddenBlocked, BlockedLine, composerGate, GateNote, SlowNote, slowLeft } from './safety.js'; // blocks, reports, moderation, slowmode
 import { MessageExtras, ownsFiles, messagingMenuItems, PlusMenu, FormatBar, formatKey, ScheduledNote, UnreadBar } from './messaging.js'; // polls, previews, forwarding, stickers, formatting, scheduling
-import { PeerState, Arriving } from './p2p.js'; // a message waiting for a friend on another PC, or held after their security code changed
+import { PeerState, Arriving } from './p2p.js';
+import { SvgPreview, PdfPreview, isSvgFile, isPdfFile } from './preview.js'; // SVG and PDF attachments // a message waiting for a friend on another PC, or held after their security code changed
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 const atBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 48;
@@ -153,9 +154,14 @@ function FileItem({ f, i, conv, m }) {
   if (isTextFile(f) && url && !f.spoiler) return html`<${TextPreview} f=${f} url=${url} CodeBlock=${CodeBlock} />`;
   const body = html`<${Icon} name=${f.kind === 'image' ? 'image' : 'file'} />
     <span class="trunc"><span class="file-name trunc" style="display:block">${f.spoiler && !shown ? 'Spoiler file' : f.name}</span><span class="file-size">${fileSize(f.size || 0)}${url ? ', download' : ''}</span><${Arriving} f=${f} /></span>`;
-  return url
+  const chip = url
     ? html`<a class="file" href=${url} download=${f.name}>${body}</a>`
     : html`<div class="file">${body}</div>`;
+  // SVG as a picture that runs nothing, and PDFs with their first page (js/views/preview.js); the chip if not.
+  const here = url && !f.spoiler && !(S.fileProgress && f.id in S.fileProgress);
+  if (here && isSvgFile(f)) return html`<${SvgPreview} f=${f} url=${url} fallback=${chip} />`;
+  if (here && isPdfFile(f)) return html`<${PdfPreview} f=${f} url=${url} fallback=${chip} />`;
+  return chip;
 }
 
 function Files({ files, conv, m }) {
