@@ -173,11 +173,12 @@ export function createKeyAuth({ db, M, hub, peer, gh, opts = {}, secure = false,
       try {
         const { raw, text } = await newRecoveryKey();
         const rk = await recoverySigner(raw);
-        if (reuse) { peer.stop(); identity.clearSelf(); }
         const { ik } = identity.ensureKeys();
         const pw = await reg.pow();
         const nonce = await solvePow(pw.c, ik, pw.bits, { signal: ctl.signal });
         const { account } = await reg.register({ username, c: pw.c, nonce, rk });
+        // The account this PC had before the registry was reset: its row and chats stay, under the new account.
+        if (reuse) { peer.stop(); identity.clearSelf(); }
         const user = ensureOwnerRow(account.uid, account.username, reuse);
         identity.setSelf({ uid: account.uid, username: account.username, user, kver: account.kver, state: 'ok', renamedAt: null });
         for (const [k, v] of [['kind', 'key'], ['rk', rk.pub], ['rk_set', '1'], ['rk_saved', '0'], ['gh_linked', '0']]) identity.set(k, v);

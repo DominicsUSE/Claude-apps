@@ -245,6 +245,23 @@ test('delete with the recovery key frees the username', async () => {
   assert.equal(a.peer.identity.self(), null);
 });
 
+test('desktop: only the app window (its per-launch cookie) may use these routes', async () => {
+  const secret = 'w'.repeat(43);
+  const a = await pc({ ghWindowOnly: true, resumeSecret: secret });
+  const win = `snug_resume=${secret}`;
+  assert.deepEqual((await get(a, '/api/id/config')).data, { enabled: false });
+  assert.equal((await post(a, '/api/id/create', { username: 'sneaky' })).status, 403);
+  assert.equal((await post(a, '/api/id/move/start')).status, 403);
+  assert.equal((await post(a, '/api/id/recover', { code: 'x' })).status, 403);
+  assert.equal((await get(a, '/api/id/config', { cookie: win })).data.enabled, true);
+  const r = await post(a, '/api/id/create', { username: 'windowed' }, { cookie: win });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  // and then the window can come back without anything typed
+  assert.equal((await get(a, '/api/id/config', { cookie: win })).data.resume, 'windowed');
+  assert.equal((await post(a, '/api/id/resume', {}, { cookie: win })).status, 200);
+  assert.equal((await post(a, '/api/id/resume', {})).status, 403);
+});
+
 test('a registry with keypair accounts off: create says to use GitHub, and config stops offering it', async () => {
   const off = await startLocalRegistry({ env: { KEY_ACCOUNTS: '0', OWNER_GITHUB_IDS: '900001' } });
   try {
