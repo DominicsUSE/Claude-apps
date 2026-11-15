@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning server/index.js",
     "seed": "node --disable-warning=ExperimentalWarning server/seed.js",
+    "reset-password": "node --disable-warning=ExperimentalWarning server/tools/reset-password.js",
     "test": "node --disable-warning=ExperimentalWarning --test tests/logic*.test.js tests/server*.test.js registry/test/*.test.js",
     "test:registry": "node --disable-warning=ExperimentalWarning --test registry/test/*.test.js",
     "registry": "node --disable-warning=ExperimentalWarning registry/dev.js",
