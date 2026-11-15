@@ -127,12 +127,17 @@ function EncryptionPage({ Row }) {
         <li>${COPY.serverSees}</li>
         <li>${COPY.roomsNot}</li>
         ${deviceKind() === 'web' && html`<li>${COPY.browserNote}</li>`}
+        ${plainHttp() && html`<li>${COPY.plainHttp}</li>`}
         <li>${COPY.storageNote}</li>
         <li>Compare safety numbers with the people you talk to (in a conversation’s details) to know nobody put different keys between you.</li>
       </ul>
     </div>
   </div>`;
 }
+
+// A plain-http address that isn't this computer: the desktop app can encrypt there (its own code runs as a
+// secure page), but everything else crosses the network readable.
+const plainHttp = () => location.protocol === 'http:' && !['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname);
 
 export function registerE2eePage({ PAGES, VIEWS, Row }) {
   VIEWS.e2ee = () => html`<${EncryptionPage} Row=${Row} />`;

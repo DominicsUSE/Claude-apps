@@ -54,6 +54,9 @@
       "updater.js",
       "update.html",
       "update-page.js",
+      "pinned.js",
+      "fallback.html",
+      "fallback.js",
       "snug/**/*",
       "package.json"
     ],

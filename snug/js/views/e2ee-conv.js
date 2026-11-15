@@ -7,7 +7,7 @@ import { html } from '../../vendor/preact-htm.js';
 import { S, openModal } from '../store.js';
 import { Icon } from '../ui/icons.js';
 import { COPY } from '../lib/e2ee/copy.js';
-import { E2 } from '../e2ee/manager.js';
+import { E2, builtInCode } from '../e2ee/manager.js';
 import { isEncrypted, rootDm, changed, sendGate, downgraded } from '../e2ee/conv.js';
 import { acceptChange } from '../e2ee/manager.js';
 import { SafetyNumber, canVerify } from './e2ee-verify.js';
@@ -49,7 +49,7 @@ export function EncDetail({ dm }) {
   if (st === 'p2p') {
     return html`<div class="detail e2-detail"><h3>Encryption</h3><p class="hint" style="margin:0">${COPY.p2p(firstName(others[0]))}</p></div>`;
   }
-  const inBrowser = !(window.snugApp && ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname));
+  const inBrowser = !builtInCode();
   return html`<div class="detail e2-detail">
     <h3><${Icon} name=${st === 'on' ? 'lock' : 'unlock'} size=${16} />${st === 'on' ? COPY.convOn : COPY.convNotOn}</h3>
     <p class="hint" style="margin:0">${st === 'on' ? COPY.convPanel : notOnText(dm)}</p>

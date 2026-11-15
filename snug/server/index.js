@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { writeFile, mkdir, stat } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
-import { join, normalize, extname, posix } from 'node:path';
+import { join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './db.js';
 import { createModel, newId } from './model.js';
@@ -33,15 +33,9 @@ import {
 } from './auth.js';
 import { createSeclog, redactLog, redact, sendFile } from './seclog.js'; // sec-web: security events, log redaction, safe file sends
 import { PROTO, MIN_CLIENT } from '../js/lib/proto.js'; // GET /api/version
-import { CSP, CSP_STRICT, BASE_CSP, SVG_CSP, WORKER_CSP } from './csp.js'; // page and response policies, shared with the desktop app's join mode
+import { staticRel, staticHeaders, BASE_HEADERS } from './static.js'; // the app's own files and their headers, shared with the desktop app's join mode
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const PUBLIC = ['index.html', 'css/', 'js/', 'fonts/', 'vendor/', 'docs/', 'brand/', 'sw.js'];
-const TYPES = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.txt': 'text/plain; charset=utf-8', '.json': 'application/json',
-  '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json',
-};
 // Uploaded images shown inline. Anything else downloads.
 // SVG is not among them: it can carry script and links, so it always downloads.
 const INLINE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
@@ -190,17 +184,9 @@ export async function startServer({
   }, 60_000);
 
   function headers(res, extra = {}) {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-    // Camera and screen capture for video in voice rooms; same origin only.
-    res.setHeader('Permissions-Policy', 'microphone=(self), camera=(self), display-capture=(self), fullscreen=(self), geolocation=()');
+    // The usual security headers (server/static.js BASE_HEADERS, shared with the desktop app's join mode).
+    for (const [k, v] of Object.entries(BASE_HEADERS)) res.setHeader(k, v);
     if (secure) res.setHeader('Strict-Transport-Security', HSTS); // sec-auth AUTH-11
-    // sec-web W6: no other origin may embed or frame anything served here, and
-    // nothing is a page unless it says so (callers pass their own policy).
-    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Content-Security-Policy', BASE_CSP);
     for (const [k, v] of Object.entries(extra)) res.setHeader(k, v);
   }
   function sendJson(res, status, body, extra = {}) {
@@ -278,28 +264,14 @@ export async function startServer({
   }
 
   async function staticFile(res, path, https = false) {
-    // /join/<code> and every other app path load the app itself.
-    // Web addresses always use forward slashes, whatever this machine's file paths look like.
-    // /m/<conversation>/<message> is a message link (js/app.js opens it after sign-in).
-    let rel = path === '/' || path.startsWith('/join/') || path.startsWith('/m/') ? 'index.html' : posix.normalize(path.replace(/\\/g, '/')).replace(/^\/+/, '');
-    if (rel.includes('..') || !PUBLIC.some((p) => (p.endsWith('/') ? rel.startsWith(p) : rel === p))) {
-      if (extname(rel)) return error(res, 404, 'Not found');
-      rel = 'index.html';
-    }
+    // Which file an address loads, and its headers: server/static.js (the desktop app's pinned join mode uses the same rules).
+    const rel = staticRel(path);
+    if (!rel) return error(res, 404, 'Not found');
     const file = join(ROOT, rel);
     let info;
     try { info = await stat(file); } catch { return error(res, 404, 'Not found'); }
     if (!info.isFile()) return error(res, 404, 'Not found');
-    headers(res, {
-      'Content-Type': TYPES[extname(file)] || 'application/octet-stream',
-      'Cache-Control': 'no-cache',
-      ...(rel === 'index.html' ? {
-        'Content-Security-Policy': https ? `${CSP}; upgrade-insecure-requests` : CSP,
-        'Content-Security-Policy-Report-Only': CSP_STRICT, // sec-web
-      } : {}),
-      ...(extname(file) === '.svg' ? { 'Content-Security-Policy': SVG_CSP } : {}), // sec-web W6
-      ...(rel === 'sw.js' ? { 'Service-Worker-Allowed': '/', 'Content-Security-Policy': WORKER_CSP } : {}), // push notifications
-    });
+    headers(res, staticHeaders(rel, https));
     await sendFile(res, file); // sec-web W1: a file gone since the stat is a 404, not a crash
     return undefined;
   }

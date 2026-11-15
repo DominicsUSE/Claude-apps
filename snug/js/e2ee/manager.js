@@ -50,15 +50,16 @@ const local = {
 };
 
 // What this device calls itself in the device list ("Firefox on Windows"), and whether its code is
-// the app's own: the desktop app on its own server loads its built-in files; everywhere else the
-// code comes from the server.
+// the app's own: the desktop app on its own server, or joined to another server with its built-in
+// client (desktop/pinned.js), loads its own files; everywhere else the code comes from the server.
+// The desktop app says which (snugApp.builtIn); its window on a server's own page isn't built-in.
+export const builtInCode = () => window.snugApp?.builtIn === true;
 export function deviceLabel(ua = navigator.userAgent) {
   const browser = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
   const os = /Windows/.test(ua) ? 'Windows' : /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : 'this computer';
-  return window.snugApp && isLoopback() ? `Snug app on ${os}` : `${browser} on ${os}`;
+  return builtInCode() ? `Snug app on ${os}` : `${browser} on ${os}`;
 }
-const isLoopback = () => ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname);
-export const deviceKind = () => (window.snugApp && isLoopback() ? 'app' : 'web');
+export const deviceKind = () => (builtInCode() ? 'app' : 'web');
 
 // --- this device's keys ------------------------------------------------------
 async function makeDevice() {

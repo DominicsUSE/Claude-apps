@@ -19,6 +19,14 @@ if (updatePage && location.href === updatePage) {
       }));
     },
   });
+} else if (location.protocol === "file:" && location.href.split(/[?#]/)[0] === ipcRenderer.sendSync("fallback:page")) {
+  // fallback.html only: the join server's version doesn't fit this app (desktop/pinned.js).
+  contextBridge.exposeInMainWorld("snugFallback", {
+    info: () => ipcRenderer.invoke("fallback:info"),
+    ownPage: () => ipcRenderer.invoke("fallback:own"),
+    checkUpdate: () => ipcRenderer.invoke("fallback:update"),
+    change: () => ipcRenderer.send("fallback:change"),
+  });
 } else if (location.protocol === "file:" && location.href.split(/[?#]/)[0] === ipcRenderer.sendSync("setup:page")) {
   // sec-desktop: setup.html only (at the address main.js serves it from), not any other file:// page.
   contextBridge.exposeInMainWorld("snugDesktop", {
@@ -34,8 +42,12 @@ if (updatePage && location.href === updatePage) {
 if (location.protocol === "http:" || location.protocol === "https:") {
   let hidden = false;
   ipcRenderer.on("window:visibility", (_e, h) => { hidden = h === true; });
+  // Whether this page runs the app's own built-in code (host mode, or join mode's pinned client), as main.js
+  // sees it; the server's own page doesn't. Encryption tells contacts which kind of device this is.
+  const builtIn = ipcRenderer.sendSync("page:builtin") === true;
   contextBridge.exposeInMainWorld("snugApp", {
     desktop: true,
+    builtIn,
     hidden: () => hidden,
     show: () => ipcRenderer.send("window:show"),
     getKeepRunning: () => ipcRenderer.invoke("keep:get"),

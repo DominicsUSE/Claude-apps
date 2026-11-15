@@ -63,6 +63,7 @@ test("first run: choose to run Snug on this computer, create an account, send a 
   assert.match(page.url(), /^http:\/\/127\.0\.0\.1:\d+\//);
   assert.equal(await page.evaluate(() => typeof window.snugDesktop), "undefined", "the Snug page gets no desktop bridge");
   assert.equal(await page.evaluate(() => typeof window.require), "undefined");
+  assert.equal(await page.evaluate(() => window.snugApp.builtIn), true, "the in-app server's page is the app's own code");
   await page.click('.auth-link:has-text("Create an account")');
   await page.fill("#auth-handle", "ada");
   await page.fill("#auth-name", "Ada Okafor");
@@ -1030,8 +1031,10 @@ test("join mode: a server redirect to another site never takes over the window (
   const other = stubSite((req, res) => { res.writeHead(200, { "content-type": "text/html" }); res.end("<title>elsewhere</title>elsewhere"); });
   const otherBase = await other.ready;
   const join = stubSite((req, res) => {
-    if (req.url === "/go") { res.writeHead(302, { location: `${otherBase}/landed` }); return res.end(); }
-    if (req.url === "/file") { res.writeHead(302, { location: "file:///etc/hostname" }); return res.end(); }
+    if (req.url === "/api/version") { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ version: "0.12.0", proto: 12, minClient: 12, e2ee: 1 })); }
+    // Pinned, only /api/ reaches the host (other paths load the app's own page, as on a real Snug server).
+    if (req.url === "/api/go") { res.writeHead(302, { location: `${otherBase}/landed` }); return res.end(); }
+    if (req.url === "/api/file") { res.writeHead(302, { location: "file:///etc/hostname" }); return res.end(); }
     res.writeHead(200, { "content-type": "text/html" });
     return res.end("<!doctype html><title>stand-in Snug</title><p>a Snug someone else runs</p>");
   });
@@ -1040,6 +1043,10 @@ test("join mode: a server redirect to another site never takes over the window (
   t.after(async () => { other.srv.close(); join.srv.close(); await removeDir(userData); });
   const { app, page } = await launchWith(userData, { config: { mode: "join", url: joinBase }, args: ["--use-fake-device-for-media-stream"] });
   await page.waitForURL(`${joinBase}/`);
+  // Pinned (the stand-in answers /api/version): the window shows the app's own page, in the join partition,
+  // and the guards and permission handlers below hold there too. (The stand-in has no API, so the page stops early.)
+  await page.waitForSelector('link[href="/css/tokens.css"]', { state: "attached" });
+  assert.ok(!join.hits.includes("/"), "the host's page was never loaded");
   await app.evaluate(({ shell, dialog }) => {
     globalThis.testOpened = [];
     shell.openExternal = async (u) => { globalThis.testOpened.push(u); };
@@ -1048,8 +1055,8 @@ test("join mode: a server redirect to another site never takes over the window (
     dialog.showMessageBox = async (_w, o) => { globalThis.testAsked.push(o.message); return { response: globalThis.testAnswer }; };
   });
 
-  // D1: /go answers 302 to another origin. will-navigate only sees /go (same origin); will-redirect stops the rest.
-  await page.evaluate(() => { location.href = "/go"; });
+  // D1: /api/go answers 302 to another origin. will-navigate only sees /api/go (same origin); will-redirect stops the rest.
+  await page.evaluate(() => { location.href = "/api/go"; });
   await new Promise((r) => setTimeout(r, 1500));
   assert.equal(new URL(page.url()).origin, joinBase, "still the Snug address");
   assert.ok(!other.hits.includes("/landed"), "the other site was never loaded in the window");
@@ -1069,10 +1076,200 @@ test("join mode: a server redirect to another site never takes over the window (
   assert.equal(cam, "ok");
   assert.equal((await app.evaluate(() => globalThis.testAsked)).at(-1), "Let this Snug use your camera?");
   // A redirect into the file loader: never followed (an error page at most), never handed to the browser.
-  await page.evaluate(() => { location.href = "/file"; });
+  await page.evaluate(() => { location.href = "/api/file"; });
   await new Promise((r) => setTimeout(r, 1000));
   assert.ok(!page.url().startsWith("file:"), page.url());
   assert.equal((await app.evaluate(() => globalThis.testOpened)).length, 1);
+  await app.close();
+});
+
+// ---------- Join mode, pinned (desktop/pinned.js) ----------
+// A Snug someone else runs, behind a small front that records every request and would hand out a changed
+// /js/app.js (the "host's code"). The window must run the app's own copy at the host's address instead,
+// with the host's cookies, socket, uploads and redirects all working, in its own session.
+const NO_PROXY_ENV = Object.fromEntries(["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"].map((k) => [k, ""]));
+async function realHost({ hosts = [] } = {}) {
+  const { startServer } = await import(require("url").pathToFileURL(path.join(__dirname, "..", "server", "index.js")).toString());
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-host-"));
+  const srv = await startServer({ port: 0, dataDir, quiet: true, hosts, e2ee: true });
+  const hits = [];
+  const front = http.createServer((req, res) => {
+    hits.push(`${req.method} ${req.url}`);
+    if (req.url === "/js/app.js") { res.writeHead(200, { "content-type": "text/javascript" }); return res.end("window.snugHostCode = 'changed by the host';"); }
+    if (req.url === "/api/test-302") { res.writeHead(302, { location: "/api/version" }); return res.end(); }
+    const up = http.request({ host: "127.0.0.1", port: srv.port, path: req.url, method: req.method, headers: req.headers }, (r) => { res.writeHead(r.statusCode, r.headers); r.pipe(res); });
+    up.on("error", () => res.destroy());
+    req.pipe(up);
+    return undefined;
+  });
+  // The socket upgrade, byte for byte.
+  front.on("upgrade", (req, sock, head) => {
+    hits.push(`WS ${req.url}`);
+    const up = require("net").connect(srv.port, "127.0.0.1", () => {
+      up.write(`${req.method} ${req.url} HTTP/1.1\r\n${Object.entries(req.headers).map(([k, v]) => `${k}: ${v}`).join("\r\n")}\r\n\r\n`);
+      if (head?.length) up.write(head);
+      sock.pipe(up).pipe(sock);
+    });
+    up.on("error", () => sock.destroy());
+    sock.on("error", () => up.destroy());
+  });
+  await new Promise((r) => front.listen(0, "127.0.0.1", r));
+  return { srv, front, hits, port: front.address().port, close: async () => { front.closeAllConnections?.(); front.close(); await srv.close(); fs.rmSync(dataDir, { recursive: true, force: true }); } };
+}
+// The window showing an address (the window is replaced when it needs another session).
+async function windowAt(app, base) {
+  for (let i = 0; i < 100; i++) {
+    const p = app.windows().find((w) => !w.isClosed() && w.url().startsWith(base));
+    if (p) { p.setDefaultTimeout(20000); return p; }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error(`no window at ${base}`);
+}
+async function signUpIn(page, handle) {
+  await page.waitForSelector(".auth-form");
+  await page.click('.auth-link:has-text("Create an account")');
+  await page.fill("#auth-handle", handle);
+  await page.fill("#auth-name", handle);
+  await page.fill("#auth-pass", "a long password");
+  await page.click(".auth-form button[type=submit]");
+  await page.waitForFunction(() => window.snug?.S.conn.socket === "open");
+}
+
+test("join mode, pinned: the app's own client runs at a plain-http LAN address, with the host's cookies, socket, uploads, redirects and encryption", async (t) => {
+  const host = await realHost({ hosts: ["snug.test"] });
+  const origin = `http://snug.test:${host.port}`;
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-pinned-"));
+  t.after(async () => { await removeDir(userData); await host.close(); });
+  // snug.test stands for a LAN name: plain http that isn't this computer, so not a secure context by itself.
+  const { app, page } = await launchWith(userData, { config: { mode: "join", url: origin }, args: ["--host-resolver-rules=MAP snug.test 127.0.0.1"], env: NO_PROXY_ENV });
+  await page.waitForURL(`${origin}/`);
+  await page.waitForSelector(".auth-form");
+  assert.equal(await page.evaluate(() => window.snugHostCode), undefined, "the host's changed app.js never ran");
+  assert.deepEqual(host.hits.filter((h) => !h.startsWith("GET /api/") && !h.startsWith("POST /api/") && !h.startsWith("WS ")), [], "the host was never asked for the page or its code");
+  assert.ok(host.hits.includes("GET /api/version"), "the versions were checked first");
+  // The insecure-origin switch for this one address: WebCrypto is there, so encryption can work.
+  assert.deepEqual(await page.evaluate(() => [isSecureContext, typeof crypto.subtle?.generateKey, window.snugApp?.builtIn]), [true, "function", true]);
+
+  await signUpIn(page, "lou");
+  // The host's session cookie lives in the join partition only.
+  const jar = await app.evaluate(async ({ session }, url) => ({
+    join: (await session.fromPartition("persist:snug-join").cookies.get({ url })).map((c) => c.name),
+    main: (await session.defaultSession.cookies.get({ url })).map((c) => c.name),
+  }), origin);
+  assert.ok(jar.join.length > 0, "signed in through the partition");
+  assert.deepEqual(jar.main, [], "nothing in the default session's jar");
+  assert.ok(host.hits.includes("WS /ws"), "the socket went straight to the host");
+
+  // Encryption works in the pinned window, and this device is "Snug app (built-in code)".
+  const dialog = page.locator(".modal[role=dialog]");
+  await dialog.locator('h2:has-text("Turn on end-to-end encryption")').waitFor();
+  assert.equal(await dialog.locator(':text("Snug’s code comes from this server")').count(), 0, "no browser warning: the code is the app's own");
+  await dialog.locator('button:has-text("Turn on")').click();
+  await dialog.locator("#e2-recovery-key").waitFor();
+  const key = (await dialog.locator("#e2-recovery-key code").allTextContents()).join("-");
+  await dialog.locator("#e2-last").fill(key.slice(-4));
+  await dialog.locator('button:has-text("I’ve saved it")').click();
+  await dialog.waitFor({ state: "detached" });
+  await page.waitForFunction(() => window.snug.e2ee.E2.status === "ready");
+  await page.click('.me-row [aria-label="Settings"], .me-panel [aria-label="Settings"]');
+  await page.click('.layer-nav .row:has-text("Encryption")');
+  await page.locator('.layer-col :text("Snug app (built-in code)")').first().waitFor();
+  await page.locator('.layer-col :text("isn’t https")').first().waitFor(); // plain http: what crosses the network unencrypted is said
+  // A house to post a file in (house rooms aren't encrypted, so a plain upload is right there).
+  await page.keyboard.press("Escape");
+  await page.click(".rail-add");
+  await page.fill("#house-name", "Pinned house");
+  await page.click(".modal button[type=submit]");
+  await page.waitForSelector('.main .bar-title:has-text("Lounge")');
+  const room = host.srv.db.get("SELECT id FROM rooms WHERE name = 'Lounge'").id;
+  // An upload through the pass-through, then a Range request for it, then a redirect the page follows itself.
+  const r = await page.evaluate(async (conv) => {
+    const up = await fetch(`/api/files?conv=${conv}`, { method: "POST", body: new Blob([new Uint8Array(200000).fill(7)], { type: "text/plain" }), headers: { "Content-Type": "text/plain", "X-File-Name": "notes%20one.txt" } });
+    const data = await up.json().catch(() => ({}));
+    const id = data.id || data.file?.id;
+    const part = id ? await fetch(`/api/files/${id}`, { headers: { range: "bytes=0-9" } }) : null;
+    const rd = await fetch("/api/test-302");
+    return { up: up.status, data, part: part && [part.status, (await part.arrayBuffer()).byteLength], redirected: [rd.redirected, new URL(rd.url).pathname, (await rd.json()).proto] };
+  }, room);
+  assert.equal(r.up, 201, JSON.stringify(r.data));
+  assert.deepEqual(r.part, [206, 10]);
+  assert.deepEqual(r.redirected, [true, "/api/version", 12]);
+  assert.ok(host.hits.some((h) => h.startsWith("POST /api/files")), "the upload reached the host");
+
+  await app.close();
+});
+
+test("join mode, pinned: without the switch a plain-http LAN address is no secure context (why main.js sets it)", async (t) => {
+  // The same address joined from the server's own page (default session, no switch for it): no WebCrypto.
+  const host = await realHost({ hosts: ["snug.test"] });
+  const origin = `http://snug.test:${host.port}`;
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-pinned-off-"));
+  t.after(async () => { await removeDir(userData); await host.close(); });
+  // The switch is only ever for the configured join address: here the configured one is another.
+  const { app } = await launchWith(userData, { config: { mode: "join", url: "http://127.0.0.1:9" }, args: ["--host-resolver-rules=MAP snug.test 127.0.0.1"], env: NO_PROXY_ENV });
+  const secure = await app.evaluate(async ({ BrowserWindow }, url) => {
+    const w = new BrowserWindow({ show: false });
+    await w.loadURL(url);
+    const v = await w.webContents.executeJavaScript("isSecureContext");
+    w.destroy();
+    return v;
+  }, `${origin}/`);
+  assert.equal(secure, false);
+  await app.close();
+});
+
+test("join mode, fallback: an older server gets a local page, never its code silently; its own page opens in the default session with a label", async (t) => {
+  let version = { version: "0.12.0", proto: 12, minClient: 12, e2ee: 1 };
+  const host = stubSite((req, res) => {
+    if (req.url === "/api/version") {
+      if (!version) { res.writeHead(404, { "content-type": "application/json" }); return res.end("{}"); }
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify(version));
+    }
+    res.writeHead(200, { "content-type": "text/html" });
+    return res.end("<!doctype html><title>Old Snug</title><p id=old>the server's own page</p>");
+  });
+  const base = await host.ready;
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-fallback-"));
+  t.after(async () => { host.srv.close(); await removeDir(userData); });
+
+  // First a 0.12 server: the pinned client runs and keeps something in IndexedDB for this address.
+  let { app, page } = await launchWith(userData, { config: { mode: "join", url: base } });
+  await page.waitForSelector('link[href="/css/tokens.css"]', { state: "attached" });
+  await page.evaluate(() => new Promise((resolve) => { const r = indexedDB.open("pinned-only"); r.onsuccess = () => { r.result.close(); resolve(); }; }));
+  await app.close();
+
+  // Then the server goes back to 0.11 (no /api/version): the fallback page, saying why.
+  version = null;
+  ({ app, page } = await launchWith(userData, { config: { mode: "join", url: base } }));
+  await page.waitForSelector("#fallback");
+  assert.ok(page.url().startsWith("file:"), page.url());
+  const host0 = new URL(base).host;
+  assert.equal(await page.locator("#lead").textContent(), `${host0} runs an older Snug (0.11 or earlier); this app has ${await app.evaluate(({ app: a }) => a.getVersion())}. The app runs its own built-in code, which needs a newer server.`);
+  assert.match(await page.locator("#own-note").textContent(), /runs code from/);
+  assert.ok(!host.hits.includes("/"), "nothing of the server's page was loaded");
+  // "Check for an app update": nothing to find when running from source; it says so.
+  await page.click("#update");
+  await page.locator('#status:has-text("No newer Snug app")').waitFor();
+  // "Open the server's own page": a new window on the default session, labelled, with a one-time note.
+  await app.evaluate(({ dialog }) => { globalThis.testNotes = []; dialog.showMessageBox = async (_w, o) => { globalThis.testNotes.push(o.message); return { response: 0 }; }; });
+  await page.click("#own");
+  const own = await windowAt(app, base);
+  await own.waitForSelector("#old");
+  await own.waitForFunction(() => document.title === "Old Snug");
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()).map((w) => w.getTitle())[0]), "Old Snug — server’s own page");
+  assert.deepEqual(await app.evaluate(() => globalThis.testNotes), [`This window runs code from ${host0}. Encrypted conversations here depend on trusting it.`]);
+  assert.equal(await app.evaluate(({ BrowserWindow, session }) => BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()).webContents.session === session.defaultSession), true);
+  // A separate store: the server's own code can't see what the pinned client kept for this address.
+  assert.deepEqual(await own.evaluate(async () => (await indexedDB.databases()).map((d) => d.name)), []);
+  assert.equal(await own.evaluate(() => typeof window.snugApp?.builtIn), "boolean");
+  assert.equal(await own.evaluate(() => window.snugApp.builtIn), false, "the server's own code is not the app's");
+  await app.close();
+
+  // The choice is remembered for this server and version: next time it opens straight away, with no new note.
+  ({ app } = await launchWith(userData, { config: undefined }));
+  await (await windowAt(app, base)).waitForSelector("#old");
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()).getTitle()), "Old Snug — server’s own page");
   await app.close();
 });
 

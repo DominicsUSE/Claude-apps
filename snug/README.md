@@ -86,7 +86,23 @@ On first run it asks where Snug should run:
   address from **Snug > Copy the address for other people**, in a browser or
   in their own Snug app. Over that plain address they can write but not use
   voice, because browsers only allow the microphone on secure pages.
-- **Join a Snug.** Type the address of a Snug that someone else runs.
+- **Join a Snug.** Type the address of a Snug that someone else runs. The app
+  runs its own built-in copy of the Snug page at that address (in a separate
+  session, with that server's sign-in and connection), so the server's own
+  JavaScript never runs in the app: someone running the server can't change
+  the code you use. It still decides who is in which conversation and which
+  keys belong to whom (compare safety numbers for that). Before loading, the
+  app asks the server which version it runs (`GET /api/version`). A server
+  that doesn't fit (Snug 0.11 or earlier, or one that needs a newer app) gets
+  a page saying so, with **Check for an app update** and **Open the server's
+  own page**: that opens the server's own code in a separate session whose
+  window title ends "— server's own page", and is remembered for that server
+  and version. On a plain `http://` address on your network the app treats
+  that one address as a secure page, so encryption works there (the code is
+  the app's own); everything else on such an address, passwords included,
+  still crosses the network readable, and Settings > Encryption says so.
+  Choosing another such address restarts the app. Joining a server for the
+  first time after updating to 0.12 asks you to sign in once more.
 
 **Snug > Change where Snug runs** brings the choice back.
 
