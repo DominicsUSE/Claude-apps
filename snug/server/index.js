@@ -2,14 +2,14 @@
 // Start it with `npm start`. Configuration comes from environment variables;
 // see the README.
 import { createServer } from 'node:http';
-import { writeFile, mkdir, stat } from 'node:fs/promises';
+import { mkdir, stat } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { join, normalize, extname, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './db.js';
 import { createModel, newId } from './model.js';
 import { createHub, ringMsFrom, voiceGraceFrom } from './hub.js';
-import { AUDIO_TYPES, VIDEO_TYPES, uploadType, fileKind, parseRange, createMediaHttp, createFileSweep } from './media.js'; // sec-authz: createFileSweep // voice messages, GIFs, video
+import { AUDIO_TYPES, VIDEO_TYPES, parseRange, createMediaHttp, createFileSweep } from './media.js'; // sec-authz: createFileSweep // voice messages, GIFs, video
 import { createEmojiHttp, emojiReads } from './emoji.js'; // custom emoji per house
 import { createMessagingHttp } from './messaging.js'; // sticker uploads and images; link previews and the scheduler are configured below
 import { createVoiceOptsHttp, iceConfig } from './voiceopts.js'; // soundboard uploads and sound files; STUN and TURN (short-lived TURN credentials)
@@ -18,7 +18,8 @@ import { createPlacesHttp } from './places.js'; // webhook deliveries: POST /api
 import { createAccountHttp } from './account.js'; // two-factor sign-in, export, deactivate, delete, banners
 import { createAppearanceHttp } from './appearance.js'; // profile pictures: POST /api/files?avatar, GET /api/avatars/<file>
 import { createCommunityHttp } from './community.js'; // house pictures, event covers, invitation previews with custom links
-import { HUES, cleanFileName } from '../js/lib/util.js'; // sec-authz: cleanFileName
+import { createUploads } from './uploads.js'; // attachments: one-request and chunked uploads, limits, quotas, free disk
+import { HUES } from '../js/lib/util.js';
 import { createPeer } from './peer.js'; // p2p: friends, DMs, profiles and calls with people on other PCs
 import { createGroups } from './peergroups.js'; // v0.10 B: groups across PCs
 import { createGhAuth } from './ghauth.js'; // p2p: Sign in with GitHub and the Snug username
@@ -45,7 +46,6 @@ const INLINE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 // Voice messages, sound files and videos play inline too (their type is checked
 // against the bytes at upload), and so do GIFs the server fetched as video.
 for (const t of [...AUDIO_TYPES, ...VIDEO_TYPES]) INLINE.add(t);
-const MAX_FILE = 10 * 1024 * 1024;
 const HANDLE = /^[a-z0-9](?:[a-z0-9_.-]{0,22}[a-z0-9])?$/;
 
 const CSP = [
@@ -107,6 +107,9 @@ export async function startServer({
   // sec-desktop D10: the desktop app sets this: GitHub sign-in answers only its window (the resume cookie).
   ghWindowOnly = false,
   peerIdleMs = 120_000, peerDialMs = 8000, peerCacheMB = 1024, peerDirect = true, peerMaxLinks,
+  // Attachment limits in bytes (maxFile, chunk, quota, houseQuota, diskFloor) and a statfs stand-in; tests only.
+  // Otherwise they come from SNUG_MAX_FILE_MB and friends (server/uploads.js).
+  uploads: uploadOpts = {},
 } = {}) {
   // sec-registry REG-L6: a damaged snug.db is replaced by the newest good encrypted snapshot before opening.
   // sec-integrate: the data key is loaded once (two-factor secrets, backup codes, snapshots). One that couldn't
@@ -190,6 +193,7 @@ export async function startServer({
   const sweepFiles = createFileSweep({ db, filesDir, log }); // sec-authz: deleted attachments and never-sent uploads (server/media.js)
   const sweep = setInterval(() => {
     try { sweepFiles(); } catch (e) { log('error', 'file sweep', e); } // sec-authz: before the files column is cleared below
+    try { uploads.sweep(); } catch (e) { log('error', 'upload sweep', e); } // uploads nobody finished within a day
     sec.prune(); // sec-web W4: security events past 90 days, and past 500 per account
     db.run("UPDATE messages SET text = '', fold = '', files = NULL WHERE deleted IS NOT NULL AND deleted < ? AND text != ''", Date.now() - 11 * 60_000);
     db.run('DELETE FROM sessions WHERE expires < ?', Date.now());
@@ -248,6 +252,8 @@ export async function startServer({
   const accountHttp = createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonBody, body, headers, ipOf, secure, authLimit, uploadLimit, log, dataDir, keyStore, dataKey, desktop: !!resumeSecret }); // server/account.js; sec-auth: the data key, sign-up, sign-in, sign-out, new password
   const appearanceHttp = createAppearanceHttp({ db, M, hub, filesDir, sendJson, error, body, headers, uploadLimit }); // server/appearance.js
   const communityHttp = createCommunityHttp({ db, M, hub, filesDir, sendJson, error, body, headers, uploadLimit, userOf: (req) => userOf(req) }); // server/community.js
+  // Attachments (server/uploads.js): SNUG_MAX_FILE_MB, SNUG_QUOTA_MB, SNUG_HOUSE_QUOTA_MB, SNUG_DISK_FLOOR_MB.
+  const uploads = createUploads({ db, M, filesDir, sendJson, error, jsonBody, uploadLimit, opts: uploadOpts, log });
   // p2p: GitHub sign-in, the username picker and the owner's account rules (server/ghauth.js).
   const gh = createGhAuth({ db, M, hub, peer, opts: { registryUrl, githubClientId, githubBase, fetch: fetchFn, resumeSecret, trustProxy, ghWindowOnly /* sec-desktop */ }, secure, log, agentOf: accountHttp.agentOf, userOf });
   // v0.10 A: registry notices, bans and admin (server/notices.js)
@@ -392,22 +398,10 @@ export async function startServer({
     if (await messagingHttp(req, res, path, url, user)) return undefined; // POST /api/files?sticker=<house>, GET /api/stickers/<file>
     if (await voiceOptsHttp(req, res, path, url, user)) return undefined; // POST /api/files?sound=<house>, GET /api/sounds/<file>
     if (await emojiHttp(req, res, path, url, user)) return undefined; // POST /api/files?emoji=<house>
-    if (post && path === '/api/files') {
-      if (!uploadLimit.take(user)) return error(res, 429, 'Too many uploads at once. Wait a moment.');
-      const conv = url.searchParams.get('conv') || '';
-      const gate = M.postGate(user, conv.startsWith('t:') && !M.thread(conv) ? (M.liveMsg(conv.slice(2))?.conv || '') : conv);
-      if (!gate.ok) return error(res, 403, gate.why);
-      const size = Number(req.headers['content-length']);
-      if (!size || size > MAX_FILE) return error(res, 413, 'Files can be up to 10 MB.');
-      const name = cleanFileName(safeDecode(String(req.headers['x-file-name'] || 'file'))); // sec-authz: no bidi or zero-width characters (js/lib/util.js)
-      const data = await body(req, MAX_FILE);
-      // Codec parameters are dropped; audio and video keep their type only if the bytes agree.
-      const type = uploadType(req.headers['content-type'], data);
-      const id = newId('f');
-      await writeFile(join(filesDir, id), data, { mode: 0o600 });
-      db.run('INSERT INTO files (id, owner, conv, name, type, size, created) VALUES (?, ?, ?, ?, ?, ?, ?)', id, user, conv, name, type, data.length, Date.now());
-      return sendJson(res, 201, { id, name, size: data.length, kind: fileKind(type) });
-    }
+    // Attachments: one request streamed to disk, or chunked and resumable for big files (server/uploads.js).
+    // Codec parameters are dropped; audio and video keep their type only if the bytes agree.
+    if (post && path === '/api/files') return await uploads.single(req, res, url, user);
+    if (await uploads.http(req, res, path, url, user)) return undefined;
 
     const file = /^\/api\/files\/(f_[a-z0-9]{8,40})$/.exec(path);
     if (req.method === 'GET' && file) {
@@ -455,6 +449,7 @@ export async function startServer({
     port: address.port, db, M, hub, server,
     seclog: sec, // sec-web W4: tests run the security-event sweep and read events
     sweepFiles, // sec-authz: tests run the attachment sweep with their own clock
+    sweepUploads: (now) => uploads.sweep(now), // tests: abandoned chunked uploads
     peer, // p2p: srv.peer.stats() for tests, srv.peer.wake() for desktop main
     vaultBusy: () => vault.busy?.() === true, // desktop main: no update restart during a data-file transfer
     voiceBusy: () => hub.voiceBusy(), // ... or while anyone is in a voice room or a call on this server
