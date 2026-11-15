@@ -199,6 +199,42 @@ function KeywordsEditor() {
   </div>`;
 }
 
+// Quiet hours by weekday (0.12): each day follows the daily window, has none,
+// is quiet all day, or has its own times. Listed from Monday.
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+function QuietDays({ q, setQuiet }) {
+  const days = Array.isArray(q.days) ? q.days : Array(7).fill(null);
+  const setDay = (i, v) => {
+    const next = days.slice();
+    next[i] = v;
+    setQuiet({ days: next.every((d) => d === null) ? undefined : next });
+  };
+  const modeOf = (d) => (d === null ? 'usual' : typeof d === 'object' ? 'own' : d);
+  return html`<div class="quiet-days" role="group" aria-label="Quiet hours by day">
+    ${[1, 2, 3, 4, 5, 6, 0].map((i) => {
+      const d = days[i];
+      const mode = modeOf(d);
+      return html`<div class="quiet-day" key=${i}>
+        <label class="quiet-day-name" for=${`quiet-day-${i}`}>${DAY_NAMES[i]}</label>
+        <select id=${`quiet-day-${i}`} class="field" disabled=${!q.on} value=${mode}
+          onChange=${(e) => setDay(i, { usual: null, off: 'off', all: 'all', own: { from: q.from, to: q.to } }[e.target.value])}>
+          <option value="usual">Usual hours</option>
+          <option value="off">No quiet hours</option>
+          <option value="all">Quiet all day</option>
+          <option value="own">Own times</option>
+        </select>
+        ${mode === 'own' && html`<span class="acc-inline">
+          <input class="field acc-time" type="time" aria-label=${`${DAY_NAMES[i]} quiet from`} value=${minutesToTime(d.from)} disabled=${!q.on}
+            onChange=${(e) => { const m = timeToMinutes(e.target.value); if (m != null) setDay(i, { ...d, from: m }); }} />
+          <span class="faint">to</span>
+          <input class="field acc-time" type="time" aria-label=${`${DAY_NAMES[i]} quiet until`} value=${minutesToTime(d.to)} disabled=${!q.on}
+            onChange=${(e) => { const m = timeToMinutes(e.target.value); if (m != null) setDay(i, { ...d, to: m }); }} />
+        </span>`}
+      </div>`;
+    })}
+  </div>`;
+}
+
 export function NotifyMore() {
   const p = S.prefs;
   const q = p.quiet || { on: false, from: 1320, to: 420, tz: 0 };
@@ -218,7 +254,7 @@ export function NotifyMore() {
       <${Switch} on=${p.preview !== false} label="Show message text in notifications" onChange=${(v) => setPref('preview', v)} />
     <//>
     <div class="set-head">Quiet hours</div>
-    <${Row} label="Quiet hours" hint="No sounds, pop-ups or phone notifications between these times, every day. Everything still collects in Catch up.">
+    <${Row} label="Quiet hours" hint="No sounds, pop-ups or phone notifications between these times. Everything still collects in Catch up.">
       <${Switch} on=${q.on} label="Quiet hours" onChange=${(v) => setQuiet({ on: v })} />
     <//>
     <${Row} label="From and until" hint="In your own time zone.">
@@ -227,6 +263,9 @@ export function NotifyMore() {
         <span class="faint">to</span>
         <input class="field acc-time" type="time" aria-label="Quiet until" value=${minutesToTime(q.to)} disabled=${!q.on} onChange=${(e) => { const m = timeToMinutes(e.target.value); if (m != null) setQuiet({ to: m }); }} />
       </div>
+    <//>
+    <${Row} label="Different on some days" hint="A window that runs past midnight belongs to the day it starts. Days use your own time zone." top>
+      <${QuietDays} q=${q} setQuiet=${setQuiet} />
     <//>
     <${Row} label="Calls from favourites" hint="While you’re Focused, calls from friends you starred still ring out loud.">
       <${Switch} on=${p.favCalls} label="Let calls from favourites ring while Focused" onChange=${(v) => setPref('favCalls', v)} />

@@ -90,7 +90,7 @@ export function Search() {
     let live = true;
     const t = setTimeout(() => {
       searchMessages(q).then(
-        (hits) => live && setRes({ q, hits, local: false }),
+        (hits) => live && setRes({ q, hits, local: false, close: hits.close }),
         (e) => live && (e.offline ? setRes({ q, hits: runSearch(S, p), local: true }) : setRes({ q, hits: [], error: e.message })),
       );
     }, 220);
@@ -163,7 +163,8 @@ export function Search() {
               ${filtered && html`<button class="btn" onClick=${() => set(p.terms.join(' '))}>Clear filters</button>`}
             <//>`
           : html`<div class="col search-results">
-              <div class="view-note search-group-h">${hits.length === 80 ? 'First 80 messages' : plural(hits.length, 'message')}, newest first${res.local ? '. You\u2019re offline, so this only covers messages already on this device.' : ''}</div>
+              ${res.close && !loading && html`<p class="view-note search-close" role="status">No exact match. Showing close matches: words one or two letters different.</p>`}
+              <div class="view-note search-group-h">${hits.length === 80 ? 'First 80 messages' : plural(hits.length, 'message')}, ${p.terms.length && !res.local ? 'best matches first' : 'newest first'}${res.local ? '. You\u2019re offline, so this only covers messages already on this device.' : ''}</div>
               ${hits.map(({ conv, m }) => {
                 const meta = convMeta(conv);
                 const who = S.users[m.author];

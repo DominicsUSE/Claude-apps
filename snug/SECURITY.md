@@ -127,6 +127,11 @@ stronger than "end-to-end encrypted" is used.
   sees your IP address unless "Hide my IP from friends" is on and a relay server is set up.
 - **People you talk to.** Anyone in a conversation can copy, screenshot or forward it. Deleting a message
   removes it from Snug, not from someone else's copy.
+- **Disappearing messages are not unrecoverable.** The timer (0.12) removes a message from Snug's database,
+  search index and attachments when it is due, and devices hide it on time. Before then anyone can copy it;
+  the encrypted daily database snapshots (`server/dbbackup.js`, seven kept) can hold a copy for up to a week;
+  a friend's PC on an older or modified Snug could keep it (Snug only offers the timer when every friend's
+  PC says it supports it, and can't check what a modified one does).
 - **A stolen GitHub account combined with an absent owner.** If the current PC is offline for the whole
   72-hour wait, a move started with a stolen GitHub login completes. Keep GitHub two-factor sign-in on.
 - **A stolen recovery key combined with an absent owner,** the same way. And a lost PC plus a lost recovery key

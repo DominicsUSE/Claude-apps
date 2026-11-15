@@ -34,6 +34,7 @@ import { vp } from '../voiceopts.js';
 import { DmHeaderButtons, dmHeaderItems } from './dm-manage.js'; // Add people and the members of a group (server/dms.js)
 import { DirectLine, KeyBanner, remoteOf, GroupLine, isPeerGroup } from './p2p.js'; // a friend on another PC: how it travels, and a changed security code
 import { EncLabel, EncDetail, RoomEncNote } from './e2ee-conv.js'; // end-to-end encryption labels in conversations
+import { TtlButton, ttlMenuItem } from './disappear.js'; // 0.12: disappearing messages
 
 const Back = () => S.ui.phone && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
 
@@ -348,6 +349,7 @@ function headerMore(conv, meta, level, anchor) {
     items: [
       ...(meta.dm ? dmHeaderItems(conv, anchor) : []),
       pinsOf(conv).length > 0 && { label: `Pinned messages (${pinsOf(conv).length})`, icon: 'pin', onSelect: () => togglePane('pins') },
+      ttlMenuItem(conv),
       { label: level === 'muted' ? 'Notifications (muted)' : 'Notifications', icon: level === 'muted' ? 'bell-off' : 'bell', onSelect: () => setTimeout(() => notifyMenu(conv, { anchor }), 0) },
       // Go to a date opens its own popover from the (hidden) calendar button beside this menu's button.
       { label: 'Go to a date', icon: 'calendar', onSelect: goToDate },
@@ -363,6 +365,7 @@ const goToDate = () => setTimeout(() => document.querySelector('.main .bar .bar-
 function barMoreItems(conv, meta, pane) {
   return [
     !isThread(conv) && { label: 'Go to a date', icon: 'calendar', onSelect: goToDate },
+    !isThread(conv) && ttlMenuItem(conv),
     meta.room && { label: pane === 'details' ? 'Hide details' : 'Details', icon: 'info', onSelect: () => togglePane('details') },
     { sep: true },
   ];
@@ -395,6 +398,7 @@ export function Conversation({ conv }) {
       ${meta.dm && !phone && remoteOf(conv) && html`<${DirectLine} conv=${conv} />`}
       ${meta.dm && !phone && isPeerGroup(conv) && html`<${GroupLine} conv=${conv} />`}
       <div class="bar-end">
+        <${TtlButton} conv=${conv} />
         ${meta.dm && !isPeerGroup(conv) && html`<${CallButtons} conv=${conv} />`}
         ${meta.dm && !phone && html`<${DmHeaderButtons} conv=${conv} />`}
         ${!phone && html`<${PinsButton} conv=${conv} />`}

@@ -34,6 +34,7 @@ import { registerDesktopPage } from './desktop-settings.js'; // the desktop app'
 import { registerAdminPage } from './admin.js'; // v0.10 A: Settings > Admin, only for accounts with admin rights
 import { registerVaultPage } from './vault-settings.js'; // v0.10 C: Settings > Your data > Data file
 import { registerE2eePage } from './e2ee-settings.js'; // Settings > Encryption (end-to-end encryption), when the server offers it
+import { registerConnectionPage } from './connection.js'; // 0.12: Settings > Connection
 
 
 function Row({ label, hint, children, top }) {
@@ -333,6 +334,8 @@ registerAdminPage({ PAGES, VIEWS, Row });
 
 // v0.10 C: registerVaultPage
 registerVaultPage({ PAGES, VIEWS, Row });
+// 0.12: how this device is talking to Snug (js/views/connection.js)
+registerConnectionPage({ PAGES, VIEWS, Row });
 
 // One structure for every settings layer: pages in sections, in this order.
 // Pages other modules add land in the section named here; anything unnamed
@@ -344,7 +347,7 @@ function arrange(pages, plan) {
 }
 arrange(PAGES, [
   ['You', ['profile', 'account', 'privacy', 'e2ee', 'data']],
-  ['App', ['notify', 'voice', 'look', 'chat', 'a11y', 'streamer', 'keys', 'desktop']],
+  ['App', ['notify', 'voice', 'look', 'chat', 'a11y', 'streamer', 'keys', 'desktop', 'connection']],
   ['Admin', ['admin']],
 ]);
 
@@ -354,7 +357,7 @@ export function Settings({ page: start }) {
   const [page, setPage] = useState(start || 'profile');
   const V = VIEWS[page];
   return html`<${Layer} title="Settings" icon=${html`<${Icon} name="sliders" />`} pages=${PAGES} page=${page} setPage=${setPage} startOpen=${!!start}
-    foot=${html`<${Nook} size=${16} /><span>Snug 0.10</span>`}>
+    foot=${html`<${Nook} size=${16} /><span>Snug${S.conn.version || S.version ? ` ${S.conn.version || S.version}` : ''}</span>`}>
     <${V} />
   <//>`;
 }

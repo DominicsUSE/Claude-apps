@@ -17,6 +17,7 @@ import { fmtStamp, STAMP_STYLES } from '../lib/format.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Rich, Switch } from '../ui/kit.js';
 import { EmojiPicker } from './emoji.js';
+import { remoteOf, isPeerGroup } from './p2p.js'; // 0.12: polls don't travel between PCs yet
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 const ALPHA = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -500,6 +501,8 @@ function StampModal({ onInsert }) {
 }
 
 // ---------- The composer: + menu, formatting bar and shortcuts ----------
+// A conversation (or its thread) with friends on other PCs: polls aren't offered there (the server refuses them too).
+const acrossPcs = (conv) => { const c = isThread(conv) ? S.threads[conv]?.conv : conv; return !!c && (!!remoteOf(c) || isPeerGroup(c)); };
 export function PlusMenu({ conv, text, update, insert, replyTo, onAttach }) {
   const open = (e) => {
     const anchor = rectOf(e);
@@ -508,7 +511,7 @@ export function PlusMenu({ conv, text, update, insert, replyTo, onAttach }) {
       items: [
         onAttach && { label: 'Upload a file', icon: 'clip', onSelect: onAttach },
         onAttach && { sep: true },
-        isEncrypted(conv) ? { label: E2COPY.pollsOff, icon: 'poll', disabled: true } : { label: 'Create a poll', icon: 'poll', onSelect: () => openModal(PollModal, { conv }) },
+        isEncrypted(conv) ? { label: E2COPY.pollsOff, icon: 'poll', disabled: true } : !acrossPcs(conv) && { label: 'Create a poll', icon: 'poll', onSelect: () => openModal(PollModal, { conv }) },
         { label: 'Send a sticker', icon: 'sticker', onSelect: () => openPop({ anchor, align: 'start', label: 'Stickers', C: StickerPicker, props: { conv, replyTo } }) },
         { label: 'Insert a time', icon: 'calendar', onSelect: () => openModal(StampModal, { onInsert: (tok) => insert(`${tok} `) }) },
         { label: 'Schedule a message', icon: 'clock', onSelect: () => openModal(ScheduleModal, { conv, text, replyTo, done: () => update('') }) },

@@ -9,6 +9,9 @@
 //   while away is lost; messages still waiting to send are kept and resent.
 // - Messages carry a client-made id; the server ignores a second copy of the
 //   same id, so a resend after a dropped connection never duplicates.
+// - A heartbeat (0.12): a ping every 10 seconds. A connection that has said
+//   nothing for 25 seconds is treated as dead (a phone changing networks can
+//   leave one looking open for minutes), dropped, and opened again.
 import {
   S, emit, toast, applySnapshot, useTransport, convMeta, jumpToMsg, signedOut, checkView, findMsg, localRing,
 } from './store.js';
@@ -29,6 +32,10 @@ const handlers = new Map();
 // goes out, whenOpen holds a notification until its message is open.
 export const transportHooks = { scan: null, isEncrypted: null, downgraded: null, sendEncrypted: null, uploadEncrypted: null, whenOpen: null };
 const scanIn = (d) => { try { transportHooks.scan?.(d); } catch (e) { console.warn('e2ee scan', e); } };
+// The heartbeat (0.12). Tests may shorten these through window.snug.heartbeat.
+export const HEARTBEAT = { every: 10_000, dead: 25_000 };
+let lastRx = 0, beatTimer = null;
+const noteProblem = (text) => { S.conn.lastError = { text, at: Date.now() }; };
 
 // Other modules (voice) listen for their own events here.
 export function on(ev, fn) { if (!handlers.has(ev)) handlers.set(ev, new Set()); handlers.get(ev).add(fn); }
@@ -71,14 +78,17 @@ function connect() {
   S.conn.socket = attempt ? 'reconnecting' : 'connecting';
   emit();
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
-  ws.onopen = () => { opened = true; };
+  ws.onopen = () => { opened = true; lastRx = Date.now(); };
   ws.onmessage = (e) => {
+    lastRx = Date.now();
     let msg;
     try { msg = JSON.parse(e.data); } catch { return; }
     if (msg.t === 'hello') {
       attempt = 0;
       S.conn.socket = 'open';
       scanIn(msg.d);
+      S.conn.since = Date.now();
+      startBeat();
       applySnapshot(msg.d);
       fire('hello', msg.d); // js/e2ee/manager.js binds this device to the new socket
       fire('open');
@@ -96,31 +106,65 @@ function connect() {
       emit();
     }
   };
-  ws.onclose = async (e) => {
-    for (const w of waiting.values()) { clearTimeout(w.t); w.reject(offline()); }
-    waiting.clear();
-    for (const list of Object.values(S.msgs)) for (const m of list) if (m.state === 'sending') m.state = 'queued';
-    S.conn.socket = 'closed';
-    S.typing = {};
-    fire('close');
+  ws.onclose = closed;
+}
+
+// The heartbeat: ping, time the answer, and drop a connection that went quiet.
+function startBeat() {
+  clearInterval(beatTimer);
+  beatTimer = setInterval(beat, HEARTBEAT.every);
+  beat();
+}
+function beat() {
+  if (!ws || S.conn.socket !== 'open') return;
+  if (Date.now() - lastRx > HEARTBEAT.dead) {
+    noteProblem('The server stopped answering.');
+    const dead = ws;
+    dead.onclose = null; dead.onmessage = null;
+    try { dead.close(4000, 'no answer'); } catch { /* already gone */ }
+    ws = null;
+    closed({ code: 4000 });
+    return;
+  }
+  const t0 = performance.now();
+  call('ping').then((r) => {
+    S.conn.rtt = Math.round(performance.now() - t0);
+    S.conn.version = r.version;
+    S.conn.pingAt = Date.now();
     emit();
-    // 4001: this session was ended (signed out elsewhere, or the password changed).
-    if (e.code === 4001) { signedOut(); return; }
-    // 4008 (sec-authz): too many tabs and devices open at once, and this was the
-    // oldest. Don't reconnect on a timer (the tabs would push each other out in
-    // turn); come back when someone uses this tab again.
-    if (e.code === 4008) { bumped = true; return; }
-    // A refused upgrade looks like any other failure; ask whether the session is still valid.
-    if (!opened) {
-      try {
-        const r = await fetch('/api/me', { credentials: 'same-origin' });
-        if (r.status === 401) { signedOut(); return; }
-      } catch { /* still offline */ }
-    }
-    const delay = Math.min(15000, 1000 * 2 ** attempt) * (0.7 + Math.random() * 0.6);
-    attempt++;
-    timer = setTimeout(connect, delay);
-  };
+  }, () => { /* the next beat decides */ });
+}
+export const pingNow = () => beat(); // Settings > Connection: "Test again"
+
+async function closed(e) {
+  clearInterval(beatTimer);
+  for (const w of waiting.values()) { clearTimeout(w.t); w.reject(offline()); }
+  waiting.clear();
+  for (const list of Object.values(S.msgs)) for (const m of list) if (m.state === 'sending') m.state = 'queued';
+  S.conn.socket = 'closed';
+  S.typing = {};
+  fire('close');
+  emit();
+  // 4001: this session was ended (signed out elsewhere, or the password changed).
+  if (e.code === 4001) { signedOut(); return; }
+  // 4008 (sec-authz): too many tabs and devices open at once, and this was the
+  // oldest. Don't reconnect on a timer (the tabs would push each other out in
+  // turn); come back when someone uses this tab again.
+  if (e.code === 4008) { bumped = true; return; }
+  // A refused upgrade looks like any other failure; ask whether the session is still valid.
+  if (!opened) {
+    try {
+      const r = await fetch('/api/me', { credentials: 'same-origin' });
+      if (r.status === 401) { signedOut(); return; }
+    } catch { /* still offline */ }
+  }
+  if (opened && e.code !== 4000) noteProblem('The connection dropped.');
+  else if (!opened) noteProblem('Snug couldn’t reach the server.');
+  const delay = Math.min(15000, 1000 * 2 ** attempt) * (0.7 + Math.random() * 0.6);
+  attempt++;
+  S.conn.attempts = (S.conn.attempts || 0) + 1;
+  S.conn.retryAt = Date.now() + delay;
+  timer = setTimeout(connect, delay);
 }
 
 // For the end-to-end checks: the connection dropping without a goodbye (4000 is
@@ -133,6 +177,7 @@ export function startTransport() {
 }
 export function stopTransport() {
   clearTimeout(timer);
+  clearInterval(beatTimer);
   if (ws) { ws.onclose = null; ws.close(); ws = null; }
   S.conn.socket = 'idle';
 }
@@ -267,6 +312,7 @@ export async function searchMessages(q) {
   Object.assign(S.users, r.users);
   Object.assign(S.threads, r.threads);
   for (const h of r.hits) if (!(S.msgs[h.conv] || []).some((m) => m.id === h.m.id)) S.cache[h.m.id] = h.m;
+  r.hits.close = !!r.close; // 0.12: nothing matched exactly, these are words one or two letters away
   return r.hits;
 }
 

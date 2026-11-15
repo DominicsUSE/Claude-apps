@@ -8,6 +8,8 @@ import { isIP } from 'node:net';
 import { join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './db.js';
+import { createExpiry } from './expiry.js'; // 0.12: disappearing messages
+import { createShell } from './shell.js'; // 0.12: ETag, gzip and the offline app shell list
 import { createModel, newId } from './model.js';
 import { createHub, ringMsFrom, voiceGraceFrom } from './hub.js';
 import { AUDIO_TYPES, VIDEO_TYPES, parseRange, createMediaHttp, createFileSweep } from './media.js'; // sec-authz: createFileSweep // voice messages, GIFs, video
@@ -37,7 +39,7 @@ import {
 } from './auth.js';
 import { createSeclog, redactLog, redact, sendFile } from './seclog.js'; // sec-web: security events, log redaction, safe file sends
 import { PROTO, MIN_CLIENT } from '../js/lib/proto.js'; // GET /api/version
-import { staticRel, staticHeaders, BASE_HEADERS } from './static.js'; // the app's own files and their headers, shared with the desktop app's join mode
+import { staticRel, staticHeaders, BASE_HEADERS, PUBLIC } from './static.js'; // the app's own files and their headers, shared with the desktop app's join mode
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // Uploaded images shown inline. Anything else downloads.
@@ -173,6 +175,15 @@ export async function startServer({
   hub.hooks.note = (user, note) => push.onNote(user, note).catch((e) => log('push', e)); // event reminders (server/community.js)
   // --- end push notifications ---
 
+  // 0.12: the page's heartbeat. It asks every few seconds; a connection that
+  // stops answering is dropped and opened again (js/server.js), and the round
+  // trip and the server's version show on Settings > Connection.
+  hub.addLimits({ ping: limiter({ capacity: 20, perSecond: 1 }) });
+  hub.ops.ping = () => ({ now: Date.now(), version: VERSION });
+
+  // 0.12: disappearing messages, before the peer module wraps the ops (server/expiry.js).
+  const expiry = createExpiry({ db, M, hub, ops: hub.ops });
+
   // p2p: the peer module wraps the ops last, after push (server/peer.js).
   const peer = createPeer({
     db, M, hub, ops: hub.ops, filesDir, log,
@@ -184,6 +195,7 @@ export async function startServer({
   // Deleted messages can be restored for ten minutes; after that their content is gone for good.
   const sweepFiles = createFileSweep({ db, filesDir, log }); // sec-authz: deleted attachments and never-sent uploads (server/media.js)
   const sweep = setInterval(() => {
+    try { expiry.sweep(); } catch (e) { log('error', 'expiry sweep', e); } // 0.12: disappearing messages, before their files go
     try { sweepFiles(); } catch (e) { log('error', 'file sweep', e); } // sec-authz: before the files column is cleared below
     try { uploads.sweep(); } catch (e) { log('error', 'upload sweep', e); } // uploads nobody finished within a day
     sec.prune(); // sec-web W4: security events past 90 days, and past 500 per account
@@ -273,7 +285,7 @@ export async function startServer({
     try {
       if (path.startsWith('/api/')) return await api(req, res, path, url);
       if (req.method !== 'GET' && req.method !== 'HEAD') return error(res, 405, 'Method not allowed');
-      return await staticFile(res, path, httpsReq(req));
+      return await staticFile(res, path, httpsReq(req), req);
     } catch (e) {
       if (e.status) return error(res, e.status, e.status === 413 ? 'That’s too large.' : 'That request isn’t valid.');
       log('error', req.method, path, e); // sec-web W5: redacted by log() (webhook tokens, control characters)
@@ -282,7 +294,15 @@ export async function startServer({
     }
   }
 
-  async function staticFile(res, path, https = false) {
+  // 0.12: ETags, gzip, and the list of the app's files for sw.js (server/shell.js).
+  const shell = createShell({ root: ROOT, dirs: PUBLIC.filter((p) => p.endsWith('/') && p !== 'docs/') });
+  async function staticFile(res, path, https = false, req = null) {
+    if (path === '/shell.json') {
+      headers(res, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+      res.writeHead(200);
+      res.end(JSON.stringify(shell.shellList()));
+      return undefined;
+    }
     // Which file an address loads, and its headers: server/static.js (the desktop app's pinned join mode uses the same rules).
     const rel = staticRel(path);
     if (!rel) return error(res, 404, 'Not found');
@@ -290,7 +310,9 @@ export async function startServer({
     let info;
     try { info = await stat(file); } catch { return error(res, 404, 'Not found'); }
     if (!info.isFile()) return error(res, 404, 'Not found');
-    headers(res, staticHeaders(rel, https));
+    const extra = staticHeaders(rel, https);
+    if (req && await shell.send(req, res, file, info, headers, extra)) return undefined; // 304, or gzipped
+    if (!req) headers(res, extra);
     await sendFile(res, file); // sec-web W1: a file gone since the stat is a 404, not a crash
     return undefined;
   }
@@ -369,7 +391,7 @@ export async function startServer({
     if (req.method === 'GET' && path === '/api/account/security-events') return sendJson(res, 200, { events: sec.list(user, url.searchParams.get('limit')) });
     if (req.method === 'GET' && path === '/api/me') {
       const row = M.userRow(user);
-      return sendJson(res, 200, { user: M.userView(row, row.presence, true), ice: hub.iceFor(user), p2p: peer.statusFor(user) }); // p2p
+      return sendJson(res, 200, { user: M.userView(row, row.presence, true), ice: hub.iceFor(user), p2p: peer.statusFor(user), version: VERSION }); // p2p; version: 0.12
     }
     if (post && path === '/api/logout-all') {
       const token = readCookie(req.headers.cookie, COOKIE);
@@ -436,6 +458,7 @@ export async function startServer({
     seclog: sec, // sec-web W4: tests run the security-event sweep and read events
     sweepFiles, // sec-authz: tests run the attachment sweep with their own clock
     sweepUploads: (now) => uploads.sweep(now), // tests: abandoned chunked uploads
+    expiry, // 0.12: tests run the disappearing-messages sweep with their own clock
     peer, // p2p: srv.peer.stats() for tests, srv.peer.wake() for desktop main
     vaultBusy: () => vault.busy?.() === true, // desktop main: no update restart during a data-file transfer
     voiceBusy: () => hub.voiceBusy(), // ... or while anyone is in a voice room or a call on this server

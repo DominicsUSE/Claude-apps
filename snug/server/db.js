@@ -13,6 +13,8 @@ import { migrateCommunity } from './community.js'; // pictures, verification, cu
 import { migrateInbox } from './inbox.js'; // timed mutes, presence for a while, dismissed mentions, held usernames (server/inbox.js)
 import { migrateE2ee } from './e2ee.js'; // end-to-end encryption: key directory and encrypted columns (server/e2ee.js)
 import { migrateDms } from './dms.js'; // closed, pinned and named conversations, group owners and icons (server/dms.js)
+import { migrateFts } from './fts.js'; // 0.12: full-text search index over messages (server/fts.js)
+import { migrateExpiry } from './expiry.js'; // 0.12: disappearing messages (server/expiry.js)
 
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
@@ -427,7 +429,8 @@ function migrateMessagesExtras(db) {
 }
 // --- end messages extras ----------------------------------------------------
 
-export function openDb(path) {
+// fts: false keeps search on its substring scan (tests of that path, or SNUG_FTS=0).
+export function openDb(path, { fts = process.env.SNUG_FTS !== '0' } = {}) {
   if (path !== ':memory:') {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   }
@@ -435,6 +438,8 @@ export function openDb(path) {
   const db = new DatabaseSync(path);
   db.exec(SCHEMA);
   migrate(db);
+  migrateExpiry(db);
+  const hasFts = fts && migrateFts(db);
   // The database file holds password hashes and private messages: owner only.
   if (path !== ':memory:' && fresh) { try { chmodSync(path, 0o600); } catch { /* not supported */ } }
 
@@ -447,6 +452,7 @@ export function openDb(path) {
   let depth = 0;
   return {
     raw: db,
+    fts: hasFts, // full-text search is available (server/fts.js)
     get: (sql, ...p) => stmt(sql).get(...p),
     all: (sql, ...p) => stmt(sql).all(...p),
     run: (sql, ...p) => stmt(sql).run(...p),

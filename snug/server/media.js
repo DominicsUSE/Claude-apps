@@ -197,9 +197,11 @@ export function createFileSweep({ db, filesDir, log = () => {} }) {
   const refSql = refCols.map((c) => `instr(coalesce(${c}, ''), ?) > 0`).join(' OR ');
   const hasTable = (t) => !!db.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", t);
   // Still wanted: a message that isn't past its undo window names it, a saved GIF, a house emoji or sticker.
-  const wanted = (fid, convs, exceptMsg, cutoff) => {
+  // 0.12: a message past its disappearing time doesn't want its files any more (server/expiry.js).
+  const live = cols.has('expires') ? ' AND (expires IS NULL OR expires > ?)' : '';
+  const wanted = (fid, convs, exceptMsg, cutoff, now = Date.now()) => {
     for (const conv of new Set(convs.filter(Boolean))) {
-      if (db.get(`SELECT 1 FROM messages WHERE conv = ? AND id != ? AND (deleted IS NULL OR deleted >= ?) AND (${refSql}) LIMIT 1`, conv, exceptMsg || '', cutoff, ...refCols.map(() => fid))) return true;
+      if (db.get(`SELECT 1 FROM messages WHERE conv = ? AND id != ? AND (deleted IS NULL OR deleted >= ?)${live} AND (${refSql}) LIMIT 1`, conv, exceptMsg || '', cutoff, ...(live ? [now] : []), ...refCols.map(() => fid))) return true;
     }
     if (hasTable('gif_favs') && db.get('SELECT 1 FROM gif_favs WHERE file = ?', fid)) return true;
     if (hasTable('house_emoji') && db.get('SELECT 1 FROM house_emoji WHERE file = ?', fid)) return true;
@@ -215,13 +217,15 @@ export function createFileSweep({ db, filesDir, log = () => {} }) {
     const cutoff = now - UNDO_MS;
     let removed = 0;
     // 1. Messages past their undo window that still name files.
-    const dead = db.all(`SELECT id, conv, ${refCols.join(', ')} FROM messages WHERE deleted IS NOT NULL AND deleted < ? AND (${refCols.map((c) => `${c} IS NOT NULL`).join(' OR ')}) LIMIT 500`, cutoff);
+    // 0.12: and messages that disappeared (no undo window for those).
+    const gone = live ? ' OR (expires IS NOT NULL AND expires <= ?)' : '';
+    const dead = db.all(`SELECT id, conv, ${refCols.join(', ')} FROM messages WHERE ((deleted IS NOT NULL AND deleted < ?)${gone}) AND (${refCols.map((c) => `${c} IS NOT NULL`).join(' OR ')}) LIMIT 500`, cutoff, ...(gone ? [now] : []));
     for (const m of dead) {
       const ids = new Set(refCols.flatMap((c) => String(m[c] || '').match(FID) || []));
       for (const fid of ids) {
         const f = db.get('SELECT id, conv FROM files WHERE id = ?', fid);
         if (!f || OWNED.test(f.conv)) continue;
-        if (wanted(fid, [m.conv, f.conv], m.id, cutoff)) continue;
+        if (wanted(fid, [m.conv, f.conv], m.id, cutoff, now)) continue;
         remove(fid); removed++;
       }
       db.run(`UPDATE messages SET ${refCols.map((c) => `${c} = NULL`).join(', ')} WHERE id = ?`, m.id);
@@ -233,7 +237,7 @@ export function createFileSweep({ db, filesDir, log = () => {} }) {
       const batch = db.all('SELECT id, conv, meta, created FROM files WHERE created >= ? AND created < ? ORDER BY created LIMIT 200', mark, until);
       for (const f of batch) {
         if (OWNED.test(f.conv) || /"remote"\s*:\s*1/.test(f.meta || '')) continue; // a friend's file (server/peer.js keeps its own cache)
-        if (wanted(f.id, [f.conv], '', cutoff)) continue;
+        if (wanted(f.id, [f.conv], '', cutoff, now)) continue;
         remove(f.id); removed++;
       }
       mark = batch.length === 200 ? batch[199].created : until;

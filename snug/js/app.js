@@ -5,7 +5,7 @@ import {
   S, emit, useStore, me, go, openConv, back, setTab, closePane, closeMenu, closePop, closeModal, closeLayer,
   closeQuick, closeLightbox, openQuick, openLayer, openModal, openPop, markHouseRead, markConvRead, applyPrefs, convMeta, isOnline, loadCache,
 } from './store.js';
-import { api, startTransport } from './server.js';
+import { api, startTransport, HEARTBEAT } from './server.js';
 import { on as onServer } from './server.js'; // p2p: the link host loads on socket open
 import { P2pNotice } from './views/p2p.js'; // p2p: moving here, moved away, a move waiting for an answer
 // v0.10 C: data file notice
@@ -443,6 +443,7 @@ async function boot() {
     const r = await api('/api/me');
     S.me = r.user.id;
     S.ice = r.ice;
+    S.version = r.version; // 0.12: the server's version (Settings)
     S.auth = 'in';
     loadCache(r.user.id);
     startTransport();
@@ -453,11 +454,19 @@ async function boot() {
   emit();
 }
 boot();
+// 0.12: the service worker keeps the app's own files, so Snug opens without a
+// connection (sw.js). Not in the desktop app, which always has its own server.
+if ('serviceWorker' in navigator && window.isSecureContext && !window.snugApp) {
+  navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(() => navigator.serviceWorker.ready)
+    .then((reg) => reg.active?.postMessage({ t: 'snug:shell' })) // bring the copy up to date with this server's version
+    .catch(() => { /* no worker: Snug still works, it just can't open offline */ });
+}
 // p2p: the link host (js/peer.js) loads once, when the server says this is the PC's P2P owner.
 let peerHost = null;
 onServer('open', () => { if (S.p2p?.enabled && S.p2p.owner && !peerHost) peerHost = import('./peer.js'); });
 // Exposed for the end-to-end checks and for poking at state in the console.
 window.snug = { S, emit, voiceStats, ringtone: ringtonePlaying };
+window.snug.heartbeat = HEARTBEAT; // 0.12: tests can shorten the heartbeat (js/server.js)
 window.snug.voiceDebug = voiceDebug; // voice options (js/voiceopts.js)
 window.snug.account = { goIdle, sounds: () => soundsPlayed, soundLog }; // js/account.js
 window.snug.e2ee = { E2, safetyFor }; // end-to-end checks read the encryption state

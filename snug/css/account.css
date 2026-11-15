@@ -161,3 +161,20 @@
   .acc-key-row { grid-template-columns: 1fr; gap: 2px; }
   .acc-emoji-picks .ib { min-height: var(--touch); }
 }
+
+/* Quiet hours by weekday (0.12) */
+.quiet-days { display: grid; gap: var(--s-2); width: 100%; }
+.quiet-day { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+.quiet-day-name { min-width: calc(var(--s-20) + var(--s-4)); }
+.quiet-day select { width: auto; min-height: 44px; }
+
+/* Settings > Connection (0.12, js/views/connection.js) */
+.conn-state { margin-bottom: var(--s-4); }
+.conn-state { color: var(--text-1); }
+.conn-state.ok { background: var(--surface-sel); }
+.conn-facts { margin: 0; display: grid; gap: 0; }
+.conn-fact { display: grid; grid-template-columns: minmax(140px, 220px) 1fr; gap: var(--s-3); padding: var(--s-3) 0; border-bottom: 1px solid var(--line); }
+.conn-fact dt { color: var(--text-2); font-size: var(--t-14); }
+.conn-fact dd { margin: 0; color: var(--text-1); font-size: var(--t-14); overflow-wrap: anywhere; }
+.conn-acts { display: flex; gap: var(--s-2); flex-wrap: wrap; margin: var(--s-4) 0 var(--s-2); }
+@media (max-width: 560px) { .conn-fact { grid-template-columns: 1fr; gap: var(--s-1); } }

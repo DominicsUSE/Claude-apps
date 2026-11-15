@@ -153,6 +153,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
   hub.voiceBusy = () => voiceRooms.size > 0 || calls.size > 0; // anyone in a voice room or a call here (the desktop app won't restart for an update)
   // Push notifications (server/push.js): does this person have any socket open right now?
   hub.connected = (u) => (socks.get(u)?.size || 0) > 0;
+  hub.socketsOf = (u) => [...(socks.get(u) || [])]; // tests: a connection that stops answering (tests/e2e-core.test.js)
 
   // sec-authz: a fan-out that rebuilds views for a whole house runs at once,
   // then waits a window of 4x what that run cost: calls inside the window

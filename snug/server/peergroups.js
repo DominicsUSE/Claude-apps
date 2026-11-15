@@ -424,6 +424,11 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
     if (!m) return db.get('SELECT 1 FROM grp_items WHERE g = ? AND id = ? AND by != ?', g, id, byUid) ? aliasOf(id, byUid) : id;
     return m.conv === g && m.author === byLocal ? id : aliasOf(id, byUid);
   }
+  // The conversation a message of group g is in: g, or one of g's threads (0.12).
+  const convIn = (g, id) => {
+    const row = M.msg(id);
+    return row && row.conv !== g && row.conv.startsWith('t:') && M.thread(row.conv)?.conv === g ? row.conv : g;
+  };
   function applyItem(item) {
     const g = item.g;
     const by = localId(item.by);
@@ -438,15 +443,22 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
         if (temp) db.run('INSERT OR IGNORE INTO dm_members (dm, user) VALUES (?, ?)', g, by);
         try {
           if (item.k === 'msg') {
-            const files = item.by === me() ? [] : X.acceptFiles(item.by, g, d.files);
-            ops['msg.send'](c, { conv: g, id: own(item.id), text: d.text, files, ...(d.replyTo ? { replyTo: d.replyTo } : {}) });
+            // 0.12: a thread reply goes into its thread when the thread's first message is here;
+            // it also carries that message as replyTo, for PCs without threads (0.11).
+            const root = d.t ? M.liveMsg(d.t) : null;
+            const conv = root && root.conv === g && !root.sys ? `t:${root.id}` : g;
+            const replyTo = d.replyTo && !(conv !== g && d.replyTo === d.t) ? d.replyTo : null;
+            const files = item.by === me() ? [] : X.acceptFiles(item.by, conv, d.files);
+            ops['msg.send'](c, { conv, id: own(item.id), text: d.text, files, ...(replyTo ? { replyTo } : {}) });
             if (files.length) queueMicrotask(() => X.fetchPending(item.by));
           } else if (item.k === 'edit') {
             const newest = db.get("SELECT MAX(ts) t FROM grp_items WHERE g = ? AND id != ? AND json_extract(body, '$.item.k') = 'edit' AND json_extract(body, '$.item.d.id') = ?", g, item.id, d.id)?.t;
-            if (!(newest > item.ts)) ops['msg.edit'](c, { conv: g, id: own(d.id), text: d.text });
-          } else if (item.k === 'delete') ops['msg.delete'](c, { conv: g, id: own(d.id) });
-          else if (item.k === 'restore') ops['msg.restore'](c, { conv: g, id: own(d.id) });
-          else if (item.k === 'react') ops.react(c, { conv: g, id: d.id, emoji: d.emoji, on: d.on === true });
+            if (!(newest > item.ts)) ops['msg.edit'](c, { conv: convIn(g, own(d.id)), id: own(d.id), text: d.text });
+          } else if (item.k === 'delete') ops['msg.delete'](c, { conv: convIn(g, own(d.id)), id: own(d.id) });
+          else if (item.k === 'restore') ops['msg.restore'](c, { conv: convIn(g, own(d.id)), id: own(d.id) });
+          else if (item.k === 'react') ops.react(c, { conv: convIn(g, d.id), id: d.id, emoji: d.emoji, on: d.on === true });
+          else if (item.k === 'pin') ops[d.on ? 'msg.pin' : 'msg.unpin'](c, { conv: g, id: d.id });
+          else if (item.k === 'ttl') ops['conv.ttl'](c, { conv: g, ttl: d.ttl });
         } finally {
           if (temp) db.run('DELETE FROM dm_members WHERE dm = ? AND user = ?', g, by);
         }
@@ -634,10 +646,13 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
     return {};
   });
   // Messages: applied here as usual, then signed and queued for every other member.
-  const inGroup = (c, conv) => isGroup(conv) && !c.peer;
+  // A group's threads travel with the group (0.12, bug B3).
+  const groupOf = (conv) => (isGroup(conv) ? conv : isGroup(X.threadParent(conv)) ? X.threadParent(conv) : null);
+  const inGroup = (c, conv) => !!groupOf(conv) && !c.peer;
   wrap('msg.send', (c, d, base) => {
     if (!inGroup(c, d.conv)) return base(c, d);
-    if (!mineC(c) || !amIn(d.conv)) fail('You don’t have access to this conversation.');
+    const g = groupOf(d.conv);
+    if (!mineC(c) || !amIn(g)) fail('You don’t have access to this conversation.');
     const fresh = typeof d.id === 'string' && !M.msg(d.id);
     // Files over 10 MB only when every member's PC takes them (server/peer.js fitsPeers).
     if (fresh) X.fitsPeers(d.files, [...state(d.conv).members.keys()].filter((u) => u !== me()));
@@ -652,22 +667,39 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
           const hash = await X.hashOf(row.id);
           files.push({ id: row.id, name: row.name, type: row.type, size: row.size, hash, ...(f.w ? { w: f.w, h: f.h } : {}) });
         }
-        myItem(d.conv, 'msg', { text: m.text || '', ...(m.replyTo ? { replyTo: m.replyTo } : {}), ...(files.length ? { files } : {}) }, m.id, m.ts);
+        const root = g !== d.conv ? String(d.conv).slice(2) : null;
+        const replyTo = m.replyTo || root; // a PC without threads (0.11) shows a thread reply as a reply to its first message
+        myItem(g, 'msg', { text: m.text || '', ...(replyTo ? { replyTo } : {}), ...(root ? { t: root } : {}), ...(files.length ? { files } : {}) }, m.id, m.ts);
       });
     }
     return r;
   });
-  const itemOp = (name, k, pick) => wrap(name, (c, d, base) => {
+  const itemOp = (name, k, pick, check) => ops[name] && wrap(name, (c, d, base) => {
     if (!inGroup(c, d.conv)) return base(c, d);
-    if (!mineC(c) || !amIn(d.conv)) fail('You don’t have access to this conversation.');
+    const g = groupOf(d.conv);
+    if (!mineC(c) || !amIn(g)) fail('You don’t have access to this conversation.');
+    check?.(g);
     const r = base(c, d);
-    X.later(() => myItem(d.conv, k, pick(d)));
+    X.later(() => myItem(g, k, pick(d)));
     return r;
   });
   itemOp('msg.edit', 'edit', (d) => ({ id: d.id, text: d.text }));
   itemOp('msg.delete', 'delete', (d) => ({ id: d.id }));
   itemOp('msg.restore', 'restore', (d) => ({ id: d.id }));
   itemOp('react', 'react', (d) => ({ id: d.id, emoji: d.emoji, on: d.on === true }));
+  // 0.12: pins reach every member (a 0.11 PC drops them, as before); the timer only once every member's PC knows it.
+  itemOp('msg.pin', 'pin', (d) => ({ id: d.id, on: true }));
+  itemOp('msg.unpin', 'pin', (d) => ({ id: d.id, on: false }));
+  const olderPcs = (g) => [...state(g).members.keys()].filter((u) => u !== me() && !X.capsOf(u).includes('ttl'));
+  const OLD_PCS = (uids) => `${uids.map((u) => M.userRow(localId(u))?.name || 'Someone').join(', ')} ${uids.length === 1 ? 'needs' : 'need'} to update Snug before messages can disappear here. Until then, nothing would be removed on their PC.`;
+  itemOp('conv.ttl', 'ttl', (d) => ({ ttl: d.ttl }), (g) => { const old = olderPcs(g); if (old.length) fail(OLD_PCS(old)); });
+  const baseDmView = M.dmView;
+  M.dmView = (id, viewer) => {
+    const v = baseDmView(id, viewer);
+    if (v && isGroup(id) && viewer === X.owner() && amIn(id)) { const old = olderPcs(id); if (old.length) v.ttlBlocked = OLD_PCS(old); }
+    return v;
+  };
+  wrap('poll.create', (c, d, base) => { if (groupOf(d.conv)) fail('Polls with friends on other PCs aren’t available yet.'); return base(c, d); });
   wrap('call.start', (c, d, base) => { if (isGroup(d.dm)) fail(NO_CALLS); return base(c, d); });
   wrap('call.join', (c, d, base) => { if (isGroup(d.dm)) fail(NO_CALLS); return base(c, d); });
 

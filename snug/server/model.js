@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { can, canPost } from '../js/lib/perms.js';
 import { fold } from '../js/lib/util.js';
 import { parseQuery, isEmptyQuery, dateRange } from '../js/lib/search.js';
+import { splitTerms, matchExpr, closeWords } from './fts.js'; // 0.12: full-text search
 import { EVENT_LENGTH } from '../js/lib/social.js';
 
 export const PAGE = 60;
@@ -307,9 +308,13 @@ export function createModel(db) {
     if (!convs.length) return [];
     // sec-authz: the conversation list goes in as one JSON array, so someone in
     // a great many rooms and threads can't run past SQLite's variable limit.
-    const where = ['conv IN (SELECT value FROM json_each(?))', 'deleted IS NULL'];
-    const params = [JSON.stringify(convs)];
-    for (const t of p.terms) { where.push("fold LIKE ? ESCAPE '\\'"); params.push(`%${t.replace(/[\\%_]/g, (c) => `\\${c}`)}%`); }
+    const where = ['conv IN (SELECT value FROM json_each(?))', 'deleted IS NULL', '(expires IS NULL OR expires > ?)']; // expires: 0.12 disappearing messages
+    const params = [JSON.stringify(convs), Date.now()];
+    const like = (t) => { where.push("fold LIKE ? ESCAPE '\\'"); params.push(`%${t.replace(/[\\%_]/g, (c) => `\\${c}`)}%`); };
+    // 0.12: words go to the full-text index (ranked, prefix matches); what it
+    // can't serve (one letter, emoji, symbols) keeps the substring scan.
+    const split = db.fts ? splitTerms(p.terms) : { fts: [], like: p.terms };
+    for (const t of split.like) like(t);
     if (p.from.length) {
       const authors = db.all('SELECT id, name, handle FROM users').filter((u) => p.from.every((v) => fold(`${u.name} ${u.handle}`).includes(v))).map((u) => u.id);
       if (!authors.length) return [];
@@ -318,7 +323,7 @@ export function createModel(db) {
     }
     if (p.saved) { where.push('id IN (SELECT msg FROM saved WHERE user = ?)'); params.push(user); }
     // Mentions, dates and pins (messaging track).
-    for (const h of p.mentions || []) { where.push("fold LIKE ? ESCAPE '\\'"); params.push(`%@${h.replace(/[\\%_]/g, (x) => `\\${x}`)}%`); }
+    for (const h of p.mentions || []) like(`@${h}`);
     for (const [k, cmp] of [['before', (r) => ['ts < ?', r[0]]], ['after', (r) => ['ts >= ?', r[1]]], ['during', (r) => ['ts >= ? AND ts < ?', r[0], r[1]]]]) {
       const r = p[k] && dateRange(p[k], tz);
       if (r) { const [sql, ...v] = cmp(r); where.push(sql); params.push(...v); }
@@ -327,16 +332,43 @@ export function createModel(db) {
     if (p.has.includes('poll')) where.push('id IN (SELECT msg FROM polls)');
     if (p.has.includes('sticker')) where.push('sticker IS NOT NULL');
     if (p.has.includes('embed')) where.push('embeds IS NOT NULL AND noembed IS NULL');
-    const rows = db.all(`SELECT * FROM messages WHERE ${where.join(' AND ')} ORDER BY seq DESC LIMIT 1000`, ...params)
-      .filter((r) => {
-        const files = json(r.files, []);
-        return p.has.every((h) => (h === 'image' && files.some((f) => f.kind === 'image'))
-          || (h === 'file' && files.some((f) => f.kind === 'file'))
-          || (h === 'link' && /https?:\/\//.test(r.text))
-          || (h === 'video' && files.some((f) => f.kind === 'video'))
-          || ['poll', 'sticker', 'embed'].includes(h)); // checked in SQL above
-      }).slice(0, limit);
-    return M.withReactions(rows).map((m, i) => ({ conv: rows[i].conv, m }));
+    const keep = (r) => {
+      const files = json(r.files, []);
+      return p.has.every((h) => (h === 'image' && files.some((f) => f.kind === 'image'))
+        || (h === 'file' && files.some((f) => f.kind === 'file'))
+        || (h === 'link' && /https?:\/\//.test(r.text))
+        || (h === 'video' && files.some((f) => f.kind === 'video'))
+        || ['poll', 'sticker', 'embed'].includes(h)); // checked in SQL above
+    };
+    // Relevance (bm25: more of the words, in shorter messages, ranks higher),
+    // gently discounted by age so a good match from today beats an equal one
+    // from last year. bm25 is negative: lower is better.
+    const ranked = (expr) => db.all(`SELECT messages.* FROM
+        (SELECT rowid AS fseq, bm25(messages_fts) AS score FROM messages_fts WHERE messages_fts MATCH ?) f
+      JOIN messages ON messages.seq = f.fseq
+      WHERE ${where.join(' AND ')}
+      ORDER BY f.score / (1.0 + (? - ts) / 2592000000.0), seq DESC LIMIT 1000`, expr, ...params, Date.now())
+      .filter(keep).slice(0, limit);
+    let rows, close = false;
+    if (split.fts.length) {
+      rows = ranked(matchExpr(split.fts));
+      // Nothing at all: try words one or two letters away from each long one
+      // ("tenmokku" finds "tenmoku"). The reply says these are close matches.
+      // Candidate words can come from anywhere in the index, but the hits are
+      // filtered exactly like any search, so nothing unreadable is returned.
+      if (!rows.length) {
+        const alts = split.fts.map((parts) => (parts.length === 1 ? [parts[0], ...closeWords(db, parts[0])] : [parts.join(' ')]));
+        if (alts.some((a) => a.length > 1)) {
+          rows = ranked(alts.map((a) => `(${a.map((w) => `"${w}"*`).join(' OR ')})`).join(' AND '));
+          close = rows.length > 0;
+        }
+      }
+    } else {
+      rows = db.all(`SELECT * FROM messages WHERE ${where.join(' AND ')} ORDER BY seq DESC LIMIT 1000`, ...params).filter(keep).slice(0, limit);
+    }
+    const hits = M.withReactions(rows).map((m, i) => ({ conv: rows[i].conv, m }));
+    if (close) hits.close = true;
+    return hits;
   };
 
   return M;

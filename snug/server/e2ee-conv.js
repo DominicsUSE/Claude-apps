@@ -120,7 +120,7 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
   };
   // Server search can't read these rows (their fold is empty); filters such as from: still skip them.
   const baseSearch = M.search;
-  M.search = (...a) => baseSearch(...a).filter((h) => !h.m.e2ee);
+  M.search = (...a) => { const all = baseSearch(...a); const hits = all.filter((h) => !h.m.e2ee); if (all.close) hits.close = true; return hits; }; // keeps 0.12's close-match flag
   // A declared mention (the header's ping list) counts as a mention for notifications.
   M.pinged = (user, row) => !!row?.ping && json(row.ping, []).includes(user);
 

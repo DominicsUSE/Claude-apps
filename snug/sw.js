@@ -1,10 +1,69 @@
-// Snug's service worker. It does one job: show a notification when the server
-// pushes one while no Snug tab is open, and open the conversation when the
-// notification is clicked. It caches nothing and handles no requests.
+// Snug's service worker. Two jobs:
+// 1. Push: show a notification when the server pushes one while no Snug tab
+//    is open, and open the conversation when the notification is clicked.
+// 2. The app shell (0.12): keep a copy of the app's own files (the page,
+//    scripts, styles, fonts, pictures) so Snug opens with no connection and
+//    shows what this device already has. Always network first, so a new
+//    version shows at once whenever the server can be reached; the copy is
+//    only used when it can't. Never kept: anything under /api/ (messages,
+//    files, sign-in), the socket, or this worker itself. The list of files and
+//    its version come from /shell.json (server/shell.js).
 /* eslint-env serviceworker */
 
-self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+const SHELL = 'snug-shell-v1';
+const NEVER = /^\/(api|ws)(\/|$)|^\/sw\.js$|^\/shell\.json$/;
+
+async function precache() {
+  const r = await fetch('/shell.json', { cache: 'no-store' });
+  if (!r.ok) return;
+  const { version, files } = await r.json();
+  const cache = await caches.open(SHELL);
+  if ((await (await cache.match('/__version'))?.text()) === version) return;
+  // Four at a time, kind to a small server. A file that fails is kept when it's next used instead,
+  // and the version isn't written, so the next visit tries the whole list again.
+  const todo = files.filter((f) => typeof f === 'string' && f.startsWith('/') && !NEVER.test(f));
+  let failed = 0;
+  const worker = async () => {
+    for (let f = todo.shift(); f; f = todo.shift()) {
+      try { const res = await fetch(f, { cache: 'no-cache' }); if (res.ok) await cache.put(f, res); else failed++; } catch { failed++; }
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  if (!failed) await cache.put('/__version', new Response(version));
+}
+
+self.addEventListener('install', (e) => { self.skipWaiting(); e.waitUntil(precache().catch(() => {})); });
+self.addEventListener('activate', (e) => e.waitUntil((async () => {
+  for (const k of await caches.keys()) if (k.startsWith('snug-shell-') && k !== SHELL) await caches.delete(k);
+  await self.clients.claim();
+})()));
+// The page asks for a refresh of the copy after it loads (a new version on the server).
+self.addEventListener('message', (e) => { if (e.data?.t === 'snug:shell') e.waitUntil(precache().catch(() => {})); });
+
+self.addEventListener('fetch', (e) => {
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin || NEVER.test(url.pathname)) return;
+  // Pages (/, /join/..., /m/...) are all the same app page.
+  const key = req.mode === 'navigate' ? '/' : url.pathname;
+  if (req.mode !== 'navigate' && !/^\/(js|css|vendor|fonts|brand)\//.test(url.pathname)) return;
+  e.respondWith((async () => {
+    try {
+      const res = await fetch(req);
+      // Keep the newest copy of what loaded fine (never a partial or an error).
+      if (res.ok && res.status === 200 && res.type === 'basic' && (req.mode !== 'navigate' || /^text\/html/.test(res.headers.get('content-type') || ''))) {
+        const copy = res.clone();
+        e.waitUntil(caches.open(SHELL).then((c) => c.put(key, copy)).catch(() => {}));
+      }
+      return res;
+    } catch (err) {
+      const hit = await caches.match(key, { cacheName: SHELL });
+      if (hit) return hit;
+      throw err;
+    }
+  })());
+});
 
 self.addEventListener('push', (e) => {
   let d = {};
