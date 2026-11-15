@@ -18,9 +18,13 @@ export const DEFAULT_LIMITS = {
   ipWs: [30, MIN],
   ipAdmin: [120, MIN],
   ipVault: [30, HOUR],
+  ipPow: [20, HOUR], // v0.12 keypair accounts (keyacct.js): proof-of-work challenges
+  ipRegister: [3, DAY], // v0.12: keypair sign-ups per /48 (persisted)
+  ipMoveWait: [60, MIN], // v0.12: a new PC polling for its pairing code
   // global (SQLite)
   authGlobal: [300, HOUR], // tokens GitHub accepted (REG-M4)
   authBadGlobal: [3000, HOUR], // tokens GitHub refused: only bounds our calls to GitHub (REG-M4)
+  regGlobal: [300, HOUR], // v0.12: keypair sign-ups, all addresses together (GitHub sign-up is not counted)
   // per uid (SQLite)
   lookupDay: [300, DAY],
   turnDay: [10, DAY],
@@ -33,6 +37,13 @@ export const DEFAULT_LIMITS = {
   watchDay: [200, DAY],
   knockDay: [50, DAY],
   knockPairDay: [5, DAY],
+  // v0.12: a keypair account in its first 72 hours (keyacct.js limitFor)
+  newKnockDay: [10, DAY],
+  newKnockPairDay: [2, DAY],
+  newLookupDay: [60, DAY],
+  newTurnDay: [3, DAY],
+  movePeek: [10, DAY], // v0.12: pairing codes an account may try
+  recSet: [5, DAY], // v0.12: recovery key changes
   adminDay: [1000, DAY],
   vaultDay: [20, DAY],
   vaultRotDay: [5, DAY], // REG-L1
@@ -43,6 +54,7 @@ export const DEFAULT_LIMITS = {
   relayBurst: [50, 1000],
   watchHour: [30, HOUR],
   xferBurst: [60, 1000],
+  moveWait: [30, MIN], // v0.12: polls per pairing code
   framesMin: [2400, MIN], // frames per authenticated socket mode; past it the socket closes (REG-M5)
   xferFramesMin: [4800, MIN],
   // sizes / counts

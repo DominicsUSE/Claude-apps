@@ -15,6 +15,12 @@ export const need = (cond) => {
   if (!cond) fail('bad_request');
 };
 
+// Shared by the Hub and keyacct.js (v0.12): how long a move waits, how long a Stop blocks the next one.
+export const REBIND_DELAY = 72 * 3_600_000;
+export const REBIND_BLOCK = 24 * 3_600_000;
+export const KNOCK_TTL = 30 * 86_400_000;
+export const MAX_KNOCK_BOX = 4096;
+
 export const UID_RE = /^[a-z2-7]{16}$/;
 export const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const RAW_NAME_RE = /^[A-Za-z0-9_.]{1,32}$/;

@@ -22,6 +22,14 @@ PING_SECONDS = "90"
 # The Durable Object instance holding every account. A new name starts an empty registry (a reset).
 # "hub-2": reset on 2026-11-14 at the owner's request (the old instance's test accounts are abandoned).
 HUB_NAME = "hub-2"
+# v0.12: keypair accounts (no GitHub account needed; registry/src/keyacct.js). "1" = on; anything else answers
+# their routes with 404, exactly as before. 0.11 clients never call them either way.
+KEY_ACCOUNTS = "1"
+# Proof-of-work bits for a keypair sign-up (default 20; +1 per doubling of sign-ups past 30 an hour; max 28).
+# Raise it (no code change) if sign-ups are abused.
+POW_BITS = "20"
+# Optional: free the names of keypair accounts with no connection for this many days (empty = never).
+# KEY_ACCOUNT_IDLE_DAYS = "400"
 
 # Secrets (wrangler secret put NAME), never committed:
 #   GH_HMAC_SECRET    required. >= 32 random bytes. NEVER ROTATE (it keys every account's GitHub hash).
