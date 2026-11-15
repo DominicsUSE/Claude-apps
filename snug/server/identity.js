@@ -30,6 +30,8 @@ export function createIdentity({ dataDir, keyStore = null, db }) {
   const memory = dataDir === ':memory:';
   const file = memory ? null : join(dataDir, 'identity.json');
   let keys = null;       // { ikPriv, xkPriv, ik, xk }
+  let recovery = null;   // v0.12: Buffer(20) until the person confirms they saved it
+  const recFile = memory ? null : join(dataDir, 'recovery.json');
   let enc = 'none';
 
   const available = () => { try { return !!keyStore?.available?.(); } catch { return false; } };
@@ -100,6 +102,33 @@ export function createIdentity({ dataDir, keyStore = null, db }) {
     clearSelf() { store.clear(); },
     // Forget the keys (account deleted): the file goes, the next sign-in makes new ones.
     forget() { keys = null; if (!memory) { try { unlinkSync(file); } catch { /* none */ } } },
+    // v0.12: the recovery secret (20 bytes), kept only until the person shows they saved it (keyauth.js).
+    // <dataDir>/recovery.json, wrapped like identity.json.
+    saveRecovery(raw) {
+      recovery = Buffer.from(raw);
+      if (memory) return;
+      const plain = recovery.toString('base64');
+      let blob = plain, e = 'none';
+      if (available()) { try { blob = keyStore.encrypt(plain); e = 'safeStorage'; } catch { blob = plain; } }
+      mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+      writeAtomic(recFile, JSON.stringify({ v: 1, enc: e, blob, created: Date.now() }));
+    },
+    takeRecovery() {
+      if (recovery) return new Uint8Array(recovery);
+      if (memory || !existsSync(recFile)) return null;
+      try {
+        const f = JSON.parse(readFileSync(recFile, 'utf8'));
+        const b = Buffer.from(f.enc === 'safeStorage' ? keyStore.decrypt(f.blob) : f.blob, 'base64');
+        if (b.length !== 20) return null;
+        recovery = b;
+        return new Uint8Array(b);
+      } catch { return null; }
+    },
+    dropRecovery() {
+      if (recovery) recovery.fill(0);
+      recovery = null;
+      if (!memory) { try { unlinkSync(recFile); } catch { /* none */ } }
+    },
     // After a move completes, the files kept aside are no longer needed (S29).
     dropBroken() {
       if (memory) return 0;

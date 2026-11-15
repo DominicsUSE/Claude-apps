@@ -1157,8 +1157,13 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
         keyProtected: identity.protected, state: self.state, registry,
         renameAt: renamedAt ? renamedAt + 7 * DAY : 0,
         ...(self.rebindAt ? { rebindAt: self.rebindAt } : {}),
-        ...(rebindPending ? { rebindPending: { at: rebindPending.at, fingerprint: fingerprint(rebindPending.ik, rebindPending.xk) } } : {}),
+        ...(rebindPending ? { rebindPending: { at: rebindPending.at, fingerprint: fingerprint(rebindPending.ik, rebindPending.xk), via: identity.get('move_via') || 'github' } } : {}),
         hideIp: !!self.hideIp, relayed: stats.relayed,
+        // v0.12: a keypair account ('key') or a GitHub one ('gh'), and its recovery key (server/keyauth.js keeps these).
+        // Short names: the snapshot never spells out the GitHub name (tests check no GitHub identity reaches it).
+        kind: identity.get('kind') === 'key' ? 'key' : 'gh',
+        recovery: { set: identity.get('rk_set') === '1', saved: identity.get('rk_saved') === '1', pendingAt: Number(identity.get('rk_pending_at')) || null },
+        ghLinked: identity.get('gh_linked') === '1',
       };
     },
     // The old PC says "That was me" (section 6.4): my friends go to the new PC, then the registry moves now.
@@ -1177,6 +1182,18 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       const r = await reg.rebindApprove({ kver: pend.kver, ik: pend.ik, xk: pend.xk, prev });
       rebindPending = null;
       return r;
+    },
+    // v0.12: "Move to a new PC" with the pairing code shown there (server/keyauth.js id.moveAccept). My friends go
+    // along in a restore list stored with the move (as approveRebind's), and the registry moves the account now.
+    async moveAccept(code) {
+      if (!active() || self.state !== 'ok') fail('Your account isn’t active on this PC right now.');
+      const pk = await reg.signedCall('/v1/move/peek', 'move-peek', { code });
+      const m = identity.me();
+      const id = rid();
+      const box = seal(m, myUid(), pk.xk, { t: 'restore', id, ts: Math.round(reg.now()), from: m.uid, d: { uids: friendShadows().map(uidOf).filter(Boolean) } });
+      const prev = keychangeSign(m.ikPriv, myUid(), pk.kver, pk.ik, pk.xk);
+      // A very long friend list doesn't fit a knock; the data file that follows the move carries it anyway.
+      return reg.signedCall('/v1/move/accept', 'move-accept', { code, prev, ...(box.length <= 4096 ? { knock: { id, box } } : {}) });
     },
     async cancelRebind() {
       if (!active()) fail('This PC isn’t signed in.');
