@@ -149,6 +149,8 @@ test('friends only: a house-mate who isn’t a friend sees Robin offline with no
   assert.equal(t.doing, 'Offline', 'no “last wrote” line');
   assert.notEqual((await seen(ines)).presence, 'offline');
   await robin.click('.seg[aria-label="Who sees when you’re online"] button:has-text("Everyone")');
+  // Back to everyone: Tomasz sees him online again, and his activity lines come back.
+  await tomasz.waitForFunction((id) => window.snug.S.users[id].presence !== 'offline' && !window.snug.S.users[id].hideActive, robinId);
   for (const p of [robin, tomasz, ines]) await close(p);
 });
 
