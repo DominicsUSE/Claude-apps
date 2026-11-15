@@ -263,44 +263,17 @@ derives from the recovery secret (`js/lib/recovery.js`); the registry stores onl
 | Call | Body | Signed by / string |
 |---|---|---|
 | `POST /v1/pow` | `{purpose:"register"}` | none (20 an hour per address) → `{c, bits, exp}` (10 min, MAC-protected, single use) |
-| `POST /v1/register` | `{ik, xk, rk, username, c, nonce, ts, sig, rsig}` | `ik` **and** `rk` over `register
-{ik}
-{xk}
-{rk}
-{username}
-{c}
-{nonce}
-{ts}`; `SHA-256("snug-pow-v1
-"+c+"
-"+ik+"
-"+nonce)` starts with `bits` zero bits → `{account}` |
-| `POST /v1/recover` | `{rk, ik, xk, ts, sig, rsig}` | `rk` and the new `ik` over `recover
-{rk}
-{ik}
-{xk}
-{ts}` → `{status:"pending", uid, account, at}`: a 72 h move (the old PC gets the usual `rebind` frame and can stop it); at once when the owner armed `move.force` |
-| `POST /v1/move/hello` | `{ik, xk, ts, sig}` | new `ik`, `move-hello
-{ik}
-{xk}
-{ts}` → `{code:"XXXXX-XXXXX", hid, exp}` (10 min, Crockford base32) |
-| `POST /v1/move/wait` | `{hid, ts, sig}` | the hello's `ik`, `move-wait
-{hid}
-{ts}` → `{state: waiting \| done (+account) \| expired}` |
+| `POST /v1/register` | `{ik, xk, rk, username, c, nonce, ts, sig, rsig}` | `ik` **and** `rk` over `register\n{ik}\n{xk}\n{rk}\n{username}\n{c}\n{nonce}\n{ts}`; `SHA-256("snug-pow-v1\n"+c+"\n"+ik+"\n"+nonce)` starts with `bits` zero bits → `{account}` |
+| `POST /v1/recover` | `{rk, ik, xk, ts, sig, rsig}` | `rk` and the new `ik` over `recover\n{rk}\n{ik}\n{xk}\n{ts}` → `{status:"pending", uid, account, at}`: a 72 h move (the old PC gets the usual `rebind` frame and can stop it); at once when the owner armed `move.force` |
+| `POST /v1/move/hello` | `{ik, xk, ts, sig}` | new `ik`, `move-hello\n{ik}\n{xk}\n{ts}` → `{code:"XXXXX-XXXXX", hid, exp}` (10 min, Crockford base32) |
+| `POST /v1/move/wait` | `{hid, ts, sig}` | the hello's `ik`, `move-wait\n{hid}\n{ts}` → `{state: waiting \| done (+account) \| expired}` |
 | `POST /v1/move/peek` | `{uid, ts, p:{code}, sig}` | current key, `move-peek` → `{ik, xk, kver}` (5 tries a code, 10 codes a day) |
 | `POST /v1/move/accept` | `{uid, ts, p:{code, prev, knock?}, sig}` | current key, `move-accept`, mutating; `prev` as `/v1/rebind/approve` → `{ok}`: the move completes now; `knock {id, box}` is the restore list for the new key |
-| `POST /v1/recovery/set` | `{uid, ts, p:{rk, rsigNew, rsigOld?}, sig}` | current key; both rsigs over `recovery-set
-{uid}
-{rk}
-{ts}` → `{state:"set"}` (no key yet, or with the old one), else `{state:"pending", at}` (7 days) |
-| `POST /v1/recovery/cancel` | `{uid, ts, rsig}` | current `rk`, `recovery-cancel
-{uid}
-{ts}`, mutating → `{ok}` |
+| `POST /v1/recovery/set` | `{uid, ts, p:{rk, rsigNew, rsigOld?}, sig}` | current key; both rsigs over `recovery-set\n{uid}\n{rk}\n{ts}` → `{state:"set"}` (no key yet, or with the old one), else `{state:"pending", at}` (7 days) |
+| `POST /v1/recovery/cancel` | `{uid, ts, rsig}` | current `rk`, `recovery-cancel\n{uid}\n{ts}`, mutating → `{ok}` |
 | `POST /v1/link/github` | `{uid, ts, p:{ticket}, sig}` | current key, `link-github`; a fresh `new` ticket issued to the same key → `{ok}`. A linked GitHub signs in to (and can move) the account |
 | `POST /v1/link/github/remove` | `{uid, ts, p:{}, sig}` | current key, `unlink-github` → `{ok}` |
-| `POST /v1/release/key` | `{uid, ts, p:{}, sig, rsig}` | current key **and** `rk` over `release-key
-{uid}
-{ts}
-{p}` → `{ok}` (the name is free at once) |
+| `POST /v1/release/key` | `{uid, ts, p:{}, sig, rsig}` | current key **and** `rk` over `release-key\n{uid}\n{ts}\n{p}` → `{ok}` (the name is free at once) |
 | `POST /v1/account/kind` | `{uid, ts, p:{}, sig}` | current key → `{kind, recovery:{set, pendingAt}, github:{linked}, move:{via, at}\|null}` |
 
 Errors added: `pow_invalid` 400, `too_new` 409 (`{retryAt?, what?}`), `key_in_use` 409, `recovery_pending`
