@@ -21,7 +21,7 @@ export const AUDIO_TYPES = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg'
 export const MAX_PINS = 50;
 export const MAX_GIF_FAVS = 200;
 export const MAX_VOICE_SECONDS = 300;
-const MAX_FILE = 10 * 1024 * 1024;
+const MAX_GIF = 10 * 1024 * 1024; // a GIF fetched from a search provider (attachments have their own limit, server/uploads.js)
 const FILE_ID = /^f_[a-z0-9]{8,40}$/;
 const json = (s, f) => { try { return s == null ? f : JSON.parse(s); } catch { return f; } };
 
@@ -367,12 +367,12 @@ export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, he
     let res;
     try { res = await fetch(u, { redirect: 'manual', signal: AbortSignal.timeout(15000) }); } catch { return { err: 'The GIF couldn’t be fetched. Try another.' }; }
     if (res.status !== 200 || !res.body) return { err: 'The GIF couldn’t be fetched. Try another.' };
-    if (Number(res.headers.get('content-length')) > MAX_FILE) return { err: 'That GIF is over 10 MB. Try another.' };
+    if (Number(res.headers.get('content-length')) > MAX_GIF) return { err: 'That GIF is over 10 MB. Try another.' };
     const chunks = [];
     let size = 0;
     for await (const c of res.body) {
       size += c.length;
-      if (size > MAX_FILE) return { err: 'That GIF is over 10 MB. Try another.' };
+      if (size > MAX_GIF) return { err: 'That GIF is over 10 MB. Try another.' };
       chunks.push(c);
     }
     const data = Buffer.concat(chunks);

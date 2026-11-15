@@ -3,7 +3,9 @@
 // contiguously into a .part file that may never pass the size declared by the
 // message or profile that refers to it, checked against its hash, then kept.
 // One transfer per friend and four in all; the rest wait in a short queue.
-import { createReadStream, openSync, writeSync, closeSync, unlinkSync, renameSync, readSync, fstatSync, existsSync } from 'node:fs';
+// A transfer cut off by a dropped link keeps its .part file, and the next try
+// asks only for the rest (the hash check at the end still covers every byte).
+import { createReadStream, openSync, writeSync, closeSync, unlinkSync, renameSync, readSync, fstatSync, existsSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
@@ -18,7 +20,10 @@ export function hashFile(path) {
   });
 }
 
-export function createBlobs({ db, filesDir, sendEph, canServe, log = () => {}, stats }) {
+// Failures that leave the bytes so far good: the next try carries on from them.
+const RESUMABLE = new Set(['link down', 'timeout', 'closing', 'missing']);
+
+export function createBlobs({ db, filesDir, sendEph, canServe, log = () => {}, stats, onProgress = () => {} }) {
   const active = new Map();   // uid -> transfer
   const queue = [];           // { uid, job, resolve }
   let total = 0;
@@ -87,14 +92,31 @@ export function createBlobs({ db, filesDir, sendEph, canServe, log = () => {}, s
       begin(q);
     }
   }
+  // Bytes kept from a cut transfer: hashed again so the check at the end covers them.
+  function resumeFrom(path, size, hash) {
+    let have = 0;
+    try { have = statSync(path).size; } catch { return 0; }
+    if (have <= 0 || have >= size) return 0;
+    const fd = openSync(path, 'r');
+    try {
+      const buf = Buffer.alloc(1024 * 1024);
+      for (let o = 0; o < have;) { const n = readSync(fd, buf, 0, Math.min(buf.length, have - o), o); if (!n) break; hash.update(buf.subarray(0, n)); o += n; }
+    } finally { closeSync(fd); }
+    return have;
+  }
   function begin(q) {
     const path = join(filesDir, `${q.job.id}.part`);
-    let fd;
-    try { fd = openSync(path, 'w', 0o600); } catch { q.resolve(false); return; }
-    const t = { ...q, path, fd, written: 0, hash: createHash('sha256'), timer: null };
+    const hash = createHash('sha256');
+    let fd, written = 0;
+    try {
+      written = resumeFrom(path, q.job.size, hash);
+      fd = openSync(path, written ? 'a' : 'w', 0o600);
+    } catch { q.resolve(false); return; }
+    const t = { ...q, path, fd, written, hash, timer: null };
     active.set(q.uid, t);
     total++;
     if (q.job.size === 0) { finish(t); return; }
+    onProgress(q.job.id, written, q.job.size);
     ask(t);
   }
   function ask(t) {
@@ -102,6 +124,7 @@ export function createBlobs({ db, filesDir, sendEph, canServe, log = () => {}, s
     t.timer = setTimeout(() => end(t, false, 'timeout'), 20_000);
     t.timer.unref?.();
     // One outstanding request per friend, up to 8 parts (S4).
+    t.until = t.written + 8 * PART;
     if (!sendEph(t.uid, 'blob.get', { h: t.job.h, o: t.written, n: 8 })) end(t, false, 'link down');
   }
   function onPart(uid, d) {
@@ -115,7 +138,7 @@ export function createBlobs({ db, filesDir, sendEph, canServe, log = () => {}, s
     t.hash.update(buf);
     t.written += buf.length;
     if (t.written === t.job.size) { finish(t); return; }
-    if (t.written % (8 * PART) === 0) ask(t);
+    if (t.written >= t.until) { onProgress(t.job.id, t.written, t.job.size); ask(t); }
     else { clearTimeout(t.timer); t.timer = setTimeout(() => end(t, false, 'timeout'), 20_000); t.timer.unref?.(); }
   }
   function onMiss(uid, d) { const t = active.get(uid); if (t && d?.h === t.job.h) end(t, false, 'missing'); }
@@ -123,6 +146,7 @@ export function createBlobs({ db, filesDir, sendEph, canServe, log = () => {}, s
     if (t.hash.digest('base64url') !== t.job.h) { end(t, false, 'hash'); return; }
     try { closeSync(t.fd); t.fd = null; renameSync(t.path, join(filesDir, t.job.id)); } catch { end(t, false, 'rename'); return; }
     stats.blobsFetched++;
+    onProgress(t.job.id, t.job.size, t.job.size);
     end(t, true);
   }
   function end(t, ok, why) {
@@ -131,7 +155,11 @@ export function createBlobs({ db, filesDir, sendEph, canServe, log = () => {}, s
     active.delete(t.uid);
     total--;
     if (t.fd != null) try { closeSync(t.fd); } catch { /* closed */ }
-    if (!ok) { try { unlinkSync(t.path); } catch { /* none */ } log('peer', 'blob failed', why); }
+    if (!ok) {
+      // A dropped link keeps what arrived; wrong or unwanted bytes go.
+      if (!(RESUMABLE.has(why) && t.written > 0)) try { unlinkSync(t.path); } catch { /* none */ }
+      log('peer', 'blob failed', why);
+    }
     t.resolve(ok);
     next();
   }
