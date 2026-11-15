@@ -661,7 +661,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       const dm = inCall(uid);
       if (!dm || hub.voicePlaceOf(shadowId(uid)) !== dm) fail('Not in the call.');
       const s = {};
-      for (const k of ['muted', 'deaf', 'camera', 'screen']) if (typeof d[k] === 'boolean') s[k] = d[k];
+      for (const k of ['muted', 'deaf', 'camera', 'screen', 'listen']) if (typeof d[k] === 'boolean') s[k] = d[k];
       hub.voiceState(shadowId(uid), s);
     },
     rtc: (uid, d) => {
@@ -987,7 +987,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     const shadow = place && remoteOfDm(place);
     if (shadow) {
       const s = {};
-      for (const k of ['muted', 'deaf', 'camera', 'screen']) if (typeof d[k] === 'boolean') s[k] = d[k];
+      for (const k of ['muted', 'deaf', 'camera', 'screen', 'listen']) if (typeof d[k] === 'boolean') s[k] = d[k];
       links.sendEph(uidOf(shadow), 'voice.state', s);
     }
     return r;

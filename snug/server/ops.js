@@ -78,7 +78,7 @@ function linksOf(v) {
   });
 }
 
-// sec-authz: a WebRTC signal is one of { sdp }, { candidate } or { kinds } (js/voice.js).
+// sec-authz: a WebRTC signal is one of { sdp }, { candidate }, { kinds } or { want } (js/voice.js).
 const RTC_SDP_MAX = 24_000;
 const badSignal = () => fail('That signal isn’t valid.');
 const sOrNull = (v, max) => (v === null || v === undefined ? null : typeof v === 'string' && v.length <= max ? v : badSignal());
@@ -110,6 +110,11 @@ export function rtcSignal(data) {
       out[kk] = sOrNull(vv, 128);
     }
     return { kinds: out };
+  }
+  // Data saver (js/voice.js): whether this person wants my camera at all.
+  if (k === 'want') {
+    if (Object.keys(v).length !== 1 || typeof v.camera !== 'boolean') badSignal();
+    return { want: { camera: v.camera } };
   }
   return badSignal();
 }
@@ -960,12 +965,13 @@ export function createOps({ db, M, hub }) {
       return { peers: hub.voiceJoin(c, room.id) };
     },
     'voice.leave': (c) => { hub.voiceLeave(c.user); return {}; },
-    // Mute, deafen, camera and screen flags. Each is optional; when present it
+    // Mute, deafen, camera, screen and listen flags. Each is optional; when present it
     // must be a real true or false. Camera and screen only reach the people
     // who can see the room, the same as mute.
     'voice.state'(c, d) {
       const s = {};
-      for (const k of ['muted', 'deaf', 'camera', 'screen']) {
+      // listen: in without a microphone, only hearing (js/voice.js).
+      for (const k of ['muted', 'deaf', 'camera', 'screen', 'listen']) {
         if (d[k] === undefined) continue;
         if (typeof d[k] !== 'boolean') fail('That voice state isn’t valid.');
         s[k] = d[k];

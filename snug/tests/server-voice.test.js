@@ -177,6 +177,40 @@ test('reconnect: someone banned while their slot is held can’t come back, and 
 });
 
 // ---------- Share camera and screen ----------
+// ---------- Listening without a microphone, and data saver signals ----------
+test('listen only: "listen" is a real true or false in voice.state, reaches the others, and a later microphone clears it', async () => {
+  const { a, b, hangout } = await people('ls');
+  await a.ok('voice.join', { room: hangout });
+  await b.ok('voice.join', { room: hangout });
+  assert.match(await b.refused('voice.state', { listen: 'yes' }), /isn’t valid/);
+  await b.ok('voice.state', { muted: true, listen: true });
+  const heard = await a.next('voice', (v) => v.room === hangout && v.state[b.id]?.listen === true);
+  assert.equal(heard.state[b.id].muted, true);
+  // A microphone added later in the call: talking, no longer listening.
+  await b.ok('voice.state', { muted: false, listen: false });
+  const now = await a.next('voice', (v) => v.room === hangout && v.state[b.id]?.muted === false);
+  assert.equal(now.state[b.id].listen, undefined, 'not listening: the key is left out');
+  // A listener's receive-only signalling still goes through.
+  await b.ok('rtc', { to: a.id, data: { kinds: { mic: null } } });
+  assert.deepEqual((await a.next('rtc', (r) => r.from === b.id)).data, { kinds: { mic: null } });
+  closeAll(a, b);
+});
+
+test('data saver: { want: { camera } } is a signal with one true or false, rebuilt, and nothing else gets through', async () => {
+  const { rtcSignal } = await import('../server/ops.js');
+  assert.deepEqual(rtcSignal({ want: { camera: false } }), { want: { camera: false } });
+  assert.deepEqual(rtcSignal({ want: { camera: true } }), { want: { camera: true } });
+  assert.throws(() => rtcSignal({ want: { camera: 'off' } }));
+  assert.throws(() => rtcSignal({ want: { camera: false, screen: false } }));
+  assert.throws(() => rtcSignal({ want: {} }));
+  const { a, b, hangout } = await people('ws');
+  await a.ok('voice.join', { room: hangout });
+  await b.ok('voice.join', { room: hangout });
+  await b.ok('rtc', { to: a.id, data: { want: { camera: false } } });
+  assert.deepEqual((await a.next('rtc', (r) => r.from === b.id)).data, { want: { camera: false } });
+  closeAll(a, b);
+});
+
 test('video permission: a role without "Share camera and screen" is refused camera and screen; taking it away mid-call turns them off', async () => {
   const { a, b, hangout, house } = await people('vp');
   const role = srv.db.get('SELECT join_role FROM houses WHERE id = ?', house).join_role;

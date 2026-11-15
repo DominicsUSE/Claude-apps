@@ -247,7 +247,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
   function voiceView(place) {
     const m = voiceRooms.get(place);
     const call = calls.get(place);
-    const v = !m ? { users: [], state: {} } : { users: [...m.keys()], state: Object.fromEntries([...m].map(([u, s]) => [u, { muted: s.muted, deaf: s.deaf, camera: !!s.camera, screen: !!s.screen, ...(s.smute ? { smute: true } : {}), ...(s.sdeaf ? { sdeaf: true } : {}), ...(s.lost ? { reconnecting: true } : {}) }])) };
+    const v = !m ? { users: [], state: {} } : { users: [...m.keys()], state: Object.fromEntries([...m].map(([u, s]) => [u, { muted: s.muted, deaf: s.deaf, camera: !!s.camera, screen: !!s.screen, ...(s.smute ? { smute: true } : {}), ...(s.sdeaf ? { sdeaf: true } : {}), ...(s.lost ? { reconnecting: true } : {}), ...(s.listen ? { listen: true } : {}) }])) };
     if (call) v.call = callView(call);
     else if (!M.room(place)) v.call = null;
     return v;
