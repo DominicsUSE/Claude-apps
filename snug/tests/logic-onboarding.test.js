@@ -8,7 +8,7 @@ import {
   messageable, whyNotMessageable, localOnly, looksLikeEmail,
 } from '../js/lib/onboarding.js';
 import { byActivity } from '../js/lib/inbox.js';
-import { wroteLately } from '../js/lib/social.js';
+import { wroteLately, summaryLine } from '../js/lib/social.js';
 
 test('parseInvite: a full link, an app link, a path or a bare code; nothing else', () => {
   assert.equal(parseInvite('https://snug.example.org/join/AbC_12-x'), 'AbC_12-x');
@@ -129,4 +129,10 @@ test('byActivity: Messages are ordered by the last message, a new empty one by w
 test('wroteLately: says what is counted', () => {
   assert.equal(wroteLately(1), '1 person wrote in the last 15 minutes');
   assert.equal(wroteLately(3), '3 people wrote in the last 15 minutes');
+});
+
+test('summaryLine: Home’s summary is one sentence with a capital, whichever part comes first', () => {
+  assert.equal(summaryLine(['something on now']), 'Something on now.');
+  assert.equal(summaryLine(['2 friends around', 'something on now']), '2 friends around, something on now.');
+  assert.equal(summaryLine([]), '');
 });

@@ -257,11 +257,11 @@ function Notify() {
     <${Row} label="Pop-ups" hint="A small note at the top when something needs you and you’re looking elsewhere.">
       <${Switch} on=${S.prefs.toasts} label="Pop-ups" onChange=${(v) => setPref('toasts', v)} />
     <//>
-    <${Row} label="Desktop notifications" hint=${desktopHint()}>
-      <${Switch} on=${S.prefs.desktop && typeof Notification !== 'undefined' && Notification.permission === 'granted'} label="Desktop notifications" onChange=${setDesktop} />
+    <${Row} label="Notifications while Snug is open" hint=${desktopHint()}>
+      <${Switch} on=${S.prefs.desktop && typeof Notification !== 'undefined' && Notification.permission === 'granted'} label="Notifications while Snug is open" onChange=${setDesktop} />
     <//>
     <${PushSetting} />
-    <${Row} label="While you’re Focused" hint=${`Nothing pops up. Everything collects in Catch up. ${me().presence === 'focus' ? 'You’re focused now.' : 'Set it from your name at the top of the sidebar.'}`}>
+    <${Row} label="While you’re Focused" hint=${`Nothing pops up. Everything collects in Catch up. ${me().presence === 'focus' ? 'You’re focused now.' : S.ui.phone ? 'Set it from the You tab, under your name.' : 'Set it from your name at the bottom of the sidebar.'}`}>
       <span class="sub" style="display:flex;gap:8px;align-items:center"><i class="pres inline focus"></i>${PRESENCE.focus.label}</span>
     <//>
     <div class="set-head">Houses</div>
@@ -289,10 +289,12 @@ const Keys = () => html`<${KeysEditor} />`;
 setMessageComponent(Message); // the live preview on Appearance draws real messages
 
 // Desktop notifications appear while Snug is open in a background tab.
+// Written for wherever it is read: a phone has no tabs beside Snug, and its
+// browser keeps site settings in a menu, not beside the address.
 const desktopHint = () => {
-  if (typeof Notification === 'undefined') return 'This browser doesn\u2019t support them.';
-  if (Notification.permission === 'denied') return 'Your browser is blocking them for Snug. Allow notifications in its site settings.';
-  return 'When Snug is open in another tab and something needs you. Only on this device.';
+  if (typeof Notification === 'undefined') return S.ui.phone ? 'This browser can\u2019t show them. The setting below may still work.' : 'This browser doesn\u2019t support them.';
+  if (Notification.permission === 'denied') return S.ui.phone ? 'Your browser is blocking them for Snug. Allow notifications in its settings for this site.' : 'Your browser is blocking them for Snug. Allow notifications in its site settings.';
+  return S.ui.phone ? 'While Snug is open in your browser and something needs you. Only on this device.' : 'When Snug is open in another tab and something needs you. Only on this device.';
 };
 async function setDesktop(on) {
   if (!on) return setPref('desktop', false);
@@ -310,6 +312,18 @@ async function signOut(everywhere) {
   stopTransport();
   closeLayer();
   signedOut();
+  toast(everywhere ? 'You’re signed out on every device.' : 'You’re signed out.');
+}
+
+// Sign out from the menu under your name and the phone's You tab: one
+// short question first, since it sits beside everyday items.
+export function confirmSignOut() {
+  openModal(Confirm, {
+    title: 'Sign out?',
+    text: 'You’ll need your username and password to come back. Your houses and messages stay on the server; anything you were still writing on this device is cleared.',
+    action: 'Sign out',
+    onConfirm: () => signOut(false),
+  });
 }
 
 // Appearance and Account and security are drawn by js/views/account.js (registerAccountPages below).
@@ -349,9 +363,15 @@ arrange(PAGES, [
 
 export function Settings({ page: start }) {
   const [page, setPage] = useState(start || 'profile');
+  // The version this server runs (server/index.js /api/me), never a number typed here.
+  const [ver, setVer] = useState(S.version || '');
+  useEffect(() => {
+    if (S.version) return;
+    api('/api/me').then((r) => { S.version = r.version; setVer(r.version || ''); }, () => {});
+  }, []);
   const V = VIEWS[page];
   return html`<${Layer} title="Settings" icon=${html`<${Icon} name="sliders" />`} pages=${PAGES} page=${page} setPage=${setPage} startOpen=${!!start}
-    foot=${html`<${Nook} size=${16} /><span>Snug 0.10</span>`}>
+    foot=${html`<${Nook} size=${16} /><span class="set-version">${ver ? `Snug ${ver}` : 'Snug'}</span>`}>
     <${V} />
   <//>`;
 }

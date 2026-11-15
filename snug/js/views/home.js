@@ -5,7 +5,7 @@
 import { html, useEffect, useState } from '../../vendor/preact-htm.js';
 import { S, me, go, back, openConv, convMeta, isOnline, voiceRoomOf, discover, person } from '../store.js';
 import { attention, houseAttention } from '../lib/attention.js';
-import { friendsOnline, friendsList, friendRequests, activeConversations, liveVoice, upcomingEvents, eventState, greeting } from '../lib/social.js';
+import { friendsOnline, friendsList, friendRequests, activeConversations, liveVoice, upcomingEvents, eventState, greeting, wroteLately, summaryLine } from '../lib/social.js';
 import { gather } from './catchup.js';
 import { plural } from '../lib/util.js';
 import { plain } from '../lib/format.js';
@@ -151,7 +151,7 @@ function ConvRow({ conv, talking, typing, inVoice, newCount }) {
   const authors = [...new Set(list.slice(-12).reverse().map((m) => m.author))].filter((u) => u !== S.me).slice(0, 3).map((u) => person(u));
   const typers = (S.typing[conv] || []).filter((u) => u !== S.me).map((u) => first(person(u).name));
   const bits = [];
-  if (talking) bits.push(html`<span class="talking">${plural(talking, 'person', 'people')} talking</span>`);
+  if (talking) bits.push(html`<span class="talking">${wroteLately(talking)}</span>`);
   if (typing) bits.push(html`<span class="is-typing">${typers.length === 1 ? `${typers[0]} is typing` : `${typing} typing`}</span>`);
   // A call in a direct conversation is mint, like every call mark; a voice room keeps its own.
   if (inVoice) bits.push(meta.dm ? html`<span class="call-now">In a call</span>` : html`<span class="is-live">${inVoice} in voice</span>`);
@@ -277,7 +277,7 @@ export function Home() {
         <div class="home-hello">
           <h2 class="home-greet">${greeting(now)}, ${first(u.name) || 'you'}</h2>
           ${(summary.length > 0 || forYou > 0 || requests.length > 0) && html`<p class="home-summary">
-            ${summary.join(', ')}${summary.length ? '.' : ''}
+            ${summaryLine(summary)}
             ${forYou > 0 && html`<button class="home-foryou" onClick=${() => go({ type: 'catchup' })}><span class="badge">${forYou}</span>for you in Catch up</button>`}
             ${requests.length > 0 && html`<button class="home-foryou" onClick=${() => go({ type: 'friends', tab: 'requests' })}><span class="badge">${requests.length}</span>${requests.length === 1 ? `${first(person(requests[0]).name)} wants to be friends` : 'friend requests'}</button>`}
           </p>`}

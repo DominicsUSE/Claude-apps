@@ -7,7 +7,8 @@ import {
 } from '../store.js';
 import { can, roleOf } from '../lib/perms.js';
 import { roomIds, unreadOf } from '../lib/attention.js';
-import { eventState } from '../lib/social.js';
+import { eventState, wroteLately } from '../lib/social.js';
+import { newcomerSees } from '../lib/onboarding.js'; // newcomers see starter and voice rooms
 import { plain } from '../lib/format.js';
 import { plural, hueOf, fmtWhen, nameList, MIN } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
@@ -149,7 +150,7 @@ function RoomLine({ id, now }) {
   let act = null;
   if (people.length) act = html`<span class="pl-room-act live"><${Stack} users=${people} max=${3} size=${20} /><span class="num">${people.length} in voice</span></span>`;
   else if (typing) act = html`<span class="pl-room-act"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span>typing</span></span>`;
-  else if (talking > 1) act = html`<span class="pl-room-act warm"><span><span class="num">${talking}</span> talking</span></span>`;
+  else if (talking > 1) act = html`<span class="pl-room-act warm"><span><span class="num">${talking}</span> wrote lately</span></span>`;
   else if (last) act = html`<span class="pl-room-act faint num">${fmtWhen(last.ts, now)}</span>`;
   const preview = last
     ? html`<b>${last.author === S.me ? 'You' : first(person(last.author).name)}</b> ${plain(last.text) || 'shared a file'}`
@@ -168,7 +169,7 @@ function RoomLine({ id, now }) {
 // only where it's busiest. Phone has no column, so it keeps the full list.
 function busiest(id, now) {
   const h = S.houses[id];
-  const ids = roomIds(S, id).filter((r) => !h.newcomer || h.starter.includes(r));
+  const ids = roomIds(S, id).filter((r) => newcomerSees(h, r, S.rooms[r]?.kind));
   const score = (r) => { const a = activity(r, now); return [(S.voice[r] || []).length, a.talking, a.last?.ts || 0]; };
   return ids.map((r) => [r, score(r)])
     .sort((a, b) => (b[1][0] - a[1][0]) || (b[1][1] - a[1][1]) || (b[1][2] - a[1][2]))
@@ -187,13 +188,14 @@ function Rooms({ id, now }) {
       <div class="pl-group">${top.map((r) => html`<${RoomLine} key=${r} id=${r} now=${now} />`)}</div>
     </section>`;
   }
-  const hidden = h.newcomer ? roomIds(S, id).length - h.starter.length : 0;
+  const sees = (r) => newcomerSees(h, r, S.rooms[r]?.kind); // starter and voice rooms (js/lib/onboarding.js)
+  const hidden = h.newcomer ? roomIds(S, id).filter((r) => !sees(r)).length : 0;
   return html`<section class="pl-sect" aria-labelledby="pl-rooms">
     <div class="pl-head"><h2 id="pl-rooms">Rooms</h2><span class="count num">${roomIds(S, id).length}</span>
       ${can(S, id, 'rooms') && html`<button class="btn quiet" onClick=${() => openModal(RoomBrowser, { house: id })}>Browse all</button>`}
     </div>
     ${h.groups.map((g) => {
-      const rooms = h.newcomer ? g.rooms.filter((r) => h.starter.includes(r)) : g.rooms;
+      const rooms = g.rooms.filter(sees);
       if (!rooms.length) return null;
       return html`<div class="pl-group" key=${g.id}>
         <h3 class="pl-group-name">${g.name}</h3>
@@ -201,7 +203,7 @@ function Rooms({ id, now }) {
       </div>`;
     })}
     ${hidden > 0 && html`<button class="pl-more-rooms" onClick=${() => openModal(RoomBrowser, { house: id })}>
-      <${Icon} name="chev-r" size=${16} /><span><b>${plural(hidden, 'more room')}</b> open after your first message. Have a look now.</span>
+      <${Icon} name="chev-r" size=${16} /><span><b>Browse ${plural(hidden, 'more room')}</b>. You can read them now; they join this list once you post.</span>
     </button>`}
   </section>`;
 }
@@ -368,7 +370,7 @@ function PublicPage({ id }) {
         <div class="pl-main">
           ${(h.inVoice > 0 || h.talking > 0) && html`<section class="pl-sect pl-happening" aria-labelledby="pl-now">
             <div class="pl-head"><h2 id="pl-now"><i class="pl-pulse" aria-hidden="true"></i>Happening now</h2></div>
-            <p class="pl-note">${[h.inVoice > 0 && `${plural(h.inVoice, 'person', 'people')} in voice`, h.talking > 0 && `${plural(h.talking, 'person', 'people')} talking in the last few minutes`].filter(Boolean).join(', ')}.</p>
+            <p class="pl-note">${[h.inVoice > 0 && `${plural(h.inVoice, 'person', 'people')} in voice`, h.talking > 0 && wroteLately(h.talking)].filter(Boolean).join(', ')}.</p>
           </section>`}
           ${events.length > 0 && html`<section class="pl-sect ev-list" aria-labelledby="pl-ev">
             <div class="pl-head"><h2 id="pl-ev">Coming up</h2><span class="count num">${events.length}</span></div>

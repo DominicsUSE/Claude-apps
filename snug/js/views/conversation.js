@@ -18,7 +18,8 @@ import { joinVoice, leaveVoice, toggleMute, toggleDeaf } from '../voice.js';
 import { leavingCall } from '../calls.js';
 import { toggleCamera, toggleScreen, mediaOf, canShareScreen } from '../voice.js';
 import { emit, toast } from '../store.js';
-import { RoomForm, RoomBrowser } from './modals.js';
+import { RoomForm, RoomBrowser, Invite } from './modals.js';
+import { landingRoom } from '../lib/onboarding.js'; // where a newcomer lands, so the welcome sits there
 import { showProfile } from './people.js';
 import { PinsButton, pinsOf } from './media.js'; // pinned messages
 import { ForumView, StageRoom, RoomPlaces } from './places.js'; // forum and stage rooms; access, follows and nicknames in details
@@ -294,7 +295,7 @@ function Stage({ roomId, dm }) {
 
 export function Welcome({ house, inPage }) {
   const h = S.houses[house];
-  const step = h.firstStep || { room: h.starter[1] || h.starter[0], label: 'Say hello', draft: '' };
+  const step = h.firstStep || { room: landingRoom(S, house) || h.starter[0], label: 'Say hello', draft: '' };
   const start = () => {
     if (step.draft && !S.drafts[step.room]) S.drafts[step.room] = step.draft;
     openConv(step.room);
@@ -304,7 +305,7 @@ export function Welcome({ house, inPage }) {
     ${inPage
       ? html`<div class="welcome-head"><div><span class="welcome-kicker">You’re new here</span><h2>Welcome to ${h.name}. Start with hello.</h2></div></div>`
       : html`<div class="welcome-head"><${Tile} house=${h} lg /><div><span class="welcome-kicker">You’re new here</span><h2>Welcome to ${h.name}</h2><div class="faint">${h.about}</div></div></div>`}
-    <p>You start with ${plural(h.starter.length, 'room')}. The rest of the house opens once you’ve posted your first message.</p>
+    <p>You can read every room in ${h.name} now. Your list starts with these and the voice rooms; the rest join it after your first message.</p>
     <div class="welcome-rooms">
       ${h.starter.map((id) => html`<button class="welcome-room" key=${id} onClick=${() => openConv(id)}>
         <${RoomIcon} kind=${S.rooms[id].kind} /><span><b>${S.rooms[id].name}</b> <span>${S.rooms[id].topic}</span></span>
@@ -321,14 +322,18 @@ function Intro({ conv, meta }) {
   const empty = !(S.msgs[conv] || []).length;
   if (meta.room) {
     const h = S.houses[meta.house];
-    const welcome = h.newcomer && h.starter[0] === conv;
+    const welcome = h.newcomer && landingRoom(S, meta.house) === conv;
     return html`
       ${welcome && html`<${Welcome} house=${meta.house} />`}
       <div class="start">
         <span class="start-mark" aria-hidden="true"><${RoomIcon} kind=${meta.kind} size=${28} /></span>
         <h2>${meta.title}</h2>
         <p>${meta.topic ? `${meta.topic}. ` : ''}${empty ? 'Nothing has been said here yet.' : `This is where ${meta.title} begins.`}</p>
-        ${can(S, meta.house, 'rooms') && empty && html`<div class="acts"><button class="btn" onClick=${() => openModal(RoomForm, { room: conv })}><${Icon} name="edit" size=${16} />Edit room</button></div>`}
+        ${empty && (can(S, meta.house, 'invite') || can(S, meta.house, 'rooms')) && html`<div class="acts">
+          ${can(S, meta.house, 'invite') && html`<button class="btn primary" onClick=${() => openModal(Invite, { house: meta.house })}><${Icon} name="user-plus" size=${16} />Invite people</button>`}
+          ${can(S, meta.house, 'rooms') && html`<button class="btn" onClick=${() => openModal(RoomForm, { room: conv })}><${Icon} name="edit" size=${16} />Edit room</button>`}
+        </div>`}
+        ${empty && can(S, meta.house, 'invite') && Object.keys(h.members || {}).length < 2 && html`<p class="faint start-invite-note">It\u2019s just you so far. Send your people the invitation link so they can join.</p>`}
       </div>`;
   }
   return html`<div class="start">
@@ -367,6 +372,9 @@ function barMoreItems(conv, meta, pane) {
   ];
 }
 
+// "2 of 5 others online", never "0 here", which read as if nobody was in it.
+const onlineNote = (on, others, inVoice) => `${others > 0 ? `${on} of ${others} ${others === 1 ? 'other' : 'others'} online` : 'just you'}${inVoice ? `, ${inVoice} in voice` : ''}`;
+
 export function Conversation({ conv }) {
   const meta = convMeta(conv);
   if (!meta) return null;
@@ -399,8 +407,8 @@ export function Conversation({ conv }) {
         ${!phone && html`<button class=${`ib${level === 'muted' ? ' is-muted' : ''}`} aria-label="Notifications" aria-haspopup="menu" data-tip=${level === 'muted' ? 'Muted' : 'Notifications'}
           onClick=${(e) => notifyMenu(conv, { anchor: e.currentTarget.getBoundingClientRect() })}><${Icon} name=${level === 'muted' ? 'bell-off' : 'bell'} /></button>`}
         <span class="bar-date-src" aria-hidden="true"><${JumpToDate} conv=${conv} /></span>
-        ${!meta.user && html`<button class=${`ib${pane === 'people' ? ' on' : ''}`} aria-pressed=${String(pane === 'people')} aria-label=${`People, ${here.length} here`}
-          data-tip=${pane === 'people' ? 'Hide the member list' : `Show the member list (${here.length} here${inVoice ? `, ${inVoice} in voice` : ''})`} onClick=${togglePeople}><${Icon} name="people" /></button>`}
+        ${!meta.user && !(phone && meta.dm) && html`<button class=${`ib${pane === 'people' ? ' on' : ''}`} aria-pressed=${String(pane === 'people')} aria-label=${`Member list, ${onlineNote(here.length, members.length - 1, inVoice)}`}
+          data-tip=${pane === 'people' ? 'Hide the member list' : `Show the member list (${onlineNote(here.length, members.length - 1, inVoice)})`} onClick=${togglePeople}><${Icon} name="people" /></button>`}
         ${phone
           ? html`<button class="ib" aria-label="More" aria-haspopup="menu" data-tip="More" onClick=${(e) => headerMore(conv, meta, level, e.currentTarget.getBoundingClientRect())}><${Icon} name="more-v" /></button>`
           : html`${!meta.room && html`<button class=${`ib${pane === 'details' ? ' on' : ''}`} aria-pressed=${String(pane === 'details')} aria-label="Details" data-tip="Details and notifications" onClick=${() => togglePane('details')}><${Icon} name="info" /></button>`}

@@ -9,6 +9,7 @@ import { uid } from './lib/util.js';
 import { plain } from './lib/format.js';
 import { unreadOf, isThread, roomIds } from './lib/attention.js';
 import { upgradePrefs } from './lib/account.js';
+import { landingRoom } from './lib/onboarding.js'; // where a newcomer lands after joining
 
 export const PAGE = 40;
 const KEYS = { prefs: 'snug.prefs', drafts: 'snug.drafts', cache: 'snug.cache', last: 'snug.last' };
@@ -52,6 +53,7 @@ function freshUi() {
     view: local.get(KEYS.last) || { type: 'catchup' },
     pane: null,          // { type: 'thread', id } | { type: 'people' } | { type: 'details' }
     depth: 0,            // phone: 0 shows the tabs, 1 shows the open view
+    trail: [],           // phone: the house page under the open room, so Back returns to it
     tab: 'home',
     marker: {}, hold: {}, win: {}, loaded: {}, reply: {}, jump: null, editing: null,
     menu: null, pop: null, modal: null, layer: null, quick: null, lightbox: null,
@@ -239,7 +241,12 @@ export function signedOut() {
   S.ringing = {};
   S.callEnd = null;
   local.del(KEYS.last);
-  S.ui = freshUi();
+  // A shared browser: the next person never sees the last one's drafts.
+  S.drafts = {};
+  local.del(KEYS.drafts);
+  // Whether this is a phone is about the screen, not the person: keep it, or
+  // the next sign-in draws the desktop layout on a phone.
+  S.ui = { ...freshUi(), phone: S.ui.phone };
   // The next person to sign in starts at home, not on the last person's page.
   S.ui.view = { type: 'home' };
   emit();
@@ -296,8 +303,17 @@ function leave() {
   S.ui.editing = null;
 }
 
+// Phone: opening one of a house's rooms from its page keeps the page under
+// it, so Back goes to the house's room list, not all the way Home.
+function keepTrail(next) {
+  const cur = S.ui.view;
+  if (!S.ui.phone || S.ui.depth < 1 || cur.type !== 'house' || cur.events) return;
+  if (next.type === 'conv' && S.rooms[next.id]?.house === cur.id) S.ui.trail = [...(S.ui.trail || []), cur].slice(-5);
+}
+
 export function go(view) {
   leave();
+  if (view.type !== 'conv') S.ui.trail = [];
   S.ui.view = view;
   // On a phone Home is a tab, never a screen pushed on top with a Back arrow.
   // A thread, the people sheet and the drawer belonged to the place left behind.
@@ -320,6 +336,7 @@ function aim(conv, id) {
 export function openConv(id, { at } = {}) {
   const cur = S.ui.view;
   if (!(cur.type === 'conv' && cur.id === id)) {
+    keepTrail({ type: 'conv', id });
     leave();
     S.ui.marker[id] = unreadOf(S, id).firstTs;
     S.ui.view = { type: 'conv', id };
@@ -375,11 +392,14 @@ export function closePane() {
 export function back() {
   if (S.ui.pane) return closePane();
   leave();
+  const under = S.ui.phone && S.ui.depth > 0 ? (S.ui.trail || []).pop() : null;
+  if (under) { S.ui.view = under; remember(under); emit(); return undefined; }
+  S.ui.trail = [];
   S.ui.depth = 0;
   emit();
   return undefined;
 }
-export function setTab(tab) { S.ui.tab = tab; S.ui.depth = 0; emit(); }
+export function setTab(tab) { S.ui.tab = tab; S.ui.depth = 0; S.ui.trail = []; emit(); }
 
 // Read state, synced to the server and from there to your other devices.
 export function setRead(conv, ts) {
@@ -577,10 +597,11 @@ export function setNotify(kind, id, level) {
 }
 
 // Joining: by a personal invitation (house) or by a link (code).
+// Land where they can say hello: never a notice room they can only read.
 function joined(r) {
   S.ui.modal = null;
   S.ui.joinCode = null;
-  openConv(r.starter?.[0] || roomIds(S, r.house)[0]);
+  openConv((S.houses[r.house] && landingRoom(S, r.house)) || r.starter?.[0] || roomIds(S, r.house)[0]);
 }
 export const joinHouse = (house) => call('invite.join', { house }).then(joined);
 export const joinByCode = (code) => call('invite.accept', { code }).then(joined);
@@ -744,7 +765,7 @@ export function startDm(userIds) {
 
 // Overlays
 export function openMenu(menu) { S.ui.menu = { ...menu, k: uid('k') }; emit(); }
-export function closeMenu() { if (S.ui.menu) { S.ui.menu = null; emit(); } }
+export function closeMenu() { if (S.ui.menu) { const done = S.ui.menu.onClose; S.ui.menu = null; done?.(); emit(); } } // onClose: e.g. a long-pressed message's added room (js/views/stream.js)
 export function openPop(pop) { S.ui.pop = { ...pop, k: uid('k') }; S.ui.menu = null; emit(); }
 export function closePop() { if (S.ui.pop) { S.ui.pop = null; emit(); } }
 export function openModal(C, props = {}) { S.ui.modal = { C, props, k: uid('k') }; S.ui.menu = null; S.ui.pop = null; S.ui.quick = null; emit(); }

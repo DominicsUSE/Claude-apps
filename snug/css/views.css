@@ -198,6 +198,18 @@ select.field { width: auto; padding-right: var(--s-6); }
 .picker-grid button { aspect-ratio: 1; border-radius: var(--r-sm); transition: background var(--m-fast) var(--ease-in-out); font-size: var(--t-20); display: grid; place-items: center; }
 .picker-grid button:hover, .picker-grid button:focus-visible { background: var(--surface-hover); }
 .picker-none { grid-column: 1 / -1; padding: var(--s-4); text-align: center; color: var(--text-3); }
+/* New message: people you can't message yet, with what would change it. */
+.pick-others { display: grid; gap: var(--s-1); margin-top: var(--s-3); }
+.pick-other { cursor: default; opacity: 0.75; }
+.pick-other small { display: block; white-space: normal; }
+/* The rail's plus: start or join, one choice at a time. */
+.add-house { display: grid; gap: var(--s-4); }
+.add-house h2 { margin: 0; }
+.add-house .seg { justify-self: start; }
+.local-address { display: flex; gap: var(--s-2); align-items: flex-start; margin: var(--s-2) 0 0; color: var(--warning); }
+.local-address svg { flex: none; margin-top: 2px; }
+.start-invite-note { margin: var(--s-2) 0 0; }
+.join-bad h2 { margin-top: 0; }
 
 .pick-list { max-height: 280px; overflow-y: auto; margin: 0 calc(var(--s-2) * -1); }
 .pick-list .menu-item { min-height: 40px; }
@@ -261,3 +273,8 @@ select.field { width: auto; padding-right: var(--s-6); }
 .set-field.narrow { width: 200px; }
 @media (max-width: 759px) { .set-field, .set-field.narrow { width: 100%; } }
 @media (max-width: 759px) { .set-row .set-ctl { width: 100%; } }
+
+/* Add a friend: someone not here yet gets a way in, not a dead end. */
+.f-nothere { margin-top: var(--s-3); padding: var(--s-3); border-radius: var(--r-md); background: var(--surface-hover); }
+.f-nothere p { margin: 0 0 var(--s-2); }
+.f-nothere-acts { display: flex; flex-wrap: wrap; gap: var(--s-2); }

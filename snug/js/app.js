@@ -7,7 +7,7 @@ import {
 } from './store.js';
 import { api, startTransport } from './server.js';
 import { on as onServer } from './server.js'; // p2p: the link host loads on socket open
-import { P2pNotice } from './views/p2p.js'; // p2p: moving here, moved away, a move waiting for an answer
+import { P2pNotice, p2pOwner } from './views/p2p.js'; // p2p: moving here, moved away, a move waiting for an answer
 // v0.10 C: data file notice
 import { VaultNotice } from './views/vault-settings.js'; // a data file on its way between PCs
 // v0.10 A: admin button, notices
@@ -26,7 +26,7 @@ import { PinsPane } from './views/media.js'; // pinned messages
 import { PeoplePane, MePop, peopleWanted } from './views/people.js';
 import { CatchUp, Saved } from './views/catchup.js';
 import { Search, QuickJump } from './views/search.js';
-import { Settings } from './views/settings.js';
+import { Settings, confirmSignOut } from './views/settings.js'; // confirmSignOut: the You tab's Sign out
 import { NewMessage, JoinByLink } from './views/modals.js';
 import { Auth, Splash } from './views/auth.js';
 import { Home } from './views/home.js';
@@ -41,7 +41,8 @@ import { voiceDebug } from './voiceopts.js';
 import { applyAppearance, goIdle, soundsPlayed, soundLog } from './account.js'; // settings that follow you, auto-idle, sounds (js/account.js)
 import { openShortcuts, toggleStreamer } from './views/account.js'; // Ctrl+/ and Ctrl+Shift+S
 import { openMessageLink } from './views/chat.js'; // message links: /m/<conversation>/<message>
-import './inbox.js'; // server unread counts, groups leaving, timed mutes (js/inbox.js)
+import { orderDms } from './inbox.js'; // server unread counts, groups leaving, timed mutes; the Messages order (js/inbox.js)
+import { newcomerSees } from './lib/onboarding.js'; // which rooms a newcomer's sidebar lists
 import './landmarks.js'; // Skip to messages, F6 between regions
 import { desktopTest } from './desktop.js'; // the desktop app's badge, global voice keys, idle, snug:// links
 
@@ -159,6 +160,7 @@ function YouTab() {
       ${row('bell', 'Notifications', () => openLayer({ C: Settings, props: { page: 'notify' } }))}
       ${row('palette', 'Appearance', () => openLayer({ C: Settings, props: { page: 'look' } }))}
       ${row('sliders', 'All settings', () => openLayer({ C: Settings, props: {} }))}
+      ${!p2pOwner() && row('leave', 'Sign out', confirmSignOut)}
     </div>
   </div>`;
 }
@@ -231,7 +233,7 @@ function Overlays() {
 let pushed = 0;
 function layers() {
   const u = S.ui;
-  return (u.phone && u.depth > 0 ? 1 : 0) + (u.pane ? 1 : 0) + (u.phone && u.drawer ? 1 : 0)
+  return (u.phone && u.depth > 0 ? 1 + (u.trail?.length || 0) : 0) + (u.pane ? 1 : 0) + (u.phone && u.drawer ? 1 : 0)
     + (u.lightbox || u.menu || u.pop || u.quick || u.modal || u.layer ? 1 : 0);
 }
 function syncHistory() {
@@ -285,10 +287,10 @@ const typing = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA
 
 // Every conversation, in the order the places come in the rail.
 function navOrder() {
-  const out = [...S.dmOrder];
+  const out = orderDms();
   for (const h of S.houseOrder) {
     const house = S.houses[h];
-    out.push(...roomIds(S, h).filter((r) => !house.newcomer || house.starter.includes(r)));
+    out.push(...roomIds(S, h).filter((r) => newcomerSees(house, r, S.rooms[r]?.kind)));
   }
   return out;
 }
@@ -439,6 +441,7 @@ async function boot() {
     const r = await api('/api/me');
     S.me = r.user.id;
     S.ice = r.ice;
+    S.version = r.version; // Settings' footer
     S.auth = 'in';
     loadCache(r.user.id);
     startTransport();

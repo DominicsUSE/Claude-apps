@@ -53,6 +53,10 @@ function useReturnFocus() {
   }, []);
 }
 
+// A phone's sheet stops below what it was opened from (`avoid`, a long-pressed
+// message), scrolling inside instead, but never shorter than 45% of the screen.
+const sheetCap = (avoid) => (avoid && innerWidth < 760 ? `;max-height:${Math.round(Math.max(innerHeight * 0.45, innerHeight - avoid.bottom - 8))}px;overflow-y:auto` : '');
+
 export function Menu({ menu }) {
   const ref = useRef();
   const [pos, setPos] = useState(null);
@@ -87,7 +91,7 @@ export function Menu({ menu }) {
   return html`
     <div class="menu-scrim" onClick=${closeMenu}></div>
     <div class="menu float" role="menu" tabindex="-1" ref=${ref} onKeyDown=${onKey}
-      style=${pos ? `left:${pos.left}px;top:${pos.top}px` : 'visibility:hidden'}>
+      style=${pos ? `left:${pos.left}px;top:${pos.top}px${sheetCap(menu.avoid)}` : 'visibility:hidden'}>
       ${menu.quick && html`<div class="menu-quick">
         ${menu.quick.emoji.map((e) => html`<button key=${e} aria-label=${`React with ${e}`} onClick=${() => { closeMenu(); menu.quick.onPick(e); }}>${e}</button>`)}
       </div><div class="menu-sep"></div>`}

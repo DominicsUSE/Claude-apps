@@ -5,7 +5,7 @@
 import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { S, emit, go, back, discover, joinPublicHouse, openModal, closeModal } from '../store.js';
 import { call } from '../server.js';
-import { TOPICS, eventState } from '../lib/social.js';
+import { TOPICS, eventState, wroteLately } from '../lib/social.js';
 import { hueOf, plural, nameList, fmtTime, sameDay, DAY } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Stack, RoomIcon, Empty } from '../ui/kit.js';
@@ -62,7 +62,8 @@ const Banner = ({ house, cls = '' }) => (house.banner
 function LiveLine({ h }) {
   const bits = [];
   if (h.inVoice) bits.push(html`<span class="live-voice"><${Icon} name="voice" size=${14} />${h.inVoice} in voice</span>`);
-  if (h.talking) bits.push(html`<span class="live-talk"><i class="pres inline open"></i>${plural(h.talking, 'person', 'people')} talking</span>`);
+  // Who wrote lately is not who is online, so no presence dot (js/lib/social.js wroteLately).
+  if (h.talking) bits.push(html`<span class="live-talk"><${Icon} name="room" size=${14} />${wroteLately(h.talking)}</span>`);
   if (!bits.length && h.online) bits.push(html`<span class="live-talk"><i class="pres inline around"></i>${h.online} online</span>`);
   if (!bits.length) return null;
   return html`<span class="live-line">${bits}</span>`;
@@ -98,7 +99,7 @@ function Featured({ h }) {
       <${ArchTile} house=${h} size="lg" />
     </button>
     <div class="d-feature-text">
-      <div class="d-kicker">${h.inVoice || h.talking ? 'Lively right now' : 'Worth a look'}</div>
+      <div class="d-kicker">${h.inVoice ? 'Live in voice now' : h.talking ? 'Busy in the last 15 minutes' : 'Worth a look'}</div>
       <h2 class="d-feature-name" id=${`feat-${h.id}`}><button class="link-like" onClick=${() => openPreview(h.id)}>${h.name}</button></h2>
       <${Counts} h=${h} />
       ${h.about && html`<p class="d-feature-about">${h.about}</p>`}

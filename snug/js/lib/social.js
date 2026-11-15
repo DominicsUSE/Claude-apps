@@ -127,3 +127,7 @@ export function safeLink(url) {
 // What "busy" counts: distinct people who wrote in the last 15 minutes. Not
 // who is online, so it never reads as presence (server/ops.js houseCard).
 export const wroteLately = (n) => `${n} ${n === 1 ? 'person' : 'people'} wrote in the last 15 minutes`;
+
+// Home's summary: the parts as one sentence, a capital first whichever part
+// comes first ("Something on now.", never "something on now.").
+export const summaryLine = (parts) => (parts.length ? `${parts.join(', ').replace(/^./, (c) => c.toUpperCase())}.` : '');

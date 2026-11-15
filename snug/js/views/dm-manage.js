@@ -205,8 +205,8 @@ export function DmHeaderButtons({ conv }) {
   const group = isGroupDm(conv);
   return html`
     <button class="ib" aria-label="Add people" data-tip="Add people" onClick=${() => openModal(AddPeople, { dm: conv })}><${Icon} name="user-plus" /></button>
-    ${group && html`<button class="ib" aria-label=${`Members, ${dm.members.length}`} data-tip="Members"
-      onClick=${(e) => openPop({ anchor: rectOf(e), label: 'Members', C: MembersPop, props: { dm: conv } })}><${Icon} name="people" /></button>`}`;
+    ${group && html`<button class="ib" aria-label=${`Manage members, ${dm.members.length}`} data-tip="Manage members"
+      onClick=${(e) => openPop({ anchor: rectOf(e), label: 'Members', C: MembersPop, props: { dm: conv } })}><${Icon} name="settings" /></button>`}`;
 }
 
 // The same, as menu items for the phone's header menu (js/views/conversation.js).
