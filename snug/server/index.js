@@ -21,7 +21,8 @@ import { createCommunityHttp } from './community.js'; // house pictures, event c
 import { HUES, cleanFileName } from '../js/lib/util.js'; // sec-authz: cleanFileName
 import { createPeer } from './peer.js'; // p2p: friends, DMs, profiles and calls with people on other PCs
 import { createGroups } from './peergroups.js'; // v0.10 B: groups across PCs
-import { createGhAuth } from './ghauth.js'; // p2p: Sign in with GitHub and the Snug username
+import { createGhAuth } from './ghauth.js';
+import { APP_VERSION } from './peersignal.js'; // the version Settings shows // p2p: Sign in with GitHub and the Snug username
 import { createNotices } from './notices.js'; // v0.10 A: registry notices, bans and admin
 import { createVault } from './vault.js'; // v0.10 C: the account's data file
 import { restoreIfDamaged, scheduleSnapshots } from './dbbackup.js'; // sec-registry REG-L6: database snapshots
@@ -377,7 +378,7 @@ export async function startServer({
     if (req.method === 'GET' && path === '/api/account/security-events') return sendJson(res, 200, { events: sec.list(user, url.searchParams.get('limit')) });
     if (req.method === 'GET' && path === '/api/me') {
       const row = M.userRow(user);
-      return sendJson(res, 200, { user: M.userView(row, row.presence, true), ice: hub.iceFor(user), p2p: peer.statusFor(user) }); // p2p
+      return sendJson(res, 200, { user: M.userView(row, row.presence, true), ice: hub.iceFor(user), p2p: peer.statusFor(user), version: APP_VERSION }); // p2p; version: Settings' footer
     }
     if (post && path === '/api/logout-all') {
       const token = readCookie(req.headers.cookie, COOKIE);

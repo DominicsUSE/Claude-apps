@@ -214,7 +214,7 @@ export function createModel(db) {
     const d = db.get('SELECT * FROM dms WHERE id = ?', id);
     if (!d) return null;
     const members = db.all('SELECT user FROM dm_members WHERE dm = ? ORDER BY rowid', id).map((r) => r.user);
-    const v = { id, members };
+    const v = { id, members, created: d.created }; // created: the Messages order before anyone writes
     if (d.name) v.name = d.name;
     const level = M.notifyOf(viewer, id);
     if (level) v.notify = level;
@@ -222,7 +222,9 @@ export function createModel(db) {
   };
 
   M.houseIdsOf = (user) => db.all('SELECT house FROM members WHERE user = ? ORDER BY joined', user).map((r) => r.house);
-  M.dmIdsOf = (user) => db.all('SELECT d.id FROM dms d JOIN dm_members m ON m.dm = d.id WHERE m.user = ? ORDER BY d.created DESC', user).map((r) => r.id);
+  // Newest activity first: the last message, or when it started (js/lib/inbox.js byActivity keeps it so live).
+  M.dmIdsOf = (user) => db.all(`SELECT d.id FROM dms d JOIN dm_members m ON m.dm = d.id WHERE m.user = ?
+    ORDER BY MAX(d.created, COALESCE((SELECT ts FROM messages WHERE conv = d.id AND deleted IS NULL ORDER BY seq DESC LIMIT 1), 0)) DESC, d.created DESC`, user).map((r) => r.id);
 
   // Every conversation this person can read, threads included.
   M.readable = (user) => {
