@@ -195,7 +195,18 @@ export function cleanPrefs(patch, fail = (m) => { throw new Error(m); }) {
       // The named zone (e.g. Europe/Paris) follows daylight saving; tz is the
       // offset when it was saved, used if the zone is missing or unknown.
       if (v.zone !== undefined && !validZone(v.zone)) fail('Quiet hours need your time zone.');
-      out[k] = { on: v.on, from: v.from, to: v.to, tz: v.tz, ...(v.zone !== undefined ? { zone: v.zone } : {}) };
+      // 0.12: days, one entry per weekday (0 is Sunday): null follows the daily
+      // window, 'off' has no quiet hours, 'all' is quiet all day, {from, to} its own times.
+      let days;
+      if (v.days !== undefined) {
+        if (!Array.isArray(v.days) || v.days.length !== 7) fail('Quiet hours by day need all seven days.');
+        days = v.days.map((d) => {
+          if (d === null || d === 'off' || d === 'all') return d;
+          if (d && typeof d === 'object' && mins(d.from) && mins(d.to)) return { from: d.from, to: d.to };
+          return fail('Each day’s quiet hours need a start and an end time.');
+        });
+      }
+      out[k] = { on: v.on, from: v.from, to: v.to, tz: v.tz, ...(v.zone !== undefined ? { zone: v.zone } : {}), ...(days ? { days } : {}) };
     } else if (kind === 'fn') {
       out[k] = spec(v, fail); // the setting checks itself (emojiUse)
     } else if (kind === 'words') {
@@ -227,7 +238,7 @@ const zones = new Map();
 function zoneClock(zone) {
   if (!zones.has(zone)) {
     let f = null;
-    try { f = new Intl.DateTimeFormat('en-GB', { timeZone: zone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }); } catch { f = null; }
+    try { f = new Intl.DateTimeFormat('en-GB', { timeZone: zone, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }); } catch { f = null; }
     if (zones.size > 500) zones.clear();
     zones.set(zone, f);
   }
@@ -236,22 +247,41 @@ function zoneClock(zone) {
 export function validZone(zone) {
   return typeof zone === 'string' && /^[A-Za-z][\w+\-/]{0,63}$/.test(zone) && !!zoneClock(zone);
 }
-// Minutes after midnight in that zone at that moment, or null.
-function zoneMinutes(zone, now) {
+// Minutes after midnight and the weekday (0 is Sunday) in that zone at that moment, or null.
+const WEEKDAYS = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+function zoneTime(zone, now) {
   const f = typeof zone === 'string' ? zoneClock(zone) : null;
   if (!f) return null;
   const parts = Object.fromEntries(f.formatToParts(new Date(now)).map((p) => [p.type, p.value]));
-  const h = Number(parts.hour) % 24, m = Number(parts.minute);
-  return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
+  const h = Number(parts.hour) % 24, m = Number(parts.minute), day = WEEKDAYS[parts.weekday];
+  return Number.isFinite(h) && Number.isFinite(m) && day != null ? { mins: h * 60 + m, day } : null;
 }
 
 // Quiet hours: is this moment inside them? from/to are minutes after
 // midnight in the person's own time zone: the named zone when there is one
 // (it follows daylight saving), else tz (Date#getTimezoneOffset() when saved).
+// With days (0.12), each weekday can follow the daily window (null), have
+// none ('off'), be quiet all day ('all') or have its own times. A window that
+// runs past midnight belongs to the day it starts on.
 export function inQuiet(q, now = Date.now()) {
-  if (!q || !q.on || q.from === q.to) return false;
-  const local = zoneMinutes(q.zone, now) ?? (((Math.floor(now / 60000) - q.tz) % 1440) + 1440) % 1440;
-  return q.from < q.to ? local >= q.from && local < q.to : local >= q.from || local < q.to;
+  if (!q || !q.on) return false;
+  const local = zoneTime(q.zone, now) ?? (() => {
+    const t = Math.floor(now / 60000) - q.tz;
+    return { mins: ((t % 1440) + 1440) % 1440, day: (((Math.floor(t / 1440) + 4) % 7) + 7) % 7 }; // 1970-01-01 was a Thursday
+  })();
+  const windowOf = (day) => {
+    const d = Array.isArray(q.days) ? q.days[day] : null;
+    if (d === 'off') return null;
+    if (d === 'all') return { from: 0, to: 1440 };
+    const w = d && typeof d === 'object' ? d : q;
+    return w.from === w.to ? null : { from: w.from, to: w.to };
+  };
+  const today = windowOf(local.day);
+  if (today) {
+    if (today.from < today.to ? local.mins >= today.from && local.mins < today.to : local.mins >= today.from) return true;
+  }
+  const yesterday = windowOf((local.day + 6) % 7);
+  return !!yesterday && yesterday.from > yesterday.to && local.mins < yesterday.to;
 }
 
 // When a custom status clears. `endOfDay` is the browser's own midnight.

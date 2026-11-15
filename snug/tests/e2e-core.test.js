@@ -74,3 +74,25 @@ test('search: a misspelt word shows close matches, and says so', async () => {
   assert.ok(await page.locator('.search-results .item', { hasText: 'pyrometer' }).count() >= 1);
   await page.context().close();
 });
+
+test('quiet hours: one weekday set to quiet all day is saved for every device', async () => {
+  const page = await person('ines');
+  await page.click('.me-row [aria-label="Settings"]');
+  await page.click('.layer-nav .row:has-text("Notifications")');
+  await page.locator('.layer-body h1').waitFor();
+  // Switch quiet hours on, then make Saturday quiet all day.
+  const sw = page.getByRole('switch', { name: 'Quiet hours' });
+  if ((await sw.getAttribute('aria-checked')) !== 'true') await sw.click();
+  await page.selectOption('#quiet-day-6', 'all');
+  await page.selectOption('#quiet-day-3', 'own');
+  await page.getByLabel('Wednesday quiet from').fill('13:00');
+  await page.getByLabel('Wednesday quiet from').dispatchEvent('change');
+  const id = srv.db.get("SELECT id FROM users WHERE handle = 'ines'").id;
+  const saved = async () => JSON.parse(srv.db.get('SELECT prefs FROM user_prefs WHERE user = ?', id)?.prefs || '{}').quiet;
+  for (let i = 0; i < 50 && (await saved())?.days?.[3]?.from !== 780; i++) await page.waitForTimeout(100);
+  const q = await saved();
+  assert.equal(q.days[6], 'all');
+  assert.equal(q.days[3].from, 13 * 60);
+  assert.equal(q.days[1], null);
+  await page.context().close();
+});

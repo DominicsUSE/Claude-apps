@@ -161,3 +161,9 @@
   .acc-key-row { grid-template-columns: 1fr; gap: 2px; }
   .acc-emoji-picks .ib { min-height: var(--touch); }
 }
+
+/* Quiet hours by weekday (0.12) */
+.quiet-days { display: grid; gap: var(--s-2); width: 100%; }
+.quiet-day { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+.quiet-day-name { min-width: calc(var(--s-20) + var(--s-4)); }
+.quiet-day select { width: auto; min-height: 44px; }
