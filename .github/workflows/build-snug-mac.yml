@@ -8,6 +8,12 @@
 # `release` environment (see build-snug-windows.yml). Actions are pinned to commits (Dependabot updates them),
 # checkouts don't keep the token, install scripts don't run except Electron's own download. The app is signed
 # with the hardened runtime (entitlements.mac.plist) and its Electron fuses are checked after the build.
+#
+# Not notarized: Apple notarization needs a paid Apple Developer Program membership (a Developer ID certificate
+# plus notarytool), so macOS warns the first time and people choose Privacy & Security > Open Anyway
+# (docs/install.html). With a membership: put the Developer ID certificate (CSC_LINK, CSC_KEY_PASSWORD) and
+# APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER in the `release` environment, sign and notarize in a
+# separate job like build-snug-windows.yml's sign-* jobs, and drop "identity": "-" from desktop/package.json.
 name: Snug Mac app
 
 on:

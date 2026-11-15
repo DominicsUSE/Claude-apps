@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath artifact configuration "snug-installers" (build-snug-windows.yml, job sign-installers).
+     The GitHub artifact Snug-Windows-Wrapped holds the two files people download: sign both.
+     Paste into SignPath: Project > Artifact configurations > New, slug snug-installers. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file-set>
+      <include path="Snug-Setup-*.exe" min-matches="1" max-matches="1" />
+      <include path="Snug-*-portable.exe" min-matches="1" max-matches="1" />
+      <for-each>
+        <authenticode-sign />
+      </for-each>
+    </pe-file-set>
+  </zip-file>
+</artifact-configuration>
