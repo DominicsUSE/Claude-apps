@@ -236,6 +236,7 @@ export async function startServer({
   // Soundboard (server/voiceopts.js): uploads at POST /api/files?sound=<house>, files at GET /api/sounds/<file>.
   const voiceOptsHttp = createVoiceOptsHttp({ db, M, filesDir, sendJson, error, body, headers, uploadLimit });
   hub.messaging?.configure({ filesDir, previews: linkPreviews, allowLoopback: linkAllowLocal });
+  hub.e2ee?.conv?.configure({ filesDir }); // e2ee.file.copy (server/e2ee-conv.js)
   const placesHttp = createPlacesHttp({ db, M, hub, sendJson, error, jsonBody, ipOf }); // webhooks (server/places.js)
   const accountHttp = createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonBody, body, headers, ipOf, secure, authLimit, uploadLimit, log, dataDir, keyStore, dataKey, desktop: !!resumeSecret }); // server/account.js; sec-auth: the data key, sign-up, sign-in, sign-out, new password
   const appearanceHttp = createAppearanceHttp({ db, M, hub, filesDir, sendJson, error, body, headers, uploadLimit }); // server/appearance.js

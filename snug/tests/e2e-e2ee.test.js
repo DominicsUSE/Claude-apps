@@ -7,7 +7,7 @@
 // Encryption, and the same sheets on a phone.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -190,7 +190,7 @@ test('safety numbers: the same 60 digits on both sides; marking verified follows
   await dialog(ines).locator('button:has-text("Done")').click();
   await waitStatus(ines, 'ready');
   await openDmDetails(robinA, 'Ines Carvalho');
-  assert.match(await robinA.locator('.e2-detail').textContent(), /Not end-to-end encrypted yet/);
+  assert.match(await robinA.locator('.e2-detail').textContent(), /End-to-end encrypted/, 'both have it on: their DM turned encrypted');
   await robinA.locator('.e2-detail button:has-text("Safety number")').click();
   await dialog(robinA).locator('#e2-safety-number').waitFor();
   await openDmDetails(ines, 'Robin Hale');
@@ -217,6 +217,184 @@ test('safety numbers: the same 60 digits on both sides; marking verified follows
   await robinA.keyboard.press('Escape');
   await ines.context().close();
   await b2.context().close();
+});
+
+// ---------- encrypted conversations (step 5) ----------
+async function recoverWith(page, key) {
+  await dialog(page).locator('h2:has-text("Add this browser")').waitFor();
+  await dialog(page).locator('button:has-text("Use my recovery key")').click();
+  await dialog(page).locator('#e2-rk-in').fill(key);
+  await dialog(page).locator('button:has-text("Use recovery key")').click();
+  await dialog(page).locator('h2:has-text("Encryption is back")').waitFor();
+  await dialog(page).locator('button:has-text("Done")').click();
+  await waitStatus(page, 'ready');
+}
+async function openDm(page, title) {
+  // A sheet left from an earlier step ("Device added") closes first.
+  for (let i = 0; i < 3 && await dialog(page).count(); i++) { await page.keyboard.press('Escape'); await page.waitForTimeout(100); }
+  await page.click('.rail-btn:has(.sr:text-matches("^Messages"))');
+  await page.click(`.nav .row:has-text("${title}")`);
+  await page.locator(`.main .bar-title:has-text("${title}")`).waitFor();
+}
+async function say(page, text) {
+  const box = page.locator('.main [data-composer] textarea');
+  await box.fill(text);
+  await box.press('Enter');
+}
+const dmOf = (a, b) => srv.db.get(`SELECT dm FROM dm_members WHERE user IN (?, ?) GROUP BY dm
+  HAVING COUNT(*) = 2 AND (SELECT COUNT(*) FROM dm_members x WHERE x.dm = dm_members.dm) = 2`, idOf(a), idOf(b)).dm;
+// Every place the server keeps things: rows, the raw database and WAL bytes, and the files folder.
+function scanServer(needle) {
+  const rows = JSON.stringify([srv.db.all('SELECT * FROM messages'), srv.db.all('SELECT * FROM msg_edits'), srv.db.all('SELECT * FROM files')]);
+  assert.equal(rows.includes(needle), false, 'a row holds the marker');
+  srv.db.run('PRAGMA wal_checkpoint(PASSIVE)');
+  for (const f of ['snug.db', 'snug.db-wal']) {
+    const p = join(dir, f);
+    if (existsSync(p)) assert.equal(readFileSync(p).includes(Buffer.from(needle)), false, `${f} holds the marker`);
+  }
+  for (const f of readdirSync(join(dir, 'files'))) assert.equal(readFileSync(join(dir, 'files', f)).includes(Buffer.from(needle)), false, `files/${f} holds the marker`);
+}
+const textOf = (page, needle) => page.locator(`.main .msg .msg-text:has-text("${needle}")`);
+
+test('encrypted DM: the conversation turned encrypted says so, messages go both ways, survive a reload, and the server holds no text', async () => {
+  const ines = await device('ines');
+  await recoverWith(ines, inesKey);
+  const dm = dmOf('robin', 'ines');
+  assert.equal(srv.db.get('SELECT e2ee FROM dms WHERE id = ?', dm).e2ee, 1);
+  await openDm(robinA, 'Ines Carvalho');
+  await openDm(ines, 'Robin Hale');
+  // The header label, the line where it turned on (with the honest note about what came before), legacy marks.
+  await robinA.locator('.main .bar .e2-label.on:has-text("End-to-end encrypted")').waitFor();
+  await ines.locator('.main .e2-line:has-text("Messages above were sent before end-to-end encryption")').waitFor();
+  const MARK = `MARK-${Date.now().toString(36)}`;
+  await say(robinA, `Dinner at 7? ${MARK}`);
+  await textOf(ines, `Dinner at 7? ${MARK}`).waitFor();
+  await say(ines, `Yes! ${MARK}-reply`);
+  await textOf(robinA, `Yes! ${MARK}-reply`).waitFor();
+  const row = srv.db.get("SELECT text, enc FROM messages WHERE conv = ? AND enc IS NOT NULL ORDER BY seq DESC LIMIT 1", dm);
+  assert.equal(row.text, '');
+  // A reload opens them again (from the server's envelopes and this device's keys).
+  await ines.reload();
+  await ines.waitForFunction(() => window.snug?.S.conn.socket === 'open');
+  await waitStatus(ines, 'ready');
+  await openDm(ines, 'Robin Hale');
+  await textOf(ines, `Dinner at 7? ${MARK}`).waitFor();
+  await textOf(ines, `Yes! ${MARK}-reply`).waitFor();
+  // A message from before shows its "not encrypted" line in its menu.
+  const legacy = ines.locator('.main .msg').first();
+  await legacy.click({ button: 'right' });
+  await ines.locator('[role=menu] :text("Not end-to-end encrypted")').waitFor();
+  await ines.keyboard.press('Escape');
+  scanServer(MARK);
+  await ines.context().close();
+});
+
+test('encrypted DM: an edit, a reply quote and a thread reply all decrypt after a reload; a stale plain send gets the reload message', async () => {
+  const ines = await device('ines');
+  await recoverWith(ines, inesKey);
+  await openDm(robinA, 'Ines Carvalho');
+  await openDm(ines, 'Robin Hale');
+  const MARK = `EDIT-${Date.now().toString(36)}`;
+  await say(robinA, `${MARK} first`);
+  await textOf(ines, `${MARK} first`).waitFor();
+  // Edit (Arrow Up edits your last message).
+  const box = robinA.locator('.main [data-composer] textarea');
+  await box.press('ArrowUp');
+  const edit = robinA.locator('.main .msg-edit textarea');
+  await edit.fill(`${MARK} second`);
+  await edit.press('Enter');
+  await textOf(ines, `${MARK} second`).waitFor();
+  // Reply with a quote, and a thread reply.
+  const target = ines.locator(`.main .msg:not(.has-ref):has-text("${MARK} second")`);
+  await target.hover();
+  await target.locator('[aria-label="Reply"]').click();
+  await say(ines, `${MARK} reply`);
+  await robinA.locator(`.main .msg.has-ref:has-text("${MARK} reply") .reply-ref:has-text("${MARK} second")`).waitFor();
+  const tid = await robinA.evaluate((needle) => { for (const l of Object.values(window.snug.S.msgs)) { const m = l.find((x) => x.text === needle); if (m) return m.id; } return null; }, `${MARK} second`);
+  const own = robinA.locator(`.main .msg[data-id="${tid}"]`);
+  await own.hover();
+  await own.locator('[aria-label="More actions"]').click();
+  await robinA.locator('[role=menu] :text("Start a thread")').click();
+  await robinA.locator('.thread-pane [data-composer] textarea').fill(`${MARK} in thread`);
+  await robinA.locator('.thread-pane [data-composer] textarea').press('Enter');
+  await robinA.locator(`.thread-pane .msg-text:has-text("${MARK} in thread")`).waitFor();
+  assert.ok(srv.db.get('SELECT enc FROM messages WHERE conv = ? AND enc IS NOT NULL', `t:${tid}`), 'the thread reply is encrypted');
+  await ines.reload();
+  await ines.waitForFunction(() => window.snug?.S.conn.socket === 'open');
+  await waitStatus(ines, 'ready');
+  await openDm(ines, 'Robin Hale');
+  await textOf(ines, `${MARK} second`).waitFor();
+  await ines.locator(`.main .msg[data-id="${tid}"] .edited`).waitFor();
+  await ines.locator(`.main .reply-ref:has-text("${MARK} second")`).waitFor();
+  await ines.locator('.main .stub:has-text("1 reply")').click();
+  await ines.locator(`.thread-pane .msg-text:has-text("${MARK} in thread")`).waitFor();
+  // A tab running old code sends plain text: refused with the reload message.
+  const err = await ines.evaluate(async (dm) => {
+    const { call } = await import('/js/server.js');
+    try { await call('msg.send', { conv: dm, id: 'm_staleplaintext01', text: 'old tab' }); return null; } catch (e) { return e.message; }
+  }, dmOf('robin', 'ines'));
+  assert.match(err, /end-to-end encrypted\. Reload Snug/);
+  scanServer(MARK);
+  await ines.context().close();
+});
+
+test('encrypted DM: polls and /roll are off and say why; forwarding to a room warns and posts readable text; into the group it stays encrypted', async () => {
+  await openDm(robinA, 'Ines Carvalho');
+  await robinA.locator('.main .plus-btn').click();
+  const poll = robinA.locator('[role=menu] .menu-item:has-text("Polls aren’t available in encrypted conversations yet")');
+  await poll.waitFor();
+  assert.equal(await poll.isDisabled(), true);
+  await robinA.keyboard.press('Escape');
+  await say(robinA, '/roll 2d6');
+  await robinA.locator('.toast:has-text("a fair roll needs the server to see the result")').waitFor();
+  assert.equal(await robinA.locator('.main [data-composer] textarea').inputValue(), '/roll 2d6', 'the command stays for editing');
+  await robinA.locator('.main [data-composer] textarea').fill('');
+  const MARK = `FWD-${Date.now().toString(36)}`;
+  await say(robinA, `${MARK} to share`);
+  const msg = robinA.locator(`.main .msg:has-text("${MARK} to share")`).last();
+  await msg.locator('.msg-text').waitFor();
+  await msg.hover();
+  await msg.locator('[aria-label="More actions"]').click();
+  await robinA.locator('[role=menu] :text-is("Forward")').click();
+  await dialog(robinA).locator('input[type=search]').fill('glaze');
+  await dialog(robinA).locator('.fwd-dest').first().click();
+  await dialog(robinA).locator('.e2-warn:has-text("This will post the message unencrypted in")').waitFor();
+  await dialog(robinA).locator('button:has-text("Forward")').last().click();
+  await dialog(robinA).waitFor({ state: 'detached' });
+  await expectRow(() => srv.db.get("SELECT text FROM messages WHERE conv = 'k_glaze' AND text LIKE ?", `%${MARK} to share%`), 'the room copy is readable, as the warning said');
+  // Into an encrypted conversation (here the same one): sealed again, shown as a forward, nothing readable on the server.
+  await msg.hover();
+  await msg.locator('[aria-label="More actions"]').click();
+  await robinA.locator('[role=menu] :text-is("Forward")').click();
+  await dialog(robinA).locator('input[type=search]').fill('Ines');
+  await dialog(robinA).locator('.fwd-dest:has-text("Ines Carvalho")').first().click();
+  assert.equal(await dialog(robinA).locator('.e2-warn').count(), 0);
+  await dialog(robinA).locator('textarea').fill(`${MARK} note`);
+  await dialog(robinA).locator('button:has-text("Forward")').last().click();
+  await dialog(robinA).waitFor({ state: 'detached' });
+  await robinA.locator(`.main .msg:has-text("${MARK} note") .fwd:has-text("${MARK} to share")`).waitFor();
+  const dm = dmOf('robin', 'ines');
+  assert.equal(srv.db.get('SELECT COUNT(*) n FROM messages WHERE conv = ? AND (text LIKE ? OR fwd LIKE ?)', dm, `%${MARK}%`, `%${MARK}%`).n, 0);
+});
+
+async function expectRow(get, why) {
+  for (let i = 0; i < 50; i++) { if (get()) return; await new Promise((r) => setTimeout(r, 100)); }
+  assert.fail(why);
+}
+
+test('labels: a DM with someone who hasn’t set up encryption says so; a house room says it isn’t end-to-end encrypted', async () => {
+  await openDm(robinA, 'Tomasz');
+  await robinA.locator('.main .bar .e2-label:not(.on):has-text("Not end-to-end encrypted")').waitFor();
+  await robinA.click('.main .bar [aria-label="Details"]');
+  assert.match(await robinA.locator('.pane[aria-label="Details"] .e2-detail').textContent(), /hasn’t set up encryption yet\. Messages are stored readable on this server/);
+  await robinA.evaluate(() => import('/js/store.js').then((s) => s.openConv('k_glaze')));
+  await robinA.locator('.main.conv .bar-title').waitFor();
+  if (!(await robinA.locator('.pane[aria-label="Details"]').count())) {
+    await robinA.click('.main .bar [aria-label="More options"]');
+    await robinA.locator('[role=menu] :text-is("Details")').click();
+  }
+  await robinA.locator('.pane[aria-label="Details"] .e2-room-note:has-text("aren’t end-to-end encrypted")').waitFor();
+  assert.equal(await robinA.locator('.main .bar .e2-label').count(), 0, 'no lock or shield in rooms');
 });
 
 test('phone: the setup, add-device and safety-number sheets fit a 390px screen', async () => {

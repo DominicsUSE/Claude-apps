@@ -33,8 +33,7 @@ import { togglePeople } from './people.js'; // the member list toggle, remembere
 import { vp } from '../voiceopts.js';
 import { DmHeaderButtons, dmHeaderItems } from './dm-manage.js'; // Add people and the members of a group (server/dms.js)
 import { DirectLine, KeyBanner, remoteOf, GroupLine, isPeerGroup } from './p2p.js'; // a friend on another PC: how it travels, and a changed security code
-import { E2 } from '../e2ee/manager.js'; // end-to-end encryption state
-import { SafetyNumber, canVerify } from './e2ee-verify.js'; // safety numbers
+import { EncLabel, EncDetail, RoomEncNote } from './e2ee-conv.js'; // end-to-end encryption labels in conversations
 
 const Back = () => S.ui.phone && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
 
@@ -389,6 +388,7 @@ export function Conversation({ conv }) {
         ${meta.user ? html`<${Avatar} user=${meta.user} size=${24} presence />` : meta.room ? html`<${RoomIcon} kind=${meta.kind} />` : html`<${Icon} name="people" />`}
         <span class="trunc">${meta.title}</span>
       </h1>
+      ${meta.dm && html`<${EncLabel} conv=${conv} onOpen=${() => togglePane('details')} />`}
       ${phone && meta.house && html`<button class="ib drawer-btn title-switch" aria-label="Rooms and places" data-tip="Rooms and places" onClick=${openDrawer}><${Icon} name="chev-d" size=${16} /></button>`}
       ${meta.topic && html`<span class="bar-sub trunc">${meta.topic}</span>`}
       ${meta.user && html`<span class="bar-sub trunc">${presenceLabel(meta.user)}${meta.user.status ? `. ${meta.user.status}` : ''}</span>`}
@@ -461,20 +461,6 @@ export function NotifyControl({ kind, id, level }) {
   return html`<${Seg} label="Notify me about" value=${level} options=${options} onChange=${(l) => setNotify(kind, id, l)} />`;
 }
 
-// End-to-end encryption in a direct conversation's details: honest about the
-// state (conversations aren't encrypted yet in this build) and a way to
-// compare safety numbers with each person once both have encryption on.
-function EncryptionDetail({ dm }) {
-  if (E2.status === 'off' || dm.members.some((id) => S.users[id]?.remote)) return null;
-  const others = dm.members.filter((id) => id !== S.me);
-  return html`<div class="detail e2-detail">
-    <h3>Encryption</h3>
-    <p class="hint" style="margin:0">Not end-to-end encrypted yet. Messages here are stored readable on this server.</p>
-    ${canVerify(dm) && html`<div class="e2-detail-people">${others.map((id) => html`<button class="btn" key=${id} onClick=${() => openModal(SafetyNumber, { user: id })}>
-      <${Icon} name="lock" size=${16} />Safety number${others.length > 1 ? ` with ${S.users[id]?.name.split(' ')[0] || 'them'}` : ''}</button>`)}</div>`}
-  </div>`;
-}
-
 export function DetailsPane({ conv }) {
   const meta = convMeta(conv);
   if (!meta) return null;
@@ -495,14 +481,15 @@ export function DetailsPane({ conv }) {
               <p class="sub">${room.topic || 'No description yet.'}</p>
               <p class="faint">In ${S.houses[room.house].name}</p>
               ${(can(S, room.house, 'rooms') || room.perms?.manage) && html`<div><button class="btn" onClick=${() => openModal(RoomForm, { room: conv })}><${Icon} name="edit" size=${16} />Edit room</button></div>`}
-              <${RoomPlaces} conv=${conv} />`
+              <${RoomPlaces} conv=${conv} />
+              <${RoomEncNote} />`
           : meta.user
             ? html`<button class="person" style="margin:0 -8px;width:calc(100% + 16px)" onClick=${(e) => showProfile(meta.user, e.currentTarget.getBoundingClientRect())}>
                 <${Avatar} user=${meta.user} presence /><span class="grow"><span class="person-name" style="display:block">${meta.user.name}</span><span class="person-sub" style="display:block">${presenceLabel(meta.user)}</span></span>
               </button>`
             : html`<h2>${meta.title}</h2><p class="sub">${meta.dm.members.map((id) => S.users[id].name.split(' ')[0]).join(', ')}</p>`}
       </div>
-      ${meta.dm && html`<${EncryptionDetail} dm=${meta.dm} />`}
+      ${meta.dm && html`<${EncDetail} dm=${meta.dm} />`}
       <div class="detail">
         <h3>Notify me about</h3>
         <${NotifyControl} kind=${room ? 'room' : 'dm'} id=${conv} level=${level} />

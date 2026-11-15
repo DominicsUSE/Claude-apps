@@ -380,3 +380,98 @@ test('a prekey rotation is fine for an hour: a message sealed to the previous pr
   assert.equal((await openAs(b, got.m, { conv: dm, senderDsk: dsk(a) })).body.text, 'sealed to the old key');
   await close(a, b);
 });
+
+// ---------- step 6: attachments copied, scheduled messages, devices and resets ----------
+test('e2ee.file.copy: ciphertext copied into another encrypted conversation; never into a plain one or from one you can’t read', async () => {
+  const { a, b, dm } = await pair('ec-copy');
+  const c = await enrolled('ec-copy-c');
+  await friends(a, c);
+  const { id: dm2 } = await a.sock.ok('dm.open', { users: [c.id] });
+  const base = web(srv).base;
+  const { ct } = await encryptFile(new Uint8Array(64).fill(7));
+  const up = await (await fetch(`${base}/api/files?conv=${dm}&enc=1`, { method: 'POST', headers: { cookie: a.cookie, origin: base, 'content-type': 'application/octet-stream' }, body: ct })).json();
+  const r = await a.sock.ok('e2ee.file.copy', { id: up.id, to: dm2 });
+  const row = srv.db.get('SELECT * FROM files WHERE id = ?', r.id);
+  assert.deepEqual([row.conv, row.enc, row.owner, row.name], [dm2, 1, a.id, 'file']);
+  assert.deepEqual(readFileSync(join(dataDir, 'files', r.id)), readFileSync(join(dataDir, 'files', up.id)));
+  const plain = await person('ec-copy-plain');
+  await friends(a, plain);
+  const { id: dm3 } = await a.sock.ok('dm.open', { users: [plain.id] });
+  await a.sock.refused('e2ee.file.copy', { id: up.id, to: dm3 }, /only into encrypted/);
+  await c.sock.refused('e2ee.file.copy', { id: up.id, to: dm2 }, /isn’t there/);
+  await close(a, b, c, plain);
+});
+
+test('scheduled messages: the envelope waits and is sent as sealed; 14 days at most; a changed group cancels it with a note', async () => {
+  const a = await enrolled('ec-sch-a');
+  const b = await enrolled('ec-sch-b');
+  const c = await enrolled('ec-sch-c');
+  for (const [x, y] of [[a, b], [a, c], [b, c]]) await friends(x, y);
+  const { id: g } = await a.sock.ok('dm.open', { users: [b.id, c.id] });
+  const users = [a.id, b.id, c.id].sort();
+  const at = Date.now() + 90_000;
+  await a.sock.refused('sched.create', { conv: g, text: 'plain later', at }, RELOAD);
+  const far = Date.now() + 15 * 86_400_000;
+  let id = mid();
+  let s = await sealFrom(a, { conv: g, id, users, kind: 'sched', at: far, body: { text: 'too far' } });
+  await a.sock.refused('sched.create', { conv: g, id, at: far, text: '', e2ee: s.e2ee }, /14 days/);
+  s = await sealFrom(a, { conv: g, id, users, kind: 'sched', at, body: { text: 'later, sealed' } });
+  await a.sock.refused('sched.create', { conv: g, id, at: at + 60_000, text: '', e2ee: s.e2ee }, /doesn’t match/);
+  const r = await a.sock.ok('sched.create', { conv: g, id, at, text: '', e2ee: s.e2ee });
+  const row = srv.db.get('SELECT text, enc, members FROM scheduled WHERE id = ?', r.id);
+  assert.equal(row.text, '');
+  assert.ok(row.enc && !row.enc.includes('later, sealed'));
+  // Time comes: sent as the stored envelope, under the message id it was sealed with.
+  srv.db.run('UPDATE scheduled SET at = ? WHERE id = ?', Date.now() - 1, r.id);
+  srv.hub.messaging.tick();
+  const got = await b.sock.next('msg', (d) => d.m.id === id);
+  assert.equal(got.m.e2ee.h.kind, 'sched');
+  assert.equal((await openAs(b, got.m, { conv: g, senderDsk: dsk(a) })).body.text, 'later, sealed');
+  // Another one, then c leaves before it is due: not sent, and a says why.
+  const id2 = mid();
+  s = await sealFrom(a, { conv: g, id: id2, users, kind: 'sched', at, body: { text: 'never' } });
+  const r2 = await a.sock.ok('sched.create', { conv: g, id: id2, at, text: '', e2ee: s.e2ee });
+  await c.sock.ok('dm.leave', { dm: g });
+  srv.db.run('UPDATE scheduled SET at = ? WHERE id = ?', Date.now() - 1, r2.id);
+  srv.hub.messaging.tick();
+  const why = await a.sock.next('sched.failed', (d) => d.id === r2.id);
+  assert.match(why.reason, /group changed/);
+  assert.equal(srv.db.get('SELECT 1 FROM messages WHERE id = ?', id2), undefined);
+  await close(a, b, c);
+});
+
+test('removing a device: a sender with the old list is told to refetch; the removed device’s wraps are gone', async () => {
+  const { a, b, dm } = await pair('ec-rm');
+  const b2 = await new Sock(srv, await login(srv, b.handle)).connect();
+  const dev = await newDevice(b.id);
+  const { linkId } = await b2.ok('e2ee.link.start', { device: devicePublic(dev), prekey: dev.prekeys[1].signed });
+  await bind(b2, dev);
+  await b2.ok('e2ee.link.proof', { linkId, tag1: b64u(random(32)) });
+  await b.sock.ok('e2ee.link.approve', { linkId, devlist: await nextList(b.acct, (cur) => ({ devs: [...cur.devs, deviceEntry(dev)] })), box: b64u(random(120)), tag2: b64u(random(32)) });
+  const { id } = await sendEnc(a, { dm, users: [a.id, b.id], text: 'to both devices' });
+  assert.ok(srv.db.get('SELECT 1 FROM e2ee_wraps WHERE msg = ? AND target = ?', id, `d:${dev.d}`));
+  const old = await recipientsFor(a.sock, [a.id, b.id]);
+  await b.sock.ok('e2ee.device.remove', { d: dev.d, devlist: await nextList(b.acct, (cur) => ({ devs: cur.devs.filter((x) => x.d !== dev.d) })) });
+  assert.equal(srv.db.get('SELECT COUNT(*) n FROM e2ee_wraps WHERE target = ?', `d:${dev.d}`).n, 0, 'nothing left for the removed device to open');
+  const id2 = mid();
+  const s = await sealFrom(a, { conv: dm, id: id2, users: [a.id, b.id], recipients: old });
+  assert.equal((await a.sock.op('msg.send', { conv: dm, id: id2, text: '', e2ee: s.e2ee })).code, 'e2ee_stale');
+  await b2.close().catch(() => {}); await close(a, b);
+});
+
+test('a reset: contacts get the new account key from bundles, and old recipients are stale', async () => {
+  const { a, b, dm } = await pair('ec-reset');
+  const old = await recipientsFor(a.sock, [a.id, b.id]);
+  const fresh = await newDevice(b.id);
+  const { acct, payload } = await setupPayload(b.id, fresh);
+  const list = await (await import('./helpers/e2ee.js')).obj.makeList(acct.keys.aik, { ...payload.devlist, ver: b.acct.list.ver + 1 });
+  await b.sock.ok('e2ee.reset', { ...payload, devlist: list });
+  const r = await a.sock.ok('e2ee.bundles', { users: [b.id] });
+  assert.notEqual(r.users[b.id].list.aik, b.acct.list.aik);
+  assert.ok(r.users[b.id].resetAt);
+  const id = mid();
+  const s = await sealFrom(a, { conv: dm, id, users: [a.id, b.id], recipients: old });
+  assert.equal((await a.sock.op('msg.send', { conv: dm, id, text: '', e2ee: s.e2ee })).code, 'e2ee_stale');
+  assert.equal(srv.db.get('SELECT e2ee FROM dms WHERE id = ?', dm).e2ee, 1, 'still encrypted: never back to plain');
+  await close(a, b);
+});

@@ -3,6 +3,7 @@
 // and members popover, and the line a change writes into the conversation.
 // The server checks every rule again (server/dms.js).
 import { html, useState } from '../../vendor/preact-htm.js';
+import { EncLine } from './e2ee-conv.js';
 import { S, closeModal, closePop, openModal, openPop, openConv, convMeta, person, go } from '../store.js';
 import { fuzzy, HUES } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
@@ -222,6 +223,7 @@ export function dmHeaderItems(conv, anchor) {
 // ---------- The line a change writes ----------
 export function DmLine({ m }) {
   const l = m.dmLine || {};
+  if (l.act === 'e2ee') return html`<${EncLine} m=${m} />`; // the conversation turned end-to-end encrypted (js/views/e2ee-conv.js)
   const by = person(l.by || m.author);
   const name = (u) => html`<b>${person(u).name}</b>`;
   let text;

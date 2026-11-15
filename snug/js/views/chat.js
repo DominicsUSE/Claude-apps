@@ -21,6 +21,8 @@ import { customSuggest } from './emoji-custom.js';
 import { countUse } from './emoji.js';
 import { GifPicker } from './media.js';
 import { PollModal } from './messaging.js';
+import { isEncrypted } from '../e2ee/conv.js'; // polls and /roll need the server to see them: off in encrypted conversations
+import { COPY as E2COPY } from '../lib/e2ee/copy.js';
 
 // ---------------------------------------------------------------- Parser hooks
 // Roles by name after an @ (people win), message links on this Snug, room names for plain().
@@ -252,6 +254,7 @@ export function runSlash(conv, body, { anchor } = {}) {
     if (name === 'silent') return { send: rest, silent: true };
     return { send: out };
   }
+  if ((name === 'roll' || name === 'poll') && isEncrypted(conv)) { toast(name === 'roll' ? E2COPY.rollOff : E2COPY.pollsOff); return { keep: true }; }
   if (name === 'roll') {
     if (!parseRoll(rest)) { toast('Roll like /roll 2d6: up to 20 dice, each with 2 to 1000 sides.'); return { keep: true }; }
     call('cmd.roll', { conv, id: newId(), spec: rest || undefined }).catch((e) => toast(e.offline ? 'You’re offline. Roll again when you’re back.' : e.message));

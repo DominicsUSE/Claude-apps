@@ -45,6 +45,7 @@ import './inbox.js'; // server unread counts, groups leaving, timed mutes (js/in
 import './landmarks.js'; // Skip to messages, F6 between regions
 import { E2, safetyFor } from './e2ee/manager.js'; // end-to-end encryption on this device
 import { E2eeHost } from './views/e2ee-setup.js'; // opens the encryption sheets when they're needed
+import './e2ee/conv.js'; // end-to-end encrypted conversations: sealing and opening messages
 import { desktopTest } from './desktop.js'; // the desktop app's badge, global voice keys, idle, snug:// links
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();

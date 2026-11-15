@@ -7,7 +7,9 @@ import {
   S, emit, persist, toast, openModal, closeModal, openPop, closePop, openMenu, convMeta, findMsg, jumpToMsg, person,
   openLightbox, markRead, setPref,
 } from '../store.js';
-import { call, on } from '../server.js';
+import { call, on, sendMessage, uploadFile } from '../server.js';
+import { isEncrypted, copyEncryptedFile } from '../e2ee/conv.js'; // end-to-end encrypted conversations
+import { COPY as E2COPY } from '../lib/e2ee/copy.js';
 import { can, canPost } from '../lib/perms.js';
 import { roomIds, isThread } from '../lib/attention.js';
 import { fmtWhen, fmtFull, fmtTime, plural, fuzzy } from '../lib/util.js';
@@ -223,7 +225,7 @@ function Forwarded({ m, Files }) {
     <div class="fwd-card">
       <div class="fwd-head"><${Avatar} user=${u} size=${20} /><b>${u.name}</b><time class="faint" datetime=${new Date(f.ts).toISOString()} data-tip=${fmtFull(f.ts)}>${fmtWhen(f.ts)}</time></div>
       ${f.text && html`<div class="msg-text"><${Rich} text=${f.text} /></div>`}
-      ${m.sticker && m.files?.[0] && html`<img class="sticker" src=${`/api/files/${m.files[0].id}`} alt=${`Sticker: ${m.sticker.name}`} />`}
+      ${m.sticker && m.files?.[0] && (m.files[0].src || !m.files[0].encFile) && html`<img class="sticker" src=${m.files[0].src || `/api/files/${m.files[0].id}`} alt=${`Sticker: ${m.sticker.name}`} />`}
       ${!m.sticker && m.files?.length > 0 && Files && html`<${Files} files=${m.files} />`}
       ${from && html`<button class="fwd-src" onClick=${() => jumpToMsg(f.conv, f.id)}>From ${from.kind === 'thread' ? `a thread in ${from.where}` : from.title} · Go to message</button>`}
     </div>
@@ -240,6 +242,26 @@ function places() {
   return out;
 }
 
+// Forwarding out of or into an end-to-end encrypted conversation happens here,
+// not on the server (which can't read the message): into an encrypted one it is
+// sealed as a new message (attachments copied with their keys); into a room or a
+// plain conversation it is posted as readable text, after saying so.
+async function forwardHere(conv, m, to, note) {
+  const fwd = m.fwd ? { ...m.fwd } : { conv, id: m.id, author: m.author, ts: m.ts, text: m.text || '', ...(m.sticker ? { sticker: m.sticker } : {}) };
+  const files = [];
+  for (const f of (m.files || []).slice(0, 6)) {
+    if (isEncrypted(to)) { files.push(await copyEncryptedFile(to, f)); continue; }
+    const res = await fetch(f.src || `/api/files/${f.id}`, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error(`Couldn’t forward ${f.name}.`);
+    const up = await uploadFile(to, await res.blob(), f.name);
+    files.push({ id: up.id, kind: f.kind, name: f.name, size: up.size, w: f.w, h: f.h, duration: f.duration, peaks: f.peaks, voice: f.voice });
+  }
+  if (isEncrypted(to)) { sendMessage(to, note, { files, fwd }); return; }
+  const quoted = fwd.text ? fwd.text.split('\n').map((l) => `> ${l}`).join('\n') : '';
+  const said = `${quoted}${quoted ? '\n' : ''}— ${person(fwd.author).name}, forwarded`;
+  sendMessage(to, [note, said].filter(Boolean).join('\n\n'), { files });
+}
+
 function ForwardModal({ conv, m }) {
   const [q, setQ] = useState('');
   const [to, setTo] = useState(null);
@@ -252,6 +274,11 @@ function ForwardModal({ conv, m }) {
     if (!to) return setError('Pick where to forward it.');
     setBusy(true);
     const dest = all.find((p) => p.id === to);
+    if (m.e2ee || isEncrypted(conv) || isEncrypted(to)) {
+      forwardHere(conv, m, to, note.trim()).then(() => { closeModal(); toast(`Forwarded to ${dest?.title || 'the conversation'}`); },
+        (e) => { setBusy(false); setError(e.offline ? 'You’re offline. Try again when you’re back.' : e.message); });
+      return undefined;
+    }
     call('msg.forward', { conv, id: m.id, to, comment: note.trim() || undefined, newId: newMsgId() }).then(() => {
       closeModal();
       toast(`Forwarded to ${dest?.title || 'the conversation'}`);
@@ -270,6 +297,7 @@ function ForwardModal({ conv, m }) {
       </button>`) : html`<p class="sub">Nowhere matches “${q}”.</p>`}
     </div>
     <textarea class="field" rows="2" maxlength="2000" placeholder="Add a note (optional)" aria-label="Add a note" value=${note} onInput=${(e) => setNote(e.target.value)}></textarea>
+    ${to && (m.e2ee || isEncrypted(conv)) && !isEncrypted(to) && html`<p class="e2-warn" role="alert"><${Icon} name="unlock" size=${16} /><span>${E2COPY.forwardPlain(all.find((p) => p.id === to)?.title || 'there')}</span></p>`}
     ${error && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${error}</div>`}
     <div class="modal-foot">
       <button class="btn" onClick=${closeModal}>Cancel</button>
@@ -300,13 +328,22 @@ function EditHistory({ conv, m }) {
 export function StickerView({ m }) {
   const f = m.files?.[0];
   if (!f) return null;
-  return html`<img class="sticker" src=${`/api/files/${f.id}`} alt=${`Sticker: ${m.sticker.name}`} data-tip=${m.sticker.name} width="160" height="160" />`;
+  const src = f.encFile || f.src ? f.src : `/api/files/${f.id}`; // encrypted: its decrypted blob only
+  if (!src) return null;
+  return html`<img class="sticker" src=${src} alt=${`Sticker: ${m.sticker.name}`} data-tip=${m.sticker.name} width="160" height="160" />`;
 }
 
 function StickerPicker({ conv, replyTo }) {
   const houses = S.houseOrder.filter((h) => S.houses[h]?.joined && (S.stickers[h] || []).length);
   const send = (s) => {
     closePop();
+    // In an encrypted conversation the sticker's picture is encrypted and uploaded like any attachment;
+    // the server sees which sticker was fetched, not where it was sent.
+    if (isEncrypted(conv)) {
+      sendMessage(conv, '', { replyTo, sticker: { id: s.id, name: s.name, house: s.house }, files: [{ id: s.file, from: `/api/stickers/${s.file}`, src: `/api/stickers/${s.file}`, kind: 'image', name: `${s.name}.png` }] });
+      delete S.ui.reply[conv];
+      return;
+    }
     call('sticker.send', { conv, id: newMsgId(), sticker: s.id, ...(replyTo ? { replyTo } : {}) }).then(() => { delete S.ui.reply[conv]; emit(); }, offlineSay);
   };
   return html`<div class="sticker-pick" role="dialog" aria-label="Stickers">
@@ -469,7 +506,7 @@ export function PlusMenu({ conv, text, update, insert, replyTo, onAttach }) {
       items: [
         onAttach && { label: 'Upload a file', icon: 'clip', onSelect: onAttach },
         onAttach && { sep: true },
-        { label: 'Create a poll', icon: 'poll', onSelect: () => openModal(PollModal, { conv }) },
+        isEncrypted(conv) ? { label: E2COPY.pollsOff, icon: 'poll', disabled: true } : { label: 'Create a poll', icon: 'poll', onSelect: () => openModal(PollModal, { conv }) },
         { label: 'Send a sticker', icon: 'sticker', onSelect: () => openPop({ anchor, align: 'start', label: 'Stickers', C: StickerPicker, props: { conv, replyTo } }) },
         { label: 'Insert a time', icon: 'calendar', onSelect: () => openModal(StampModal, { onInsert: (tok) => insert(`${tok} `) }) },
         { label: 'Schedule a message', icon: 'clock', onSelect: () => openModal(ScheduleModal, { conv, text, replyTo, done: () => update('') }) },

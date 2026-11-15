@@ -17,6 +17,8 @@
 //   and features that need plaintext on the server (polls, /roll, server-side
 //   forwarding, link previews) are off there.
 import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { canon, parseCanon } from '../js/lib/e2ee/canon.js';
 import { b64u, b64uOf } from '../js/lib/e2ee/bytes.js';
 import { envelopeProblem, CAPS } from '../js/lib/e2ee/envelope.js';
@@ -176,7 +178,7 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
     if (!dev || dev.user !== c.user || dev.state !== 'trusted') fail('That encrypted message was sealed on a device your account doesn’t trust.');
     if (!sched && c.ws?.e2eeDevice !== dev.id) fail('Send encrypted messages from the device that sealed them. Reload Snug and try again.');
     if (Math.abs(h.ts - Date.now()) > SKEW) fail('This device’s clock is off by more than ten minutes. Fix the clock and try again.');
-    if (kind === 'msg' && h.re !== (replyTo ?? null)) fail('That encrypted message doesn’t match where it was sent.');
+    if (kind !== 'edit' && h.re !== (replyTo ?? null)) fail('That encrypted message doesn’t match where it was sent.');
     const mem = new Set(members(dm));
     if (new Set(h.ping).size !== h.ping.length || h.ping.some((u) => !mem.has(u))) fail('A mention in that message isn’t someone in this conversation.');
     const hh = sha256(`${P}hdr\n${canon(h)}`);
@@ -347,6 +349,85 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
     return { e2ee: true };
   };
 
+  // ---------- scheduled messages ----------
+  // Sealed now for the people here now, sent later as it was sealed. Prekeys
+  // used now are kept at least 14 days after they retire, so that is the limit.
+  // If the group changes meanwhile it isn't sent (the author is told why).
+  const SCHED_MAX = 14 * 86_400_000;
+  const baseSched = all['sched.create'];
+  if (baseSched) {
+    ops['sched.create'] = (c, d) => {
+      const conv = typeof d?.conv === 'string' ? d.conv : '';
+      const dm = rootOf(conv);
+      if (!dm || !encrypted(conv)) {
+        if (d?.e2ee !== undefined) fail('This conversation isn’t end-to-end encrypted. Reload Snug.');
+        return baseSched(c, d);
+      }
+      if (d.e2ee == null || (typeof d.text === 'string' && d.text !== '')) fail(RELOAD);
+      const at = Number.isSafeInteger(d.at) ? d.at : fail('Pick when to send it.');
+      if (at > Date.now() + SCHED_MAX) fail('In encrypted conversations, messages can be scheduled up to 14 days ahead.');
+      if (typeof d.id !== 'string' || !/^m_[a-z0-9]{8,40}$/.test(d.id) || M.msg(d.id)) fail('That message id isn’t valid.');
+      const users = members(dm);
+      const v = checkEnvelope(c, d.e2ee, { dm, place: conv, id: d.id, kind: 'sched', rev: 0, users, replyTo: d.replyTo ?? null });
+      if (v.h.at !== at) fail('That encrypted message doesn’t match when it should be sent.');
+      // The ordinary checks (posting allowed, time, how many waiting) with a placeholder text, then the envelope instead.
+      const r = baseSched(c, { conv, text: 'encrypted', at, ...(d.replyTo != null ? { replyTo: d.replyTo } : {}) });
+      db.run("UPDATE scheduled SET text = '', enc = ?, members = ? WHERE id = ?", canon({ env: v.env, k: v.k }), JSON.stringify(users), r.id);
+      hub.toUser(c.user, 'sched', { list: db.all('SELECT * FROM scheduled WHERE user = ? ORDER BY at', c.user).map((x) => schedRow(x)) });
+      return r;
+    };
+  }
+  // What the author's own list shows of one: the envelope and only their history wrap.
+  function schedRow(r) {
+    const v = { id: r.id, conv: r.conv, text: r.text, replyTo: r.reply_to || undefined, at: r.at, created: r.created };
+    const s = r.enc ? parseCanon(r.enc, 256 * 1024) : null;
+    if (s?.env) {
+      const pre = historyTarget(r.user);
+      v.m = { id: s.env.h.id, author: r.user, ts: r.at, e2ee: s.env, k: Object.fromEntries(Object.entries(s.k).filter(([t]) => t.startsWith(pre))) };
+    }
+    return v;
+  }
+  M.schedView = schedRow;
+  M.sendScheduledEnc = (r) => {
+    const s = parseCanon(r.enc, 256 * 1024);
+    const env = s?.env && encEnv(canon(s.env));
+    const dm = rootOf(r.conv);
+    if (!env || !dm || !encrypted(r.conv)) fail('It couldn’t be sent.');
+    if (canon(members(dm)) !== r.members) fail('Your scheduled message wasn’t sent because the group changed. Send it again if you still want to.');
+    const dev = deviceRow(env.h.from.d);
+    if (!dev || dev.state !== 'trusted') fail('Your scheduled message wasn’t sent because the device that sealed it was removed.');
+    if (M.msg(env.h.id)) fail('It was already sent.');
+    // Devices removed since get nothing; devices added since have no wrap (history wraps cover them).
+    const k = {};
+    for (const [t, w] of Object.entries(s.k)) {
+      if (t.startsWith('d:') && deviceRow(t.slice(2))?.state !== 'trusted') continue;
+      k[t] = w;
+    }
+    const v = { env, k, h: env.h, files: [] };
+    const inner = { conv: r.conv, id: env.h.id, text: '', ...(r.reply_to ? { replyTo: r.reply_to } : {}) };
+    M.emptyOk?.add(inner);
+    pending.set(env.h.id, v);
+    try { return baseSend({ user: r.user, ws: null }, inner); } finally { pending.delete(env.h.id); }
+  };
+
+  // ---------- attachments forwarded between encrypted conversations ----------
+  // The ciphertext is copied as it is; its key travels inside the new message.
+  const cfg = { filesDir: null };
+  ops['e2ee.file.copy'] = (c, d) => {
+    const src = typeof d?.id === 'string' && db.get('SELECT * FROM files WHERE id = ?', d.id);
+    const from = src && (src.conv.startsWith('t:') && !M.thread(src.conv) ? M.liveMsg(src.conv.slice(2))?.conv : src.conv);
+    if (!src || !src.enc || !from || !M.canRead(c.user, from)) fail('That attachment isn’t there any more.');
+    const to = typeof d.to === 'string' ? d.to : '';
+    const gate = M.postGate(c.user, to.startsWith('t:') && !M.thread(to) ? (M.liveMsg(to.slice(2))?.conv || '') : to);
+    if (!gate.ok) fail(gate.why);
+    if (!encrypted(to)) fail('Attachments are copied this way only into encrypted conversations.');
+    if (!cfg.filesDir || !existsSync(join(cfg.filesDir, src.id))) fail('That attachment isn’t there any more.');
+    const id = newId('f');
+    copyFileSync(join(cfg.filesDir, src.id), join(cfg.filesDir, id));
+    db.run('INSERT INTO files (id, owner, conv, name, type, size, created, enc) VALUES (?, ?, ?, ?, ?, ?, ?, 1)', id, c.user, to, 'file', 'application/octet-stream', src.size, Date.now());
+    return { id };
+  };
+
   // ---------- housekeeping ----------
   // A deleted message's envelope, wraps and earlier versions go with its
   // content once the ten minutes of undo are over (as server/index.js does for text).
@@ -362,5 +443,6 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
     });
   }
 
-  return { ops, readyChanged, upgrade, encrypted, rootOf, members, ready, checkEnvelope, insertWraps, sweep, wrapsFor };
+  const configure = ({ filesDir }) => { cfg.filesDir = filesDir; };
+  return { ops, configure, readyChanged, upgrade, encrypted, rootOf, members, ready, checkEnvelope, insertWraps, sweep, wrapsFor };
 }

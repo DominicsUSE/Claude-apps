@@ -104,9 +104,12 @@ async function rotatePrekey() {
   if (changed) await save();
 }
 
+// Run when this device's account keys are loaded (js/e2ee/conv.js opens messages that waited for them).
+export const readyHooks = [];
 async function loadKeys(asb) {
   keys = await backup.loadAsb(asb);
   E2.status = 'ready';
+  for (const fn of readyHooks) { try { fn(); } catch (e) { console.warn('e2ee ready', e); } }
 }
 
 // --- connecting --------------------------------------------------------------
@@ -218,6 +221,7 @@ export async function setup({ history = true, existing = null } = {}) {
   E2.device = { d: dev.d, label: dev.label, kind: dev.kind };
   await bindHere();
   E2.status = 'ready';
+  for (const fn of readyHooks) { try { fn(); } catch (e) { console.warn('e2ee ready', e); } }
   E2.rkSaved = !!existing;
   if (rk.text) { await store.putSecret('rk', rk.text); E2.rk = { text: rk.text, fresh: true }; }
   local.set(skipKey(), null);
@@ -511,6 +515,12 @@ export async function acceptChange(u, aik, ver) {
   await updateMeta((m) => { m.pins[u] = { aik, ver }; delete m.verified[u]; });
   emit();
 }
+
+// The live keys, for js/e2ee/conv.js (sealing and opening messages). Read-only views of this module's state.
+export const ring = {
+  get dev() { return dev; }, get keys() { return keys; }, get meta() { return meta; }, get store() { return store; },
+  updateMeta: (fn) => updateMeta(fn),
+};
 
 // For tests: run without IndexedDB.
 export const _test = { memStore, useStore: (s) => { store = s; } };

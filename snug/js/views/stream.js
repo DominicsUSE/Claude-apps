@@ -33,6 +33,7 @@ import { DmLine } from './dm-manage.js'; // a group renamed, people added or gon
 import { msgFace, colourRole, BotBadge, PostTitle, RoleIconMark } from './places.js'; // nicknames, bots, role colours and icons, forum post titles
 import { messageItems, hiddenBlocked, BlockedLine, composerGate, GateNote, SlowNote, slowLeft } from './safety.js'; // blocks, reports, moderation, slowmode
 import { MessageExtras, ownsFiles, messagingMenuItems, PlusMenu, FormatBar, formatKey, ScheduledNote, UnreadBar } from './messaging.js'; // polls, previews, forwarding, stickers, formatting, scheduling
+import { EncBody, encMenuItems, EncComposerNote, quoteText } from './e2ee-conv.js'; // end-to-end encrypted messages
 import { PeerState } from './p2p.js'; // a message waiting for a friend on another PC, or held after their security code changed
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
@@ -88,6 +89,7 @@ export function messageMenu(conv, m, pos) {
       mine && !m.cmd && { label: 'Edit', icon: 'edit', hint: 'E', onSelect: () => setEditing(m.id) },
       (mine || mod) && { label: 'Delete', icon: 'trash', danger: true, onSelect: () => deleteMsg(conv, m.id) },
       ...messageItems(conv, m), // report, block, and a moderator's actions on the author
+      ...encMenuItems(conv, m), // not end-to-end encrypted (from before), or why it couldn't be decrypted
     ],
   });
 }
@@ -124,8 +126,10 @@ function FileItem({ f, i, conv, m }) {
   const [opened, setShown] = useState(false);
   const shown = opened || S.prefs?.spoilers === 'always';
   const [altOpen, setAltOpen] = useState(false);
-  const url = f.id ? `/api/files/${f.id}` : null;
+  // An end-to-end encrypted attachment exists only as its decrypted blob: never the server's copy.
+  const url = f.encFile ? f.src || null : f.id ? `/api/files/${f.id}` : null;
   const src = f.src || url;
+  if (f.encFile && !src) return html`<div class="file e2-file" role="status"><${Icon} name=${f.broken ? 'alert' : 'lock'} /><span class="trunc">${f.broken ? 'Couldn’t decrypt this attachment.' : `Decrypting ${f.name}…`}</span></div>`;
   const visual = f.kind === 'image' || f.kind === 'video' || f.gif;
   if (f.spoiler && !shown && visual) {
     const what = f.kind === 'video' ? 'video' : f.gif ? 'GIF' : 'image';
@@ -200,7 +204,7 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
     ${quoted && html`<button class="reply-ref" onClick=${() => { S.ui.jump = { conv, id: quoted.id, n: (S.ui.jump?.n || 0) + 1 }; emit(); }}>
       <${Avatar} user=${person(quoted.author)} />
       <b>${person(quoted.author).name}</b>
-      <span class="trunc">${plain(quoted.text) || 'Attachment'}</span>
+      <span class="trunc">${quoteText(quoted, plain(quoted.text) || 'Attachment')}</span>
     </button>`}
     <div class="msg-gutter">
       ${grouped
@@ -218,6 +222,7 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
       ${S.ui.editing === m.id
         ? html`<${EditBox} conv=${conv} m=${m} />`
         : m.cmd?.roll ? html`<${RollLine} m=${m} />` // a dice roll the server wrote (js/views/chat.js)
+        : m.e2ee && m.enc !== true ? html`<${EncBody} m=${m} />` // being decrypted, or couldn't be (js/views/e2ee-conv.js)
         : m.text && !m.poll && html`<div class=${`msg-text${isJumbo(m.text) ? ' jumbo' : ''}`}>
             <${Rich} m=${m} onMention=${(who, e) => showProfile(who, e.target.getBoundingClientRect(), meta?.house)} />
             ${m.edited && html`<span class="edited" data-tip=${`Edited ${fmtFull(m.edited)}`}>(edited)</span>`}
@@ -534,6 +539,7 @@ export function Composer({ conv, placeholder }) {
       <${SlowNote} conv=${conv} />
       <${WaitNote} conv=${conv} />
       <${ScheduledNote} conv=${conv} />
+      <${EncComposerNote} conv=${conv} />
       <${LengthNote} n=${text.trim().length} />
       <${FormatBar} ta=${ta} text=${text} update=${update} />
       <div class="composer-row">

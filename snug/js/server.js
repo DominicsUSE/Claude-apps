@@ -23,6 +23,11 @@ let timer = null;
 let opened = false;
 const waiting = new Map();
 const handlers = new Map();
+// Set by js/e2ee/conv.js (end-to-end encrypted conversations): scan() opens
+// every message view that arrives, sendEncrypted/uploadEncrypted seal what
+// goes out, whenOpen holds a notification until its message is open.
+export const transportHooks = { scan: null, isEncrypted: null, sendEncrypted: null, uploadEncrypted: null, whenOpen: null };
+const scanIn = (d) => { try { transportHooks.scan?.(d); } catch (e) { console.warn('e2ee scan', e); } };
 
 // Other modules (voice) listen for their own events here.
 export function on(ev, fn) { if (!handlers.has(ev)) handlers.set(ev, new Set()); handlers.get(ev).add(fn); }
@@ -72,6 +77,7 @@ function connect() {
     if (msg.t === 'hello') {
       attempt = 0;
       S.conn.socket = 'open';
+      scanIn(msg.d);
       applySnapshot(msg.d);
       fire('hello', msg.d); // js/e2ee/manager.js binds this device to the new socket
       fire('open');
@@ -82,8 +88,9 @@ function connect() {
       waiting.delete(msg.id);
       clearTimeout(w.t);
       // A refusal's code and data (e.g. e2ee_stale with the users whose keys changed) ride on the error.
-      if (msg.ok) w.resolve(msg.d); else w.reject(Object.assign(new Error(msg.error), msg.code ? { code: msg.code, data: msg.data } : {}));
+      if (msg.ok) { scanIn(msg.d); w.resolve(msg.d); } else w.reject(Object.assign(new Error(msg.error), msg.code ? { code: msg.code, data: msg.data } : {}));
     } else if (msg.t === 'ev') {
+      scanIn(msg.d);
       try { ((typeof msg.ev === 'string' && Object.hasOwn(EVENTS, msg.ev) && EVENTS[msg.ev]) || ((d) => fire(msg.ev, d)))(msg.d); } catch (err) { console.error(msg.ev, err); } // sec-integrate: own keys only
       emit();
     }
@@ -156,8 +163,10 @@ function place(conv, m) {
   delete S.cache[m.id];
 }
 
-export function sendMessage(conv, text, { replyTo, files, silent, replyPing } = {}) {
+export function sendMessage(conv, text, { replyTo, files, silent, replyPing, sticker, fwd } = {}) {
   const m = { id: msgId(), author: S.me, ts: Date.now(), text, state: 'sending' };
+  if (sticker) m.sticker = sticker; // encrypted conversations: a sticker or a forward travels in the sealed body (js/e2ee/conv.js)
+  if (fwd) m.fwd = fwd;
   if (replyTo) m.replyTo = replyTo;
   if (silent) m.silent = true; // no sound, no push (server/chat.js)
   if (replyTo && replyPing === false) m.replyPing = false; // a reply that doesn't notify its author
@@ -180,7 +189,10 @@ function send(conv, m) {
   // Voice messages also carry their length and waveform.
   // Recorded voice messages say so; any attachment may be a spoiler and have a description (server/chat.js).
   const files = (m.files || []).map((f) => ({ id: f.id, w: f.w, h: f.h, duration: f.duration, peaks: f.peaks, voice: f.voice || undefined, spoiler: f.spoiler || undefined, alt: f.alt || undefined }));
-  call('msg.send', { conv, id: m.id, text: m.text, replyTo: m.replyTo, files, silent: m.silent || undefined, replyPing: m.replyPing }).then((r) => {
+  // An end-to-end encrypted conversation: sealed on this device first (js/e2ee/conv.js).
+  const sent = transportHooks.isEncrypted?.(conv) ? transportHooks.sendEncrypted(conv, m)
+    : call('msg.send', { conv, id: m.id, text: m.text, replyTo: m.replyTo, files, silent: m.silent || undefined, replyPing: m.replyPing });
+  sent.then((r) => {
     place(conv, { ...r.m, files: r.m.files });
     if (isThread(conv)) S.followed[conv] = true;
     emit();
@@ -210,6 +222,7 @@ export function sendTyping(conv) {
 
 // Files go up over HTTP first; the message then refers to them by id.
 export async function uploadFile(conv, blob, name) {
+  if (transportHooks.isEncrypted?.(conv)) return transportHooks.uploadEncrypted(conv, blob, name); // encrypted here first
   let res;
   try {
     res = await fetch(`/api/files?conv=${encodeURIComponent(conv)}`, {
@@ -307,7 +320,9 @@ const EVENTS = {
     if (pending && isThread(conv)) S.followed[conv] = true;
     if (isNew && !pending) {
       stopTyping(conv, m.author);
-      notify(conv, m);
+      // An encrypted message notifies once it is open (with its text), never if it can't be.
+      if (m.e2ee && m.enc !== true && transportHooks.whenOpen) transportHooks.whenOpen(m, (ok) => { if (ok) { notify(conv, m); emit(); } });
+      else notify(conv, m);
     }
   },
   'msg.del'({ conv, id }) {

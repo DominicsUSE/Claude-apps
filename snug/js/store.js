@@ -445,6 +445,8 @@ export function markConvRead(conv) {
 }
 
 // Messages
+// Set by js/e2ee/conv.js: an edit in an end-to-end encrypted conversation is sealed there.
+export const msgHooks = { edit: null };
 export function editMsg(conv, id, text) {
   const m = findMsg(conv, id);
   S.ui.editing = null;
@@ -452,7 +454,7 @@ export function editMsg(conv, id, text) {
   if (m && next && m.text !== next) {
     m.text = next;
     m.edited = Date.now();
-    save('msg.edit', { conv, id, text: next });
+    if (!msgHooks.edit?.(conv, m, next)) save('msg.edit', { conv, id, text: next });
   }
   emit();
 }

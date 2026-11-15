@@ -201,7 +201,7 @@ export function VoicePlayer({ f }) {
   const [dur, setDur] = useState(f.duration || 0);
   const [rate, setRate] = useState(speed);
   const [failed, setFailed] = useState(false);
-  const src = f.src || (f.id ? `/api/files/${f.id}` : null);
+  const src = f.src || (f.id && !f.encFile ? `/api/files/${f.id}` : null); // encFile: only its decrypted blob (js/e2ee/conv.js)
   const peaks = Array.isArray(f.peaks) && f.peaks.length ? f.peaks : Array(PEAKS).fill(60);
   const total = dur || f.duration || 0;
   const frac = total ? Math.min(1, t / total) : 0;

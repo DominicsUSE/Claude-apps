@@ -35,7 +35,21 @@ textarea.e2-key-field { resize: vertical; min-height: calc(var(--h-field) * 1.6)
 .e2-keep { border: 0; padding: 0; margin: 0; display: grid; gap: var(--s-2); }
 .e2-limits ul { margin: 0; padding-left: var(--s-5); display: grid; gap: var(--s-2); color: var(--text-2); }
 .e2-detail-people { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-2); }
+/* Encrypted conversations: the header label, a message being opened (or not), the composer note, the line where it turned on. */
+.e2-label { display: inline-flex; align-items: center; gap: var(--s-1); height: var(--h-xs); padding: 0 var(--s-2); border: 1px solid var(--line); border-radius: var(--r-full); background: none; color: var(--text-2); font-size: var(--t-12); white-space: nowrap; cursor: pointer; flex: none; }
+.e2-label.on { color: var(--text-1); }
+.e2-label:hover { background: var(--surface-hover); }
+.e2-label:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.e2-msg { display: flex; align-items: center; gap: var(--s-2); color: var(--text-3); font-style: italic; }
+.e2-msg.failed { color: var(--text-2); }
+.e2-msg svg { flex: none; }
+.e2-file { color: var(--text-3); }
+.e2-compose-note { display: flex; align-items: center; gap: var(--s-1); margin: 0 0 var(--s-1); font-size: var(--t-12); color: var(--text-3); }
+.e2-line .joinline-text { color: var(--text-2); }
+.e2-detail h3 { display: flex; align-items: center; gap: var(--s-2); }
+.e2-detail .hint + .hint { margin-top: var(--s-2) !important; }
 @media (max-width: 759px) {
+  .e2-label span { display: none; }
   .e2-rk { grid-template-columns: repeat(3, auto); padding: var(--s-3); }
   .e2-number { grid-template-columns: repeat(3, auto); }
   .e2-code { font-size: var(--t-20); }
