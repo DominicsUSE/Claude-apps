@@ -44,7 +44,19 @@ on('p2p', (d) => {
   S.p2p = { ...(S.p2p || {}), ...d };
   if (d.state === 'ok' && was === 'moving') toast('Your Snug account is on this PC now.');
 });
-signOutHooks.push(() => { for (const k of ['p2p', 'peerKeys', 'peerWaiting', 'peerHeld', 'peerFailed', 'peerWaitingN', 'peerFailedN']) delete S[k]; });
+// A friend's file arriving from their PC (server/peerblob.js): 0..1 while it comes, gone once it's here.
+on('file.progress', ({ id, got, size }) => {
+  S.fileProgress ||= {};
+  if (!size || got >= size) delete S.fileProgress[id]; else S.fileProgress[id] = got / size;
+});
+signOutHooks.push(() => { for (const k of ['p2p', 'peerKeys', 'peerWaiting', 'peerHeld', 'peerFailed', 'peerWaitingN', 'peerFailedN', 'fileProgress']) delete S[k]; });
+
+// "Receiving from Ines's PC… 40%" under an attachment still on its way.
+export function Arriving({ f }) {
+  const p = S.fileProgress?.[f.id];
+  if (p == null) return null;
+  return html`<span class="file-arriving" role="status"><progress max="1" value=${p} aria-label=${`Receiving ${f.name}`}></progress>Receiving… ${Math.floor(p * 100)}%</span>`;
+}
 
 // ---------- Small helpers other views use ----------
 export const p2pOwner = () => !!(S.p2p?.enabled && S.p2p.owner);

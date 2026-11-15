@@ -221,7 +221,7 @@ test('gifs: a GIF saved on one device is in "Your GIFs" on another, and sends fr
   const picker = robin2.locator('.gif-picker');
   await picker.waitFor();
   assert.equal(await picker.locator('[role=tab][aria-selected=true]').textContent(), 'Your GIFs');
-  assert.equal(await picker.locator('[role=tab]:has-text("Search")').count(), 0, 'no search without a provider key');
+  assert.equal(await picker.locator('[role=tab]:has-text("Search")').count(), 1, '0.12: Search is always a tab (keyless Openverse by default, or a note when off)');
   await picker.locator('.gif-tile[aria-label="Send kiln-wave.gif"]').click();
   await picker.waitFor({ state: 'detached' });
   await settled(robin2);

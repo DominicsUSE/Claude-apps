@@ -5,7 +5,7 @@
 // never reach the database, its WAL or the files folder in readable form.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startServer } from '../server/index.js';
@@ -362,7 +362,8 @@ test('canary: a sent marker text and picture never reach the database, its WAL o
     for (const n of needles) assert.equal(bytes.includes(n), false, `${f} holds the marker`);
   }
   const filesDir = join(dataDir, 'files');
-  for (const f of readdirSync(filesDir)) {
+  for (const f of readdirSync(filesDir, { recursive: true })) {
+    if (!statSync(join(filesDir, f)).isFile()) continue; // files/partial holds uploads under way
     const bytes = readFileSync(join(filesDir, f));
     for (const n of [...needles, Buffer.from(tag)]) assert.equal(bytes.includes(n), false, `files/${f} holds the marker`);
     assert.notDeepEqual([...bytes.slice(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 'no PNG stored readable');

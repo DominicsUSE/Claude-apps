@@ -31,7 +31,7 @@ export function XIcon({ name, size = 20 }) {
 const visual = (f) => f && f.id && !f.voice && (f.kind === 'image' || f.kind === 'video');
 const itemOf = (conv, m, f) => ({
   key: `${m.id}:${f.id}`, src: f.src || `/api/files/${f.id}`, name: f.name, alt: f.alt || '', kind: f.kind, gif: !!f.gif,
-  w: f.w, h: f.h, conv, mid: m.id, author: m.author, ts: m.ts,
+  w: f.w, h: f.h, conv, mid: m.id, author: m.author, ts: m.ts, credit: f.credit?.text || '', // an openly licensed GIF's author and licence
 });
 
 // Everything the viewer can step through: this message's pictures and videos
@@ -163,6 +163,7 @@ export function Viewer({ lb }) {
       <button class="vw-nav next" aria-label="Next" data-tip="Next" data-key="→" onClick=${() => go(1)}><${Icon} name="chev-r" size=${24} /></button>`}
     ${(it.alt || it.mid) && html`<div class="vw-foot">
       ${it.alt ? html`<p class="vw-alt"><span class="alt-tag">ALT</span>${it.alt}</p>` : html`<p class="vw-alt faint">${it.name}</p>`}
+      ${it.credit && html`<p class="vw-alt faint vw-credit">${it.credit}</p>`}
     </div>`}
   </div>`;
 }

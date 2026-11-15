@@ -14,6 +14,7 @@ import {
 } from './store.js';
 import { needsMe, levelOf, isThread, roomIds } from './lib/attention.js';
 import { plain } from './lib/format.js';
+import { uploadBlob, needsChunks, fetchLimits } from './lib/upload.js'; // big files in resumable parts
 
 const offline = () => Object.assign(new Error('offline'), { offline: true });
 let ws = null;
@@ -222,18 +223,30 @@ export function sendTyping(conv) {
   call('typing', { conv }).catch(() => {});
 }
 
-// Files go up over HTTP first; the message then refers to them by id.
-export async function uploadFile(conv, blob, name) {
-  if (transportHooks.isEncrypted?.(conv)) return transportHooks.uploadEncrypted(conv, blob, name); // encrypted here first
+// Files go up over HTTP first; the message then refers to them by id. A big
+// file goes up in resumable parts with progress (js/lib/upload.js); Cancel
+// aborts `signal`. In an end-to-end encrypted conversation the file is
+// encrypted here first (js/e2ee/conv.js) and only the ciphertext goes up.
+let limitsP = null;
+export const uploadLimits = () => (limitsP ||= fetchLimits(fetch).then((l) => { if (!l) limitsP = null; return l; }));
+export async function uploadFile(conv, blob, name, { onProgress, signal } = {}) {
+  if (transportHooks.isEncrypted?.(conv)) return transportHooks.uploadEncrypted(conv, blob, name, { onProgress, signal });
+  if (needsChunks(blob.size)) {
+    return uploadBlob({ fetch: (...a) => fetch(...a), conv, blob, name, onProgress, signal, limits: await uploadLimits() });
+  }
   let res;
   try {
     res = await fetch(`/api/files?conv=${encodeURIComponent(conv)}`, {
-      method: 'POST', credentials: 'same-origin', body: blob,
+      method: 'POST', credentials: 'same-origin', body: blob, signal,
       headers: { 'Content-Type': blob.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(name) },
     });
-  } catch { throw new Error(`Couldn’t upload ${name}. Check your connection and try again.`); }
+  } catch (e) {
+    if (e.name === 'AbortError') throw e;
+    throw new Error(`Couldn’t upload ${name}. Check your connection and try again.`);
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Couldn’t upload ${name}.`);
+  onProgress?.(1);
   return data;
 }
 

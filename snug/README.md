@@ -312,10 +312,17 @@ Real, and covered by tests with separate users:
   in the header. Someone who joins a house sees its pins from their next
   sync, not at once.
 - GIFs: star any GIF to keep it in Your GIFs on every device, and pick from
-  GIFs posted in your places. Search is optional (see `SNUG_GIF_PROVIDER`);
-  a GIF picked from search is downloaded by the server and stored as a Snug
-  file, so no message loads from another site. Tested against a local stand-in
-  for the provider, not against Tenor itself.
+  GIFs posted in your places. Search needs no paid key: a host server searches
+  Openverse (openly licensed images, mature results filtered) by default, and can
+  add Wikimedia Commons or Tenor (see `SNUG_GIF_PROVIDER`); the desktop app
+  searches through the Snug registry. The server does the searching and fetching,
+  so the GIF site sees the server's (or the registry's) address and the words
+  searched for, never the person's address; the picker says which source it
+  uses. A GIF picked from search is copied into Snug, so no message loads from
+  another site, and an openly licensed one keeps its credit (author, licence,
+  where from) under it and in the viewer. Without search, or offline, the Search
+  tab says so. Tested against local stand-ins for the providers, not the real
+  services.
 - Custom emoji per house: up to 100, added in House settings > Emoji by roles
   with the Manage emoji permission (PNG, GIF or WebP, up to 256 KB and 256 by
   256 pixels, checked from the file on the server). Type `:name:` (with
@@ -841,7 +848,21 @@ Real, and covered by tests with separate users:
     **ALT** badge. Forwarding keeps both; spoiler GIFs never become
     favourites or "recent". Uploads are typed by their bytes (PNG, JPEG, GIF,
     WebP, MP4, QuickTime, WebM, MP3, Ogg, M4A); anything mislabelled, and
-    every SVG, only downloads.
+    every SVG, only downloads when opened directly.
+  - **Big files.** Up to 100 MB each by default (`SNUG_MAX_FILE_MB`). A file
+    over 8 MB goes up in 4 MB parts with a progress bar and Cancel; a dropped
+    connection costs one part and the upload carries on by itself. Per-person
+    and per-house quotas and a free-disk floor refuse with a message that says
+    which. Between PCs, files over 10 MB go only to friends on Snug 0.12 or
+    later (a friend on 0.11 gets a clear "takes files up to 10 MB" instead),
+    wait for a direct connection rather than the relay, show progress as they
+    arrive, and a cut transfer resumes.
+  - **Previews.** SVG shows as a picture made from its own bytes in an image
+    element, which runs no script and loads nothing from elsewhere. PDFs show
+    their first page, and Open goes through every page (pdf.js, loaded only
+    when a PDF comes into view, given the bytes in memory). Text and code files
+    show their first lines, always as text; a big one shows its first 64 KB and
+    says so.
   - **Players.** Videos play inline with their first frame as a poster, our
     own controls (play, a keyboard seek slider, time, mute, volume, full
     screen, picture in picture, download) and 44px targets on a phone. A
@@ -1011,8 +1032,10 @@ Built, but not seen end to end from the test machine:
   Google's push service (and so a real Chrome push) could not be reached from
   here; Firefox's and Apple's were not tried. Apple's needs a real
   `SNUG_PUSH_CONTACT`.
-- **GIF search against Tenor.** Tested against a local stand-in for its API;
-  the real service needs a key and was not reached.
+- **GIF search against Openverse, Wikimedia Commons and Tenor.** Tested against
+  local stand-ins for their APIs; the real services were not reachable from the
+  test machine. Openverse's anonymous limits are tight (a few searches a minute
+  per server address); results are cached for an hour.
 - **Real cameras and screens.** Only Chromium's fake devices and the desktop
   app under Xvfb.
 
@@ -1039,7 +1062,13 @@ behind a reverse proxy that terminates TLS and passes WebSocket upgrades on
 | `SNUG_PUSH_CONTACT` | Contact the push services see in each VAPID token (`mailto:` or `https:`); Apple's requires a real one | `mailto:snug@example.invalid` |
 | `SNUG_E2EE=off` | Stop offering end-to-end encryption for direct messages and groups (conversations already encrypted stay encrypted) | on |
 | `SNUG_DEMO_PASSWORD` | Password for the sample accounts when seeding | `snug-demo-1` |
-| `SNUG_GIF_PROVIDER=tenor`, `SNUG_TENOR_KEY` | Turn on GIF search through Tenor (v2 API). Searches and previews go through the server; media is fetched only from Tenor's media hosts, at most 10 MB, GIF, WebP or MP4 by content | off: no Search tab |
+| `SNUG_GIF_PROVIDER` | GIF search sources, in order, comma separated: `openverse` (keyless), `commons` (Wikimedia Commons, keyless, no safe-search filter), `tenor` (needs `SNUG_TENOR_KEY`), `registry` (the desktop app's default), or `off`. Searches, previews and picks go through the server; only addresses a search returned are fetched, at most 10 MB, GIF, WebP or MP4 by content | `openverse` (the desktop app: `registry`) |
+| `SNUG_TENOR_KEY` | A free Google Cloud key for Tenor's v2 API (check Tenor's current terms; it asks for its "Powered by Tenor" mark, which the picker shows) | none |
+| `SNUG_GIF_CONTACT` | A URL or e-mail for whoever runs the server, added to the GIF search User-Agent (Wikimedia's User-Agent policy asks for contact details). Nothing about the person searching is ever sent | none |
+| `SNUG_MAX_FILE_MB` | Largest attachment, in MB | `100` |
+| `SNUG_QUOTA_MB` | Room for each person's files, in MB (`0`: no quota) | `2048` |
+| `SNUG_HOUSE_QUOTA_MB` | Room for the files in each house's rooms, in MB (`0`: no quota) | `10240` |
+| `SNUG_DISK_FLOOR_MB` | Free disk space an upload must leave, in MB | `1024` |
 
 **Someone lost their password and their recovery key?** After checking who is
 asking (Snug can't do that part), run `npm run reset-password -- <username>`
@@ -1094,9 +1123,11 @@ before seeding anything that faces the internet, or better, do not seed there.
   prepared statements with bound values.
 - **Rendering**: message text becomes a token tree and then elements, never
   HTML. A strict Content-Security-Policy allows scripts only from Snug itself.
-- **Uploads**: 10 MB limit, fetched only by people who can read the
+- **Uploads**: `SNUG_MAX_FILE_MB` limit (100 MB by default), streamed to disk,
+  with quotas and a free-disk floor; fetched only by people who can read the
   conversation, served with `nosniff` and a sandboxing policy. Anything that
-  is not a known image type downloads instead of opening.
+  is not a known image type downloads instead of opening; SVG and PDF previews
+  are drawn in the page from the bytes (SVG as an image, which runs no script).
   Soundboard sounds must be plain PCM WAV (format, length and size read from
   the file on the server) and are fetched only by members of their house.
 - **Rate limits**: per person for messages, typing, search, friend requests

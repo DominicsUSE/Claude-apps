@@ -6,7 +6,8 @@ import {
   openThread, openMenu, openPop, closePop, react, toggleSave, toggleHighlight, deleteMsg, editMsg, setReply,
   setEditing, openLightbox, toast, setPresence, setStatus,
 } from '../store.js';
-import { sendMessage, retry, sendTyping, uploadFile, loadHistory } from '../server.js';
+import { sendMessage, retry, sendTyping, uploadFile, uploadLimits, loadHistory } from '../server.js';
+import { limitText } from '../lib/upload.js';
 import { buildItems } from '../lib/group.js';
 import { unreadOf, isThread, forMe } from '../lib/attention.js';
 import { can, canPost } from '../lib/perms.js';
@@ -34,7 +35,8 @@ import { msgFace, colourRole, BotBadge, PostTitle, RoleIconMark } from './places
 import { messageItems, hiddenBlocked, BlockedLine, composerGate, GateNote, SlowNote, slowLeft } from './safety.js'; // blocks, reports, moderation, slowmode
 import { MessageExtras, ownsFiles, messagingMenuItems, PlusMenu, FormatBar, formatKey, ScheduledNote, UnreadBar } from './messaging.js'; // polls, previews, forwarding, stickers, formatting, scheduling
 import { EncBody, encMenuItems, EncComposerNote, RoomComposerHint, quoteText } from './e2ee-conv.js'; // end-to-end encrypted messages
-import { PeerState } from './p2p.js'; // a message waiting for a friend on another PC, or held after their security code changed
+import { PeerState, Arriving } from './p2p.js'; // a message waiting for a friend on another PC, or held after their security code changed
+import { SvgPreview, PdfPreview, isSvgFile, isPdfFile } from './preview.js'; // SVG and PDF attachments
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 const atBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 48;
@@ -155,10 +157,15 @@ function FileItem({ f, i, conv, m }) {
   }
   if (isTextFile(f) && url && !f.spoiler) return html`<${TextPreview} f=${f} url=${url} CodeBlock=${CodeBlock} />`;
   const body = html`<${Icon} name=${f.kind === 'image' ? 'image' : 'file'} />
-    <span class="trunc"><span class="file-name trunc" style="display:block">${f.spoiler && !shown ? 'Spoiler file' : f.name}</span><span class="file-size">${fileSize(f.size || 0)}${url ? ', download' : ''}</span></span>`;
-  return url
+    <span class="trunc"><span class="file-name trunc" style="display:block">${f.spoiler && !shown ? 'Spoiler file' : f.name}</span><span class="file-size">${fileSize(f.size || 0)}${url ? ', download' : ''}</span><${Arriving} f=${f} /></span>`;
+  const chip = url
     ? html`<a class="file" href=${url} download=${f.name}>${body}</a>`
     : html`<div class="file">${body}</div>`;
+  // SVG as a picture that runs nothing, and PDFs with their first page (js/views/preview.js); the chip if not.
+  const here = url && !f.spoiler && !(S.fileProgress && f.id in S.fileProgress);
+  if (here && isSvgFile(f)) return html`<${SvgPreview} f=${f} url=${url} fallback=${chip} />`;
+  if (here && isPdfFile(f)) return html`<${PdfPreview} f=${f} url=${url} fallback=${chip} />`;
+  return chip;
 }
 
 function Files({ files, conv, m }) {
@@ -266,7 +273,8 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
 }
 
 // Composer. Suggestions, slash commands and quick edits are in js/views/chat.js.
-const MAX_FILE = 10 * 1024 * 1024;
+// The per-file limit is the server's (SNUG_MAX_FILE_MB); 10 MB until it has said.
+let maxFile = 10 * 1024 * 1024;
 
 // Photos are scaled down to 1600px and re-encoded before upload: smaller to
 // send, and it strips location and camera data. GIFs keep their animation.
@@ -325,6 +333,11 @@ export function Composer({ conv, placeholder }) {
 
   useEffect(() => { if (!coarse()) ta.current?.focus(); }, []);
   useLayoutEffect(() => grow(ta.current), [text]);
+  const [, setLimit] = useState(maxFile);
+  useEffect(() => { uploadLimits().then((l) => { if (l?.maxFile) { maxFile = l.maxFile; setLimit(l.maxFile); } }); }, []);
+  // Uploads under way, by attachment key, so removing one cancels it.
+  const aborts = useRef(new Map());
+  useEffect(() => () => { for (const a of aborts.current.values()) a.abort(); }, []);
 
   const update = (v) => {
     setText(v);
@@ -426,24 +439,31 @@ export function Composer({ conv, placeholder }) {
   // Each file uploads as soon as it is attached, so Send is instant.
   const patch = (key, d) => setFiles((cur) => cur.map((x) => (x.key === key ? { ...x, ...d } : x)));
   const addFiles = async (list) => {
+    const l = await uploadLimits(); // the server's limit, not the 10 MB guess, even right after loading
+    if (l?.maxFile) maxFile = l.maxFile;
     for (const f of list.slice(0, 6 - files.length)) {
-      if (f.size > MAX_FILE) { toast(`${f.name} is ${fileSize(f.size)}. Files can be up to 10 MB.`); continue; }
+      if (f.size > maxFile) { toast(`${f.name} is ${fileSize(f.size)}. Files can be up to ${limitText(maxFile)} here.`); continue; }
       const key = Math.random().toString(36).slice(2);
       const image = /^image\/(png|jpeg|gif|webp)$/.test(f.type);
       const video = /^video\/(mp4|webm|quicktime)$/.test(f.type);
-      setFiles((cur) => [...cur, { key, kind: image ? 'image' : video ? 'video' : f.type.startsWith('audio/') ? 'audio' : 'file', name: f.name, size: f.size, status: 'uploading' }]);
+      const ctl = new AbortController();
+      aborts.current.set(key, ctl);
+      setFiles((cur) => [...cur, { key, kind: image ? 'image' : video ? 'video' : f.type.startsWith('audio/') ? 'audio' : 'file', name: f.name, size: f.size, status: 'uploading', progress: 0 }]);
       try {
         let blob = f, extra = {};
         if (image) { const r = await readImage(f); blob = r.blob; extra = { w: r.w, h: r.h, src: r.src }; patch(key, { src: r.src }); }
         if (video) extra = await readVideo(f);
-        const up = await uploadFile(conv, blob, f.name);
+        // Progress shows for files sent in parts; small ones are quick.
+        const up = await uploadFile(conv, blob, f.name, { signal: ctl.signal, onProgress: (p) => patch(key, { progress: p }) });
         // The server's word on what it is (its bytes), not the browser's guess.
         patch(key, { ...extra, id: up.id, size: up.size, kind: up.kind || undefined, status: 'ready' });
       } catch (err) {
+        if (err.name === 'AbortError') continue; // removed while uploading: already gone from the list
         patch(key, { status: 'error', error: err.message === 'unreadable' ? `Couldn’t read ${f.name}.` : err.message });
-      }
+      } finally { aborts.current.delete(key); }
     }
   };
+  const removeFile = (key) => { aborts.current.get(key)?.abort(); setFiles((cur) => cur.filter((x) => x.key !== key)); };
   addRef.current = addFiles;
   // Files dragged anywhere over this conversation: an overlay says where they
   // will go, and dropping them attaches them here.
@@ -501,7 +521,7 @@ export function Composer({ conv, placeholder }) {
   const replyWho = replyTo ? person(replyTo.author).name.split(' ')[0] : '';
   return html`<div class="composer" data-composer=${conv} ref=${box}>
     ${drop && html`<div class="drop-over" style=${`left:${drop.x}px;top:${drop.y}px;width:${drop.w}px;height:${drop.h}px`} aria-hidden="true">
-      <div class="drop-card"><${Icon} name="clip" size=${24} /><b>Drop to attach</b><span>Up to 6 files, 10 MB each</span></div>
+      <div class="drop-card"><${Icon} name="clip" size=${24} /><b>Drop to attach</b><span>Up to 6 files, ${limitText(maxFile)} each</span></div>
     </div>`}
     ${ac && ac.kind === 'args' && html`<div class="ac float args"><${ArgsRow} ac=${ac} /></div>`}
     ${ac && ac.kind !== 'args' && html`<div class="ac float" role="listbox" aria-label="Suggestions">
@@ -529,10 +549,11 @@ export function Composer({ conv, placeholder }) {
         ${files.map((f, i) => html`<div class=${`pending-file${f.spoiler ? ' spoiler' : ''}`} key=${f.key}>
           ${f.kind === 'image' && f.src ? html`<img src=${f.src} alt="" />` : html`<${Icon} name=${f.status === 'error' ? 'alert' : f.kind === 'image' ? 'image' : 'file'} />`}
           <span class="pending-name"><span class="trunc">${f.name}</span>
-            <span class=${`pending-state${f.status === 'error' ? ' bad' : ''}`}>${f.status === 'uploading' ? 'Uploading…' : f.status === 'error' ? f.error : fileSize(f.size)}${f.spoiler ? ' · Spoiler' : ''}${f.alt ? ' · ALT' : ''}</span></span>
+            <span class=${`pending-state${f.status === 'error' ? ' bad' : ''}`}>${f.status === 'uploading' ? (f.progress > 0 && f.progress < 1 ? `Uploading… ${Math.floor(f.progress * 100)}% of ${fileSize(f.size)}` : 'Uploading…') : f.status === 'error' ? f.error : fileSize(f.size)}${f.spoiler ? ' · Spoiler' : ''}${f.alt ? ' · ALT' : ''}</span>
+            ${f.status === 'uploading' && f.progress > 0 && f.progress < 1 && html`<progress class="pending-progress" max="1" value=${f.progress} aria-label=${`Uploading ${f.name}`}></progress>`}</span>
           ${f.status !== 'error' && html`<button class="ib sm pf-edit" aria-label=${`Edit ${f.name}: spoiler and description`} aria-expanded=${String(editing === f.key)} data-tip="Spoiler and description"
             onClick=${() => setEditingFile(editing === f.key ? null : f.key)}><${Icon} name="edit" size=${16} /></button>`}
-          <button class="ib sm" aria-label=${`Remove ${f.name}`} onClick=${() => setFiles(files.filter((x) => x.key !== f.key))}><${Icon} name="x" size=${16} /></button>
+          <button class="ib sm" aria-label=${f.status === 'uploading' ? `Cancel uploading ${f.name}` : `Remove ${f.name}`} data-tip=${f.status === 'uploading' ? 'Cancel upload' : 'Remove'} onClick=${() => removeFile(f.key)}><${Icon} name="x" size=${16} /></button>
         </div>`)}
         ${(() => { const f = files.find((x) => x.key === editing); return f && html`<${AttachmentEdit} key=${f.key} f=${f} onChange=${(d) => patch(f.key, d)} onClose=${() => { setEditingFile(null); ta.current?.focus(); }} />`; })()}
       </div>`}

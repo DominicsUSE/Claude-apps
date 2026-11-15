@@ -16,6 +16,7 @@ import { AdminMixin, ADMIN_SCHEMA } from './admin.js';
 import { XferMixin } from './xfer.js';
 import { VaultKeyMixin, VAULT_SCHEMA } from './vaultkey.js';
 import { KeyAcctMixin, KEY_SCHEMA, KEY_STATUS, KEY_MESSAGES } from './keyacct.js';
+import { GifMixin } from './gif.js'; // 0.12: GIF search tokens
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS accounts (
@@ -356,6 +357,7 @@ export class Hub {
       case '/v1/notices': return this.noticesHttp(ip);
       case '/v1/vault/key': return this.vaultKey(body, ip);
       case '/v1/vault/rotate': return this.vaultRotate(body, ip);
+      case '/v1/gif/token': return this.gifToken(body, ip); // 0.12 (src/gif.js)
       default: return this.keyRoute(url.pathname, body, ip); // v0.12 keypair accounts (keyacct.js); not_found when off
     }
   }
@@ -1076,5 +1078,5 @@ export class Hub {
   }
 }
 
-// v0.10: admin, bans, notices (admin.js); xfer sockets (xfer.js); vault keys (vaultkey.js). v0.12: keypair accounts (keyacct.js).
-Object.assign(Hub.prototype, AdminMixin, XferMixin, VaultKeyMixin, KeyAcctMixin);
+// v0.10: admin, bans, notices (admin.js); xfer sockets (xfer.js); vault keys (vaultkey.js). v0.12: keypair accounts (keyacct.js), GIF tokens (gif.js).
+Object.assign(Hub.prototype, AdminMixin, XferMixin, VaultKeyMixin, KeyAcctMixin, GifMixin);

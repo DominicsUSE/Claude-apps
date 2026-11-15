@@ -14,7 +14,8 @@
 // Until then, or if it can't be opened, the message says so: never ciphertext.
 // Notifications for an encrypted message wait until it is open.
 import { S, emit, findMsg, msgHooks, signOutHooks, toast } from '../store.js';
-import { call, on, transportHooks, resyncNow } from '../server.js';
+import { call, on, transportHooks, resyncNow, uploadLimits } from '../server.js';
+import { needsChunks, uploadBlob } from '../lib/upload.js';
 import { b64u, b64uOf } from '../lib/e2ee/bytes.js';
 import * as obj from '../lib/e2ee/objects.js';
 import { seal, open, OpenFailure } from '../lib/e2ee/envelope.js';
@@ -132,18 +133,27 @@ function shownType(bytes, f) {
 }
 
 /** Encrypts a file on this device and uploads only the ciphertext. */
-export async function uploadEncrypted(conv, blob, name) {
+// A big file goes up in resumable parts (js/lib/upload.js), still only as ciphertext.
+export async function uploadEncrypted(conv, blob, name, { onProgress, signal } = {}) {
   const bytes = new Uint8Array(await blob.arrayBuffer());
   const { ct, meta } = await encryptFile(bytes);
-  let res;
-  try {
-    res = await fetch(`/api/files?conv=${encodeURIComponent(conv)}&enc=1`, {
-      method: 'POST', credentials: 'same-origin', body: ct,
-      headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': 'file' },
-    });
-  } catch { throw new Error(`Couldn’t upload ${name}. Check your connection and try again.`); }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Couldn’t upload ${name}.`);
+  let data;
+  if (needsChunks(ct.length)) {
+    data = await uploadBlob({ fetch: (...a) => fetch(...a), conv, blob: new Blob([ct]), name, onProgress, signal, limits: await uploadLimits(), enc: true });
+  } else {
+    let res;
+    try {
+      res = await fetch(`/api/files?conv=${encodeURIComponent(conv)}&enc=1`, {
+        method: 'POST', credentials: 'same-origin', body: ct, signal,
+        headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': 'file' },
+      });
+    } catch (e) {
+      if (e.name === 'AbortError') throw e;
+      throw new Error(`Couldn’t upload ${name}. Check your connection and try again.`);
+    }
+    data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Couldn’t upload ${name}.`);
+  }
   const type = shownType(bytes, { type: blob.type });
   fileKeys.set(data.id, { ...meta, name, type, size: bytes.length });
   blobs.set(data.id, URL.createObjectURL(new Blob([bytes], { type })));

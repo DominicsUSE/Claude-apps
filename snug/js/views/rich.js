@@ -61,7 +61,7 @@ function LeaveSnug({ url, host }) {
 }
 
 // [text](https://...): the real host shows on hover, and an unfamiliar host asks first.
-function MaskedLink({ url, children }) {
+export function MaskedLink({ url, children }) {
   const host = hostOf(url);
   const onClick = (e) => {
     if (trusted(host)) return;

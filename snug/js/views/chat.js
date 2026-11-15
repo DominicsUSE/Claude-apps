@@ -333,22 +333,39 @@ export function RollLine({ m }) {
 }
 
 // ---------------------------------------------------------------- Text and code attachments
-// A small text file shows its first lines, with Expand, Copy and Download.
-const TEXT_EXT = /\.(txt|md|log|csv|json|js|mjs|ts|tsx|jsx|py|rb|go|rs|java|c|h|cpp|cs|css|html|xml|yml|yaml|toml|ini|sh|sql)$/i;
-export const isTextFile = (f) => f.kind === 'file' && f.id && (f.size || 0) <= 100 * 1024 && TEXT_EXT.test(f.name || '');
+// A text file shows its first lines, with Expand, Copy and Download. A big one
+// is read only as far as its first 64 KB (a Range request) and says so. The
+// text is always shown as text (escaped), never as markup.
+const TEXT_EXT = /\.(txt|md|log|csv|tsv|json|js|mjs|cjs|ts|tsx|jsx|py|rb|go|rs|java|kt|swift|c|h|cpp|hpp|cs|php|lua|css|scss|html|xml|yml|yaml|toml|ini|cfg|conf|env|sh|bash|ps1|bat|sql|diff|patch)$/i;
+export const TEXT_HEAD = 64 * 1024;
+export const isTextFile = (f) => f.kind === 'file' && f.id && TEXT_EXT.test(f.name || '');
+// Bytes that are text: no NUL bytes in what was read.
+export const looksLikeText = (bytes) => !bytes.subarray(0, 8192).includes(0);
 const texts = new Map();
 export function TextPreview({ f, url, CodeBlock }) {
   const [, tick] = useState(0);
   const [open, setOpen] = useState(false);
   const got = texts.get(f.id);
+  const part = (f.size || 0) > TEXT_HEAD;
   useEffect(() => {
     if (got) return;
     texts.set(f.id, { state: 'loading' });
-    fetch(url, { credentials: 'same-origin' }).then((r) => (r.ok ? r.text() : Promise.reject())).then(
-      (t) => { texts.set(f.id, { state: 'ok', t }); tick((n) => n + 1); },
-      () => { texts.set(f.id, { state: 'error' }); tick((n) => n + 1); },
-    );
+    fetch(url, { credentials: 'same-origin', headers: part ? { Range: `bytes=0-${TEXT_HEAD - 1}` } : {} })
+      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject())).then(
+        (buf) => {
+          const bytes = new Uint8Array(buf).subarray(0, TEXT_HEAD);
+          if (!looksLikeText(bytes)) { texts.set(f.id, { state: 'binary' }); tick((n) => n + 1); return; }
+          // A cut-off multibyte character at the end is dropped, not shown as junk.
+          let t = new TextDecoder('utf-8', { fatal: false }).decode(bytes).replace(/\uFFFD$/, '');
+          if (part) t = t.slice(0, t.lastIndexOf('\n') > 0 ? t.lastIndexOf('\n') : t.length);
+          texts.set(f.id, { state: 'ok', t, part }); tick((n) => n + 1);
+        },
+        () => { texts.set(f.id, { state: 'error' }); tick((n) => n + 1); },
+      );
   }, [f.id]);
+  if (got?.state === 'binary') {
+    return html`<a class="file" href=${url} download=${f.name}><${Icon} name="file" /><span class="trunc"><span class="file-name trunc" style="display:block">${f.name}</span><span class="file-size">${fileSize(f.size || 0)}, download</span></span></a>`;
+  }
   const lines = got?.t ? got.t.split('\n') : [];
   const more = lines.length > 10;
   const shown = open ? got.t : lines.slice(0, 10).join('\n');
@@ -360,7 +377,8 @@ export function TextPreview({ f, url, CodeBlock }) {
     ${!got || got.state === 'loading' ? html`<div class="tfile-body"><span class="skel"></span><span class="skel" style="width:70%"></span></div>`
       : got.state === 'error' ? html`<div class="tfile-body faint">The preview didn’t load. Download the file instead.</div>`
       : html`<${CodeBlock} lang=${lang === 'txt' || lang === 'log' ? '' : lang} v=${shown} />
-        ${more && html`<button class="btn sm quiet tfile-more" aria-expanded=${String(open)} onClick=${() => setOpen(!open)}>${open ? 'Show less' : `Expand (${lines.length} lines)`}</button>`}`}
+        ${more && html`<button class="btn sm quiet tfile-more" aria-expanded=${String(open)} onClick=${() => setOpen(!open)}>${open ? 'Show less' : `Expand (${lines.length}${got.part ? '+' : ''} lines)`}</button>`}
+        ${got.part && (open || !more) && html`<p class="tfile-body faint">That’s the start of a bigger file. Download it to see the rest.</p>`}`}
   </div>`;
 }
 

@@ -31,7 +31,18 @@ import { imageInfo } from './messaging.js';
 import { HUES } from '../js/lib/util.js';
 
 const DAY = 86_400_000;
-const MAX_ATTACH = 10 * 1024 * 1024;
+// Files between PCs. A 0.11 PC refuses a whole message with a file over 10 MB,
+// so bigger ones go only to PCs whose signed profile says they take them
+// (`maxFile`); a PC that says nothing is treated as 0.11.
+export const OLD_MAX_FILE = 10 * 1024 * 1024;
+export const P2P_MAX_FILE = 100 * 1024 * 1024;
+export function peerMaxFile(mediaJson) {
+  let m = null;
+  try { m = JSON.parse(mediaJson || 'null'); } catch { /* none */ }
+  const n = m && Number.isSafeInteger(m.maxFile) ? m.maxFile : 0;
+  return Math.min(P2P_MAX_FILE, Math.max(OLD_MAX_FILE, n));
+}
+const BLOB_HOUR = 300 * 1024 * 1024; // bytes fetched from one friend in an hour
 const MAX_PIC = 2 * 1024 * 1024;
 const FILE_ID = /^f_[a-z0-9]{8,40}$/;
 const MSG_ID = /^m_[a-z0-9]{8,40}$/;
@@ -272,8 +283,18 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
   }
 
   // ---------- Blobs ----------
+  // Progress of a friend's file arriving, for the person here (at most one event per percent).
+  const lastPct = new Map();
+  const blobProgress = (id, got, size) => {
+    const pct = size ? Math.floor((got / size) * 100) : 100;
+    if (lastPct.get(id) === pct) return;
+    lastPct.set(id, pct);
+    if (pct >= 100) lastPct.delete(id);
+    if (lastPct.size > 100) lastPct.delete(lastPct.keys().next().value);
+    toOwner('file.progress', { id, got, size });
+  };
   const blobs = createBlobs({
-    db, filesDir, stats, log,
+    db, filesDir, stats, log, onProgress: blobProgress,
     sendEph: (uid, t, d) => links.sendEph(uid, t, d),
     canServe: (uid, row) => {
       const shadow = shadowId(uid);
@@ -312,6 +333,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       decoration: r.decoration || null, decorationHue: Number.isInteger(r.decoration_hue) ? r.decoration_hue : null,
       nameStyle: json(r.name_style, null), profileColors: json(r.profile_colors, null),
       avatar, banner: await media(r.banner),
+      maxFile: P2P_MAX_FILE, // 0.12: files this PC takes from friends (0.11 PCs ignore the field)
     };
   }
   const friendShadows = () => db.all("SELECT f.other AS user FROM friends f JOIN users u ON u.id = f.other WHERE f.user = ? AND f.state = 'friends' AND u.remote = 1", owner()).map((r) => r.user);
@@ -374,7 +396,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     db.run('UPDATE users SET status = ?, status_emoji = ?, status_until = ? WHERE id = ?', clean(pr.status, 80), emoji, until, shadow);
     const mediaOk = (m, cap) => (m && HASH.test(m.hash) && Number.isSafeInteger(m.size) && m.size > 0 && m.size <= cap && PIC_TYPES.includes(m.type) ? { hash: m.hash, size: m.size, type: m.type, anim: !!m.anim } : null);
     db.run('UPDATE peers SET profile_kver = ?, profile_ver = ?, profile_sig = ?, media = ? WHERE uid = ?',
-      snap.kver, snap.ver, d.sig, JSON.stringify({ avatar: mediaOk(pr.avatar, MAX_PIC), banner: mediaOk(pr.banner, MAX_PIC) }), uid);
+      snap.kver, snap.ver, d.sig, JSON.stringify({ avatar: mediaOk(pr.avatar, MAX_PIC), banner: mediaOk(pr.banner, MAX_PIC), ...(Number.isSafeInteger(pr.maxFile) && pr.maxFile > 0 ? { maxFile: pr.maxFile } : {}) }), uid);
     stats.profileApplied++;
     hub.userChanged(shadow);
     // A new username: believed only if the registry agrees (section 6.2).
@@ -608,7 +630,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     const shadow = shadowId(uid);
     const files = [];
     for (const f of (Array.isArray(list) ? list : []).slice(0, 6)) {
-      if (!f || typeof f.id !== 'string' || !FILE_ID.test(f.id) || !Number.isSafeInteger(f.size) || f.size < 0 || f.size > MAX_ATTACH || typeof f.hash !== 'string' || !HASH.test(f.hash)) fail('Bad attachment.');
+      if (!f || typeof f.id !== 'string' || !FILE_ID.test(f.id) || !Number.isSafeInteger(f.size) || f.size < 0 || f.size > P2P_MAX_FILE || typeof f.hash !== 'string' || !HASH.test(f.hash)) fail('Bad attachment.');
       const id = remoteFileId(uid, f.id);
       const was = db.get('SELECT owner, conv FROM files WHERE id = ?', id);
       if (was && (was.owner !== shadow || was.conv !== conv)) fail('That attachment id is taken.');
@@ -707,20 +729,21 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     const rows = db.all("SELECT id, size, meta FROM files WHERE owner = ? AND json_extract(meta, '$.remote') = 1 AND json_extract(meta, '$.have') = 0 AND conv NOT LIKE 'avatar:%' AND conv NOT LIKE 'banner:%' AND json_extract(meta, '$.failed') IS NULL ORDER BY created DESC LIMIT 20", shadow);
     for (const r of rows) fetchAttachment(uid, r).catch(() => {});
   }
-  function diskOk() { try { const s = statfsSync(filesDir); return s.bavail * s.bsize >= 1024 ** 3; } catch { return true; } }
+  function diskOk(need = 0) { try { const s = statfsSync(filesDir); return s.bavail * s.bsize >= 1024 ** 3 + need; } catch { return true; } }
   async function fetchAttachment(uid, row, eager = true) {
     const meta = json(row.meta, {});
     if (eager) {
-      // Over the relay, big files wait for a direct link (F11); everything within 50 MB an hour and a 1 GB disk floor (S11).
+      // Over the relay, big files wait for a direct link (F11); everything within 300 MB an hour from one
+      // friend and a 1 GB disk floor past the file (S11).
       if (links.transportOf(uid) === 'relay' && row.size > MAX_PIC) return false;
       const b = blobHourly.get(uid) || { at: Date.now(), bytes: 0 };
       if (Date.now() - b.at > 3_600_000) { b.at = Date.now(); b.bytes = 0; }
-      if (b.bytes + row.size > 50 * 1024 * 1024 || !diskOk()) return false;
+      if (b.bytes + row.size > BLOB_HOUR || !diskOk(row.size)) return false;
       b.bytes += row.size;
       blobHourly.set(uid, b);
       if (blobHourly.size > 1000) blobHourly.delete(blobHourly.keys().next().value);
     }
-    const ok = await blobs.fetch(uid, { h: meta.hash, size: row.size, id: row.id, cap: MAX_ATTACH });
+    const ok = await blobs.fetch(uid, { h: meta.hash, size: row.size, id: row.id, cap: P2P_MAX_FILE });
     const now = db.get('SELECT meta FROM files WHERE id = ?', row.id);
     if (!now) return false;
     const m2 = json(now.meta, {});
@@ -903,6 +926,21 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
   // Adding people to a conversation with a friend on another PC would make it a group.
   if (ops['dm.add']) wrap('dm.add', (c, d, base) => { if (remoteOfDm(d.dm) || (Array.isArray(d.users) && d.users.some(isRemote))) fail('Group chats with friends on other PCs aren’t available yet.'); return base(c, d); });
 
+  // A file bigger than a friend's PC takes would make it refuse the whole message: say so here instead.
+  function fitsPeers(files, uids) {
+    for (const f of Array.isArray(files) ? files.slice(0, 6) : []) {
+      const row = typeof f?.id === 'string' ? db.get('SELECT size FROM files WHERE id = ?', f.id) : null;
+      if (!row || row.size <= OLD_MAX_FILE) continue;
+      for (const uid of uids) {
+        const p = peerOf(uid);
+        if (!p || row.size <= peerMaxFile(p.media)) continue;
+        const who = M.userRow(p.user)?.name || p.username;
+        fail(row.size > P2P_MAX_FILE
+          ? `Files sent to friends on other PCs can be up to ${P2P_MAX_FILE / 1024 / 1024} MB.`
+          : `${who}’s Snug takes files up to 10 MB until they update it. Send a smaller file, or ask them to update Snug.`);
+      }
+    }
+  }
   // Messages: applied here as usual, then queued for the friend's PC.
   const sendable = (c, conv) => (mine(c) ? remoteOfDm(conv) : null);
   wrap('msg.send', (c, d, base) => {
@@ -913,6 +951,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     }
     const fresh = typeof d.id === 'string' && !M.msg(d.id);
     if (fresh && (!isFriend(shadow) || blockedEither(shadow))) fail(`You can only message ${M.userRow(shadow).name} while you’re friends.`);
+    if (fresh) fitsPeers(d.files, [uidOf(shadow)]);
     if (fresh && outbox.full(shadow)) fail(`Too many messages are waiting for ${M.userRow(shadow).name} to come online.`);
     const r = base(c, d);
     if (fresh && r?.m) {
@@ -1249,7 +1288,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     // v0.10 B: what server/peergroups.js needs from here.
     _g: {
       hooks: G, DURABLE, EPHEMERAL, owner, myUid, active, isRemote, uidOf, peerOf, isFriend, isContact, blockedEither,
-      ensureShadow, shadowFor, verifyFrom, acceptFiles, fetchPending, later, toOwner, asShadow, outbox, links, online,
+      ensureShadow, shadowFor, verifyFrom, acceptFiles, fetchPending, later, toOwner, asShadow, outbox, links, online, fitsPeers,
       hashOf: (id) => blobs.hashOf(id), now: () => reg.now(), watchSoon, kver: () => Number(self?.kver) || 1,
     },
   });

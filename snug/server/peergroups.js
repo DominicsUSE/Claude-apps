@@ -639,6 +639,8 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
     if (!inGroup(c, d.conv)) return base(c, d);
     if (!mineC(c) || !amIn(d.conv)) fail('You don’t have access to this conversation.');
     const fresh = typeof d.id === 'string' && !M.msg(d.id);
+    // Files over 10 MB only when every member's PC takes them (server/peer.js fitsPeers).
+    if (fresh) X.fitsPeers(d.files, [...state(d.conv).members.keys()].filter((u) => u !== me()));
     const r = base(c, d);
     if (fresh && r?.m) {
       const m = r.m;

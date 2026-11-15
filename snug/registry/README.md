@@ -33,6 +33,7 @@ release times. It stores no messages, no profiles, no IP addresses and no long-t
 | `src/admin.js` | v0.10: admin rights, bans and timeouts, reserved names, announcements, minimum app version, audit log. |
 | `src/xfer.js` | v0.10: `xfer` sockets between two device keys of the same account (data file transfer). |
 | `src/vaultkey.js` | v0.10: one wrapped data-file key per GitHub account (`POST /v1/vault/key`). |
+| `src/gif.js` | 0.12: GIF search for desktop PCs: tokens (Hub) and search and files (Worker, stateless). |
 | `src/common.js` | Errors and shape checks shared by the Hub and its v0.10 parts. |
 | `src/github.js` | Token check (`POST/DELETE /applications/{client_id}/token`) and dev mode. |
 | `src/crypto.js` | WebCrypto helpers: base64url, Ed25519 verify, SHA-256, HMAC, random ids. |
@@ -135,6 +136,27 @@ in `wrangler.toml` → `TURN_KEY_ID` and run `npx wrangler secret put TURN_KEY_T
 It was tested only against the mock, so check that endpoint against current Cloudflare docs; the
 `TURN_API` var overrides the base URL. **Check current TURN pricing and set a
 usage alert first.** Without it, `/v1/turn` answers 404 and calls use STUN only.
+
+### 6. GIF search for desktop PCs (0.12, on by default)
+A desktop PC searches GIFs through the registry, so GIF sites see the registry's address, never the
+person's. The registry already sees each PC's address (SECURITY.md "Metadata"); it now also sees the
+words searched for. `POST /v1/gif/token` (signed, in the Hub) gives a token good for an hour, at most 48
+per account and 20,000 for everyone a day. `GET /v1/gif/search?q=` and `GET /v1/gif/file?u=&s=` are
+answered by the Worker without the Hub; a file address must carry the registry's own signature from a
+search, so nothing else is fetched. Files: no redirects, at most 10 MB, GIF/WebP/MP4 by their bytes.
+Searches are cached an hour and files a day (Cache API). Per-token counts (120 searches, 1,200 files an
+hour) live in each Worker instance's memory, so they are best-effort; the token caps are the hard limit.
+- `GIF_PROVIDERS` (vars): `openverse` (default, keyless, mature results filtered), `commons` (Wikimedia
+  Commons: no safe-search filter, so opt-in), `tenor` (needs `npx wrangler secret put TENOR_KEY`, a free
+  Google Cloud key; check Tenor's current API terms first), comma-separated, or `off`.
+- `GIF_CONTACT` (vars): a URL or e-mail for the User-Agent, which Wikimedia's User-Agent policy asks for.
+  Use a project or contact page, never a personal address you don't want public.
+- `GIF_TOKEN_SECRET` (secret, optional): otherwise derived from `GH_HMAC_SECRET`.
+- Openverse's anonymous limits are tight (a few searches a minute per address, 20 results a page); the
+  registry's one address shares them for every desktop user, and the hour-long cache helps. If that is
+  not enough, register free Openverse API credentials (not yet wired in; it would be a small change).
+- Free tier: each search is one Worker request plus up to 20 preview files (each one request), so
+  roughly 4,000 searches a day fit in the 100k-request free Workers allowance next to everything else.
 
 ### Updating and rules that must not be broken
 - Redeploy with `npx wrangler deploy`. Schema changes go in `src/hub.js` as `CREATE ... IF NOT EXISTS`

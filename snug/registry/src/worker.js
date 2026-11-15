@@ -2,6 +2,7 @@
 import { Hub } from './hub.js';
 import { now } from './platform.js';
 import { KEY_ROUTES, keyAccountsOn } from './keyacct.js';
+import { gifWorker } from './gif.js'; // 0.12: GIF search and files, stateless (never the Hub)
 
 export { Hub };
 
@@ -23,6 +24,7 @@ const ROUTES = {
   '/v1/vault/rotate': 'POST', // sec-registry REG-L1: a new data file key (the old ones stay readable)
   '/v1/notices': 'GET', // v0.10: announcements + minimum app version (public)
   '/v1/check': 'GET',
+  '/v1/gif/token': 'POST', // 0.12: a short-lived token for GIF search (signed, budgeted in the Hub)
   '/v1/ws': 'GET',
 };
 
@@ -65,10 +67,13 @@ async function readCapped(req, max) {
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url);
     const path = url.pathname;
     if (path === '/v1/health') return json(env, 200, { ok: true, v: 3 });
+    // 0.12: /v1/gif/search and /v1/gif/file are answered here, with a token from /v1/gif/token.
+    const gif = await gifWorker(req, env, ctx, (status, obj) => json(env, status, obj), now(env));
+    if (gif) return gif;
     // v0.12 keypair accounts (keyacct.js): POST routes, answered exactly like unknown paths unless KEY_ACCOUNTS = "1".
     const method = ROUTES[path] || (Object.hasOwn(KEY_ROUTES, path) && keyAccountsOn(env) ? 'POST' : null);
     if (!method) return err(env, 404, 'not_found');
