@@ -105,6 +105,36 @@ test("(g) no release from another app is ever marked latest", () => {
   }
 });
 
+test("(h) every container image is pinned by digest (workflows and the scripts they run)", () => {
+  const scripts = fs.readdirSync(path.join(dir, "..", "security")).filter((f) => f.endsWith(".sh"))
+    .map((f) => ({ name: `security/${f}`, text: fs.readFileSync(path.join(dir, "..", "security", f), "utf8") }));
+  let seen = 0;
+  for (const f of [...files, ...scripts]) {
+    const t = code(f.text);
+    for (const m of t.matchAll(/(?:^\s*image:|^\s*\w*_IMAGE=)\s*"?([^"\s]+)/gm)) {
+      seen++;
+      assert.match(m[1], /@sha256:[0-9a-f]{64}$/, `${f.name}: ${m[1]}`);
+    }
+    // `docker run` names its image through one of those pinned variables, or pinned in place.
+    for (const m of t.matchAll(/docker run [^\n]*/g)) assert.match(m[0], /"\$\w+_IMAGE"|@sha256:[0-9a-f]{64}/, `${f.name}: ${m[0]}`);
+  }
+  assert.ok(seen >= 2, "found the semgrep and ZAP images");
+});
+
+test("(i) the ZAP baseline scans a seeded server with a read-only token and gates on High only", () => {
+  const sec = files.find((x) => x.name === "security.yml");
+  const job = split(sec.text).jobs["zap-baseline"];
+  assert.ok(job, "security.yml has a zap-baseline job");
+  assert.match(permsOf(job, 4) || "", /contents:\s*read/);
+  assert.doesNotMatch(permsOf(job, 4) || "", /write/);
+  assert.doesNotMatch(job, /secrets\./);
+  assert.match(job, /bash \.github\/security\/zap-baseline\.sh/);
+  const script = fs.readFileSync(path.join(dir, "..", "security", "zap-baseline.sh"), "utf8");
+  assert.match(script, /server\/seed\.js/, "the server has the sample data");
+  assert.match(script, /zap-baseline\.py -t "http:\/\/127\.0\.0\.1:\$port"[^\n]*-c rules\.tsv/);
+  assert.match(script, /gate\.mjs" zap .*--rules/);
+});
+
 test("Dependabot covers Snug's npm folders and the pinned actions", () => {
   const dep = fs.readFileSync(path.join(dir, "..", "dependabot.yml"), "utf8");
   for (const d of ["/snug", "/snug/desktop", "/snug/registry"]) assert.match(dep, new RegExp(`package-ecosystem: npm\\n\\s+directory: ${d}\\n`), d);

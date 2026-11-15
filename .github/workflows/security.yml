@@ -7,6 +7,7 @@
 #   codeql             GitHub CodeQL, security-extended queries, for Snug's JavaScript and for these workflows
 #   semgrep            Semgrep CE (container pinned by digest) with p/javascript, p/nodejs, p/owasp-top-ten, p/secrets
 #   electronegativity  Doyensec Electronegativity: Electron misconfigurations in snug/desktop
+#   zap-baseline       OWASP ZAP baseline (passive) against a seeded Snug server; High-risk alerts fail
 #   dependency-review  on pull requests: a new dependency with a high/critical advisory fails
 # Scanners report everything; .github/security/gate.mjs decides what fails (high and critical only; findings a
 # person checked are listed with the reason in .github/security/reviewed.json). SARIF goes to code scanning
@@ -250,6 +251,36 @@ jobs:
           path: sarif/
           if-no-files-found: ignore
           retention-days: 7
+
+  # OWASP ZAP baseline (passive) against a seeded Snug server on this runner: .github/security/zap-baseline.sh
+  # (the official image pinned by digest, no secrets). Only High-risk alerts not accepted in
+  # .github/security/zap-rules.tsv fail; the HTML/JSON/Markdown reports are kept as an artifact.
+  zap-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Install the server's packages
+        working-directory: snug
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Scan the seeded server and gate (High only)
+        env:
+          ZAP_OUT: zap
+        run: bash .github/security/zap-baseline.sh
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zap-baseline
+          path: zap/
+          if-no-files-found: ignore
+          retention-days: 14
 
   # The only job that can write to code scanning: it downloads the reports and uploads them, nothing else.
   upload-sarif:
