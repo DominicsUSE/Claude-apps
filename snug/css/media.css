@@ -97,3 +97,12 @@
 .gif-skel { display: block; aspect-ratio: 4 / 3; }
 .gif-none { margin: 0; padding: var(--s-4) var(--s-2); color: var(--text-3); font-size: var(--t-13); text-align: center; line-height: var(--lh-body); }
 @media (max-width: 759px) { .gif-picker { width: 100%; } .gif-grid { max-height: 50vh; } }
+/* GIF search: where results come from, which source, and each GIF's credit. */
+.gif-search-row { display: flex; gap: var(--s-2); }
+.gif-search-row .field:first-child { flex: 1; min-width: 0; }
+.gif-source { flex: none; width: auto; max-width: 45%; }
+.gif-from { margin: 0; color: var(--text-3); font-size: var(--t-12); line-height: var(--lh-body); }
+.gif-from b { color: var(--text-2); font-weight: var(--w-semibold); }
+.gif-tile-credit { position: absolute; inset: auto 0 0 0; padding: 1px var(--s-1); background: color-mix(in srgb, var(--bg-0) 80%, transparent); color: var(--text-2); font-size: var(--t-11); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.gif-credit { max-width: 320px; color: var(--text-3); font-size: var(--t-11); line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gif-credit a { color: inherit; }

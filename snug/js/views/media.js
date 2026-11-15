@@ -20,6 +20,7 @@ import { plain } from '../lib/format.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar } from '../ui/kit.js';
 import { XIcon, openViewer } from './viewer.js'; // the media viewer, and icons it adds
+import { MaskedLink } from './rich.js'; // a credit's link asks before leaving Snug
 
 const MAX_SECONDS = 300;
 const PEAKS = 48;
@@ -543,7 +544,7 @@ export function GifImage({ f, src, ctx = {} }) {
   const fav = f.id && isFavGif(f.id);
   const w = f.w || 240, h = f.h || 180;
   useEffect(() => { const v = vid.current; if (v) { if (play) v.play().catch(() => {}); else v.pause(); } }, [play]);
-  return html`<div class=${`gif${play ? ' playing' : ''}`} ref=${box} style=${`aspect-ratio:${w}/${h};width:${Math.min(320, w)}px`}>
+  const gif = html`<div class=${`gif${play ? ' playing' : ''}`} ref=${box} style=${`aspect-ratio:${w}/${h};width:${Math.min(320, w)}px`}>
     <button class="gif-open" aria-label=${`Open GIF ${f.alt || f.name}`} onClick=${() => (ctx.m ? openViewer(ctx.conv, ctx.m, f) : openLightbox(src, f.name))}>
       ${f.kind === 'video'
         ? html`<video ref=${vid} src=${src} muted loop playsinline preload="metadata" aria-label=${f.alt || f.name}></video>`
@@ -555,6 +556,13 @@ export function GifImage({ f, src, ctx = {} }) {
     ${f.id && !f.spoiler && html`<button class=${`gif-star${fav ? ' on' : ''}`} aria-pressed=${String(!!fav)} aria-label=${fav ? 'Remove from your GIFs' : 'Save to your GIFs'}
       data-tip=${fav ? 'In your GIFs' : 'Save to your GIFs'} onClick=${() => toggleGifFav(f)}><${Icon} name=${fav ? 'starred' : 'star'} size=${16} /></button>`}
   </div>`;
+  return f.credit?.text ? html`<div class="file-wrap">${gif}<${GifCredit} credit=${f.credit} /></div>` : gif;
+}
+
+// An openly licensed GIF names its author and licence wherever it shows (the server stored it at import).
+export function GifCredit({ credit }) {
+  if (!credit?.text) return null;
+  return html`<span class="gif-credit">${credit.link ? html`<${MaskedLink} url=${credit.link}>${credit.text}<//>` : credit.text}</span>`;
 }
 
 // Hook for the stream's attachment list: voice messages and GIFs draw themselves.
@@ -687,9 +695,11 @@ export function AudioFile({ f, src }) {
   </div>`;
 }
 
+// { search, sources: [{ id, label, note, badge? }] }, or { offline: true } when Snug couldn't be reached
+// (not remembered, so the next picker tries again).
 let gifConfig = null;
 const loadGifConfig = () => (gifConfig ||= fetch('/api/gifs/config', { credentials: 'same-origin' })
-  .then((r) => (r.ok ? r.json() : { search: false }), () => ({ search: false })));
+  .then((r) => (r.ok ? r.json() : { search: false, sources: [] }), () => { gifConfig = null; return { search: false, sources: [], offline: true }; }));
 
 async function post(path, body) {
   let res;
@@ -713,14 +723,17 @@ function Thumb({ src, alt, w, h, video }) {
 export function GifPicker({ conv, query = '' }) {
   const favs = S.gifFavs || [];
   const [tab, setTab] = useState(favs.length ? 'mine' : 'recent');
-  const [search, setSearch] = useState(false);
+  const [cfg, setCfg] = useState(null);           // null loading | the server's answer
+  const [source, setSource] = useState('');
   const [recent, setRecent] = useState(null);     // null loading | [] | 'error'
   const [q, setQ] = useState(query);
   const [found, setFound] = useState({ q: '', list: [], state: 'idle' });
   const [busy, setBusy] = useState(null);
   const input = useRef();
 
-  useEffect(() => { loadGifConfig().then((c) => { setSearch(!!c.search); if (c.search && query) setTab('search'); }); }, []);
+  useEffect(() => { loadGifConfig().then((c) => { setCfg(c); setSource(c.sources?.[0]?.id || ''); if (c.search && query) setTab('search'); }); }, []);
+  const search = !!cfg?.search;
+  const src = cfg?.sources?.find((x) => x.id === source) || cfg?.sources?.[0];
   useEffect(() => {
     if (tab !== 'recent' || recent) return;
     call('gif.recent').then((r) => setRecent(r.gifs), () => setRecent('error'));
@@ -729,17 +742,19 @@ export function GifPicker({ conv, query = '' }) {
   const term = q.trim().toLowerCase();
   const named = (list) => (term ? list.filter((g) => (g.name || '').toLowerCase().includes(term)) : list);
   useEffect(() => {
-    if (tab !== 'search') return undefined;
+    if (tab !== 'search' || !search) return undefined;
     const term = q.trim();
     if (!term) { setFound({ q: '', list: [], state: 'idle' }); return undefined; }
     const t = setTimeout(() => {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) { setFound({ q: term, list: [], state: 'offline' }); return; }
       setFound((f) => ({ ...f, state: 'loading' }));
-      fetch(`/api/gifs?q=${encodeURIComponent(term)}`, { credentials: 'same-origin' })
-        .then((r) => (r.ok ? r.json() : Promise.reject()))
-        .then((d) => setFound({ q: term, list: d.results || [], state: 'done' }), () => setFound({ q: term, list: [], state: 'error' }));
+      fetch(`/api/gifs?${new URLSearchParams({ q: term, ...(source ? { source } : {}) })}`, { credentials: 'same-origin' })
+        .then(async (r) => (r.ok ? r.json() : Promise.reject(Object.assign(new Error((await r.json().catch(() => ({}))).error || ''), { status: r.status }))))
+        .then((d) => setFound({ q: term, list: d.results || [], state: 'done' }),
+          (e) => setFound({ q: term, list: [], state: e instanceof TypeError ? 'offline' : 'error', why: e.message }));
     }, 350);
     return () => clearTimeout(t);
-  }, [q, tab]);
+  }, [q, tab, source, search]);
 
   const send = async (key, work) => {
     if (busy) return;
@@ -761,11 +776,12 @@ export function GifPicker({ conv, query = '' }) {
   const grid = (list, local) => html`<div class="gif-grid" role="list">
     ${list.map((g) => (local
       ? tile(g.id, `Send ${g.name}`, html`<${Thumb} src=${`/api/files/${g.id}`} alt=${g.name} w=${g.w} h=${g.h} video=${g.kind === 'video'} />`, () => useLocal(g))
-      : tile(g.id, `Send ${g.title}`, html`<${Thumb} src=${g.preview} alt=${g.title} w=${g.w} h=${g.h} />`, () => useFound(g))))}
+      : tile(g.id, g.credit ? `Send ${g.title} (${g.credit.text})` : `Send ${g.title}`, html`<${Thumb} src=${g.preview} alt=${g.title} w=${g.w} h=${g.h} />${g.credit && html`<span class="gif-tile-credit" aria-hidden="true">${g.credit.text}</span>`}`, () => useFound(g))))}
   </div>`;
   const loading = html`<div class="gif-grid" aria-hidden="true">${[1, 2, 3, 4, 5, 6].map((i) => html`<span key=${i} class="skel gif-skel"></span>`)}</div>`;
 
-  const tabs = [['mine', 'Your GIFs'], ['recent', 'Recent in your places'], ...(search ? [['search', 'Search']] : [])];
+  // Search always has its tab, so a server without it says so instead of leaving people guessing.
+  const tabs = [['mine', 'Your GIFs'], ['recent', 'Recent in your places'], ['search', 'Search']];
   return html`<div class="gif-picker">
     <div class="gif-tabs" role="tablist" aria-label="GIFs">
       ${tabs.map(([id, label]) => html`<button key=${id} role="tab" aria-selected=${String(tab === id)} class=${tab === id ? 'on' : ''} onClick=${() => setTab(id)}>${label}</button>`)}
@@ -776,13 +792,25 @@ export function GifPicker({ conv, query = '' }) {
       ${tab === 'recent' && (recent === null ? loading
         : recent === 'error' ? html`<p class="gif-none">Recent GIFs didn’t load. <button class="btn quiet" onClick=${() => { setRecent(null); call('gif.recent').then((r) => setRecent(r.gifs), () => setRecent('error')); }}>Try again</button></p>`
         : recent.length ? (named(recent).length ? grid(named(recent), true) : html`<p class="gif-none">No recent GIF is called “${q.trim()}”.</p>`) : html`<p class="gif-none">No GIFs in your places yet. When someone posts one, it shows up here.</p>`)}
-      ${tab === 'search' && html`
-        <input class="field" ref=${input} placeholder="Search GIFs" aria-label="Search GIFs" value=${q} onInput=${(e) => setQ(e.target.value)} />
+      ${tab === 'search' && cfg === null && loading}
+      ${tab === 'search' && cfg && !search && html`<p class="gif-none" role="status">${cfg.offline
+        ? 'You’re offline, so GIF search can’t reach Snug. Your GIFs and recent ones still work once they’ve loaded.'
+        : 'GIF search isn’t set up on this server. Your GIFs and recent ones are in the other tabs.'}</p>`}
+      ${tab === 'search' && search && html`
+        <div class="gif-search-row">
+          <input class="field" ref=${input} placeholder=${`Search ${src?.label || 'GIFs'}`} aria-label="Search GIFs" value=${q} onInput=${(e) => setQ(e.target.value)} />
+          ${cfg.sources.length > 1 && html`<select class="field gif-source" aria-label="Search in" value=${source} onChange=${(e) => setSource(e.target.value)}>
+            ${cfg.sources.map((x) => html`<option key=${x.id} value=${x.id}>${x.label}</option>`)}
+          </select>`}
+        </div>
+        <p class="gif-from" data-source=${src?.id}>${src?.note}${src?.id !== 'registry' ? ` Snug searches for you, so ${src?.label || 'the GIF site'} sees this server’s address and what you search for, not yours.` : ''}${src?.badge ? html` <b>${src.badge}</b>` : ''}</p>
         ${found.state === 'loading' ? loading
-          : found.state === 'error' ? html`<p class="gif-none">GIF search isn’t answering right now. Try again in a moment.</p>`
+          : found.state === 'offline' ? html`<p class="gif-none" role="status">You’re offline. Search works again when you’re back online; your GIFs are in the first tab.</p>`
+          : found.state === 'error' ? html`<p class="gif-none" role="status">${found.why || 'GIF search isn’t answering right now. Try again in a moment.'}</p>`
           : found.state === 'done' && !found.list.length ? html`<p class="gif-none">No GIFs for “${found.q}”.</p>`
           : found.list.length ? grid(found.list, false)
           : html`<p class="gif-none">Type to search. A GIF you send is copied into Snug, so nobody’s browser loads it from elsewhere.</p>`}`}
+
     </div>
   </div>`;
 }
