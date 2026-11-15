@@ -35,8 +35,14 @@ Security fixes go into the newest release only; there are no backports.
 
 - **Accounts.** Passwords (web and LAN accounts) are stored as scrypt hashes, with common passwords (about
   38,000) refused, two-factor sign-in (TOTP with backup codes) and slowing lockouts that a stranger cannot
-  use to lock the owner out. Desktop (P2P) accounts have no password at all: they are proved with GitHub's
-  device flow, and the GitHub token is checked once by the registry and revoked, never stored.
+  use to lock the owner out. Desktop (P2P) accounts have no password at all. Since v0.12 they need no
+  GitHub account either: the account is the PC's device key plus a recovery key (20 random bytes shown
+  once; the registry keeps only the public half of a key derived from it, `registry/src/keyacct.js`).
+  GitHub accounts still work: their token is checked once by the registry and revoked, never stored.
+- **Account takeover with a recovery key.** Someone who copies the recovery key only starts a **move**,
+  which waits 72 hours unless the current PC approves. The current PC is told it was the recovery key, can
+  stop it, and can then replace the key with the old one in hand (the copy stops working at once). A new
+  key set without the old one waits 7 days, and the old key can cancel it.
 - **Account takeover through GitHub.** Someone who phishes or steals the GitHub login only starts a
   **move**, which waits 72 hours (or the approval of the current PC). The current PC is told and can stop it.
   Until then the newcomer gets no vault key and no data file.
@@ -81,6 +87,10 @@ Security fixes go into the newest release only; there are no backports.
   removes it from Snug, not from someone else's copy.
 - **A stolen GitHub account combined with an absent owner.** If the current PC is offline for the whole
   72-hour wait, a move started with a stolen GitHub login completes. Keep GitHub two-factor sign-in on.
+- **A stolen recovery key combined with an absent owner,** the same way. And a lost PC plus a lost recovery key
+  (with no GitHub linked) means the account is gone: nobody, including Snug, can reset it.
+- **One person, many accounts.** Accounts without GitHub cost a proof of work, an address budget (3 a day per
+  /48) and a global budget. These slow down mass sign-ups; they do not stop someone with many addresses.
 
 ## Controls in place
 

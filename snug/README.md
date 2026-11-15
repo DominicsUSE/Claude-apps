@@ -90,6 +90,28 @@ On first run it asks where Snug should run:
 
 **Snug > Change where Snug runs** brings the choice back.
 
+**Friends on other PCs (v0.12).** The app's first screen offers **Create my
+account**: pick a Snug username and you're in. No email, phone number or
+GitHub account is needed. The account lives on this PC; Snug's directory (the
+registry, `registry/`) keeps only your username and public keys. Then Snug
+shows a **recovery key** once (36 letters and numbers): save it as a file,
+print it or copy it, and type its last 4 characters back. It is the only way to
+get the account back if you lose the PC. Snug can't reset it, and anyone who
+has it can start moving your account (your old PC is told and can stop it).
+
+- **New PC, old one at hand:** on the new PC choose **I already have an
+  account > My other PC is here**; type the code it shows in Settings >
+  Account and security > **Move to a new PC** on the old one. It moves at
+  once, and your saved chats are copied over.
+- **Old PC lost:** **I lost my other PC**, then the recovery key. The move
+  finishes after 72 hours, or sooner if the old PC says yes.
+- **GitHub** is optional: **I used GitHub before** signs in as in 0.11, and an
+  account made without GitHub can link one in Settings as a second way to move.
+
+New accounts cost a few seconds of computer work (a "proof of work") and are
+limited per network address, which slows down mass sign-ups but doesn't stop
+a determined person from making several accounts.
+
 Closing the window keeps Snug running in the system tray (the menu bar on a
 Mac), so its connection stays open and notifications keep arriving; the
 first close says so. The tray menu has **Open Snug** and **Quit**; Quit stops
