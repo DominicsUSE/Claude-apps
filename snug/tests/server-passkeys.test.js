@@ -257,7 +257,8 @@ test('passkeys: deleting the account removes its passkeys; the export lists name
   assert.equal(exp.body.signInKeys.length, 1);
   assert.equal(exp.body.signInKeys[0].name, 'Test key');
   assert.ok(!JSON.stringify(exp.body.signInKeys).includes('"x"'), 'no key material');
-  assert.equal(JSON.stringify(exp.body).includes('pass'), false, 'still no word "pass" in the export');
+  // No field named pass…, and no password or passkey secret (sign-in history may name the event "passkey.add").
+  assert.doesNotMatch(JSON.stringify(exp.body), /"pass\w*":/, 'no field named pass… in the export');
   const del = await call('POST', '/api/account/delete', { password: PW, confirm: 'pk-ha' }, { cookie: ha.cookie });
   assert.equal(del.status, 200, JSON.stringify(del.body));
   assert.equal(srv.db.get('SELECT COUNT(*) n FROM passkeys WHERE user = ?', ha.id).n, 0);

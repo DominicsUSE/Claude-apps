@@ -5,7 +5,7 @@
 // Each test failed on the code before its change.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -176,7 +176,7 @@ function dbHas(db, s) {
   }
   return null;
 }
-const filesHave = (s) => readdirSync(join(dir, 'files')).filter((f) => readFileSync(join(dir, 'files', f)).includes(s));
+const filesHave = (s) => readdirSync(join(dir, 'files')).filter((f) => statSync(join(dir, 'files', f)).isFile() && readFileSync(join(dir, 'files', f)).includes(s)); // files/partial: uploads under way
 async function upload(c, conv, name, text) {
   const r = await fetch(`${base}/api/files?conv=${encodeURIComponent(conv)}`, {
     method: 'POST', headers: { origin: base, cookie: c.cookie, 'content-type': 'text/plain', 'x-file-name': name }, body: text,

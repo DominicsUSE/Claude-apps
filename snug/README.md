@@ -1159,7 +1159,7 @@ Built, but not seen end to end from the test machine:
   `SNUG_PUSH_CONTACT`.
 - **GIF search against Openverse, Wikimedia Commons and Tenor.** Tested against
   local stand-ins for their APIs; the real services were not reachable from the
-  test machine. Openverse's anonymous limits are tight (a few searches a minute
+  test machine. Openverse's limits without a registered account are tight (a few searches a minute
   per server address); results are cached for an hour.
 - **Real cameras and screens.** Only Chromium's fake devices and the desktop
   app under Xvfb.
@@ -1391,7 +1391,7 @@ mode you're in. The short version:
   database backups keep 7 days. `GET /api/privacy` reports these for the page.
 - **What Snug never does**: no analytics, diagnostics or crash reports, no
   ads, no email or phone number, no fonts, scripts or pictures from other
-  websites. Snug is not anonymous, and whoever runs a server or the directory
+  websites. Snug doesn't hide who you are, and whoever runs a server or the directory
   can be required by law to hand over what it stores.
 
 ## What makes it different
