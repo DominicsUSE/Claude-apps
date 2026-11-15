@@ -238,7 +238,9 @@ export async function startServer({
   }
   const userOf = (req) => sessionUser(db, readCookie(req.headers.cookie, COOKIE));
   // GIF routes (/api/gifs...): picker lists, the optional search provider, and copies.
-  const mediaHttp = createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, headers });
+  // On a PC linked to a registry, GIF search goes through the registry, so a provider never sees this PC's address.
+  const gifReg = peer.enabled ? { base: String(registryUrl).replace(/\/+$/, ''), token: () => peer.reg.gifToken() } : null;
+  const mediaHttp = createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, headers, fetch: fetchFn, gifReg });
   // Custom emoji: uploads at POST /api/files?emoji=<house>, and who may fetch an emoji image.
   const emojiHttp = createEmojiHttp({ db, M, filesDir, sendJson, error, body, uploadLimit });
   const emojiR = emojiReads(db, M);

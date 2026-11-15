@@ -106,6 +106,10 @@ export function createRegClient({ url, identity, fetch: fetchFn = globalThis.fet
       const p = JSON.stringify(payload);
       return signed('POST', path, () => { const t = ts(); return { uid: u, ts: t, p, sig: sign(op, u, t, p) }; });
     },
+    // 0.12: a short-lived token for GIF search through the registry (registry/src/gif.js); null when it has none.
+    async gifToken() {
+      try { return await R.signedCall('/v1/gif/token', 'gif-token', {}); } catch (e) { if (e.status === 404) return null; throw e; }
+    },
     wsUrl() { return `${base.replace(/^http/, 'ws')}/v1/ws?uid=${uid()}`; },
   };
   return R;

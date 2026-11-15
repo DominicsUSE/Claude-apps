@@ -7,21 +7,21 @@
 //   house, pinning needs the 'pin' or the 'moderate' permission; in a direct
 //   conversation or group, anyone in it may pin.
 // - GIFs: favourites are references to files you can read, synced to every
-//   device. Search goes through a provider (Tenor) only when a key is set, and
-//   a GIF picked from search is downloaded by the server and stored as a
-//   normal Snug file, so no message ever loads from another site.
+//   device. Search goes through a provider (server/gifs.js), and a GIF picked
+//   from search is downloaded by the server and stored as a normal Snug file,
+//   so no message ever loads from another site.
 import { copyFile, writeFile } from 'node:fs/promises';
 import { unlinkSync } from 'node:fs'; // sec-authz: the attachment sweep
 import { join } from 'node:path';
 import { newId } from './model.js';
 import { limiter } from './auth.js';
 import { stripInvisible } from '../js/lib/util.js'; // sec-authz
+import { gifProviders } from './gifs.js'; // Openverse, Wikimedia Commons, Tenor, the registry
 
 export const AUDIO_TYPES = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg'];
 export const MAX_PINS = 50;
 export const MAX_GIF_FAVS = 200;
 export const MAX_VOICE_SECONDS = 300;
-const MAX_GIF = 10 * 1024 * 1024; // a GIF fetched from a search provider (attachments have their own limit, server/uploads.js)
 const FILE_ID = /^f_[a-z0-9]{8,40}$/;
 const json = (s, f) => { try { return s == null ? f : JSON.parse(s); } catch { return f; } };
 
@@ -110,6 +110,8 @@ export function decorateFile(out, row, f, fail) {
     out.duration = Math.round(f.duration * 10) / 10;
   }
   if (isGif(row)) out.gif = true;
+  // An openly licensed GIF's credit, as the server stored it at import (server/gifs.js creditOf).
+  if (meta.credit && typeof meta.credit.text === 'string') out.credit = { text: meta.credit.text.slice(0, 200), ...(typeof meta.credit.link === 'string' && /^https:\/\//.test(meta.credit.link) ? { link: meta.credit.link.slice(0, 500) } : {}) };
   if (out.kind === 'video' || out.kind === 'image') {
     const w = Number.isInteger(f.w) ? f.w : meta.w, h = Number.isInteger(f.h) ? f.h : meta.h;
     if (Number.isInteger(w) && Number.isInteger(h)) { out.w = Math.min(8000, Math.max(1, w)); out.h = Math.min(8000, Math.max(1, h)); }
@@ -335,97 +337,79 @@ export function createMediaOps({ db, M, hub, fail, ops = {} }) {
   };
 }
 
-// The GIF provider. Search is on only with SNUG_GIF_PROVIDER=tenor and a key.
-// SNUG_TENOR_BASE points the provider at a local stand-in in tests; then only
-// that stand-in's own host may serve media.
-const TENOR_MEDIA_HOSTS = ['media.tenor.com', 'media1.tenor.com', 'c.tenor.com', 'media.tenor.co'];
-export function gifConfig(env = process.env) {
-  const enabled = env.SNUG_GIF_PROVIDER === 'tenor' && !!env.SNUG_TENOR_KEY;
-  const base = (env.SNUG_TENOR_BASE || 'https://tenor.googleapis.com').replace(/\/+$/, '');
-  const test = !!env.SNUG_TENOR_BASE;
-  return {
-    enabled, key: env.SNUG_TENOR_KEY || '', base,
-    hosts: test ? [new URL(base).host] : TENOR_MEDIA_HOSTS,
-    protocol: test ? new URL(base).protocol : 'https:',
-  };
-}
-
-// HTTP routes under /api/gifs. Returns true when it answered the request.
-export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, headers, env = process.env }) {
-  const gif = gifConfig(env);
+// GIF search (server/gifs.js has the providers). Results, previews and picks
+// all go through here; only addresses a search of ours returned are fetched.
+export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, headers, env = process.env, fetch: fetchFn = globalThis.fetch, gifReg = null }) {
+  const providers = gifProviders(env, { fetch: fetchFn, reg: gifReg });
+  const byId = new Map(providers.map((p) => [p.id, p]));
   const searchLimit = limiter({ capacity: 20, perSecond: 1 });
   const fetchLimit = limiter({ capacity: 60, perSecond: 4 });
   const saveLimit = limiter({ capacity: 20, perSecond: 0.5 });
-
-  const allowed = (raw) => {
-    let u;
-    try { u = new URL(String(raw)); } catch { return null; }
-    return u.protocol === gif.protocol && gif.hosts.includes(u.host) && !u.username && !u.password ? u : null;
-  };
-  // Only from the provider's media hosts, never following a redirect elsewhere, at most 10 MB.
-  async function download(u) {
-    let res;
-    try { res = await fetch(u, { redirect: 'manual', signal: AbortSignal.timeout(15000) }); } catch { return { err: 'The GIF couldn’t be fetched. Try another.' }; }
-    if (res.status !== 200 || !res.body) return { err: 'The GIF couldn’t be fetched. Try another.' };
-    if (Number(res.headers.get('content-length')) > MAX_GIF) return { err: 'That GIF is over 10 MB. Try another.' };
-    const chunks = [];
-    let size = 0;
-    for await (const c of res.body) {
-      size += c.length;
-      if (size > MAX_GIF) return { err: 'That GIF is over 10 MB. Try another.' };
-      chunks.push(c);
-    }
-    const data = Buffer.concat(chunks);
-    const real = sniff(data);
-    const type = real === 'image/gif' || real === 'image/webp' ? real : real === 'mp4' ? 'video/mp4' : null;
-    if (!type) return { err: 'That isn’t a GIF Snug can show.' };
-    return { data, type };
+  // What our searches returned, for an hour or two: a preview or a pick must be one of these, and its
+  // credit comes from here, never from the browser.
+  const known = new Map();      // url -> { p, credit, at }
+  const results = new Map();    // `${p}\n${q}` -> { at, list }  (an hour: anonymous provider limits are tight)
+  const previews = new Map();   // url -> { at, data, type }      (an hour, about 40 MB at most)
+  let previewBytes = 0;
+  const HOUR = 3600_000;
+  const remember = (map, k, v, max) => { map.delete(k); map.set(k, v); while (map.size > max) map.delete(map.keys().next().value); };
+  const knownUrl = (u) => { const k = known.get(String(u)); return k && Date.now() - k.at < 2 * HOUR ? k : null; };
+  function keepPreview(u, got) {
+    previews.delete(u);
+    previews.set(u, { at: Date.now(), ...got });
+    previewBytes += got.data.length;
+    while (previewBytes > 40 * 1024 * 1024 && previews.size) { const [k, v] = previews.entries().next().value; previews.delete(k); previewBytes -= v.data.length; }
   }
   const gate = (user, conv) => M.postGate(user, conv.startsWith('t:') && !M.thread(conv) ? (M.liveMsg(conv.slice(2))?.conv || '') : conv);
-  const view = (id, row, meta) => ({ id, name: row.name, size: row.size, kind: fileKind(row.type, meta), gif: true, w: meta.w, h: meta.h });
+  const view = (id, row, meta) => ({ id, name: row.name, size: row.size, kind: fileKind(row.type, meta), gif: true, w: meta.w, h: meta.h, ...(meta.credit ? { credit: meta.credit } : {}) });
+  const sourceList = () => providers.map((p) => ({ id: p.id, label: p.label, note: p.note, ...(p.badge ? { badge: p.badge } : {}) }));
 
   async function mediaHttp(req, res, path, url, user) {
     if (!path.startsWith('/api/gifs')) return false;
     const post = req.method === 'POST';
 
-    if (req.method === 'GET' && path === '/api/gifs/config') { sendJson(res, 200, { search: gif.enabled }); return true; }
+    if (req.method === 'GET' && path === '/api/gifs/config') { sendJson(res, 200, { search: providers.length > 0, sources: sourceList() }); return true; }
 
     if (req.method === 'GET' && path === '/api/gifs') {
-      if (!gif.enabled) { error(res, 404, 'GIF search isn’t set up on this server.'); return true; }
+      if (!providers.length) { error(res, 404, 'GIF search isn’t set up on this server.'); return true; }
+      const p = byId.get(String(url.searchParams.get('source') || '')) || providers[0];
       if (!searchLimit.take(user)) { error(res, 429, 'You’re searching a little fast. Wait a moment.'); return true; }
       const q = String(url.searchParams.get('q') || '').trim().slice(0, 100);
-      if (!q) { sendJson(res, 200, { results: [] }); return true; }
-      const api = `${gif.base}/v2/search?${new URLSearchParams({ q, key: gif.key, client_key: 'snug', limit: '24', media_filter: 'gif,tinygif,mediumgif,mp4', contentfilter: 'medium' })}`;
-      let data;
-      try {
-        const r = await fetch(api, { redirect: 'manual', signal: AbortSignal.timeout(8000) });
-        if (!r.ok) throw new Error(String(r.status));
-        data = await r.json();
-      } catch { error(res, 502, 'GIF search isn’t answering right now. Try again in a moment.'); return true; }
-      const results = (Array.isArray(data?.results) ? data.results : []).map((g) => {
-        const f = g?.media_formats || {};
-        const send = f.mediumgif || f.gif || f.tinygif || f.mp4;
-        const prev = f.tinygif || f.mediumgif || f.gif;
-        if (!send?.url || !prev?.url || !allowed(send.url) || !allowed(prev.url)) return null;
-        const [w, h] = Array.isArray(send.dims) ? send.dims : [];
-        return {
-          id: String(g.id || ''), title: String(g.content_description || g.title || 'GIF').slice(0, 120),
-          url: send.url, preview: `/api/gifs/media?u=${encodeURIComponent(prev.url)}`,
-          w: Number.isInteger(w) ? w : undefined, h: Number.isInteger(h) ? h : undefined,
-        };
-      }).filter(Boolean);
-      sendJson(res, 200, { results });
+      if (!q) { sendJson(res, 200, { results: [], source: p.id }); return true; }
+      const key = `${p.id}\n${q.toLowerCase()}`;
+      let hit = results.get(key);
+      if (!hit || Date.now() - hit.at > HOUR) {
+        let list;
+        try { list = await p.search(q); } catch (e) {
+          error(res, e.status === 429 ? 429 : 502, e.status === 429 ? `${p.label} is getting too many searches from this server. Try again in a few minutes.` : 'GIF search isn’t answering right now. Try again in a moment.');
+          return true;
+        }
+        hit = { at: Date.now(), list };
+        remember(results, key, hit, 300);
+      }
+      const now = Date.now();
+      const out = hit.list.map((g) => {
+        remember(known, g.url, { p: p.id, credit: g.credit || null, at: now }, 5000);
+        remember(known, g.preview, { p: p.id, credit: null, at: now, preview: true }, 5000);
+        return { id: g.id, title: g.title, url: g.url, preview: `/api/gifs/media?u=${encodeURIComponent(g.preview)}`, w: g.w, h: g.h, ...(g.credit ? { credit: g.credit } : {}) };
+      });
+      sendJson(res, 200, { results: out, source: p.id });
       return true;
     }
 
     // Search previews come through Snug too, so the browser never talks to the provider.
     if (req.method === 'GET' && path === '/api/gifs/media') {
-      if (!gif.enabled) { error(res, 404, 'Not found'); return true; }
-      const u = allowed(url.searchParams.get('u'));
-      if (!u) { error(res, 403, 'That address isn’t one Snug fetches GIFs from.'); return true; }
-      if (!fetchLimit.take(user)) { error(res, 429, 'Too many at once. Wait a moment.'); return true; }
-      const got = await download(u);
-      if (got.err) { error(res, 502, got.err); return true; }
+      if (!providers.length) { error(res, 404, 'Not found'); return true; }
+      const u = String(url.searchParams.get('u') || '');
+      const k = knownUrl(u);
+      if (!k || !byId.has(k.p)) { error(res, 403, 'That address isn’t one Snug fetches GIFs from.'); return true; }
+      let got = previews.get(u);
+      if (!got || Date.now() - got.at > HOUR) {
+        if (!fetchLimit.take(user)) { error(res, 429, 'Too many at once. Wait a moment.'); return true; }
+        got = await byId.get(k.p).fetch(u);
+        if (got.err) { error(res, 502, got.err); return true; }
+        keepPreview(u, got);
+      }
       headers(res, { 'Content-Type': got.type, 'Content-Length': String(got.data.length), 'Cache-Control': 'private, max-age=3600', 'Content-Security-Policy': "default-src 'none'; sandbox" });
       res.writeHead(200);
       res.end(got.data);
@@ -433,19 +417,20 @@ export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, he
     }
 
     if (post && path === '/api/gifs/import') {
-      if (!gif.enabled) { error(res, 404, 'GIF search isn’t set up on this server.'); return true; }
+      if (!providers.length) { error(res, 404, 'GIF search isn’t set up on this server.'); return true; }
       const d = await jsonBody(req);
       const conv = typeof d.conv === 'string' ? d.conv : '';
       const g = gate(user, conv);
       if (!g.ok) { error(res, 403, g.why); return true; }
-      const u = allowed(d.url);
-      if (!u) { error(res, 403, 'That address isn’t one Snug fetches GIFs from.'); return true; }
+      const k = knownUrl(d.url);
+      if (!k || k.preview || !byId.has(k.p)) { error(res, 403, 'That address isn’t one Snug fetches GIFs from. Search again and pick it from the results.'); return true; }
       if (!saveLimit.take(user)) { error(res, 429, 'Too many GIFs at once. Wait a moment.'); return true; }
-      const got = await download(u);
+      const got = await byId.get(k.p).fetch(String(d.url));
       if (got.err) { error(res, 422, got.err); return true; }
       const id = newId('f');
       const name = `${stripInvisible(String(d.title || 'GIF')).replace(/[\u0000-\u001f\u007f/\\]/g, '').trim().slice(0, 80) || 'GIF'}.${got.type === 'video/mp4' ? 'mp4' : got.type.split('/')[1]}`;
-      const meta = { gif: true, source: 'tenor' };
+      // Openly licensed GIFs keep their credit (author, licence, where from) wherever they go.
+      const meta = { gif: true, source: k.p, ...(k.credit ? { credit: k.credit } : {}) };
       if (Number.isInteger(d.w) && Number.isInteger(d.h) && d.w > 0 && d.h > 0) { meta.w = Math.min(8000, d.w); meta.h = Math.min(8000, d.h); }
       await writeFile(join(filesDir, id), got.data, { mode: 0o600 });
       db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, user, conv, name, got.type, got.data.length, Date.now(), JSON.stringify(meta));

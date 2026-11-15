@@ -1063,11 +1063,12 @@ test('gifs: saved GIFs sync to every device; recent GIFs come from your places o
   a.close(); b.close(); b2.close(); out.close();
 });
 
-test('gif search: off without a key; with one, proxied through Snug with a media allowlist', async () => {
-  // Without SNUG_TENOR_KEY the picker has no search, and the routes say so.
+test('gif search: keyless Openverse by default; Tenor with a key, proxied through Snug with a media allowlist', async () => {
+  // With nothing set, search is on through Openverse (no key needed); Tenor needs SNUG_TENOR_KEY (tests/server-gifs.test.js has the rest).
   const plain = await Client.make(mxHandle('gs'), 'No Key');
-  assert.deepEqual(await (await fetch(`${base}/api/gifs/config`, { headers: { cookie: plain.cookie } })).json(), { search: false });
-  assert.equal((await fetch(`${base}/api/gifs?q=cat`, { headers: { cookie: plain.cookie } })).status, 404);
+  const cfg = await (await fetch(`${base}/api/gifs/config`, { headers: { cookie: plain.cookie } })).json();
+  assert.equal(cfg.search, true);
+  assert.deepEqual(cfg.sources.map((x) => x.id), ['openverse']);
   assert.equal((await fetch(`${base}/api/gifs/config`)).status, 401, 'signed-in people only');
   plain.close();
 
@@ -1113,13 +1114,13 @@ test('gif search: off without a key; with one, proxied through Snug with a media
     const { room } = (await op('house.create', { name: 'Gif House', hue: 30 })).d;
     const get = (path) => fetch(gb + path, { headers: { cookie } });
 
-    assert.deepEqual(await (await get('/api/gifs/config')).json(), { search: true });
+    assert.deepEqual((await (await get('/api/gifs/config')).json()).sources.map((x) => x.id), ['tenor']);
     const found = await (await get('/api/gifs?q=cat')).json();
     assert.equal(found.results.length, 1, 'results whose media is off the allowlist are dropped');
     const r0 = found.results[0];
     assert.equal(r0.title, 'Cat waves');
     assert.equal(r0.w, 220);
-    assert.ok(seen.some((s) => s.startsWith('/v2/search?') && s.includes('key=test-key') && s.includes('q=cat')), 'the key goes to the provider, from the server');
+    assert.ok(seen.some((s) => s.startsWith('/v2/search?') && s.includes('key=test-key') && s.includes('q=cat')), `the key goes to the provider, from the server: ${seen}`);
     // Previews come through Snug, never straight from the provider.
     assert.match(r0.preview, /^\/api\/gifs\/media\?u=/);
     const prev = await get(r0.preview);
@@ -1143,7 +1144,8 @@ test('gif search: off without a key; with one, proxied through Snug with a media
     assert.equal(sent.d.m.files[0].gif, true);
     assert.equal(sent.d.m.files[0].w, 220);
 
-    // Refusals: another host (even the same machine under another name), a redirect away, not a GIF, too big.
+    // Refusals: another host (even the same machine under another name), any address no search returned.
+    // (A redirect away, not a GIF and too big are in tests/server-gifs.test.js.)
     const refuse = async (url, status, why) => {
       const res = await gpost('/api/gifs/import', { conv: room, url }, cookie);
       assert.equal(res.status, status, url);
@@ -1151,9 +1153,7 @@ test('gif search: off without a key; with one, proxied through Snug with a media
     };
     await refuse(`http://localhost:${mock.address().port}/media/cat.gif`, 403, /isn’t one Snug fetches/);
     await refuse('https://evil.example/cat.gif', 403, /isn’t one Snug fetches/);
-    await refuse(`${here}/media/hop`, 422, /couldn’t be fetched/);
-    await refuse(`${here}/media/page`, 422, /isn’t a GIF/);
-    await refuse(`${here}/media/huge`, 422, /over 10 MB/);
+    await refuse(`${here}/media/hop`, 403, /isn’t one Snug fetches/);
     // Someone who can't post in the conversation can't import into it.
     const other = await gpost('/api/register', { handle: 'gifstranger', name: 'Stranger', password: 'a long password' });
     assert.equal((await gpost('/api/gifs/import', { conv: room, url: r0.url }, cookieOf(other))).status, 403);
