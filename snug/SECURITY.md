@@ -39,6 +39,12 @@ Security fixes go into the newest release only; there are no backports.
   GitHub account either: the account is the PC's device key plus a recovery key (20 random bytes shown
   once; the registry keeps only the public half of a key derived from it, `registry/src/keyacct.js`).
   GitHub accounts still work: their token is checked once by the registry and revoked, never stored.
+- **Server accounts that forgot their password** (v0.12). A recovery key resets the password with no email:
+  the server keeps only a scrypt hash of a key derived from it, so a database thief or the server's owner
+  can't use it. Using it signs out every device and removes passkeys; a key works once. Anyone holding the
+  key and the username can do the same, so it is as sensitive as the password, and it gets past two-factor
+  sign-in (someone who forgot a password has often lost the phone too). Optional **passkeys** add a sign-in
+  that phishing pages can't replay (bound to the server's domain); only their public halves are stored.
 - **Account takeover with a recovery key.** Someone who copies the recovery key only starts a **move**,
   which waits 72 hours unless the current PC approves. The current PC is told it was the recovery key, can
   stop it, and can then replace the key with the old one in hand (the copy stops working at once). A new
@@ -99,6 +105,8 @@ Security fixes go into the newest release only; there are no backports.
 | Passwords | scrypt (N=2^15, r=8, p=3), common-password list, no username in the password, rehash on sign-in | `server/auth.js` |
 | Brute force | Per-address and per-account limits with doubling waits kept in the database; IPv6 grouped by prefix | `server/auth.js`, `registry/src` |
 | Two-factor | TOTP encrypted under the data key, backup codes stored as HMACs, attempt limits | `server/account.js` |
+| Recovery key (server accounts) | Only scrypt(HKDF(key)) stored; per-address and per-account limits; single use; every session ended on use | `server/recovery.js` |
+| Passkeys | Single-use 5-minute challenges, origin and RP ID checks, user verification required, counter regression refused, RP ID never from the `Host` header alone | `server/webauthn.js`, `server/passkeys.js` |
 | Sessions | 256-bit tokens, hashed at rest, `__Host-` cookies, absolute and idle expiry, revoke-all | `server/auth.js` |
 | Authorization | Server-side checks on every op, one shared permission and role model | `js/lib/perms.js`, `js/lib/safety.js`, `js/lib/places.js` |
 | Input and output | Type and length checks on every field, prepared SQL, token-tree rendering, strict CSP | `server/`, `js/`, `server/index.js` |

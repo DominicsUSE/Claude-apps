@@ -22,6 +22,7 @@
     "test:e2e:places": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-places.test.js",
     "test:e2e:voice-options": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-voice-options.test.js",
     "test:e2e:account": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-account.test.js",
+    "test:e2e:passkeys": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-passkeys.test.js",
     "test:e2e:community": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-community.test.js",
     "test:e2e:integration": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-integration.test.js",
     "audit:deps": "npm audit --audit-level=high && npm audit --prefix registry --audit-level=high && npm audit --prefix desktop --audit-level=high",

@@ -149,7 +149,9 @@ usage alert first.** Without it, `/v1/turn` answers 404 and calls use STUN only.
   allows two client secrets at once). By hand, and never pasted into a chat, issue or command line:
   1. GitHub > Settings > Developer settings > OAuth Apps > Snug's app > **Generate a new client secret**.
   2. `npx wrangler secret put GH_CLIENT_SECRET` and paste it at the hidden prompt (or the Cloudflare
-     dashboard: Workers & Pages > snug-registry > Settings > Variables and Secrets, type *Secret*).
+     dashboard: Workers & Pages > snug-registry > Settings > Variables and Secrets, type *Secret*,
+     then Save and deploy). Don't pass it as a command argument or through `echo` (it would land in the
+     shell history). Either way a new version deploys and the Hub restarts with the new value.
   3. Check: sign in with GitHub from the desktop app. `config_error` or `github_invalid` means the new
      value is wrong; the old secret still works, so put the right one again.
   4. Delete the old secret in GitHub.
