@@ -481,6 +481,13 @@ test('TURN: with a shared secret each person gets a credential that verifies, ru
   a.ws.close();
 });
 
+test('STUN: SNUG_STUN=none leaves the STUN server out (it sees callers’ IP addresses); unset uses the public default', async () => {
+  const { iceConfig } = await import('../server/voiceopts.js');
+  assert.deepEqual(iceConfig({ SNUG_STUN: 'none' }), []);
+  assert.deepEqual(iceConfig({ SNUG_STUN: ' NONE ', SNUG_TURN_URL: 'turn:t.example', SNUG_TURN_USER: 'u', SNUG_TURN_PASS: 'p' }), [{ urls: ['turn:t.example'], username: 'u', credential: 'p' }]);
+  assert.match(iceConfig({})[0].urls[0], /^stun:/);
+});
+
 test('grace: SNUG_VOICE_GRACE_MS only shortens the grace under the test runner', async () => {
   const { voiceGraceFrom, VOICE_GRACE } = await import('../server/hub.js');
   assert.equal(VOICE_GRACE, 20_000);

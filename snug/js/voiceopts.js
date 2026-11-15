@@ -43,6 +43,9 @@ export const VOICE_DEFAULTS = {
   outputVolume: 1,                     // everything I hear, 0..2
   ringtone: 'chime', ringVolume: 0.8,  // the ringtone (js/calls.js RINGTONES) and its volume 0..1
   ringOutput: '',                      // the device the ringtone plays on; '' is the system default
+  // --- v12 voice track ---
+  lowData: false,                      // data saver: voice at 24 kbit/s, cameras paused, screens at 10 fps (js/lib/callnet.js)
+  relay: 'others',                     // hide my IP through the relay: 'others' (rooms, non-friends) | 'all' | 'off'
 };
 export const CAM_RES = { 360: { width: 640, height: 360 }, 720: { width: 1280, height: 720 }, 1080: { width: 1920, height: 1080 } };
 export const CAM_FPS = [15, 24, 30];
@@ -120,8 +123,9 @@ export function cameraConstraints(base) {
 }
 export function screenConstraints() {
   const v = vp();
-  const res = RESOLUTIONS[v.screenRes] || null;
-  const fps = FRAME_RATES.includes(v.screenFps) ? v.screenFps : 30;
+  // Data saver: at most 720p and 10 frames a second, whatever the quality setting.
+  const res = v.lowData ? RESOLUTIONS[720] : RESOLUTIONS[v.screenRes] || null;
+  const fps = v.lowData ? 10 : FRAME_RATES.includes(v.screenFps) ? v.screenFps : 30;
   return {
     video: { frameRate: { ideal: fps, max: fps }, ...(res ? { width: { max: res.width }, height: { max: res.height } } : {}) },
     audio: !!v.screenAudio, // the system or tab sound, where the browser offers it

@@ -14,6 +14,7 @@ import { toggleMute, dismissMutedWarn } from '../voice.js';
 import { act, startActivity, stopActivity, react } from '../activities.js';
 import { BOARD_COLOURS, BOARD_WIDTHS, BOARD_LIMITS, VOICE_REACTIONS, GAMES } from '../lib/games.js';
 import { QUALITY_LABEL, callClock, callClockWords } from '../lib/netquality.js';
+import { vp } from '../voiceopts.js'; // data saver, said in the connection details
 
 addIcons({
   'act-play': 'M4 6.5A2.5 2.5 0 0 1 6.5 4h7A2.5 2.5 0 0 1 16 6.5v7a2.5 2.5 0 0 1-2.5 2.5h-7A2.5 2.5 0 0 1 4 13.5Z|M8 8.5v3|M6.5 10h3|M12 9v.2|M13.5 11v.2',
@@ -120,8 +121,8 @@ const RANK = { good: 0, fair: 1, poor: 2 };
 export function qualityOf(id) {
   const st = S.peers[id];
   if (S.voiceState[S.call?.room]?.[id]?.reconnecting) return 'wait';
-  if (st === 'failed') return 'poor';
-  if (st === 'disconnected') return 'fair';
+  if (st === 'failed' || st === 'norelay') return 'poor';
+  if (st === 'disconnected' || st === 'reconnecting') return 'fair';
   if (st !== 'connected') return 'wait';
   return S.netq?.[id]?.quality || 'good';
 }
@@ -149,9 +150,20 @@ function QualityPop({ room }) {
           })}</tbody>
         </table>`
       : html`<p class="act-note">Nobody else is here yet, so there’s nothing to measure.</p>`}
-    <p class="act-note">You’re sending <span class="num">${mine.sendKbps == null ? '…' : `${mine.sendKbps} kbit/s`}</span>.</p>
+    ${ids.length > 0 && html`<p class="act-note">${S.call?.listen ? 'You’re listening without a microphone.' : html`You’re sending <span class="num">${mine.sendKbps == null ? '…' : `${mine.sendKbps} kbit/s`}</span>.`}${vp().lowData ? ' Data saver is on.' : ''}</p>`}
+    <${RouteNote} ids=${ids} />
     ${mine.uplinkPoor && html`<p class="act-hint" role="note">Your connection is struggling, so others may hear you break up. Turning your camera off, or moving closer to your router, can help.</p>`}
   </div>`;
+}
+// What Direct and Relayed mean, said plainly: who sees what.
+function RouteNote({ ids }) {
+  const routes = ids.map((id) => S.netq?.[id]?.relay).filter((r) => r != null);
+  if (!routes.length) return null;
+  const relayed = routes.some(Boolean);
+  return html`<p class="act-note act-route">${relayed
+    ? 'Relayed: your audio goes through a relay server, so people in the call don’t see your IP address. The relay’s operator sees that you connected and when, not what you say.'
+    : 'Direct: your audio goes straight to each person, so they can see your IP address.'}
+    Calls are encrypted between the people in them (DTLS-SRTP). That is transport encryption, not the end-to-end encryption of private messages.</p>`;
 }
 // "Voice connected", with the worst connection's bars; click for everyone's numbers.
 export function ConnHeader({ room }) {
@@ -159,10 +171,13 @@ export function ConnHeader({ room }) {
   const qs = ids.map(qualityOf).filter((q) => q in RANK);
   const worst = qs.length ? qs.reduce((a, b) => (RANK[b] > RANK[a] ? b : a)) : null;
   const poorMe = S.netq?.[S.me]?.uplinkPoor;
-  const label = `Voice connected${worst ? `. ${QUALITY_LABEL[worst]}` : ''}. Show connection details`;
+  // Direct or Relayed, as measured: Mixed when some lines go each way.
+  const rs = ids.map((id) => S.netq?.[id]?.relay).filter((r) => r != null);
+  const route = !rs.length ? null : rs.every(Boolean) ? 'Relayed' : rs.some(Boolean) ? 'Mixed' : 'Direct';
+  const label = `Voice connected${worst ? `. ${QUALITY_LABEL[worst]}` : ''}${route ? `. ${route}` : ''}. Show connection details`;
   return html`<button class=${`stage-conn ok act-conn${worst ? ` q-${worst}` : ''}`} aria-haspopup="dialog" aria-label=${label}
     onClick=${(e) => openPop({ anchor: rectOf(e), label: 'Connection', C: QualityPop, props: { room } })}>
-    <i aria-hidden="true"></i>Voice connected${worst && html`<${Bars} q=${worst} />`}
+    <i aria-hidden="true"></i>Voice connected${worst && html`<${Bars} q=${worst} />`}${route && html`<span class="act-routeword">${route}</span>`}
     ${poorMe && html`<span class="act-uplink">Your connection is weak</span>`}
   </button>`;
 }

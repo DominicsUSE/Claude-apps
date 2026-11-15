@@ -344,7 +344,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
   hub.voiceUsers = (place) => [...(voiceRooms.get(place)?.keys() || [])];
   hub.voiceStateOf = (u) => {
     const e = voiceOf.has(u) && voiceRooms.get(voiceOf.get(u))?.get(u);
-    return e ? { muted: !!e.muted, deaf: !!e.deaf, smute: !!e.smute, sdeaf: !!e.sdeaf, camera: !!e.camera, screen: !!e.screen, lost: !!e.lost } : null;
+    return e ? { muted: !!e.muted, deaf: !!e.deaf, smute: !!e.smute, sdeaf: !!e.sdeaf, camera: !!e.camera, screen: !!e.screen, lost: !!e.lost, ...(e.listen ? { listen: true } : {}) } : null;
   };
   hub.leaveVoiceInHouse = (u, houseId) => {
     const room = voiceOf.get(u);

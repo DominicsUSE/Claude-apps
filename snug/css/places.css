@@ -545,3 +545,33 @@ button.ev-title:hover { text-decoration: underline; text-underline-offset: 3px; 
 }
 @media (prefers-reduced-motion: reduce) { .vt::after, .stage-person::after { transition: none; } }
 /* ---------- end camera and screen sharing ---------- */
+
+/* ---------- v12 voice track ----------
+   Listening without a microphone, data saver's paused cameras, the route
+   (Direct or Relayed), the words under the call's buttons on a phone, and a
+   live voice room's empty chat that no longer shows a half-hidden icon. */
+.vc-word { display: none; }
+.stage-acts .btn.stage-listen { height: var(--h-36); padding: 0 var(--s-3); margin-left: var(--s-2); }
+.stage-acts .vc.listen .ic { color: var(--text-2); }
+.stage-media.listen { display: inline-flex; gap: 3px; color: var(--text-2); font-size: var(--t-meta); }
+.stage[data-size="48"] .listen-word, .stage[data-size="40"] .listen-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.vt-listen { display: inline-grid; place-items: center; flex: none; color: var(--text-2); }
+.vt-paused {
+  position: absolute; left: 50%; bottom: var(--s-6); transform: translateX(-50%); z-index: 2;
+  display: inline-flex; align-items: center; gap: var(--s-2); max-width: calc(100% - var(--s-4));
+  padding: var(--s-1) var(--s-1) var(--s-1) var(--s-3); border-radius: var(--r-btn);
+  background: color-mix(in srgb, var(--bg-0) 82%, transparent); color: var(--text-2); font-size: var(--t-meta);
+}
+.vt-paused span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act-routeword { margin-left: var(--s-2); padding-left: var(--s-2); border-left: 1px solid var(--line); color: var(--text-2); font-weight: var(--w-regular, 400); }
+.act-route { max-width: 44ch; }
+.conv.voice-live.chat-empty .start-mark { display: none; }
+/* A screen share's tile has both full screen and picture in picture: side by side, never one over the other. */
+.vt .vt-full ~ .vt-pip { right: calc(var(--s-2) + var(--h-sm) + var(--s-1)); }
+@media (max-width: 759px) {
+  .vt .vt-full ~ .vt-pip { right: calc(var(--s-2) + var(--touch) + var(--s-1)); }
+  .stage-acts .vc, .stage-acts .vc.leave { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 56px; height: 54px; margin-left: 0; }
+  .stage-acts .vc .vc-word { display: block; font-size: var(--t-micro); line-height: 1; white-space: nowrap; }
+  .stage-acts .btn.stage-listen { height: var(--touch); flex: 1; max-width: 320px; margin-left: 0; }
+  .stage-acts:has(.stage-listen) { flex-wrap: wrap; gap: var(--s-2); }
+}

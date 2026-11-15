@@ -77,12 +77,15 @@ export function turnCredential(secret, user, now = Date.now(), ttl = TURN_TTL_S)
   const username = `${Math.floor(now / 1000) + ttl}:${user}`;
   return { username, credential: createHmac('sha1', secret).update(username).digest('base64') };
 }
+// SNUG_STUN=none leaves STUN out (a STUN server sees each caller's IP
+// address); unset, Google's public one is used.
 export function iceConfig(env = process.env) {
-  const stun = { urls: (env.SNUG_STUN || 'stun:stun.l.google.com:19302').split(',').map((u) => u.trim()).filter(Boolean) };
+  const stunUrls = /^\s*none\s*$/i.test(env.SNUG_STUN || '') ? [] : (env.SNUG_STUN || 'stun:stun.l.google.com:19302').split(',').map((u) => u.trim()).filter(Boolean);
+  const stun = stunUrls.length ? [{ urls: stunUrls }] : [];
   const turnUrls = (env.SNUG_TURN_URL || '').split(',').map((u) => u.trim()).filter(Boolean);
-  if (!turnUrls.length) return [stun];
-  if (env.SNUG_TURN_SECRET) return (user) => [stun, { urls: turnUrls, ...turnCredential(env.SNUG_TURN_SECRET, user) }];
-  return [stun, { urls: turnUrls, username: env.SNUG_TURN_USER, credential: env.SNUG_TURN_PASS }];
+  if (!turnUrls.length) return stun;
+  if (env.SNUG_TURN_SECRET) return (user) => [...stun, { urls: turnUrls, ...turnCredential(env.SNUG_TURN_SECRET, user) }];
+  return [...stun, { urls: turnUrls, username: env.SNUG_TURN_USER, credential: env.SNUG_TURN_PASS }];
 }
 
 export const soundView = (s) => s && {
