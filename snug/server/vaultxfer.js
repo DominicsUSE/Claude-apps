@@ -27,6 +27,9 @@ const RATE = 24;
 const BURST = 8;
 // A receiver missing a part (or whose want/ack got lost) asks again after this long without progress.
 const STALL_MS = 2000;
+// A sender that hears nothing back sends its offer (before any want) or its end again after this long:
+// a lost offer, or a lost done/have at the very end, would otherwise wait out ACK_TIMEOUT and fail.
+const RESEND_MS = 3000;
 const PURGE_AFTER = 7 * 86_400_000;
 const XID = /^[A-Za-z0-9_-]{22}$/;
 
@@ -123,9 +126,16 @@ export function createXfer(o) {
     });
     sends.set(peer.ik, s);
     s.lastIn = now();
-    s.timer = setInterval(() => { if (now() - s.lastIn > ACK_TIMEOUT) s.finish('failed', 'timeout'); }, 1000);
+    s.offer = { t: 'offer', size: s.size, sha: s.sha, kid: f.kid ?? 1, created: f.created ?? 0 };
+    s.timer = setInterval(() => {
+      const quiet = now() - s.lastIn;
+      if (quiet > ACK_TIMEOUT) return s.finish('failed', 'timeout');
+      if (quiet < RESEND_MS || now() - (s.resentAt || 0) < RESEND_MS) return undefined;
+      if (!s.started) { s.resentAt = now(); out(s, 1, s.offer); } else if (s.endSent) { s.resentAt = now(); out(s, 1, { t: 'end' }); }
+      return undefined;
+    }, 1000);
     s.timer.unref?.();
-    if (!out(s, 1, { t: 'offer', size: s.size, sha: s.sha, kid: f.kid ?? 1, created: f.created ?? 0 })) { s.finish('failed', 'unavailable'); return s.promise; }
+    if (!out(s, 1, s.offer)) { s.finish('failed', 'unavailable'); return s.promise; }
     progress({ state: 'sending', role: 'sender', got: 0, size: s.size }, true);
     return s.promise;
   }
@@ -202,7 +212,9 @@ export function createXfer(o) {
       progress({ state: 'receiving', role: 'receiver', got: off, size: r.size }, true);
       return reply(r, { t: 'want', off });
     }
-    if (!r.size || r.ended) return undefined;
+    // Finished: an end sent again (its answer was lost) gets the same answer again.
+    if (r.ended) return fr.t === 'end' && r.final ? reply(r, r.final) : undefined;
+    if (!r.size) return undefined;
     if (fr.t === 'part') {
       if (typeof fr.d !== 'string' || !Number.isSafeInteger(fr.off)) return undefined;
       if (fr.off !== r.off) {
@@ -229,17 +241,17 @@ export function createXfer(o) {
       if (buf.length !== r.size || sha256(buf).toString('hex') !== r.sha) {
         dropPart(r.xid);
         progress({ state: 'failed', role: 'receiver', got: r.off, size: r.size, error: 'sha' }, true);
-        return reply(r, { t: 'bad', why: 'sha' });
+        return reply(r, (r.final = { t: 'bad', why: 'sha' }));
       }
       let res;
       try { res = await o.accept(buf, r.sha, r.from); } catch (e) { res = { ok: false, why: e.code || 'failed' }; }
       dropPart(r.xid);
       if (res?.ok) {
         progress({ state: 'done', role: 'receiver', got: r.size, size: r.size }, true);
-        return reply(r, { t: 'done' });
+        return reply(r, (r.final = { t: 'done' }));
       }
       progress({ state: 'failed', role: 'receiver', got: r.size, size: r.size, error: res?.why || 'failed' }, true);
-      return reply(r, { t: 'bad', why: String(res?.why || 'failed').slice(0, 40) });
+      return reply(r, (r.final = { t: 'bad', why: String(res?.why || 'failed').slice(0, 40) }));
     }
     return undefined;
   }

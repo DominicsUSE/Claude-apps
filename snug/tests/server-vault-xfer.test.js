@@ -93,6 +93,28 @@ test('xfer: a 4 MB file gets through the registry’s 60-a-second burst limit, a
   }
 });
 
+test('xfer: a lost first offer and a lost final "done" are sent again, so the transfer still ends done', async () => {
+  const file = randomBytes(PART * 3 + 5);
+  const S = device(), R = device();
+  let sx, rx, sFirst = true, accepted = false, dropDone = true;
+  const deliver = (to, from, box) => {
+    if (from === S && sFirst) { sFirst = false; return; }            // the offer never arrives
+    if (from === R && accepted && dropDone) { dropDone = false; return; } // nor the receiver's "done"
+    setTimeout(() => (to === R.ik ? rx : sx).receive(from.ik, from.xk, box), 5);
+  };
+  sx = createXfer({ uid: UID, me: S, dir: mkdtempSync(join(tmpdir(), 'xs-')), transport: { send: (to, b) => { deliver(to, S, b); return true; } },
+    getFile: () => ({ buf: file, sha: sha256(file).toString('hex'), kid: 1, created: 1 }), markSent() {}, wasSent: () => false });
+  const got = [];
+  rx = createXfer({ uid: UID, me: R, dir: mkdtempSync(join(tmpdir(), 'xr-')), transport: { send: (to, b) => { deliver(to, R, b); return true; } },
+    hasImported: () => false, accept: async (buf) => { got.push(buf); accepted = true; return { ok: true }; } });
+  const t0 = Date.now();
+  assert.equal(await sx.send({ ik: R.ik, xk: R.xk }), 'done');
+  assert.equal(got.length, 1, 'imported once');
+  assert.ok(got[0].equals(file));
+  assert.equal(dropDone, false, 'the done was dropped once');
+  assert.ok(Date.now() - t0 < 15_000, `took ${Date.now() - t0} ms`);
+});
+
 test('xfer: another account’s key, an edited box, and bytes that don’t match the offer are all refused', async () => {
   const file = randomBytes(PART * 2 + 7);
   // The receiver thinks it is another account: the session keys differ, every box is dropped.
