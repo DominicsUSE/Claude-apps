@@ -324,6 +324,7 @@ export const POLICIES = {
   pair: { free: 5, baseMs: 60_000, maxMs: 15 * 60_000, forgetMs: 3_600_000 },          // per account and address
   code: { free: 10, baseMs: 15 * 60_000, maxMs: 4 * 3_600_000, forgetMs: 86_400_000 },  // second factor
   stepUp: { free: 5, baseMs: 60_000, maxMs: 30 * 60_000, forgetMs: 86_400_000 },       // a signed-in session re-entering its password or code
+  recover: { free: 5, baseMs: 15 * 60_000, maxMs: 4 * 3_600_000, forgetMs: 86_400_000 }, // v0.12: recovery keys tried for one account (server/recovery.js)
 };
 export function createAuthGuard(db) {
   (db.raw ?? db).exec('CREATE TABLE IF NOT EXISTS auth_failures (key TEXT PRIMARY KEY, count INTEGER NOT NULL, last INTEGER NOT NULL)');

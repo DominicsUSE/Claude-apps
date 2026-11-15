@@ -669,6 +669,7 @@ export function createAccountHttp({
   configureSessions(db, { idleDays: desktop ? SESSION_DAYS : undefined });
   const G = C.guard;
   const tickets = new Map(); // sha256(ticket) -> { user, until, tries }
+  const deleteAccountHooks = []; // more of the account to forget, inside the delete's transaction
   const exportLimit = limiter({ capacity: 3, perSecond: 3 / 3600 });
   hub.extraLimits = [...(hub.extraLimits || []), exportLimit];
   const agentOf = (req) => deviceLabel(req.headers['user-agent']);
@@ -866,6 +867,7 @@ export function createAccountHttp({
       db.run('DELETE FROM personal_invites WHERE user = ?', user);
       db.run('DELETE FROM scheduled WHERE user = ?', user); // nothing goes out later as "Deleted user"
       try { db.run('DELETE FROM push_subs WHERE user = ?', user); } catch { /* push not set up */ }
+      for (const f of deleteAccountHooks) f(user); // v0.12: passkeys and the recovery key (server/passkeys.js, server/recovery.js)
       endAllSessions(db, user);
     });
     hub.endSessions(user);
@@ -1013,6 +1015,8 @@ export function createAccountHttp({
 
   return {
     open, authed, loginGate, agentOf, totpOn: R.totpOn, verifySecond: R.verifySecond, audit: M.audit,
+    // v0.12: passkey sign-in and account recovery (server/passkeys.js, server/recovery.js) make sessions the same way.
+    signIn: signedIn, reactivate, strip, guard: G, prunePush, deleteAccountHooks,
     // Tests: forget every rate limit, the failure counters included.
     reset: () => { exportLimit.reset(); G.reset(); C.windows.clear(); },
   };

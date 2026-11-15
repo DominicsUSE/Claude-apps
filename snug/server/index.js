@@ -22,6 +22,8 @@ import { HUES, cleanFileName } from '../js/lib/util.js'; // sec-authz: cleanFile
 import { createPeer } from './peer.js'; // p2p: friends, DMs, profiles and calls with people on other PCs
 import { createGroups } from './peergroups.js'; // v0.10 B: groups across PCs
 import { createGhAuth } from './ghauth.js'; // p2p: Sign in with GitHub and the Snug username
+import { createPasskeys } from './passkeys.js'; // v0.12: passkey sign-in for password accounts
+import { createRecovery } from './recovery.js'; // v0.12: "Forgot your password?" with a recovery key, no email
 import { createKeyAuth } from './keyauth.js'; // v0.12: desktop accounts that need no GitHub account
 import { createNotices } from './notices.js'; // v0.10 A: registry notices, bans and admin
 import { createVault } from './vault.js'; // v0.10 C: the account's data file
@@ -85,6 +87,9 @@ export async function startServer({
   // A server bound to loopback always checks the Host header (localhost, IPs, SNUG_ORIGINS
   // hosts, these); one bound to a public or wildcard address checks it once this is set.
   hosts = process.env.SNUG_HOSTS ? process.env.SNUG_HOSTS.split(',').map((x) => x.trim()).filter(Boolean) : null,
+  // v0.12: the passkey RP ID (server/webauthn.js passkeyPlace). Without it, the only SNUG_HOSTS name, or
+  // "localhost" on a server that listens on this machine only. Changing it later breaks existing passkeys.
+  rpId = process.env.SNUG_RP_ID || null,
   quiet = false,
   // Tests only: let push subscriptions point at a mock push service on http://127.0.0.1.
   pushAllowLocal = process.env.SNUG_PUSH_ALLOW_LOCAL === '1',
@@ -248,6 +253,8 @@ export async function startServer({
   hub.messaging?.configure({ filesDir, previews: linkPreviews, allowLoopback: linkAllowLocal });
   const placesHttp = createPlacesHttp({ db, M, hub, sendJson, error, jsonBody, ipOf }); // webhooks (server/places.js)
   const accountHttp = createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonBody, body, headers, ipOf, secure, authLimit, uploadLimit, log, dataDir, keyStore, dataKey, desktop: !!resumeSecret }); // server/account.js; sec-auth: the data key, sign-up, sign-in, sign-out, new password
+  const passkeys = createPasskeys({ db, M, hub, account: accountHttp, sendJson, error, jsonBody, ipOf, authLimit, httpsReq, rpId, hosts, loopback: isLoopbackBind(host), desktop: !!resumeSecret, extraOrigins });
+  const recovery = createRecovery({ db, M, hub, account: accountHttp, sendJson, error, jsonBody, ipOf, authLimit, log });
   const appearanceHttp = createAppearanceHttp({ db, M, hub, filesDir, sendJson, error, body, headers, uploadLimit }); // server/appearance.js
   const communityHttp = createCommunityHttp({ db, M, hub, filesDir, sendJson, error, body, headers, uploadLimit, userOf: (req) => userOf(req) }); // server/community.js
   // p2p: GitHub sign-in, the username picker and the owner's account rules (server/ghauth.js).
@@ -368,12 +375,16 @@ export async function startServer({
     // Webhooks carry their own secret instead of a session (server/places.js).
     if (await placesHttp(req, res, path)) return undefined;
     if (await accountHttp.open(req, res, path)) return undefined; // POST /api/login/totp
+    if (await passkeys.open(req, res, path)) return undefined; // v0.12: /api/passkey/{config,options,login}
+    if (await recovery.open(req, res, path)) return undefined; // v0.12: /api/recover, /api/recover/finish
 
     const user = userOf(req);
     if (!user) return error(res, 401, 'Sign in first.');
     if (await gh.authed(req, res, path, user)) return undefined; // p2p: no password for GitHub accounts; sliding sign-in on /api/me
     if (await keyAuth.authed(req, res, path, user)) return undefined; // v0.12: the recovery key until it is saved
     if (await accountHttp.authed(req, res, path, url, user)) return undefined; // export, deactivate, delete, banners
+    if (await passkeys.authed(req, res, path, user)) return undefined; // v0.12: Settings > Passkeys
+    if (await recovery.authed(req, res, path, user)) return undefined; // v0.12: Settings > Recovery key
     if (await appearanceHttp(req, res, path, url, user)) return undefined; // profile pictures (server/appearance.js)
     if (await communityHttp.authed(req, res, path, url, user)) return undefined; // house pictures and event covers (server/community.js)
     // v0.10 C: /api/vault/*
@@ -470,7 +481,7 @@ export async function startServer({
     vault, // v0.10 C: the data file (server/vault.js)
     dbSnapshots, // sec-registry REG-L6: dbSnapshots?.now() writes a snapshot (tests)
     // For tests: forget every rate limit, the socket ones and the sign-in ones.
-    resetLimits: () => { hub.resetLimits(); authLimit.reset(); uploadLimit.reset(); mediaHttp.reset(); accountHttp.reset(); openLimit.reset(); inviteLimit.reset(); cspLimit.reset(); sec.reset(); }, // sec-web: openLimit, inviteLimit, cspLimit, sec
+    resetLimits: () => { hub.resetLimits(); authLimit.reset(); uploadLimit.reset(); mediaHttp.reset(); accountHttp.reset(); passkeys.reset(); recovery.reset(); openLimit.reset(); inviteLimit.reset(); cspLimit.reset(); sec.reset(); }, // sec-web: openLimit, inviteLimit, cspLimit, sec
     close: () => new Promise((r) => { vault.flush(); vault.close(); dbSnapshots?.stop(); clearInterval(sweep); gh.close(); keyAuth.close(); notices.close(); peer.close(); hub.close(); server.close(() => { db.close(); r(); }); server.closeAllConnections?.(); }),
   };
 }
