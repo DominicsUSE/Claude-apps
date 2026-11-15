@@ -97,7 +97,7 @@ function recentlyHere(now) {
     for (let i = list.length - 1; i >= 0; i--) {
       const m = list[i];
       if (m.ts < now - 3_600_000) break;
-      if (m.sys || m.author === S.me || !S.users[m.author]) continue;
+      if (m.sys || m.author === S.me || !S.users[m.author] || S.users[m.author].hideActive || S.users[m.author].deleted) continue; // privacy: hidden activity
       if (!seen.has(m.author) || seen.get(m.author).ts < m.ts) seen.set(m.author, { id: m.author, ts: m.ts, conv });
     }
   }

@@ -630,7 +630,9 @@ export function JumpToDate({ conv }) {
 // ---------- Settings > Appearance ----------
 export function MessagingSettings({ Row }) {
   return html`<div class="set-head">Links</div>
-    <${Row} label="Link previews" hint="Show a card with the title and picture of links people send, and pictures and videos linked directly. Snug fetches them, so the sites never see you.">
+    <${Row} label="Link previews" hint=${S.p2p?.enabled && S.p2p.owner
+      ? 'Show a card with the title and picture of links, and pictures and videos linked directly. Your PC fetches previews for links you send. Links friends send get one only if you turn that on in Privacy and safety, because the site would see your PC’s address.'
+      : 'Show a card with the title and picture of links people send, and pictures and videos linked directly. This Snug’s server fetches them, so the sites see the server’s address, not yours.'}>
       <${Switch} on=${S.prefs.embeds !== false} label="Link previews" onChange=${(v) => setPref('embeds', v)} />
     <//>
     ${(S.prefs.trustedHosts || []).length > 0 && html`<${Row} label="Sites that open without asking" hint=${S.prefs.trustedHosts.join(', ')}>

@@ -15,6 +15,7 @@ import { Confirm } from './modals.js';
 import { safety, unblockUser, liftTimeout, moderate, mayAct } from './safety.js';
 import { copyText } from '../ui/kit.js';
 import { JoinSafety, SpamRules, describeCommunity } from './community-settings.js'; // verification, pausing, spam rules, their log lines
+import { PrivacyOverview, PrivacyControls } from './privacy.js'; // who can see what; online, typing and link-preview choices
 
 const err = (e) => (e.offline ? 'You’re offline. Try again once you’re back.' : e.message);
 function Row({ label, hint, children, top }) {
@@ -47,7 +48,7 @@ const Who = ({ id, sub }) => {
 };
 
 // ---------- Privacy and safety (personal settings) ----------
-export function PrivacyPage() {
+export function PrivacyPage({ openGuide } = {}) {
   const st = safety();
   const p = st.privacy;
   const set = (patch) => {
@@ -57,7 +58,10 @@ export function PrivacyPage() {
   };
   return html`
     <h1>Privacy and safety</h1>
-    <p class="lead">Who can reach you, and who you’ve blocked. Snug applies these on the server, for every device.</p>
+    <p class="lead">Who can see what, who can reach you, and who you’ve blocked. Snug applies these on the server, for every device.</p>
+    <${PrivacyOverview} openGuide=${openGuide} />
+    <${PrivacyControls} Row=${Row} />
+    <div class="set-head">Who can reach you</div>
     <${Row} label="Who can message you" hint="Starting a new conversation with you. Conversations you already have carry on." top>
       <${Seg} label="Who can message you" value=${p.dm} options=${PRIVACY_DM} onChange=${(v) => set({ dm: v })} />
     <//>

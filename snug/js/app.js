@@ -29,6 +29,7 @@ import { Search, QuickJump } from './views/search.js';
 import { Settings } from './views/settings.js';
 import { NewMessage, JoinByLink } from './views/modals.js';
 import { Auth, Splash } from './views/auth.js';
+import { PrivacyDoc, PrivacyLink } from './views/privacy.js'; // the privacy page at /privacy, and its link on the sign-in screen
 import { Home } from './views/home.js';
 import { Friends } from './views/friends.js';
 import { Discover } from './views/discover.js';
@@ -269,9 +270,11 @@ function App() {
   useEffect(() => {
     if (inside && S.ui.msgLink) { const { conv, id } = S.ui.msgLink; S.ui.msgLink = null; openMessageLink(conv, id); }
   }, [inside, S.ui.msgLink]);
+  // /privacy: the privacy page, signed in or not (js/views/privacy.js).
+  if (S.ui.guide) { document.title = 'Privacy at Snug'; return html`<${PrivacyDoc} /><${Toasts} />`; }
   if (!inside) {
     document.title = 'Snug';
-    if (S.auth === 'out') return html`<${Auth} /><${Toasts} />`;
+    if (S.auth === 'out') return html`<${Auth} /><${PrivacyLink} /><${Toasts} />`;
     return html`<${Splash} unreachable=${S.auth === 'unreachable'} onRetry=${boot} />`;
   }
   syncSpace();
@@ -431,6 +434,7 @@ async function boot() {
   const link = /^\/join\/([\w-]{3,40})$/.exec(location.pathname); // 3: a house's own link (server/community.js)
   if (link) { S.ui.joinCode = link[1]; history.replaceState(history.state, '', '/'); }
   // A message link, /m/<conversation>/<message>: opened once signed in (js/views/chat.js).
+  if (/^\/privacy\/?$/.test(location.pathname)) S.ui.guide = true; // the privacy page (js/views/privacy.js)
   const ml = /^\/m\/([\w:.-]{1,80})\/([\w.-]{1,80})\/?$/.exec(location.pathname);
   if (ml) { S.ui.msgLink = { conv: ml[1], id: ml[2] }; history.replaceState(history.state, '', '/'); }
   S.auth = 'checking';
