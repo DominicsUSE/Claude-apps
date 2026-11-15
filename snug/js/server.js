@@ -54,7 +54,7 @@ export async function api(path, body) {
     });
   } catch { throw new Error('Can’t reach Snug. Check your connection and try again.'); }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.error || 'Something went wrong. Try again.'), { status: res.status });
+  if (!res.ok) throw Object.assign(new Error(data.error || 'Something went wrong. Try again.'), { status: res.status, code: data.code });
   return data;
 }
 

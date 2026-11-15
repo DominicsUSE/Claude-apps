@@ -48,6 +48,47 @@
   .auth-gh .auth-submit, .auth-panel > .auth-submit, .auth-at { height: var(--touch); }
 }
 
+/* ---------- v0.12: accounts with no GitHub (js/views/keyauth.js) ---------- */
+/* "I already have an account": three plain choices, each a full-width row. */
+.auth-choices { display: grid; gap: var(--s-2); }
+.auth-choice {
+  display: flex; gap: var(--s-3); align-items: flex-start; width: 100%; padding: var(--s-3);
+  background: var(--surface-input); border: 1px solid var(--line-subtle); border-radius: var(--r-input);
+  color: var(--text-1); text-align: left; cursor: pointer; font: inherit;
+  transition: border-color var(--m-fast) var(--ease-in-out), background var(--m-fast) var(--ease-in-out);
+}
+.auth-choice:hover { border-color: var(--line-strong); }
+.auth-choice:focus-visible { outline: var(--focus-w) solid var(--focus); outline-offset: 2px; }
+.auth-choice > .ic { flex: none; margin-top: 2px; color: var(--text-2); }
+.auth-choice > span { display: grid; gap: 2px; }
+.auth-choice b { font-size: var(--t-14); font-weight: var(--w-semibold); }
+.auth-choice > span > span { font-size: var(--t-13); color: var(--text-2); line-height: var(--lh-ui); }
+.auth-steps { margin: 0; padding-left: var(--s-5); display: grid; gap: var(--s-1); font-size: var(--t-14); color: var(--text-2); line-height: var(--lh-ui); }
+
+/* The recovery key: 9 groups of 4, large and monospaced, three ways to keep it. */
+.rk { display: grid; gap: var(--s-3); }
+.rk-key {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-2);
+  padding: var(--s-4) var(--s-3); background: var(--surface-input); border: 1px solid var(--line-subtle); border-radius: var(--r-input);
+}
+.rk-key > span {
+  font: 400 1.25rem/1.4 var(--mono); letter-spacing: 0.1em; text-align: center; color: var(--text-1);
+  user-select: all; font-variant-numeric: tabular-nums;
+}
+.rk-acts { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.rk-acts .btn { flex: 1 1 auto; justify-content: center; gap: var(--s-2); text-decoration: none; }
+.rk-last { font-family: var(--mono); letter-spacing: 0.1em; text-transform: uppercase; max-width: 10rem; }
+.rk-input { font-family: var(--mono); letter-spacing: 0.06em; text-transform: uppercase; resize: none; min-height: 4.5rem; }
+.rk-later-warn .auth-link { margin-left: var(--s-1); }
+.rk-print { display: none; }
+@media print {
+  body.print-rk * { visibility: hidden !important; }
+  body.print-rk .rk-print, body.print-rk .rk-print * { visibility: visible !important; }
+  body.print-rk .rk-print { display: block; position: fixed; inset: 0; margin: 0; padding: 2cm; background: #fff; color: #000; font: 14pt/1.6 var(--mono); white-space: pre-wrap; }
+}
+@media (max-width: 420px) { .rk-key > span { font-size: 1.05rem; letter-spacing: 0.06em; } }
+@media (pointer: coarse) { .auth-choice { min-height: var(--touch); } }
+
 /* ---------- Account notices (moving, moved away, a move waiting) ---------- */
 .p2p-notice {
   position: fixed; z-index: 40; left: 50%; top: var(--s-3); transform: translateX(-50%);
@@ -108,3 +149,7 @@
 .auth-paste-at { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px; border-radius: var(--r-md, 10px); background: var(--surface-2, transparent); text-align: center; }
 .auth-paste-at span { font-size: var(--t-ui); color: var(--text-2); }
 .auth-paste-at .auth-device-url { font-size: 17px; word-break: break-all; }
+
+/* v0.12: Settings > Account rows with two actions (recovery key, GitHub link). */
+.p2p-row-acts { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; justify-content: flex-end; }
+.mv-code { font-family: var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }

@@ -1,6 +1,8 @@
 // Two PCs, end to end (design section 12.4): a local registry and mock GitHub,
 // one Snug server per person, and one Chromium context per person. The pages
 // are the link hosts, so messages take the direct WebRTC path. No real GitHub.
+// v0.12: an account made with no GitHub at all, its recovery key, and moving it
+// to a second PC with that key, then to a third with a pairing code.
 //
 // The tests run in order and share the people they set up.
 import test from 'node:test';
@@ -47,8 +49,11 @@ async function open(name, srv, { viewport = { width: 1280, height: 860 } } = {})
   return page;
 }
 
-// Continue with GitHub: the code screen, then (mock) GitHub approves it.
+// Continue with GitHub: the code screen, then (mock) GitHub approves it. Since v0.12 GitHub is under
+// "I already have an account" > "I used GitHub before".
 async function github(page, ghId) {
+  await page.click('#auth-have');
+  await page.click('#auth-github-path');
   await page.click('#auth-github');
   const code = (await page.locator('#auth-device-code').textContent()).trim();
   assert.match(code, /^[A-Z0-9]{4}-[A-Z0-9]{4}$/);
@@ -78,7 +83,8 @@ test('unique names: the owner takes "a"; others get clear errors; Bob is saved a
   await pc('A');
   await pc('B');
   const alice = await open('alice', pcs.A);
-  await alice.waitForSelector('#auth-github');
+  await alice.waitForSelector('#auth-create');
+  await alice.waitForSelector('#auth-have');
   await shot(alice, '01-sign-in');
   await github(alice, OWNER_GH);
   // The code screen says not to share the code.
@@ -414,6 +420,182 @@ test('key change: Bob loses his PC, moves after 72 h, re-adds Alice; Alice sees 
   await shot(alice, '14-key-banner');
   await alice.click('#p2p-key-ok');
   await alice.locator('#p2p-key-banner').waitFor({ state: 'detached' });
+});
+
+// ---------- v0.12: no GitHub ----------
+let kayCode = null; // Kay's recovery key, as she saved it
+
+test('no GitHub: Kay creates an account, saves her recovery key, adds Alice and they message', async () => {
+  const { alice } = pages;
+  await pc('K');
+  const kay = await open('kay', pcs.K);
+  await kay.click('#auth-create');
+  await kay.waitForSelector('#auth-username');
+  await typeName(kay, 'kay');
+  await kay.locator('#auth-username-err:has-text("2 or 3 characters")').waitFor();
+  await typeName(kay, 'Kaylee');
+  await kay.locator('#auth-username-ok:has-text("@kaylee is available.")').waitFor();
+  await shot(kay, '20-key-pick-username');
+  await kay.click('.auth-form button[type=submit]');
+  // "Save your recovery key": 9 groups of 4, a file, print and copy, then the last group typed back.
+  await kay.locator('#rk-key').waitFor({ timeout: 30000 });
+  await shot(kay, '21-key-save-recovery');
+  const groupsShown = await kay.locator('#rk-key > span').allTextContents();
+  assert.equal(groupsShown.length, 9);
+  kayCode = groupsShown.join('-');
+  assert.match(kayCode, /^([A-Z2-7]{4}-){8}[A-Z2-7]{4}$/);
+  const [download] = await Promise.all([kay.waitForEvent('download'), kay.click('#rk-download')]);
+  assert.equal(download.suggestedFilename(), 'Snug recovery key - @kaylee.txt');
+  const saved = await (await import('node:fs/promises')).readFile(await download.path(), 'utf8');
+  assert.ok(saved.includes(kayCode) && saved.includes('@kaylee') && saved.includes('can’t reset this key'), saved);
+  assert.ok(await kay.locator('#rk-print').isVisible());
+  assert.ok(await kay.locator('#rk-copy').isVisible());
+  await kay.fill('#rk-last', 'ZZZZ');
+  await kay.click('#rk-saved');
+  await kay.locator('#rk-last-err:has-text("isn’t the end of your recovery key")').waitFor();
+  await kay.fill('#rk-last', kayCode.slice(-4).toLowerCase());
+  await kay.click('#rk-saved');
+  await inApp(kay);
+  assert.equal(await kay.evaluate(() => window.snug.S.p2p.kind), 'key');
+  assert.equal(await kay.evaluate(() => window.snug.S.p2p.recovery?.saved), true);
+  // Settings > Account says how this account signs in, and offers GitHub only as an option.
+  await kay.click('.nav button[aria-label="Settings"]');
+  await kay.click('.layer-nav button.row:has-text("Account and security")');
+  await kay.locator('#p2p-key-saved:has-text("Recovery key saved")').waitFor();
+  await kay.locator('#p2p-gh-link').waitFor();
+  await kay.locator('#p2p-move-new').waitFor();
+  assert.equal(await kay.locator('text=Signed in with GitHub').count(), 0);
+  await shot(kay, '22-key-settings');
+  await kay.evaluate(() => { window.snug.S.ui.layer = null; window.snug.emit(); });
+
+  // Alice adds her by username; Kay accepts; messages go both ways.
+  await goto(alice, { type: 'friends', tab: 'add' });
+  await alice.fill('#f-add-handle', 'kaylee');
+  await alice.click('.f-add-form button[type=submit]');
+  await alice.locator('.f-add-msg .ok-line').waitFor();
+  await goto(kay, { type: 'friends', tab: 'requests' });
+  await kay.locator('.f-row:has-text("@a") button:has-text("Accept")').click();
+  await goto(kay, { type: 'friends', tab: 'all' });
+  await kay.locator('.f-row:has-text("@a")').waitFor();
+  await kay.locator('.f-row:has-text("@a")').hover();
+  await kay.locator('.f-row:has-text("@a") button[aria-label^="Message"]').click({ force: true }); // a hover action
+  await kay.locator('.p2p-direct:has-text("Direct between your PCs")').waitFor();
+  await kay.fill('.main .composer textarea', 'hi Alice, no GitHub here');
+  await kay.keyboard.press('Enter');
+  await alice.waitForFunction(() => Object.values(window.snug.S.msgs).flat().some((m) => m.text === 'hi Alice, no GitHub here'), null, { timeout: 20000 });
+  const dm = await alice.evaluate(() => Object.entries(window.snug.S.msgs).find(([, l]) => l.some((m) => m.text === 'hi Alice, no GitHub here'))[0]);
+  await goto(alice, { type: 'conv', id: dm });
+  await alice.fill('.main .composer textarea', 'welcome, Kay');
+  await alice.keyboard.press('Enter');
+  await kay.locator('.msg-body:has-text("welcome, Kay")').waitFor({ timeout: 20000 });
+  await shot(kay, '23-key-dm');
+});
+
+test('no GitHub: Kay loses her PC and moves to a second one with her recovery key', async () => {
+  const { alice } = pages;
+  const kay = pages.kay;
+  pcs.K.vault.close(); // a lost PC sends no data file
+  await pc('K2');
+  const kay2 = await open('kay2', pcs.K2);
+  await kay2.click('#auth-have');
+  await kay2.locator('#auth-lost-pc').waitFor();
+  await shot(kay2, '24-key-have-account');
+  await kay2.click('#auth-lost-pc');
+  // A typo is caught before anything is sent.
+  const typo = kayCode.slice(0, -1) + (kayCode.endsWith('A') ? 'B' : 'A');
+  await kay2.fill('#auth-recovery', typo);
+  await kay2.click('#auth-recover-go');
+  await kay2.locator('#auth-recovery-err:has-text("groups looks wrong")').waitFor();
+  await kay2.fill('#auth-recovery', kayCode.toLowerCase().replace(/-/g, ' '));
+  await kay2.click('#auth-recover-go');
+  await kay2.locator('#auth-moving-at').waitFor();
+  await shot(kay2, '25-key-moving');
+  await kay2.click('#auth-moving-continue');
+  await kay2.waitForFunction(() => window.snug.S.auth === 'in' && window.snug.S.conn.socket === 'open');
+  await kay2.locator('#p2p-state-notice[data-state="moving"]').waitFor();
+  // The old PC, still on, is told how the move started and could stop it.
+  await kay.locator('#p2p-move-notice[data-via="recovery"]:has-text("Someone used your recovery key")').waitFor({ timeout: 20000 });
+  await shot(kay, '26-key-old-pc-notice');
+  await registry.clock.advance(72 * 3600_000 + 1000);
+  await kay2.waitForFunction(() => window.snug.S.p2p?.state === 'ok', null, { timeout: 20000 });
+  await until(() => pcs.K.peer.identity.self()?.state === 'revoked', 15000, 'old PC revoked');
+  assert.equal(pcs.K2.peer.identity.self().username, 'kaylee');
+  // Kay re-adds Alice from the new PC; Alice sees the security-code banner, confirms, and they talk again.
+  await goto(kay2, { type: 'friends', tab: 'add' });
+  await kay2.fill('#f-add-handle', 'a');
+  await kay2.click('.f-add-form button[type=submit]');
+  await kay2.locator('.f-add-msg .ok-line').waitFor();
+  await kay2.waitForFunction(() => Object.values(window.snug.S.friends).some((f) => f.state === 'friends'), null, { timeout: 20000 });
+  const dm = await alice.evaluate(() => Object.keys(window.snug.S.dms).find((id) => window.snug.S.dms[id].members.some((m) => window.snug.S.users[m]?.username === 'kaylee')));
+  await goto(alice, { type: 'conv', id: dm });
+  await alice.locator('#p2p-key-banner:has-text("security code changed")').waitFor({ timeout: 20000 });
+  await alice.click('#p2p-key-ok');
+  await goto(kay2, { type: 'friends', tab: 'all' });
+  await kay2.locator('.f-row:has-text("@a")').hover();
+  await kay2.locator('.f-row:has-text("@a") button[aria-label^="Message"]').click({ force: true });
+  await kay2.fill('.main .composer textarea', 'back on a new PC');
+  await kay2.keyboard.press('Enter');
+  await alice.locator('.msg-body:has-text("back on a new PC")').waitFor({ timeout: 20000 });
+});
+
+test('no GitHub: Kay moves again, to a third PC, with a pairing code typed on the second', async () => {
+  const kay2 = pages.kay2;
+  await pc('K3');
+  const kay3 = await open('kay3', pcs.K3);
+  await kay3.click('#auth-have');
+  await kay3.click('#auth-other-pc');
+  await kay3.locator('#auth-move-code').waitFor();
+  const code = (await kay3.locator('#auth-move-code').textContent()).trim();
+  assert.match(code, /^[0-9A-HJKMNP-TV-Z]{5}-[0-9A-HJKMNP-TV-Z]{5}$/);
+  await shot(kay3, '27-key-pairing-code');
+  // On the second PC: Settings > Account and security > Move to a new PC.
+  await kay2.click('.nav button[aria-label="Settings"]');
+  await kay2.click('.layer-nav button.row:has-text("Account and security")');
+  await kay2.click('#p2p-move-new');
+  await kay2.fill('#mv-code', 'ZZZZZ-ZZZZZ');
+  await kay2.click('#mv-check');
+  await kay2.locator('.modal .err:has-text("isn’t right or has expired")').waitFor();
+  await kay2.fill('#mv-code', code.toLowerCase());
+  await kay2.click('#mv-check');
+  await kay2.locator('#mv-fingerprint').waitFor();
+  assert.equal((await kay2.locator('#mv-fingerprint').textContent()).replace(/\s+/g, ''), pcs.K3.peer.identity.fingerprint.replace(/\s+/g, ''));
+  await shot(kay2, '28-key-move-confirm');
+  await kay2.click('#mv-go');
+  await inApp(kay3);
+  await kay3.waitForFunction(() => window.snug.S.p2p?.state === 'ok', null, { timeout: 20000 });
+  assert.equal(pcs.K3.peer.identity.self().username, 'kaylee');
+  await until(() => pcs.K2.peer.identity.self()?.state === 'revoked', 15000, 'second PC revoked');
+  // Alice came along (the restore list), with no security-code warning: the old PC vouched for the new one.
+  await until(() => pcs.K3.db.get("SELECT 1 FROM friends f JOIN peers p ON p.user = f.other WHERE p.username = 'a' AND f.state = 'friends'"), 20000, 'Alice restored on the third PC');
+});
+
+test('no GitHub, on a phone-sized window: the welcome and recovery key screens fit with no sideways scroll', async () => {
+  await pc('P');
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  contexts.push(ctx);
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(`phone: ${e.message}`));
+  await page.goto(pcs.P.base);
+  const fits = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+  await page.waitForSelector('#auth-create');
+  assert.ok(await fits(), 'welcome fits');
+  await shot(page, '29-key-phone-welcome');
+  await page.tap('#auth-create');
+  await page.fill('#auth-username', 'phoebe');
+  await page.locator('#auth-username-ok').waitFor();
+  await page.tap('.auth-form button[type=submit]');
+  await page.locator('#rk-key').waitFor({ timeout: 30000 });
+  assert.ok(await fits(), 'recovery key screen fits');
+  const box = await page.locator('#rk-key').boundingBox();
+  assert.ok(box.x >= 0 && box.x + box.width <= 390, JSON.stringify(box));
+  await shot(page, '30-key-phone-recovery');
+  // "Do this later" warns, then lets them in; a reminder stays.
+  await page.tap('#rk-later');
+  await page.locator('.rk-later-warn:has-text("losing this PC means losing your account")').waitFor();
+  await page.tap('#rk-later-ok');
+  await inApp(page);
+  await page.locator('#p2p-state-notice:has-text("Save your recovery key")').waitFor();
+  assert.equal(await page.evaluate(() => window.snug.S.p2p.recovery.saved), false);
 });
 
 test('relay fallback: with direct links off on one PC, messages still go both ways through the registry relay', async () => {

@@ -12,6 +12,7 @@ import { Switch } from '../ui/kit.js';
 import { normalize } from '../lib/usernames.js';
 import { localNameProblem, NAME_RULES } from '../lib/username-text.js';
 import { CodeStep, NameStep } from './auth.js'; // the same code screen and username picker as signing in
+import { RecoverySave } from './keyauth.js'; // v0.12: the recovery key screen, also used from Settings
 
 addIcons({
   lock: 'M5.500 9h9a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z|M7 9V6.500a3 3 0 0 1 6 0V9',
@@ -47,6 +48,8 @@ signOutHooks.push(() => { for (const k of ['p2p', 'peerKeys', 'peerWaiting', 'pe
 
 // ---------- Small helpers other views use ----------
 export const p2pOwner = () => !!(S.p2p?.enabled && S.p2p.owner);
+// v0.12: an account with no GitHub (server/keyauth.js) rather than one that signs in with GitHub.
+export const keyAccount = () => S.p2p?.kind === 'key';
 export const isRemote = (id) => !!S.users[id]?.remote;
 // A friend on another PC is named by their Snug username (S27); a local person by their handle.
 export const atName = (u) => (u?.remote ? (u.username || u.handle) : u?.handle) || '';
@@ -155,19 +158,22 @@ export function P2pNotice() {
   const [busy, setBusy] = useState(false);
   const [hidden, setHidden] = useState('');
   if (!p?.enabled || !p.owner) return null;
+  const byKey = p.rebindPending?.via === 'recovery';
   const answer = (approve) => {
     setBusy(true);
     call('id.rebind', { approve }).then(() => {
       S.p2p = { ...S.p2p, rebindPending: null };
-      toast(approve ? 'Moving your account to your other PC now.' : 'Stopped. If that wasn’t you, check your GitHub account’s security.');
+      toast(approve ? 'Moving your account to your other PC now.'
+        : byKey ? 'Stopped. If that wasn’t you, make a new recovery key now: Settings, Account and security.'
+          : 'Stopped. If that wasn’t you, check your GitHub account’s security.');
     }, (e) => toast(e.offline ? 'You’re offline. Try again once you’re back.' : e.message)).finally(() => setBusy(false));
   };
   if (p.rebindPending) {
-    return html`<div class="p2p-notice" role="alertdialog" aria-labelledby="p2p-move-t" id="p2p-move-notice">
+    return html`<div class="p2p-notice" role="alertdialog" aria-labelledby="p2p-move-t" id="p2p-move-notice" data-via=${p.rebindPending.via || 'github'}>
       <${Icon} name="alert" size=${20} />
       <div class="p2p-notice-text">
-        <b id="p2p-move-t">Someone signed in to your Snug account on another PC</b>
-        <span>Their security code is <span class="p2p-code">${p.rebindPending.fingerprint}</span>. If that was you, choose That was me to move now. Otherwise choose Stop it. If you do nothing, your account moves on ${when(p.rebindPending.at)}.</span>
+        <b id="p2p-move-t">${byKey ? 'Someone used your recovery key to move your account to another PC' : 'Someone signed in to your Snug account on another PC'}</b>
+        <span>Their security code is <span class="p2p-code">${p.rebindPending.fingerprint}</span>. If that was you, choose That was me to move now. Otherwise choose Stop it${byKey ? ', then make a new recovery key' : ''}. If you do nothing, your account moves on ${when(p.rebindPending.at)}.</span>
         <div class="p2p-notice-acts">
           <button class="btn sm primary" disabled=${busy} onClick=${() => answer(true)}>That was me</button>
           <button class="btn sm danger" id="p2p-move-stop" disabled=${busy} onClick=${() => answer(false)}>Stop it</button>
@@ -175,23 +181,33 @@ export function P2pNotice() {
       </div>
     </div>`;
   }
-  const key = `${p.state}:${p.rebindAt || ''}`;
+  const key = `${p.state}:${p.rebindAt || ''}:${p.recovery?.saved ? 1 : 0}`;
   if (hidden === key) return null;
-  let icon = 'alert', title, text, cls = '';
-  if (p.state === 'moving') {
+  let icon = 'alert', title, text, cls = '', act = null;
+  const kindKey = keyAccount();
+  if (p.state === 'ok' && p.recovery?.set && !p.recovery.saved) {
+    // v0.12: the recovery key was shown but not confirmed as saved ("Do this later").
+    title = 'Save your recovery key';
+    text = 'If you lose this PC, it’s the only way to get your account back.';
+    act = html`<div class="p2p-notice-acts"><button class="btn sm primary" id="p2p-save-key" onClick=${() => openModal(RecoveryModal)}>Save it now</button></div>`;
+  } else if (p.state === 'moving') {
     cls = ' info'; icon = 'clock';
     title = 'Your account is moving to this PC';
     text = `It finishes ${p.rebindAt ? `on ${when(p.rebindAt)}` : 'in 72 hours'}, or sooner if you confirm on your other PC. Houses and everything on this PC work meanwhile.`;
   } else if (p.state === 'revoked') {
     title = 'Your Snug account moved to another PC';
-    text = 'Sign in with GitHub to move it back here. Everything saved on this PC is still here to read.';
+    text = kindKey
+      ? 'Everything saved on this PC is still here to read. To move it back, sign out and choose I already have an account.'
+      : 'Sign in with GitHub to move it back here. Everything saved on this PC is still here to read.';
   } else if (p.state === 'needs-signin') {
-    title = p.stopped ? 'Your other PC stopped the move' : 'Sign in with GitHub again';
-    text = p.stopped ? 'Your account stays on your other PC. If you didn’t expect this, check your GitHub account’s security.' : 'This PC’s keys couldn’t be read. Signing in again moves your account back here.';
+    title = p.stopped ? 'Your other PC stopped the move' : kindKey ? 'Sign in again' : 'Sign in with GitHub again';
+    text = p.stopped
+      ? (kindKey ? 'Your account stays on your other PC. If you lost that PC, whoever has it can stop the move; the Snug owner can help.' : 'Your account stays on your other PC. If you didn’t expect this, check your GitHub account’s security.')
+      : (kindKey ? 'This PC’s keys couldn’t be read. Sign out, then use your recovery key to move your account back here.' : 'This PC’s keys couldn’t be read. Signing in again moves your account back here.');
   } else return null;
   return html`<div class=${`p2p-notice${cls}`} role="status" id="p2p-state-notice" data-state=${p.state}>
     <${Icon} name=${icon} size=${20} />
-    <div class="p2p-notice-text"><b>${title}</b><span>${text}</span></div>
+    <div class="p2p-notice-text"><b>${title}</b><span>${text}</span>${act}</div>
     <button class="ib" aria-label="Hide this note" onClick=${() => setHidden(key)}><${Icon} name="x" size=${16} /></button>
   </div>`;
 }
@@ -247,12 +263,33 @@ export function UsernameRow({ Row }) {
 export function AccountRows({ Row, signOut }) {
   const p = S.p2p;
   const hideIp = (on) => call('peer.setHideIp', { on }).then((r) => { S.p2p = { ...S.p2p, hideIp: r.hideIp }; emit(); }, (e) => toast(e.message));
+  const kindKey = keyAccount();
+  const rec = p.recovery || {};
+  const active = p.state === 'ok';
   return html`
     <div class="set-head">Snug account</div>
     <${UsernameRow} Row=${Row} />
-    <${Row} label="Sign-in" hint="GitHub only proves it’s you. Nobody on Snug sees your GitHub account, and there’s no password to forget.">
-      <span class="p2p-tag ok"><${Icon} name="check" size=${14} />Signed in with GitHub</span>
-    <//>
+    ${kindKey
+      ? html`<${Row} label="Sign-in" hint="Your account lives on this PC. Your recovery key brings it back if you lose this PC. There’s no password, email or phone number.">
+          ${rec.saved
+            ? html`<span class="p2p-tag ok" id="p2p-key-saved"><${Icon} name="check" size=${14} />Recovery key saved</span>`
+            : html`<button class="btn primary" id="p2p-save-key-row" onClick=${() => openModal(RecoveryModal)}>Save your recovery key</button>`}
+        <//>`
+      : html`<${Row} label="Sign-in" hint="GitHub only proves it’s you. Nobody on Snug sees your GitHub account, and there’s no password to forget.">
+          <span class="p2p-tag ok"><${Icon} name="check" size=${14} />Signed in with GitHub</span>
+        <//>`}
+    ${(kindKey || rec.set)
+      ? html`<${Row} label="Recovery key" hint=${rec.pendingAt
+          ? `Your new recovery key starts working on ${when(rec.pendingAt)}. Until then your old one works, and it can cancel the new one.`
+          : 'Lost it, or think someone else has seen it? Make a new one. Your old key stops working.'}>
+          <div class="p2p-row-acts">
+            ${rec.pendingAt && html`<button class="btn" id="p2p-recovery-cancel" disabled=${!active} onClick=${() => openModal(CancelRecoveryModal)}>Cancel the new key</button>`}
+            <button class="btn" id="p2p-recovery-new" disabled=${!active} onClick=${() => openModal(NewRecoveryModal)}>Make a new one</button>
+          </div>
+        <//>`
+      : html`<${Row} label="Recovery key (optional)" hint="Then you don’t need GitHub to move to a new PC. Snug can’t reset it for you, so keep it safe.">
+          <button class="btn" id="p2p-recovery-add" disabled=${!active} onClick=${() => openModal(NewRecoveryModal, { first: true })}>Add a recovery key</button>
+        <//>`}
     <${Row} label="Status" hint=${p.state === 'moving' ? `Moving here. It finishes ${p.rebindAt ? `on ${when(p.rebindAt)}` : 'in 72 hours'}, or sooner if you confirm on your other PC.` : p.registry === 'connected' ? 'Connected to Snug’s directory. Friends on other PCs can reach you.' : 'Not connected to Snug’s directory. Messages to friends wait and send when it’s back.'}>
       <span class=${`p2p-tag${p.registry === 'connected' && p.state === 'ok' ? ' ok' : ' warn'}`}><${Icon} name=${p.registry === 'connected' && p.state === 'ok' ? 'check' : 'clock'} size=${14} />${p.state === 'moving' ? 'Moving here' : p.state !== 'ok' ? 'Not active here' : p.registry === 'connected' ? 'Online' : 'Offline'}</span>
     <//>
@@ -265,12 +302,179 @@ export function AccountRows({ Row, signOut }) {
     <${Row} label="Hide my IP from friends" hint="Messages go through the Snug relay instead of directly. Calls use a relay server when one is set up; otherwise calls may fail.">
       <${Switch} on=${!!p.hideIp} label="Hide my IP from friends" onChange=${hideIp} />
     <//>
-    <${Row} label="On a new PC" hint="Sign in with GitHub there. Confirm on this PC and it moves at once; if you lost this PC, it moves after 72 hours. Saved chats stay on the PC they’re on.">
-      <span class="p2p-tag"><${Icon} name="screen" size=${14} />One PC at a time</span>
+    <${Row} label="On a new PC" hint=${kindKey
+      ? 'Open Snug on the new PC and choose I already have an account. It shows a code: type it here. Saved chats are copied over and stay here too. One PC at a time.'
+      : 'Open Snug on the new PC: it shows a code to type here, or sign in with GitHub there (it moves after 72 hours unless you confirm here). One PC at a time.'}>
+      <button class="btn" id="p2p-move-new" disabled=${!active} onClick=${() => openModal(MoveModal)}>Move to a new PC</button>
     <//>
-    <${Row} label="Sign out on this PC" hint="Your messages stay on this PC. Sign in with GitHub to come back.">
+    ${kindKey && html`<${Row} label="GitHub (optional)" hint=${p.ghLinked
+        ? 'Your GitHub account can also move your Snug account to a new PC. Nobody on Snug sees it.'
+        : 'Lets you move your account with GitHub too, if you have an account there. Nobody on Snug sees your GitHub account.'}>
+      ${p.ghLinked
+        ? html`<div class="p2p-row-acts"><span class="p2p-tag ok"><${Icon} name="check" size=${14} />Linked</span>
+            <button class="btn" id="p2p-gh-unlink" disabled=${!active} onClick=${unlinkGithub}>Unlink</button></div>`
+        : html`<button class="btn" id="p2p-gh-link" disabled=${!active} onClick=${() => openModal(LinkGitHubKey)}>Link GitHub</button>`}
+    <//>`}
+    <${Row} label="Sign out on this PC" hint=${kindKey ? 'Your messages stay on this PC. Open Snug to come back, or use your recovery key.' : 'Your messages stay on this PC. Sign in with GitHub to come back.'}>
       <button class="btn" id="p2p-signout" onClick=${() => signOut?.(false)}>Sign out</button>
     <//>`;
+}
+
+const offlineText = (e) => (e.offline ? 'You’re offline. Try again once you’re back.' : e.message);
+function unlinkGithub() {
+  call('id.unlinkGithub', {}).then(() => { S.p2p = { ...S.p2p, ghLinked: false }; emit(); toast('GitHub unlinked. Your recovery key still moves your account.'); }, (e) => toast(offlineText(e)));
+}
+
+// ---------- v0.12: the recovery key from Settings ----------
+// The key shown at sign-up and not yet confirmed as saved.
+function RecoveryModal() {
+  const [k, setK] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => { call('id.recoveryShow', {}).then(setK, (e) => setErr(offlineText(e))); }, []);
+  if (err) return html`<div><h2 id="rk-modal-t">Save your recovery key</h2><div class="err" role="alert"><${Icon} name="alert" size=${14} /><span>${err}</span></div>
+    <p class="modal-lead">If you can’t find it, make a new one: Settings, Account and security, Recovery key.</p>
+    <div class="modal-foot"><button class="btn" onClick=${closeModal}>Close</button></div></div>`;
+  if (!k) return html`<p class="modal-lead">Loading…</p>`;
+  return html`<${RecoverySave} code=${k.code} username=${k.username} titleId="rk-modal-t"
+    confirm=${(last) => call('id.recoveryConfirm', { last })} onDone=${() => { closeModal(); toast('Recovery key saved. Keep it safe.'); }} />`;
+}
+
+// A new key: with the old one typed it replaces it now; without, it starts in 7 days.
+function NewRecoveryModal({ first = false }) {
+  const [old, setOld] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [made, setMade] = useState(null);
+  if (made) {
+    return html`<${RecoverySave} code=${made.code} username=${made.username} titleId="rk-modal-t" pendingAt=${made.state === 'pending' ? made.at : null}
+      confirm=${(last) => call('id.recoveryConfirm', { last })} onDone=${() => { closeModal(); toast(made.state === 'pending' ? 'Saved. Your new key starts working in 7 days.' : 'New recovery key saved. The old one no longer works.'); }} />`;
+  }
+  const go = (e) => {
+    e.preventDefault();
+    setBusy(true);
+    call('id.recoveryNew', old.trim() ? { old } : {}).then(setMade, (x) => { setErr(offlineText(x)); setBusy(false); });
+  };
+  return html`<form onSubmit=${go} novalidate>
+    <h2 id="rk-modal-t">${first ? 'Add a recovery key' : 'Make a new recovery key'}</h2>
+    <p class="modal-lead">${first
+      ? 'A recovery key moves your account to a new PC without GitHub. You’ll see it once, so have paper or a password manager ready.'
+      : 'Type your old recovery key and the new one replaces it at once. If you lost the old one, leave it empty: the new key then starts working in 7 days, and your old key can cancel it. That stops someone who only has this PC from locking you out.'}</p>
+    ${!first && html`<div class="form">
+      <label class="label" for="rk-old">Old recovery key (optional)</label>
+      <textarea id="rk-old" class="field rk-input" rows="2" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="120" value=${old} data-autofocus
+        aria-invalid=${err ? 'true' : undefined} onInput=${(e) => { setOld(e.target.value); setErr(''); }}></textarea>
+    </div>`}
+    ${err && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} /><span>${err}</span></div>`}
+    <div class="modal-foot">
+      <button type="button" class="btn" onClick=${closeModal}>Cancel</button>
+      <button type="submit" class="btn primary" id="rk-make" disabled=${busy} aria-busy=${String(busy)}>${busy ? 'Making…' : 'Make my key'}</button>
+    </div>
+  </form>`;
+}
+
+// The current key stops a new one that is waiting.
+function CancelRecoveryModal() {
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const go = (e) => {
+    e.preventDefault();
+    setBusy(true);
+    call('id.recoveryCancel', { code }).then(() => { closeModal(); toast('Cancelled. Your current recovery key stays.'); }, (x) => { setErr(offlineText(x)); setBusy(false); });
+  };
+  return html`<form onSubmit=${go} novalidate>
+    <h2>Cancel the new recovery key?</h2>
+    <p class="modal-lead">Type your current recovery key. If you didn’t ask for a new one, someone with this PC may have: cancel it, and keep your key safe.</p>
+    <div class="form"><label class="label" for="rk-cur">Current recovery key</label>
+      <textarea id="rk-cur" class="field rk-input" rows="2" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="120" value=${code} data-autofocus onInput=${(e) => { setCode(e.target.value); setErr(''); }}></textarea></div>
+    ${err && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} /><span>${err}</span></div>`}
+    <div class="modal-foot">
+      <button type="button" class="btn" onClick=${closeModal}>Back</button>
+      <button type="submit" class="btn primary" disabled=${busy || !code.trim()}>${busy ? 'Cancelling…' : 'Cancel the new key'}</button>
+    </div>
+  </form>`;
+}
+
+// "Move to a new PC": the code shown on the new PC, then a check of where it goes, then the move.
+function MoveModal() {
+  const p = S.p2p;
+  const [code, setCode] = useState('');
+  const [peek, setPeek] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const check = (e) => {
+    e.preventDefault();
+    setBusy(true);
+    call('id.movePeek', { code }).then((r) => { setPeek(r); setBusy(false); }, (x) => { setErr(offlineText(x)); setBusy(false); });
+  };
+  const move = () => {
+    setBusy(true);
+    call('id.moveAccept', { code }).then(() => { closeModal(); toast(`@${p.username} is moving to your new PC now. Your saved chats are copied over.`); }, (x) => { setErr(offlineText(x)); setBusy(false); });
+  };
+  if (peek) {
+    return html`<div>
+      <h2 id="mv-t">Move @${p.username} to the new PC?</h2>
+      <p class="modal-lead">This PC stops getting messages. Your saved chats are copied over and stay here too.</p>
+      <div class="p2p-peer-code"><span class="p2p-local">The new PC’s security code</span>
+        <div class="p2p-fp" id="mv-fingerprint">${groups(peek.fingerprint).map((g, i) => html`<span key=${i}>${g}</span>`)}</div>
+        <span class="p2p-local">It should match Settings, Account and security on the new PC, once it’s moved.</span></div>
+      ${err && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} /><span>${err}</span></div>`}
+      <div class="modal-foot">
+        <button type="button" class="btn" onClick=${closeModal}>Cancel</button>
+        <button type="button" class="btn primary" id="mv-go" disabled=${busy} aria-busy=${String(busy)} onClick=${move}>${busy ? 'Moving…' : 'Move now'}</button>
+      </div>
+    </div>`;
+  }
+  return html`<form onSubmit=${check} novalidate>
+    <h2 id="mv-t">Move to a new PC</h2>
+    <p class="modal-lead">On the new PC, open Snug and choose <b>I already have an account</b>, then <b>My other PC is here</b>. Type the code it shows.</p>
+    <div class="form"><label class="label" for="mv-code">Code from your new PC</label>
+      <input id="mv-code" class=${`field mv-code${err ? ' bad' : ''}`} maxlength="16" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="K7QF2-M9XDA" value=${code} data-autofocus
+        aria-invalid=${err ? 'true' : undefined} onInput=${(e) => { setCode(e.target.value); setErr(''); }} /></div>
+    ${err && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} /><span>${err}</span></div>`}
+    <div class="modal-foot">
+      <button type="button" class="btn" onClick=${closeModal}>Cancel</button>
+      <button type="submit" class="btn primary" id="mv-check" disabled=${busy || !code.trim()}>${busy ? 'Checking…' : 'Continue'}</button>
+    </div>
+  </form>`;
+}
+
+// Link GitHub to an account with no GitHub: the usual code screen, then the link.
+function LinkGitHubKey() {
+  const [step, setStep] = useState(null);
+  const [err, setErr] = useState('');
+  const flow = useRef(null);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const s = await api('/api/gh/start', { purpose: 'link-account' });
+        if (!live) { api('/api/gh/cancel', { flow: s.flow }).catch(() => {}); return; }
+        flow.current = s.flow;
+        setStep({ kind: 'code', flow: s.flow, userCode: s.userCode, uri: s.verificationUri });
+        for (;;) {
+          const w = await api('/api/gh/wait', { flow: s.flow });
+          if (!live) return;
+          if (w.state === 'pending') continue;
+          flow.current = null;
+          if (w.state === 'confirmed') {
+            await call('id.linkGithub', { flow: s.flow });
+            S.p2p = { ...S.p2p, ghLinked: true };
+            closeModal();
+            toast('GitHub linked. It can also move your account now.');
+          } else { setErr(w.message || 'GitHub sign-in stopped. Try again.'); setStep(null); }
+          return;
+        }
+      } catch (e) { if (live) { setErr(offlineText(e)); setStep(null); } }
+    })();
+    return () => { live = false; if (flow.current) api('/api/gh/cancel', { flow: flow.current }).catch(() => {}); };
+  }, []);
+  return html`<div class="p2p-link">
+    ${!step && !err && html`<p class="modal-lead">Asking GitHub…</p>`}
+    ${step?.kind === 'code' && html`<${CodeStep} step=${step} onCancel=${closeModal} />`}
+    ${err && html`<h2>Link GitHub</h2><div class="err" role="alert"><${Icon} name="alert" size=${14} /><span>${err}</span></div>
+      <div class="modal-foot"><button class="btn" onClick=${closeModal}>Close</button></div>`}
+  </div>`;
 }
 
 // The PC's first password account, on a PC with no Snug account yet: connect
@@ -323,7 +527,49 @@ function LinkGitHub() {
 }
 
 // Delete for a GitHub account: type the username, and confirm on GitHub so the name is freed.
+// v0.12: an account with no GitHub confirms with its recovery key instead.
 export function DeleteP2p({ onGone }) {
+  if (keyAccount()) return html`<${DeleteKey} onGone=${onGone} />`;
+  return html`<${DeleteGh} onGone=${onGone} />`;
+}
+function DeleteKey({ onGone }) {
+  const p = S.p2p;
+  const [typed, setTyped] = useState('');
+  const [code, setCode] = useState('');
+  const [flow, setFlow] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const check = () => {
+    setErr('');
+    call('id.releaseCheck', { code }).then((r) => setFlow(r.flow), (e) => setErr(offlineText(e)));
+  };
+  const del = async () => {
+    setBusy(true);
+    try {
+      const r = await api('/api/account/delete', { confirm: typed, flow: flow || undefined });
+      if (!r.released) toast('Deleted on this PC. Your username stays reserved, because the recovery key wasn’t used.');
+      await onGone();
+    } catch (e) { setErr(e.message); setBusy(false); }
+  };
+  return html`<div>
+    <h2>Delete your account?</h2>
+    <p class="modal-lead">This can’t be undone. Friends on other PCs see you leave. Your messages stay where you wrote them, by “Deleted user”.</p>
+    <div class="form">
+      <div><label class="label" for="cf-handle">Type your username, <b>${p.username}</b>, to confirm</label>
+        <input id="cf-handle" class="field" autocapitalize="none" spellcheck="false" data-autofocus value=${typed} onInput=${(e) => { setTyped(e.target.value); setErr(''); }} /></div>
+      ${!flow && html`<div><label class="label" for="cf-recovery">Recovery key, to free @${p.username} for anyone (optional)</label>
+        <textarea id="cf-recovery" class="field rk-input" rows="2" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="120" value=${code} onInput=${(e) => { setCode(e.target.value); setErr(''); }}></textarea>
+        <button type="button" class="btn" id="cf-recovery-check" disabled=${!code.trim()} onClick=${check}>Check my key</button></div>`}
+      ${flow && html`<div class="ok-line"><${Icon} name="check" size=${16} /><span>Key checked. @${p.username} will be free once you delete.</span></div>`}
+      ${err && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} /><span>${err}</span></div>`}
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn" onClick=${closeModal}>Cancel</button>
+      <button type="button" class="btn danger" disabled=${busy || normalize(typed).replace(/^@/, '') !== p.username} onClick=${del}>${busy ? 'Working…' : 'Delete my account'}</button>
+    </div>
+  </div>`;
+}
+function DeleteGh({ onGone }) {
   const p = S.p2p;
   const [typed, setTyped] = useState('');
   const [step, setStep] = useState(null); // {flow, userCode, uri, state}
