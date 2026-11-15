@@ -58,7 +58,7 @@ jobs:
         timeout-minutes: 8
         env:
           SNUG_BIN: dist/mac-universal/Snug.app/Contents/MacOS/Snug
-        run: node --test --test-timeout=120000 --test-force-exit test.js
+        run: node --test --test-timeout=400000 --test-force-exit test.js # on this runner the limit also covers the whole file
 
   # Adds the dmg and SHA256SUMS-mac.txt to snug-v<version> (desktop/release.sh creates the release if the
   # Windows workflow hasn't yet), then marks it latest. The app's mandatory updater reads this release.

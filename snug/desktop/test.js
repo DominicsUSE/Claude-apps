@@ -154,6 +154,13 @@ test("voice: the camera turns on, and the screen picker shares a screen", async 
   await page.click(".stage .vc.cam");
   step("camera plays");
   await plays("camera");
+  // On macOS the app hands screen sharing to the system's own picker (useSystemPicker), which a test
+  // can't click and which waits on the Screen Recording permission: the Snug picker below is Windows/Linux.
+  if (process.platform === "darwin") {
+    t.diagnostic("macOS: screen sharing uses the system picker; picker steps not run");
+    await page.click('.stage [aria-label="Leave voice"]');
+    return;
+  }
 
   // Cancel shares nothing and says nothing.
   step("open picker");
