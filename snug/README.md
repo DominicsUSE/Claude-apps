@@ -75,8 +75,50 @@ tests there, and drives the packaged app before publishing:
   **Snug-Windows-Portable** (one `.exe` that runs without installing).
 - Builds on the default branch also publish both as a release (`snug-v<version>`).
 
-The app is not code-signed, so the first time Windows may show "Windows
-protected your PC": click **More info**, then **Run anyway**.
+### Install, update, go back
+
+The step-by-step page for people who aren't developers is `docs/install.html`
+(any Snug server serves it at `/docs/install.html`; in a browser it is linked
+from **Settings > Desktop app**). Every release's notes carry the same steps.
+
+- **Which file.** From <https://github.com/DominicsUSE/Claude-apps/releases/latest>:
+  `Snug-Setup-<version>.exe` (installs for you only, no administrator),
+  `Snug-<version>-portable.exe` (no install) or `Snug-<version>-mac.dmg`
+  (universal). No account is needed to download.
+- **Warnings.** The Windows files are not code-signed yet (the workflow signs
+  them as soon as the project has a certificate or a SignPath Foundation
+  account: see SECURITY.md, "Code signing"), so SmartScreen says "Windows
+  protected your PC" and "Unknown publisher": **More info**, then **Run
+  anyway**. A signed file has a **Digital Signatures** tab in Properties; even a
+  signed new version can be warned about until it has a download reputation.
+  The Mac app is ad-hoc signed, not notarized (that needs a paid Apple
+  Developer membership): open it once, then **System Settings > Privacy &
+  Security > Open Anyway**.
+- **Check a download.** Compare its SHA-256 with `SHA256SUMS-windows.txt` or
+  `SHA256SUMS-mac.txt` from the same release: `Get-FileHash .\Snug-Setup-<version>.exe
+  -Algorithm SHA256` in PowerShell, `shasum -a 256 -c SHA256SUMS-mac.txt` on a
+  Mac. That catches a damaged or swapped copy, not someone who could change the
+  release itself; for that, `gh attestation verify <file> -R DominicsUSE/Claude-apps`
+  checks GitHub's build provenance (the file was built by this repository's
+  workflow).
+- **Updates** install themselves: the app downloads the new release, checks its
+  size and SHA-256 against the release's checksum file (and that file's Ed25519
+  signature once a key is pinned in `desktop/updater.js`), and installs it at a
+  quiet moment, never during a call or a data-file transfer. Updates are
+  required: an installed app ignores `SNUG_UPDATE_CHECK`.
+- **Going back.** The updater never installs an older version. Every version
+  stays on the releases page (<https://github.com/DominicsUSE/Claude-apps/releases?q=snug-v>):
+  download the older file, check it, and install it over the current one (or
+  replace the Mac app); the data folder is kept, and additions of the newer
+  version don't work in the older one. Because updates are required, the app
+  takes the newest release again at its next check, so a person can go back
+  only for a while. **To stop a broken release for everyone**, the owner edits
+  it on GitHub and ticks **Set as a pre-release** (or saves it as a draft): the
+  updater skips pre-releases and drafts (`desktop/updater.test.js`, D11), so
+  clients that haven't updated stay where they are and people who have can
+  reinstall the previous version. Then publish a fixed version with a higher
+  number (the version in `desktop/package.json`); never reuse a number, since
+  published files are never replaced.
 
 On first run it asks where Snug should run:
 
@@ -134,10 +176,10 @@ open-url. Anything else is ignored; the server still refuses what you may not
 read. **Away** follows the computer: locked, asleep or idle for five
 minutes, and back when it is unlocked or used again.
 
-**A newer Snug**: once a day the installed app asks GitHub for the latest
-release (10 seconds, 1 MB at most) and shows a strip with **Get it** (opens
-the release page in your browser). Nothing downloads. Off in settings or with
-`SNUG_UPDATE_CHECK=0`; running from source doesn't ask.
+**A newer Snug**: the installed app asks GitHub for the newest `snug-v`
+release, downloads it in the background, checks it, and installs it when you
+aren't using the window (see *Install, update, go back* above). Running from
+source doesn't ask.
 
 Tested by `desktop/test.js` under Xvfb: the badge count and the flash when a
 second person mentions you while another window has the focus, the overlay

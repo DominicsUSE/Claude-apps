@@ -24,7 +24,7 @@ Snug can ship the patched version.
 
 | Version | Supported |
 | --- | --- |
-| 0.10.x (latest release) | Yes |
+| The latest release (0.12.x) | Yes |
 | Anything older | No. The desktop updater moves every install to the latest release, and the registry can refuse old versions (`min_version`). |
 
 Security fixes go into the newest release only; there are no backports.
@@ -99,7 +99,7 @@ Security fixes go into the newest release only; there are no backports.
 | Error handling | Users see plain messages; stack traces and internals stay in the server log | `server/` |
 | Backup and recovery | Daily encrypted, integrity-checked database snapshots with automatic restore of the newest good one; the portable data file; registry point-in-time recovery | `server/dbbackup.js`, `server/vault.js`, `registry/SECURITY.md` |
 | Desktop hardening | Sandbox, context isolation, navigation lock, Electron fuses, hardened runtime on macOS, verified updates | `desktop/main.js`, `desktop/fuses.js`, `desktop/updater.js` |
-| Release integrity | Release jobs only in the protected `release` environment; build jobs skip npm install scripts; read-only tokens elsewhere; every action pinned to a commit | `.github/workflows/`, `desktop/workflows.test.js` |
+| Release integrity | Release jobs only in the protected `release` environment; build jobs skip npm install scripts; read-only tokens elsewhere; every action pinned to a commit and every container image to a digest; SHA256SUMS per platform, Ed25519-signed when the update key is set; GitHub build provenance attestations; Windows Authenticode signing as soon as a credential is configured (see "Code signing") | `.github/workflows/`, `desktop/release.sh`, `desktop/workflows.test.js` |
 | Registry | Signed device-key requests, move delay, wrapped vault keys, bans, minimum version, per-address and global budgets | `registry/SECURITY.md` |
 
 ### Automated security testing (all free and open source)
@@ -114,8 +114,9 @@ Security fixes go into the newest release only; there are no backports.
 | [CodeQL](https://codeql.github.com) | Snug's JavaScript and the workflows, `security-extended` queries | high or critical from precise queries |
 | [Semgrep CE](https://github.com/semgrep/semgrep) | `p/javascript`, `p/nodejs`, `p/owasp-top-ten`, `p/secrets` over `snug/` (`snug/.semgrepignore`) | severity ERROR, security, confidence above low |
 | [Electronegativity](https://github.com/doyensec/electronegativity) | Electron misconfigurations in `snug/desktop` | high or critical, firm or certain |
+| [OWASP ZAP](https://www.zaproxy.org) baseline | A seeded Snug server started on the runner: headers, cookies, CSP, information leaks on the HTTP routes (passive; it does not attack, and it doesn't exercise the WebSocket operations). Official image pinned by digest; accepted alerts with the reason in `.github/security/zap-rules.tsv`; reports kept as the `zap-baseline` artifact | high risk |
 | Dependency review | New dependencies in a pull request | high or critical |
-| Workflow rules (`desktop/workflows.test.js`) | Least-privilege tokens, actions pinned to commits, no kept credentials, release jobs in the `release` environment | any rule broken |
+| Workflow rules (`desktop/workflows.test.js`) | Least-privilege tokens, actions pinned to commits, images pinned to digests, no kept credentials, release and signing jobs in the `release` environment, signing credentials only in signing jobs, every signature checked | any rule broken |
 
 Every report also goes to the repository's code scanning alerts. `.github/security/gate.mjs` decides what
 fails; a finding that a person checked and found not exploitable goes into `.github/security/reviewed.json`
@@ -126,7 +127,7 @@ actions, grouped, and security updates as soon as an advisory appears. Routine u
 release, which keeps most hijacked versions out.
 
 The same checks run locally from `snug/` (install the tools first: `gitleaks`, `osv-scanner`, `semgrep`;
-Electronegativity runs through `npx`):
+Electronegativity runs through `npx`; the ZAP scan needs Docker):
 
 ```sh
 npm run audit:deps       # npm audit, three folders, high and above
@@ -135,6 +136,7 @@ npm run audit:osv        # OSV-Scanner over every lockfile, gated on snug/
 npm run audit:electron   # Electronegativity over desktop/
 npm run lint:security    # Semgrep with the four rule packs
 npm run audit:all        # all of the above
+npm run audit:zap        # ZAP baseline against a seeded server (Docker; ZAP_PORT=8787 by default)
 ```
 
 Security regression tests live with the other tests (`npm test`, `tests/server-sec-*.test.js`,
@@ -146,4 +148,50 @@ Security regression tests live with the other tests (`npm test`, `tests/server-s
   with push protection** and **Code scanning** in the repository's security settings (all free for public
   repositories), and require the `Security scans` checks on the default branch.
 - Never rotate `GH_HMAC_SECRET` and never change `HUB_NAME`: see `registry/SECURITY.md`.
-- Keep `SNUG_UPDATE_SIGNING_KEY` only in the protected `release` environment.
+- Keep `SNUG_UPDATE_SIGNING_KEY` and every code-signing credential only in the protected `release` environment
+  (Settings > Environments > release: deployment branches limited to the release branches; add yourself as a
+  required reviewer if you want to approve each release).
+
+### Update signing (turn it on once)
+
+The release jobs already sign `SHA256SUMS-<platform>.txt` whenever the `SNUG_UPDATE_SIGNING_KEY` secret exists
+(`desktop/release.sh`, `desktop/sign-sums.js`); the app only *requires* a signature once a public key is pinned.
+Do this on your own computer, never in CI, and never commit or paste the private key anywhere:
+
+1. `cd snug/desktop && node sign-sums.js --new-key snug-update-key.pem` writes the private key (owner-only file)
+   and prints its public key. Make a second, backup key the same way (`snug-update-key-backup.pem`) and keep
+   both files offline (a password manager or an encrypted USB stick), apart from each other.
+2. GitHub: Settings > Environments > release > Add environment secret `SNUG_UPDATE_SIGNING_KEY`, value: the whole
+   contents of `snug-update-key.pem` (from `-----BEGIN PRIVATE KEY-----` to the end line).
+3. Ship one release as it is (the key exists, nothing pinned yet): its checksum files get `.sig` files next to
+   them (`sign-sums.js` checks each signature before it is uploaded, so a bad key fails the release job).
+4. Put both printed public keys in `UPDATE_PUBKEYS` in `desktop/updater.js` (main first, backup second), run
+   `node --test updater.test.js release.test.js`, and release that version. From then on an update without a
+   valid signature by one of the pinned keys is never offered or installed, and `release.sh` refuses to publish
+   without the key. If the main key is lost or leaks: sign with the backup, and pin a new backup in the next
+   release.
+
+### Code signing (Windows; switch it on when you have a credential)
+
+`build-snug-windows.yml` signs the app, then the installer and the portable exe, as soon as the repository
+variable `SNUG_WINDOWS_SIGNING` is set; each signature is checked with `Get-AuthenticodeSignature`. Signed files
+can still get a SmartScreen warning for a while after each new version until they gain download reputation.
+
+- **SignPath Foundation (free for qualifying open-source projects).** Apply at <https://signpath.org> (OSI
+  licence, public repository, builds on GitHub-hosted runners, MFA for maintainers). When accepted: in SignPath,
+  create the project and two artifact configurations by pasting `desktop/signpath/snug-app.xml` (slug
+  `snug-app`) and `desktop/signpath/snug-installers.xml` (slug `snug-installers`); link the project to this
+  repository with the GitHub connector (trusted build system). In GitHub: environment `release` secret
+  `SIGNPATH_API_TOKEN` (a CI user's API token); repository variables `SIGNPATH_ORGANIZATION_ID`,
+  `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_POLICY_SLUG` (for example `release-signing`); then variable
+  `SNUG_WINDOWS_SIGNING` = `signpath`.
+- **A certificate you bought (PFX).** Environment `release` secrets `WIN_CSC_LINK` (the `.pfx` file as base64:
+  `[Convert]::ToBase64String([IO.File]::ReadAllBytes("cert.pfx"))` in PowerShell, or `base64 -w0 cert.pfx`)
+  and `WIN_CSC_KEY_PASSWORD`; then variable `SNUG_WINDOWS_SIGNING` = `pfx`. Certificates whose key must stay on
+  a hardware token can't be used this way; use SignPath or a cloud signing service.
+- Azure Trusted Signing also works with signtool but is a paid service; it is not wired up.
+- A misspelt `SNUG_WINDOWS_SIGNING` fails the build. With signing on, a signing failure stops the release; it
+  never falls back to unsigned files. Remove the variable to go back to unsigned releases.
+
+macOS: the app is ad-hoc signed with the hardened runtime. Notarization (no Gatekeeper warning) needs the paid
+Apple Developer Program; `build-snug-mac.yml` says what to add if you join.
