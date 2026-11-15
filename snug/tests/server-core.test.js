@@ -350,3 +350,12 @@ test('the web app manifest: installable on phones (id, scope, standalone, icons 
     assert.ok(s.label, 'screenshots say what they show');
   }
 });
+
+test('heartbeat: the ping op answers with the time and this server’s version; /api/me says the version too', async () => {
+  const pkg = JSON.parse(readFileSync(new URL('package.json', ROOT)));
+  const r = await ada.ok('ping');
+  assert.equal(r.version, pkg.version);
+  assert.ok(Math.abs(r.now - Date.now()) < 5000);
+  const me = await (await fetch(`${base}/api/me`, { headers: { cookie: ada.cookie } })).json();
+  assert.equal(me.version, pkg.version);
+});

@@ -2,6 +2,7 @@
 // Start it with `npm start`. Configuration comes from environment variables;
 // see the README.
 import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
 import { writeFile, mkdir, stat } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { join, normalize, extname, posix } from 'node:path';
@@ -35,6 +36,8 @@ import {
 import { createSeclog, redactLog, redact, sendFile } from './seclog.js'; // sec-web: security events, log redaction, safe file sends
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
+// The version this server runs (package.json), for the page's Settings > Connection and /api/me.
+const VERSION = (() => { try { return JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version; } catch { return 'unknown'; } })();
 const PUBLIC = ['index.html', 'css/', 'js/', 'fonts/', 'vendor/', 'docs/', 'brand/', 'sw.js'];
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -179,6 +182,12 @@ export async function startServer({
   hub.hooks.message = (conv, id) => push.onMessage(conv, id).catch((e) => log('push', e));
   hub.hooks.note = (user, note) => push.onNote(user, note).catch((e) => log('push', e)); // event reminders (server/community.js)
   // --- end push notifications ---
+
+  // 0.12: the page's heartbeat. It asks every few seconds; a connection that
+  // stops answering is dropped and opened again (js/server.js), and the round
+  // trip and the server's version show on Settings > Connection.
+  hub.addLimits({ ping: limiter({ capacity: 20, perSecond: 1 }) });
+  hub.ops.ping = () => ({ now: Date.now(), version: VERSION });
 
   // 0.12: disappearing messages, before the peer module wraps the ops (server/expiry.js).
   const expiry = createExpiry({ db, M, hub, ops: hub.ops });
@@ -393,7 +402,7 @@ export async function startServer({
     if (req.method === 'GET' && path === '/api/account/security-events') return sendJson(res, 200, { events: sec.list(user, url.searchParams.get('limit')) });
     if (req.method === 'GET' && path === '/api/me') {
       const row = M.userRow(user);
-      return sendJson(res, 200, { user: M.userView(row, row.presence, true), ice: hub.iceFor(user), p2p: peer.statusFor(user) }); // p2p
+      return sendJson(res, 200, { user: M.userView(row, row.presence, true), ice: hub.iceFor(user), p2p: peer.statusFor(user), version: VERSION }); // p2p; version: 0.12
     }
     if (post && path === '/api/logout-all') {
       const token = readCookie(req.headers.cookie, COOKIE);

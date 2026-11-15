@@ -4,7 +4,7 @@
 // connection page, and long conversations.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -132,8 +132,8 @@ test('disappearing messages: set from the header, a line says so, the timer show
   assert.match(await dialog.innerText(), /backups/);
   await dialog.locator('label:has-text("1 hour")').click();
   await dialog.locator('button[type=submit]').click();
-  await robin.locator('.dmline', { hasText: 'turned on disappearing messages' }).waitFor();
-  await ines.locator('.dmline', { hasText: 'turned on disappearing messages' }).waitFor();
+  await robin.locator('.dmline', { hasText: 'set messages to disappear after 1 hour' }).waitFor();
+  await ines.locator('.dmline', { hasText: 'set messages to disappear after 1 hour' }).waitFor();
   assert.match(await ines.locator('.main .ttl-btn').innerText(), /1 hour/);
   await say(robin, 'this note will vanish');
   await msg(ines, 'this note will vanish').waitFor();
@@ -261,4 +261,50 @@ test('offline: a reaction and an edit made with no connection wait, survive a re
   await msg(page, 'Edited offline.').waitFor();
   assert.equal(await page.evaluate(() => localStorage.getItem('snug.ops')).then((s) => JSON.parse(s).ops.length), 0, 'nothing left waiting');
   await page.context().close();
+});
+
+test('heartbeat: a connection that stops answering is noticed within about 30 seconds and opened again', async () => {
+  const page = await person('tomasz');
+  const id = srv.db.get("SELECT id FROM users WHERE handle = 'tomasz'").id;
+  await page.waitForFunction(() => window.snug.S.conn.rtt != null, null, { timeout: 15000 });
+  // The server side of the socket goes silent: it reads nothing and sends nothing (a half-open connection).
+  const silent = srv.hub.socketsOf(id);
+  for (const ws of silent) { ws.send = () => {}; ws._socket.pause(); }
+  const t0 = Date.now();
+  await page.waitForFunction(() => window.snug.S.conn.lastError?.text.includes('stopped answering'), null, { timeout: 40000, polling: 500 });
+  const noticed = Date.now() - t0;
+  assert.ok(noticed <= 36_000, `noticed after ${noticed} ms`);
+  await page.waitForFunction(() => window.snug.S.conn.socket === 'open', null, { timeout: 20000 });
+  // And it works again.
+  await go(page, 'Glaze lab');
+  await say(page, 'back after a dead connection');
+  for (let i = 0; i < 50 && !srv.db.get("SELECT 1 FROM messages WHERE text = 'back after a dead connection'"); i++) await page.waitForTimeout(100);
+  assert.ok(srv.db.get("SELECT 1 FROM messages WHERE text = 'back after a dead connection'"));
+  for (const ws of silent) ws.terminate(); // the server would drop it at its next check; not after the test
+  await page.context().close();
+  await new Promise((r) => setTimeout(r, 200));
+});
+
+test('Settings > Connection: plain words for the socket, round trip, relay, version and last problem; details copy without secrets', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, permissions: ['clipboard-read', 'clipboard-write'] });
+  const page = await person('ines', { ctx });
+  await page.waitForFunction(() => window.snug.S.conn.rtt != null, null, { timeout: 15000 });
+  await page.click('.me-row [aria-label="Settings"]');
+  await page.click('.layer-nav .row:has-text("Connection")');
+  await page.locator('.layer-body h1:has-text("Connection")').waitFor();
+  const text = await page.locator('.conn-facts').innerText();
+  assert.match(text, /Connection to the server\s+Connected/);
+  assert.match(text, /Round trip\s+\d+ ms/);
+  assert.match(text, /Calls through a relay \(TURN\)\s+Not set up on this server/);
+  assert.match(text, new RegExp(`Server version\\s+${JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).version.replace(/\./g, '\\.')}`));
+  assert.match(await page.locator('.layer').innerText(), new RegExp(`Snug ${JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).version.replace(/\./g, '\\.')}`), 'the settings footer shows the real version');
+  // A drop is reported as the last problem.
+  await page.evaluate(() => window.snug.voiceTest.dropSocket());
+  await page.waitForFunction(() => window.snug.S.conn.socket === 'open' && window.snug.S.conn.attempts >= 1, null, { timeout: 20000 });
+  assert.match(await page.locator('.conn-facts').innerText(), /Reconnects since this page opened\s+1/);
+  await page.click('button:has-text("Copy details")');
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  assert.match(copied, /^Snug connection details/);
+  assert.equal(/127\.0\.0\.1|snug_session|password/i.test(copied), false, 'no addresses or secrets');
+  await ctx.close();
 });

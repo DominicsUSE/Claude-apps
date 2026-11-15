@@ -231,7 +231,7 @@ export function DmLine({ m }) {
   else if (l.act === 'add') text = html`${name(by.id)} added ${(l.users || []).map((u, i) => html`${i ? ', ' : ''}${name(u)}`)}`;
   else if (l.act === 'leave') text = html`${name(by.id)} left the group`;
   else if (l.act === 'kick') text = html`${name(by.id)} removed ${name(l.user)}`;
-  else if (l.act === 'ttl') text = l.ttl ? html`${name(by.id)} turned on disappearing messages: new messages go after <b>${ttlLabel(l.ttl)}</b>` : html`${name(by.id)} turned off disappearing messages`; // 0.12
+  else if (l.act === 'ttl') text = l.ttl ? html`${name(by.id)} set messages to disappear after <b>${ttlLabel(l.ttl)}</b>` : html`${name(by.id)} turned off disappearing messages`; // 0.12
   else text = m.text;
   const icon = l.act === 'add' ? 'user-plus' : l.act === 'leave' || l.act === 'kick' ? 'leave' : l.act === 'ttl' ? 'clock' : 'edit';
   return html`<div class="joinline dmline" role="note" data-mid=${m.id}>

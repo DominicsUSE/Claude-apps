@@ -5,7 +5,7 @@ import {
   S, emit, useStore, me, go, openConv, back, setTab, closePane, closeMenu, closePop, closeModal, closeLayer,
   closeQuick, closeLightbox, openQuick, openLayer, openModal, openPop, markHouseRead, markConvRead, applyPrefs, convMeta, isOnline, loadCache,
 } from './store.js';
-import { api, startTransport } from './server.js';
+import { api, startTransport, HEARTBEAT } from './server.js';
 import { on as onServer } from './server.js'; // p2p: the link host loads on socket open
 import { P2pNotice } from './views/p2p.js'; // p2p: moving here, moved away, a move waiting for an answer
 // v0.10 C: data file notice
@@ -439,6 +439,7 @@ async function boot() {
     const r = await api('/api/me');
     S.me = r.user.id;
     S.ice = r.ice;
+    S.version = r.version; // 0.12: the server's version (Settings)
     S.auth = 'in';
     loadCache(r.user.id);
     startTransport();
@@ -461,6 +462,7 @@ let peerHost = null;
 onServer('open', () => { if (S.p2p?.enabled && S.p2p.owner && !peerHost) peerHost = import('./peer.js'); });
 // Exposed for the end-to-end checks and for poking at state in the console.
 window.snug = { S, emit, voiceStats, ringtone: ringtonePlaying };
+window.snug.heartbeat = HEARTBEAT; // 0.12: tests can shorten the heartbeat (js/server.js)
 window.snug.voiceDebug = voiceDebug; // voice options (js/voiceopts.js)
 window.snug.account = { goIdle, sounds: () => soundsPlayed, soundLog }; // js/account.js
 window.snug.toggleStreamer = toggleStreamer; // the desktop app's View > Streamer mode

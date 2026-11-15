@@ -200,7 +200,7 @@ button.poll-a:active { background: var(--bg-4); }
 :root[data-motion="off"] .poll-bar { transition: none; }
 
 /* Disappearing messages (0.12): the header timer and its dialog (js/views/disappear.js) */
-.ttl-btn { width: auto; gap: var(--s-1); padding: 0 var(--s-2); }
+.ttl-btn { width: auto; display: inline-flex; flex-direction: row; align-items: center; gap: var(--s-1); padding: 0 var(--s-2); white-space: nowrap; }
 .ttl-btn-text { font-size: var(--t-12); color: var(--text-2); }
 .ttl-choices { border: 0; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--s-2); }
 .ttl-choices legend { margin-bottom: var(--s-2); }

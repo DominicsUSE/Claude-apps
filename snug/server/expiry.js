@@ -19,6 +19,7 @@ import { UserError } from './ops.js';
 import { newId, now } from './model.js';
 
 export const TTLS = [0, 3_600_000, 86_400_000, 7 * 86_400_000, 30 * 86_400_000];
+const TTL_WORDS = { 3_600_000: '1 hour', 86_400_000: '1 day', [7 * 86_400_000]: '7 days', [30 * 86_400_000]: '30 days' };
 const fail = (m) => { throw new UserError(m); };
 
 export function migrateExpiry(db) {
@@ -82,7 +83,8 @@ export function createExpiry({ db, M, hub, ops, clock = Date.now }) {
     });
     // A line in the conversation, like a group change (rendered by js/views/dm-manage.js DmLine).
     const mid = newId('m');
-    const text = ttl ? `${M.userRow(c.user)?.name || 'Someone'} turned on disappearing messages` : `${M.userRow(c.user)?.name || 'Someone'} turned off disappearing messages`;
+    const who = M.userRow(c.user)?.name || 'Someone';
+    const text = ttl ? `${who} set messages to disappear after ${TTL_WORDS[ttl]}` : `${who} turned off disappearing messages`;
     db.run('INSERT INTO messages (id, conv, author, ts, text, fold, sys) VALUES (?, ?, ?, ?, ?, ?, ?)',
       mid, conv, c.user, c.ts ?? now(), text, M.foldText(text, []), JSON.stringify({ kind: 'dm', act: 'ttl', by: c.user, ttl }));
     const [m] = M.withReactions([M.msg(mid)]);
