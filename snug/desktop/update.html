@@ -12,7 +12,7 @@
 <link rel="stylesheet" href="snug/css/brand.css"><!-- .auth, .auth-panel: the sign-in layout this page reuses -->
 </head>
 <body>
-<!-- The mandatory update (desktop/main.js, desktop/updater.js). This page's only bridge is window.snugUpdate. -->
+<!-- The update page (desktop/main.js, desktop/updater.js): Snug updates itself; this shows while it installs, or when the update must come first. This page's only bridge is window.snugUpdate. -->
 <div class="auth">
   <main class="auth-main">
     <div class="auth-panel" aria-labelledby="title">
@@ -23,8 +23,8 @@
         <span>Snug</span>
       </div>
       <div class="auth-head">
-        <h1 id="title">A new Snug is ready</h1>
-        <p class="auth-sub" id="lead">This update is required.</p>
+        <h1 id="title">Updating Snug</h1>
+        <p class="auth-sub" id="lead">Snug updates itself. This takes a moment.</p>
       </div>
       <form class="form auth-form" id="update" novalidate>
         <div id="bar" hidden>
@@ -32,7 +32,7 @@
           <div class="hint" id="status" role="status" aria-live="polite"></div>
         </div>
         <div class="err" id="error" role="alert" hidden></div>
-        <button class="btn primary auth-submit" type="submit" id="go">Update</button>
+        <button class="btn primary auth-submit" type="submit" id="go" hidden>Try again</button>
       </form>
     </div>
   </main>

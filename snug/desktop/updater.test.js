@@ -186,6 +186,30 @@ test("download: streams with progress, verifies size and sha256, then renames fr
   assert.ok(fs.existsSync(await u.download(i2)));
 });
 
+test("download: a finished download is checked again and reused, a changed one is replaced; recheck before installing", async () => {
+  const { bytes } = publish("0.10.88", { bytes: crypto.randomBytes(300_000) });
+  const tempDir = fs.mkdtempSync(path.join(tmp, "reuse-"));
+  const u = updater({ tempDir });
+  const info = await u.check();
+  const file = await u.download(info);
+  assert.equal(await u.recheck(file), true);
+  assert.equal(await u.recheck(path.join(tmp, "never-downloaded.exe")), false, "only what download() verified");
+  // A new run (the app was closed before it installed): the same file, with nothing fetched.
+  const u2 = updater({ tempDir });
+  assert.equal(await u2.recheck(file), false, "not verified in this run yet");
+  const real = info.asset.url;
+  const seen = [];
+  assert.equal(await u2.download({ ...info, asset: { ...info.asset, url: `${base}/nowhere` } }, (p) => seen.push(p)), file, "no request for the asset");
+  assert.deepEqual(seen, [{ received: bytes.length, total: bytes.length, verifying: true }]);
+  assert.equal(await u2.recheck(file), true);
+  // Something changed the file while it waited: recheck says so, and the next download replaces it.
+  fs.writeFileSync(file, Buffer.concat([bytes.subarray(0, bytes.length - 1), Buffer.from([bytes.at(-1) ^ 1])]));
+  assert.equal(await u2.recheck(file), false, "same size, other bytes");
+  assert.equal(await u2.download({ ...info, asset: { ...info.asset, url: real } }), file);
+  assert.deepEqual(fs.readFileSync(file), bytes);
+  assert.equal(await u2.recheck(file), true);
+});
+
 test("download: a wrong checksum or a wrong size is refused and the part deleted", async () => {
   const u = updater();
   publish("0.10.3", { sumsText: `${"0".repeat(64)}  ${U.assetName("portable", "0.10.3")}\n` });

@@ -934,6 +934,7 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
   return {
     enabled: true, status, flush, importBuffer, write, backupNow, http: handle, backups, forget,
     sendToOther,
+    busy: () => !!(x?.sending() || x?.receiving()), // a PC-to-PC transfer is running (the desktop app won't restart for an update)
     close() {
       closed = true;
       clearTimeout(timer); clearTimeout(statusT); clearInterval(hourly); clearTimeout(first); clearTimeout(closeT);

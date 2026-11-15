@@ -1,5 +1,5 @@
-// Snug's mandatory updater (desktop app). No Electron import: main.js passes in
-// what it needs, so this file unit-tests under plain Node (updater.test.js).
+// Snug's updater (desktop app). Updates install themselves; main.js decides when. No Electron import:
+// main.js passes in what it needs, so this file unit-tests under plain Node (updater.test.js).
 //
 //   check()     the newest snug-v<x.y.z> GitHub release (+ the registry's minimum version) → required or none
 //   download()  the platform's asset, size and sha256 checked against the release's
@@ -305,10 +305,27 @@ function createUpdater(o) {
     return { state: "required", min, ...picked };
   }
 
+  // A verified download can wait a long while for a quiet moment: main.js asks again right before installing.
+  // False for a file download() never verified in this run, or one that has changed since.
+  const known = new Map(); // verified file -> { size, sha }
+  async function recheck(file) {
+    const k = known.get(file);
+    return !!k && sameFile(file, k.size, k.sha);
+  }
+  // Is the file at this path exactly `size` bytes with this sha256?
+  function sameFile(file, size, sha) {
+    return new Promise((resolve) => {
+      try { if (fs.statSync(file).size !== size) return resolve(false); } catch { return resolve(false); }
+      const h = crypto.createHash("sha256");
+      fs.createReadStream(file).on("data", (c) => h.update(c)).on("error", () => resolve(false)).on("end", () => resolve(h.digest("hex") === sha));
+      return undefined;
+    });
+  }
+
   // Downloads and verifies; resolves with the verified file's path. Errors carry code checksum | size | network.
   async function download(info, onProgress = () => {}) {
     const dir = path.join(tempDir, `snug-update-${info.version}`);
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     const name = path.basename(info.asset.name);
     const final = path.join(dir, name);
     const part = `${final}.part`;
@@ -316,6 +333,13 @@ function createUpdater(o) {
     const want = sums.get(name);
     if (!want) throw err("checksum", "The release has no checksum for this file.");
     const limit = Math.min(info.asset.size, MAX_ASSET);
+    // A download from an earlier run that never got installed (Snug was closed first): checked again, in
+    // full, and used as it is. Anything else under that name goes.
+    if (fs.existsSync(final)) {
+      onProgress({ received: info.asset.size, total: info.asset.size, verifying: true });
+      if (await sameFile(final, info.asset.size, want)) { known.set(final, { size: info.asset.size, sha: want }); return final; }
+      try { fs.rmSync(final, { force: true }); } catch { /* replaced below */ }
+    }
     try { fs.rmSync(part, { force: true }); } catch { /* not there */ }
     let got = 0;
     let last = 0;
@@ -349,6 +373,7 @@ function createUpdater(o) {
       if (got !== info.asset.size) throw err("size", "The download is not the size the release says.");
       if (hash.digest("hex") !== want) throw err("checksum", "The download doesn’t match its checksum.");
       fs.renameSync(part, final);
+      known.set(final, { size: info.asset.size, sha: want });
       return final;
     } catch (e) {
       try { fs.rmSync(part, { force: true }); } catch { /* already gone */ }
@@ -458,7 +483,7 @@ function createUpdater(o) {
     throw err("network", "This computer has no automatic updates.");
   }
 
-  return { kind, testMode, check, download, install, cleanup, takeFailure };
+  return { kind, testMode, check, download, recheck, install, cleanup, takeFailure };
 }
 
 module.exports = { createUpdater, semverCmp, needsUpdate, pickAssets, pickRelease, parseSums, swapScript, allowedUrl, kindOf, assetName, verifySums, updaterEnvFor, UPDATE_PUBKEYS, RELEASES_LIST };

@@ -132,7 +132,7 @@ async function open(error) {
   }
   buildMenu();
   try {
-    await win.loadURL(gated(origin)); // a required update shows its page instead (mandatory updates, below)
+    await win.loadURL(gated(origin)); // an update that is installing, or must come first, shows its page instead (automatic updates, below)
   } catch {
     if (config.mode === "join") return open(`Couldn’t reach ${config.url}. Check the address and your connection.`);
   }
@@ -176,6 +176,7 @@ function createWindow() {
     if (place.maximized) win.maximize();
     // Started at login, or "Start minimised": stay in the tray (or the taskbar, with no tray).
     if (startHidden) { startHidden = false; if (!tray) win.minimize(); return; }
+    if (startInactive) { startInactive = false; win.showInactive(); return; } // back from an update: the keyboard stays where it was
     win.show();
   });
   shellWindow(win); // window size and place, minimise to tray, flash on mention (desktop shell, below)
@@ -600,11 +601,11 @@ else {
   });
 }
 
-// ---------- Desktop shell: settings, window place, badge, global voice keys, idle, snug:// links, mandatory updates ----------
+// ---------- Desktop shell: settings, window place, badge, global voice keys, idle, snug:// links, automatic updates ----------
 // Settings live in desktop.json next to keepRunning. Everything the Snug page
 // sends is checked here again; only the Snug page (fromSnug) may ask.
 const { screen, powerMonitor } = require("electron");
-const SHELL_DEFAULTS = { openAtLogin: false, startMinimized: false, minimizeToTray: false, hardwareAcceleration: true }; // an old updateCheck is ignored: updates are mandatory
+const SHELL_DEFAULTS = { openAtLogin: false, startMinimized: false, minimizeToTray: false, hardwareAcceleration: true }; // an old updateCheck is ignored: updates install themselves
 const HEX = /^#[0-9a-fA-F]{6}$/;
 function rawConfig() { try { return JSON.parse(fs.readFileSync(configPath(), "utf8")) || {}; } catch { return {}; } }
 function shellPrefs() {
@@ -621,6 +622,15 @@ const publicPrefs = () => { const p = shellPrefs(); delete p.themeColor; return 
 if (rawConfig().hardwareAcceleration === false) app.disableHardwareAcceleration();
 // Opened at login with --hidden, or "Start minimised": the window waits in the tray.
 let startHidden = process.argv.includes("--hidden") || rawConfig().startMinimized === true;
+// Back from an update that installed itself (automatic updates, below): the window comes back the way it was.
+// Read once; a note older than ten minutes is from some other start and is ignored.
+let startInactive = false;
+try {
+  const f = path.join(app.getPath("userData"), "update-relaunch.json");
+  const note = JSON.parse(fs.readFileSync(f, "utf8"));
+  fs.rmSync(f, { force: true });
+  if (Date.now() - note.at < 600_000) { if (note.mode === "hidden") startHidden = true; else if (note.mode === "inactive") startInactive = true; }
+} catch { /* an ordinary start */ }
 
 function applyLoginItem(on) {
   globalThis.snugLoginItem = !!on; // for the desktop test (Linux has no login items)
@@ -800,7 +810,7 @@ ipcMain.handle("voicekeys:set", (e, keys) => {
 });
 ipcMain.handle("voicekeys:active", (e, on) => {
   if (!fromSnug(e.senderFrame.url)) return null;
-  if (on !== true) { releaseVoiceKeys(); voiceFrom = null; if (upd.state === "required") showUpdatePage(); return {}; }
+  if (on !== true) { releaseVoiceKeys(); voiceFrom = null; if (upd.state === "required") showUpdatePage(); if (upd.state === "quiet" && upd.phase === "required") startUpdate(); installWhenQuiet(); return {}; }
   e.sender.once("destroyed", () => { releaseVoiceKeys(); voiceFrom = null; });
   return registerVoiceKeys(e.sender);
 });
@@ -865,23 +875,34 @@ ipcMain.on("deeplink:ready", (e) => {
 });
 app.on("open-url", (e, url) => { e.preventDefault(); deepLinkFrom([url]); if (win) showWindow(); });
 
-// ---------- Mandatory updates (desktop/updater.js) ----------
-// At start (after 8 s) and every 4 hours: one request for the latest GitHub
-// release, one for the registry's minimum version. When a newer release has
-// this computer's file and its checksum file, the update is required: the
-// window shows update.html instead of Snug (the in-app server keeps running).
-// "Update" downloads the file, checks its size and sha256, installs it and
-// relaunches. Only update.html may drive it (its exact file:// URL, checked on
+// ---------- Automatic updates (desktop/updater.js) ----------
+// Nobody downloads a new Snug by hand. A little after starting and every hour: one request for the newest
+// GitHub release, one for the registry's minimum version. A newer release with this computer's file and its
+// checksum file is downloaded quietly while Snug stays in use, checked (size, sha256, and the signature once a
+// key is pinned), and then installs itself at a moment that interrupts nothing: never during a call or a
+// data-file transfer; when the window is hidden, minimised or not in front, when the computer has been idle
+// for a minute, or when Snug has only just been opened. Snug comes back the way it was (hidden stays hidden).
+// A download that was never installed because Snug was closed first is used at the next start.
+// The update page (update.html) shows only while installing, when the registry's minimum version rules this
+// version out (then the download shows there, and starts by itself), or when a person is needed (Snug can't
+// write to its folder, the install failed). Only update.html may drive it (its exact file:// URL, checked on
 // every message). SNUG_UPDATE_CHECK=0 turns the check off (development, tests).
 const UPDATE_PAGE = pathToFileURL(path.join(__dirname, "update.html")).toString();
-const { createUpdater, updaterEnvFor } = require("./updater.js");
+const { createUpdater, updaterEnvFor, semverCmp } = require("./updater.js");
 const BUSY = new Set(["downloading", "verifying", "installing"]);
-const upd = { state: "none", info: null, phase: "ready", received: 0, total: 0, message: null };
+// state: none | quiet (downloading or waiting in the background) | required (the update page is up).
+// phase: ready | required | downloading | verifying | waiting (verified, waiting for a quiet moment) |
+//        installing | installed | manual | error.
+const upd = { state: "none", info: null, phase: "ready", received: 0, total: 0, message: null, file: null };
+const QUIET_IDLE_S = 60;      // the computer untouched this long: a restart interrupts nothing
+const JUST_OPENED_MS = 20_000; // Snug opened this recently: nothing is under way yet
+const UPDATE_RETRY_MS = 10 * 60_000;
+let shellStartedAt = Date.now();
 let updater = null;
 globalThis.snugUpdateLog = []; // phases, for the desktop test
 // sec-desktop D9: an installed app ignores the updater's test variables (SNUG_UPDATE_URL, SNUG_UPDATE_CHECK,
 // SNUG_UPDATE_KIND, ...) unless it was started with --dev-update, so a variable planted in this computer's
-// environment can't turn the mandatory updates off or point them somewhere else.
+// environment can't turn the updates off or point them somewhere else.
 const devUpdate = !app.isPackaged || process.argv.includes("--dev-update");
 const updaterEnv = () => updaterEnvFor(process.env, devUpdate);
 function getUpdater() {
@@ -918,15 +939,20 @@ async function checkUpdate() {
   let r;
   if (!cleaned) { cleaned = true; try { getUpdater().cleanup(); } catch { /* best effort */ } }
   try { r = await getUpdater().check(); } catch { return null; }
-  // Once required it stays required: offline or an odd reply never lifts the block.
-  if (r.state !== "required") return upd.state === "required" ? publicUpdate() : null;
+  // Once found it stays found: offline or an odd reply never lifts it.
+  if (r.state !== "required") return upd.state !== "none" ? publicUpdate() : null;
   if (BUSY.has(upd.phase)) return publicUpdate();
-  upd.state = "required";
-  const same = upd.info?.version === r.version && upd.phase !== "ready"; // a later check keeps an error or a manual step on screen
-  setUpdate(same ? { info: r } : { info: r, phase: "required", received: 0, total: r.asset.size });
-  // The last try's helper couldn't put the new version in place: say so instead of starting over silently.
-  if (getUpdater().takeFailure()) setUpdate({ phase: "error", message: UPDATE_ERRORS.install });
-  showUpdatePage();
+  if (upd.info?.version !== r.version) { upd.file = null; setUpdate({ info: r, phase: "required", received: 0, total: r.asset.size, message: null }); } else upd.info = r;
+  // The registry's minimum is above this version: it may not be used meanwhile.
+  const forced = !!r.min && semverCmp(r.min, app.getVersion()) > 0;
+  if (forced) upd.state = "required";
+  else if (upd.state === "none") upd.state = "quiet";
+  // The last try's helper couldn't put the new version in place: say so instead of trying again in a loop.
+  if (getUpdater().takeFailure()) { upd.state = "required"; setUpdate({ phase: "error", message: UPDATE_ERRORS.install }); }
+  if (upd.state === "required") showUpdatePage();
+  // Quietly: a download that failed is tried again at each check. On the update page it waits for "Try again".
+  if (upd.phase === "required" || (upd.phase === "error" && upd.state === "quiet")) startUpdate();
+  else if (upd.phase === "waiting") installWhenQuiet();
   return publicUpdate();
 }
 const UPDATE_ERRORS = {
@@ -938,20 +964,88 @@ const UPDATE_ERRORS = {
   install: "Snug couldn’t install the update. Try again, or download Snug from GitHub.",
 };
 let cleaned = false;
+let retryT = null;
+function retryLater(ms) {
+  clearTimeout(retryT);
+  retryT = setTimeout(() => { retryT = null; if (upd.state === "quiet" && (upd.phase === "required" || upd.phase === "error")) startUpdate(); }, ms);
+  retryT.unref?.();
+}
 async function startUpdate() {
-  if (upd.state !== "required" || BUSY.has(upd.phase) || upd.phase === "installed") return;
-  setUpdate({ phase: "downloading", received: 0, total: upd.info.asset.size, message: null });
+  if (upd.state === "none" || !upd.info || BUSY.has(upd.phase) || upd.phase === "installed") return;
+  // A verified download is already here (the install is what failed, or is still waiting).
+  if (upd.file && fs.existsSync(upd.file)) { setUpdate({ phase: "waiting", message: null }); installWhenQuiet(); return; }
+  // Quietly, a call keeps the whole connection: the download starts when it has ended.
+  if (upd.state === "quiet" && inCall()) { retryLater(60_000); return; }
+  const info = upd.info;
+  setUpdate({ phase: "downloading", received: 0, total: info.asset.size, message: null });
   try {
-    const file = await getUpdater().download(upd.info, (p) => setUpdate(p.verifying ? { phase: "verifying", received: p.received } : { received: p.received, total: p.total }));
+    const file = await getUpdater().download(info, (p) => setUpdate(p.verifying ? { phase: "verifying", received: p.received } : { received: p.received, total: p.total }));
     globalThis.snugUpdateLog.push("verified");
-    setUpdate({ phase: "installing" });
-    const r = await getUpdater().install(file, upd.info);
+    upd.file = file;
+    setUpdate({ phase: "waiting" });
+    installWhenQuiet();
+  } catch (e) {
+    console.warn("[snug] update failed:", e.code, e.message);
+    setUpdate({ phase: "error", message: UPDATE_ERRORS[e.code] || UPDATE_ERRORS.network });
+    if (upd.state === "quiet") retryLater(UPDATE_RETRY_MS);
+  }
+}
+// Would a restart right now interrupt anything?
+function quietMoment() {
+  if (inCall()) return false;
+  try { if (server?.vaultBusy?.()) return false; } catch { /* no data file here */ }
+  if (upd.state === "required") return true; // the update page is already in the way
+  if (typeof globalThis.snugUpdateQuiet === "boolean") return globalThis.snugUpdateQuiet; // the desktop test decides
+  const q = updaterEnv().SNUG_UPDATE_QUIET; // and how it starts out (honoured like the other test variables: --dev-update)
+  if (q === "0" || q === "1") return q === "1";
+  if (!win || win.isDestroyed() || !win.isVisible() || win.isMinimized() || !win.isFocused()) return true;
+  if (Date.now() - shellStartedAt < JUST_OPENED_MS) return true;
+  try { return powerMonitor.getSystemIdleTime() >= QUIET_IDLE_S; } catch { return false; }
+}
+// How Snug comes back after the update: hidden stays hidden, a window that wasn't in front doesn't take the
+// keyboard (read once at the next start: relaunchMode, above).
+const relaunchFile = () => path.join(app.getPath("userData"), "update-relaunch.json");
+function rememberWindow() {
+  const mode = !win || win.isDestroyed() || !win.isVisible() || win.isMinimized() ? "hidden" : win.isFocused() ? "shown" : "inactive";
+  try { fs.writeFileSync(relaunchFile(), JSON.stringify({ mode, at: Date.now() })); } catch { /* it opens the usual way */ }
+}
+let quietT = null;
+function installWhenQuiet() {
+  if (upd.phase !== "waiting") { clearInterval(quietT); quietT = null; return; }
+  if (!quietMoment()) {
+    quietT ||= setInterval(installWhenQuiet, 5_000);
+    quietT.unref?.();
+    return;
+  }
+  clearInterval(quietT); quietT = null;
+  installUpdate();
+}
+async function installUpdate() {
+  if (upd.phase !== "waiting" || !upd.file) return;
+  // It may have waited hours in the temp folder: its size and checksum are checked once more, now.
+  setUpdate({ phase: "verifying" });
+  if (!(await getUpdater().recheck(upd.file).catch(() => false))) {
+    console.warn("[snug] update: the download changed while it waited; fetching it again");
+    try { fs.rmSync(upd.file, { force: true }); } catch { /* gone already */ }
+    upd.file = null;
+    setUpdate({ phase: "required" });
+    startUpdate();
+    return;
+  }
+  if (!quietMoment()) { setUpdate({ phase: "waiting" }); installWhenQuiet(); return; } // a call began meanwhile
+  rememberWindow();
+  upd.state = "required"; // the window shows the update page from here on
+  setUpdate({ phase: "installing", message: null });
+  showUpdatePage();
+  try {
+    const r = await getUpdater().install(upd.file, upd.info);
     if (r?.manual) setUpdate({ phase: "manual", message: r.message });
     else if (r?.dry) setUpdate({ phase: "installed" }); // SNUG_UPDATE_DRY_INSTALL: recorded, nothing spawned
     // Otherwise the helper or the installer takes over and the app is quitting.
   } catch (e) {
     console.warn("[snug] update failed:", e.code, e.message);
-    setUpdate({ phase: "error", message: UPDATE_ERRORS[e.code] || UPDATE_ERRORS.network });
+    if (!fs.existsSync(upd.file)) upd.file = null;
+    setUpdate({ phase: "error", message: UPDATE_ERRORS[e.code] || UPDATE_ERRORS.install });
   }
 }
 globalThis.snugCheckUpdate = checkUpdate; // for the desktop test
@@ -962,9 +1056,10 @@ ipcMain.on("update:page", (e) => { e.returnValue = String(e.senderFrame?.url || 
 // sec-desktop: and the setup page's exact address, so snugDesktop goes to that page only, not any file:// page.
 ipcMain.on("setup:page", (e) => { e.returnValue = String(e.senderFrame?.url || "").startsWith("file:") ? SETUP : null; });
 ipcMain.handle("update:info", (e) => (fromUpdatePage(e) ? publicUpdate() : null));
+// "Try again" on the update page.
 ipcMain.handle("update:start", (e) => {
   if (!fromUpdatePage(e)) return null;
-  startUpdate();
+  if (upd.phase === "error" || upd.phase === "required") startUpdate();
   return publicUpdate();
 });
 
@@ -1005,9 +1100,10 @@ function shellReady() {
   }
   deepLinkFrom(process.argv);
   watchIdle();
-  // A little after starting, then every 4 hours. Nothing else polls.
-  setTimeout(() => { checkUpdate(); }, 8_000).unref?.();
-  setInterval(() => { checkUpdate(); }, 4 * 3_600_000).unref?.();
+  // Just after starting, then every hour. Nothing else polls.
+  shellStartedAt = Date.now();
+  setTimeout(() => { checkUpdate(); }, 3_000).unref?.();
+  setInterval(() => { checkUpdate(); }, 3_600_000).unref?.();
   const p = shellPrefs();
   if (p.openAtLogin) applyLoginItem(true);
 }

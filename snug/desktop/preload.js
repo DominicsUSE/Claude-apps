@@ -1,5 +1,5 @@
 // Bridges. The first-run setup page gets snugDesktop (read and save where Snug
-// runs). The mandatory update page gets snugUpdate. The Snug page itself (local
+// runs). The update page gets snugUpdate. The Snug page itself (local
 // or on someone else's server) gets only snugApp, below: nothing that reads
 // files, settings or the network.
 const { contextBridge, ipcRenderer } = require("electron");
