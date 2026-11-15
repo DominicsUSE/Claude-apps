@@ -401,7 +401,11 @@ Real, and covered by tests with separate users:
     Pictures are stored as Snug files in the conversation, so a reader's
     browser never loads another site. The author or a moderator removes a
     message's previews; `<https://...>` asks for none; Settings > Appearance >
-    Link previews hides them; `SNUG_LINK_PREVIEWS=0` turns fetching off.
+    Link previews hides them; `SNUG_LINK_PREVIEWS=0` turns fetching off. In
+    the desktop app, links friends on other PCs send get no preview unless
+    Settings > Privacy and safety > Previews for links friends send is on,
+    because fetching one shows the site that PC's address; links you send
+    still get previews, fetched by your own PC.
   - **Forward** a message (from its menu) to any room or conversation you can
     post in, with a note: who wrote it and when travel with it, files are
     copied, and "Go to message" shows only to people who can read the original.
@@ -965,7 +969,8 @@ behind a reverse proxy that terminates TLS and passes WebSocket upgrades on
 | `SNUG_DATA_KEY` | 32 bytes (base64 or hex) that encrypt two-factor secrets and key the backup-code hashes; without it Snug makes `data/secret.key` | `data/secret.key` |
 | `SNUG_ORIGINS` | Extra allowed page origins, comma separated | none |
 | `SNUG_HOSTS` | Host names this server answers to, comma separated (for example `snug.example.org`). Any other `Host` gets 421, which stops DNS-rebinding pages. A server bound to loopback always checks (localhost, IP addresses and `SNUG_ORIGINS` hosts pass). A server bound to a public address checks once this is set, and logs a warning until then | none |
-| `SNUG_STUN` | STUN servers for voice | Google's public server |
+| `SNUG_STUN` | STUN servers for voice, comma separated; `none` asks no STUN server at all | Google's public server |
+| `SNUG_LOG_DAYS` | Days sign-in history and security events are kept (1 to 365) | `30` |
 | `SNUG_TURN_URL`, `SNUG_TURN_USER`, `SNUG_TURN_PASS` | TURN relay for voice | none |
 | `SNUG_TURN_SECRET` | Shared secret of the TURN server's REST API (coturn `use-auth-secret`): each person gets their own credential, `<expiry>:<user id>` with a base64 HMAC-SHA1, valid 12 hours and refreshed by the `ice.refresh` op. When set, `SNUG_TURN_USER`/`SNUG_TURN_PASS` are never sent | none |
 | `SNUG_PUSH_CONTACT` | Contact the push services see in each VAPID token (`mailto:` or `https:`); Apple's requires a real one | `mailto:snug@example.invalid` |
@@ -993,9 +998,10 @@ before seeding anything that faces the internet, or better, do not seed there.
   account, then waits from 15 minutes. Every password or code check by someone
   already signed in shares one counter (5 free).
 - **Audit**: sign-ins, failures and security changes go to the `auth_events`
-  table (90 days, addresses truncated) and the log as JSON lines, never with a
-  password, code or token; bursts log a `suspicious` line, and other devices
-  get a "new sign-in" notice.
+  table (30 days by default, `SNUG_LOG_DAYS`; addresses truncated) and the log
+  as JSON lines, never with a password, code, token or full address; bursts
+  log a `suspicious` line, and other devices get a "new sign-in" notice.
+  Failure counters name an address only by an HMAC under the data key.
 - **Sessions**: a random 256-bit token in an `HttpOnly`, `SameSite=Lax`
   cookie (`__Host-` and `Secure` over HTTPS). The database keeps only its hash.
   A session ends after 30 days, or 14 days unused. Changing a password, turning
@@ -1038,6 +1044,45 @@ before seeding anything that faces the internet, or better, do not seed there.
   room or call. Only members of the house can join a voice room; only the
   people in a conversation can start, join, decline or see its call, and
   its ringing and call state go to them alone.
+
+## Privacy
+
+The whole of it, in plain words, is the privacy page: Settings > Privacy
+guide, or `/privacy` on any Snug (signed in or not; the sign-in screen links
+to it). Settings > Privacy and safety starts with "Who can see what" for the
+mode you're in. The short version:
+
+- **On a Snug server** (a website, or someone's desktop app you join over a
+  network), messages, files and profiles are stored on that server. Whoever
+  runs it can read houses and rooms, and direct messages too unless they are
+  marked end-to-end encrypted. People on your network see that you use it,
+  not what you say (over HTTPS). Link previews are fetched by the server.
+- **In the desktop app with friends on other PCs**, messages travel encrypted
+  between the PCs and are stored readable on each PC. The Snug directory
+  (registry, on Cloudflare) sees when you're online, which accounts are your
+  friends or share a group with you, when your PC contacts theirs, and keeps
+  your data-file key wrapped. Calls go straight between PCs or through a
+  Cloudflare relay that can't hear them.
+- **Your choices**: who sees that you're online (everyone you share a place
+  with, friends only, nobody), which also hides your "Recently here" and
+  "last wrote" lines; typing on or off (off stops sending and showing it, and
+  nothing is sent while invisible); who can message, befriend or invite you.
+  Read receipts don't exist in Snug.
+- **Your data**: Settings > Your data downloads one zip (profile, settings,
+  your messages, the whole of each direct conversation you're in, files you
+  uploaded, reactions, sign-in history, devices) as JSON and readable text.
+  Deleting your account asks whether to keep your messages as "Deleted user"
+  or erase them with your files, reactions, poll votes, sign-in history and
+  security events. Copies other people already have can't be erased.
+- **What is kept**: sign-in history and security events 30 days
+  (`SNUG_LOG_DAYS`), addresses shortened; failed sign-in counters 2 days,
+  addresses only as a keyed hash; sessions store the kind of device, never an
+  address; deleted message text goes after about 11 minutes; encrypted
+  database backups keep 7 days. `GET /api/privacy` reports these for the page.
+- **What Snug never does**: no analytics, diagnostics or crash reports, no
+  ads, no email or phone number, no fonts, scripts or pictures from other
+  websites. Snug is not anonymous, and whoever runs a server or the directory
+  can be required by law to hand over what it stores.
 
 ## What makes it different
 
