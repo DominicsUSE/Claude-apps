@@ -11,6 +11,8 @@ export const COPY = {
   setupTitle: 'Turn on end-to-end encryption for your messages',
   setupBody: 'Direct messages and groups with people who have it on are encrypted on your device, and can be read only on your devices and theirs. This server stores them encrypted.',
   setupStill: 'The server still sees who talks to whom, when, and how much. Rooms in houses aren’t end-to-end encrypted.',
+  inviteTitle: 'Encrypt your direct messages',
+  inviteBody: 'Turn on end-to-end encryption so direct messages and groups are readable only on your devices and theirs.',
   setupNotHere: 'Not on this computer',
   setupOn: 'Turn on',
   setupBusy: 'Making your keys…',

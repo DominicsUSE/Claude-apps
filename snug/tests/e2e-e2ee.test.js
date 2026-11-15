@@ -57,8 +57,16 @@ const idOf = (handle) => srv.db.get('SELECT id FROM users WHERE handle = ?', han
 const dialog = (page) => page.locator('.modal[role=dialog]');
 const noOverflow = (page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
 
-// Turns encryption on from the first-run sheet and confirms the recovery key; returns the key text.
+// Opens the setup sheet from the invitation above the direct messages (0.12: offered without interrupting).
+async function openSetup(page) {
+  if (await page.locator('.tab:has-text("Messages")').count()) await page.click('.tab:has-text("Messages")');
+  else await page.click('.rail-btn:has(.sr:text-matches("^Messages"))');
+  await page.locator('.e2-invite button:has-text("Turn on")').click();
+  await dialog(page).locator('h2:has-text("Turn on end-to-end encryption")').waitFor();
+}
+// Turns encryption on from the invitation and confirms the recovery key; returns the key text.
 async function turnOn(page) {
+  if (!(await dialog(page).count())) await openSetup(page);
   await dialog(page).locator('h2:has-text("Turn on end-to-end encryption")').waitFor();
   await dialog(page).locator('button:has-text("Turn on")').click();
   await dialog(page).locator('#e2-recovery-key').waitFor();
@@ -455,6 +463,8 @@ test('group of three: once Malik turns it on the group is encrypted; after he is
   await textOf(ines, `${MARK} all three`).waitFor();
   await textOf(malik, `${MARK} all three`).waitFor();
   await robinA.evaluate(async (u) => (await import('/js/server.js')).call('dm.kick', { dm: 'g_sat', user: u }), idOf('malik'));
+  // The server writes the line about the removal: in an encrypted conversation it says it isn't encrypted.
+  await robinA.locator('.main .dmline:has-text("removed") .e2-note-mark[aria-label="Snug note (not encrypted)"]').waitFor();
   await say(robinA, `${MARK} just us`);
   await textOf(ines, `${MARK} just us`).waitFor();
   await malik.waitForTimeout(500);
@@ -560,11 +570,26 @@ test('labels: a DM with someone who hasn’t set up encryption says so; a house 
   }
   await robinA.locator('.pane[aria-label="Details"] .e2-room-note:has-text("aren’t end-to-end encrypted")').waitFor();
   assert.equal(await robinA.locator('.main .bar .e2-label').count(), 0, 'no lock or shield in rooms');
+  // A one-time hint above a room's composer says the same; "Got it" puts it away on this device, for every room.
+  const hint = robinA.locator('.main .composer .e2-room-hint');
+  assert.match(await hint.textContent(), /can be read by whoever runs it and by moderators\. They aren’t end-to-end encrypted/);
+  await hint.locator('button:has-text("Got it")').click();
+  await hint.waitFor({ state: 'detached' });
+  const other = await robinA.evaluate(() => Object.keys(window.snug.S.rooms).find((r) => r !== 'k_glaze' && window.snug.S.rooms[r].kind === 'text'));
+  await robinA.evaluate((r) => import('/js/store.js').then((s) => s.openConv(r)), other);
+  await robinA.locator('.main .composer textarea').waitFor();
+  assert.equal(await robinA.locator('.main .composer .e2-room-hint').count(), 0);
+  // In a DM there is no room hint.
+  await openDm(robinA, 'Tomasz');
+  assert.equal(await robinA.locator('.main .composer .e2-room-hint').count(), 0);
 });
 
 test('phone: the setup, add-device and safety-number sheets fit a 390px screen', async () => {
   const priya = await device('priya', { phone: true });
-  await dialog(priya).locator('h2:has-text("Turn on end-to-end encryption")').waitFor();
+  await priya.locator('.tab:has-text("Messages")').click();
+  await priya.locator('.e2-invite').waitFor();
+  assert.ok(await noOverflow(priya), 'the invitation');
+  await openSetup(priya);
   assert.ok(await noOverflow(priya), 'setup sheet');
   const key = await turnOn(priya);
   assert.ok(key);
@@ -605,8 +630,47 @@ test('phone: the setup, add-device and safety-number sheets fit a 390px screen',
   await priya.context().close();
 });
 
-test('off by default: a server without SNUG_E2EE offers nothing and lists no Encryption page', async () => {
-  const off = await startServer({ port: 0, dataDir: dir.replace(/$/, '-off'), quiet: true });
+test('on by default: a server with no setting offers encryption without interrupting; Not now puts the offer away on this device', async () => {
+  const d = `${dir}-default`;
+  const on = await startServer({ port: 0, dataDir: d, quiet: true });
+  try {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    page.setDefaultTimeout(15000);
+    page.on('pageerror', (e) => errors.push(`default: ${e.message}`));
+    await page.goto(`http://127.0.0.1:${on.port}`);
+    await page.waitForSelector('.auth-form');
+    await page.evaluate(async () => {
+      await fetch('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ handle: 'newperson', name: 'New Person', password: 'a long password' }) });
+    });
+    await page.reload();
+    await page.waitForFunction(() => window.snug?.S.conn.socket === 'open');
+    await waitStatus(page, 'none');
+    await page.waitForTimeout(500);
+    assert.equal(await dialog(page).count(), 0, 'nothing pops up over the app');
+    await page.click('.rail-btn:has(.sr:text-matches("^Messages"))');
+    const invite = page.locator('.e2-invite');
+    await invite.locator('h3:has-text("Encrypt your direct messages")').waitFor();
+    await invite.locator('button:has-text("Not now")').click();
+    await invite.waitFor({ state: 'detached' });
+    await page.reload();
+    await page.waitForFunction(() => window.snug?.S.conn.socket === 'open');
+    await page.click('.rail-btn:has(.sr:text-matches("^Messages"))');
+    await page.locator('.nav .sect:has-text("Direct messages")').waitFor();
+    assert.equal(await page.locator('.e2-invite').count(), 0, 'put away on this device');
+    // Still offered where it belongs.
+    await openEncryptionSettings(page);
+    await page.locator('.layer-col button:has-text("Turn on")').click();
+    await dialog(page).locator('h2:has-text("Turn on end-to-end encryption")').waitFor();
+    await ctx.close();
+  } finally { await on.close(); rmSync(d, { recursive: true, force: true }); }
+});
+
+test('the server owner\'s switch: with SNUG_E2EE=off the server offers nothing and lists no Encryption page', async () => {
+  const was = process.env.SNUG_E2EE;
+  process.env.SNUG_E2EE = 'off';
+  let off;
+  try { off = await startServer({ port: 0, dataDir: dir.replace(/$/, '-off'), quiet: true }); } finally { if (was === undefined) delete process.env.SNUG_E2EE; else process.env.SNUG_E2EE = was; }
   try {
     const ctx = await browser.newContext();
     const page = await ctx.newPage();

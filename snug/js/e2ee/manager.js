@@ -154,10 +154,11 @@ async function onHello(d) {
     E2.status = info.me.state === 'ready' ? 'new-device' : 'none';
     keys = null;
   }
-  if (!E2.prompt && !local.get(skipKey())) {
-    if (E2.status === 'none' && E2.on && !local.get(askedKey())) E2.prompt = 'setup';
-    else if (E2.status === 'new-device' && !local.get(askedKey())) E2.prompt = 'new-device';
-  }
+  // An account that already uses encryption, signing in on a new device, is asked at once (its encrypted
+  // messages can't be read here until it is added). Turning encryption on for the first time is offered
+  // without interrupting (invitePending: an invitation above the direct messages, a button in a
+  // conversation's details, Settings > Encryption), since the server offers it to everyone by default.
+  if (!E2.prompt && !local.get(skipKey()) && E2.status === 'new-device' && !local.get(askedKey())) E2.prompt = 'new-device';
   clearInterval(rotateTimer);
   rotateTimer = setInterval(() => { rotatePrekey().catch(() => {}); }, 3600_000);
   emit();
@@ -182,6 +183,9 @@ async function forgetLocal() {
   await store.putAsb(null);
   await store.putSecret('rk', null);
 }
+
+/** Whether to show the invitation to turn encryption on: offered here, not set up, and not put off on this device. */
+export const invitePending = () => E2.on && E2.status === 'none' && !local.get(askedKey()) && !local.get(skipKey());
 
 export function dismissPrompt(skip = false) {
   if (skip) local.set(skipKey(), '1');

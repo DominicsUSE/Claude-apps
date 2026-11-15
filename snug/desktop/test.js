@@ -1162,6 +1162,8 @@ test("join mode, pinned: the app's own client runs at a plain-http LAN address, 
 
   // Encryption works in the pinned window, and this device is "Snug app (built-in code)".
   const dialog = page.locator(".modal[role=dialog]");
+  await page.click('.rail-btn:has(.sr:text-matches("^Messages"))');
+  await page.locator('.e2-invite button:has-text("Turn on")').click(); // offered above the direct messages
   await dialog.locator('h2:has-text("Turn on end-to-end encryption")').waitFor();
   assert.equal(await dialog.locator(':text("Snug’s code comes from this server")').count(), 0, "no browser warning: the code is the app's own");
   await dialog.locator('button:has-text("Turn on")').click();
@@ -1277,7 +1279,7 @@ test("in-app server: ambient SNUG_* variables change nothing, and a foreign Host
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-hosts-"));
   t.after(() => removeDir(userData));
   // What same-user malware could plant in the environment.
-  const planted = { SNUG_HOSTS: "rebind.attacker.example", SNUG_ORIGINS: "http://rebind.attacker.example:47821", SNUG_TRUST_PROXY: "1", SNUG_SECURE: "1" };
+  const planted = { SNUG_HOSTS: "rebind.attacker.example", SNUG_ORIGINS: "http://rebind.attacker.example:47821", SNUG_TRUST_PROXY: "1", SNUG_SECURE: "1", SNUG_E2EE: "off" };
   const { app, page } = await launchWith(userData, { config: { mode: "host", lan: true }, env: planted });
   await page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//);
   await page.waitForSelector(".auth-form");
@@ -1291,6 +1293,8 @@ test("in-app server: ambient SNUG_* variables change nothing, and a foreign Host
     req.on("error", reject);
     req.end(body);
   });
+  // Encryption stays offered whatever the environment says (the in-app server sets it itself).
+  assert.equal(await page.evaluate(async () => (await (await fetch("/api/version")).json()).e2ee), 1);
   const foreign = await ask(`rebind.attacker.example:${port}`);
   assert.equal(foreign.status, 421, "a name this server doesn't answer to");
   assert.equal(foreign.cookie, undefined);

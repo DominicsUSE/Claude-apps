@@ -57,3 +57,14 @@ textarea.e2-key-field { resize: vertical; min-height: calc(var(--h-field) * 1.6)
 .e2-gate { align-items: center; flex-wrap: wrap; margin-bottom: var(--s-2); }
 .e2-gate .grow { flex: 1 1 14em; }
 .e2-gif-note { margin: 0 0 var(--s-2); font-size: var(--t-12); }
+/* The offer to turn encryption on, above the direct messages (js/views/e2ee-setup.js EncInvite). */
+.e2-invite { display: flex; gap: var(--s-2); margin: var(--s-1) 0 var(--s-2); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); }
+.e2-invite-ic { flex: none; color: var(--brand); padding-top: 2px; }
+.e2-invite-body { display: grid; gap: var(--s-1); min-width: 0; }
+.e2-invite h3 { margin: 0; font-size: var(--t-ui); font-weight: var(--w-medium); color: var(--text-1); }
+.e2-invite .hint { margin: 0; }
+.e2-invite-acts { display: flex; gap: var(--s-2); flex-wrap: wrap; margin-top: var(--s-1); }
+/* A room's one-time composer hint, and the mark on server lines in encrypted conversations (js/views/e2ee-conv.js). */
+.e2-room-hint { display: flex; align-items: center; gap: var(--s-2); margin: 0 0 var(--s-1); font-size: var(--t-12); color: var(--text-3); }
+.e2-room-hint .btn { flex: none; }
+.e2-note-mark { display: inline-flex; align-items: center; color: var(--text-3); flex: none; }

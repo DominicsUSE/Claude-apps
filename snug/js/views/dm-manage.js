@@ -3,7 +3,7 @@
 // and members popover, and the line a change writes into the conversation.
 // The server checks every rule again (server/dms.js).
 import { html, useState } from '../../vendor/preact-htm.js';
-import { EncLine } from './e2ee-conv.js';
+import { EncLine, ServerNoteMark } from './e2ee-conv.js';
 import { S, closeModal, closePop, openModal, openPop, openConv, convMeta, person, go } from '../store.js';
 import { fuzzy, HUES } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
@@ -221,7 +221,7 @@ export function dmHeaderItems(conv, anchor) {
 }
 
 // ---------- The line a change writes ----------
-export function DmLine({ m }) {
+export function DmLine({ conv, m }) {
   const l = m.dmLine || {};
   if (l.act === 'e2ee') return html`<${EncLine} m=${m} />`; // the conversation turned end-to-end encrypted (js/views/e2ee-conv.js)
   const by = person(l.by || m.author);
@@ -237,6 +237,7 @@ export function DmLine({ m }) {
   return html`<div class="joinline dmline" role="note" data-mid=${m.id}>
     <span class="dmline-ic" aria-hidden="true"><${Icon} name=${icon} size=${16} /></span>
     <span class="joinline-text">${text}</span>
+    <${ServerNoteMark} conv=${conv} />
     <time class="joinline-time num" datetime=${new Date(m.ts).toISOString()}>${new Date(m.ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>
   </div>`;
 }

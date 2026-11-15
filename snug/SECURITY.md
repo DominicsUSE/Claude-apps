@@ -62,7 +62,7 @@ Security fixes go into the newest release only; there are no backports.
   checked, time and size caps); rate limits per person and per
   address.
 
-### End-to-end encrypted conversations (0.12, `SNUG_E2EE=on`)
+### End-to-end encrypted conversations (0.12, offered by default; `SNUG_E2EE=off` stops offering it)
 
 Direct messages and groups whose members have all turned on encryption are end-to-end encrypted:
 messages, edits, replies, thread replies, attachments, GIFs, stickers and scheduled messages. Against
@@ -74,7 +74,7 @@ get nothing sent after their removal. Key substitution by the server is caught w
 safety numbers.
 
 It does not protect against whoever serves the browser's JavaScript (an operator who changes the code
-can read messages in a browser; the desktop app runs its own built-in code), membership decided by the
+can read messages in a browser; the desktop app runs its own built-in code, also when it joins another server, except on a server's own page, which its window title names), membership decided by the
 server (ghost members), withheld or delayed messages, metadata (who, when, how much, group names,
 reactions, devices, IP addresses), compromised devices and people in the conversation, history readable
 with the history key (on by default) or the recovery key and password, messages sent before a

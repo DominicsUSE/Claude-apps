@@ -89,9 +89,9 @@ export async function startServer({
   // sec-desktop D10: the desktop app sets this: GitHub sign-in answers only its window (the resume cookie).
   ghWindowOnly = false,
   peerIdleMs = 120_000, peerDialMs = 8000, peerCacheMB = 1024, peerDirect = true, peerMaxLinks,
-  // End-to-end encryption for DMs and groups (server/e2ee.js). Off by default until it ships; SNUG_E2EE=on turns it on.
-  // Off stops offering setup; it never downgrades anything already encrypted.
-  e2ee = ['1', 'on', 'true'].includes(String(process.env.SNUG_E2EE || '').toLowerCase()),
+  // End-to-end encryption for DMs and groups (server/e2ee.js). On by default since 0.12; the server's owner can
+  // turn it off with SNUG_E2EE=off. Off stops offering setup; it never downgrades anything already encrypted.
+  e2ee = !['0', 'off', 'false', 'no'].includes(String(process.env.SNUG_E2EE ?? 'on').trim().toLowerCase()),
 } = {}) {
   // sec-registry REG-L6: a damaged snug.db is replaced by the newest good encrypted snapshot before opening.
   // sec-integrate: the data key is loaded once (two-factor secrets, backup codes, snapshots). One that couldn't

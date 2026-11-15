@@ -6,7 +6,7 @@ import { html, useState, useEffect } from '../../vendor/preact-htm.js';
 import { S, closeModal, openModal, toast, me } from '../store.js';
 import { Icon } from '../ui/icons.js';
 import { copyText } from '../ui/kit.js';
-import { E2, setup, confirmRecoveryKey, dismissPrompt, deviceKind } from '../e2ee/manager.js';
+import { E2, setup, confirmRecoveryKey, dismissPrompt, deviceKind, invitePending } from '../e2ee/manager.js';
 import { COPY } from '../lib/e2ee/copy.js';
 import { recoveryFileText } from '../lib/recovery.js';
 import { NewDeviceSheet, ApproveSheet } from './e2ee-link.js';
@@ -24,7 +24,24 @@ export function E2eeHost() {
   return null;
 }
 
-// Shown once on a device when the server offers encryption and the account has none yet.
+// Above the direct messages while the account hasn't turned encryption on: the offer, without interrupting.
+// "Not now" puts it away on this device; a conversation's details and Settings > Encryption still offer it.
+export function EncInvite() {
+  if (!invitePending()) return null;
+  return html`<section class="e2-invite" aria-labelledby="e2-invite-title">
+    <span class="e2-invite-ic" aria-hidden="true"><${Icon} name="lock" size=${16} /></span>
+    <div class="e2-invite-body">
+      <h3 id="e2-invite-title">${COPY.inviteTitle}</h3>
+      <p class="hint">${COPY.inviteBody}</p>
+      <div class="e2-invite-acts">
+        <button class="btn sm primary" onClick=${() => openModal(SetupSheet, {})}>${COPY.setupOn}</button>
+        <button class="btn sm ghost" onClick=${() => dismissPrompt()}>Not now</button>
+      </div>
+    </div>
+  </section>`;
+}
+
+// Turning encryption on: from the invitation, a conversation's details or Settings > Encryption.
 export function SetupSheet() {
   const [history, setHistory] = useState(true);
   const [have, setHave] = useState(false);

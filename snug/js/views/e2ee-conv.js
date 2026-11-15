@@ -3,7 +3,7 @@
 // it is opened or if it can't be, the line where a conversation turned
 // encrypted, and the honest labels for rooms and P2P conversations
 // (the v0.12 e2ee spec, section 16.4). Wording lives in js/lib/e2ee/copy.js.
-import { html } from '../../vendor/preact-htm.js';
+import { html, useState } from '../../vendor/preact-htm.js';
 import { S, openModal } from '../store.js';
 import { Icon } from '../ui/icons.js';
 import { COPY } from '../lib/e2ee/copy.js';
@@ -11,6 +11,7 @@ import { E2, builtInCode } from '../e2ee/manager.js';
 import { isEncrypted, rootDm, changed, sendGate, downgraded } from '../e2ee/conv.js';
 import { acceptChange } from '../e2ee/manager.js';
 import { SafetyNumber, canVerify } from './e2ee-verify.js';
+import { SetupSheet } from './e2ee-setup.js';
 
 const firstName = (id) => S.users[id]?.name.split(' ')[0] || 'Someone';
 const remoteDm = (dm) => dm.members.some((id) => S.users[id]?.remote);
@@ -53,6 +54,7 @@ export function EncDetail({ dm }) {
   return html`<div class="detail e2-detail">
     <h3><${Icon} name=${st === 'on' ? 'lock' : 'unlock'} size=${16} />${st === 'on' ? COPY.convOn : COPY.convNotOn}</h3>
     <p class="hint" style="margin:0">${st === 'on' ? COPY.convPanel : notOnText(dm)}</p>
+    ${st === 'off' && E2.status === 'none' && E2.on && html`<div><button class="btn sm primary" onClick=${() => openModal(SetupSheet, {})}><${Icon} name="lock" size=${14} />${COPY.setupOn}</button></div>`}
     ${st === 'on' && inBrowser && html`<p class="hint" style="margin:0">${COPY.browserNote}</p>`}
     ${st === 'on' && dm.group && html`<p class="hint" style="margin:0">${COPY.joinedNote}</p>`}
     ${others.filter((id) => changed.has(id)).map((id) => html`<p class="e2-warn" role="alert" key=${id}><${Icon} name="alert" size=${16} /><span>${COPY.changedLine(S.users[id]?.name || 'Someone')}</span></p>`)}
@@ -63,6 +65,23 @@ export function EncDetail({ dm }) {
 
 /** Rooms are never end-to-end encrypted: on a server that offers encryption, a room's details and a house's About say so. */
 export const RoomEncNote = () => (E2.status === 'off' && !E2.on ? null : html`<p class="hint e2-room-note" style="margin:0">${COPY.roomsNot}</p>`);
+
+// Above a room's composer, once per device, where encryption is offered: rooms aren't end-to-end encrypted.
+const ROOM_HINT = 'snug-e2ee-room-hint';
+const hintGone = () => { try { return localStorage.getItem(ROOM_HINT) === '1'; } catch { return false; } };
+export function RoomComposerHint({ conv }) {
+  const [gone, setGone] = useState(hintGone);
+  if (gone || !S.rooms[conv] || (E2.status === 'off' && !E2.on)) return null;
+  const done = () => { try { localStorage.setItem(ROOM_HINT, '1'); } catch { /* storage off: gone for now */ } setGone(true); };
+  return html`<p class="e2-room-hint hint" role="note"><${Icon} name="unlock" size=${12} /><span class="grow">${COPY.roomsNot}</span>
+    <button type="button" class="btn sm ghost" onClick=${done}>Got it</button></p>`;
+}
+
+/** On a line the server writes (calls, people added or leaving, renames) in an encrypted conversation: it isn't encrypted. */
+export function ServerNoteMark({ conv }) {
+  if (!conv || !isEncrypted(conv)) return null;
+  return html`<span class="e2-note-mark" role="img" aria-label=${COPY.serverNote} data-tip=${COPY.serverNote}><${Icon} name="unlock" size=${12} /></span>`;
+}
 
 /** What an encrypted message shows until it is open, or if it can't be. Null once it is. */
 export function EncBody({ m }) {

@@ -1,6 +1,6 @@
 // End-to-end encryption on the real server (server/e2ee.js and the hooks it
 // uses), with real sockets. The clients use the real js/lib/e2ee modules
-// (tests/helpers/e2ee.js). Encryption is off by default; these servers turn it on.
+// (tests/helpers/e2ee.js). Encryption is on by default (0.12); the server's owner can turn it off with SNUG_E2EE=off.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -86,7 +86,7 @@ async function enrolled(handle, opts) {
 }
 const reconnect = async (p, cookie = p.cookie) => new Sock(srv, cookie).connect();
 
-test('setup: once per account, hello reports it, and the server refuses it when encryption is off', async () => {
+test('setup: once per account, hello reports it; on by default, and refused when the server owner turns it off (SNUG_E2EE=off)', async () => {
   const p = await person('e2-setup');
   assert.equal(p.sock.hello.proto, 12);
   assert.equal(p.sock.hello.e2ee.on, true);
@@ -110,15 +110,31 @@ test('setup: once per account, hello reports it, and the server refuses it when 
   assert.notEqual(again.hello.e2ee.nonce, p.sock.hello.e2ee.nonce, 'a fresh nonce per socket');
   await again.close(); await p.sock.close();
 
-  const offSrv = await startServer({ port: 0, dataDir: tmp(), quiet: true });
+  // On by default: a server started with no setting offers it.
+  const onSrv = await startServer({ port: 0, dataDir: tmp(), quiet: true });
   try {
-    const q = await register(offSrv, 'e2-off');
-    const s = await new Sock(offSrv, q.cookie).connect();
-    assert.equal(s.hello.e2ee.on, false, 'off by default');
-    const dev = await newDevice(q.id);
-    await s.refused('e2ee.setup', (await setupPayload(q.id, dev)).payload, /isn’t turned on/);
+    const q = await register(onSrv, 'e2-default');
+    const s = await new Sock(onSrv, q.cookie).connect();
+    assert.equal(s.hello.e2ee.on, true, 'on by default');
+    assert.equal((await (await fetch(`http://127.0.0.1:${onSrv.port}/api/version`)).json()).e2ee, 1);
     await s.close();
-  } finally { await offSrv.close(); }
+  } finally { await onSrv.close(); }
+
+  // The server owner's switch: SNUG_E2EE=off stops offering it (nothing already encrypted is downgraded).
+  for (const value of ['off', '0', 'false']) {
+    const was = process.env.SNUG_E2EE;
+    process.env.SNUG_E2EE = value;
+    let offSrv;
+    try { offSrv = await startServer({ port: 0, dataDir: tmp(), quiet: true }); } finally { if (was === undefined) delete process.env.SNUG_E2EE; else process.env.SNUG_E2EE = was; }
+    try {
+      const q = await register(offSrv, `e2-off-${value}`);
+      const s = await new Sock(offSrv, q.cookie).connect();
+      assert.equal(s.hello.e2ee.on, false, `SNUG_E2EE=${value}`);
+      const dev = await newDevice(q.id);
+      await s.refused('e2ee.setup', (await setupPayload(q.id, dev)).payload, /isn’t turned on/);
+      await s.close();
+    } finally { await offSrv.close(); }
+  }
 });
 
 test('bind: only a valid proof over this socket’s nonce binds; another socket’s nonce or another person’s device doesn’t', async () => {

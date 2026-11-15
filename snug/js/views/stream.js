@@ -33,7 +33,7 @@ import { DmLine } from './dm-manage.js'; // a group renamed, people added or gon
 import { msgFace, colourRole, BotBadge, PostTitle, RoleIconMark } from './places.js'; // nicknames, bots, role colours and icons, forum post titles
 import { messageItems, hiddenBlocked, BlockedLine, composerGate, GateNote, SlowNote, slowLeft } from './safety.js'; // blocks, reports, moderation, slowmode
 import { MessageExtras, ownsFiles, messagingMenuItems, PlusMenu, FormatBar, formatKey, ScheduledNote, UnreadBar } from './messaging.js'; // polls, previews, forwarding, stickers, formatting, scheduling
-import { EncBody, encMenuItems, EncComposerNote, quoteText } from './e2ee-conv.js'; // end-to-end encrypted messages
+import { EncBody, encMenuItems, EncComposerNote, RoomComposerHint, quoteText } from './e2ee-conv.js'; // end-to-end encrypted messages
 import { PeerState } from './p2p.js'; // a message waiting for a friend on another PC, or held after their security code changed
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
@@ -540,6 +540,7 @@ export function Composer({ conv, placeholder }) {
       <${WaitNote} conv=${conv} />
       <${ScheduledNote} conv=${conv} />
       <${EncComposerNote} conv=${conv} />
+      <${RoomComposerHint} conv=${conv} />
       <${LengthNote} n=${text.trim().length} />
       <${FormatBar} ta=${ta} text=${text} update=${update} />
       <div class="composer-row">
@@ -776,7 +777,7 @@ export function Stream({ conv, intro, placeholder }) {
               if (it.type === 'pin') return html`<${PinLine} key=${it.key} conv=${conv} pin=${it.pin} />`;
               if (it.m.call) { lit = false; return html`<${CallLine} key=${it.key} conv=${conv} m=${it.m} />`; }
               if (it.m.join) { lit = false; return html`<${JoinLine} key=${it.key} conv=${conv} m=${it.m} />`; }
-              if (it.m.dmLine) { lit = false; return html`<${DmLine} key=${it.key} m=${it.m} />`; }
+              if (it.m.dmLine) { lit = false; return html`<${DmLine} key=${it.key} conv=${conv} m=${it.m} />`; }
               const toMe = forMe(S, conv, it.m);
               const cont = !toMe && it.grouped && lit;
               lit = toMe || cont;

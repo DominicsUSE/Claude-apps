@@ -985,6 +985,7 @@ behind a reverse proxy that terminates TLS and passes WebSocket upgrades on
 | `SNUG_TURN_URL`, `SNUG_TURN_USER`, `SNUG_TURN_PASS` | TURN relay for voice | none |
 | `SNUG_TURN_SECRET` | Shared secret of the TURN server's REST API (coturn `use-auth-secret`): each person gets their own credential, `<expiry>:<user id>` with a base64 HMAC-SHA1, valid 12 hours and refreshed by the `ice.refresh` op. When set, `SNUG_TURN_USER`/`SNUG_TURN_PASS` are never sent | none |
 | `SNUG_PUSH_CONTACT` | Contact the push services see in each VAPID token (`mailto:` or `https:`); Apple's requires a real one | `mailto:snug@example.invalid` |
+| `SNUG_E2EE=off` | Stop offering end-to-end encryption for direct messages and groups (conversations already encrypted stay encrypted) | on |
 | `SNUG_DEMO_PASSWORD` | Password for the sample accounts when seeding | `snug-demo-1` |
 | `SNUG_GIF_PROVIDER=tenor`, `SNUG_TENOR_KEY` | Turn on GIF search through Tenor (v2 API). Searches and previews go through the server; media is fetched only from Tenor's media hosts, at most 10 MB, GIF, WebP or MP4 by content | off: no Search tab |
 
@@ -1057,10 +1058,14 @@ before seeding anything that faces the internet, or better, do not seed there.
 
 ### End-to-end encrypted conversations (direct messages and groups)
 
-Snug 0.12 can encrypt direct messages and groups end to end. It is off unless the
-server sets `SNUG_E2EE=on` (it stays off by default until this feature has been
-reviewed outside its implementation). With it on, each person turns it on once per
-account (Settings, Encryption) and saves a recovery key.
+Snug 0.12 encrypts direct messages and groups end to end. A server offers it by
+default; its owner can turn the offer off with `SNUG_E2EE=off` (nothing already
+encrypted is turned back into plain text). Each person turns it on once per account
+and saves a recovery key: Snug offers it above the direct messages (and in a
+conversation's details, and Settings > Encryption) without interrupting, and "Not
+now" puts the offer away on that device. An account that already uses encryption,
+signing in on a new device, is asked straight away to add it. The desktop app's own
+server always offers it.
 
 **What it does.** A conversation is encrypted once everyone in it has turned it on
 (new conversations start encrypted; existing ones switch over by themselves and say
@@ -1085,7 +1090,8 @@ and call signalling. Push notifications say only "New message".
 - *Whoever serves the code.* In a browser, Snug's JavaScript comes from the server
   every time you open it; whoever runs the server could change it to read messages
   as they are typed or shown. Nothing in a browser prevents that. The Snug desktop
-  app runs its own built-in code on its own server. Encryption in a browser protects
+  app runs its own built-in code, on its own server and when it joins someone else's
+  (unless you choose that server's own page, which its title says). Encryption in a browser protects
   against theft of the database, backups and disk, an operator who reads stored data
   or logs, and server bugs that leak rows; not against an operator who changes the code.
 - *Membership.* The server decides who is in a group (everyone sees the member list

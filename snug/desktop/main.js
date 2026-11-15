@@ -113,6 +113,8 @@ async function startHost(lan) {
     secure: false, trustProxy: false, extraOrigins: [], hosts: [], pushAllowLocal: false, linkAllowLocal: false,
     // sec-desktop D10: GitHub sign-in answers only this window (its per-launch cookie), not any program on this PC.
     ghWindowOnly: true,
+    // End-to-end encryption for direct messages and groups is offered here (SNUG_E2EE in the environment doesn't change it).
+    e2ee: true,
     ...p2pConfig(), keyStore, fetch: net.fetch.bind(net), resumeSecret, // p2p
   };
   // The same address every launch keeps you signed in; fall back to any free port if it is taken.
