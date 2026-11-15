@@ -91,7 +91,7 @@ test('unread counts: 100 messages with a mention at #10 gives count 100, needs 1
   const { unread } = await s.ow.ok('unread.counts');
   assert.equal(unread[s.room].needs, 1);
   // Reading moves the read point; nothing is unread afterwards.
-  await s.ow.ok('read.set', { conv: s.room, ts: Date.now() });
+  await s.ow.ok('read.set', { conv: s.room, ts: Math.max(Date.now(), hello.unread[s.room].upTo) });
   assert.equal((await s.ow.ok('unread.counts')).unread[s.room], undefined);
   // The Mentions inbox keeps it after reading.
   const list = await s.ow.ok('mentions.list', {});

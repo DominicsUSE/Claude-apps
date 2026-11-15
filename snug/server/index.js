@@ -98,7 +98,7 @@ export async function startServer({
     return [`${proto}://${req.headers.host}`, ...extraOrigins];
   };
 
-  const server = createServer(handle);
+  const server = createServer({ keepAliveTimeout: 65_000 }, handle); // well past any client's idle reuse, so a reused socket is never closed under a request
   const hub = createHub({ db, M, server, origins, ice, log, ringMs, voiceGraceMs });
   // --- push notifications (server/push.js) ---
   // A new message that needs someone with no Snug open anywhere goes to their devices.
