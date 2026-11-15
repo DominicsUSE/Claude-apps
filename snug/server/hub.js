@@ -100,7 +100,18 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
   hub.voiceHooks = { joined: [], left: [], empty: [] };
   const fireVoice = (kind, ...a) => { for (const fn of hub.voiceHooks[kind]) { try { fn(...a); } catch (e) { log('error', `voice.${kind}`, e); } } };
 
-  hub.toUser = (u, ev, d, exceptWs) => { for (const ws of socks.get(u) || []) if (ws !== exceptWs) send(ws, { t: 'ev', ev, d }); };
+  // socketView (ws, ev, d) -> d: set by a module that adds something only one
+  // socket may have to an event (server/e2ee.js: the wraps for that socket's
+  // device). Unset, every socket of a person gets the same event.
+  hub.socketView = null;
+  const viewFor = (ws, ev, d) => {
+    if (!hub.socketView) return d;
+    try { return hub.socketView(ws, ev, d); } catch (e) { log('error', `socketView ${ev}`, e); return d; }
+  };
+  hub.toUser = (u, ev, d, exceptWs) => { for (const ws of socks.get(u) || []) if (ws !== exceptWs) send(ws, { t: 'ev', ev, d: viewFor(ws, ev, d) }); };
+  hub.socketsOf = (u) => socks.get(u) || new Set();
+  // Extra hello fields for one socket (server/e2ee.js: a fresh nonce to bind a device to it).
+  hub.helloExtras = [];
   hub.toUsers = (users, ev, d, exceptUser) => { for (const u of new Set(users)) if (u !== exceptUser) hub.toUser(u, ev, d); };
   hub.toConv = (conv, ev, d, exceptUser) => hub.toUsers(M.audience(conv), ev, d, exceptUser);
 
@@ -540,7 +551,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
     }
     socks.get(user).add(ws);
     if (first) presenceChanged(user);
-    send(ws, { t: 'hello', d: { ...hub.snapshotFor(user), ice: hub.iceFor(user) } });
+    send(ws, { t: 'hello', d: Object.assign({ ...hub.snapshotFor(user), ice: hub.iceFor(user) }, ...hub.helloExtras.map((fn) => fn(ws, user))) });
     log('connect', user);
 
     ws.on('pong', () => { ws.alive = true; });
@@ -548,7 +559,9 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
       let msg;
       try { msg = JSON.parse(buf); } catch { return; }
       if (!msg || msg.t !== 'op' || typeof msg.op !== 'string') return;
-      const reply = (ok, d) => msg.id != null && send(ws, ok ? { t: 'ack', id: msg.id, ok: true, d } : { t: 'ack', id: msg.id, ok: false, error: d });
+      // A refusal may carry a code and data (UserError's extras) for the client to act on; old clients ignore them.
+      const reply = (ok, d, e) => msg.id != null && send(ws, ok ? { t: 'ack', id: msg.id, ok: true, d }
+        : { t: 'ack', id: msg.id, ok: false, error: d, ...(e?.code ? { code: e.code } : {}), ...(e?.data !== undefined ? { data: e.data } : {}) });
       // A session ended elsewhere (sign out everywhere) closes its sockets.
       if (!sessionUser(db, token)) { reply(false, 'You’ve been signed out. Sign in again.'); ws.close(4001, 'signed out'); return; }
       const handler = Object.hasOwn(ops, msg.op) ? ops[msg.op] : null;
@@ -561,7 +574,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
         return reply(false, 'You’re going a little fast. Wait a moment and try again.');
       }
       const failed = (e) => {
-        if (e instanceof UserError) reply(false, e.message);
+        if (e instanceof UserError) reply(false, e.message, e);
         else { log('error', msg.op, e); reply(false, 'Something went wrong on the server. Try again.'); }
       };
       try {

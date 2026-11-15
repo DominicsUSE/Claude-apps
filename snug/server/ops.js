@@ -22,8 +22,17 @@ import { createActivitiesOps } from './activities.js'; // whiteboard, games, voi
 import { createInboxOps } from './inbox.js'; // unread counts, mentions inbox, timed mutes, presence for a while, mutual friends, username change
 import { createDmOps } from './dms.js'; // close, pin, rename, icon, add, leave and remove in direct conversations and groups
 
-export class UserError extends Error {}
-const fail = (msg) => { throw new UserError(msg); };
+// A refusal the person should read. An optional { code, data } goes back to
+// the client with it (the ack's code and data), for refusals a client handles
+// by itself, such as e2ee_stale (fetch newer keys and seal again).
+export class UserError extends Error {
+  constructor(message, extra = {}) {
+    super(message);
+    if (extra.code) this.code = extra.code;
+    if (extra.data !== undefined) this.data = extra.data;
+  }
+}
+const fail = (msg, extra) => { throw new UserError(msg, extra); };
 
 // Input checks
 const str = (v, { max = 200, min = 0, name = 'This', trim = true } = {}) => {

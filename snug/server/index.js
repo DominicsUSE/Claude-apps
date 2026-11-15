@@ -3,6 +3,7 @@
 // see the README.
 import { createServer } from 'node:http';
 import { writeFile, mkdir, stat } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { join, normalize, extname, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +32,8 @@ import {
   loadDataKey, // sec-registry REG-L6: the snapshot key
 } from './auth.js';
 import { createSeclog, redactLog, redact, sendFile } from './seclog.js'; // sec-web: security events, log redaction, safe file sends
+import { PROTO, MIN_CLIENT } from '../js/lib/proto.js'; // GET /api/version
+import { CSP, CSP_STRICT, BASE_CSP, SVG_CSP, WORKER_CSP } from './csp.js'; // page and response policies, shared with the desktop app's join mode
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PUBLIC = ['index.html', 'css/', 'js/', 'fonts/', 'vendor/', 'docs/', 'brand/', 'sw.js'];
@@ -48,25 +51,10 @@ for (const t of [...AUDIO_TYPES, ...VIDEO_TYPES]) INLINE.add(t);
 const MAX_FILE = 10 * 1024 * 1024;
 const HANDLE = /^[a-z0-9](?:[a-z0-9_.-]{0,22}[a-z0-9])?$/;
 
-const CSP = [
-  "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:",
-  "media-src 'self' blob:", "connect-src 'self'", "font-src 'self'", "object-src 'none'", "base-uri 'none'",
-  "frame-ancestors 'none'", "form-action 'self'",
-  "worker-src 'self'", "manifest-src 'self'", "frame-src 'none'", // sec-web: no workers, manifests or frames from anywhere else
-].join('; ');
-// sec-web W6: every other response (API JSON, errors, scripts, styles) gets a
-// policy that allows nothing, so nothing served here can be framed or run as a
-// page; brand SVGs may style themselves but never run script; the service
-// worker may fetch from this origin only.
-const BASE_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
-const SVG_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'none'";
-const WORKER_CSP = "default-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
 const HSTS = 'max-age=31536000; includeSubDomains';
-// sec-web: a stricter page policy in report-only mode (no inline styles, Trusted
-// Types for script sinks). Nothing is blocked by it; what it would block is
-// reported to /api/csp-report and kept as a security event, so an injection
-// attempt (or a page change that would break under it) shows up.
-const CSP_STRICT = `${CSP.replace("style-src 'self' 'unsafe-inline'", "style-src 'self'")}; require-trusted-types-for 'script'; report-uri /api/csp-report`; // report-uri: sent at once by every browser (report-to batches for up to a minute)
+// Snug's version: from package.json, or (in the desktop app, whose bundled copy has no version) the app's own one level up.
+const VERSION = [join(ROOT, 'package.json'), join(ROOT, '..', 'package.json')]
+  .map((f) => { try { return JSON.parse(readFileSync(f, 'utf8')).version; } catch { return null; } }).find(Boolean) || null;
 // sec-web W2: names a loopback server always answers to. An address typed as an
 // IP is always fine too: a DNS rebinding attack needs a name it controls.
 const LOCAL_NAMES = ['localhost'];
@@ -107,6 +95,9 @@ export async function startServer({
   // sec-desktop D10: the desktop app sets this: GitHub sign-in answers only its window (the resume cookie).
   ghWindowOnly = false,
   peerIdleMs = 120_000, peerDialMs = 8000, peerCacheMB = 1024, peerDirect = true, peerMaxLinks,
+  // End-to-end encryption for DMs and groups (server/e2ee.js). Off by default until it ships; SNUG_E2EE=on turns it on.
+  // Off stops offering setup; it never downgrades anything already encrypted.
+  e2ee = ['1', 'on', 'true'].includes(String(process.env.SNUG_E2EE || '').toLowerCase()),
 } = {}) {
   // sec-registry REG-L6: a damaged snug.db is replaced by the newest good encrypted snapshot before opening.
   // sec-integrate: the data key is loaded once (two-factor secrets, backup codes, snapshots). One that couldn't
@@ -322,6 +313,8 @@ export async function startServer({
     // sec-web: reads that need no sign-in, per address (a session cookie skips the general one).
     // sec-integrate: a live session skips it, not just any cookie by that name (a made-up one used to).
     if (!post && !userOf(req) && !openLimit.take(ipOf(req))) return error(res, 429, 'Too many requests. Wait a moment.');
+    // Which Snug this is, for the desktop app's join mode (it runs its own bundled client and checks they fit). Public.
+    if (req.method === 'GET' && path === '/api/version') return sendJson(res, 200, { version: VERSION, proto: PROTO, minClient: MIN_CLIENT, e2ee: e2ee ? 1 : 0 });
     // sec-web: signing out drops the browser's cached copies of private files.
     if (post && path === '/api/logout') res.setHeader('Clear-Site-Data', '"cache"');
 

@@ -80,7 +80,8 @@ function connect() {
       if (!w) return;
       waiting.delete(msg.id);
       clearTimeout(w.t);
-      if (msg.ok) w.resolve(msg.d); else w.reject(new Error(msg.error));
+      // A refusal's code and data (e.g. e2ee_stale with the users whose keys changed) ride on the error.
+      if (msg.ok) w.resolve(msg.d); else w.reject(Object.assign(new Error(msg.error), msg.code ? { code: msg.code, data: msg.data } : {}));
     } else if (msg.t === 'ev') {
       try { ((typeof msg.ev === 'string' && Object.hasOwn(EVENTS, msg.ev) && EVENTS[msg.ev]) || ((d) => fire(msg.ev, d)))(msg.d); } catch (err) { console.error(msg.ev, err); } // sec-integrate: own keys only
       emit();
