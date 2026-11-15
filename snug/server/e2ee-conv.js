@@ -428,6 +428,20 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
     return { id };
   };
 
+  // ---------- account deletion (spec 11.10) ----------
+  // The key directory goes: nobody can seal to this account any more, and nothing is left to unwrap.
+  M.e2eeForget = (u) => {
+    const devs = db.all('SELECT id FROM e2ee_devices WHERE user = ?', u).map((r) => r.id);
+    for (const d of devs) {
+      db.run('DELETE FROM e2ee_wraps WHERE target = ?', `d:${d}`);
+      db.run('DELETE FROM e2ee_prekeys WHERE device = ?', d);
+      db.run('DELETE FROM e2ee_asb_boxes WHERE device = ?', d);
+    }
+    const pre = historyTarget(u);
+    db.run('DELETE FROM e2ee_wraps WHERE substr(target, 1, ?) = ?', pre.length, pre);
+    for (const t of ['e2ee_links', 'e2ee_backup', 'e2ee_meta', 'e2ee_accounts', 'e2ee_devices']) db.run(`DELETE FROM ${t} WHERE user = ?`, u);
+  };
+
   // ---------- housekeeping ----------
   // A deleted message's envelope, wraps and earlier versions go with its
   // content once the ten minutes of undo are over (as server/index.js does for text).

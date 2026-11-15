@@ -54,3 +54,6 @@ textarea.e2-key-field { resize: vertical; min-height: calc(var(--h-field) * 1.6)
   .e2-number { grid-template-columns: repeat(3, auto); }
   .e2-code { font-size: var(--t-20); }
 }
+.e2-gate { align-items: center; flex-wrap: wrap; margin-bottom: var(--s-2); }
+.e2-gate .grow { flex: 1 1 14em; }
+.e2-gif-note { margin: 0 0 var(--s-2); font-size: var(--t-12); }

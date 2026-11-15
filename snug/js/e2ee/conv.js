@@ -37,12 +37,24 @@ export function rootDm(conv) {
   return null;
 }
 export const isEncrypted = (conv) => !!S.dms[rootDm(conv)]?.e2ee;
+// Conversations are encrypted one way only. Each one this account has seen encrypted is remembered
+// in the synced settings; if the server later says one isn't, Snug refuses to send there (spec 12.3).
+export const downgraded = (conv) => { const dm = rootDm(conv); return !!dm && !S.dms[dm]?.e2ee && !!ring.meta?.convs?.[dm]; };
+function rememberEncrypted(dm) {
+  if (!dm || ring.meta?.convs?.[dm]) return;
+  ring.updateMeta((m) => { (m.convs ||= {})[dm] = S.dms[dm]?.e2eeSince || 1; }).catch(() => {});
+}
 
 // ---------- other people's keys ----------
 const bundles = new Map(); // user -> { list, prekeys, at }
 const knownDevs = new Map(); // user -> Map(device -> dsk): every device seen in a list we accepted
 export const changed = new Map(); // user -> new aik, when someone's account key changed (a reset)
-on('e2ee.devices', (d) => bundles.delete(d.user));
+// Someone's devices or keys changed: forget their keys; if we share an encrypted conversation, look
+// again now, so a changed safety number shows before anyone sends.
+on('e2ee.devices', (d) => {
+  bundles.delete(d.user);
+  if (d.user !== S.me && E2.status === 'ready' && Object.values(S.dms).some((x) => x.e2ee && x.members.includes(d.user))) fetchBundles([d.user]).then(emit, () => {});
+});
 
 function remember(u, list) {
   const m = knownDevs.get(u) || new Map();
@@ -170,7 +182,7 @@ const pingOf = (text, users) => users.filter((u) => u !== S.me && mentions(text 
 const opened = new Map(); // "id:rev" -> { body, flags } this device has opened (or sealed)
 const keyOf = (id, rev) => `${id}:${rev}`;
 
-async function sealAndSend(op, { conv, dm, id, kind, rev, users, body, re = null, extra = {} }) {
+async function sealAndSend(op, { conv, dm, id, kind, rev, users, body, re = null, at, extra = {} }) {
   const { dev } = ring;
   if (E2.status !== 'ready' || !dev) throw new Error('Turn on end-to-end encryption on this device to send here (Settings, Encryption).');
   const gate = sendGate(users);
@@ -178,7 +190,7 @@ async function sealAndSend(op, { conv, dm, id, kind, rev, users, body, re = null
   let fresh = false;
   for (let tries = 0; tries < 3; tries++) {
     const rc = await recipients(users, fresh);
-    const header = { conv: dm, place: conv, id, kind, rev, from: { u: S.me, d: dev.d }, ts: Date.now(), lv: rc.lv, ping: body.mentions || [], re };
+    const header = { conv: dm, place: conv, id, kind, rev, from: { u: S.me, d: dev.d }, ts: Date.now(), lv: rc.lv, ping: body.mentions || [], re, ...(at !== undefined ? { at } : {}) };
     const { env, k, K } = await seal({ header, body, dsk: dev.dsk.privateKey, recipients: rc });
     opened.set(keyOf(id, rev), { body: { ...body, v: 1, conv: dm, place: conv, id, rev, from: header.from }, flags: [] });
     ring.store?.putSecret?.(`k:${keyOf(id, rev)}`, b64u(K)).catch?.(() => {});
@@ -196,6 +208,7 @@ async function sealAndSend(op, { conv, dm, id, kind, rev, users, body, re = null
 /** Sends message m (from js/server.js send) into an encrypted conversation; resolves with the server's answer. */
 export async function sendEncrypted(conv, m) {
   const dm = rootDm(conv);
+  rememberEncrypted(dm);
   const users = membersOf(dm);
   const files = [];
   for (const f of m.files || []) {
@@ -212,6 +225,18 @@ export async function sendEncrypted(conv, m) {
   });
 }
 const clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+
+const ALNUM = 'abcdefghijklmnopqrstuvwxyz0123456789';
+const newMsgId = () => `m_${[...crypto.getRandomValues(new Uint8Array(16))].map((b) => ALNUM[b % 36]).join('')}`;
+export const SCHEDULE_MAX = 14 * 86_400_000;
+/** A scheduled message in an encrypted conversation: sealed now (for the people here now), sent by the server later. */
+export async function scheduleEncrypted(conv, text, at, replyTo) {
+  if (at > Date.now() + SCHEDULE_MAX) throw new Error('In encrypted conversations, messages can be scheduled up to 14 days ahead.');
+  const dm = rootDm(conv);
+  const users = membersOf(dm);
+  const body = { text, mentions: pingOf(text, users) };
+  return sealAndSend('sched.create', { conv, dm, id: newMsgId(), kind: 'sched', rev: 0, users, body, re: replyTo || null, at, extra: clean({ text: '', at, replyTo }) });
+}
 
 /** An edit: a new envelope (rev + 1) for the original recipients who are still here. */
 async function editEncrypted(conv, m, text) {
@@ -302,6 +327,7 @@ export function scan(o, conv = null, depth = 0) {
 
 async function drain() {
   if (!queue.size) return;
+  if (E2.settling) { timer = setTimeout(drain, 50); return; } // keys still loading for this connection
   const { keys, dev } = ring;
   const batch = [...queue.entries()];
   queue.clear();
@@ -324,6 +350,7 @@ async function drain() {
     try {
       const r = await openOne(m, q.k || wraps[id]?.k || {});
       opened.set(key, r);
+      rememberEncrypted(r.body.conv);
       for (const v of q.views) apply(v, r);
       for (const fn of waiters.get(key) || []) fn(true);
     } catch (e) {
@@ -347,6 +374,8 @@ async function openOne(m, wraps) {
     keys: { device: (kid) => dev.prekeys[kid]?.pair || null, history: (e) => keys.ahk[e] || null, cached: cachedKey ? b64uOf(cachedKey, 32) : null },
     wraps,
   });
+  if ((h.rev === 0) !== (h.kind !== 'edit')) throw new OpenFailure('revision');
+  if (h.kind === 'sched' && Math.abs((m.ts || 0) - h.at) > 2 * 60_000) throw new OpenFailure('time');
   // The thread a message says it is in must hang off the DM it says it is in.
   const t = h.place.startsWith('t:') ? S.threads[h.place] : null;
   if (t && t.conv !== h.conv) throw new OpenFailure('moved');
@@ -377,7 +406,7 @@ signOutHooks.push(() => {
 });
 
 // ---------- the transport's hooks (js/server.js) ----------
-Object.assign(transportHooks, { scan, isEncrypted, sendEncrypted, uploadEncrypted, whenOpen });
+Object.assign(transportHooks, { scan, isEncrypted, downgraded, sendEncrypted, uploadEncrypted, whenOpen });
 
 // For the end-to-end checks.
 export const _test = { opened, findMsg };

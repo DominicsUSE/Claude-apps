@@ -23,6 +23,7 @@ import { AppearancePage, ProfileStyle, SoundSettings, setSettingsLayer } from '.
 import { bindings, comboKeys, ACTIONS } from '../lib/keys.js'; // the person's shortcuts in the sheet
 import { setLook } from '../account.js';
 import { Confirm } from './modals.js';
+import { RevokeSheet, hasKeys } from './e2ee-revoke.js'; // signing out a device can remove its encryption keys too
 import { p2pOwner, AccountRows, ConnectRow, DeleteP2p } from './p2p.js'; // GitHub-secured accounts: no password; the Snug username
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
@@ -401,7 +402,11 @@ function Sessions() {
   const [err, setErr] = useState('');
   const load = () => call('sessions.list').then((r) => setList(r.sessions), (e) => setErr(e.offline ? 'You’re offline. Your devices show once you’re back.' : e.message));
   useEffect(() => { load(); }, []);
-  const revoke = async (id) => { try { await call('sessions.revoke', { id }); toast('That device is signed out.'); load(); } catch (e) { toast(e.message); } };
+  const revoke = async (id) => {
+    const s = list.find((x) => x.id === id);
+    if (s && hasKeys(s)) { openModal(RevokeSheet, { session: s, done: load }); return; }
+    try { await call('sessions.revoke', { id }); toast('That device is signed out.'); load(); } catch (e) { toast(e.message); }
+  };
   const others = async () => { try { const r = await call('sessions.revokeOthers'); toast(r.ended ? `${plural(r.ended, 'other device')} signed out.` : 'No other devices were signed in.'); load(); } catch (e) { toast(e.message); } };
   if (err) return html`<p class="err" role="alert">${err}</p>`;
   if (!list) return html`<p class="faint" role="status">Loading your devices…</p>`;

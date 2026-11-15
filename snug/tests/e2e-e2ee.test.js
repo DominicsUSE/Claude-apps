@@ -231,7 +231,7 @@ async function recoverWith(page, key) {
 }
 async function openDm(page, title) {
   // A sheet left from an earlier step ("Device added") closes first.
-  for (let i = 0; i < 3 && await dialog(page).count(); i++) { await page.keyboard.press('Escape'); await page.waitForTimeout(100); }
+  for (let i = 0; i < 4 && (await dialog(page).count() || await page.locator('.layer-col').count()); i++) { await page.keyboard.press('Escape'); await page.waitForTimeout(100); }
   await page.click('.rail-btn:has(.sr:text-matches("^Messages"))');
   await page.click(`.nav .row:has-text("${title}")`);
   await page.locator(`.main .bar-title:has-text("${title}")`).waitFor();
@@ -310,7 +310,7 @@ test('encrypted DM: an edit, a reply quote and a thread reply all decrypt after 
   await target.locator('[aria-label="Reply"]').click();
   await say(ines, `${MARK} reply`);
   await robinA.locator(`.main .msg.has-ref:has-text("${MARK} reply") .reply-ref:has-text("${MARK} second")`).waitFor();
-  const tid = await robinA.evaluate((needle) => { for (const l of Object.values(window.snug.S.msgs)) { const m = l.find((x) => x.text === needle); if (m) return m.id; } return null; }, `${MARK} second`);
+  const tid = await (await robinA.waitForFunction((needle) => { for (const l of Object.values(window.snug.S.msgs)) { const m = l.find((x) => x.text === needle && !x.state); if (m) return m.id; } return null; }, `${MARK} second`)).jsonValue();
   const own = robinA.locator(`.main .msg[data-id="${tid}"]`);
   await own.hover();
   await own.locator('[aria-label="More actions"]').click();
@@ -382,6 +382,171 @@ async function expectRow(get, why) {
   assert.fail(why);
 }
 
+// ---------- step 6: attachments, scheduled, groups, epochs, device removal, reset ----------
+// A 2 by 2 PNG.
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==', 'base64');
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+
+test('attachments: a picture sent in an encrypted DM shows from a blob on the other side; the server keeps no PNG', async () => {
+  const ines = await device('ines');
+  await recoverWith(ines, inesKey);
+  await openDm(robinA, 'Ines Carvalho');
+  await openDm(ines, 'Robin Hale');
+  const before = new Set(readdirSync(join(dir, 'files')));
+  await robinA.locator('.main [data-composer] input[type=file]').setInputFiles({ name: 'glaze-test.png', mimeType: 'image/png', buffer: PNG });
+  await robinA.locator('.main [data-composer] .pending-file .pending-state:not(:has-text("Uploading"))').waitFor();
+  assert.equal(await robinA.locator('.main [data-composer] .pending-state.bad').count(), 0, 'the encrypted upload worked');
+  await robinA.locator('.main [data-composer] textarea').press('Enter');
+  const img = ines.locator('.main .msg .files img[src^="blob:"]').last();
+  await img.waitFor();
+  assert.ok(await img.evaluate((el) => el.complete && el.naturalWidth === 2), 'the decrypted picture loads');
+  const added = readdirSync(join(dir, 'files')).filter((f) => !before.has(f));
+  assert.ok(added.length >= 1);
+  for (const f of added) {
+    const bytes = readFileSync(join(dir, 'files', f));
+    assert.equal(bytes.subarray(0, 4).equals(PNG_MAGIC), false, `files/${f} is a readable PNG`);
+    assert.equal(srv.db.get('SELECT enc FROM files WHERE id = ?', f)?.enc, 1);
+  }
+  const res = await ines.evaluate(async (id) => { const r = await fetch(`/api/files/${id}`); return [r.headers.get('content-type'), r.headers.get('content-disposition')]; }, added[0]);
+  assert.equal(res[0], 'application/octet-stream');
+  assert.match(res[1], /^attachment/);
+  await ines.context().close();
+});
+
+test('scheduled: sealed now, sent later by the server, readable when it arrives; 14 days at most here', async () => {
+  const ines = await device('ines');
+  await recoverWith(ines, inesKey);
+  await openDm(robinA, 'Ines Carvalho');
+  await openDm(ines, 'Robin Hale');
+  const MARK = `SCHED-${Date.now().toString(36)}`;
+  await robinA.locator('.main .plus-btn').click();
+  await robinA.locator('[role=menu] :text("Schedule a message")').click();
+  await dialog(robinA).locator('.modal-lead:has-text("Up to 14 days ahead in encrypted conversations")').waitFor();
+  await dialog(robinA).locator('textarea').fill(`${MARK} later`);
+  // 70 seconds from now (to the second), so the time it was sealed for matches when the server sends it below.
+  await dialog(robinA).locator('#sched-at').evaluate((el) => {
+    const t = new Date(Date.now() + 70_000);
+    const p = (n) => String(n).padStart(2, '0');
+    el.value = `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}T${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}`;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await dialog(robinA).locator('button:has-text("Schedule")').last().click();
+  await dialog(robinA).waitFor({ state: 'detached' });
+  const row = srv.db.get('SELECT id, text, enc FROM scheduled WHERE user = ? ORDER BY created DESC LIMIT 1', idOf('robin'));
+  assert.equal(row.text, '');
+  assert.ok(!row.enc.includes(MARK));
+  srv.db.run('UPDATE scheduled SET at = ? WHERE id = ?', Date.now() - 1, row.id);
+  srv.hub.messaging.tick();
+  await textOf(ines, `${MARK} later`).waitFor();
+  scanServer(MARK);
+  await ines.context().close();
+});
+
+test('group of three: once Malik turns it on the group is encrypted; after he is removed his open page gets nothing new', async () => {
+  const malik = await device('malik');
+  await turnOn(malik);
+  const g = 'g_sat';
+  await expectRow(() => srv.db.get('SELECT e2ee FROM dms WHERE id = ?', g)?.e2ee === 1, 'the group turned encrypted');
+  const ines = await device('ines');
+  await recoverWith(ines, inesKey);
+  for (const p of [robinA, ines, malik]) await openDm(p, 'Saturday load');
+  const MARK = `GRP-${Date.now().toString(36)}`;
+  await say(robinA, `${MARK} all three`);
+  await textOf(ines, `${MARK} all three`).waitFor();
+  await textOf(malik, `${MARK} all three`).waitFor();
+  await robinA.evaluate(async (u) => (await import('/js/server.js')).call('dm.kick', { dm: 'g_sat', user: u }), idOf('malik'));
+  await say(robinA, `${MARK} just us`);
+  await textOf(ines, `${MARK} just us`).waitFor();
+  await malik.waitForTimeout(500);
+  assert.equal(await malik.evaluate((needle) => JSON.stringify(window.snug.S.msgs).includes(needle), `${MARK} just us`), false);
+  const last = srv.db.get("SELECT enc FROM messages WHERE conv = 'g_sat' AND enc IS NOT NULL ORDER BY seq DESC LIMIT 1");
+  assert.equal(JSON.parse(last.enc).h.to.some(([u]) => u === idOf('malik')), false, 'not sealed to Malik');
+  scanServer(MARK);
+  await ines.context().close();
+  await malik.context().close();
+});
+
+test('history epochs: a week-old history key is replaced; removing a device starts another; the recovery key still reads both sides', async () => {
+  const MARK = `EPOCH-${Date.now().toString(36)}`;
+  await openDm(robinA, 'Ines Carvalho');
+  await say(robinA, `${MARK} before`);
+  await textOf(robinA, `${MARK} before`).waitFor();
+  const robin = idOf('robin');
+  const e0 = srv.db.get('SELECT epoch FROM e2ee_accounts WHERE user = ?', robin).epoch;
+  srv.db.run('UPDATE e2ee_accounts SET epoch_at = ? WHERE user = ?', Date.now() - 8 * 86_400_000, robin);
+  await robinA.reload();
+  await robinA.waitForFunction(() => window.snug?.S.conn.socket === 'open');
+  await waitStatus(robinA, 'ready');
+  await expectRow(() => srv.db.get('SELECT epoch FROM e2ee_accounts WHERE user = ?', robin).epoch === e0 + 1, 'a new epoch');
+  await openDm(robinA, 'Ines Carvalho');
+  await say(robinA, `${MARK} after`);
+  await textOf(robinA, `${MARK} after`).waitFor();
+  const h = JSON.parse(srv.db.get('SELECT enc FROM messages WHERE conv = ? AND enc IS NOT NULL ORDER BY seq DESC LIMIT 1', dmOf('robin', 'ines')).enc).h;
+  assert.deepEqual(h.ar.find(([u]) => u === robin), [robin, e0 + 1], 'sealed to the new history key');
+  // Remove one of Robin's other devices in Settings: another epoch.
+  await openEncryptionSettings(robinA);
+  const others = robinA.locator('.e2-dev:not(:has-text("(this device)")) button:has-text("Remove")');
+  await others.first().click();
+  await dialog(robinA).locator('button:has-text("Remove")').last().click();
+  await expectRow(() => srv.db.get('SELECT epoch FROM e2ee_accounts WHERE user = ?', robin).epoch === e0 + 2, 'removal starts a new epoch');
+  await robinA.keyboard.press('Escape');
+  // A new browser with the recovery key reads messages sealed to the old and the new history keys.
+  const fresh = await device('robin');
+  await recoverWith(fresh, robinKey);
+  await openDm(fresh, 'Ines Carvalho');
+  await textOf(fresh, `${MARK} before`).waitFor();
+  await textOf(fresh, `${MARK} after`).waitFor();
+  await fresh.context().close();
+});
+
+test('search: the server finds nothing in encrypted conversations; this device does, and further back on request', async () => {
+  const MARK = `FIND${Date.now().toString(36)}`;
+  await openDm(robinA, 'Ines Carvalho');
+  await say(robinA, `the kiln code is ${MARK}`);
+  await textOf(robinA, `the kiln code is ${MARK}`).waitFor();
+  const server = await robinA.evaluate(async (q) => (await (await import('/js/server.js')).call('search', { q })).hits.length, MARK.toLowerCase());
+  assert.equal(server, 0, 'the server has no text to match');
+  await robinA.evaluate((q) => import('/js/store.js').then((s) => s.go({ type: 'search', q })), MARK.toLowerCase());
+  const section = robinA.locator('.e2-search');
+  await section.locator('.search-group-h:has-text("Encrypted conversations (searched on this device)")').waitFor();
+  await section.locator(`.item-text:has-text("${MARK}")`).waitFor();
+  // A new browser of Robin's has nothing loaded far back; searching further back loads and decrypts it.
+  const fresh = await device('robin');
+  await recoverWith(fresh, robinKey);
+  await fresh.evaluate((q) => import('/js/store.js').then((s) => s.go({ type: 'search', q })), MARK.toLowerCase());
+  await fresh.locator('.e2-search button:has-text("Search further back")').click();
+  await fresh.locator('.e2-search .hint:has-text("Searched up to 2000 messages")').waitFor();
+  await fresh.locator(`.e2-search .item-text:has-text("${MARK}")`).waitFor();
+  await fresh.context().close();
+});
+
+test('reset: Ines resets her encryption; Robin, who verified her, is held at the composer until he chooses; then it sends', async () => {
+  const ines = await device('ines');
+  await dialog(ines).locator('h2:has-text("Add this browser")').waitFor();
+  await ines.keyboard.press('Escape');
+  await openEncryptionSettings(ines);
+  await ines.locator('.layer-col button:has-text("Reset encryption")').click();
+  await dialog(ines).locator('h2:has-text("Reset end-to-end encryption")').waitFor();
+  await dialog(ines).locator('button[type=submit]:has-text("Reset encryption")').click();
+  await dialog(ines).locator('#e2-recovery-key').waitFor();
+  inesKey = (await dialog(ines).locator('#e2-recovery-key code').allTextContents()).join('-');
+  await waitStatus(ines, 'ready');
+  await ines.keyboard.press('Escape');
+  assert.ok(srv.db.get('SELECT reset_at FROM e2ee_accounts WHERE user = ?', idOf('ines')).reset_at);
+  await openDm(robinA, 'Ines Carvalho');
+  const gate = robinA.locator('.main .e2-gate:has-text("safety number changed since you verified it")');
+  await gate.waitFor();
+  const MARK = `RESET-${Date.now().toString(36)}`;
+  await say(robinA, `${MARK} held`);
+  await robinA.locator('.main .msg-state.failed:has-text("safety number changed")').waitFor();
+  await gate.locator('button:has-text("I understand, send anyway")').click();
+  await gate.waitFor({ state: 'detached' });
+  await say(robinA, `${MARK} sent`);
+  await openDm(ines, 'Robin Hale');
+  await textOf(ines, `${MARK} sent`).waitFor();
+  await ines.context().close();
+});
+
 test('labels: a DM with someone who hasn’t set up encryption says so; a house room says it isn’t end-to-end encrypted', async () => {
   await openDm(robinA, 'Tomasz');
   await robinA.locator('.main .bar .e2-label:not(.on):has-text("Not end-to-end encrypted")').waitFor();
@@ -427,6 +592,15 @@ test('phone: the setup, add-device and safety-number sheets fit a 390px screen',
   assert.ok(await noOverflow(priya), 'safety number sheet');
   const sn = await dialog(priya).boundingBox();
   assert.ok(sn.x >= 0 && sn.x + sn.width <= 391, 'the safety number sheet is inside the screen');
+  // Their DM turned encrypted (Robin has it on): the phone header shows the lock, a message goes through, nothing overflows.
+  await priya.keyboard.press('Escape');
+  await priya.locator('.screen.push .bar .e2-label.on').waitFor();
+  const pbox = priya.locator('.screen.push .composer textarea');
+  await pbox.fill('From my phone, encrypted');
+  await pbox.press('Enter');
+  await priya.locator('.screen.push .msg-text:has-text("From my phone, encrypted")').waitFor();
+  await priya.locator('.screen.push .e2-compose-note').waitFor();
+  assert.ok(await noOverflow(priya), 'encrypted conversation on a phone');
   await phone2.context().close();
   await priya.context().close();
 });

@@ -26,7 +26,7 @@ const handlers = new Map();
 // Set by js/e2ee/conv.js (end-to-end encrypted conversations): scan() opens
 // every message view that arrives, sendEncrypted/uploadEncrypted seal what
 // goes out, whenOpen holds a notification until its message is open.
-export const transportHooks = { scan: null, isEncrypted: null, sendEncrypted: null, uploadEncrypted: null, whenOpen: null };
+export const transportHooks = { scan: null, isEncrypted: null, downgraded: null, sendEncrypted: null, uploadEncrypted: null, whenOpen: null };
 const scanIn = (d) => { try { transportHooks.scan?.(d); } catch (e) { console.warn('e2ee scan', e); } };
 
 // Other modules (voice) listen for their own events here.
@@ -189,6 +189,8 @@ function send(conv, m) {
   // Voice messages also carry their length and waveform.
   // Recorded voice messages say so; any attachment may be a spoiler and have a description (server/chat.js).
   const files = (m.files || []).map((f) => ({ id: f.id, w: f.w, h: f.h, duration: f.duration, peaks: f.peaks, voice: f.voice || undefined, spoiler: f.spoiler || undefined, alt: f.alt || undefined }));
+  // A conversation this account knows as encrypted, now reported as plain: never sent in the clear.
+  if (transportHooks.downgraded?.(conv)) { m.state = 'failed'; m.error = 'This server says this conversation isn’t encrypted any more. Snug won’t send here in plain text.'; emit(); return; }
   // An end-to-end encrypted conversation: sealed on this device first (js/e2ee/conv.js).
   const sent = transportHooks.isEncrypted?.(conv) ? transportHooks.sendEncrypted(conv, m)
     : call('msg.send', { conv, id: m.id, text: m.text, replyTo: m.replyTo, files, silent: m.silent || undefined, replyPing: m.replyPing });

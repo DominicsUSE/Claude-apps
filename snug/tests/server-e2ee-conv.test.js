@@ -475,3 +475,41 @@ test('a reset: contacts get the new account key from bundles, and old recipients
   assert.equal(srv.db.get('SELECT e2ee FROM dms WHERE id = ?', dm).e2ee, 1, 'still encrypted: never back to plain');
   await close(a, b);
 });
+
+// ---------- step 7: export ----------
+test('account export: encrypted messages come out as their envelopes, with a note; never as text', async () => {
+  const { a, b, dm } = await pair('ec-export');
+  const { id } = await sendEnc(a, { dm, users: [a.id, b.id], text: 'export me not' });
+  const res = await fetch(`${web(srv).base}/api/account/export`, { headers: { cookie: a.cookie } });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  const m = data.messages.find((x) => x.id === id);
+  assert.ok(m.encrypted?.h && m.encrypted.c, 'the envelope');
+  assert.equal(m.text, undefined);
+  assert.match(data.encryptedNote, /encrypted envelopes/);
+  assert.equal(JSON.stringify(data).includes('export me not'), false);
+  await close(a, b);
+});
+
+test('sessions.list names the encryption device of each session, so signing one out can remove its keys too', async () => {
+  const a = await enrolled('ec-sess');
+  const b = await new Sock(srv, await login(srv, a.handle)).connect();
+  const dev = await newDevice(a.id);
+  await b.ok('e2ee.link.start', { device: devicePublic(dev), prekey: dev.prekeys[1].signed });
+  await bind(b, dev);
+  const { sessions } = await a.sock.ok('sessions.list', {});
+  assert.deepEqual(sessions.map((s) => s.e2eeDevice).filter(Boolean).sort(), [a.dev.d, dev.d].sort());
+  await b.close(); await close(a);
+});
+
+test('deleting an account removes its key directory: list, devices, prekeys, backup, settings and its wraps', async () => {
+  const { a, b, dm } = await pair('ec-gone');
+  await sendEnc(a, { dm, users: [a.id, b.id], text: 'before I go' });
+  const res = await web(srv).post('/api/account/delete', { password: 'a long password', confirm: b.handle }, b.cookie);
+  assert.equal(res.status, 200, await res.clone().text());
+  for (const t of ['e2ee_accounts', 'e2ee_backup', 'e2ee_meta']) assert.equal(srv.db.get(`SELECT COUNT(*) n FROM ${t} WHERE user = ?`, b.id).n, 0, t);
+  assert.equal(srv.db.get("SELECT COUNT(*) n FROM e2ee_devices WHERE user = ? AND state != 'removed'", b.id).n, 0);
+  assert.equal(srv.db.get('SELECT COUNT(*) n FROM e2ee_prekeys WHERE device = ?', b.dev.d).n, 0);
+  assert.equal(srv.db.get('SELECT COUNT(*) n FROM e2ee_wraps WHERE target = ? OR target LIKE ?', `d:${b.dev.d}`, `a:${b.id}:%`).n, 0);
+  await a.sock.close();
+});

@@ -8,7 +8,8 @@ import { S, openModal } from '../store.js';
 import { Icon } from '../ui/icons.js';
 import { COPY } from '../lib/e2ee/copy.js';
 import { E2 } from '../e2ee/manager.js';
-import { isEncrypted, rootDm, changed } from '../e2ee/conv.js';
+import { isEncrypted, rootDm, changed, sendGate, downgraded } from '../e2ee/conv.js';
+import { acceptChange } from '../e2ee/manager.js';
 import { SafetyNumber, canVerify } from './e2ee-verify.js';
 
 const firstName = (id) => S.users[id]?.name.split(' ')[0] || 'Someone';
@@ -60,8 +61,8 @@ export function EncDetail({ dm }) {
   </div>`;
 }
 
-/** A room's details: rooms are never end-to-end encrypted, and the page says so. */
-export const RoomEncNote = () => html`<p class="hint e2-room-note" style="margin:0">${COPY.roomsNot}</p>`;
+/** Rooms are never end-to-end encrypted: on a server that offers encryption, a room's details and a house's About say so. */
+export const RoomEncNote = () => (E2.status === 'off' && !E2.on ? null : html`<p class="hint e2-room-note" style="margin:0">${COPY.roomsNot}</p>`);
 
 /** What an encrypted message shows until it is open, or if it can't be. Null once it is. */
 export function EncBody({ m }) {
@@ -83,9 +84,21 @@ export function encMenuItems(conv, m) {
 }
 
 /** Under the composer of an encrypted conversation: what isn't made here. */
+// A verified contact whose safety number changed: sending waits until the person chooses (spec 12.3).
 export function EncComposerNote({ conv }) {
+  if (downgraded(conv)) return html`<div class="e2-warn" role="alert"><${Icon} name="alert" size=${16} /><span>${COPY.downgraded}</span></div>`;
   if (!isEncrypted(conv)) return null;
-  return html`<p class="e2-compose-note hint"><${Icon} name="lock" size=${12} />${COPY.convOn}. ${COPY.previewsOff}</p>`;
+  const dm = S.dms[rootDm(conv)];
+  const gate = sendGate(dm.members);
+  const seen = dm.members.filter((u) => u !== S.me && changed.has(u) && !gate.includes(u));
+  return html`
+    ${gate.map((u) => html`<div class="e2-warn e2-gate" role="alert" key=${u}><${Icon} name="alert" size=${16} />
+      <span class="grow">${COPY.gate(S.users[u]?.name || 'Someone')}</span>
+      <button class="btn sm" onClick=${() => openModal(SafetyNumber, { user: u })}>${COPY.verifyAgain}</button>
+      <button class="btn sm" onClick=${() => acceptChange(u, changed.get(u), 0)}>${COPY.sendAnyway}</button>
+    </div>`)}
+    ${seen.map((u) => html`<p class="e2-warn" role="status" key=${u}><${Icon} name="alert" size=${16} /><span>${COPY.changedLine(S.users[u]?.name || 'Someone')}</span></p>`)}
+    <p class="e2-compose-note hint"><${Icon} name="lock" size=${12} />${COPY.convOn}. ${COPY.previewsOff}</p>`;
 }
 
 /** The server line written when a conversation turned encrypted (server/e2ee-conv.js). */

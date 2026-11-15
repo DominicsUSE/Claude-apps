@@ -139,6 +139,7 @@ async function onHello(d) {
         if (!dev.trusted) { dev.trusted = true; await save(); }
         await rotatePrekey();
         await Promise.all([loadMeta(), fetchAsbBoxes()]);
+        await maybeRotate().catch((e) => console.warn('e2ee epoch', e));
         const rk = await store.getSecret('rk');
         if (rk && !E2.rkSaved) E2.rk = { text: rk, fresh: false };
       } else if (dev.linkId) await finishLink().catch(() => { E2.status = 'pending'; });
@@ -160,7 +161,8 @@ async function onHello(d) {
   rotateTimer = setInterval(() => { rotatePrekey().catch(() => {}); }, 3600_000);
   emit();
 }
-on('hello', (d) => { onHello(d).catch((e) => { console.warn('e2ee', e); E2.status = 'unsupported'; E2.support = { ok: false, reason: 'old' }; emit(); }); });
+// settling: this device's keys are being loaded for a new connection (js/e2ee/conv.js waits before opening messages).
+on('hello', (d) => { E2.settling = true; onHello(d).catch((e) => { console.warn('e2ee', e); E2.status = 'unsupported'; E2.support = { ok: false, reason: 'old' }; emit(); }).finally(() => { E2.settling = false; emit(); }); });
 on('e2ee.me', (me) => { E2.me = me; emit(); });
 on('e2ee.devices', (d) => { bundleCache.delete(d.user); if (d.user === userId()) refreshMe(); });
 on('e2ee.asb', () => { fetchAsbBoxes().then(emit, () => {}); });
@@ -251,11 +253,18 @@ async function ownList() {
 }
 const nextOf = async (list, change) => obj.makeList(keys.aik, { u: list.u, ver: list.ver + 1, aik: list.aik, devs: list.devs, arc: list.arc, ...change });
 
-/** Remove a device (another one, or this one when others remain). */
+/**
+ * Remove a device (another one, or this one when others remain). With history on, a new history
+ * epoch starts in the same step, sealed only to the devices that stay, so the removed one can't
+ * open history sent after it (spec 11.7).
+ */
 export async function removeDevice(d) {
-  const { list } = await ownList();
-  const devlist = await nextOf(list, { devs: list.devs.filter((x) => x.d !== d) });
-  await call('e2ee.device.remove', { d, devlist });
+  const { list, prekeys } = await ownList();
+  const devs = list.devs.filter((x) => x.d !== d);
+  const extra = d === dev?.d ? {} : await newEpoch(list, devs, prekeys);
+  const devlist = extra.devlist || await nextOf(list, { devs });
+  await call('e2ee.device.remove', { d, devlist, ...(extra.boxes ? { boxes: extra.boxes, backup: extra.backup } : {}) });
+  if (extra.asb) { await store.putAsb(extra.asb); await loadKeys(extra.asb); }
   if (d === dev?.d) { await forgetLocal(); await deleteStore(userId()).catch(() => {}); E2.status = 'new-device'; E2.device = null; }
   await refreshMe();
 }
@@ -285,6 +294,76 @@ export async function newRecoveryKeyFlow() {
   E2.rk = { text: rk.text, fresh: true };
   E2.rkSaved = false;
   await updateMeta((m) => { m.rk = false; });
+  emit();
+  return rk.text;
+}
+
+// A new history epoch (spec 11.6): a new history key in the ASB, a list naming it, the ASB sealed to
+// each other device that stays, and the backup rewritten. Null parts when history is off.
+async function newEpoch(list, devs, prekeys) {
+  if (!list.arc) return {};
+  const { asb, e } = await backup.addEpoch(await store.getAsb());
+  const devlist = await nextOf(list, { devs, arc: { e, pub: asb.ahk[e].pub, at: Date.now() } });
+  const boxes = await boxesFor(asb, devlist, prekeys);
+  const bk = b64uOf(asb.bk, 32);
+  return { asb, devlist, boxes, backup: await backup.sealBackup(asb, bk, { ver: devlist.ver, aik: devlist.aik }) };
+}
+export const EPOCH_ROTATE = 7 * DAY;
+/** Weekly (and on "my keys may be exposed"): a new history epoch, by the first trusted device online. */
+export async function rotateEpoch() {
+  const run = async () => {
+    const { list, prekeys } = await ownList();
+    if (!list.arc) return false;
+    const x = await newEpoch(list, list.devs, prekeys);
+    try { await call('e2ee.publish', { devlist: x.devlist, boxes: x.boxes, backup: x.backup }); } catch (e) { if (e.code === 'e2ee_conflict') return false; throw e; } // another device won
+    await store.putAsb(x.asb);
+    await loadKeys(x.asb);
+    await refreshMe();
+    return true;
+  };
+  return navigator.locks ? navigator.locks.request(`snug-e2ee:${userId()}`, run) : run();
+}
+async function maybeRotate() {
+  const me = E2.me;
+  if (E2.status !== 'ready' || !me?.hist || !me.epochAt || Date.now() - me.epochAt < EPOCH_ROTATE) return;
+  if (me.devices.find((x) => x.d === dev?.d)?.state !== 'trusted') return;
+  await rotateEpoch();
+}
+
+/**
+ * Reset (spec 11.8): no device and no recovery key, or "lost or stolen". A new account key and
+ * history key; old encrypted history can't be opened any more; every contact sees that this
+ * person's safety number changed. Throws an Error with code 'reauth' when the password is needed.
+ */
+export async function resetEncryption({ password } = {}) {
+  const rk = await newRecoveryKey();
+  const nd = await makeDevice();
+  const asb = await backup.newAsb(userId());
+  const bk = await deriveBackupKey(rk.raw);
+  asb.bk = b64u(bk);
+  const k = await backup.loadAsb(asb);
+  const cur = E2.me?.ver || 0;
+  const devlist = await obj.makeList(k.aik, { u: userId(), ver: cur + 1, aik: k.aikPub, devs: [entryOf(nd)], arc: { e: 1, pub: asb.ahk[1].pub, at: Date.now() } });
+  const m = backup.emptyMeta();
+  const r = await call('e2ee.reset', {
+    devlist, device: publicOf(nd), prekey: nd.prekeys[1].signed,
+    backup: await backup.sealBackup(asb, bk, { ver: devlist.ver, aik: k.aikPub }),
+    meta: await backup.sealMeta(m, k.sync, { u: userId(), ver: 1 }),
+    ...(password ? { password } : {}),
+  });
+  nd.trusted = true;
+  dev = nd;
+  await save();
+  await store.putAsb(asb);
+  meta = m; metaVer = 1;
+  E2.me = r.me;
+  E2.device = { d: dev.d, label: dev.label, kind: dev.kind };
+  E2.notice = null;
+  await bindHere();
+  await loadKeys(asb);
+  await store.putSecret('rk', rk.text);
+  E2.rk = { text: rk.text, fresh: true };
+  E2.rkSaved = false;
   emit();
   return rk.text;
 }

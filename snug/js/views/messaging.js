@@ -8,7 +8,7 @@ import {
   openLightbox, markRead, setPref,
 } from '../store.js';
 import { call, on, sendMessage, uploadFile } from '../server.js';
-import { isEncrypted, copyEncryptedFile } from '../e2ee/conv.js'; // end-to-end encrypted conversations
+import { isEncrypted, copyEncryptedFile, scheduleEncrypted, SCHEDULE_MAX } from '../e2ee/conv.js'; // end-to-end encrypted conversations
 import { COPY as E2COPY } from '../lib/e2ee/copy.js';
 import { can, canPost } from '../lib/perms.js';
 import { roomIds, isThread } from '../lib/attention.js';
@@ -425,7 +425,8 @@ function ScheduleModal({ conv, text, replyTo, done }) {
     if (!body.trim()) return setError('Write the message first.');
     if (!Number.isFinite(at) || at < Date.now() + 60_000) return setError('Pick a time at least a minute from now.');
     setBusy(true);
-    call('sched.create', { conv, text: body.trim(), at, ...(replyTo ? { replyTo } : {}) }).then(() => {
+    const enc = isEncrypted(conv); // sealed on this device now (js/e2ee/conv.js)
+    (enc ? scheduleEncrypted(conv, body.trim(), at, replyTo) : call('sched.create', { conv, text: body.trim(), at, ...(replyTo ? { replyTo } : {}) })).then(() => {
       closeModal();
       done?.();
       toast(`Scheduled for ${fmtFull(at)}`);
@@ -434,25 +435,26 @@ function ScheduleModal({ conv, text, replyTo, done }) {
   };
   const cancel = (s) => call('sched.cancel', { id: s.id }).then((r) => {
     if (r.gone) return;
-    toast('Scheduled message cancelled', { undo: () => call('sched.create', { conv: s.conv, text: s.text, at: Math.max(s.at, Date.now() + 61_000) }).catch(offlineSay) });
+    const again = Math.max(s.at, Date.now() + 61_000);
+    toast('Scheduled message cancelled', { undo: () => (s.m ? (s.m.enc === true ? scheduleEncrypted(s.conv, s.m.text, again, s.replyTo) : Promise.reject(new Error('That encrypted message can’t be brought back on this device.'))) : call('sched.create', { conv: s.conv, text: s.text, at: again })).catch(offlineSay) });
   }, offlineSay);
   return html`<form class="form sched-form" onSubmit=${submit} novalidate>
     <h2>Schedule a message</h2>
-    <p class="modal-lead">Snug sends it for you at the time you pick, even if you’re away. Up to 30 days ahead.</p>
+    <p class="modal-lead">Snug sends it for you at the time you pick, even if you’re away. ${isEncrypted(conv) ? 'Up to 14 days ahead in encrypted conversations; if the group changes before then, it isn’t sent.' : 'Up to 30 days ahead.'}</p>
     <textarea class="field" rows="3" maxlength="4000" data-autofocus aria-label="Message" placeholder="What should it say?" value=${body} onInput=${(e) => { setBody(e.target.value); setError(''); }}></textarea>
     <div class="chips" role="group" aria-label="Quick times">
       ${quickTimes().map(([label, ts]) => html`<button type="button" key=${label} class=${`chip${localInput(ts) === when ? ' on' : ''}`} aria-pressed=${String(localInput(ts) === when)} onClick=${() => setWhen(localInput(ts))}>${label}</button>`)}
     </div>
     <div>
       <label class="label" for="sched-at">Send at</label>
-      <input id="sched-at" class="field" type="datetime-local" value=${when} min=${localInput(Date.now() + 60_000)} max=${localInput(Date.now() + 30 * 86_400_000)} onInput=${(e) => { setWhen(e.target.value); setError(''); }} />
+      <input id="sched-at" class="field" type="datetime-local" value=${when} min=${localInput(Date.now() + 60_000)} max=${localInput(Date.now() + (isEncrypted(conv) ? SCHEDULE_MAX : 30 * 86_400_000))} onInput=${(e) => { setWhen(e.target.value); setError(''); }} />
     </div>
     ${error && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${error}</div>`}
     ${here.length > 0 && html`<div class="sched-list">
       <h3 class="label">Waiting here</h3>
       ${here.map((s) => html`<div class="sched-item" key=${s.id}>
         <${Icon} name="clock" size=${16} />
-        <span class="grow"><span class="sched-when">${fmtFull(s.at)}</span><span class="trunc sched-text">${s.text}</span></span>
+        <span class="grow"><span class="sched-when">${fmtFull(s.at)}</span><span class="trunc sched-text">${s.m ? (s.m.enc === true ? s.m.text : 'Encrypted message') : s.text}</span></span>
         <button type="button" class="btn sm quiet" aria-label=${`Cancel the message scheduled for ${fmtFull(s.at)}`} onClick=${() => cancel(s)}>Cancel</button>
       </div>`)}
     </div>`}

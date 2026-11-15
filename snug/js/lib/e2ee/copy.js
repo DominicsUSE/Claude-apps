@@ -63,6 +63,12 @@ export const COPY = {
   serverSees: 'The server still sees who talks to whom, when, and how much; group names, reactions and pictures of groups; and which devices you have.',
   roomsNot: 'Room messages are stored on this server and can be read by whoever runs it and by moderators. They aren’t end-to-end encrypted.',
 
+  resetTitle: 'Reset end-to-end encryption',
+  resetBody: 'For when you’ve lost every device and your recovery key, or a device was stolen. You get new keys and a new recovery key. Messages encrypted before can’t be read any more, on any device. Everyone you talk to sees that your safety number changed.',
+  resetStolen: 'If a device was stolen, remove it first if you can, then reset, then sign out everywhere (Settings, Account): a stolen device that’s still trusted holds your account key.',
+  resetAction: 'Reset encryption',
+  resetDone: 'Encryption was reset. Save your new recovery key.',
+
   // Conversations (spec 16.4)
   convOn: 'End-to-end encrypted',
   convPanel: 'Messages and attachments are encrypted on your device and can be read only on the devices of the people here. This server stores them encrypted. It still sees who talks to whom, when, and how much. Group names, reactions and pictures of the group aren’t encrypted.',
@@ -80,6 +86,7 @@ export const COPY = {
   cantDecryptFile: 'Couldn’t decrypt this attachment.',
   locked: 'Encrypted message. Approve this browser from another device, or enter your recovery key, to read it.',
   encryptedQuote: 'Encrypted message',
+  gifNote: 'The server sees what you search for and which GIF you pick. The GIF you send is encrypted on your device.',
   previewsOff: 'Link previews aren’t made in encrypted conversations.',
   pollsOff: 'Polls aren’t available in encrypted conversations yet.',
   rollOff: '/roll isn’t available in encrypted conversations: a fair roll needs the server to see the result.',
@@ -88,6 +95,7 @@ export const COPY = {
   gate: (name) => `${name}’s safety number changed since you verified it. Compare it again, or send anyway.`,
   sendAnyway: 'I understand, send anyway',
   verifyAgain: 'Verify again',
+  downgraded: 'This server says this conversation isn’t encrypted any more. Snug won’t send here in plain text.',
   p2p: (name) => `Encrypted between your PC and ${name}’s PC. Stored readable on each PC.`,
   forwardPlain: (where) => `This will post the message unencrypted in ${where}.`,
   why: { moved: 'it was moved from where it was sent', signature: 'its signature didn’t check out', 'no key': 'this device has no key for it', 'unknown device': 'it came from a device Snug can’t check', ciphertext: 'it was changed', author: 'its author doesn’t match', malformed: 'it’s damaged', body: 'its content doesn’t match its header', revision: 'it’s an older version', error: 'something went wrong' },

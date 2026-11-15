@@ -3,11 +3,11 @@
 // words about what it protects and what it doesn't. Listed only when this
 // server offers encryption or the account already has keys.
 import { html, useState } from '../../vendor/preact-htm.js';
-import { S, openModal, toast, subscribe } from '../store.js';
+import { S, openModal, closeModal, toast, subscribe } from '../store.js';
 import { Icon } from '../ui/icons.js';
 import { Switch } from '../ui/kit.js';
 import { Confirm } from './modals.js';
-import { E2, removeDevice, setHistory, newRecoveryKeyFlow, deviceKind } from '../e2ee/manager.js';
+import { E2, removeDevice, setHistory, newRecoveryKeyFlow, deviceKind, resetEncryption } from '../e2ee/manager.js';
 import { COPY } from '../lib/e2ee/copy.js';
 import { SetupSheet, RecoveryKeyScreen } from './e2ee-setup.js';
 import { LinkScreen, RecoverScreen } from './e2ee-link.js';
@@ -61,6 +61,39 @@ function Devices({ Row }) {
   </div>`;
 }
 
+// Reset (spec 11.8): said plainly before it happens; asks for the password when the sign-in is old.
+function ResetSheet() {
+  const [busy, setBusy] = useState(false);
+  const [needPw, setNeedPw] = useState(false);
+  const [password, setPassword] = useState('');
+  const [err, setErr] = useState('');
+  const go = async (e) => {
+    e?.preventDefault();
+    setBusy(true); setErr('');
+    try {
+      await resetEncryption({ password: needPw ? password : undefined });
+      toast(COPY.resetDone);
+      openModal(RecoveryKeyScreen, {});
+    } catch (x) {
+      if (x.code === 'reauth') setNeedPw(true);
+      setErr(failText(x));
+    }
+    setBusy(false);
+  };
+  return html`<form class="form e2-sheet" onSubmit=${go} aria-labelledby="e2-reset-title">
+    <h2 id="e2-reset-title">${COPY.resetTitle}</h2>
+    <p class="modal-lead">${COPY.resetBody}</p>
+    <p class="hint">${COPY.resetStolen}</p>
+    ${needPw && html`<div class="field-group"><label class="label" for="e2-reset-pw">Your password</label>
+      <input id="e2-reset-pw" class="field" type="password" autocomplete="current-password" data-autofocus value=${password} onInput=${(x) => setPassword(x.target.value)} /></div>`}
+    ${err && html`<p class="err" role="alert">${err}</p>`}
+    <div class="modal-foot">
+      <button type="button" class="btn" onClick=${closeModal}>Cancel</button>
+      <button type="submit" class="btn danger" disabled=${busy || (needPw && !password)} aria-busy=${String(busy)}>${busy ? 'Resetting…' : COPY.resetAction}</button>
+    </div>
+  </form>`;
+}
+
 function EncryptionPage({ Row }) {
   const [busy, setBusy] = useState(false);
   const ready = E2.status === 'ready';
@@ -85,6 +118,9 @@ function EncryptionPage({ Row }) {
         <${Switch} on=${hist} label=${COPY.history} disabled=${busy} onChange=${flip} />
       <//>`}
     ${(ready || E2.status === 'pending' || E2.status === 'new-device') && html`<${Devices} Row=${Row} />`}
+    ${(ready || E2.status === 'pending' || E2.status === 'new-device') && html`<${Row} label=${COPY.resetTitle} hint=${COPY.resetBody} top>
+      <button class="btn danger" onClick=${() => openModal(ResetSheet, {})}>${COPY.resetAction}</button>
+    <//>`}
     <div class="detail e2-limits">
       <h2 class="e2-h2">What it does and doesn’t do</h2>
       <ul>
