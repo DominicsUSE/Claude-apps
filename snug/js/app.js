@@ -449,6 +449,13 @@ async function boot() {
   emit();
 }
 boot();
+// 0.12: the service worker keeps the app's own files, so Snug opens without a
+// connection (sw.js). Not in the desktop app, which always has its own server.
+if ('serviceWorker' in navigator && window.isSecureContext && !window.snugApp) {
+  navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(() => navigator.serviceWorker.ready)
+    .then((reg) => reg.active?.postMessage({ t: 'snug:shell' })) // bring the copy up to date with this server's version
+    .catch(() => { /* no worker: Snug still works, it just can't open offline */ });
+}
 // p2p: the link host (js/peer.js) loads once, when the server says this is the PC's P2P owner.
 let peerHost = null;
 onServer('open', () => { if (S.p2p?.enabled && S.p2p.owner && !peerHost) peerHost = import('./peer.js'); });

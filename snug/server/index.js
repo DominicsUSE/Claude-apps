@@ -8,6 +8,7 @@ import { join, normalize, extname, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './db.js';
 import { createExpiry } from './expiry.js'; // 0.12: disappearing messages
+import { createShell } from './shell.js'; // 0.12: ETag, gzip and the offline app shell list
 import { createModel, newId } from './model.js';
 import { createHub, ringMsFrom, voiceGraceFrom } from './hub.js';
 import { AUDIO_TYPES, VIDEO_TYPES, uploadType, fileKind, parseRange, createMediaHttp, createFileSweep } from './media.js'; // sec-authz: createFileSweep // voice messages, GIFs, video
@@ -280,7 +281,7 @@ export async function startServer({
     try {
       if (path.startsWith('/api/')) return await api(req, res, path, url);
       if (req.method !== 'GET' && req.method !== 'HEAD') return error(res, 405, 'Method not allowed');
-      return await staticFile(res, path, httpsReq(req));
+      return await staticFile(res, path, httpsReq(req), req);
     } catch (e) {
       if (e.status) return error(res, e.status, e.status === 413 ? 'That’s too large.' : 'That request isn’t valid.');
       log('error', req.method, path, e); // sec-web W5: redacted by log() (webhook tokens, control characters)
@@ -289,7 +290,15 @@ export async function startServer({
     }
   }
 
-  async function staticFile(res, path, https = false) {
+  // 0.12: ETags, gzip, and the list of the app's files for sw.js (server/shell.js).
+  const shell = createShell({ root: ROOT, dirs: PUBLIC.filter((p) => p.endsWith('/') && p !== 'docs/') });
+  async function staticFile(res, path, https = false, req = null) {
+    if (path === '/shell.json') {
+      headers(res, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache' });
+      res.writeHead(200);
+      res.end(JSON.stringify(shell.shellList()));
+      return undefined;
+    }
     // /join/<code> and every other app path load the app itself.
     // Web addresses always use forward slashes, whatever this machine's file paths look like.
     // /m/<conversation>/<message> is a message link (js/app.js opens it after sign-in).
@@ -302,7 +311,7 @@ export async function startServer({
     let info;
     try { info = await stat(file); } catch { return error(res, 404, 'Not found'); }
     if (!info.isFile()) return error(res, 404, 'Not found');
-    headers(res, {
+    const extra = {
       'Content-Type': TYPES[extname(file)] || 'application/octet-stream',
       'Cache-Control': 'no-cache',
       ...(rel === 'index.html' ? {
@@ -311,7 +320,9 @@ export async function startServer({
       } : {}),
       ...(extname(file) === '.svg' ? { 'Content-Security-Policy': SVG_CSP } : {}), // sec-web W6
       ...(rel === 'sw.js' ? { 'Service-Worker-Allowed': '/', 'Content-Security-Policy': WORKER_CSP } : {}), // push notifications
-    });
+    };
+    if (req && await shell.send(req, res, file, info, headers, extra)) return undefined; // 304, or gzipped
+    if (!req) headers(res, extra);
     await sendFile(res, file); // sec-web W1: a file gone since the stat is a 404, not a crash
     return undefined;
   }

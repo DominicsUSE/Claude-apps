@@ -258,8 +258,21 @@ Real, and covered by tests with separate users:
   12-person call, and calls on real phones and networks. Calls respect
   muting, Focused, quiet hours and blocks (a blocked person can't call you,
   and a group call never rings someone who blocked the caller).
-- Offline: the app opens from a copy on the device, what you write waits,
-  and it sends once when the connection is back.
+- Offline: once Snug has been opened online in a browser, its service worker
+  (`sw.js`) keeps the app's own files (page, scripts, styles, fonts, icons),
+  so Snug opens without a connection and shows the messages this device
+  already had (the last 40 or so per conversation). What you write waits and
+  sends once when the connection is back; edits and reactions made offline
+  wait too. Searching offline covers only what is on the device. Nothing
+  from the API (messages, files, sign-in) is kept by the worker, and the
+  page is always fetched fresh when the server can be reached. It needs
+  HTTPS (or `localhost`); on plain HTTP over a network the browser offers no
+  service worker, so Snug can't open offline there. The desktop app doesn't
+  use it (it has its own server).
+- Install on a phone: open Snug in the phone's browser and choose *Install*
+  or *Add to Home Screen*. It then opens in its own window with the Snug
+  icon. On iPhone and iPad (Safari, Share > Add to Home Screen), push
+  notifications only work for Snug added this way, iOS 16.4 or later.
 - Voice messages: hold the microphone to record (or tap to start and tap
   Send), up to 5 minutes, with a live timer and level meter; Esc (or sliding
   left on a phone) cancels. They play in a compact row with a waveform, seeking

@@ -266,3 +266,87 @@ test('disappearing: a database from before 0.12 gains the column and keeps its m
     again.close();
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
+
+// ---------- PWA: validators, compression, the shell list and the manifest ----------
+import { request } from 'node:http';
+import { gunzipSync } from 'node:zlib';
+import { readFileSync, existsSync, statSync } from 'node:fs';
+const raw = (path, headers = {}) => new Promise((resolve, reject) => {
+  const req = request(`${base}${path}`, { headers }, (res) => {
+    const chunks = [];
+    res.on('data', (c) => chunks.push(c));
+    res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
+  });
+  req.on('error', reject);
+  req.end();
+});
+const ROOT = new URL('../', import.meta.url);
+
+test('static files: an ETag, 304 when unchanged, gzip when asked, never for API replies', async () => {
+  const file = readFileSync(new URL('js/app.js', ROOT));
+  const first = await raw('/js/app.js');
+  assert.equal(first.status, 200);
+  assert.ok(first.headers.etag, 'an ETag');
+  assert.equal(first.headers['cache-control'], 'no-cache', 'still checked every time, so a new version shows at once');
+  assert.deepEqual(first.body, file);
+  const again = await raw('/js/app.js', { 'if-none-match': first.headers.etag });
+  assert.equal(again.status, 304);
+  assert.equal(again.body.length, 0);
+  const zipped = await raw('/js/app.js', { 'accept-encoding': 'gzip, deflate, br' });
+  assert.equal(zipped.headers['content-encoding'], 'gzip');
+  assert.match(zipped.headers.vary || '', /accept-encoding/i);
+  assert.ok(zipped.body.length < file.length / 2);
+  assert.deepEqual(gunzipSync(zipped.body), file);
+  // The page itself too, with its security headers kept.
+  const page = await raw('/', { 'accept-encoding': 'gzip' });
+  assert.equal(page.headers['content-encoding'], 'gzip');
+  assert.match(page.headers['content-security-policy'], /script-src 'self'/);
+  // Fonts and images are already compressed: sent as they are.
+  assert.equal((await raw('/fonts/inter-latin.woff2', { 'accept-encoding': 'gzip' })).headers['content-encoding'], undefined);
+  // API replies are never compressed or validated here (they can hold secrets: BREACH).
+  const api = await raw('/api/me', { 'accept-encoding': 'gzip' });
+  assert.equal(api.headers['content-encoding'], undefined);
+  assert.equal(api.headers.etag, undefined);
+});
+
+test('the app shell list: every file the app needs offline, versioned, and nothing private', async () => {
+  const r = await fetch(`${base}/shell.json`);
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('cache-control'), 'no-cache');
+  const shell = await r.json();
+  assert.match(shell.version, /^\d+\.\d+\.\d+-[a-z0-9]{8,}$/);
+  for (const f of ['/', '/js/app.js', '/js/store.js', '/css/tokens.css', '/vendor/preact-htm.js', '/fonts/inter-latin.woff2', '/brand/manifest.json']) assert.ok(shell.files.includes(f), f);
+  assert.equal(shell.files.some((f) => /^\/(api|ws|data|server|docs)\b/.test(f) || f.includes('..')), false);
+  assert.equal(shell.files.includes('/sw.js'), false, 'the worker is never cached by itself');
+});
+
+// PNG width and height from the IHDR chunk.
+const pngSize = (buf) => [buf.readUInt32BE(16), buf.readUInt32BE(20)];
+test('the web app manifest: installable on phones (id, scope, standalone, icons incl. maskable, screenshots, colours)', async () => {
+  const r = await fetch(`${base}/brand/manifest.json`);
+  assert.equal(r.status, 200);
+  const m = await r.json();
+  assert.equal(m.id, '/');
+  assert.equal(m.scope, '/');
+  assert.equal(m.start_url, '/');
+  assert.equal(m.display, 'standalone');
+  assert.equal(m.lang, 'en');
+  assert.match(m.description, /calm place/i);
+  for (const k of ['theme_color', 'background_color']) assert.match(m[k], /^#[0-9A-Fa-f]{6}$/, k);
+  const pngs = m.icons.filter((i) => i.type === 'image/png');
+  for (const want of ['192x192', '512x512']) assert.ok(pngs.some((i) => i.sizes === want && (i.purpose || 'any').includes('any')), `an ${want} icon`);
+  assert.ok(pngs.some((i) => i.sizes === '512x512' && i.purpose === 'maskable'), 'a maskable icon');
+  for (const i of pngs) {
+    const res = await fetch(base + i.src);
+    assert.equal(res.status, 200, i.src);
+    assert.deepEqual(pngSize(Buffer.from(await res.arrayBuffer())).join('x'), i.sizes, i.src);
+  }
+  assert.ok(m.screenshots.some((s) => s.form_factor === 'narrow'), 'a phone screenshot');
+  assert.ok(m.screenshots.some((s) => s.form_factor === 'wide'), 'a wide screenshot');
+  for (const s of m.screenshots) {
+    const res = await fetch(base + s.src);
+    assert.equal(res.status, 200, s.src);
+    assert.equal(pngSize(Buffer.from(await res.arrayBuffer())).join('x'), s.sizes, s.src);
+    assert.ok(s.label, 'screenshots say what they show');
+  }
+});

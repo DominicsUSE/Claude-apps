@@ -1,14 +1,25 @@
 {
+  "id": "/",
   "name": "Snug",
   "short_name": "Snug",
-  "description": "A place with someone in it.",
+  "description": "A calm place for your people: houses, rooms, threads and voice.",
+  "lang": "en",
+  "dir": "ltr",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#0E0F10",
   "theme_color": "#0E0F10",
+  "categories": ["social"],
   "icons": [
-    { "src": "/brand/app-icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/brand/app-icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "/brand/app-icon.svg", "sizes": "any", "type": "image/svg+xml" }
+    { "src": "/brand/app-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/app-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/app-icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/brand/app-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "screenshots": [
+    { "src": "/brand/screens/phone.png", "sizes": "390x844", "type": "image/png", "form_factor": "narrow", "label": "Home on a phone: who was around and what is going on" },
+    { "src": "/brand/screens/wide.png", "sizes": "1280x800", "type": "image/png", "form_factor": "wide", "label": "A room in a house, with a thread and replies" }
   ]
 }

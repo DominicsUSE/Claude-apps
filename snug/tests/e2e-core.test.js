@@ -140,3 +140,47 @@ test('disappearing messages: set from the header, a line says so, the timer show
   await robin.context().close();
   await ines.context().close();
 });
+
+test('PWA: the app shell is kept by the service worker and opens with no connection, showing this device’s copy', async () => {
+  const page = await person('robin');
+  // The worker installs and keeps every file of the app.
+  await page.waitForFunction(() => navigator.serviceWorker?.controller || navigator.serviceWorker?.ready.then(() => true), null, { timeout: 15000 });
+  await page.waitForFunction(async () => (await caches.keys()).includes('snug-shell-v1') && !!(await (await caches.open('snug-shell-v1')).match('/__version')), null, { timeout: 30000, polling: 250 });
+  const kept = await page.evaluate(async () => (await (await caches.open('snug-shell-v1')).keys()).map((r) => new URL(r.url).pathname));
+  assert.ok(kept.includes('/') && kept.includes('/js/app.js') && kept.includes('/css/tokens.css'));
+  assert.equal(kept.some((p) => p.startsWith('/api/')), false, 'nothing from the API is kept');
+  await go(page, 'Glaze lab');
+  await msg(page, 'pyrometer').first().waitFor();
+  // Wait for the device copy of the data to be written (it's throttled).
+  await page.waitForFunction(() => !!localStorage.getItem('snug.cache'));
+  await page.waitForTimeout(2500);
+  // No connection: reload. The page, scripts and styles come from the worker's copy,
+  // the messages from the device copy, and Snug says it can't reach the server.
+  await page.context().setOffline(true);
+  await page.reload();
+  await page.waitForSelector('.nav', { timeout: 15000 });
+  await msg(page, 'pyrometer').first().waitFor();
+  await page.waitForFunction(() => window.snug.S.conn.socket !== 'open');
+  assert.match(await page.locator('.main').innerText(), /You.re offline/);
+  await page.context().setOffline(false);
+  await page.waitForFunction(() => window.snug.S.conn.socket === 'open', null, { timeout: 30000 });
+  await page.context().close();
+});
+
+test('PWA: the manifest is linked and complete enough to install (checked in the browser)', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  await page.goto(url);
+  const m = await page.evaluate(async () => {
+    const href = document.querySelector('link[rel=manifest]').href;
+    return (await fetch(href)).json();
+  });
+  assert.equal(m.display, 'standalone');
+  assert.ok(m.icons.some((i) => i.purpose === 'maskable'));
+  assert.ok(m.screenshots.some((s) => s.form_factor === 'narrow'));
+  // Chromium's own manifest parser: no errors for this manifest.
+  const cdp = await ctx.newCDPSession(page);
+  const r = await cdp.send('Page.getAppManifest');
+  assert.deepEqual(r.errors, [], JSON.stringify(r.errors));
+  await ctx.close();
+});
