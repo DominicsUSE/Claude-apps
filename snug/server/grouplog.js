@@ -16,7 +16,9 @@ export const GID = /^dg_[a-z2-7]{26}$/;
 export const OP_ID = /^o_[a-z0-9]{16}$/;
 export const ITEM_ID = /^m_[a-z0-9]{8,40}$/;
 const OP_TYPES = new Set(['create', 'add', 'remove', 'leave', 'rename', 'icon']);
-const ITEM_KINDS = new Set(['msg', 'edit', 'delete', 'restore', 'react']);
+// pin and ttl: 0.12 (a 0.11 PC drops items of a kind it doesn't know, and is never sent a ttl).
+const ITEM_KINDS = new Set(['msg', 'edit', 'delete', 'restore', 'react', 'pin', 'ttl']);
+const TTLS = [0, 3_600_000, 86_400_000, 7 * 86_400_000, 30 * 86_400_000];
 const isUid = (s) => typeof s === 'string' && UID.test(s);
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 
@@ -61,11 +63,14 @@ export function itemShape(item) {
   const d = item.d;
   const mid = (v) => typeof v === 'string' && ITEM_ID.test(v);
   switch (item.k) {
+    // t (0.12): a thread reply names its thread's first message.
     case 'msg': return typeof d.text === 'string' && d.text.length <= 4000 && (d.replyTo === undefined || mid(d.replyTo))
-      && (d.files === undefined || (Array.isArray(d.files) && d.files.length <= 6));
+      && (d.files === undefined || (Array.isArray(d.files) && d.files.length <= 6)) && (d.t === undefined || mid(d.t));
     case 'edit': return mid(d.id) && typeof d.text === 'string' && d.text.length <= 4000;
     case 'delete': case 'restore': return mid(d.id);
     case 'react': return mid(d.id) && typeof d.emoji === 'string' && d.emoji.length <= 32 && typeof d.on === 'boolean';
+    case 'pin': return mid(d.id) && typeof d.on === 'boolean';
+    case 'ttl': return TTLS.includes(d.ttl);
     default: return false;
   }
 }

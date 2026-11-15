@@ -35,6 +35,12 @@ const MAX_ATTACH = 10 * 1024 * 1024;
 const MAX_PIC = 2 * 1024 * 1024;
 const FILE_ID = /^f_[a-z0-9]{8,40}$/;
 const MSG_ID = /^m_[a-z0-9]{8,40}$/;
+// 0.12: what this PC understands beyond 0.11, told to friends in its signed
+// profile. A friend's PC is only sent these frames once its profile lists them
+// (a 0.11 PC refuses a frame it doesn't know): thread replies over the link,
+// pins, and the disappearing-messages timer.
+export const PEER_CAPS = ['thread', 'pin', 'ttl'];
+const TTLS = [0, 3_600_000, 86_400_000, 7 * 86_400_000, 30 * 86_400_000];
 const CALL_ID = /^call_[a-z0-9]{8,40}$/;
 const HASH = /^[A-Za-z0-9_-]{43}$/;
 // A registry username as stored there (js/lib/usernames.js); "1" and "a" are the owner's one-letter names.
@@ -49,6 +55,8 @@ const rid = () => b64u(randomBytes(12)).replace(/[-_]/g, 'x').toLowerCase();
 
 export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {} }) {
   migratePeer(db);
+  // 0.12: each friend's capabilities, from their profile.
+  if (!db.all('PRAGMA table_info(peers)').some((c) => c.name === 'caps')) db.run('ALTER TABLE peers ADD COLUMN caps TEXT');
   const identity = createIdentity({ dataDir: opts.dataDir ?? ':memory:', keyStore: opts.keyStore, db });
   const reg = createRegClient({ url: opts.registryUrl, identity, fetch: opts.fetch });
   const enabled = !!opts.registryUrl;
@@ -67,6 +75,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     missing: () => false,
     serveMissing: async () => false,
     stats: () => ({ ...stats, outbox: 0, held: 0 }),
+    capsOf: () => [],
   };
   if (!enabled) return P;
 
@@ -312,6 +321,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       decoration: r.decoration || null, decorationHue: Number.isInteger(r.decoration_hue) ? r.decoration_hue : null,
       nameStyle: json(r.name_style, null), profileColors: json(r.profile_colors, null),
       avatar, banner: await media(r.banner),
+      caps: PEER_CAPS, // 0.12: a 0.11 PC ignores fields it doesn't know
     };
   }
   const friendShadows = () => db.all("SELECT f.other AS user FROM friends f JOIN users u ON u.id = f.other WHERE f.user = ? AND f.state = 'friends' AND u.remote = 1", owner()).map((r) => r.user);
@@ -375,6 +385,9 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     const mediaOk = (m, cap) => (m && HASH.test(m.hash) && Number.isSafeInteger(m.size) && m.size > 0 && m.size <= cap && PIC_TYPES.includes(m.type) ? { hash: m.hash, size: m.size, type: m.type, anim: !!m.anim } : null);
     db.run('UPDATE peers SET profile_kver = ?, profile_ver = ?, profile_sig = ?, media = ? WHERE uid = ?',
       snap.kver, snap.ver, d.sig, JSON.stringify({ avatar: mediaOk(pr.avatar, MAX_PIC), banner: mediaOk(pr.banner, MAX_PIC) }), uid);
+    // 0.12: what their PC understands (none listed: a 0.11 PC).
+    const caps = Array.isArray(pr.caps) ? [...new Set(pr.caps.filter((x) => typeof x === 'string' && /^[a-z0-9.]{1,24}$/.test(x)))].slice(0, 32) : [];
+    db.run('UPDATE peers SET caps = ? WHERE uid = ?', JSON.stringify(caps), uid);
     stats.profileApplied++;
     hub.userChanged(shadow);
     // A new username: believed only if the registry agrees (section 6.2).
@@ -495,6 +508,18 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     ack();
   }
   const asShadow = (shadow) => ({ user: shadow, ws: null, peer: true });
+  // 0.12: a friend's capabilities (tests can pretend a PC is older with _setCaps).
+  const capsOverride = new Map();
+  const capsOf = (uid) => (capsOverride.has(uid) ? capsOverride.get(uid) : json(peerOf(uid)?.caps, []) || []);
+  const can = (shadow, cap) => !!shadow && capsOf(uidOf(shadow)).includes(cap);
+  // The conversation a thread hangs off, so a thread reply goes where its conversation goes.
+  const threadParent = (conv) => (typeof conv === 'string' && conv.startsWith('t:') ? (M.thread(conv)?.conv || M.liveMsg(conv.slice(2))?.conv || null) : null);
+  // A friend's message, edit or reaction lands in the thread its message is in, if it's one of this conversation's.
+  const convFor = (dm, id) => {
+    const row = typeof id === 'string' ? M.msg(id) : null;
+    if (row && row.conv !== dm && row.conv.startsWith('t:') && M.thread(row.conv)?.conv === dm) return row.conv;
+    return dm;
+  };
   const KNOCKS = {
     'friend.request': async (from) => {
       const shadow = shadowId(from);
@@ -591,16 +616,33 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       if (!isFriend(shadow)) fail('Not friends.');
       if (typeof d.id !== 'string' || !MSG_ID.test(d.id)) fail('Bad message id.');
       const dm = ensureDm(uid);
-      const files = acceptFiles(uid, dm, d.files);
+      // 0.12: a thread reply names its thread's first message (t). If that message isn't here, it
+      // lands in the conversation as a reply to it, or as a plain message.
+      const root = typeof d.t === 'string' && MSG_ID.test(d.t) ? M.liveMsg(d.t) : null;
+      const conv = root && root.conv === dm && !root.sys ? `t:${root.id}` : dm;
+      let replyTo = typeof d.replyTo === 'string' ? d.replyTo : null;
+      if (conv !== dm && replyTo === d.t) replyTo = null;
+      if (conv === dm && !replyTo && root?.conv === dm) replyTo = root.id;
+      const files = acceptFiles(uid, conv, d.files);
       ops['msg.send']({ ...asShadow(shadow), ts: Math.min(ts, Date.now() + 60_000) }, {
-        conv: dm, id: d.id, text: typeof d.text === 'string' ? d.text : '', files, ...(typeof d.replyTo === 'string' ? { replyTo: d.replyTo } : {}),
+        conv, id: d.id, text: typeof d.text === 'string' ? d.text : '', files, ...(replyTo ? { replyTo } : {}),
       });
       if (files.length) queueMicrotask(() => fetchPending(uid));
     },
-    'dm.edit': (uid, d) => ops['msg.edit'](asShadow(shadowId(uid)), { conv: dmIdFor(myUid(), uid), id: d.id, text: d.text }),
-    'dm.delete': (uid, d) => ops['msg.delete'](asShadow(shadowId(uid)), { conv: dmIdFor(myUid(), uid), id: d.id }),
-    'dm.restore': (uid, d) => ops['msg.restore'](asShadow(shadowId(uid)), { conv: dmIdFor(myUid(), uid), id: d.id }),
-    'dm.react': (uid, d) => ops.react(asShadow(shadowId(uid)), { conv: dmIdFor(myUid(), uid), id: d.id, emoji: d.emoji, on: d.on === true }),
+    'dm.edit': (uid, d) => ops['msg.edit'](asShadow(shadowId(uid)), { conv: convFor(dmIdFor(myUid(), uid), d.id), id: d.id, text: d.text }),
+    'dm.delete': (uid, d) => ops['msg.delete'](asShadow(shadowId(uid)), { conv: convFor(dmIdFor(myUid(), uid), d.id), id: d.id }),
+    'dm.restore': (uid, d) => ops['msg.restore'](asShadow(shadowId(uid)), { conv: convFor(dmIdFor(myUid(), uid), d.id), id: d.id }),
+    'dm.react': (uid, d) => ops.react(asShadow(shadowId(uid)), { conv: convFor(dmIdFor(myUid(), uid), d.id), id: d.id, emoji: d.emoji, on: d.on === true }),
+    // 0.12, sent only to PCs that list the capability.
+    'dm.pin': (uid, d) => {
+      if (!isFriend(shadowId(uid))) fail('Not friends.');
+      ops[d.on === true ? 'msg.pin' : 'msg.unpin'](asShadow(shadowId(uid)), { conv: dmIdFor(myUid(), uid), id: d.id });
+    },
+    'dm.ttl': (uid, d, ts) => {
+      if (!isFriend(shadowId(uid))) fail('Not friends.');
+      if (!TTLS.includes(d.ttl)) fail('Bad timer.');
+      ops['conv.ttl']({ ...asShadow(shadowId(uid)), ts: Math.min(ts, Date.now() + 60_000) }, { conv: ensureDm(uid), ttl: d.ttl });
+    },
     profile: (uid, d) => applyProfile(uid, d),
   };
   // Attachment metadata from a friend's PC (bytes come later from their PC): local file rows owned by their shadow.
@@ -905,10 +947,13 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
 
   // Messages: applied here as usual, then queued for the friend's PC.
   const sendable = (c, conv) => (mine(c) ? remoteOfDm(conv) : null);
+  // Messages and what happens to them follow their thread's conversation (0.12, bug B3).
+  const sendableMsg = (c, conv) => sendable(c, threadParent(conv) || conv);
   wrap('msg.send', (c, d, base) => {
-    const shadow = sendable(c, d.conv);
+    const shadow = sendableMsg(c, d.conv);
     if (!shadow) {
-      if (guestTouchesRemote(c, remoteOfDm(d.conv) ? [remoteOfDm(d.conv)] : [])) fail('You don’t have access to this conversation.');
+      const r = remoteOfDm(threadParent(d.conv) || d.conv);
+      if (guestTouchesRemote(c, r ? [r] : [])) fail('You don’t have access to this conversation.');
       return base(c, d);
     }
     const fresh = typeof d.id === 'string' && !M.msg(d.id);
@@ -926,7 +971,11 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
           const hash = await blobs.hashOf(row.id);
           files.push({ id: row.id, name: row.name, type: row.type, size: row.size, hash, ...(f.w ? { w: f.w, h: f.h } : {}) });
         }
-        outbox.push(shadow, 'dm.msg', m.id, JSON.stringify({ id: m.id, text: m.text, ...(m.replyTo ? { replyTo: m.replyTo } : {}), ...(files.length ? { files } : {}) }), at);
+        // A thread reply (0.12): its thread's first message goes with it. A PC without threads over the
+        // link (0.11) gets it as a reply to that message instead, so it still reads in context.
+        const root = String(d.conv).startsWith('t:') ? String(d.conv).slice(2) : null;
+        const thread = root ? (can(shadow, 'thread') ? { t: root } : (!m.replyTo ? { replyTo: root } : {})) : {};
+        outbox.push(shadow, 'dm.msg', m.id, JSON.stringify({ id: m.id, text: m.text, ...(m.replyTo ? { replyTo: m.replyTo } : {}), ...thread, ...(files.length ? { files } : {}) }), at);
         const uid = uidOf(shadow);
         if (!links.want(uid) || !links.isUp(uid)) toOwner('msg.state', { conv: d.conv, id: m.id, state: 'waiting' });
       });
@@ -934,7 +983,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     return r;
   });
   const queueKind = (name, kind, pick) => wrap(name, (c, d, base) => {
-    const shadow = sendable(c, d.conv);
+    const shadow = sendableMsg(c, d.conv);
     const r = base(c, d);
     if (shadow) {
       const at = Math.round(reg.now());
@@ -946,6 +995,34 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
   queueKind('msg.delete', 'dm.delete', (d) => ({ id: d.id }));
   queueKind('msg.restore', 'dm.restore', (d) => ({ id: d.id }));
   queueKind('react', 'dm.react', (d) => ({ id: d.id, emoji: d.emoji, on: d.on === true }));
+  // 0.12: pins and the disappearing-messages timer, only to PCs that understand them.
+  const queueIf = (name, cap, kind, pick, refuse) => ops[name] && wrap(name, (c, d, base) => {
+    const shadow = sendable(c, d.conv);
+    if (shadow && !can(shadow, cap) && refuse) fail(refuse(shadow));
+    const r = base(c, d);
+    if (shadow && can(shadow, cap)) {
+      const at = Math.round(reg.now());
+      later(() => { outbox.push(shadow, kind, null, JSON.stringify(pick(d)), at); links.want(uidOf(shadow)); });
+    }
+    return r;
+  });
+  queueIf('msg.pin', 'pin', 'dm.pin', (d) => ({ id: d.id, on: true }));
+  queueIf('msg.unpin', 'pin', 'dm.pin', (d) => ({ id: d.id, on: false }));
+  const OLD_PC = (shadow) => `${M.userRow(shadow)?.name || 'Your friend'}’s Snug needs an update before messages can disappear here. Until then, nothing would be removed on their PC.`;
+  queueIf('conv.ttl', 'ttl', 'dm.ttl', (d) => ({ ttl: d.ttl }), OLD_PC);
+  // The dialog says why it can't be switched on yet (js/views/disappear.js).
+  const baseDmView = M.dmView;
+  M.dmView = (id, viewer) => {
+    const v = baseDmView(id, viewer);
+    const shadow = v && viewer === owner() ? remoteOfDm(id) : null;
+    if (shadow && !can(shadow, 'ttl')) v.ttlBlocked = OLD_PC(shadow);
+    return v;
+  };
+  // Polls don't travel between PCs yet: refused plainly rather than left on one PC (0.12, bug B3).
+  if (ops['poll.create']) wrap('poll.create', (c, d, base) => {
+    if (remoteOfDm(threadParent(d.conv) || d.conv)) fail('Polls with friends on other PCs aren’t available yet.');
+    return base(c, d);
+  });
   wrap('typing', (c, d, base) => {
     const r = base(c, d);
     const shadow = sendable(c, d.conv);
@@ -1227,12 +1304,14 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     stats: () => ({ ...stats, links: links.count(), linksOpened: stats.links, outbox: db.get('SELECT COUNT(*) n FROM peer_outbox').n, held: db.get(`SELECT COUNT(*) n FROM peer_outbox WHERE kind LIKE 'held:%'`).n }),
     // For tests and Track C: the internals that are safe to reach.
     _links: links, _signal: signal, _outbox: outbox, _ensureShadow: ensureShadow, _pushProfile: pushProfile,
+    capsOf, // 0.12: what a friend's PC understands
+    _setCaps: (uid, list) => { if (list === null) capsOverride.delete(uid); else capsOverride.set(uid, list); }, // tests: pretend a PC is older
     // Who is watched changed (Track C's import, groups across PCs).
     friendsChanged: () => watchSoon(),
     // v0.10 B: what server/peergroups.js needs from here.
     _g: {
       hooks: G, DURABLE, EPHEMERAL, owner, myUid, active, isRemote, uidOf, peerOf, isFriend, isContact, blockedEither,
-      ensureShadow, shadowFor, verifyFrom, acceptFiles, fetchPending, later, toOwner, asShadow, outbox, links, online,
+      ensureShadow, shadowFor, verifyFrom, acceptFiles, fetchPending, later, toOwner, asShadow, outbox, links, online, capsOf, threadParent, // capsOf, threadParent: 0.12
       hashOf: (id) => blobs.hashOf(id), now: () => reg.now(), watchSoon, kver: () => Number(self?.kver) || 1,
     },
   });
