@@ -21,6 +21,7 @@ import { createCommunityOps } from './community.js'; // categories, house pictur
 import { createActivitiesOps } from './activities.js'; // whiteboard, games, voice reactions, ring again, who can ring, TURN refresh
 import { createInboxOps } from './inbox.js'; // unread counts, mentions inbox, timed mutes, presence for a while, mutual friends, username change
 import { createDmOps } from './dms.js'; // close, pin, rename, icon, add, leave and remove in direct conversations and groups
+import { createE2eeOps } from './e2ee.js'; // end-to-end encryption: the key directory
 
 // A refusal the person should read. An optional { code, data } goes back to
 // the client with it (the ack's code and data), for refusals a client handles
@@ -1045,6 +1046,7 @@ export function createOps({ db, M, hub }) {
   Object.assign(ops, createCommunityOps({ db, M, hub, fail, ops })); // houses and community (server/community.js)
   Object.assign(ops, createInboxOps({ db, M, hub, fail, ops })); // inbox and notifications (server/inbox.js)
   Object.assign(ops, createDmOps({ db, M, hub, fail, ops })); // managing direct conversations and groups (server/dms.js)
+  Object.assign(ops, createE2eeOps({ db, M, hub, fail, ops, on: !!hub.e2eeOn })); // end-to-end encryption (server/e2ee.js); after dms so its wrappers are outermost
   // Changes made through the ops above go in the house log too (server/safety.js).
   M.auditLate?.();
 

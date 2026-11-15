@@ -11,6 +11,7 @@ import { migratePlaces } from './places.js'; // room overrides, extra roles, for
 import { migrateChat } from './chat.js'; // silent messages, reply mentions, @everyone without the right, dice rolls (server/chat.js)
 import { migrateCommunity } from './community.js'; // pictures, verification, custom links, event covers, spam rules, new permissions (server/community.js)
 import { migrateInbox } from './inbox.js'; // timed mutes, presence for a while, dismissed mentions, held usernames (server/inbox.js)
+import { migrateE2ee } from './e2ee.js'; // end-to-end encryption: key directory and encrypted columns (server/e2ee.js)
 import { migrateDms } from './dms.js'; // closed, pinned and named conversations, group owners and icons (server/dms.js)
 
 const SCHEMA = `
@@ -246,6 +247,7 @@ export function migrate(db) {
   migrateCommunity(db); // houses and community (server/community.js)
   migrateInbox(db); // inbox and notifications (server/inbox.js)
   migrateDms(db); // direct conversations and groups (server/dms.js)
+  migrateE2ee(db); // end-to-end encryption (server/e2ee.js)
 }
 
 // --- Voice options (server/voiceopts.js) ----------------------------------------

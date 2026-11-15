@@ -150,7 +150,7 @@ export async function startServer({
   // sec-web: slow-header and slow-body clients are cut off sooner (Node's defaults are 60 s and 300 s);
   // an idle keep-alive socket is not affected by headersTimeout.
   const server = createServer({ keepAliveTimeout: 65_000, headersTimeout: 20_000, requestTimeout: 120_000, maxHeaderSize: 16 * 1024 }, handle);
-  const hub = createHub({ db, M, server, origins, ice, log, ringMs, voiceGraceMs, ipOf }); // sec-authz: ipOf for the socket rate limit
+  const hub = createHub({ db, M, server, origins, ice, log, ringMs, voiceGraceMs, ipOf, e2ee }); // sec-authz: ipOf for the socket rate limit
   // --- push notifications (server/push.js) ---
   // A new message that needs someone with no Snug open anywhere goes to their devices.
   const push = createPush({ db, M, hub, origins, log, allowLocal: pushAllowLocal });
@@ -186,6 +186,7 @@ export async function startServer({
     db.run('DELETE FROM sessions WHERE expires < ?', Date.now());
     push.prune(); // devices whose sign-in expired stop getting notifications
     peer.housekeep(); // p2p: outbox rows past 30 days, old knock ids
+    hub.e2ee?.sweep(); // end-to-end encryption: expired device requests (server/e2ee.js)
   }, 60_000);
 
   function headers(res, extra = {}) {

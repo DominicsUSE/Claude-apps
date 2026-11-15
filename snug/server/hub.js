@@ -41,7 +41,7 @@ export function callLength(ms) {
   return m ? `${m}m ${r}s` : `${r}s`;
 }
 
-export function createHub({ db, M, server, origins, ice = [], log = () => {}, ringMs = ringMsFrom(), voiceGraceMs = voiceGraceFrom(), ipOf = (req) => req.socket.remoteAddress, maxSockets = MAX_SOCKETS }) {
+export function createHub({ db, M, server, origins, ice = [], log = () => {}, ringMs = ringMsFrom(), voiceGraceMs = voiceGraceFrom(), ipOf = (req) => req.socket.remoteAddress, maxSockets = MAX_SOCKETS, e2ee = false }) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 512 * 1024 });
   const socks = new Map();        // user -> Set<ws>
   const offlineTimers = new Map();
@@ -491,6 +491,7 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
 
   // ICE servers for one person: a list, or (short-lived TURN credentials, server/index.js) a function of who asks.
   hub.iceFor = (u) => (typeof ice === 'function' ? ice(u) : ice);
+  hub.e2eeOn = e2ee; // server/e2ee.js: offer end-to-end encryption setup (SNUG_E2EE)
   const ops = createOps({ db, M, hub });
 
   // Connections
