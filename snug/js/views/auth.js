@@ -18,6 +18,8 @@ import { localNameProblem, NAME_RULES } from '../lib/username-text.js';
 import { TotpStep } from './account.js'; // two-factor sign-in, the second step
 import { KeyAuth } from './keyauth.js'; // v0.12: accounts that need no GitHub account
 import { Tile } from '../ui/kit.js'; // the house's icon in its arch (server/community.js)
+import { ForgotPassword } from './recover.js'; // v0.12: "Forgot your password?" with a recovery key
+import { usePasskeySignIn } from './passkeys.js'; // v0.12: passkey sign-in where the server allows it
 
 function entered(user) {
   S.me = user.id;
@@ -294,6 +296,8 @@ function PasswordAuth({ onGitHub }) {
   const [busy, setBusy] = useState(false);
   const [invite, setInvite] = useState(null);
   const [ticket, setTicket] = useState(null); // two-factor sign-in: the password was right, a code is next
+  const [forgot, setForgot] = useState(false);
+  const pk = usePasskeySignIn(entered);
   const refs = { handle: useRef(null), name: useRef(null), password: useRef(null) };
 
   useEffect(() => {
@@ -337,6 +341,12 @@ function PasswordAuth({ onGitHub }) {
   const described = (field, hint) => [bad(field) && `auth-${field}-err`, hint && `auth-${field}-hint`].filter(Boolean).join(' ') || undefined;
   const isNew = mode === 'new';
 
+  if (forgot) {
+    return html`<div class="auth"><main class="auth-main"><div class="auth-panel" aria-labelledby="auth-title">
+      <div class="auth-brand"><${Lockup} size=${24} /></div>
+      <${ForgotPassword} onDone=${entered} onBack=${() => setForgot(false)} />
+    </div></main></div>`;
+  }
   return html`<div class="auth">
     <main class="auth-main">
       <div class="auth-panel">
@@ -354,7 +364,7 @@ function PasswordAuth({ onGitHub }) {
         <form class="form auth-form" hidden=${!!ticket} onSubmit=${submit} novalidate aria-labelledby="auth-title" aria-busy=${busy ? 'true' : undefined}>
           <div class="auth-field">
             <label class="label" for="auth-handle">Username</label>
-            <input id="auth-handle" ref=${refs.handle} class=${`field${bad('handle') ? ' bad' : ''}`} autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="24" value=${handle}
+            <input id="auth-handle" ref=${refs.handle} class=${`field${bad('handle') ? ' bad' : ''}`} autocomplete=${isNew ? 'username' : 'username webauthn'} autocapitalize="none" spellcheck="false" maxlength="24" value=${handle}
               aria-invalid=${bad('handle') ? 'true' : undefined} aria-describedby=${described('handle', isNew)}
               onInput=${edit('handle', setHandle)} autofocus />
             ${bad('handle') && html`<${Err} id="auth-handle-err" text=${error.text} />`}
@@ -375,12 +385,19 @@ function PasswordAuth({ onGitHub }) {
               onInput=${edit('password', setPassword)} />
             ${bad('password') && html`<${Err} id="auth-password-err" text=${error.text} />`}
             ${isNew && html`<div class="hint" id="auth-password-hint">At least 8 characters.</div>`}
+            ${!isNew && html`<button type="button" class="auth-link auth-forgot" id="auth-forgot" onClick=${() => setForgot(true)}>Forgot your password?</button>`}
           </div>
           ${error && !error.field && html`<${Err} id="auth-form-err" text=${error.text} />`}
           <button class="btn primary auth-submit" type="submit" disabled=${busy} aria-busy=${busy ? 'true' : undefined}>
             ${busy ? (isNew ? 'Creating your account…' : 'Signing in…') : (isNew ? 'Create account' : 'Sign in')}
           </button>
         </form>
+        ${!isNew && !ticket && pk.offered && html`<div class="auth-passkey">
+          <button type="button" class="btn auth-submit" id="auth-passkey" disabled=${pk.busy} aria-busy=${pk.busy ? 'true' : undefined} onClick=${pk.start}>
+            <${Icon} name="shield" size=${16} />${pk.busy ? 'Waiting for your passkey…' : 'Sign in with a passkey'}
+          </button>
+          ${pk.error && html`<${Err} id="auth-passkey-err" text=${pk.error} />`}
+        </div>`}
         <p class="auth-swap" hidden=${!!ticket}>
           ${isNew ? 'Already have an account?' : 'New to Snug?'}
           <button type="button" class="auth-link" onClick=${() => swap(isNew ? 'in' : 'new')}>${isNew ? 'Sign in' : 'Create an account'}</button>

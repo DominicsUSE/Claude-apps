@@ -119,6 +119,8 @@ on('account', (d) => {
   if (d.note) { if (d.note.note) S.account.notes[d.note.user] = d.note.note; else delete S.account.notes[d.note.user]; }
   if ('totp' in d) S.account.totp = d.totp;
   if ('backupLeft' in d) S.account.backupLeft = d.backupLeft;
+  if ('recovery' in d) S.account.recovery = d.recovery; // v0.12: the recovery key (server/recovery.js)
+  if ('passkeys' in d) S.account.passkeys = d.passkeys; // v0.12: how many passkeys (server/passkeys.js)
   // sec-auth: another device just signed in to this account (server/account.js).
   if (d.newSignIn) toast(`New sign-in: ${String(d.newSignIn.agent || 'a device').slice(0, 80)}. Not you? Change your password in Settings > Account.`);
 });

@@ -25,8 +25,9 @@ export const SHORT_NAME_TEXT = 'Usernames of 2 or 3 characters are open to new a
 /**
  * The recovery key, shown once, and the ways to keep it. `confirm(last)` checks the last group typed back;
  * `onDone` follows it. `onLater` (optional) skips with a warning; a reminder stays in the app.
+ * `lead`, `warn` and `laterWarn` replace the desktop wording (a Snug server's password accounts use other words).
  */
-export function RecoverySave({ code, username, confirm, onDone, onLater, titleId = 'auth-title', pendingAt = null }) {
+export function RecoverySave({ code, username, confirm, onDone, onLater, titleId = 'auth-title', pendingAt = null, lead = null, warn = null, laterWarn = null }) {
   const [last, setLast] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -49,7 +50,7 @@ export function RecoverySave({ code, username, confirm, onDone, onLater, titleId
   return html`<div class="rk">
     <div class="auth-head">
       <h1 id=${titleId}>Save your recovery key</h1>
-      <p class="auth-sub">If you lose this PC, this key is the only way to get your account back. Snug can’t reset it for you.</p>
+      <p class="auth-sub">${lead || 'If you lose this PC, this key is the only way to get your account back. Snug can’t reset it for you.'}</p>
     </div>
     ${pendingAt && html`<p class="auth-fine" id="rk-pending">This key starts working on ${when(pendingAt)}. Until then your old key still works, and it can cancel this one.</p>`}
     <div class="rk-key" id="rk-key" role="group" aria-label="Your recovery key, 9 groups of 4">
@@ -60,7 +61,7 @@ export function RecoverySave({ code, username, confirm, onDone, onLater, titleId
       <button type="button" class="btn" id="rk-print" onClick=${print}>Print</button>
       <button type="button" class="btn" id="rk-copy" onClick=${() => copyText(code)}><${Icon} name="copy" size=${16} />Copy</button>
     </div>
-    <div class="auth-warn" role="note"><${Icon} name="shield" size=${16} /><span>Keep it somewhere other than this PC: on paper, or in a password manager. Anyone who has it can move your account to their PC.</span></div>
+    <div class="auth-warn" role="note"><${Icon} name="shield" size=${16} /><span>${warn || 'Keep it somewhere other than this PC: on paper, or in a password manager. Anyone who has it can move your account to their PC.'}</span></div>
     <form class="form auth-form" onSubmit=${submit} novalidate aria-busy=${busy ? 'true' : undefined}>
       <div class="auth-field">
         <label class="label" for="rk-last">Type the last 4 characters to show you saved it</label>
@@ -73,7 +74,7 @@ export function RecoverySave({ code, username, confirm, onDone, onLater, titleId
     ${onLater && !later && html`<p class="auth-swap"><button type="button" class="auth-link" id="rk-later" onClick=${() => setLater(true)}>Do this later</button></p>`}
     ${onLater && later && html`<div class="auth-warn rk-later-warn" role="alert">
       <${Icon} name="alert" size=${16} />
-      <span>Without your recovery key, losing this PC means losing your account. Settings will remind you until it’s saved.
+      <span>${laterWarn || 'Without your recovery key, losing this PC means losing your account. Settings will remind you until it’s saved.'}
         <button type="button" class="auth-link" id="rk-later-ok" onClick=${onLater}>Continue without saving</button></span>
     </div>`}
     <pre class="rk-print" aria-hidden="true">${text}</pre>

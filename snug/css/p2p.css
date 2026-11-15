@@ -153,3 +153,19 @@
 /* v0.12: Settings > Account rows with two actions (recovery key, GitHub link). */
 .p2p-row-acts { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; justify-content: flex-end; }
 .mv-code { font-family: var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
+
+/* v0.12: password accounts on a server: the recovery key reminder on Home, "Forgot your password?",
+   and the passkey button on the sign-in screen (js/views/recover.js, js/views/passkeys.js). */
+.rk-remind {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3);
+  padding: var(--s-3) var(--s-4); margin-bottom: var(--s-4);
+  border: 1px solid var(--line-subtle); border-radius: var(--r-lg); background: var(--surface-2);
+}
+.rk-remind > .grow { display: grid; gap: 2px; min-width: 12rem; flex: 1 1 12rem; }
+.rk-remind b { color: var(--text-1); font-weight: var(--w-semibold); }
+.auth-forgot { justify-self: start; font-size: var(--t-13); margin-top: var(--s-1); }
+.auth-passkey { display: grid; gap: var(--s-2); }
+.auth-passkey .btn { justify-content: center; gap: var(--s-2); }
+.rk-lost-app { align-items: flex-start; }
+.rk-lost-app input { margin-top: 3px; }
+.rk-after { display: grid; gap: var(--s-3); }
