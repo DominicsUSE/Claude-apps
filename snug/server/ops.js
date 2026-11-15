@@ -949,7 +949,7 @@ export function createOps({ db, M, hub }) {
     search(c, d) {
       const q = str(d.q ?? '', { max: 200, name: 'The search' });
       const hits = M.search(c.user, q, 80, Number.isInteger(d.tz) && Math.abs(d.tz) <= 900 ? d.tz : 0); // tz: for before:/after:/during:
-      return { hits, users: hub.usersFor(hits.map((h) => h.m.author)), threads: hub.threadsFor(hits.map((h) => h.conv)) };
+      return { hits, close: hits.close || undefined, users: hub.usersFor(hits.map((h) => h.m.author)), threads: hub.threadsFor(hits.map((h) => h.conv)) }; // close: 0.12 close matches
     },
 
     // Voice: membership and signalling. Audio itself flows peer to peer.

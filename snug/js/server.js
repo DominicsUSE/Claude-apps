@@ -237,6 +237,7 @@ export async function searchMessages(q) {
   Object.assign(S.users, r.users);
   Object.assign(S.threads, r.threads);
   for (const h of r.hits) if (!(S.msgs[h.conv] || []).some((m) => m.id === h.m.id)) S.cache[h.m.id] = h.m;
+  r.hits.close = !!r.close; // 0.12: nothing matched exactly, these are words one or two letters away
   return r.hits;
 }
 
