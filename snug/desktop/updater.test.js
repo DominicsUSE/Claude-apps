@@ -15,12 +15,14 @@ test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 // ---------- the stand-in ----------
 const files = new Map(); // name -> Buffer
 let release = null;
+let list = null; // sec-desktop D11: the /releases list, when a test sets it
 let notices = { min: null, ann: [] };
 let noticesStatus = 200;
 const hits = [];
 const stub = http.createServer((req, res) => {
   hits.push(req.url);
   const u = new URL(req.url, "http://x");
+  if (u.pathname === "/list") { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify(list || [])); }
   if (u.pathname === "/latest") { res.writeHead(release ? 200 : 404, { "content-type": "application/json" }); return res.end(JSON.stringify(release || { message: "Not Found" })); }
   if (u.pathname === "/notices") { res.writeHead(noticesStatus, { "content-type": "application/json" }); return res.end(JSON.stringify(notices)); }
   if (u.pathname.startsWith("/dl/")) {
@@ -290,6 +292,8 @@ test("install (for real, spawn stubbed): portable spawns cmd detached and quits;
   assert.deepEqual(await u.install(file, info), { ok: true });
   assert.match(spawned[0].cmd, /cmd/i);
   assert.equal(spawned[0].args.at(-1).endsWith("snug-swap.cmd"), true);
+  // sec-integrate: the script lives in a fresh private folder, never at a fixed name in the temp folder.
+  assert.match(path.basename(path.dirname(spawned[0].args.at(-1))), /^snug-swap-[A-Za-z0-9]{6}$/);
   assert.equal(spawned[0].opts.detached, true);
   assert.ok(fs.readFileSync(spawned[0].args.at(-1), "utf8").includes("Snug-0.11.1-portable.exe"));
   assert.equal(quits.length, 1);
@@ -373,6 +377,7 @@ test("0.10 review fixes: UTF-8 batch, failure marker, read-only folder, inner .a
   for (const d of ["snug-update-0.9.0", "snug-update-0.10.0", "snug-update-0.11.0"]) fs.mkdirSync(path.join(tdir, d));
   fs.writeFileSync(path.join(tdir, "snug-update-0.9.0", "Snug-Setup-0.9.0.exe"), "x");
   fs.writeFileSync(path.join(tdir, "snug-swap.cmd"), "x");
+  fs.mkdirSync(path.join(tdir, "snug-swap-Ab12Cd")); // sec-integrate: a leftover private script folder
   fs.writeFileSync(path.join(tdir, "other.txt"), "x");
   u.cleanup();
   assert.deepEqual(fs.readdirSync(tdir).sort(), ["other.txt", "snug-update-0.11.0"]);
@@ -389,4 +394,108 @@ test("0.10 review fixes: UTF-8 batch, failure marker, read-only folder, inner .a
   const sh = fs.readFileSync(spawned[0][1], "utf8");
   assert.match(sh, new RegExp(`^CUR='${path.join(outer, "Snug.app").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}'$`, "m"));
   assert.ok(at(sh, 'if [ -z "$ID" ] || [ "$(BID "$CUR")" != "$ID" ]') < at(sh, 'mv "$CUR" "$OLD"'), "bundle id checked before anything moves");
+});
+
+// ---------- sec-desktop D3: signed checksums ----------
+// A test key pair; the updater gets its public key the way UPDATE_PUBKEYS would hold it (raw 32 bytes, base64).
+const signer = crypto.generateKeyPairSync("ed25519");
+const pubB64 = signer.publicKey.export({ type: "spki", format: "der" }).subarray(12).toString("base64");
+const signSums = (text, key = signer.privateKey) => crypto.sign(null, Buffer.from(text), key).toString("base64");
+// Publishes like publish(), plus SHA256SUMS-windows.txt.sig with `sig` as its content (none when null).
+function publishSigned(version, { sig, sumsText, bytes = crypto.randomBytes(200_000) } = {}) {
+  const name = U.assetName("portable", version);
+  const text = sumsText ?? `${sha(bytes)}  ${name}\n`;
+  const r = publish(version, { bytes, sumsText: text });
+  if (sig !== null) {
+    files.set("SHA256SUMS-windows.txt.sig", Buffer.from(sig === undefined ? signSums(text) : sig));
+    release.assets.push({ name: "SHA256SUMS-windows.txt.sig", size: 88, browser_download_url: `${base}/dl/SHA256SUMS-windows.txt.sig` });
+  }
+  return { ...r, text };
+}
+const signed = (o = {}) => updater({ ...o, pubkeys: [pubB64] });
+
+test("D3: with a pinned key, a validly signed release downloads", async () => {
+  const { bytes } = publishSigned("0.11.1");
+  const u = signed();
+  const info = await u.check();
+  assert.equal(info.state, "required");
+  assert.equal(info.sig.name, "SHA256SUMS-windows.txt.sig");
+  assert.deepEqual(fs.readFileSync(await u.download(info)), bytes);
+});
+
+test("D3: someone who can write the release but has no key: new asset + matching checksums, old signature → refused", async () => {
+  // The real, signed checksum file for what Snug built...
+  const real = `${sha(crypto.randomBytes(10))}  ${U.assetName("portable", "0.11.2")}\n`;
+  const realSig = signSums(real);
+  // ...and the attacker's asset with a checksum file that matches it, next to that signature.
+  publishSigned("0.11.2", { sig: realSig });
+  const u = signed();
+  const info = U.pickAssets(release, "portable");
+  await assert.rejects(u.download(info), (e) => e.code === "checksum");
+  assert.equal((await u.check()).state, "none", "and it never blocks the app with an update it can't install");
+  // Signed with another key: the same.
+  publishSigned("0.11.3", { sig: undefined, sumsText: undefined });
+  const other = crypto.generateKeyPairSync("ed25519");
+  const text = files.get("SHA256SUMS-windows.txt").toString();
+  files.set("SHA256SUMS-windows.txt.sig", Buffer.from(signSums(text, other.privateKey)));
+  await assert.rejects(u.download(U.pickAssets(release, "portable")), (e) => e.code === "checksum");
+  // Garbage in the signature file: the same.
+  files.set("SHA256SUMS-windows.txt.sig", Buffer.from("not a signature"));
+  await assert.rejects(u.download(U.pickAssets(release, "portable")), (e) => e.code === "checksum");
+});
+
+test("D3: with a pinned key, a release with no signature file is refused", async () => {
+  publishSigned("0.11.4", { sig: null });
+  const u = signed();
+  await assert.rejects(u.download(U.pickAssets(release, "portable")), (e) => e.code === "checksum");
+  assert.equal((await u.check()).state, "none");
+});
+
+test("D3: with no key pinned (today's builds), the unsigned flow still works; the shipped list is well formed", async () => {
+  const { bytes } = publishSigned("0.11.5", { sig: null });
+  const u = updater();
+  const info = await u.check();
+  assert.equal(info.state, "required");
+  assert.deepEqual(fs.readFileSync(await u.download(info)), bytes);
+  assert.ok(Array.isArray(U.UPDATE_PUBKEYS));
+  for (const k of U.UPDATE_PUBKEYS) assert.equal(Buffer.from(k, "base64").length, 32, "each pinned key is 32 raw bytes, base64");
+  assert.equal(U.verifySums(Buffer.from("x"), signSums("x"), [pubB64]), true);
+  assert.equal(U.verifySums(Buffer.from("y"), signSums("x"), [pubB64]), false);
+  assert.equal(U.verifySums(Buffer.from("x"), signSums("x"), ["bm90IGEga2V5"]), false, "a malformed key never verifies");
+});
+
+// ---------- sec-desktop D11: only snug-v releases, from the list ----------
+test("D11: the updater reads the releases list and takes the newest snug-v release, never another app's", async () => {
+  assert.match(U.RELEASES_LIST, /\/releases\?per_page=\d+$/, "not /releases/latest");
+  publish("0.10.2");
+  const snug = release;
+  const foreign = (tag, extra = {}) => ({ ...snug, tag_name: tag, assets: snug.assets.map((a) => ({ ...a, name: a.name.replace("0.10.2", tag.replace(/^\D+/, "")) })), ...extra });
+  list = [
+    { tag_name: "siteless-v3.0.0", assets: [{ name: "Siteless-Setup-3.0.0.exe", size: 5, browser_download_url: `${base}/dl/x` }] },
+    foreign("other-v9.9.9"),        // Snug-named files under another tag
+    foreign("snug-v9.9.8", { prerelease: true }),
+    foreign("snug-v9.9.7", { draft: true }),
+    foreign("snug-v9.9.6-rc1"),
+    snug,
+  ];
+  const u = updater({ env: { PORTABLE_EXECUTABLE_FILE: "D:\\Apps\\Snug-0.10.0-portable.exe", SNUG_UPDATE_URL: `${base}/list` } });
+  const r = await u.check();
+  assert.equal(r.state, "required");
+  assert.equal(r.version, "0.10.2");
+  assert.equal(U.pickAssets({ ...snug, tag_name: "evil-v0.10.2" }, "portable"), null, "a semver anywhere in the tag isn't enough");
+  assert.equal(U.pickAssets({ ...snug, tag_name: undefined, name: "snug-v0.10.2" }, "portable"), null, "the tag, not the title");
+  list = null;
+});
+
+// ---------- sec-desktop D9: an installed app ignores the test variables ----------
+test("D9: without --dev-update the updater sees no SNUG_UPDATE_* variables", async () => {
+  const planted = { SNUG_UPDATE_URL: `${base}/latest`, SNUG_UPDATE_CHECK: "0", SNUG_UPDATE_KIND: "portable", SNUG_UPDATE_DRY_INSTALL: "1", SNUG_NOTICES_URL: `${base}/notices`, PORTABLE_EXECUTABLE_FILE: "C:\\Snug.exe", ComSpec: "C:\\Windows\\system32\\cmd.exe" };
+  assert.deepEqual(U.updaterEnvFor(planted, false), { PORTABLE_EXECUTABLE_FILE: "C:\\Snug.exe", ComSpec: "C:\\Windows\\system32\\cmd.exe" });
+  assert.equal(U.updaterEnvFor(planted, true), planted, "running from source or with --dev-update: as given");
+  const u = U.createUpdater({ current: "0.10.0", platform: "win32", env: U.updaterEnvFor(planted, false) });
+  assert.equal(u.testMode, false, "no test mode: GitHub's address, GitHub hosts only");
+  publish("0.10.1");
+  const before = hits.length;
+  await u.check().catch(() => {});
+  assert.ok(!hits.slice(before).some((h) => h === "/latest"), "the planted address is never asked");
 });

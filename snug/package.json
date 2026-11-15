@@ -1,6 +1,6 @@
 {
   "name": "snug",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "private": true,
   "type": "module",
   "description": "A calm place for your people: houses, rooms, threads and voice.",
@@ -22,10 +22,16 @@
     "test:e2e:voice-options": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-voice-options.test.js",
     "test:e2e:account": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-account.test.js",
     "test:e2e:community": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-community.test.js",
-    "test:e2e:integration": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-integration.test.js"
+    "test:e2e:integration": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-integration.test.js",
+    "audit:deps": "npm audit --audit-level=high && npm audit --prefix registry --audit-level=high && npm audit --prefix desktop --audit-level=high",
+    "audit:secrets": "gitleaks git .. --config .gitleaks.toml --redact --no-banner",
+    "audit:osv": "f=\"${TMPDIR:-/tmp}/snug-osv.json\"; rm -f \"$f\"; osv-scanner scan source -r --format json --output-file \"$f\" ..; [ $? -le 1 ] && node ../.github/security/gate.mjs osv \"$f\" --root .. --only snug/",
+    "audit:electron": "npm_config_ignore_scripts=true npx --yes @doyensec/electronegativity@1.10.3 -i desktop -r -v false -o \"${TMPDIR:-/tmp}/snug-electronegativity.csv\" && node ../.github/security/gate.mjs electronegativity \"${TMPDIR:-/tmp}/snug-electronegativity.csv\"",
+    "lint:security": "semgrep scan --metrics=off --disable-version-check --config p/javascript --config p/nodejs --config p/owasp-top-ten --config p/secrets --json . | node ../.github/security/gate.mjs semgrep -",
+    "audit:all": "npm run audit:deps && npm run audit:secrets && npm run audit:osv && npm run audit:electron && npm run lint:security"
   },
   "dependencies": {
-    "ws": "^8.18.3"
+    "ws": "^8.22.1"
   },
   "engines": {
     "node": ">=22.13"

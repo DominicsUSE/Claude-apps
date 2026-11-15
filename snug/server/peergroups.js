@@ -20,7 +20,7 @@ import { newId, now } from './model.js';
 import { shadowId, isUid, sha256, base32 } from './peercrypto.js';
 import { HUES } from '../js/lib/util.js';
 import {
-  GID, MAX_MEMBERS, MAX_OPS, ITEM_DAYS, gidFor, signOp, verifyOp, signItem, verifyItem, opShape, itemShape, replay,
+  GID, MAX_MEMBERS, MAX_OPS, MAX_OPS_HARD, AUTHOR_MAX, ITEM_DAYS, gidFor, signOp, verifyOp, signItem, verifyItem, opShape, itemShape, replay,
   memberAt, itemAllowed, opsDigest, exportGroups, parseGroupsSection,
 } from './grouplog.js';
 
@@ -30,7 +30,7 @@ const HUE_SET = new Set(HUES.map(([h]) => h));
 const fail = (m) => { throw new UserError(m); };
 const json = (s, f) => { try { return s == null ? f : JSON.parse(s); } catch { return f; } };
 const ALNUM = 'abcdefghijklmnopqrstuvwxyz0123456789';
-const rid16 = () => { let s = ''; for (const b of randomBytes(16)) s += ALNUM[b % 36]; return s; };
+const rid16 = () => { let s = ''; while (s.length < 16) for (const b of randomBytes(16)) if (b < 252 && s.length < 16) s += ALNUM[b % 36]; return s; }; // sec-integrate: unbiased
 const MIX = 'A group can have friends on other PCs or people on this PC, not both.';
 const NO_CALLS = 'Group calls with friends on other PCs aren’t available yet.';
 
@@ -199,12 +199,32 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
     invalidate(op.g);
     return r?.changes !== 0;
   }
+  // sec-registry REG-M3: why an op may not join a group's log, or null. At most MAX_OPS ops, except that the
+  // owner's removes and anyone's leave are always taken (up to MAX_OPS_HARD); at most AUTHOR_MAX by one
+  // member (the owner has no quota), so one member can't fill the log and freeze membership for everyone.
+  function capRefusal(op) {
+    const st = state(op.g);
+    const n = db.get('SELECT COUNT(*) n FROM grp_ops WHERE g = ?', op.g).n;
+    // sec-review: a leave keeps control only when it really takes a member out (replayed with the log as it
+    // is). A leave by a non-member, a second one, or one back-dated before the member joined changes nothing,
+    // so it is held to the cap and the quota like any other op; otherwise one member could sign hundreds of
+    // leaves and fill the room kept for the owner's removes. Replayed only when the answer matters.
+    const leaves = () => op.t === 'leave' && st.ok && st.members.has(op.by) && !replay(op.g, [...opsOf(op.g), op]).members.has(op.by);
+    const owners = op.t === 'remove' && st.ok && op.by === st.owner;
+    const mine = () => db.get('SELECT COUNT(*) n FROM grp_ops WHERE g = ? AND by = ?', op.g, op.by).n;
+    if (n >= MAX_OPS_HARD) return 'cap';
+    if (n >= MAX_OPS && !owners && !leaves()) return 'cap';
+    if (st.ok && op.by !== st.owner && !owners && mine() >= AUTHOR_MAX && !leaves()) return 'quota';
+    return null;
+  }
   // Sign and apply one of my own ops, then send it (and, to new members, the whole log).
   function myOp(g, t, d) {
     if (!X.active() || !ikPriv()) fail('This PC isn’t signed in to Snug.');
-    if (g && db.get('SELECT COUNT(*) n FROM grp_ops WHERE g = ?', g).n >= MAX_OPS) fail('This group has had too many changes. Start a new one.');
     const id = `o_${rid16()}`;
     const op = { g: g || gidFor(me(), id), id, t, by: me(), kver: X.kver(), ts: Math.max(Math.round(X.now()), lastOpTs(g) + 1), d };
+    const cap = g ? capRefusal(op) : null;
+    if (cap === 'cap') fail('This group has had too many changes. Start a new one.');
+    if (cap === 'quota') fail('You’ve made too many changes to this group.');
     if (!opShape(op)) fail('That change isn’t valid.');
     const sig = signOp(ikPriv(), op);
     const before = g ? state(g) : null;
@@ -312,8 +332,11 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
     const known = amIn(op.g) || db.get('SELECT 1 FROM grp_ops WHERE g = ? LIMIT 1', op.g);
     if (!known) return joinFrom(from, op, sig);
     if (!X.isFriend(shadowId(from)) && !state(op.g).members.has(from) && !state(op.g).spans.has(from)) { stats.dropped++; return; }
-    if (db.get('SELECT COUNT(*) n FROM grp_ops WHERE g = ?', op.g).n >= MAX_OPS) { stats.dropped++; return; }
+    if (capRefusal(op)) { stats.dropped++; return; }
     if (!await verifyBy(op.by, (ik) => verifyOp(ik, op, sig))) { stats.dropped++; return; }
+    // sec-review: checked again with the store, after the await: ops sent all at once must not all pass the
+    // first check against the same, not yet updated state (one leave each, not dozens).
+    if (capRefusal(op)) { stats.dropped++; return; }
     if (!storeOp(op, sig)) return;
     const st = state(op.g);
     if (st.valid.has(op.id)) opLine(op);
@@ -331,7 +354,7 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
       L = { at: Date.now(), ops: new Map() };
       limbo.set(op.g, L);
     }
-    if (L.ops.size >= MAX_OPS) return;
+    if (L.ops.size >= MAX_OPS_HARD) return;
     L.ops.set(op.id, { op, sig });
     const names = (o) => (o.t === 'create' ? o.d.members : o.t === 'add' ? o.d.uids : []);
     const trigger = [...L.ops.values()].some(({ op: o }) => (o.t === 'create' || o.t === 'add') && names(o).includes(me())
@@ -478,7 +501,7 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
       }
     }
     if (Array.isArray(d.ops)) {
-      const has = new Set(d.ops.slice(0, MAX_OPS).filter((x) => typeof x === 'string'));
+      const has = new Set(d.ops.slice(0, MAX_OPS_HARD).filter((x) => typeof x === 'string'));
       const rows = opRows(g).map((r) => ({ op: json(r.body, null), sig: r.sig })).filter((x) => x.op && !has.has(x.op.id))
         .sort((a, b) => (a.op.ts - b.op.ts) || (a.op.id < b.op.id ? -1 : 1));
       for (const x of rows) queue(from, 'grp.op', x.op.id, frame(x.op, x.sig, 'op'));
@@ -689,8 +712,13 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
       const D = ctx?.db || db;
       const keysOf = (uid) => D.all('SELECT ik FROM peer_keys WHERE uid = ? UNION SELECT ik FROM peers WHERE uid = ?', uid, uid).map((r) => r.ik);
       for (const grp of parseGroupsSection(data)) {
-        // Ops by others are checked against the pinned keys; my own came sealed in my own data file.
-        const good = grp.ops.filter((x) => x.op.by === my || keysOf(x.op.by).some((ik) => verifyOp(ik, x.op, x.sig)));
+        // Ops by others are checked against the pinned keys. My own against my key chain from the registry
+        // (sec-registry REG-L2: whoever holds the vault key could seal a file; ctx.selfKeys is fetched before
+        // the import). Offline (no chain), my own ops are taken as sealed in my own data file.
+        const mine = Array.isArray(ctx?.selfKeys) ? ctx.selfKeys : null;
+        const good = grp.ops.filter((x) => (x.op.by === my
+          ? (!mine || mine.some((ik) => verifyOp(ik, x.op, x.sig)))
+          : keysOf(x.op.by).some((ik) => verifyOp(ik, x.op, x.sig))));
         const st = replay(grp.g, good.map((x) => x.op));
         if (!st.ok || !st.members.has(my)) continue;
         for (const x of good) D.run('INSERT OR IGNORE INTO grp_ops (g, id, by, ts, body, sig) VALUES (?, ?, ?, ?, ?, ?)', grp.g, x.op.id, x.op.by, x.op.ts, x.body, x.sig);

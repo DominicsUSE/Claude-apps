@@ -12,7 +12,7 @@ import { platform, now as clockNow } from './platform.js';
 import { ApiError, fail, need, ID_RE, isUid, isKey, isSig, isTs, rawName, isUnique } from './common.js';
 import { AdminMixin, ADMIN_SCHEMA } from './admin.js';
 import { XferMixin } from './xfer.js';
-import { VaultKeyMixin } from './vaultkey.js';
+import { VaultKeyMixin, VAULT_SCHEMA } from './vaultkey.js';
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS accounts (
@@ -37,6 +37,7 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS budget (
     uid TEXT NOT NULL, win INTEGER NOT NULL, kind TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (uid, win, kind))`,
   ...ADMIN_SCHEMA, // v0.10: admins, bans, reserved names, announcements, settings, audit, vault keys (admin.js)
+  ...VAULT_SCHEMA, // older vault keys, pending rotations (vaultkey.js, REG-L1)
 ];
 
 const STATUS = {
@@ -84,8 +85,8 @@ const OK_MAX = 20; // invisible senders: peers they contacted this session may r
 
 const isTicket = isKey; // 32 random bytes, b64url
 
-/** IPv4 -> the address (/32); IPv6 -> its /64. Never stored; only fed to an HMAC for memory buckets. */
-export function ipPrefix(ip) {
+/** IPv4 -> the address (/32); IPv6 -> its /64 (or /48 with groups = 3). Never stored; only fed to an HMAC. */
+export function ipPrefix(ip, groups = 4) {
   const s = String(ip || '').trim().replace(/%.*$/, '');
   const v4 = s.match(/^(?:::ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/i);
   if (v4) return v4[1];
@@ -93,8 +94,14 @@ export function ipPrefix(ip) {
   const [head, tail] = s.split('::');
   const h = head ? head.split(':') : [];
   const parts = tail === undefined ? h : [...h, ...Array(Math.max(0, 8 - h.length - (tail ? tail.split(':').length : 0))).fill('0'), ...(tail ? tail.split(':') : [])];
-  return `${parts.slice(0, 4).map((p) => (parseInt(p, 16) || 0).toString(16)).join(':')}::/64`;
+  return `${parts.slice(0, groups).map((p) => (parseInt(p, 16) || 0).toString(16)).join(':')}::/${groups * 16}`;
 }
+// sec-registry REG-M4: the sign-in and account limits count a whole IPv6 /48 as one address (a /64 is
+// nearly free to get many of); every other limit keeps the /64.
+const WIDE_KINDS = new Set(['ipAuth', 'ipAccount']);
+// sec-registry REG-L3: these per-address limits live in SQLite (the Budgets table, keyed by the HMACed
+// prefix), so a Hub that sleeps and wakes doesn't hand every address a fresh allowance. The rest stay in memory.
+const PERSIST_KINDS = new Set(['ipAuth', 'ipAccount', 'ipVault', 'ipAdmin', 'ipRename']);
 
 export class Hub {
   constructor(ctx, env) {
@@ -110,6 +117,7 @@ export class Hub {
     this.gone = new WeakSet();
     this.alarmAt = undefined;
     this.ownerHashes = null; // [ghh] for OWNER_GITHUB_IDS
+    this.authOk = new Set(); // HMACed /48s that signed in successfully (memory; a reserve when junk floods)
     for (const q of SCHEMA) this.sql.exec(q);
     platform(env).autoResponse(ctx, 'ping', 'pong');
   }
@@ -141,8 +149,20 @@ export class Hub {
     if (Math.abs(ts - t) > TS_WINDOW) fail('stale');
   }
   ipLimit(kind, ip) {
-    const s = this.win.hit(`${kind}|${ip}`, this.L[kind]);
-    if (s) fail('rate_limited', { retryAfter: s });
+    if (ip && typeof ip === 'object') ip = WIDE_KINDS.has(kind) ? ip.w : ip.n;
+    if (PERSIST_KINDS.has(kind)) {
+      if (!this.budgets.take(`ip:${ip}`, kind, this.L[kind])) fail('rate_limited', { retryAfter: this.retryAfter(this.L[kind][1]) });
+    } else {
+      const s = this.win.hit(`${kind}|${ip}`, this.L[kind]);
+      if (s) fail('rate_limited', { retryAfter: s });
+    }
+    // sec-registry REG-M5: the global request estimate (it switches relay and xfer off for everyone) counts
+    // only requests that got past their per-address limit, so one address can't flip it.
+    this.budgets.bump('*', 'req20', DAY, 20);
+  }
+  /** One accepted socket frame toward the same estimate (frames refused by their limits are not counted). */
+  countFrame() {
+    this.budgets.bump('*', 'req20', DAY, 1);
   }
   retryAfter(ms) {
     const t = this.now();
@@ -150,6 +170,13 @@ export class Hub {
   }
   async ipKey(req) {
     return hmacHex(this.secret(), `ip\n${ipPrefix(req.headers.get('cf-connecting-ip'))}`);
+  }
+  /** {n: the /64 (or IPv4) key, w: the /48 key}, both HMACed; ipLimit picks per kind. */
+  async ipKeys(req) {
+    const raw = req.headers.get('cf-connecting-ip');
+    const n = await hmacHex(this.secret(), `ip\n${ipPrefix(raw)}`);
+    const p48 = ipPrefix(raw, 3);
+    return { n, w: p48 === ipPrefix(raw) ? n : await hmacHex(this.secret(), `ip\n${p48}`) };
   }
   async owners() {
     if (!this.ownerHashes) {
@@ -285,10 +312,9 @@ export class Hub {
   // ---------- HTTP ----------
   async fetch(req) {
     const url = new URL(req.url);
-    this.budgets.bump('*', 'req20', DAY, 20);
     try {
       if (url.pathname === '/v1/ws') return await this.upgrade(req, url);
-      const ip = await this.ipKey(req);
+      const ip = await this.ipKeys(req);
       let body = null;
       if (req.method === 'POST') {
         const text = await req.text();
@@ -326,6 +352,7 @@ export class Hub {
       case '/v1/admin': return this.admin(body, ip);
       case '/v1/notices': return this.noticesHttp(ip);
       case '/v1/vault/key': return this.vaultKey(body, ip);
+      case '/v1/vault/rotate': return this.vaultRotate(body, ip);
       default: fail('not_found');
     }
   }
@@ -343,14 +370,27 @@ export class Hub {
     } catch {
       fail('config_error');
     }
-    if (!this.budgets.take('*', 'auth', this.L.authGlobal)) fail('rate_limited', { retryAfter: this.retryAfter(HOUR) });
+    // sec-registry REG-M4: the global sign-in budget counts tokens GitHub accepted, so junk tokens can't use
+    // it up. Calls GitHub refused have their own, much larger global budget (it only bounds our calls to
+    // GitHub); when that runs out, addresses that signed in successfully before still get through.
+    if (this.budgets.value('*', 'auth', this.L.authGlobal[1]) >= this.L.authGlobal[0]) fail('rate_limited', { retryAfter: this.retryAfter(HOUR) });
+    const wide = ip && typeof ip === 'object' ? ip.w : ip;
+    if (this.budgets.value('*', 'authBad', this.L.authBadGlobal[1]) >= this.L.authBadGlobal[0] && !this.authOk.has(wide)) {
+      fail('rate_limited', { retryAfter: this.retryAfter(HOUR) });
+    }
     let id;
     try {
       ({ id } = await checkToken(this.env, token, this.env.__fetch || fetch));
     } catch (e) {
-      if (e instanceof GhError) fail(e.code);
+      if (e instanceof GhError) {
+        if (e.code !== 'config_error') this.budgets.take('*', 'authBad', this.L.authBadGlobal);
+        fail(e.code);
+      }
       throw e;
     }
+    if (!this.budgets.take('*', 'auth', this.L.authGlobal)) fail('rate_limited', { retryAfter: this.retryAfter(HOUR) });
+    if (this.authOk.size >= 5000) this.authOk.delete(this.authOk.keys().next().value);
+    this.authOk.add(wide);
     const ghh = await hmacHex(secret, `gh:${id}`);
     const owner = this.ownerIds().includes(String(id));
     id = null;
@@ -420,6 +460,20 @@ export class Hub {
       this.refuseBanned(acc.uid);
       if (acc.ik === t.ik && acc.xk === t.xk) fail('bad_request');
       const now = this.now();
+      // sec-registry REG-M2: an owner-armed recovery: this GitHub-proved move completes at once (audited).
+      const forced = this.row('SELECT 1 AS x FROM move_force WHERE ghh=? AND until>?', t.ghh, now) && this.takeMoveForce(t.ghh);
+      if (forced) {
+        this.tx(() => {
+          this.sql.exec('INSERT OR REPLACE INTO pending_rebind(uid,ik,xk,at,created) VALUES(?,?,?,?,?)', acc.uid, t.ik, t.xk, now, now);
+          this.sql.exec('DELETE FROM tickets WHERE h=?', h);
+          this.audit(forced.by, 'move.forced', acc.uid, { kver: acc.kver + 1 });
+          this.markForcedOld(acc);
+          this.markVaultRotate(acc.ghh); // REG-L1: the forced-out device holds the old vault key
+        });
+        this.closeSockets(acc.uid, (a) => a.mode === 'pending' || a.mode === 'xfer', 4006, 'move stopped');
+        this.completeRebind(acc.uid, null);
+        return { status: 'pending', uid: acc.uid, at: now };
+      }
       const meta = this.row('SELECT rebind_block_until FROM ghh_meta WHERE ghh=?', t.ghh);
       if (meta?.rebind_block_until > now) fail('rebind_blocked', { retryAt: meta.rebind_block_until });
       const old = this.pending(acc.uid);
@@ -451,6 +505,7 @@ export class Hub {
     const cur = this.accountByUid(uid);
     const p2 = cur && this.pending(uid);
     if (!cur || cur.ik !== acc.ik || !p2 || p2.ik !== ik || p2.xk !== xk) fail('not_found');
+    this.refuseBanned(uid); // sec-registry hardening: as for rebind itself
     this.completeRebind(uid, prev);
     return { ok: true };
   }
@@ -568,7 +623,12 @@ export class Hub {
     await this.signed(uid, ts, sig, `snug-reg-v1\nturn\n${uid}\n${peer}\n${ts}`, false, () => {
       this.refuseBanned(uid);
       if (peer === uid || !this.accountByUid(peer)) fail('not_found');
+      // sec-registry REG-L5: only for a peer we're both connected to and watch each other (friends or
+      // group co-members, online now): the same answer as a missing uid otherwise. And a global daily cap,
+      // so free accounts can't turn the TURN service into a paid open relay.
+      if (!this.watchSet(uid)?.has(peer) || !this.watchSet(peer)?.has(uid)) fail('not_found');
       if (!this.budgets.take(uid, 'turn', this.L.turnDay)) fail('rate_limited', { retryAfter: this.retryAfter(DAY) });
+      if (!this.budgets.take('*', 'turnAll', this.L.turnGlobalDay)) fail('rate_limited', { retryAfter: this.retryAfter(DAY) });
     });
     const ttl = 7200;
     const base = String(this.env.TURN_API || 'https://rtc.live.cloudflare.com/v1/turn/keys').replace(/\/+$/, '');
@@ -728,10 +788,15 @@ export class Hub {
   }
 
   async webSocketMessage(ws, msg) {
-    this.budgets.bump('*', 'req20', DAY, 1);
     try {
       const a = this.att(ws);
       if (!a || this.gone.has(ws)) return;
+      // sec-registry REG-M5: a socket that floods frames (counted or refused) is closed; reconnects are
+      // bounded by the connect budget. sec-review: counted per key too (as REG-M1's connect budget), so the
+      // old or a pending key's flood can't close the current key's sockets in the same mode.
+      if (a.authed && this.win.hit(`frames|${a.uid}|${a.mode}|${a.ik || ''}`, a.mode === 'xfer' ? this.L.xferFramesMin : this.L.framesMin)) {
+        return this.closeWs(ws, 4029, 'rate limited');
+      }
       if (typeof msg !== 'string') return this.closeWs(ws, 1003, 'text only');
       if (msg.length > MAX_FRAME) {
         if (!a.authed) return this.closeWs(ws, 4001, 'bad auth');
@@ -820,7 +885,14 @@ export class Hub {
       this.send(ws, { t: 'update', min });
       return this.closeWs(ws, 4011, 'update');
     }
-    if (!this.budgets.take(uid, 'connect', this.L.connect)) return this.closeWs(ws, 4029, 'rate limited');
+    // sec-registry REG-M1: each key has its own connect budget, so a pending move's key (GitHub access
+    // only) can never use up the current key's and keep it from hearing about the move. The current key
+    // keeps the uid-keyed bucket it always had.
+    if (!this.budgets.take(mode === 'normal' ? uid : `${uid}|${ik}`, 'connect', this.L.connect)) {
+      if (mode === 'normal' && p2) this.send(ws, { t: 'rebind', state: 'pending', at: p2.at, kver: cur.kver + 1, ik: p2.ik, xk: p2.xk });
+      return this.closeWs(ws, 4029, 'rate limited');
+    }
+    this.countFrame();
     const att = { uid, authed: true, mode, visible: f.visible !== false, at: this.now(), ik, ...(v ? { v } : {}) };
     ws.serializeAttachment(att);
     const ready = { t: 'ready', mode, kver: cur.kver, ping: Number(this.env.PING_SECONDS) || 90, now: this.now() };
@@ -857,6 +929,7 @@ export class Hub {
     if (this.win.hit(`watch|${me}`, this.L.watchHour) || !this.budgets.take(me, 'watch', this.L.watchDay)) {
       return this.send(ws, { t: 'err', id: null, code: 'rate_limited' });
     }
+    this.countFrame();
     const next = new Set(f.uids.filter((u) => isUid(u) && u !== me));
     const prev = this.watchSet(me) || new Set();
     this.sql.exec('INSERT OR REPLACE INTO watch(uid, uids) VALUES(?,?)', me, JSON.stringify([...next]));
@@ -898,6 +971,7 @@ export class Hub {
     } else if (this.win.hit(`sig|${me}`, this.L.sigMin) || !this.budgets.take(me, 'sig', this.L.sigDay)) {
       return this.send(ws, { t: 'err', id, code: 'rate_limited' });
     }
+    this.countFrame();
     const w = this.deliverable(me, f.to);
     if (!w) return this.send(ws, { t: 'err', id, code: 'unavailable' });
     this.send(w, { t: f.t, from: me, box: f.box });
@@ -921,6 +995,7 @@ export class Hub {
       // Self-knock: only while a move is pending; carries the restore list to the new key. At most one.
       if (!this.pending(me)) return this.send(ws, { t: 'err', id, code: 'unavailable' });
       if (!this.budgets.take(me, 'knock', this.L.knockDay)) return this.send(ws, { t: 'err', id, code: 'rate_limited' });
+      this.countFrame();
       this.tx(() => {
         this.sql.exec('DELETE FROM knocks WHERE to_uid=? AND frm=?', me, me);
         this.sql.exec('INSERT INTO knocks(to_uid,frm,id,box,ts) VALUES(?,?,?,?,?)', me, me, id, f.box, now);
@@ -931,6 +1006,7 @@ export class Hub {
     if (!this.budgets.take(me, 'knock', this.L.knockDay) || !this.budgets.take(`${me}>${f.to}`, 'knockP', this.L.knockPairDay)) {
       return this.send(ws, { t: 'err', id, code: 'rate_limited' });
     }
+    this.countFrame();
     const exists = this.row('SELECT 1 AS x FROM accounts WHERE uid=?', f.to);
     if (exists) {
       this.tx(() => {

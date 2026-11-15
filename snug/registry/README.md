@@ -138,6 +138,10 @@ usage alert first.** Without it, `/v1/turn` answers 404 and calls use STUN only.
   or additive `ALTER`. Never rename or delete the `Hub` class or its migration: that deletes every account.
 - **Never rotate `GH_HMAC_SECRET`.** It keys every account's GitHub hash. A new value orphans every
   account: people could no longer sign in to their names.
+- **Never change `HUB_NAME`.** Every account and every data-file key lives in that one Durable Object; a
+  new name starts an empty registry. See `SECURITY.md` for the recovery plan.
+- Optional: `npx wrangler secret put VAULT_WRAP_SECRET` (32+ characters) wraps data-file keys apart from
+  `GH_HMAC_SECRET` (rows re-wrap as they are read). Once set, never change or remove it.
 - `GH_CLIENT_SECRET` can be rotated in GitHub at any time. Put the new one, then delete the old one.
 - `OWNER_GITHUB_IDS` changes take effect on the next request.
 
@@ -201,7 +205,8 @@ v0.10 calls send their arguments as one JSON string `p`, signed whole: `{op}\n{u
 | Call | Body | Signed by / string |
 |---|---|---|
 | `POST /v1/admin` | `{uid, ts, p, sig}`, `p` = `{a, ...}` ≤ 8192 chars | current key, `admin`, mutating (a captured call never replays). Actions below. |
-| `POST /v1/vault/key` | `{uid, ts, p:"{}", sig}` | current **or pending** key, `vault-key` → `{key, kid}` (created on first use, one per GitHub account) |
+| `POST /v1/vault/key` | `{uid, ts, p:"{}" \| "{\"kid\":n}", sig}` | current key only (never a pending move's key, REG-H1), `vault-key` → `{key, kid}` (created on first use, one per GitHub account; `p:"{}"` is the newest key, `{kid}` an older one for an older file) |
+| `POST /v1/vault/rotate` | `{uid, ts, p:"{}", sig}` | current key, `vault-rotate`, mutating → `{kid}`: a new newest key; older keys stay readable by `{kid}` (REG-L1, 5 a day) |
 | `GET /v1/notices` | | public → `{min, ann:[{id, text, level, at, until}]}` |
 
 Admin actions (`a`) and the right each needs: `me` (anyone → `{perms}`), `stats` (stats), `user.find {q}`
@@ -209,8 +214,12 @@ Admin actions (`a`) and the right each needs: `me` (anyone → `{perms}`), `stat
 `name.unreserve {name}`, `name.reserved` (names), `ban {uid, reason, until|null}`, `unban {uid}`, `bans`
 (ban), `ann.add {text, level, until?}`, `ann.remove {id}` (ann), `min.set {v|null, app}` (update; never
 above `app`, the caller's own version), `admin.grant {uid, perms}`, `admin.revoke {uid}`, `admins`
-(owner only), `audit {before?}` (stats). The owner (`OWNER_GITHUB_IDS`) has every right; nobody acts on
-the owner; only the owner acts on an admin. Changes are written to `audit` (newest 5000 kept); plain
+(owner only), `audit {before?}` (stats), `move.force {uid}` (owner only: a pending move completes now, or the
+account's next GitHub-proved move within 7 days completes at once, for a stolen current device; the forced-out
+key gets no `old` xfer role and the vault key rotates), `vault.export {after?}` (owner only: the vault key rows,
+still wrapped; audited). The owner (`OWNER_GITHUB_IDS`) has every right; nobody acts on
+the owner; only the owner acts on an admin. Changes are written to `audit` (newest 5000 kept; bans, grants, renames, `min.set`, `move.force` and
+`vault.export` are kept a year instead); plain
 reads (`me`, `stats`, `bans`, `name.reserved`, `admins`, `audit`) are not. Errors: `forbidden` 403,
 `banned` 403 (`{until, reason}`), `not_found`, `bad_request`.
 

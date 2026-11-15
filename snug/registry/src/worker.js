@@ -19,6 +19,7 @@ const ROUTES = {
   '/v1/turn': 'POST',
   '/v1/admin': 'POST', // v0.10: admin actions (signed, permission-checked in the Hub)
   '/v1/vault/key': 'POST', // v0.10: the account's data file key
+  '/v1/vault/rotate': 'POST', // sec-registry REG-L1: a new data file key (the old ones stay readable)
   '/v1/notices': 'GET', // v0.10: announcements + minimum app version (public)
   '/v1/check': 'GET',
   '/v1/ws': 'GET',
@@ -33,6 +34,34 @@ function json(env, status, obj) {
 }
 
 const err = (env, status, code) => json(env, status, { error: code, message: code });
+
+/**
+ * The body, read with a running byte cap: a chunked body with no Content-Length is cut off at the first chunk
+ * past the cap instead of being buffered whole first (sec-registry hardening). null when it is too big.
+ */
+async function readCapped(req, max) {
+  if (!req.body) return new ArrayBuffer(0);
+  const reader = req.body.getReader();
+  const parts = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.byteLength;
+    if (n > max) {
+      try { await reader.cancel(); } catch { /* gone */ }
+      return null;
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(n);
+  let o = 0;
+  for (const p of parts) {
+    out.set(p, o);
+    o += p.byteLength;
+  }
+  return out.buffer;
+}
 
 export default {
   async fetch(req, env) {
@@ -52,8 +81,8 @@ export default {
     let body;
     if (method === 'POST') {
       if (Number(req.headers.get('content-length') || 0) > MAX_BODY) return err(env, 413, 'bad_request');
-      body = await req.arrayBuffer();
-      if (body.byteLength > MAX_BODY) return err(env, 413, 'bad_request');
+      body = await readCapped(req, MAX_BODY);
+      if (!body) return err(env, 413, 'bad_request');
     }
     const fwd = new Request(url.toString(), { method, headers: req.headers, body });
     return env.HUB.get(env.HUB.idFromName(env.HUB_NAME || 'hub')).fetch(fwd);

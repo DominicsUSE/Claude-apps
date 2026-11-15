@@ -101,7 +101,7 @@ export function gcmSeal(key, nonce, plain, aad) {
 }
 export function gcmOpen(key, nonce, data, aad) {
   if (data.length < 16) throw new Error('short');
-  const d = createDecipheriv('aes-256-gcm', key, nonce);
+  const d = createDecipheriv('aes-256-gcm', key, nonce, { authTagLength: 16 }); // sec-integrate: a fixed 16-byte tag, never a shorter one
   d.setAAD(Buffer.from(aad, 'utf8'));
   d.setAuthTag(data.subarray(data.length - 16));
   return Buffer.concat([d.update(data.subarray(0, data.length - 16)), d.final()]);

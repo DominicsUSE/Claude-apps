@@ -1,7 +1,7 @@
 {
   "name": "snug-desktop",
   "productName": "Snug",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "A calm place for your people",
   "author": "Snug",
   "main": "main.js",
@@ -12,11 +12,11 @@
     "test": "node build.js --files-only && node --test test.js"
   },
   "dependencies": {
-    "ws": "8.18.3"
+    "ws": "8.23.0"
   },
   "devDependencies": {
-    "electron": "38.8.6",
-    "electron-builder": "26.15.3",
+    "electron": "45.3.2",
+    "electron-builder": "26.18.0",
     "playwright": "1.63.0"
   },
   "build": {
@@ -25,6 +25,17 @@
     "directories": {
       "output": "dist",
       "buildResources": "build"
+    },
+    "asar": true,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "grantFileProtocolExtraPrivileges": true,
+      "resetAdHocDarwinSignature": true
     },
     "protocols": [
       {
@@ -91,7 +102,9 @@
         }
       ],
       "identity": "-",
-      "hardenedRuntime": false,
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
       "darkModeSupport": true,
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Snug uses the microphone for voice calls and voice rooms.",

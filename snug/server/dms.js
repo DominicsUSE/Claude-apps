@@ -12,7 +12,7 @@
 // Changes write a line into the conversation, as a call record does.
 import { limiter } from './auth.js';
 import { newId, now } from './model.js';
-import { HUES } from '../js/lib/util.js';
+import { HUES, stripInvisible } from '../js/lib/util.js'; // sec-authz: stripInvisible
 
 export const MAX_GROUP = 10;
 export const MAX_PINNED = 10;
@@ -163,7 +163,7 @@ export function createDmOps({ db, M, hub, fail, ops: all }) {
     if (d.name !== null && d.name !== '') {
       if (typeof d.name !== 'string') fail('The name is missing.');
       // No control or direction-changing characters, as other names (server/ops.js str).
-      label = d.name.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, ' ').trim().replace(/\s+/g, ' ');
+      label = stripInvisible(d.name).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().replace(/\s+/g, ' '); // sec-authz: zero-width too (js/lib/util.js)
       if (!label) fail('The name can’t be empty.');
       if ([...label].length > 40) fail('The name can be at most 40 characters.');
     }

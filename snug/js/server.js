@@ -82,7 +82,7 @@ function connect() {
       clearTimeout(w.t);
       if (msg.ok) w.resolve(msg.d); else w.reject(new Error(msg.error));
     } else if (msg.t === 'ev') {
-      try { (EVENTS[msg.ev] || ((d) => fire(msg.ev, d)))(msg.d); } catch (err) { console.error(msg.ev, err); }
+      try { ((typeof msg.ev === 'string' && Object.hasOwn(EVENTS, msg.ev) && EVENTS[msg.ev]) || ((d) => fire(msg.ev, d)))(msg.d); } catch (err) { console.error(msg.ev, err); } // sec-integrate: own keys only
       emit();
     }
   };
@@ -96,6 +96,10 @@ function connect() {
     emit();
     // 4001: this session was ended (signed out elsewhere, or the password changed).
     if (e.code === 4001) { signedOut(); return; }
+    // 4008 (sec-authz): too many tabs and devices open at once, and this was the
+    // oldest. Don't reconnect on a timer (the tabs would push each other out in
+    // turn); come back when someone uses this tab again.
+    if (e.code === 4008) { bumped = true; return; }
     // A refused upgrade looks like any other failure; ask whether the session is still valid.
     if (!opened) {
       try {
@@ -123,6 +127,10 @@ export function stopTransport() {
   S.conn.socket = 'idle';
 }
 addEventListener('online', () => { if (S.auth === 'in') { attempt = 0; connect(); } });
+let bumped = false; // sec-authz: closed as the oldest of too many connections (4008)
+const comeBack = () => { if (bumped && S.auth === 'in' && document.visibilityState === 'visible') { bumped = false; attempt = 0; connect(); } };
+addEventListener('focus', comeBack);
+document.addEventListener('visibilitychange', comeBack);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && S.auth === 'in' && S.conn.socket === 'closed') { attempt = 0; connect(); }
 });

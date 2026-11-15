@@ -99,6 +99,10 @@ function save(op, d) {
 // offline. What was read offline is kept and sent after the next snapshot.
 const offlineReads = {};
 function saveQuiet(op, d) {
+  // sec-authz: the server takes up to 500 reads per call.
+  if (op === 'read.many' && d.items?.length > 500) {
+    return Promise.all(Array.from({ length: Math.ceil(d.items.length / 500) }, (_, i) => saveQuiet(op, { items: d.items.slice(i * 500, i * 500 + 500) })));
+  }
   return call(op, d).catch((e) => {
     if (!e.offline) { transport.resync(); return; }
     for (const { conv, ts } of d.items || [d]) offlineReads[conv] = ts;

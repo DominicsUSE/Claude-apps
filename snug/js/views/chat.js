@@ -124,7 +124,7 @@ export function RolePill({ v, hue }) {
   return html`<span class=${`pill-role${h == null ? '' : ' hued'}`} style=${h == null ? '' : `--hue:${h}`}>@${v}</span>`;
 }
 export function RoomPill({ id }) {
-  const room = S.rooms[id];
+  const room = Object.hasOwn(S.rooms, id) ? S.rooms[id] : null; // sec-authz: <#constructor> isn't a room
   if (!room || !convMeta(id)) return html`<span class="pill-room gone" data-tip="You can’t see this room">#unknown room</span>`;
   return html`<button type="button" class="pill-room" aria-label=${`Open #${room.name}`} onClick=${() => openConv(id)}><${Icon} name=${room.kind === 'voice' ? 'voice' : 'room'} size=${14} />${room.name}</button>`;
 }

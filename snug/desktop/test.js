@@ -15,6 +15,9 @@ const { _electron: electron } = require("playwright");
 const live = new Set();
 const realLaunch = electron.launch.bind(electron);
 electron.launch = async (opts) => {
+  // sec-desktop D9: an installed app honours SNUG_UPDATE_CHECK / SNUG_UPDATE_URL only with --dev-update,
+  // so every launch here passes it (a packaged build under SNUG_BIN would otherwise ask GitHub).
+  if (!opts.noDevUpdate) opts = { ...opts, args: [...(opts.args || []), "--dev-update"] };
   const app = await realLaunch(opts);
   const entry = { app, args: (opts.args || []).join(" ") };
   live.add(entry);
@@ -890,4 +893,138 @@ test("mandatory update: the blocking screen downloads with progress, verifies an
   assert.equal((await app.evaluate(() => globalThis.snugUpdateInstalled)).kind, "portable");
   fs.rmSync(dir, { recursive: true, force: true });
   upd.version = "9.9.9";
+});
+
+// ---------- sec-desktop: join mode against a stand-in server, the in-app server's switches, fuses ----------
+const http = require("http");
+function stubSite(handler) {
+  const hits = [];
+  const srv = http.createServer((req, res) => { hits.push(req.url); handler(req, res); });
+  const ready = new Promise((r) => srv.listen(0, "127.0.0.1", r)).then(() => `http://127.0.0.1:${srv.address().port}`);
+  return { srv, hits, ready };
+}
+async function launchWith(userData, { config, env = {}, args = [] } = {}) {
+  if (config) fs.writeFileSync(path.join(userData, "desktop.json"), JSON.stringify(config));
+  const bin = process.env.SNUG_BIN && path.resolve(process.env.SNUG_BIN);
+  const app = await electron.launch({
+    executablePath: bin || require("electron"),
+    args: [...(bin ? [] : [__dirname]), "--no-sandbox", `--user-data-dir=${userData}`, ...args],
+    cwd: __dirname,
+    env: { ...process.env, ...env },
+  });
+  const page = await app.firstWindow();
+  page.setDefaultTimeout(20000);
+  return { app, page };
+}
+
+test("join mode: a server redirect to another site never takes over the window (will-redirect); the microphone asks first", async (t) => {
+  const other = stubSite((req, res) => { res.writeHead(200, { "content-type": "text/html" }); res.end("<title>elsewhere</title>elsewhere"); });
+  const otherBase = await other.ready;
+  const join = stubSite((req, res) => {
+    if (req.url === "/go") { res.writeHead(302, { location: `${otherBase}/landed` }); return res.end(); }
+    if (req.url === "/file") { res.writeHead(302, { location: "file:///etc/hostname" }); return res.end(); }
+    res.writeHead(200, { "content-type": "text/html" });
+    return res.end("<!doctype html><title>stand-in Snug</title><p>a Snug someone else runs</p>");
+  });
+  const joinBase = await join.ready;
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-join-"));
+  t.after(async () => { other.srv.close(); join.srv.close(); await removeDir(userData); });
+  const { app, page } = await launchWith(userData, { config: { mode: "join", url: joinBase }, args: ["--use-fake-device-for-media-stream"] });
+  await page.waitForURL(`${joinBase}/`);
+  await app.evaluate(({ shell, dialog }) => {
+    globalThis.testOpened = [];
+    shell.openExternal = async (u) => { globalThis.testOpened.push(u); };
+    globalThis.testAsked = [];
+    globalThis.testAnswer = 1; // "Don't allow"
+    dialog.showMessageBox = async (_w, o) => { globalThis.testAsked.push(o.message); return { response: globalThis.testAnswer }; };
+  });
+
+  // D1: /go answers 302 to another origin. will-navigate only sees /go (same origin); will-redirect stops the rest.
+  await page.evaluate(() => { location.href = "/go"; });
+  await new Promise((r) => setTimeout(r, 1500));
+  assert.equal(new URL(page.url()).origin, joinBase, "still the Snug address");
+  assert.ok(!other.hits.includes("/landed"), "the other site was never loaded in the window");
+  assert.deepEqual(await app.evaluate(() => globalThis.testOpened), [`${otherBase}/landed`], "it opens in the browser instead");
+
+  // D6: the remote page asks for the microphone: the person is asked; "Don't allow" refuses it.
+  const mic = () => page.evaluate(() => navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => { s.getTracks().forEach((x) => x.stop()); return "ok"; }, (e) => e.name));
+  assert.equal(await mic(), "NotAllowedError");
+  assert.deepEqual(await app.evaluate(() => globalThis.testAsked), ["Let this Snug use your microphone?"]);
+  // "Allow microphone": granted, and not asked again this run.
+  await app.evaluate(() => { globalThis.testAnswer = 0; });
+  assert.equal(await mic(), "ok");
+  assert.equal(await mic(), "ok");
+  assert.equal((await app.evaluate(() => globalThis.testAsked)).length, 2, "asked once more, then remembered");
+  // The camera still asks on its own.
+  const cam = await page.evaluate(() => navigator.mediaDevices.getUserMedia({ video: true }).then((s) => { s.getTracks().forEach((x) => x.stop()); return "ok"; }, (e) => e.name));
+  assert.equal(cam, "ok");
+  assert.equal((await app.evaluate(() => globalThis.testAsked)).at(-1), "Let this Snug use your camera?");
+  // A redirect into the file loader: never followed (an error page at most), never handed to the browser.
+  await page.evaluate(() => { location.href = "/file"; });
+  await new Promise((r) => setTimeout(r, 1000));
+  assert.ok(!page.url().startsWith("file:"), page.url());
+  assert.equal((await app.evaluate(() => globalThis.testOpened)).length, 1);
+  await app.close();
+});
+
+test("in-app server: ambient SNUG_* variables change nothing, and a foreign Host gets 421 (DNS rebinding), LAN mode included", async (t) => {
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-hosts-"));
+  t.after(() => removeDir(userData));
+  // What same-user malware could plant in the environment.
+  const planted = { SNUG_HOSTS: "rebind.attacker.example", SNUG_ORIGINS: "http://rebind.attacker.example:47821", SNUG_TRUST_PROXY: "1", SNUG_SECURE: "1" };
+  const { app, page } = await launchWith(userData, { config: { mode: "host", lan: true }, env: planted });
+  await page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//);
+  await page.waitForSelector(".auth-form");
+  const port = new URL(page.url()).port;
+  const ask = (host, extra = {}) => new Promise((resolve, reject) => {
+    const body = JSON.stringify({ handle: "planted", name: "Planted", password: "a long password" });
+    const req = http.request({ host: "127.0.0.1", port, path: "/api/register", method: "POST", headers: { host, origin: `http://${host}`, "content-type": "application/json", "content-length": Buffer.byteLength(body), ...extra } }, (res) => {
+      res.resume();
+      res.on("end", () => resolve({ status: res.statusCode, cookie: res.headers["set-cookie"] }));
+    });
+    req.on("error", reject);
+    req.end(body);
+  });
+  const foreign = await ask(`rebind.attacker.example:${port}`);
+  assert.equal(foreign.status, 421, "a name this server doesn't answer to");
+  assert.equal(foreign.cookie, undefined);
+  // The real address still works, and the cookie isn't marked Secure by a planted SNUG_SECURE (it is plain http).
+  const real = await ask(`127.0.0.1:${port}`);
+  assert.equal(real.status, 201);
+  assert.doesNotMatch(String(real.cookie), /;\s*Secure/i);
+  await app.close();
+});
+
+test("fuses: the packaged app can't be run as plain Node (ELECTRON_RUN_AS_NODE)", { skip: !process.env.SNUG_BIN && "only for a packaged build (SNUG_BIN)" }, async () => {
+  const { spawn } = require("child_process");
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-fuse-"));
+  const marker = path.join(userData, "ran-as-node.txt");
+  const child = spawn(path.resolve(process.env.SNUG_BIN), ["-e", `require("fs").writeFileSync(${JSON.stringify(marker)}, "1")`, "--no-sandbox", `--user-data-dir=${userData}`], {
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }, stdio: "ignore",
+  });
+  // As Node it would write the file and exit at once; with RunAsNode off it starts Snug instead, which we stop.
+  await new Promise((r) => { const timer = setTimeout(r, 8000); child.on("exit", () => { clearTimeout(timer); r(); }); });
+  try { child.kill(); } catch { /* already gone */ }
+  await new Promise((r) => setTimeout(r, 500));
+  const ran = fs.existsSync(marker);
+  fs.rmSync(userData, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  assert.equal(ran, false);
+});
+
+test("an installed app ignores planted updater variables without --dev-update (SNUG_UPDATE_URL)", { skip: !process.env.SNUG_BIN && "only for a packaged build (SNUG_BIN)" }, async (t) => {
+  const planted = stubSite((req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end("{}"); });
+  const base = await planted.ready;
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-noupd-"));
+  fs.writeFileSync(path.join(userData, "desktop.json"), JSON.stringify({ mode: "host" }));
+  t.after(async () => { planted.srv.close(); await removeDir(userData); });
+  const app = await electron.launch({
+    executablePath: path.resolve(process.env.SNUG_BIN), args: ["--no-sandbox", `--user-data-dir=${userData}`], cwd: __dirname, noDevUpdate: true,
+    env: (({ SNUG_UPDATE_CHECK, ...rest }) => ({ ...rest, SNUG_UPDATE_URL: `${base}/latest`, SNUG_NOTICES_URL: `${base}/notices`, SNUG_UPDATE_KIND: "portable" }))(process.env),
+  });
+  const page = await app.firstWindow();
+  await page.waitForSelector(".auth-form", { timeout: 20000 });
+  // The check asks GitHub, never the planted address (SNUG_UPDATE_CHECK=0 is ignored the same way: updater.test.js).
+  await app.evaluate(() => globalThis.snugCheckUpdate());
+  assert.deepEqual(planted.hits, []);
+  await app.close();
 });

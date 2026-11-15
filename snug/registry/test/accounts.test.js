@@ -365,6 +365,14 @@ test('TURN: 404 when not configured; per-call credentials when configured', asyn
     r2.runtime.env.TURN_API = `${r2.github.url}/turn`;
     const x = await r2.signUp(1, 'mia');
     const y = await r2.signUp(2, 'ned');
+    // sec-registry REG-L5: only for a peer both sides are connected to and watch (a call between friends).
+    assert.equal((await turn(r2, x, y.uid)).status, 404, 'not watching each other: same answer as a missing uid');
+    const sx = await r2.connect(x.uid, x.k);
+    const sy = await r2.connect(y.uid, y.k);
+    sx.send({ t: 'watch', uids: [y.uid] });
+    assert.equal((await turn(r2, x, y.uid)).status, 404, 'one-way watch is not enough');
+    sy.send({ t: 'watch', uids: [x.uid] });
+    await sx.next((m) => m.t === 'presence' && m.uid === y.uid && m.on);
     const ok = await turn(r2, x, y.uid);
     assert.equal(ok.status, 200, JSON.stringify(ok.body));
     assert.ok(Array.isArray(ok.body.iceServers));
@@ -374,6 +382,8 @@ test('TURN: 404 when not configured; per-call credentials when configured', asyn
     assert.equal((await turn(r2, x, 'aaaaaaaaaaaaaaaa')).status, 404);
     assert.equal((await turn(r2, x, y.uid)).status, 200);
     assert.equal((await turn(r2, x, y.uid)).status, 429);
+    sx.close();
+    sy.close();
   } finally {
     await r2.close();
   }

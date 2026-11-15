@@ -43,7 +43,7 @@ export function PlacesRoles({ house }) {
   const role = h.roles.find((r) => r.id === sel) || h.roles[0];
   const owner = h.roles[0].id === role.id;
   // The shared hierarchy (js/lib/safety.js): people who aren't owners change only roles below their own.
-  const mine = owner || roleBelow(h.roles, h.members, S.me, role.id, h.extra || {});
+  const mine = owner || roleBelow(h.roles, h.members, S.me, role.id, h.rankExtra || h.extra || {}) /* sec-authz: interest roles give no rank */;
   const count = (id) => Object.keys(h.members).filter((u) => rolesOf(house, u).includes(id)).length;
   const extraHolders = Object.keys(h.members).filter((u) => (h.extra?.[u] || []).includes(role.id));
   const candidates = Object.keys(h.members).filter((u) => S.users[u] && h.members[u] !== role.id && !extraHolders.includes(u) && q && fuzzy(q, S.users[u].name) >= 0).slice(0, 6);

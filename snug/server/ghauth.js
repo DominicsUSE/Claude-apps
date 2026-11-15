@@ -19,7 +19,8 @@ import { readFileSync } from 'node:fs';
 import { HUES } from '../js/lib/util.js';
 import { normalize, check } from '../js/lib/usernames.js';
 import { nameMessage, localNameProblem } from '../js/lib/username-text.js';
-import { createSession, sessionCookie, readCookie, COOKIE, tokenHash, SESSION_DAYS } from './auth.js';
+import { createSession, sessionCookie, readCookie, COOKIE, tokenHash, SESSION_DAYS, recentAuth } from './auth.js';
+import { secRecord } from './seclog.js'; // sec-integrate
 import { UserError } from './ops.js';
 
 const VERSION = (() => { try { return JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version; } catch { return '0'; } })();
@@ -47,7 +48,7 @@ function regMessage(e, name) {
 }
 
 export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log = () => {}, agentOf = () => '', userOf }) {
-  const { registryUrl, githubClientId, githubBase = 'https://github.com', resumeSecret = null, trustProxy = false } = opts;
+  const { registryUrl, githubClientId, githubBase = 'https://github.com', resumeSecret = null, trustProxy = false, ghWindowOnly = false } = opts;
   const fetchFn = opts.fetch || globalThis.fetch;
   const enabled = !!(registryUrl && githubClientId && peer?.enabled);
   const deviceUri = `${githubBase}/login/device`;
@@ -258,6 +259,7 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
 
   function signIn(res, req, user, body = {}) {
     const token = createSession(db, user, agentOf(req));
+    M.onSignIn?.(req, user, 'github'); // sec-auth: the audit trail and a word to the account's other devices (server/account.js)
     send(res, 200, { ...body, user: M.userView(M.userRow(user), M.userRow(user).presence, true) }, { 'Set-Cookie': sessionCookie(token, { secure }) });
   }
   const isLocal = (id) => !!db.get("SELECT 1 FROM users WHERE id=? AND remote IS NOT 1 AND deleted IS NOT 1 AND pass != '!'", id);
@@ -268,7 +270,7 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
     if (!path.startsWith('/api/gh/')) return false;
     const post = req.method === 'POST';
     if (path === '/api/gh/config' && req.method === 'GET') {
-      if (!enabled || !loopback(req)) { send(res, 200, { enabled: false }); return true; }
+      if (!enabled || !loopback(req) || (ghWindowOnly && !resumeOk(req))) { send(res, 200, { enabled: false }); return true; } // sec-desktop D10
       const s = self();
       const resumable = s?.user && (s.state === 'ok' || s.state === 'moving') && userRow(s.user) && !userRow(s.user).deleted && resumeOk(req);
       // Any password account on this PC may connect GitHub while the PC has no Snug account yet (S18); first one wins.
@@ -279,6 +281,9 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
     }
     if (!enabled) { err(res, 404, 'Not found'); return true; }
     if (!loopback(req)) { err(res, 403, 'GitHub sign-in works only in the Snug app on this PC.'); return true; }
+    // sec-desktop D10: in the desktop app only its own window (the per-launch cookie it alone holds) may run the
+    // sign-in: another program or OS account on this PC reaches 127.0.0.1 too, and could claim this PC's account.
+    if (ghWindowOnly && !resumeOk(req)) { secRecord(db, 'access.refused', { req, detail: { path: path.slice(0, 60), why: 'not the app window' } }); err(res, 403, 'GitHub sign-in works only in the Snug app on this PC.'); return true; } // sec-integrate: logged
 
     if (post && path === '/api/gh/start') {
       const d = await json(req);
@@ -292,6 +297,18 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
         } else {
           if (!isLocal(user)) { err(res, 403, 'This account can’t connect GitHub.'); return true; }
           if (self()?.uid) { err(res, 409, 'This PC is linked to another Snug account.'); return true; }
+          // sec-auth AUTH-10: linking removes the password and two-factor sign-in and hands the account to a
+          // GitHub account, so it needs proof: the password (and a code) now, or a sign-in in the last 10 minutes.
+          const token = readCookie(req.headers.cookie, COOKIE);
+          if (!(d.password === undefined && recentAuth(db, token))) {
+            // No password typed is not a wrong guess: it isn't counted.
+            const r = typeof d.password === 'string' ? await M.stepUp?.(user, { password: d.password, code: d.code, token }) : { status: 401 };
+            if (r !== null) {
+              M.audit?.('github.link', req, user, { ok: false, why: r?.field === 'wait' ? 'locked' : 'reauth' });
+              err(res, r?.status === 429 ? 429 : 401, r?.field === 'wait' ? r.message : 'For your security, type your password (or sign out and back in) before connecting GitHub.', 'reauth');
+              return true;
+            }
+          }
           f.link = user;
         }
       }
@@ -364,6 +381,7 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
       if (f.link) {
         // The account is GitHub-secured from now on: no password, no authenticator (section 3.3).
         user = f.link;
+        M.audit?.('github.link', req, user);
         clearHandle(account.username, user);
         db.run("UPDATE users SET handle = ?, pass = '!' WHERE id = ?", account.username, user);
         try { db.run('DELETE FROM totp WHERE user = ?', user); } catch { /* two-factor not set up */ }
@@ -447,7 +465,8 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
   // ---------- Routes for a signed-in person ----------
   async function authed(req, res, path, user) {
     // Sliding sign-in (S23): a session that is used keeps going, up to 90 days from sign-in.
-    if (req.method === 'GET' && path === '/api/me') refresh(req, res);
+    // sec-auth AUTH-13: only in the desktop app (P2P on, or its resume secret); web sessions end at 30 days.
+    if (req.method === 'GET' && path === '/api/me' && (enabled || resumeSecret)) refresh(req, res);
     if (!enabled || !peer.isOwner(user)) return false;
     if (req.method === 'POST' && path === '/api/password') { err(res, 403, 'Your account is secured by GitHub sign-in.'); return true; }
     return false;
@@ -507,6 +526,8 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
 
     // Account delete and deactivate (server/account.js) for the P2P owner.
     M.p2pOwner = (u) => peer.isOwner(u);
+    // sec-auth AUTH-10: a delete confirmed on GitHub (the release flow).
+    M.p2pConfirmed = (flow) => typeof flow === 'string' && flows.get(flow)?.status === 'confirmed';
     M.p2pDelete = async (u, d, run) => {
       const f = typeof d.flow === 'string' ? flows.get(d.flow) : null;
       const ticket = f?.status === 'confirmed' ? f.ticket : null;

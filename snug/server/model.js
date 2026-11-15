@@ -9,9 +9,10 @@ import { EVENT_LENGTH } from '../js/lib/social.js';
 export const PAGE = 60;
 const ALPHA = 'abcdefghijklmnopqrstuvwxyz0123456789';
 export function newId(prefix) {
-  const bytes = randomBytes(14);
+  // sec-integrate: unbiased characters (bytes from 252 up are skipped: 252 is 7 x 36), so
+  // every one of the 14 is uniform: file ids are unguessable links, among others.
   let s = '';
-  for (const b of bytes) s += ALPHA[b % 36];
+  while (s.length < 14) for (const b of randomBytes(16)) if (b < 252 && s.length < 14) s += ALPHA[b % 36];
   return `${prefix}_${s}`;
 }
 
@@ -228,7 +229,7 @@ export function createModel(db) {
     const rooms = db.all('SELECT r.id FROM rooms r JOIN members m ON m.house = r.house WHERE m.user = ?', user).map((r) => r.id);
     const convs = [...rooms, ...M.dmIdsOf(user)];
     const threads = convs.length
-      ? db.all(`SELECT id FROM threads WHERE conv IN (${convs.map(() => '?').join(',')})`, ...convs).map((r) => r.id)
+      ? db.all('SELECT id FROM threads WHERE conv IN (SELECT value FROM json_each(?))', JSON.stringify(convs)).map((r) => r.id) // sec-authz: one bound array, no variable limit
       : [];
     return [...convs, ...threads];
   };
@@ -262,7 +263,7 @@ export function createModel(db) {
       if (p.more) more[conv] = true;
       p.msgs.forEach((m) => users.add(m.author));
     }
-    for (const t of db.all(`SELECT * FROM threads WHERE id IN (${convs.map(() => '?').join(',') || "''"})`, ...convs)) {
+    for (const t of db.all('SELECT * FROM threads WHERE id IN (SELECT value FROM json_each(?))', JSON.stringify(convs))) { // sec-authz
       threads[t.id] = { conv: t.conv, root: t.root };
     }
     // People you have only asked, with no place in common, stay offline to you until they say yes.
@@ -304,14 +305,16 @@ export function createModel(db) {
       convs = convs.filter((c) => { const n = fold(nameOf(c)); return p.in.every((v) => n.includes(v)); });
     }
     if (!convs.length) return [];
-    const where = [`conv IN (${convs.map(() => '?').join(',')})`, 'deleted IS NULL'];
-    const params = [...convs];
+    // sec-authz: the conversation list goes in as one JSON array, so someone in
+    // a great many rooms and threads can't run past SQLite's variable limit.
+    const where = ['conv IN (SELECT value FROM json_each(?))', 'deleted IS NULL'];
+    const params = [JSON.stringify(convs)];
     for (const t of p.terms) { where.push("fold LIKE ? ESCAPE '\\'"); params.push(`%${t.replace(/[\\%_]/g, (c) => `\\${c}`)}%`); }
     if (p.from.length) {
       const authors = db.all('SELECT id, name, handle FROM users').filter((u) => p.from.every((v) => fold(`${u.name} ${u.handle}`).includes(v))).map((u) => u.id);
       if (!authors.length) return [];
-      where.push(`author IN (${authors.map(() => '?').join(',')})`);
-      params.push(...authors);
+      where.push('author IN (SELECT value FROM json_each(?))'); // sec-authz
+      params.push(JSON.stringify(authors));
     }
     if (p.saved) { where.push('id IN (SELECT msg FROM saved WHERE user = ?)'); params.push(user); }
     // Mentions, dates and pins (messaging track).

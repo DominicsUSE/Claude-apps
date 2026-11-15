@@ -147,7 +147,7 @@ function render(tokens, ctx) {
       case 's': return html`<s>${render(t.c, ctx)}</s>`;
       case 'link': return html`<a href=${t.v} target="_blank" rel="noopener noreferrer">${t.v.replace(/^https?:\/\//, '')}</a>`;
       case 'at': {
-        const u = S.users[t.v] || Object.values(S.users).find((x) => x.handle === t.v);
+        const u = (Object.hasOwn(S.users, t.v) ? S.users[t.v] : null) || Object.values(S.users).find((x) => x.handle === t.v); // sec-authz: not Object.prototype (@constructor)
         if (!u) return `@${t.v}`;
         return html`<span class=${`at${u.id === S.me ? ' at-you' : ''}`} onClick=${(e) => ctx.onMention?.(u, e)}>@${u.name}</span>`;
       }

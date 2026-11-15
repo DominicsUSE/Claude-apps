@@ -420,3 +420,8 @@ input[type="search"]::-webkit-search-cancel-button, input[type="search"]::-webki
   .seg { display: grid; width: 100%; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
   .seg button { padding: 0 var(--s-2); }
 }
+
+/* sec-authz: names and file names are isolated from the text around them, so
+   right-to-left characters in one can't reorder what comes after it
+   ("X joined the house."). The server also strips direction overrides. */
+[class*="-name"], [class*="-who"], .who, .name { unicode-bidi: isolate; }

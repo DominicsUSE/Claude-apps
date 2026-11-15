@@ -12,7 +12,7 @@
 // - Settings: a "custom:<id>" theme has to name one of the person's saved
 //   themes; every other rule is in cleanPrefs (js/lib/account.js).
 import { writeFile, unlink } from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
+import { sendFile } from './seclog.js'; // sec-web W1
 import { join } from 'node:path';
 import { newId } from './model.js';
 import { limiter } from './auth.js';
@@ -202,8 +202,7 @@ export function createAppearanceHttp({ db, M, hub, filesDir, sendJson, error, bo
         'Content-Type': row.type, 'Content-Length': String(row.size), 'Cache-Control': 'private, max-age=86400',
         'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Content-Type-Options': 'nosniff',
       });
-      res.writeHead(200);
-      createReadStream(join(filesDir, row.id)).pipe(res);
+      sendFile(res, join(filesDir, row.id)); // sec-web W1: 404 when the bytes are gone, never an unhandled stream error (server/seclog.js)
       return true;
     }
     return false;

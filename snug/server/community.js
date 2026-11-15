@@ -18,14 +18,14 @@
 //   invitations, a custom invitation link, join announcements and a default
 //   notification level for new members.
 import { writeFile, unlink } from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
+import { sendFile } from './seclog.js'; // sec-web W1
 import { join } from 'node:path';
 import { limiter } from './auth.js';
 import { newId, now } from './model.js';
 import { imageInfo } from './messaging.js';
 import { safeLink, LIMITS, eventState } from '../js/lib/social.js';
 import { left } from '../js/lib/safety.js';
-import { fold } from '../js/lib/util.js';
+import { fold, stripInvisible } from '../js/lib/util.js'; // sec-authz: stripInvisible
 import { MANAGING } from './places.js';
 import {
   GROUP_NAME_MAX, MAX_GROUPS, PICTURES, PICTURE_TYPES, COVER_TYPES, COVER_BYTES, LOCATION_MAX, RSVP_KINDS, REMIND_LEAD,
@@ -90,7 +90,7 @@ export function createCommunityOps({ db, M, hub, fail, ops }) {
   // ---------- Input checks (the same rules as server/ops.js) ----------
   const str = (v, { max = 200, min = 0, name = 'This' } = {}) => {
     if (typeof v !== 'string') fail(`${name} is missing.`);
-    const s = v.trim().replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '');
+    const s = stripInvisible(v).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim(); // sec-authz: stripInvisible
     if (s.length < min) fail(min === 1 ? `${name} can’t be empty.` : `${name} needs at least ${min} characters.`);
     if (s.length > max) fail(`${name} can be at most ${max} characters.`);
     return s;
@@ -984,8 +984,7 @@ export function createCommunityHttp({ db, M, hub, filesDir, sendJson, error, bod
       'Content-Type': row.type, 'Content-Length': String(row.size), 'Cache-Control': 'private, max-age=86400',
       'Content-Security-Policy': "default-src 'none'; sandbox", 'X-Content-Type-Options': 'nosniff',
     });
-    res.writeHead(200);
-    createReadStream(join(filesDir, row.id)).pipe(res);
+    sendFile(res, join(filesDir, row.id)); // sec-web W1: 404 when the bytes are gone, never an unhandled stream error (server/seclog.js)
   }
 
   async function open(req, res, path, url) {

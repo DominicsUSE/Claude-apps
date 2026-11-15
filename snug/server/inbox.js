@@ -321,6 +321,7 @@ export function createInboxOps({ db, M, hub, fail, ops: all }) {
   };
   const baseContent = hub.sendHouseContent;
   hub.sendHouseContent = (u, houseId) => {
+    if (hub.connected && !hub.connected(u)) return; // sec-authz: nothing to build for someone with no socket open
     baseContent(u, houseId);
     const rooms = db.all('SELECT id FROM rooms WHERE house = ?', houseId).map((r) => r.id);
     const convs = M.readable(u).filter((c) => rooms.includes(c) || (c.startsWith('t:') && rooms.includes(M.thread(c)?.conv)));
@@ -347,11 +348,11 @@ export function createInboxOps({ db, M, hub, fail, ops: all }) {
     const items = [];
     let cursor = before, scanned = 0, more = false;
     for (;;) {
-      const rows = db.all(`SELECT * FROM messages WHERE conv IN (${convs.map(() => '?').join(',')}) AND seq < ? AND ts > ?
+      const rows = db.all(`SELECT * FROM messages WHERE conv IN (SELECT value FROM json_each(?)) AND seq < ? AND ts > ?
           AND author != ? AND deleted IS NULL AND sys IS NULL${noBlocks}
           AND (text LIKE '%@%' OR (reply_to IS NOT NULL AND COALESCE(reply_ping, 1) != 0 AND reply_to IN (SELECT id FROM messages WHERE author = ?)))
           AND id NOT IN (SELECT msg FROM mention_dismiss WHERE user = ?)
-        ORDER BY seq DESC LIMIT 200`, ...convs, cursor, since, c.user, ...blocks, c.user, c.user);
+        ORDER BY seq DESC LIMIT 200`, JSON.stringify(convs), cursor, since, c.user, ...blocks, c.user, c.user); // sec-authz: one bound array, no variable limit
       for (const row of rows) {
         if (items.length >= limit) { more = true; break; }
         cursor = row.seq;
@@ -407,12 +408,13 @@ export function createInboxOps({ db, M, hub, fail, ops: all }) {
   };
 
   // ---------- Change your username ----------
-  ops['me.handle'] = (c, d) => {
+  ops['me.handle'] = async (c, d) => { // sec-auth: async, for the password check off the event loop
     slow('handle', c.user);
     const handle = typeof d.handle === 'string' ? d.handle.trim().toLowerCase().replace(/^@/, '') : fail('Type a username.');
     if (!HANDLE.test(handle)) fail('Usernames are 2 to 24 letters, numbers, dots, dashes or underscores, starting and ending with a letter or number.');
     const u = M.userRow(c.user);
-    if (typeof d.password !== 'string' || d.password.length > 200 || !checkPassword(d.password, u.pass)) fail('That password isn’t right.');
+    // sec-auth AUTH-8: through the shared step-up counter (server/account.js M.passwordOk); refused with a wait after five failures.
+    if (typeof d.password !== 'string' || d.password.length > 200 || !(await M.passwordOk(c.user, d.password))) fail('That password isn’t right.');
     if (M.totpOn?.(c.user) && !M.verifySecond?.(c.user, typeof d.code === 'string' ? d.code : '')) fail('That code isn’t right. Use a fresh code from your app or a backup code.');
     if (handle === u.handle.toLowerCase()) fail('That’s already your username.');
     const t = Date.now();

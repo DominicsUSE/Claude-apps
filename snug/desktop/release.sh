@@ -4,6 +4,8 @@
 # Creates the release if it is missing (marked latest), writes SHA256SUMS-<platform>.txt for the
 # given files, uploads only the files the release doesn't have yet (never --clobber, so a published
 # file never changes under someone's download), and marks the release latest. Needs gh, node and GH_TOKEN.
+# With SNUG_UPDATE_SIGNING_KEY (an Ed25519 private key, PEM) it also signs the checksum file
+# (SHA256SUMS-<platform>.txt.sig, desktop/sign-sums.js); once updater.js pins a key it refuses to run without one.
 set -euo pipefail
 
 platform="${1:-}"
@@ -16,6 +18,16 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 version="$(node -p "require(process.argv[1]).version" "$here/package.json")"
 tag="snug-v$version"
 sha="${GITHUB_SHA:-$(git -C "$here" rev-parse HEAD)}"
+
+# sec-desktop D3: once updater.js pins an update key, every release must carry a signature by it, or no
+# client would take it. Checked before anything is created or uploaded; a key that isn't pinned fails here too.
+pinned="$(node -p "require(process.argv[1]).UPDATE_PUBKEYS.length" "$here/updater.js")"
+if [ -n "${SNUG_UPDATE_SIGNING_KEY:-}" ]; then
+  node "$here/sign-sums.js" /dev/null >/dev/null
+elif [ "$pinned" != 0 ]; then
+  echo "release.sh: updater.js pins an update key, but SNUG_UPDATE_SIGNING_KEY is not set: not publishing an unsigned release" >&2
+  exit 1
+fi
 
 title="Snug $version"
 if [ "$platform" = windows ]; then
@@ -39,11 +51,11 @@ dir="$(cd "$(dirname "$1")" && pwd)"
 sums_name="SHA256SUMS-$platform.txt"
 sums="$dir/$sums_name"
 hash_of() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
+pub="$(mktemp -d)"
+trap 'rm -rf "$pub"' EXIT
 if in_release "$sums_name"; then
   echo "release.sh: $sums_name is already in $tag"
 else
-  pub="$(mktemp -d)"
-  trap 'rm -rf "$pub"' EXIT
   : > "$sums"
   for f in "$@"; do
     name="$(basename "$f")"
@@ -53,11 +65,24 @@ else
   done
 fi
 
-# The files first, the checksum file last: the app needs both before it offers an update.
+# The signature of the checksum file exactly as people download it (the published copy, if there is one).
+sig_name="$sums_name.sig"
+sig="$sums.sig"
+rm -f "$sig"
+if in_release "$sig_name"; then
+  echo "release.sh: $sig_name is already in $tag"
+elif [ -n "${SNUG_UPDATE_SIGNING_KEY:-}" ]; then
+  signed="$sums"
+  if in_release "$sums_name"; then gh release download "$tag" -p "$sums_name" -D "$pub" --clobber; signed="$pub/$sums_name"; fi
+  node "$here/sign-sums.js" "$signed" > "$sig"
+fi
+
+# The files first, then the signature, the checksum file last: the app needs them all before it offers an update.
 for f in "$@"; do
   name="$(basename "$f")"
   if in_release "$name"; then echo "release.sh: $name is already in $tag"; else gh release upload "$tag" "$f"; fi
 done
+if [ -f "$sig" ]; then gh release upload "$tag" "$sig"; fi
 in_release "$sums_name" || gh release upload "$tag" "$sums"
 
 gh release edit "$tag" --latest >/dev/null

@@ -21,6 +21,7 @@ import { imageInfo } from './messaging.js';
 import { newId } from './model.js';
 import { APP_VERSION } from './peersignal.js';
 import { cleanPrefs } from '../js/lib/account.js';
+import { suspicious } from './seclog.js'; // sec-registry: alerts in the security log
 
 const DAY = 86_400_000;
 const MAX_PIC = 2 * 1024 * 1024;
@@ -121,7 +122,11 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
     if (!keyFetch) {
       keyFetch = (async () => {
         let r;
-        try { r = await peer.reg.signedCall('/v1/vault/key', 'vault-key'); } catch (e) { throw new VaultError('no_key', e.code || e.message); }
+        try { r = await peer.reg.signedCall('/v1/vault/key', 'vault-key'); } catch (e) {
+          // sec-registry REG-H1: the registry gives the key to the current key only, never to a pending move.
+          if (self()?.state === 'moving' && (e.code === 'bad_signature' || e.status === 401)) throw new VaultError('not_yet', e.code);
+          throw new VaultError('no_key', e.code || e.message);
+        }
         const key = typeof r?.key === 'string' ? unb64u(r.key) : Buffer.alloc(0);
         if (key.length !== 32 || !Number.isSafeInteger(r.kid) || r.kid < 1) throw new VaultError('no_key', 'reply');
         if (myUid() !== uid) throw new VaultError('no_key', 'account changed');
@@ -131,6 +136,41 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
       })().finally(() => { keyFetch = null; });
     }
     return keyFetch;
+  }
+  // sec-registry REG-L1: the vault key can rotate. A file sealed with an older key (a backup, or the old PC's
+  // file after a move) asks the registry for that key by kid; it is kept in memory only.
+  const olderKeys = new Map(); // `${uid}:${kid}` -> { uid, key, kid }
+  async function keyForKid(kid) {
+    let key = await ensureKey();
+    if (kid === key.kid) return key;
+    if (kid > key.kid) {
+      key = await ensureKey(true);
+      if (kid === key.kid) return key;
+      throw new VaultError('tampered', 'kid');
+    }
+    const uid = myUid();
+    const hit = olderKeys.get(`${uid}:${kid}`);
+    if (hit) return hit;
+    let r;
+    try { r = await peer.reg.signedCall('/v1/vault/key', 'vault-key', { kid }); } catch (e) {
+      if (e.code === 'not_found') throw new VaultError('tampered', 'kid');
+      throw new VaultError('no_key', e.code || e.message);
+    }
+    const raw = typeof r?.key === 'string' ? unb64u(r.key) : Buffer.alloc(0);
+    if (raw.length !== 32 || r.kid !== kid || myUid() !== uid) throw new VaultError('no_key', 'reply');
+    const k = { uid, key: raw, kid };
+    if (olderKeys.size >= 8) olderKeys.delete(olderKeys.keys().next().value);
+    olderKeys.set(`${uid}:${kid}`, k);
+    return k;
+  }
+  // A new vault key (the user asked, or a move was stopped: a key holder may be in the wrong hands). Files
+  // written from now on use it; older files and backups stay readable through keyForKid.
+  async function rotateKey() {
+    await peer.reg.signedCall('/v1/vault/rotate', 'vault-rotate');
+    const k = await ensureKey(true);
+    markDirty();
+    await write({ force: true }).catch(() => {});
+    return k.kid;
   }
   function cacheEnc() {
     if (mem?.uid === myUid()) return mem.enc;
@@ -289,7 +329,8 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
     try { await ensureKey(); } catch (e) {
       // No key yet (fresh device, registry offline): stay dirty, try again at the next ready.
       dirty = true;
-      if (lastError !== e.code) { lastError = e.code; pushStatus(); }
+      const code = e.code === 'not_yet' ? null : e.code; // a pending move: nothing is wrong, the key comes after it
+      if (lastError !== code) { lastError = code; pushStatus(); }
       return false;
     }
     try { return writeNow(opts); } catch (e) {
@@ -334,12 +375,12 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
       id, o, `${kind}:${o}`, kind, img.type, data.length, Date.now(), JSON.stringify({ w: img.w, h: img.h }));
     return { id, anim: img.type === 'image/gif' };
   }
-  function applyPayload(p) {
+  function applyPayload(p, selfKeys = null) {
     const o = owner();
     const uid = myUid();
     const t = Date.now();
     const counts = { people: 0, friends: 0, conversations: 0, messages: 0 };
-    const newFriends = [], newDms = [], created = [];
+    const newFriends = [], newDms = [], created = [], newPins = [];
     try {
       db.tx(() => {
         // People: pin the keys the file knows; a live pin is never overridden.
@@ -349,6 +390,7 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
           const had = !!db.get('SELECT 1 FROM peers WHERE uid = ?', x.uid);
           peer._ensureShadow({ uid: x.uid, username: x.username, ik: x.ik, xk: x.xk, kver: x.kver });
           if (!had) {
+            newPins.push(x.uid);
             counts.people++;
             if (x.name) db.run('UPDATE users SET name = ? WHERE id = ?', clip(x.name, 64), shadowId(x.uid));
           }
@@ -435,7 +477,7 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
           }
         }
         // Other tracks' data (groups across PCs); a throw aborts everything.
-        const ctx = { db, M, owner: o, myUid: uid, peer };
+        const ctx = { db, M, owner: o, myUid: uid, peer, selfKeys };
         for (const s of hub.vaultSections || []) {
           if (p.sections && Object.hasOwn(p.sections, s.name)) s.import(p.sections[s.name], ctx);
         }
@@ -444,7 +486,40 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
       for (const id of created) rm(join(filesDir, id));
       throw e;
     }
-    return { counts, newFriends, newDms };
+    return { counts, newFriends, newDms, newPins };
+  }
+
+  // sec-registry REG-L2: a key pinned from a data file (for someone this PC hadn't met) is only what the file
+  // says. Checked with the registry as soon as it can be: a key that isn't in the person's key chain there is
+  // replaced by the registry's (and the file's history rows for them go), so a forged file can't pin a fake
+  // key or a kver-999 trap that refuses the real person's next key. Offline: checked at the next import or
+  // when the shadow is next looked up.
+  async function checkFilePins(uids) {
+    for (const uid of uids.slice(0, 500)) {
+      let r = null;
+      try { r = await peer.reg.lookup({ uid }); } catch (e) { log('vault', 'pin check', e.code || e.message); return; }
+      const pin = db.get('SELECT user, ik, xk, kver FROM peers WHERE uid = ?', uid);
+      if (!pin) continue;
+      const chain = Array.isArray(r?.chain) ? r.chain : [];
+      const inChain = r && r.uid === uid && chain.some((k) => k.kver === pin.kver && k.ik === pin.ik && k.xk === pin.xk);
+      if (inChain) continue;
+      db.tx(() => {
+        if (r && r.uid === uid && typeof r.ik === 'string' && typeof r.xk === 'string' && Number.isSafeInteger(r.kver)) {
+          db.run('UPDATE peers SET ik = ?, xk = ?, kver = ?, pinned_at = ? WHERE uid = ?', r.ik, r.xk, r.kver, Date.now(), uid);
+          const keep = new Set(chain.map((k) => `${k.kver}|${k.ik}`));
+          for (const k of db.all('SELECT kver, ik FROM peer_keys WHERE uid = ?', uid)) {
+            if (!keep.has(`${k.kver}|${k.ik}`)) db.run('DELETE FROM peer_keys WHERE uid = ? AND kver = ? AND ik = ?', uid, k.kver, k.ik);
+          }
+          for (const k of chain) db.run('INSERT OR IGNORE INTO peer_keys (uid, kver, ik, xk, at) VALUES (?, ?, ?, ?, ?)', uid, k.kver, k.ik, k.xk, Date.now());
+        } else {
+          // Not on Snug (any more): no pin at all; a later contact looks them up afresh.
+          db.run('DELETE FROM peer_keys WHERE uid = ?', uid);
+          db.run('DELETE FROM peers WHERE uid = ?', uid);
+        }
+      });
+      log('vault', 'pin from a data file replaced by the registry’s', uid);
+      suspicious({ what: 'a data file held a key the directory doesn’t know for someone (replaced)', user: owner() }, db);
+    }
   }
 
   // Verify (all of it) then apply. Throws VaultError with a code; nothing is applied unless it returns.
@@ -452,13 +527,16 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
     if (!usable()) throw new VaultError('no_key', 'signed out');
     if (!Buffer.isBuffer(buf) || buf.length > MAX_FILE) throw new VaultError('too_big');
     const parsed = readHeader(buf, myUid());
-    let key = await ensureKey();
-    if (parsed.header.kid !== key.kid) {
-      key = await ensureKey(true);
-      if (parsed.header.kid !== key.kid) throw new VaultError('tampered', 'kid');
-    }
+    const key = await keyForKid(parsed.header.kid);
     const p = decrypt(buf, parsed, key.key);
-    const { counts, newFriends, newDms } = applyPayload(p);
+    // sec-registry REG-L2: my own key chain, so my own signed things in the file are checked too.
+    let selfKeys = null;
+    try {
+      const r = await peer.reg.lookup({ uid: myUid() });
+      if (r?.uid === myUid() && Array.isArray(r.chain)) selfKeys = [...new Set([peer.identity.me()?.ik, ...r.chain.map((k) => k.ik)].filter(Boolean))];
+    } catch (e) { log('vault', 'own key chain', e.code || e.message); }
+    const { counts, newFriends, newDms, newPins } = applyPayload(p, selfKeys);
+    if (newPins.length) checkFilePins(newPins).catch((e) => log('vault', 'pin check', e.message));
     const o = owner();
     // After the commit: show it here, tell friends the profile, watch the people now known. Never knocks or messages.
     const row = M.userRow(o);
@@ -541,10 +619,10 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
       hasImported: (sha) => !!meta.get(`imp:${sha}`),
       wasSent: (sha, ik) => !!meta.get(`sent:${sha}:${ik}`),
       markSent: (sha, ik) => meta.set(`sent:${sha}:${ik}`, Date.now()),
+      mayReceive,
       accept: async (buf, sha, from) => {
-        // The key from before a move (maybe a lost or stolen PC) may only hand over a file while this PC
-        // waits for one after the move, once (security review 0.10 #2).
-        if (roleOf(from) === 'old' && !wants.has('wait')) return { ok: false, why: 'not_waiting' };
+        const no = mayReceive(from);
+        if (no) return { ok: false, why: no };
         try {
           const counts = await importBuffer(buf);
           if (meta.num('wait_until')) {
@@ -580,6 +658,19 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
   });
   // Why the xfer socket is open: reason -> { until, target: ik | 'cur' | 'any' | null (receiver), waiters }
   const wants = new Map();
+  // Who may give this PC a data file over xfer (sec-registry REG-H1). Only one case: this PC is the account's
+  // current key, waits for its data after a move, and the sender is the key from before the move. Never a
+  // pending move's key (it proved GitHub only: a takeover attempt the 72 h delay and Stop exist for), never
+  // the current key while this PC is the pending one (it can't open the file yet), and the old key only once
+  // (security review 0.10 #2). An import only merges, so a forged file could not be undone by Stop.
+  function mayReceive(from) {
+    const r = roleOf(from);
+    if (r === 'old') return wants.has('wait') ? null : 'not_waiting';
+    if (r === 'cur') return 'not_yet';
+    // A pending move's key offering this (current) PC a file: what a takeover attempt looks like.
+    if (r === 'pending') suspicious({ what: 'an unapproved new device offered this PC a data file (refused)', user: owner() }, db);
+    return 'not_allowed';
+  }
   // The role a key of this account has now: what the registry last said (xfer-peer), else from the key chain.
   function roleOf(ik) {
     const p = sock.peers().find((x) => x.ik === ik);
@@ -649,6 +740,7 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
         const res = await engine().send(pick);
         w.busy = false;
         if (res === 'failed') { retryLater(reason, w); return; }
+        if (res === 'refused') w.why = lastXfer?.error || 'refused';
         w.result = res;
         unwant(reason, res);
       })().catch((e) => { w.busy = false; log('vault', 'xfer', e.message); retryLater(reason, w); });
@@ -672,6 +764,8 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
       w.waiters.push((res) => {
         if (res === 'done' || res === 'have' || res === 'skipped') resolve({ sent: true, result: res });
         else if (quiet) resolve(false);
+        else if (res === 'refused' && w.why === 'not_yet') reject(new UserError('Your new PC gets your data once the move is done. Approve the move on this PC first.'));
+        else if (res === 'refused') reject(new UserError('Your other PC didn’t take the file. It only takes one from the PC you moved away from, while it waits for it.'));
         else reject(new UserError('Your other PC isn’t connected. Open Snug there and sign in with GitHub; it waits for your data.'));
       });
     });
@@ -692,12 +786,30 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
       if (dirty || !existsSync(liveFile())) write().catch(() => {});
       pushStatus();
     });
+    // sec-registry REG-H1: a pending move sends nothing. Its key proved GitHub only (maybe a phished sign-in);
+    // the file goes once the move is done: approved here, or after 72 h ('revoked' below), to the new current key.
     peer._signal.on('rebind', (m) => {
       if (m.state !== 'pending' || typeof m.ik !== 'string') return;
       flush();
-      want(`rebind:${m.ik}`, 73 * 3600_000, m.ik);
     });
     peer._signal.on('revoked', () => { flush(); want('old', DAY, 'cur'); });
+  }
+  // sec-registry REG-L1: Stop on a move (someone else signed in with this GitHub account): the vault key
+  // gets a new kid, so a copy taken earlier can't open files written from now on.
+  if (typeof peer.cancelRebind === 'function') {
+    const cancel = peer.cancelRebind;
+    peer.cancelRebind = async (...a) => {
+      const r = await cancel(...a);
+      if (usable()) rotateKey().catch((e) => log('vault', 'rotate after stop', e.code || e.message));
+      return r;
+    };
+  }
+  // sec-registry REG-H1: the new PC only takes a file while it waits, so the wait starts the moment this PC
+  // becomes 'moving' (GitHub sign-in), not at the next 'ready': a move approved within seconds would
+  // otherwise complete before this PC ever waited.
+  if (peer.identity?.setSelf) {
+    const setSelf = peer.identity.setSelf;
+    peer.identity.setSelf = (...a) => { const r = setSelf(...a); if (self()?.state === 'moving' && !closed) queueMicrotask(maybeWait); return r; };
   }
   // Started after a move happened while this PC was off: deliver once in this run.
   queueMicrotask(() => {
@@ -738,6 +850,11 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
     meta.set('backup_days', d.days);
     if (d.days) setTimeout(() => { tick(); }, 1000).unref?.();
     pushStatus();
+    return status();
+  };
+  hub.ops['vault.rotateKey'] = async (c) => {
+    ownerOnly(c);
+    try { await rotateKey(); } catch (e) { if (e instanceof UserError) throw e; fail('Snug couldn’t reach its directory. Try again when you’re online.'); }
     return status();
   };
   hub.ops['vault.backupNow'] = async (c) => { ownerOnly(c); const name = await backupNow(); return { ...status(), name }; };

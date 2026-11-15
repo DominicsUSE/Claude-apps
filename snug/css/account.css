@@ -125,6 +125,10 @@
 .acc-session { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-3) 0; border-bottom: 1px solid var(--line-subtle); }
 .acc-session .grow { display: grid; min-width: 0; }
 .acc-session .faint { font-size: var(--t-13); }
+/* sec-auth: recent sign-ins and security changes, laid out like the device list */
+.acc-event { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) 0; border-bottom: 1px solid var(--line-subtle); }
+.acc-event .grow { display: grid; min-width: 0; }
+.acc-event .faint { font-size: var(--t-13); }
 .acc-tag { font-size: var(--t-12); color: var(--text-2); background: var(--bg-4); padding: 2px var(--s-2); border-radius: var(--r-row); white-space: nowrap; }
 .acc-row-end { display: flex; justify-content: flex-end; padding: var(--s-3) 0; }
 

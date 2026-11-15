@@ -960,9 +960,11 @@ behind a reverse proxy that terminates TLS and passes WebSocket upgrades on
 | --- | --- | --- |
 | `PORT`, `HOST` | Where to listen | `8787`, `127.0.0.1` |
 | `SNUG_DATA` | Folder for the database and uploaded files | `./data` |
-| `SNUG_SECURE=1` | Mark the session cookie `Secure` (set this behind HTTPS) | off |
-| `SNUG_TRUST_PROXY=1` | Read the client address and scheme from `X-Forwarded-*` | off |
+| `SNUG_SECURE=1` | HTTPS: the session cookie becomes `__Host-snug_session` (`Secure`), and responses carry `Strict-Transport-Security` | off |
+| `SNUG_TRUST_PROXY=<n>` | `n` reverse proxies in front (usually `1`): the client address is the `n`th entry from the right of `X-Forwarded-For`, believed only when the connection comes from a loopback or private address; `X-Forwarded-Proto: https` makes the cookie `Secure` | off |
+| `SNUG_DATA_KEY` | 32 bytes (base64 or hex) that encrypt two-factor secrets and key the backup-code hashes; without it Snug makes `data/secret.key` | `data/secret.key` |
 | `SNUG_ORIGINS` | Extra allowed page origins, comma separated | none |
+| `SNUG_HOSTS` | Host names this server answers to, comma separated (for example `snug.example.org`). Any other `Host` gets 421, which stops DNS-rebinding pages. A server bound to loopback always checks (localhost, IP addresses and `SNUG_ORIGINS` hosts pass). A server bound to a public address checks once this is set, and logs a warning until then | none |
 | `SNUG_STUN` | STUN servers for voice | Google's public server |
 | `SNUG_TURN_URL`, `SNUG_TURN_USER`, `SNUG_TURN_PASS` | TURN relay for voice | none |
 | `SNUG_TURN_SECRET` | Shared secret of the TURN server's REST API (coturn `use-auth-secret`): each person gets their own credential, `<expiry>:<user id>` with a base64 HMAC-SHA1, valid 12 hours and refreshed by the `ice.refresh` op. When set, `SNUG_TURN_USER`/`SNUG_TURN_PASS` are never sent | none |
@@ -970,17 +972,36 @@ behind a reverse proxy that terminates TLS and passes WebSocket upgrades on
 | `SNUG_DEMO_PASSWORD` | Password for the sample accounts when seeding | `snug-demo-1` |
 | `SNUG_GIF_PROVIDER=tenor`, `SNUG_TENOR_KEY` | Turn on GIF search through Tenor (v2 API). Searches and previews go through the server; media is fetched only from Tenor's media hosts, at most 10 MB, GIF, WebP or MP4 by content | off: no Search tab |
 
-Back up the `data` folder; it is the whole state. Change the sample password
+Back up the `data` folder; it is the whole state. Keep `data/secret.key` (or
+`SNUG_DATA_KEY`) with it but stored apart: without it two-factor sign-in can't be
+checked, and with the database alone nobody can make codes. Change the sample password
 before seeding anything that faces the internet, or better, do not seed there.
 
 ## Security
 
-- **Passwords**: scrypt with a per-user salt. Sign-in is limited to 10
-  attempts per 15 minutes per address and per username, and takes the same
-  time whether or not the account exists.
+- **Passwords**: scrypt (N=2^15, r=8, p=3, OWASP's minimum) with a per-user
+  salt, run off the event loop; older hashes are upgraded at the next sign-in.
+  New passwords need 8 characters and can't be one of ~38,000 common passwords
+  or contain the username. Sign-in is limited to 10 attempts per 15 minutes per
+  address (IPv6 per /64); wrong passwords count per account and address (5
+  free) and per account (20 free), then each waits twice as long as the last,
+  kept in the database. A browser that signed in to the account before skips
+  the account-wide wait, so strangers can't lock the owner out. Unknown and
+  password-less accounts take the same time to refuse.
+- **Two-factor**: the TOTP secret is encrypted (AES-256-GCM) and backup codes
+  are HMACs, both under the data key outside the database. Ten wrong codes per
+  account, then waits from 15 minutes. Every password or code check by someone
+  already signed in shares one counter (5 free).
+- **Audit**: sign-ins, failures and security changes go to the `auth_events`
+  table (90 days, addresses truncated) and the log as JSON lines, never with a
+  password, code or token; bursts log a `suspicious` line, and other devices
+  get a "new sign-in" notice.
 - **Sessions**: a random 256-bit token in an `HttpOnly`, `SameSite=Lax`
-  cookie. The database keeps only its hash. Changing a password or signing
-  out everywhere ends every session and closes its live connections.
+  cookie (`__Host-` and `Secure` over HTTPS). The database keeps only its hash.
+  A session ends after 30 days, or 14 days unused. Changing a password, turning
+  on two-factor sign-in or signing out everywhere ends the other sessions and
+  closes their live connections; a signed-out or expired session's socket
+  closes within 25 seconds.
 - **Authorization is on the server.** Every action is checked against the
   database: membership for reading, role permissions for acting. The same
   permission rules file (`js/lib/perms.js`) runs in the browser to decide

@@ -17,6 +17,11 @@ const SCHEMA = `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 PRAGMA busy_timeout = 3000;
+-- sec-authz: deleted rows and wiped message text are overwritten with zeros
+-- instead of lingering in free pages, and the WAL is cut back after each
+-- checkpoint so old copies of pages don't stay in it either.
+PRAGMA secure_delete = ON;
+PRAGMA journal_size_limit = 4194304;
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
@@ -366,6 +371,7 @@ function migrateSafety(db) {
     ['invites', 'max_uses', 'INTEGER NOT NULL DEFAULT 0'],
     ['invites', 'uses', 'INTEGER NOT NULL DEFAULT 0'],
     ['invites', 'revoked', 'INTEGER'],
+    ['privacy', 'invites', "TEXT NOT NULL DEFAULT 'everyone'"], // sec-authz: who may send personal house invitations
   ]) {
     if (!db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }

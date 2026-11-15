@@ -11,9 +11,11 @@
 //   a GIF picked from search is downloaded by the server and stored as a
 //   normal Snug file, so no message ever loads from another site.
 import { copyFile, writeFile } from 'node:fs/promises';
+import { unlinkSync } from 'node:fs'; // sec-authz: the attachment sweep
 import { join } from 'node:path';
 import { newId } from './model.js';
 import { limiter } from './auth.js';
+import { stripInvisible } from '../js/lib/util.js'; // sec-authz
 
 export const AUDIO_TYPES = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg'];
 export const MAX_PINS = 50;
@@ -176,6 +178,68 @@ export function addMediaSnapshot(db, M, user, snap) {
 }
 
 // Ops over the socket.
+// ---------- sec-authz: attachments that nothing uses any more ----------
+// A deleted message can be restored for ten minutes; after that its
+// attachments and link-preview pictures are removed, row and bytes, unless
+// another message still in use (or a saved GIF) names them. Conversation
+// uploads never attached to anything are removed after a day. Pictures that
+// belong to a person or a house (avatar:, banner:, emoji:, sticker:,
+// housepic:, eventcover:) are never touched here.
+export const UNDO_MS = 11 * 60_000;
+export const UNATTACHED_MS = 24 * 3600_000;
+const OWNED = /^(avatar|banner|emoji|sticker|housepic|eventcover|sound):/;
+const FID = /f_[a-z0-9]{8,40}/g;
+export function createFileSweep({ db, filesDir, log = () => {} }) {
+  const cols = new Set(db.all('PRAGMA table_info(messages)').map((c) => c.name));
+  const refCols = ['files', 'embeds', 'fwd'].filter((c) => cols.has(c)); // fixed names, never input
+  const refSql = refCols.map((c) => `instr(coalesce(${c}, ''), ?) > 0`).join(' OR ');
+  const hasTable = (t) => !!db.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", t);
+  // Still wanted: a message that isn't past its undo window names it, a saved GIF, a house emoji or sticker.
+  const wanted = (fid, convs, exceptMsg, cutoff) => {
+    for (const conv of new Set(convs.filter(Boolean))) {
+      if (db.get(`SELECT 1 FROM messages WHERE conv = ? AND id != ? AND (deleted IS NULL OR deleted >= ?) AND (${refSql}) LIMIT 1`, conv, exceptMsg || '', cutoff, ...refCols.map(() => fid))) return true;
+    }
+    if (hasTable('gif_favs') && db.get('SELECT 1 FROM gif_favs WHERE file = ?', fid)) return true;
+    if (hasTable('house_emoji') && db.get('SELECT 1 FROM house_emoji WHERE file = ?', fid)) return true;
+    if (hasTable('house_stickers') && db.get('SELECT 1 FROM house_stickers WHERE file = ?', fid)) return true;
+    return false;
+  };
+  const remove = (fid) => {
+    db.run('DELETE FROM files WHERE id = ?', fid);
+    try { unlinkSync(join(filesDir, fid)); } catch (e) { if (e.code !== 'ENOENT') log('error', 'file sweep', e); }
+  };
+  let mark = Date.now() - UNATTACHED_MS * 2; // after a restart, look back two days
+  return function sweepFiles(now = Date.now()) {
+    const cutoff = now - UNDO_MS;
+    let removed = 0;
+    // 1. Messages past their undo window that still name files.
+    const dead = db.all(`SELECT id, conv, ${refCols.join(', ')} FROM messages WHERE deleted IS NOT NULL AND deleted < ? AND (${refCols.map((c) => `${c} IS NOT NULL`).join(' OR ')}) LIMIT 500`, cutoff);
+    for (const m of dead) {
+      const ids = new Set(refCols.flatMap((c) => String(m[c] || '').match(FID) || []));
+      for (const fid of ids) {
+        const f = db.get('SELECT id, conv FROM files WHERE id = ?', fid);
+        if (!f || OWNED.test(f.conv)) continue;
+        if (wanted(fid, [m.conv, f.conv], m.id, cutoff)) continue;
+        remove(fid); removed++;
+      }
+      db.run(`UPDATE messages SET ${refCols.map((c) => `${c} = NULL`).join(', ')} WHERE id = ?`, m.id);
+    }
+    // 2. Uploads to a conversation that no message ever took up.
+    const until = now - UNATTACHED_MS;
+    if (until > mark) {
+      // A few hundred per pass, oldest first, so one pass never holds the server for long.
+      const batch = db.all('SELECT id, conv, meta, created FROM files WHERE created >= ? AND created < ? ORDER BY created LIMIT 200', mark, until);
+      for (const f of batch) {
+        if (OWNED.test(f.conv) || /"remote"\s*:\s*1/.test(f.meta || '')) continue; // a friend's file (server/peer.js keeps its own cache)
+        if (wanted(f.id, [f.conv], '', cutoff)) continue;
+        remove(f.id); removed++;
+      }
+      mark = batch.length === 200 ? batch[199].created : until;
+    }
+    return removed;
+  };
+}
+
 export function createMediaOps({ db, M, hub, fail, ops = {} }) {
   const convId = (v) => (typeof v === 'string' && /^[\w:.-]{1,80}$/.test(v) ? v : fail('That conversation isn’t valid.'));
   // The same id check as the other message ops: older and sample messages have short ids.
@@ -380,7 +444,7 @@ export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, he
       const got = await download(u);
       if (got.err) { error(res, 422, got.err); return true; }
       const id = newId('f');
-      const name = `${String(d.title || 'GIF').replace(/[\u0000-\u001f\u007f/\\]/g, '').trim().slice(0, 80) || 'GIF'}.${got.type === 'video/mp4' ? 'mp4' : got.type.split('/')[1]}`;
+      const name = `${stripInvisible(String(d.title || 'GIF')).replace(/[\u0000-\u001f\u007f/\\]/g, '').trim().slice(0, 80) || 'GIF'}.${got.type === 'video/mp4' ? 'mp4' : got.type.split('/')[1]}`;
       const meta = { gif: true, source: 'tenor' };
       if (Number.isInteger(d.w) && Number.isInteger(d.h) && d.w > 0 && d.h > 0) { meta.w = Math.min(8000, d.w); meta.h = Math.min(8000, d.h); }
       await writeFile(join(filesDir, id), got.data, { mode: 0o600 });

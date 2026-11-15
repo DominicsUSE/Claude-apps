@@ -22,14 +22,32 @@
 //   (stored hashed). Turning it on needs the password; turning it off, new
 //   backup codes, a new password, deactivating and deleting all need the
 //   password and, when it is on, a code.
+// - Sign-in hardening (sec-auth): sign-up, sign-in and sign-out live here.
+//   Wrong passwords and codes count in SQLite (server/auth.js createAuthGuard)
+//   per account, per account and address, and per second factor, with
+//   exponential waits after a free allowance; a browser that signed in to the
+//   account before (the snug_known cookie) skips the account-wide wait, so a
+//   stranger can't lock the owner out. Every check of a password or code by a
+//   signed-in session (step-up) shares one counter. The TOTP secret is stored
+//   encrypted (AES-256-GCM) and backup codes as HMACs, both under the data
+//   key kept outside the database (<data>/secret.key). Every sign-in, failure
+//   and security change goes to the auth_events table (90 days, addresses
+//   truncated) and the log as one JSON line, never with a password, code,
+//   secret or token; a burst of failures logs a "suspicious" line; other
+//   devices hear about a new sign-in.
 // - Data: export everything you wrote as JSON; deactivate (sign in again to
 //   come back); delete (your messages stay, as "Deleted user").
 import { createHmac, randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
+import { sendFile, suspicious, securityEvent } from './seclog.js'; // sec-web W1; sec-integrate: the audit trail feeds the detectors directly
 import { join } from 'node:path';
 import { newId } from './model.js';
-import { limiter, checkPassword, tokenHash, createSession, sessionCookie, endAllSessions } from './auth.js';
+import {
+  limiter, verifyPassword, hashPasswordAsync, burnPasswordCheck, passwordProblem, tokenHash, createSession, sessionCookie, endAllSessions, endSession,
+  readCookie, COOKIE, sessionValid, recentAuth, markAuth, createAuthGuard, POLICIES, loadDataKey, subKey, seal, unseal, isSealed, maskIp,
+  configureSessions, MAX_PASSWORD, SESSION_DAYS, idleMs,
+} from './auth.js';
+import { HUES, stripInvisible } from '../js/lib/util.js'; // sec-authz: stripInvisible
 import { imageInfo } from './messaging.js';
 import { cleanPrefs, upgradePrefs, mergePrefs, inQuiet, hasKeyword, everyonePing, MAX_PREFS_BYTES, deviceLabel } from '../js/lib/account.js';
 
@@ -88,15 +106,76 @@ export function totpMatch(key, code, { now = Date.now(), window = 1, after = -In
   return hit;
 }
 const CODE_ALPHA = 'abcdefghjkmnpqrstuvwxyz23456789';
-const backupHash = (code) => createHash('sha256').update(`snug-backup:${String(code).toLowerCase().replace(/[^a-z0-9]/g, '')}`).digest('hex');
+// 0.10.1 stored an unsalted SHA-256 of each backup code. Now that digest is keyed
+// with the data key and the account (HMAC-SHA256), so a copy of the database
+// alone can't be searched offline, and the same code gives a different value
+// for every account. Old rows are rewrapped the first time they are read.
+const legacyBackup = (code) => createHash('sha256').update(`snug-backup:${String(code).toLowerCase().replace(/[^a-z0-9]/g, '')}`).digest('hex');
+const wrapBackup = (key, user, legacy) => `h2:${createHmac('sha256', key).update(`${user}:${legacy}`).digest('hex')}`;
+const backupHash = (key, user, code) => wrapBackup(key, user, legacyBackup(code));
+// Unbiased characters: bytes past the last whole multiple of 31 are skipped.
+function randomCode(n) {
+  let s = '';
+  while (s.length < n) for (const x of randomBytes(16)) if (x < 248 && s.length < n) s += CODE_ALPHA[x % 31];
+  return s;
+}
 function makeBackupCodes() {
   const codes = [];
-  for (let i = 0; i < BACKUP_CODES; i++) {
-    const b = randomBytes(8);
-    const s = [...b].map((x) => CODE_ALPHA[x % CODE_ALPHA.length]).join('');
-    codes.push(`${s.slice(0, 4)}-${s.slice(4)}`);
-  }
+  for (let i = 0; i < BACKUP_CODES; i++) { const s = randomCode(8); codes.push(`${s.slice(0, 4)}-${s.slice(4)}`); }
   return codes;
+}
+
+// ---------- Security core: one per database ----------
+// The data key, the failure counters and the audit trail, shared by the ops
+// (made first, in server/ops.js) and the HTTP routes (which load the key and
+// pass the log, before the server takes any request).
+const CORES = new WeakMap();
+const tooMany = (ms) => `Too many tries. Wait ${ms > 90_000 ? `${Math.ceil(ms / 60_000)} minutes` : 'a minute'} and try again.`;
+function core(db) {
+  let c = CORES.get(db);
+  if (c) return c;
+  c = { key: null, derived: null, log: () => {}, guard: createAuthGuard(db), windows: new Map(), pruned: 0 };
+  c.setKey = (k) => { c.key = k; c.derived = null; };
+  // sec-review: false while the data key is a throwaway (secret.key couldn't be read, server/auth.js): nothing
+  // may then be sealed or wrapped with it, or it would stay unreadable once the real key is back.
+  c.usable = () => !c.key?.unusable;
+  c.keys = () => {
+    if (!c.key) c.key = randomBytes(32); // only when the ops run without the HTTP side (never in the server)
+    return (c.derived ||= { enc: subKey(c.key, 'totp-secret'), backup: subKey(c.key, 'backup-codes'), device: subKey(c.key, 'known-device') });
+  };
+  // A burst of failures for one account or one address: one "suspicious" line an hour.
+  const bump = (k, limit, what, extra) => {
+    const now = Date.now();
+    const w = c.windows.get(k);
+    if (!w || w.start < now - 3_600_000) { c.windows.set(k, { start: now, n: 1, told: false }); }
+    else if (++w.n > limit && !w.told) {
+      w.told = true;
+      c.log('suspicious', JSON.stringify({ what, failures: w.n, window: '1h', ...extra }));
+      suspicious({ source: 'auth', what, failures: w.n, ...extra }, db); // sec-web: db picks this server's seclog; never throws
+    }
+    if (c.windows.size > 20_000) for (const [key, v] of c.windows) if (v.start < now - 3_600_000) c.windows.delete(key);
+  };
+  // One security event: a row in auth_events and a JSON log line. Never a password,
+  // code, secret, ticket or token; addresses truncated (1.2.3.x, 2001:db8:1::/48);
+  // `why` is one of a few fixed words.
+  c.audit = (event, { user = null, ip = '', agent = '', ok = true, why = null } = {}) => {
+    const now = Date.now();
+    const masked = maskIp(ip);
+    try { db.run('INSERT INTO auth_events (ts, user, event, ok, ip, agent, why) VALUES (?, ?, ?, ?, ?, ?, ?)', now, user, event, ok ? 1 : 0, masked, String(agent || '').slice(0, 80), why); } catch { /* closing */ }
+    const line = { event, ok, ...(user ? { user } : {}), ...(masked ? { ip: masked } : {}), ...(agent ? { agent: String(agent).slice(0, 80) } : {}), ...(why ? { why } : {}) };
+    c.log('audit', JSON.stringify(line));
+    securityEvent({ source: 'auth', ...line }, db); // sec-web; never throws
+    if (!ok) {
+      if (user) bump(`u:${user}`, 20, 'auth failures for one account', { user });
+      if (ip) bump(`i:${masked}`, 100, 'auth failures from one address', { ip: masked });
+    }
+    if (now - c.pruned > 3_600_000) {
+      c.pruned = now;
+      try { db.run('DELETE FROM auth_events WHERE ts < ?', now - 90 * 86_400_000); c.guard.prune(); } catch { /* closing */ }
+    }
+  };
+  CORES.set(db, c);
+  return c;
 }
 
 // ---------- Database ----------
@@ -113,7 +192,20 @@ export function migrateAccount(db) {
   add('users', 'deleted', 'INTEGER');
   add('sessions', 'seen', 'INTEGER');
   add('sessions', 'agent', "TEXT NOT NULL DEFAULT ''");
+  add('sessions', 'auth_at', 'INTEGER'); // sec-auth: when this session last proved who it is (server/auth.js recentAuth)
   db.exec(`
+    CREATE TABLE IF NOT EXISTS auth_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts INTEGER NOT NULL,
+      user TEXT,
+      event TEXT NOT NULL,
+      ok INTEGER NOT NULL,
+      ip TEXT NOT NULL DEFAULT '',
+      agent TEXT NOT NULL DEFAULT '',
+      why TEXT
+    );
+    CREATE INDEX IF NOT EXISTS auth_events_user ON auth_events(user, ts);
+    CREATE INDEX IF NOT EXISTS auth_events_ts ON auth_events(ts);
     CREATE TABLE IF NOT EXISTS user_prefs (
       user TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       prefs TEXT NOT NULL DEFAULT '{}',
@@ -140,8 +232,31 @@ export function migrateAccount(db) {
 // Reads shared by the ops and the HTTP routes.
 function reads(db) {
   const R = {};
+  const C = core(db);
   R.prefs = (u) => upgradePrefs(json(db.get('SELECT prefs FROM user_prefs WHERE user = ?', u)?.prefs, {}));
-  R.totp = (u) => db.get('SELECT * FROM totp WHERE user = ?', u);
+  // The two-factor row with its secrets decrypted (null when they don't decrypt
+  // with this data key). Plain 0.10.1 secrets and backup digests are upgraded here.
+  R.sealTotp = (u, secret) => seal(C.keys().enc, `totp:${u}`, secret);
+  R.backupHash = (u, code) => backupHash(C.keys().backup, u, code);
+  R.keyUsable = () => C.usable();
+  R.totp = (u) => {
+    const row = db.get('SELECT * FROM totp WHERE user = ?', u);
+    if (!row) return row;
+    const out = { ...row };
+    for (const col of ['secret', 'pending']) {
+      const v = row[col];
+      if (!v) continue;
+      if (isSealed(v)) out[col] = unseal(C.keys().enc, `totp:${u}`, v);
+      else if (C.usable()) db.run(`UPDATE totp SET ${col} = ? WHERE user = ? AND ${col} = ?`, R.sealTotp(u, v), u, v); // col is one of the two names above
+    }
+    const list = json(row.backup, []);
+    // sec-review: with a throwaway key, 0.10.1 digests stay as they are (and don't match: backup codes fail closed).
+    if (C.usable() && list.some((h) => /^[0-9a-f]{64}$/.test(h))) {
+      out.backup = JSON.stringify(list.map((h) => (/^[0-9a-f]{64}$/.test(h) ? wrapBackup(C.keys().backup, u, h) : h)));
+      db.run('UPDATE totp SET backup = ? WHERE user = ? AND backup = ?', out.backup, u, row.backup);
+    }
+    return out;
+  };
   R.totpOn = (u) => !!R.totp(u)?.enabled;
   R.notes = (u) => Object.fromEntries(db.all('SELECT target, note FROM user_notes WHERE user = ?', u).map((r) => [r.target, r.note]));
   // A second factor: a fresh TOTP code (not one already used) or an unused backup code.
@@ -150,6 +265,7 @@ function reads(db) {
     if (!row?.enabled || typeof code !== 'string') return null;
     const c = code.replace(/\s/g, '');
     if (/^\d{6}$/.test(c)) {
+      if (!row.secret) return null; // not readable with this data key: never a known key
       const s = totpMatch(unbase32(row.secret), c, { now, after: row.step });
       if (s < 0) return null;
       // Only one sign-in per code: the step is burnt even if a later check fails.
@@ -157,21 +273,58 @@ function reads(db) {
       return r.changes ? 'totp' : null;
     }
     const list = json(row.backup, []);
-    const h = backupHash(c);
+    const h = R.backupHash(u, c);
     if (!c || !list.includes(h)) return null;
-    db.run('UPDATE totp SET backup = ? WHERE user = ?', JSON.stringify(list.filter((x) => x !== h)), u);
-    return 'backup';
+    const r = db.run('UPDATE totp SET backup = ? WHERE user = ? AND backup = ?', JSON.stringify(list.filter((x) => x !== h)), u, row.backup);
+    return r.changes ? 'backup' : null; // two uses of one code at once: only the first counts
   };
+
+  // ---------- Step-up: a signed-in session proving it again ----------
+  // One counter per account for every path that checks a password or code for
+  // someone already signed in (two-factor settings, a new password, a new
+  // username, delete, deactivate, house transfer and delete, GitHub link): five
+  // free failures, then waits that double. Password failures also count toward
+  // the account's sign-in lockout. Returns null, or { status, field, message }.
+  const G = C.guard;
+  R.stepFail = (u, field, what) => {
+    G.fail(`su:${u}`, POLICIES.stepUp);
+    if (field === 'password') G.fail(`pw:${u}`, POLICIES.password);
+    if (field === 'code') G.fail(`code:${u}`, POLICIES.code);
+    C.audit('stepup', { user: u, ok: false, why: field });
+    void what;
+  };
+  R.stepWait = (u) => G.waitMs(`su:${u}`, POLICIES.stepUp);
+  R.stepUp = async (u, { password, code, token = null, needPassword = true, needCode = true, what = '' } = {}) => {
+    const wait = R.stepWait(u);
+    if (wait) { C.audit('stepup', { user: u, ok: false, why: 'locked' }); return { status: 429, field: 'wait', message: tooMany(wait) }; }
+    const row = db.get('SELECT pass FROM users WHERE id = ?', u);
+    if (needPassword) {
+      const r = await verifyPassword(typeof password === 'string' ? password : '', row?.pass);
+      if (!r.ok) { R.stepFail(u, 'password', what); return { status: 401, field: 'password', message: 'Your password isn’t right.' }; }
+      if (r.upgrade) await R.rehash(u, password);
+    }
+    if (needCode && R.totpOn(u) && !R.verifySecond(u, typeof code === 'string' ? code : '')) {
+      R.stepFail(u, 'code', what);
+      return { status: 401, field: 'code', message: 'Type a code from your authenticator app, or a backup code.' };
+    }
+    G.clear(`su:${u}`);
+    markAuth(db, token);
+    return null;
+  };
+  // A stored hash older or cheaper than today's, replaced after a right password.
+  R.rehash = (u, password) => hashPasswordAsync(password)
+    .then((h) => { db.run("UPDATE users SET pass = ? WHERE id = ? AND pass != '!'", h, u); }).catch(() => {});
   return R;
 }
 
 // ---------- Ops ----------
 export function createAccountOps({ db, M, hub, fail, ops = {} }) {
   const R = reads(db);
+  const keyCheck = () => { if (!R.keyUsable()) fail('Two-factor settings can’t be changed right now: Snug can’t read its key file. Restart Snug, or ask whoever runs this server.'); };
   const idOf = (v, name) => (typeof v === 'string' && /^[\w:.-]{1,80}$/.test(v) ? v : fail(`That ${name} isn’t valid.`));
   const text = (v, { max, name }) => {
     if (typeof v !== 'string') fail(`${name} is missing.`);
-    const s = v.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim();
+    const s = stripInvisible(v).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim(); // sec-authz: stripInvisible
     if (s.length > max) fail(`${name} can be at most ${max} characters.`);
     return s;
   };
@@ -226,7 +379,22 @@ export function createAccountOps({ db, M, hub, fail, ops = {} }) {
   M.prefsOf = (user) => R.prefs(user);
   M.quietHours = (user) => inQuiet(R.prefs(user).quiet);
   // Deleting a house and two-factor for moderators (server/community.js) ask for the same second factor.
-  M.totpOn = R.totpOn; M.verifySecond = R.verifySecond;
+  // sec-auth: through the shared step-up counter; while it says wait, the op is refused with how long.
+  M.totpOn = R.totpOn;
+  M.verifySecond = (u, code) => {
+    const wait = R.stepWait(u);
+    if (wait) fail(tooMany(wait));
+    const r = R.verifySecond(u, code);
+    if (r) core(db).guard.clear(`su:${u}`); else R.stepFail(u, 'code', 'op');
+    return r;
+  };
+  // A password typed by a signed-in person (server/inbox.js me.handle): true or false, or refused while waiting.
+  M.passwordOk = async (u, password) => {
+    const r = await R.stepUp(u, { password, needCode: false, what: 'op' });
+    if (r?.field === 'wait') fail(r.message);
+    return !r;
+  };
+  M.stepUp = R.stepUp;
   const baseForMe = M.forMeExtra; // role mentions (server/places.js)
   M.forMeExtra = (user, row, w) => {
     if (baseForMe?.(user, row, w)) return true;
@@ -261,6 +429,23 @@ export function createAccountOps({ db, M, hub, fail, ops = {} }) {
 
   const sendAccount = (u, d, exceptWs) => hub.toUser(u, 'account', d, exceptWs);
   const currentHash = (c) => (c.ws?.token ? tokenHash(c.ws.token) : null);
+  const audit = (event, c, extra = {}) => core(db).audit(event, { user: c.user, agent: c.ws?.agent || '', ...extra });
+  // Password (and code, when two-factor is on) for an op; the op's own words for each failure.
+  async function stepUp(c, d, { needCode = true, words = {} } = {}) {
+    const r = await R.stepUp(c.user, { password: d.password, code: typeof d.code === 'string' ? d.code.replace(/\s/g, '') : '', token: c.ws?.token, needCode });
+    if (r) fail(words[r.field] || r.message);
+  }
+  // Every session but this one ends: after a password change, or turning on two-factor sign-in.
+  function endOthers(c) {
+    const mine = currentHash(c);
+    const others = db.all('SELECT hash FROM sessions WHERE user = ? AND hash != ?', c.user, mine || '');
+    for (const s of others) {
+      db.run('DELETE FROM sessions WHERE hash = ?', s.hash);
+      try { db.run('DELETE FROM push_subs WHERE session = ?', s.hash); } catch { /* push not set up */ }
+    }
+    hub.endSessions(c.user, c.ws?.token);
+    return others.length;
+  }
 
   const out = {
     // Settings that follow you. Only the names and values in PREF_RULES are kept.
@@ -340,7 +525,7 @@ export function createAccountOps({ db, M, hub, fail, ops = {} }) {
       slow('sessions', c.user);
       const mine = currentHash(c);
       return {
-        sessions: db.all('SELECT hash, agent, created, seen FROM sessions WHERE user = ? AND expires > ? ORDER BY COALESCE(seen, created) DESC', c.user, Date.now())
+        sessions: db.all('SELECT hash, agent, created, seen FROM sessions WHERE user = ? AND expires > ? AND COALESCE(seen, created) > ? ORDER BY COALESCE(seen, created) DESC', c.user, Date.now(), Date.now() - idleMs(db))
           .map((s) => ({ id: s.hash.slice(0, 16), agent: s.agent || 'Unknown device', created: s.created, seen: s.seen || s.created, current: s.hash === mine })),
       };
     },
@@ -353,63 +538,86 @@ export function createAccountOps({ db, M, hub, fail, ops = {} }) {
       db.run('DELETE FROM sessions WHERE hash = ?', row.hash);
       try { db.run('DELETE FROM push_subs WHERE session = ?', row.hash); } catch { /* push not set up */ }
       hub.endToken?.(c.user, row.hash);
+      audit('sessions.revoke', c);
       return {};
     },
     'sessions.revokeOthers'(c) {
       slow('sessions', c.user);
-      const mine = currentHash(c);
-      if (!mine) fail('Snug can’t tell which device this is.');
-      const others = db.all('SELECT hash FROM sessions WHERE user = ? AND hash != ?', c.user, mine);
-      for (const s of others) {
-        db.run('DELETE FROM sessions WHERE hash = ?', s.hash);
-        try { db.run('DELETE FROM push_subs WHERE session = ?', s.hash); } catch { /* push not set up */ }
-      }
-      hub.endSessions(c.user, c.ws.token);
-      return { ended: others.length };
+      if (!currentHash(c)) fail('Snug can’t tell which device this is.');
+      const ended = endOthers(c);
+      audit('sessions.revokeOthers', c);
+      return { ended };
+    },
+    // sec-auth: the account's recent sign-ins and security changes (Settings > Account): device, time, truncated address.
+    'auth.recent'(c) {
+      const alertsFor = (u) => {
+        try {
+          return db.all("SELECT ts, ip, detail FROM security_events WHERE user = ? AND kind = 'alert' ORDER BY ts DESC LIMIT 10", u).map((r) => {
+            let what = '';
+            try { what = String(JSON.parse(r.detail).what || '').slice(0, 120); } catch { /* kept empty */ }
+            return { at: r.ts, event: 'alert', ok: false, ip: r.ip, agent: '', what };
+          });
+        } catch { return []; } // no security log (ops without the server)
+      };
+      slow('sessions', c.user);
+      return {
+        events: [
+          ...db.all('SELECT ts, event, ok, ip, agent FROM auth_events WHERE user = ? ORDER BY ts DESC, id DESC LIMIT 30', c.user)
+            .map((e) => ({ at: e.ts, event: e.event, ok: !!e.ok, ip: e.ip, agent: e.agent })),
+          ...alertsFor(c.user), // sec-integrate: suspicious-activity alerts for this account (server/seclog.js)
+        ].sort((a, b) => b.at - a.at).slice(0, 30),
+      };
     },
 
     // Two-factor sign-in.
     'totp.begin'(c) {
       slow('totp', c.user);
+      keyCheck(); // sec-review: never sealed under a throwaway data key
       if (R.totpOn(c.user)) fail('Two-factor sign-in is already on.');
       const secret = base32(randomBytes(20));
-      db.run('INSERT INTO totp (user, pending, created) VALUES (?, ?, ?) ON CONFLICT (user) DO UPDATE SET pending = excluded.pending', c.user, secret, Date.now());
+      db.run('INSERT INTO totp (user, pending, created) VALUES (?, ?, ?) ON CONFLICT (user) DO UPDATE SET pending = excluded.pending', c.user, R.sealTotp(c.user, secret), Date.now());
       const handle = M.userRow(c.user).handle;
       const uri = `otpauth://totp/${encodeURIComponent(`Snug:${handle}`)}?secret=${secret}&issuer=Snug&algorithm=SHA1&digits=6&period=30`;
       return { secret, uri };
     },
-    'totp.enable'(c, d) {
+    async 'totp.enable'(c, d) {
       slow('totp', c.user);
+      keyCheck(); // sec-review: never sealed under a throwaway data key
       const row = R.totp(c.user);
       if (row?.enabled) fail('Two-factor sign-in is already on.');
       if (!row?.pending) fail('Start again: Snug has no code waiting for you.');
       // The password first: a stolen session alone can't lock the owner out
       // behind an authenticator that isn't theirs.
-      if (!checkPassword(String(d.password || ''), M.userRow(c.user).pass)) fail('Your password isn’t right.');
+      await stepUp(c, d, { needCode: false });
       const s = totpMatch(unbase32(row.pending), typeof d.code === 'string' ? d.code.replace(/\s/g, '') : '');
-      if (s < 0) fail('That code isn’t right. Check the time on your phone and type the newest code.');
+      if (s < 0) { R.stepFail(c.user, 'code', 'totp.enable'); fail('That code isn’t right. Check the time on your phone and type the newest code.'); }
       const codes = makeBackupCodes();
-      db.run('UPDATE totp SET secret = pending, pending = NULL, enabled = 1, step = ?, backup = ? WHERE user = ?', s, JSON.stringify(codes.map(backupHash)), c.user);
+      const r = db.run('UPDATE totp SET secret = pending, pending = NULL, enabled = 1, step = ?, backup = ? WHERE user = ? AND enabled = 0', s, JSON.stringify(codes.map((x) => R.backupHash(c.user, x))), c.user);
+      if (!r.changes) fail('Two-factor sign-in is already on.');
+      // Whoever else was signed in (perhaps the reason for turning it on) signs in again, with a code.
+      const ended = endOthers(c);
       sendAccount(c.user, { totp: true, backupLeft: codes.length }, c.ws);
-      return { codes };
+      audit('totp.enable', c);
+      return { codes, ended };
     },
-    'totp.disable'(c, d) {
+    async 'totp.disable'(c, d) {
       slow('totp', c.user);
       if (!R.totpOn(c.user)) fail('Two-factor sign-in is already off.');
-      if (!checkPassword(String(d.password || ''), M.userRow(c.user).pass)) fail('Your password isn’t right.');
-      if (!R.verifySecond(c.user, String(d.code || ''))) fail('That code isn’t right.');
+      await stepUp(c, d, { words: { code: 'That code isn’t right.' } });
       db.run('DELETE FROM totp WHERE user = ?', c.user);
       sendAccount(c.user, { totp: false, backupLeft: 0 }, c.ws);
+      audit('totp.disable', c);
       return {};
     },
-    'totp.codes'(c, d) {
+    async 'totp.codes'(c, d) {
       slow('totp', c.user);
+      keyCheck(); // sec-review: never sealed under a throwaway data key
       if (!R.totpOn(c.user)) fail('Turn on two-factor sign-in first.');
-      if (!checkPassword(String(d.password || ''), M.userRow(c.user).pass)) fail('Your password isn’t right.');
-      if (!R.verifySecond(c.user, String(d.code || ''))) fail('That code isn’t right.');
+      await stepUp(c, d, { words: { code: 'That code isn’t right.' } });
       const codes = makeBackupCodes();
-      db.run('UPDATE totp SET backup = ? WHERE user = ?', JSON.stringify(codes.map(backupHash)), c.user);
+      db.run('UPDATE totp SET backup = ? WHERE user = ?', JSON.stringify(codes.map((x) => R.backupHash(c.user, x))), c.user);
       sendAccount(c.user, { backupLeft: codes.length }, c.ws);
+      audit('totp.codes', c);
       return { codes };
     },
   };
@@ -442,14 +650,66 @@ export function createAccountOps({ db, M, hub, fail, ops = {} }) {
 }
 
 // ---------- HTTP: two-factor sign-in, export, deactivate, delete, banners ----------
-export function createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonBody, body, headers, ipOf, secure, authLimit, uploadLimit, log = () => {} }) {
+const HANDLE = /^[a-z0-9](?:[a-z0-9_.-]{0,22}[a-z0-9])?$/;
+// What a sign-in may name: wider than new usernames (older or moved-aside ones, such as name-old2), never an address-like key clash (keys are namespaced).
+const LOGIN_HANDLE = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
+const KNOWN = 'snug_known';
+const KNOWN_DAYS = 180;
+
+export function createAccountHttp({
+  db, M, hub, filesDir, sendJson, error, jsonBody, body, headers, ipOf, secure, authLimit, uploadLimit, log = () => {},
+  dataDir = null, keyStore = null, desktop = false,
+  dataKey = null, // sec-integrate: the key server/index.js already loaded (one load, one log line)
+}) {
   const R = reads(db);
+  const C = core(db);
+  C.log = log;
+  C.setKey(dataKey || loadDataKey({ dataDir, keyStore, log }));
+  // On the desktop (one person, their own PC) a session may sit unused as long as it lasts.
+  configureSessions(db, { idleDays: desktop ? SESSION_DAYS : undefined });
+  const G = C.guard;
   const tickets = new Map(); // sha256(ticket) -> { user, until, tries }
   const exportLimit = limiter({ capacity: 3, perSecond: 3 / 3600 });
   hub.extraLimits = [...(hub.extraLimits || []), exportLimit];
   const agentOf = (req) => deviceLabel(req.headers['user-agent']);
   const ticketKey = (t) => createHash('sha256').update(String(t)).digest('hex');
   const strip = (row) => M.userView(row, row.presence, true);
+  const tokenOf = (req) => readCookie(req.headers.cookie, COOKIE);
+  const who = (req, user = null) => ({ user, ip: ipOf(req), agent: agentOf(req) });
+  const prunePush = () => { try { db.run('DELETE FROM push_subs WHERE session IS NULL OR session NOT IN (SELECT hash FROM sessions WHERE expires > ?)', Date.now()); } catch { /* push not set up */ } };
+  const tooManyRes = (res, ms) => sendJson(res, 429, { error: tooMany(ms) }, { 'Retry-After': String(Math.ceil(ms / 1000)) });
+
+  // The browser that signed in to an account before: an HMAC-signed note of the
+  // account and when (OWASP's device cookie). It skips the account-wide sign-in
+  // wait, so a stranger guessing at someone's password can't lock them out.
+  const deviceMac = (uid, at) => createHmac('sha256', C.keys().device).update(`${uid}.${at}`).digest('base64url').slice(0, 32);
+  const knownCookie = (uid) => {
+    const at = Date.now();
+    return `${KNOWN}=${uid}.${at}.${deviceMac(uid, at)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${KNOWN_DAYS * 86_400}${secure ? '; Secure' : ''}`;
+  };
+  function knownDevice(req, uid) {
+    const v = readCookie(req.headers.cookie, KNOWN);
+    const m = /^([\w-]{1,64})\.(\d{1,15})\.([\w-]{32})$/.exec(v || '');
+    if (!m || m[1] !== uid || Number(m[2]) < Date.now() - KNOWN_DAYS * 86_400_000) return false;
+    const want = Buffer.from(deviceMac(m[1], m[2])), got = Buffer.from(m[3]);
+    return want.length === got.length && timingSafeEqual(want, got);
+  }
+
+  // A new session for someone who just proved who they are: the audit trail, a
+  // word to their other devices, and the cookies. `how`: password, totp, register.
+  function signedIn(req, user, how) {
+    const token = createSession(db, user, agentOf(req));
+    const agent = agentOf(req);
+    C.audit('login', { ...who(req, user), ok: true, why: how });
+    if (how !== 'register') hub.toUser(user, 'account', { newSignIn: { agent: agent || 'Unknown device', at: Date.now() } });
+    return { 'Set-Cookie': [sessionCookie(token, { secure }), knownCookie(user)].flat() };
+  }
+  // GitHub sign-in (server/ghauth.js) makes its own session; it reports here.
+  M.onSignIn = (req, user, how) => {
+    C.audit('login', { ...who(req, user), ok: true, why: how });
+    hub.toUser(user, 'account', { newSignIn: { agent: agentOf(req) || 'Unknown device', at: Date.now() } });
+  };
+  M.audit = (event, req, user, extra = {}) => C.audit(event, { ...(req ? who(req, user) : { user }), ...extra });
 
   // After a correct password: either sign in now (null) or ask for the second step.
   function loginGate(row) {
@@ -463,16 +723,115 @@ export function createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonB
     if (M.userRow(user)?.deactivated) { db.run('UPDATE users SET deactivated = NULL WHERE id = ?', user); hub.userChanged(user); }
   }
   // Password, typed handle (for delete) and the second factor when it is on.
-  function confirm(user, d, { handle = false } = {}) {
+  // Null, or { status, message }.
+  async function confirm(req, user, d, { handle = false, del = false } = {}) {
     const row = M.userRow(user);
+    const typed = String(d.confirm || '').trim().replace(/^@/, '').toLowerCase() === row.handle.toLowerCase();
     // p2p: a GitHub-secured account has no password; typing the username confirms instead (server/ghauth.js).
-    if (M.p2pOwner?.(user)) return String(d.confirm || '').trim().replace(/^@/, '').toLowerCase() === row.handle.toLowerCase() ? null : `Type your username, ${row.handle}, to confirm.`;
-    if (!checkPassword(String(d.password || ''), row.pass)) return 'Your password isn’t right.';
-    if (handle && String(d.confirm || '').trim().replace(/^@/, '').toLowerCase() !== row.handle.toLowerCase()) return `Type your username, ${row.handle}, to confirm.`;
-    if (R.totpOn(user) && !R.verifySecond(user, String(d.code || ''))) return 'Type a code from your authenticator app, or a backup code.';
+    if (M.p2pOwner?.(user)) {
+      if (!typed) return { status: 401, message: `Type your username, ${row.handle}, to confirm.` };
+      // sec-auth AUTH-10: deleting needs GitHub's confirmation, or a sign-in on this session in the last 10 minutes.
+      if (del && !M.p2pConfirmed?.(d.flow) && !recentAuth(db, tokenOf(req))) {
+        C.audit('account.delete', { ...who(req, user), ok: false, why: 'reauth' });
+        return { status: 401, message: 'Confirm on GitHub first (or sign out and back in), then delete.' };
+      }
+      return null;
+    }
+    const r = await R.stepUp(user, { password: d.password, code: d.code, token: tokenOf(req), needCode: false });
+    if (r) return r;
+    if (handle && !typed) return { status: 401, message: `Type your username, ${row.handle}, to confirm.` };
+    const c = await R.stepUp(user, { code: d.code, token: tokenOf(req), needPassword: false });
+    if (c) return c;
     return null;
   }
   const cookieGone = () => ({ 'Set-Cookie': sessionCookie('', { secure, clear: true }) });
+
+  // ---------- Sign-up, sign-in and sign-out ----------
+  async function register(req, res) {
+    if (!authLimit.take(`reg:${ipOf(req)}`)) return error(res, 429, 'Too many attempts. Wait a few minutes and try again.');
+    const d = await jsonBody(req);
+    const handleV = String(d.handle || '').trim().toLowerCase().replace(/^@/, '');
+    const name = String(d.name || '').trim().replace(/[\u0000-\u001f\u007f]/g, '');
+    const password = String(d.password || '');
+    if (!HANDLE.test(handleV)) return error(res, 400, 'Usernames are 2 to 24 letters, numbers, dots, dashes or underscores, starting and ending with a letter or number.');
+    if (!name || name.length > 40) return error(res, 400, 'Your name can be 1 to 40 characters.');
+    const weak = passwordProblem(password, { handle: handleV, name });
+    if (weak) return error(res, 400, weak);
+    const taken = () => db.get('SELECT 1 FROM users WHERE handle = ?', handleV) || M.handleHeld?.(handleV); // held: given up in the last 7 days (server/inbox.js)
+    if (taken()) return error(res, 409, `@${handleV} is taken. Try another username.`);
+    const pass = await hashPasswordAsync(password);
+    const id = newId('u');
+    const hue = HUES[Math.floor(Math.random() * HUES.length)][0];
+    try {
+      if (taken()) throw new Error('taken');
+      db.run('INSERT INTO users (id, handle, name, pass, hue, created) VALUES (?, ?, ?, ?, ?, ?)', id, handleV, name, pass, hue, Date.now());
+    } catch { return error(res, 409, `@${handleV} is taken. Try another username.`); } // the same name, a moment apart
+    log('register', handleV);
+    return sendJson(res, 201, { user: M.userView(M.userRow(id), 'around') }, signedIn(req, id, 'register'));
+  }
+
+  // Sign-in (AUTH-1, 3, 12): per address (in memory), then the account's own
+  // counters in SQLite: per account and address (5 free), per account (20 free,
+  // skipped by a browser that signed in to it before). Only failures count.
+  // Unknown accounts are counted and timed like real ones.
+  async function login(req, res) {
+    const d = await jsonBody(req);
+    const handleV = String(d.handle || '').trim().toLowerCase().replace(/^@/, '');
+    const password = typeof d.password === 'string' ? d.password : '';
+    const ip = ipOf(req);
+    if (!authLimit.take(`login-ip:${ip}`)) { C.audit('login', { ...who(req), ok: false, why: 'locked' }); return error(res, 429, 'Too many attempts. Wait a few minutes and try again.'); }
+    const nope = () => error(res, 401, 'That username and password don’t match.');
+    if (!LOGIN_HANDLE.test(handleV) || !password || password.length > MAX_PASSWORD) { await burnPasswordCheck(password); C.audit('login', { ...who(req), ok: false, why: 'unknown' }); return nope(); }
+    const row = db.get('SELECT * FROM users WHERE handle = ?', handleV);
+    const acct = row ? `pw:${row.id}` : `pwh:${handleV}`;
+    const pair = `${acct}|${ip}`;
+    const wait = Math.max(G.waitMs(pair, POLICIES.pair), row && knownDevice(req, row.id) ? 0 : G.waitMs(acct, POLICIES.password));
+    if (wait) { C.audit('login', { ...who(req, row?.id), ok: false, why: 'locked' }); return tooManyRes(res, wait); }
+    const v = row ? await verifyPassword(password, row.pass) : { ok: await burnPasswordCheck(password) };
+    if (!v.ok) {
+      G.fail(acct, POLICIES.password);
+      G.fail(pair, POLICIES.pair);
+      C.audit('login', { ...who(req, row?.id), ok: false, why: row ? 'password' : 'unknown' });
+      return nope();
+    }
+    G.clear(pair);
+    if (v.upgrade) await R.rehash(row.id, password); // once per old hash
+    // Two-factor sign-in asks for a code before any session exists.
+    const gate = loginGate(row);
+    if (gate) { C.audit('login', { ...who(req, row.id), ok: true, why: 'password-then-code' }); return sendJson(res, 200, gate); }
+    return sendJson(res, 200, { user: M.userView(row, row.presence, true) }, signedIn(req, row.id, 'password'));
+  }
+
+  function logout(req, res) {
+    const token = tokenOf(req);
+    const user = token ? sessionValid(db, token) : null;
+    endSession(db, token);
+    if (user) { hub.endToken?.(user, tokenHash(token)); C.audit('logout', who(req, user)); } // AUTH-9: its sockets close too
+    prunePush();
+    return sendJson(res, 200, {}, cookieGone());
+  }
+
+  // A new password (moved here from server/index.js): the current one, a code when two-factor is on, a password that isn't common.
+  async function changePassword(req, res, user) {
+    if (!authLimit.take(`pw:${user}`)) return error(res, 429, 'Too many attempts. Wait a few minutes and try again.');
+    const d = await jsonBody(req);
+    const row = M.userRow(user);
+    const r = await R.stepUp(user, { password: d.current, token: tokenOf(req), needCode: false });
+    if (r) return r.field === 'wait' ? error(res, 429, r.message) : error(res, 401, 'Your current password isn’t right.');
+    const next = String(d.next || '');
+    const weak = passwordProblem(next, { handle: row.handle, name: row.name, current: String(d.current) });
+    if (weak) return error(res, 400, weak);
+    const c = await R.stepUp(user, { code: d.code, token: tokenOf(req), needPassword: false });
+    if (c) return error(res, c.status, c.field === 'wait' ? c.message : 'Type a code from your authenticator app, or a backup code.');
+    db.run('UPDATE users SET pass = ? WHERE id = ?', await hashPasswordAsync(next), user);
+    // Every other device has to sign in again with the new password.
+    endAllSessions(db, user);
+    hub.endSessions(user);
+    prunePush(); // this device re-sends its subscription when it reconnects
+    C.audit('password.change', who(req, user));
+    const fresh = createSession(db, user, agentOf(req));
+    return sendJson(res, 200, {}, { 'Set-Cookie': sessionCookie(fresh, { secure }) });
+  }
 
   function soleOwnerOf(user) {
     const out = [];
@@ -557,21 +916,32 @@ export function createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonB
 
   // Routes that need no session: the second step of signing in.
   async function open(req, res, path) {
-    if (!(req.method === 'POST' && path === '/api/login/totp')) return false;
+    if (req.method !== 'POST') return false;
+    if (path === '/api/register') { await register(req, res); return true; }
+    if (path === '/api/login') { await login(req, res); return true; }
+    if (path === '/api/logout') { logout(req, res); return true; }
+    if (path !== '/api/login/totp') return false;
     if (!authLimit.take(`totp:${ipOf(req)}`)) { error(res, 429, 'Too many attempts. Wait a few minutes and try again.'); return true; }
     const d = await jsonBody(req);
     const key = ticketKey(d.ticket || '');
     const t = tickets.get(key);
     if (!t || t.until < Date.now()) { tickets.delete(key); error(res, 401, 'That sign-in took too long. Start again with your password.'); return true; }
-    if (++t.tries > 5) { tickets.delete(key); error(res, 429, 'Too many wrong codes. Start again with your password.'); return true; }
+    if (++t.tries > 5) { tickets.delete(key); C.audit('login.code', { ...who(req, t.user), ok: false, why: 'ticket' }); error(res, 429, 'Too many wrong codes. Start again with your password.'); return true; }
     // And per account, whatever the address and however many tickets: someone
-    // with the password and many addresses still gets ten guesses per 15 minutes.
-    if (!authLimit.take(`totp-user:${t.user}`)) { error(res, 429, 'Too many attempts. Wait a few minutes and try again.'); return true; }
-    if (!R.verifySecond(t.user, String(d.code || ''))) { error(res, 401, 'That code isn’t right. Type the newest code from your app, or a backup code.'); return true; }
+    // with the password and many addresses gets ten guesses, then waits that
+    // grow from 15 minutes (kept in SQLite, so a restart doesn't reset them).
+    const wait = G.waitMs(`code:${t.user}`, POLICIES.code);
+    if (wait) { C.audit('login.code', { ...who(req, t.user), ok: false, why: 'locked' }); error(res, 429, 'Too many attempts. Wait a few minutes and try again.'); return true; }
+    if (!R.verifySecond(t.user, String(d.code || ''))) {
+      G.fail(`code:${t.user}`, POLICIES.code);
+      C.audit('login.code', { ...who(req, t.user), ok: false, why: 'code' });
+      error(res, 401, 'That code isn’t right. Type the newest code from your app, or a backup code.');
+      return true;
+    }
     tickets.delete(key);
+    G.clear(`code:${t.user}`);
     reactivate(t.user);
-    const token = createSession(db, t.user, agentOf(req));
-    sendJson(res, 200, { user: strip(M.userRow(t.user)) }, { 'Set-Cookie': sessionCookie(token, { secure }) });
+    sendJson(res, 200, { user: strip(M.userRow(t.user)) }, signedIn(req, t.user, 'totp'));
     return true;
   }
 
@@ -584,12 +954,14 @@ export function createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonB
       sendJson(res, 200, data, { 'Content-Disposition': `attachment; filename="snug-${data.account.handle}-${new Date().toISOString().slice(0, 10)}.json"` });
       return true;
     }
+    if (post && path === '/api/password') { await changePassword(req, res, user); return true; } // sec-auth: from server/index.js
     if (post && (path === '/api/account/delete' || path === '/api/account/deactivate')) {
       if (!authLimit.take(`acct:${user}`)) { error(res, 429, 'Too many attempts. Wait a few minutes and try again.'); return true; }
       const d = await jsonBody(req);
       const del = path === '/api/account/delete';
-      const why = confirm(user, d, { handle: del });
-      if (why) { error(res, 401, why); return true; }
+      const why = await confirm(req, user, d, { handle: del, del });
+      if (why) { error(res, why.status === 429 ? 429 : 401, why.message); return true; }
+      C.audit(del ? 'account.delete' : 'account.deactivate', who(req, user));
       if (del) {
         const owned = soleOwnerOf(user);
         if (owned.length) { error(res, 409, `You’re the only owner of ${owned.join(', ')}. Give someone else the owner role first, or remove everyone else.`); return true; }
@@ -633,12 +1005,15 @@ export function createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonB
         'Content-Type': row.type, 'Content-Length': String(row.size), 'Cache-Control': 'private, max-age=86400',
         'Content-Security-Policy': "default-src 'none'; sandbox",
       });
-      res.writeHead(200);
-      createReadStream(join(filesDir, row.id)).pipe(res);
+      sendFile(res, join(filesDir, row.id)); // sec-web W1: 404 when the bytes are gone, never an unhandled stream error (server/seclog.js)
       return true;
     }
     return false;
   }
 
-  return { open, authed, loginGate, agentOf, totpOn: R.totpOn, verifySecond: R.verifySecond, reset: () => exportLimit.reset() };
+  return {
+    open, authed, loginGate, agentOf, totpOn: R.totpOn, verifySecond: R.verifySecond, audit: M.audit,
+    // Tests: forget every rate limit, the failure counters included.
+    reset: () => { exportLimit.reset(); G.reset(); C.windows.clear(); },
+  };
 }

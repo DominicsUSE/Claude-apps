@@ -1,0 +1,7 @@
+[
+  {
+    "rule": "js/request-forgery",
+    "path": "snug/server/media.js",
+    "why": "GIF downloads: allowed() admits only the configured provider's protocol and media hosts with no credentials, and fetch uses redirect: 'manual', a 15 s timeout and a 10 MB cap. CodeQL does not model the host allowlist as a sanitizer. Reviewed 2026-11-15."
+  }
+]

@@ -212,9 +212,10 @@ test('GitHub sign-in refuses a request whose Host is not this machine (DNS rebin
     req.end(data);
   });
   const evil = `rebind.example:${a.port}`;
-  assert.equal((await raw('GET', '/api/gh/config', evil)).data.enabled, false);
-  assert.equal((await raw('POST', '/api/gh/start', evil, {})).status, 403);
-  assert.equal((await raw('POST', '/api/gh/resume', evil, {})).status, 403);
+  // sec-web W2: the server itself now refuses a foreign Host (421) before ghauth's own check (403) runs.
+  assert.notEqual((await raw('GET', '/api/gh/config', evil)).data.enabled, true);
+  assert.ok([403, 421].includes((await raw('POST', '/api/gh/start', evil, {})).status));
+  assert.ok([403, 421].includes((await raw('POST', '/api/gh/resume', evil, {})).status));
   // This machine's own names still work.
   for (const host of [`127.0.0.1:${a.port}`, `localhost:${a.port}`]) assert.equal((await raw('GET', '/api/gh/config', host)).data.enabled, true, host);
 });
@@ -350,4 +351,37 @@ test('after the registry is reset, signing in again keeps this PC’s account an
     assert.equal(me.user.handle, 'tess');
     assert.equal(me.p2p.owner, true);
   } finally { registry = saved; await p2.close(); await r2.close(); }
+});
+
+// sec-auth AUTH-10: linking GitHub strips the password and two-factor sign-in, and deleting a P2P
+// account unfriends everyone, so an old (perhaps stolen) session needs proof first.
+test('connecting GitHub from an old session needs the password; deleting a GitHub account from one needs GitHub', async () => {
+  const a = await pc();
+  const r = await post(a, '/api/register', { handle: 'stale', name: 'stale', password: 'a long password' });
+  assert.equal(r.status, 201);
+  const old = () => a.db.run('UPDATE sessions SET auth_at = ? WHERE user = ?', Date.now() - 3_600_000, r.data.user.id);
+  old();
+  const bare = await post(a, '/api/gh/start', { link: true }, { cookie: r.cookie });
+  assert.equal(bare.status, 401);
+  assert.equal(bare.data.code, 'reauth');
+  assert.equal((await post(a, '/api/gh/start', { link: true, password: 'not it' }, { cookie: r.cookie })).status, 401);
+  const ok = await post(a, '/api/gh/start', { link: true, password: 'a long password' }, { cookie: r.cookie });
+  assert.equal(ok.status, 200, JSON.stringify(ok.data));
+  await post(a, '/api/gh/cancel', { flow: ok.data.flow });
+  // A GitHub account deleted from a session signed in more than 10 minutes ago, without the GitHub check: refused.
+  const b = await pc();
+  const w = await githubSignIn(b, 1011);
+  const c = await post(b, '/api/gh/claim', { flow: w.flow, username: 'stale.gh' });
+  assert.equal(c.status, 200);
+  b.db.run('UPDATE sessions SET auth_at = ?', Date.now() - 3_600_000);
+  const del = await post(b, '/api/account/delete', { confirm: 'stale.gh' }, { cookie: c.cookie });
+  assert.equal(del.status, 401);
+  assert.match(del.data.error, /Confirm on GitHub/);
+  // With GitHub's confirmation it goes ahead.
+  const conf = await githubSignIn(b, 1011, { purpose: 'release' }, { cookie: c.cookie });
+  assert.equal(conf.data.state, 'confirmed');
+  const gone = await post(b, '/api/account/delete', { confirm: 'stale.gh', flow: conf.flow }, { cookie: c.cookie });
+  assert.equal(gone.status, 200, JSON.stringify(gone.data));
+  // The stopped peer's signalling socket finishes closing (it writes to the database) before the PCs shut down.
+  await new Promise((r) => setTimeout(r, 1500));
 });

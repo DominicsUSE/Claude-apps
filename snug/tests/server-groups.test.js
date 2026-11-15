@@ -354,3 +354,74 @@ test('a member can’t hide someone’s message by sending its id first; removin
   assert.equal(A.db.get('SELECT COUNT(*) n FROM grp_pending WHERE g = ?', g).n, 0);
   assert.deepEqual((await clientFor(A, a.id)).hello.peerWaitingN, {});
 });
+
+test('REG-M3: a member who floods the op log can’t freeze the group: the owner still removes them, everywhere', async () => {
+  const { A, B, C, a, b, c, g } = await group(['ga9', 'gb9', 'gc9']);
+  const cUid = uidOf(c);
+  const cKey = C.peer.identity.me();
+  // C's modified client signs 300 cheap renames and sends them to A and B.
+  const t0 = Date.now() - 5000;
+  for (let i = 0; i < 300; i++) {
+    const op = { g, id: `o_flood${String(i).padStart(11, '0')}`, t: 'rename', by: cUid, kver: C.peer._g.kver(), ts: t0 + i, d: { name: `spam ${i}` } };
+    const sig = signOp(cKey.ikPriv, op);
+    A.peer._g.DURABLE['grp.op'](cUid, { op, sig });
+    B.peer._g.DURABLE['grp.op'](cUid, { op, sig });
+  }
+  await new Promise((r) => setTimeout(r, 1500));
+  const byC = (S) => S.db.get('SELECT COUNT(*) n FROM grp_ops WHERE g = ? AND by = ?', g, cUid).n;
+  assert.ok(byC(A) <= 31 && byC(B) <= 31, `a per-member quota: A ${byC(A)}, B ${byC(B)}`);
+  // The owner removes the abuser, and every PC agrees.
+  await a.ok('dm.kick', { dm: g, user: c.id });
+  await until(() => !members(A, g).includes(c.id) && !members(B, g).includes(c.id), 10_000, 'C removed on A and B');
+  assert.equal(B.peer.groups.state(g).members.has(cUid), false);
+  // Others can still change the group.
+  await b.ok('dm.rename', { dm: g, name: 'calm again' });
+  await until(() => A.db.get('SELECT name FROM dms WHERE id = ?', g).name === 'calm again', 10_000, 'rename after the flood');
+});
+
+test('REG-M3: at the 300-op cap, the owner’s remove and a member’s leave still go through', async () => {
+  const { A, B, a, b, c, g } = await group(['ga10', 'gb10', 'gc10']);
+  for (let i = 0; i < 300; i++) A.db.run('INSERT INTO grp_ops (g, id, by, ts, body, sig) VALUES (?, ?, ?, ?, ?, ?)', g, `o_fill${String(i).padStart(12, '0')}`, uidOf(a), 1, '{}', 'x');
+  A.peer.groups.state(g);
+  assert.equal(await a.refused('dm.rename', { dm: g, name: 'more' }), 'This group has had too many changes. Start a new one.');
+  await a.ok('dm.kick', { dm: g, user: c.id });
+  assert.ok(!members(A, g).includes(c.id), 'remove allowed at the cap');
+  await b.ok('dm.leave', { dm: g });
+  await until(() => !members(A, g).includes(b.id), 10_000, 'B’s leave reaches A at the cap');
+  A.db.run("DELETE FROM grp_ops WHERE id LIKE 'o_fill%'");
+});
+
+test('REG-M3 (review): a flood of leave ops can’t fill the log past the owner’s room for removes', async () => {
+  const { A, C, a, b, c, g } = await group(['ga11', 'gb11', 'gc11']);
+  const cUid = uidOf(c);
+  const cKey = { ...C.peer.identity.me(), kver: C.peer._g.kver() };
+  // C's modified client signs 400 leave ops (each a new id) and sends them to A, the owner.
+  const t0 = Date.now() - 5000;
+  for (let i = 0; i < 400; i++) {
+    const op = { g, id: `o_leave${String(i).padStart(11, '0')}`, t: 'leave', by: cUid, kver: cKey.kver, ts: t0 + i, d: {} };
+    A.peer._g.DURABLE['grp.op'](cUid, { op, sig: signOp(cKey.ikPriv, op) });
+  }
+  await new Promise((r) => setTimeout(r, 1500));
+  const byC = A.db.get('SELECT COUNT(*) n FROM grp_ops WHERE g = ? AND by = ?', g, cUid).n;
+  assert.ok(byC <= 31, `leave ops by one member are bounded too: ${byC}`);
+  // The owner can still remove someone and others can still change the group.
+  await a.ok('dm.kick', { dm: g, user: b.id });
+  assert.ok(!members(A, g).includes(b.id), 'remove still allowed');
+});
+
+test('REG-M3 (review): a member’s real leave goes through, the copies after it are held to the quota', async () => {
+  const { A, C, a, b, c, g } = await group(['ga12', 'gb12', 'gc12']);
+  const cUid = uidOf(c);
+  const cKey = { ...C.peer.identity.me(), kver: C.peer._g.kver() };
+  const t0 = Date.now();
+  for (let i = 0; i < 400; i++) {
+    const op = { g, id: `o_leavr${String(i).padStart(11, '0')}`, t: 'leave', by: cUid, kver: cKey.kver, ts: t0 + i, d: {} };
+    A.peer._g.DURABLE['grp.op'](cUid, { op, sig: signOp(cKey.ikPriv, op) });
+  }
+  await until(() => !members(A, g).includes(c.id), 10_000, 'C’s first leave applied on A');
+  await new Promise((r) => setTimeout(r, 1000));
+  const byC = A.db.get('SELECT COUNT(*) n FROM grp_ops WHERE g = ? AND by = ?', g, cUid).n;
+  assert.ok(byC <= 31, `copies of the leave are bounded: ${byC}`);
+  await a.ok('dm.kick', { dm: g, user: b.id });
+  assert.ok(!members(A, g).includes(b.id), 'remove still allowed');
+});

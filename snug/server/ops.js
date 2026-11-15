@@ -2,10 +2,12 @@
 // permission against the database, writes, and tells the people affected.
 // Nothing here trusts the client's own permission checks.
 import { randomBytes } from 'node:crypto';
+import { limiter } from './auth.js'; // sec-authz: the rtc byte budget
+import { secRecord } from './seclog.js'; // sec-integrate
 import { PERMS } from '../js/lib/perms.js';
 import { newId, now } from './model.js';
 import { TOPICS, LIMITS, EVENT_LENGTH, eventEnd, eventState, cleanInterests, safeLink } from '../js/lib/social.js';
-import { fold } from '../js/lib/util.js';
+import { fold, stripInvisible } from '../js/lib/util.js'; // sec-authz: stripInvisible
 import { decorateFile, createMediaOps } from './media.js'; // voice messages, pins, GIFs
 import { createEmojiOps } from './emoji.js'; // custom emoji per house
 import { createSafetyOps } from './safety.js'; // blocks, privacy, moderation, audit log
@@ -26,11 +28,13 @@ const fail = (msg) => { throw new UserError(msg); };
 // Input checks
 const str = (v, { max = 200, min = 0, name = 'This', trim = true } = {}) => {
   if (typeof v !== 'string') fail(`${name} is missing.`);
-  const s = trim ? v.trim() : v;
+  // Control characters other than newline and tab have no business in chat,
+  // nor do invisible and direction-changing ones (sec-authz, js/lib/util.js).
+  const c = stripInvisible(v).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '');
+  const s = trim ? c.trim() : c;
   if (s.length < min) fail(min === 1 ? `${name} can’t be empty.` : `${name} needs at least ${min} characters.`);
   if (s.length > max) fail(`${name} can be at most ${max} characters.`);
-  // Control characters other than newline and tab have no business in chat.
-  return s.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '');
+  return s;
 };
 const opt = (v, o) => (v === undefined ? undefined : str(v, o));
 const id = (v, name = 'id') => (typeof v === 'string' && /^[\w:.-]{1,80}$/.test(v) ? v : fail(`That ${name} isn’t valid.`));
@@ -51,6 +55,8 @@ const PERM_IDS = PERMS.map((p) => p.id);
 const json = (s, f) => { try { return s == null ? f : JSON.parse(s); } catch { return f; } };
 const MIN = 60_000, DAY = 86_400_000;
 const MAX_PENDING = 50;
+export const MAX_OWNED_HOUSES = 100; // sec-authz
+export const MAX_HOUSE_INVITES_DAY = 200; // sec-authz: personal invitations per house per day
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 function interestsOf(v) {
@@ -72,7 +78,47 @@ function linksOf(v) {
   });
 }
 
+// sec-authz: a WebRTC signal is one of { sdp }, { candidate } or { kinds } (js/voice.js).
+const RTC_SDP_MAX = 24_000;
+const badSignal = () => fail('That signal isn’t valid.');
+const sOrNull = (v, max) => (v === null || v === undefined ? null : typeof v === 'string' && v.length <= max ? v : badSignal());
+export function rtcSignal(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) badSignal();
+  const keys = Object.keys(data);
+  if (keys.length !== 1) badSignal();
+  const [k] = keys;
+  const v = data[k];
+  // An sdp may also be an opaque string (older test peers); it only goes to the one person.
+  if (k === 'sdp' && typeof v === 'string') return v.length <= RTC_SDP_MAX ? { sdp: v } : badSignal();
+  if (!v || typeof v !== 'object' || Array.isArray(v)) badSignal();
+  if (k === 'sdp') {
+    if (!['offer', 'answer', 'pranswer', 'rollback'].includes(v.type)) badSignal();
+    if (typeof (v.sdp ?? '') !== 'string' || (v.sdp ?? '').length > RTC_SDP_MAX) badSignal();
+    return { sdp: { type: v.type, sdp: v.sdp ?? '' } };
+  }
+  if (k === 'candidate') {
+    const cand = v.candidate ?? ''; // an empty candidate marks the end of candidates
+    if (typeof cand !== 'string' || cand.length > 1024) badSignal();
+    const idx = v.sdpMLineIndex ?? null;
+    if (idx !== null && !(Number.isInteger(idx) && idx >= 0 && idx < 1024)) badSignal();
+    return { candidate: { candidate: cand, sdpMid: sOrNull(v.sdpMid, 64), sdpMLineIndex: idx, usernameFragment: sOrNull(v.usernameFragment, 256) } };
+  }
+  if (k === 'kinds') {
+    const out = {};
+    for (const [kk, vv] of Object.entries(v)) {
+      if (!['mic', 'camera', 'screen', 'screenAudio'].includes(kk)) badSignal();
+      out[kk] = sOrNull(vv, 128);
+    }
+    return { kinds: out };
+  }
+  return badSignal();
+}
+
 export function createOps({ db, M, hub }) {
+  // sec-authz: bytes of WebRTC signalling one person may send: enough for
+  // offers to a full room at once, then 64 KB a second.
+  const rtcBytes = limiter({ capacity: 512 * 1024, perSecond: 64 * 1024 });
+  (hub.extraLimits ||= []).push(rtcBytes);
   const member = (user, house) => (M.isMember(house, user) ? true : fail('You’re not a member of that house.'));
   const need = (user, house, perm, what) => {
     member(user, house);
@@ -228,6 +274,9 @@ export function createOps({ db, M, hub }) {
     'INSERT INTO friend_cooldown (user, other, ts) VALUES (?, ?, ?) ON CONFLICT (user, other) DO UPDATE SET ts = excluded.ts',
     user, other, Date.now());
 
+  // sec-authz: houses where this person holds the owner role (the first one).
+  const ownedHouses = (u) => db.get(`SELECT COUNT(*) n FROM members m WHERE m.user = ? AND m.role = (SELECT id FROM roles r WHERE r.house = m.house ORDER BY pos LIMIT 1)`, u).n;
+  M.ownedHouses = ownedHouses; // server/places.js: houses made from a template or a copy
   const ops = {
     sync: (c) => hub.snapshotFor(c.user),
 
@@ -367,7 +416,7 @@ export function createOps({ db, M, hub }) {
       return {};
     },
     'read.many'(c, d) {
-      const items = Array.isArray(d.items) ? d.items.slice(0, 2000) : [];
+      const items = Array.isArray(d.items) ? d.items.slice(0, 500) : []; // sec-authz: was 2000; the client sends bigger sets in parts (js/store.js)
       const out = {};
       db.tx(() => {
         for (const it of items) {
@@ -473,6 +522,8 @@ export function createOps({ db, M, hub }) {
     // Houses
     'house.create'(c, d) {
       const name = str(d.name, { min: 1, max: 40, name: 'The name' });
+      // sec-authz: a cap on houses one person owns.
+      if (ownedHouses(c.user) >= MAX_OWNED_HOUSES) fail(`You can own up to ${MAX_OWNED_HOUSES} houses. Delete or hand over one first.`);
       const h = hue(d.hue);
       const hid = newId('h');
       const owner = newId('role'), memberRole = newId('role');
@@ -677,8 +728,13 @@ export function createOps({ db, M, hub }) {
       need(c.user, houseId, 'invite', 'invite people');
       const handle = str(d.handle, { min: 1, max: 30, name: 'The username' }).replace(/^@/, '');
       const target = db.get('SELECT id, name FROM users WHERE handle = ?', handle);
-      if (!target) fail(`Nobody is called @${handle}.`);
+      // sec-authz: the same answer for nobody by that name and someone who
+      // doesn't take invitations from you (privacy, server/safety.js), so this
+      // can't be used to find out who has an account.
+      if (!target || M.invitesFrom?.(target.id, c.user) === false) fail(`@${handle} can’t be invited. Check the username, or ask them to join with a link.`);
       if (M.isMember(houseId, target.id)) fail(`${target.name} is already in this house.`);
+      // sec-authz: a day's personal invitations from one house.
+      if (db.get('SELECT COUNT(*) n FROM personal_invites WHERE house = ? AND ts > ?', houseId, Date.now() - DAY).n >= MAX_HOUSE_INVITES_DAY) fail(`This house has sent ${MAX_HOUSE_INVITES_DAY} personal invitations today. Try again tomorrow, or share a link.`);
       db.run('INSERT OR REPLACE INTO personal_invites (house, user, by, ts) VALUES (?, ?, ?, ?)', houseId, target.id, c.user, Date.now());
       hub.sendInvites(target.id);
       return { name: target.name };
@@ -936,8 +992,12 @@ export function createOps({ db, M, hub }) {
     },
     rtc(c, d) {
       const to = id(d.to, 'person');
-      const data = d.data;
-      if (!data || typeof data !== 'object' || JSON.stringify(data).length > 64_000) fail('That signal isn’t valid.');
+      // sec-authz: only the three shapes the client sends, rebuilt from their
+      // known fields, and a byte budget per person, so a call member can't
+      // flood someone else's browser with junk signalling.
+      const data = rtcSignal(d.data);
+      const size = JSON.stringify(data).length;
+      if (!rtcBytes.take(c.user, size)) { secRecord(db, 'ratelimit.hit', { req: c.ws?.secReq, user: c.user, detail: { op: 'rtc', by: 'bytes' } }); fail('You’re going a little fast. Wait a moment and try again.'); } // sec-integrate: logged
       if (!hub.rtcRelay(c.user, to, data)) fail('That person isn’t in your voice room.');
       return {};
     },

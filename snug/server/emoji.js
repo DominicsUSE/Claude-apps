@@ -17,6 +17,7 @@ import { writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { newId } from './model.js';
 import { safeDecode } from './auth.js';
+import { cleanFileName } from '../js/lib/util.js'; // sec-authz
 
 export const MAX_EMOJI = 100;
 export const MAX_EMOJI_BYTES = 256 * 1024;
@@ -140,6 +141,7 @@ export function createEmojiOps({ db, M, hub, fail, ops = {} }) {
   const baseContent = hub.sendHouseContent;
   if (baseContent) {
     hub.sendHouseContent = (u, houseId) => {
+      if (hub.connected && !hub.connected(u)) return; // sec-authz: nothing to build for someone with no socket open
       baseContent(u, houseId);
       hub.toUser(u, 'emoji', { house: houseId, list: R.list(houseId) });
     };
@@ -281,7 +283,7 @@ export function createEmojiHttp({ db, M, filesDir, sendJson, error, body, upload
       error(res, 422, `That image is ${img.w} by ${img.h} pixels. Emoji can be up to ${MAX_EMOJI_SIDE} by ${MAX_EMOJI_SIDE}.`);
       return true;
     }
-    const name = (safeDecode(String(req.headers['x-file-name'] || 'emoji')).replace(/[\u0000-\u001f\u007f/\\]/g, '').trim() || 'emoji').slice(0, 120);
+    const name = cleanFileName(safeDecode(String(req.headers['x-file-name'] || 'emoji')), 'emoji'); // sec-authz
     const id = newId('f');
     await writeFile(join(filesDir, id), data, { mode: 0o600 });
     db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',

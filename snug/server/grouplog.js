@@ -6,6 +6,10 @@ import { canon, sha256, base32, signStr, verifyStr, UID } from './peercrypto.js'
 
 export const MAX_MEMBERS = 25;          // including the creator
 export const MAX_OPS = 300;
+// sec-registry REG-M3: room past MAX_OPS for the ops that keep membership in hand (a remove by the owner, a
+// leave), so a member can't freeze a group by filling the log; and a per-member quota (the owner has none).
+export const MAX_OPS_HARD = MAX_OPS + 60;
+export const AUTHOR_MAX = 30;
 export const ITEM_DAYS = 30;
 export const LEFT_GRACE = 24 * 3600_000; // items by someone who left: at most this long after the leave
 export const GID = /^dg_[a-z2-7]{26}$/;
@@ -169,7 +173,7 @@ export function exportGroups(groups) {
 export function parseGroupsSection(data) {
   if (!isObj(data) || !Array.isArray(data.groups) || data.groups.length > 200) throw new Error('bad groups section');
   return data.groups.map((x) => {
-    if (!isObj(x) || !GID.test(x.g) || !Array.isArray(x.ops) || x.ops.length > MAX_OPS || !Array.isArray(x.msgs) || x.msgs.length > 5000) throw new Error('bad group');
+    if (!isObj(x) || !GID.test(x.g) || !Array.isArray(x.ops) || x.ops.length > MAX_OPS_HARD || !Array.isArray(x.msgs) || x.msgs.length > 5000) throw new Error('bad group');
     const ops = x.ops.map((o) => {
       if (!isObj(o) || typeof o.body !== 'string' || typeof o.sig !== 'string' || o.body.length > 16384) throw new Error('bad op');
       const op = JSON.parse(o.body);

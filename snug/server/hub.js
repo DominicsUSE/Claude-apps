@@ -1,8 +1,9 @@
 // The real-time hub. Owns the WebSocket connections, works out who is online,
 // and delivers each change only to the people allowed to see it.
 import { WebSocketServer } from 'ws';
-import { readCookie, sessionUser, COOKIE, limiter, tokenHash } from './auth.js';
+import { readCookie, sessionUser, COOKIE, limiter, tokenHash, sessionValid } from './auth.js'; // sec-auth: sessionValid
 import { createOps, UserError } from './ops.js';
+import { secRecord } from './seclog.js'; // sec-integrate: refused sockets and rate limits in the security log
 import { newId, now } from './model.js';
 import { addMediaSnapshot } from './media.js'; // pins and saved GIFs in every snapshot
 import { addEmojiSnapshot } from './emoji.js'; // each house's custom emoji in every snapshot
@@ -10,6 +11,10 @@ import { addEmojiSnapshot } from './emoji.js'; // each house's custom emoji in e
 const OFFLINE_GRACE = 5000;
 export const RING_MS = 30_000;
 const VOICE_MAX = 12;
+// sec-authz: sockets one person may hold open at once (tabs, windows, devices).
+// One more closes their oldest. Each new socket builds a full snapshot, so
+// opening them is rate limited too, per person and per address.
+export const MAX_SOCKETS = 10;
 
 // How long a call rings. SNUG_RING_MS shortens it, but only under the test
 // runner (node --test sets NODE_TEST_CONTEXT), so a stray variable on a real
@@ -36,7 +41,7 @@ export function callLength(ms) {
   return m ? `${m}m ${r}s` : `${r}s`;
 }
 
-export function createHub({ db, M, server, origins, ice = [], log = () => {}, ringMs = ringMsFrom(), voiceGraceMs = voiceGraceFrom() }) {
+export function createHub({ db, M, server, origins, ice = [], log = () => {}, ringMs = ringMsFrom(), voiceGraceMs = voiceGraceFrom(), ipOf = (req) => req.socket.remoteAddress, maxSockets = MAX_SOCKETS }) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 512 * 1024 });
   const socks = new Map();        // user -> Set<ws>
   const offlineTimers = new Map();
@@ -60,7 +65,18 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
     // Taking back requests, and joining open houses, both notify other people.
     'friend.remove': limiter({ capacity: 10, perSecond: 0.2 }),
     'house.joinPublic': limiter({ capacity: 5, perSecond: 0.1 }),
-    rtc: limiter({ capacity: 400, perSecond: 80 }),
+    // sec-authz: a burst big enough to call 11 people at once (offers and
+    // candidates), then 40 a second (was 80); bytes are limited too (ops.js rtc).
+    rtc: limiter({ capacity: 400, perSecond: 40 }),
+    // sec-authz: ops that rebuild a lot (a full snapshot, many reads, history
+    // pages) get their own, slower buckets instead of the default 15 a second.
+    sync: limiter({ capacity: 6, perSecond: 0.2 }),
+    'read.many': limiter({ capacity: 10, perSecond: 0.5 }),
+    history: limiter({ capacity: 40, perSecond: 4 }),
+    // sec-authz: personal invitations reach strangers: 10 at once, then one every 30 seconds.
+    'invite.user': limiter({ capacity: 10, perSecond: 1 / 30 }),
+    // sec-authz: new houses: five at once, then one a minute (a cap on how many you own is in ops.js).
+    'house.create': limiter({ capacity: 5, perSecond: 1 / 60 }),
     // Starting a call rings other people's devices: four at once, then one every 15 seconds.
     'call.start': limiter({ capacity: 4, perSecond: 1 / 15 }),
   };
@@ -126,16 +142,46 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
   // Push notifications (server/push.js): does this person have any socket open right now?
   hub.connected = (u) => (socks.get(u)?.size || 0) > 0;
 
+  // sec-authz: a fan-out that rebuilds views for a whole house runs at once,
+  // then waits a window of 4x what that run cost: calls inside the window
+  // collapse into one trailing run, which reads the state as it is by then.
+  // A small house (a few ms) is never held back; a big one can use at most
+  // about a fifth of the event loop, however fast a member renames themselves
+  // or picks interests.
+  const fanouts = new Map(); // key -> { next, timer, fn }
+  hub.throttle = (key, fn, minGap = 0) => {
+    const s = fanouts.get(key);
+    const t = Date.now();
+    if (s && (s.timer || t < s.next)) {
+      s.fn = fn;
+      if (!s.timer) s.timer = setTimeout(() => { s.timer = null; if (!closed) runFanout(key, s.fn, minGap); }, Math.max(0, s.next - t));
+      return;
+    }
+    runFanout(key, fn, minGap);
+  };
+  function runFanout(key, fn, minGap) {
+    const t0 = Date.now();
+    try { fn(); } finally {
+      const took = Date.now() - t0;
+      const s = fanouts.get(key) || {};
+      s.next = Date.now() + Math.max(minGap, took * 4);
+      fanouts.set(key, s);
+      if (fanouts.size > 5000) for (const [k, v] of fanouts) { if (!v.timer && v.next < Date.now()) fanouts.delete(k); }
+    }
+  }
+
   hub.sendHouse = (u, houseId) => {
+    if (!hub.connected(u)) return; // sec-authz: nobody to send it to, so nothing to build
     const v = M.houseView(houseId, u);
     if (v) hub.toUser(u, 'house', { house: v.house, rooms: v.rooms, users: hub.usersFor(v.userIds) });
   };
-  hub.houseChanged = (houseId) => {
+  hub.houseChanged = (houseId) => hub.throttle(`house:${houseId}`, () => { // sec-authz: throttled per house
     for (const r of db.all('SELECT user FROM members WHERE house = ?', houseId)) hub.sendHouse(r.user, houseId);
     for (const r of db.all('SELECT user FROM personal_invites WHERE house = ?', houseId)) hub.sendHouse(r.user, houseId);
-  };
+  });
   // A house plus its conversations, for someone who has just joined or created it.
   hub.sendHouseContent = (u, houseId) => {
+    if (!hub.connected(u)) return; // sec-authz
     hub.sendHouse(u, houseId);
     const rooms = db.all('SELECT id FROM rooms WHERE house = ?', houseId).map((r) => r.id).filter((r) => M.canRead(u, r)); // private rooms (server/places.js)
     const threads = rooms.length ? db.all(`SELECT * FROM threads WHERE conv IN (${rooms.map(() => '?').join(',')})`, ...rooms) : [];
@@ -436,13 +482,25 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
   const ops = createOps({ db, M, hub });
 
   // Connections
+  // sec-authz: generous enough for reloads and several devices, slow enough
+  // that a loop opening sockets can't keep the server building snapshots.
+  const upgradeLimits = { ip: limiter({ capacity: 60, perSecond: 2 }), user: limiter({ capacity: 30, perSecond: 0.5 }) };
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://x');
     if (url.pathname !== '/ws') return socket.destroy();
     // A page on another site must not be able to open a socket with this person's cookie.
     const origin = req.headers.origin;
     if (!origin || !origins(req).includes(origin)) {
+      secRecord(db, 'origin.refused', { req, detail: { origin: String(origin || 'none').slice(0, 100), path: '/ws' } }); // sec-integrate
       socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+      return socket.destroy();
+    }
+    // sec-authz: new sockets are rate limited per address before the session
+    // lookup, and per person after it.
+    const ip = String(ipOf(req) || '');
+    if (!upgradeLimits.ip.take(ip)) {
+      secRecord(db, 'ratelimit.hit', { req, detail: { path: '/ws', by: 'address' } }); // sec-integrate
+      socket.write('HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\n\r\n');
       return socket.destroy();
     }
     const user = sessionUser(db, readCookie(req.headers.cookie, COOKIE));
@@ -450,9 +508,16 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
       return socket.destroy();
     }
+    if (!upgradeLimits.user.take(user)) {
+      secRecord(db, 'ratelimit.hit', { req, user, detail: { path: '/ws', by: 'person' } }); // sec-integrate
+      socket.write('HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\n\r\n');
+      return socket.destroy();
+    }
     wss.handleUpgrade(req, socket, head, (ws) => {
       // p2p: only a page on this machine may host peer links (F6).
       ws.loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+      // sec-integrate: just what the security log needs to place a later event (address, browser), not the request.
+      ws.secReq = { socket: { remoteAddress: req.socket.remoteAddress }, headers: { 'x-forwarded-for': req.headers['x-forwarded-for'], 'user-agent': req.headers['user-agent'] } };
       connected(ws, user, readCookie(req.headers.cookie, COOKIE));
     });
     return undefined;
@@ -465,6 +530,13 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
     const first = !online(user);
     if (offlineTimers.has(user)) { clearTimeout(offlineTimers.get(user)); offlineTimers.delete(user); }
     if (!socks.has(user)) socks.set(user, new Set());
+    // sec-authz: one too many closes the oldest (a Set keeps insertion order).
+    while (socks.get(user).size >= maxSockets) {
+      const oldest = socks.get(user).values().next().value;
+      socks.get(user).delete(oldest);
+      try { oldest.close(4008, 'too many connections'); } catch { oldest.terminate(); }
+      secRecord(db, 'socket.evicted', { req: ws.secReq, user, detail: { max: maxSockets } }); // sec-integrate
+    }
     socks.get(user).add(ws);
     if (first) presenceChanged(user);
     send(ws, { t: 'hello', d: { ...hub.snapshotFor(user), ice: hub.iceFor(user) } });
@@ -480,9 +552,11 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
       if (!sessionUser(db, token)) { reply(false, 'You’ve been signed out. Sign in again.'); ws.close(4001, 'signed out'); return; }
       const handler = Object.hasOwn(ops, msg.op) ? ops[msg.op] : null;
       if (!handler) return reply(false, 'Snug doesn’t know how to do that.');
-      const bucket = limits[msg.op] || limits.default;
-      if (!bucket.take(`${user}:${msg.op in limits ? msg.op : '*'}`)) {
+      const own = Object.hasOwn(limits, msg.op); // sec-integrate: never a prototype key
+      const bucket = own ? limits[msg.op] : limits.default;
+      if (!bucket.take(`${user}:${own ? msg.op : '*'}`)) {
         if (msg.op === 'typing') return reply(true, {});
+        secRecord(db, 'ratelimit.hit', { req: ws.secReq, user, detail: { op: msg.op.slice(0, 40) } }); // sec-integrate
         return reply(false, 'You’re going a little fast. Wait a moment and try again.');
       }
       const failed = (e) => {
@@ -519,7 +593,13 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
       ws.alive = false;
       ws.ping();
     }
+    hub.recheckSessions(); // sec-auth AUTH-9
   }, 25_000);
+  // sec-auth AUTH-9: a socket whose session has ended (signed out, expired, unused too long) closes
+  // instead of going on receiving live events until it next sends something.
+  hub.recheckSessions = () => {
+    for (const set of socks.values()) for (const ws of set) if (ws.token !== undefined && !sessionValid(db, ws.token)) ws.close(4001, 'signed out');
+  };
 
   hub.endSessions = (u, exceptToken) => {
     for (const ws of socks.get(u) || []) if (ws.token !== exceptToken) ws.close(4001, 'signed out');
@@ -532,12 +612,13 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
     closed = true;
     clearInterval(beat);
     for (const t of offlineTimers.values()) clearTimeout(t);
+    for (const f of fanouts.values()) clearTimeout(f.timer); // sec-authz
     for (const call of calls.values()) { clearTimeout(call.silentTimer); for (const r of call.ringing.values()) clearTimeout(r.timer); }
     for (const m of voiceRooms.values()) for (const e of m.values()) clearTimeout(e.lostTimer);
     for (const set of socks.values()) for (const ws of set) ws.terminate();
     wss.close();
   };
   hub.ops = ops;
-  hub.resetLimits = () => { Object.values(limits).forEach((l) => l.reset()); (hub.extraLimits || []).forEach((l) => l.reset()); };
+  hub.resetLimits = () => { Object.values(limits).forEach((l) => l.reset()); Object.values(upgradeLimits).forEach((l) => l.reset()); /* sec-authz */ (hub.extraLimits || []).forEach((l) => l.reset()); };
   return hub;
 }

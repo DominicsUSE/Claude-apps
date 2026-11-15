@@ -64,13 +64,23 @@ test('vault key: created on first use, 32 bytes, stable, the same after release 
   assert.notEqual((await vaultKey(other)).body.key, r1.body.key);
 });
 
-test('vault key: the pending move key may fetch it; other keys and other uids may not; not stored raw', async () => {
+test('vault key: only the current key gets it (never a pending move key); other keys and uids may not; not stored raw', async () => {
   const u = await user('pemma');
   const key = (await vaultKey(u)).body.key;
   const k2 = await startMove(u);
+  // sec-registry REG-H1: a pending key has proved GitHub only; the 72 h delay and the old PC's Stop exist
+  // because that is not enough. It gets the key once the move completes (approve, or after 72 h).
   const viaPending = await vaultKey(u, { k: k2 });
-  assert.equal(viaPending.status, 200, JSON.stringify(viaPending.body));
-  assert.equal(viaPending.body.key, key);
+  assert.equal(viaPending.status, 401, JSON.stringify(viaPending.body));
+  assert.equal(viaPending.body.error, 'bad_signature');
+  assert.equal(viaPending.body.key, undefined);
+  assert.equal((await vaultKey(u)).body.key, key, 'the current key still gets it during the move');
+  await approve(u, k2);
+  const afterMove = await vaultKey(u, { k: k2 });
+  assert.equal(afterMove.status, 200, JSON.stringify(afterMove.body));
+  assert.equal(afterMove.body.key, key, 'after the move the new key gets the same key');
+  assert.equal((await vaultKey(u)).body.error, 'bad_signature', 'and the old key no longer does');
+  u.k = k2;
   assert.equal((await vaultKey(u, { k: makeKeys() })).body.error, 'bad_signature');
   const mallory = await user('mallory');
   assert.equal((await vaultKey(u, { k: mallory.k })).body.error, 'bad_signature', 'another account’s key cannot fetch it');

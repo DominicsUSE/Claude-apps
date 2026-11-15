@@ -30,6 +30,7 @@ export const MESSAGES = {
   newer_version: 'This data file was made by a newer Snug. Update Snug first.',
   too_big: 'That file is too large to be a Snug data file.',
   no_key: 'Snug can’t reach its directory to unlock your data file. Try again when you’re online.',
+  not_yet: 'Your data file can be opened on this PC once the move is done: approve it on your old PC, or wait until it completes.',
 };
 
 export class VaultError extends Error {
@@ -49,7 +50,7 @@ function gcmSeal(key, iv, plain, aad) {
 }
 function gcmOpen(key, iv, data, aad) {
   if (data.length < 16) throw new Error('short');
-  const d = createDecipheriv('aes-256-gcm', key, iv);
+  const d = createDecipheriv('aes-256-gcm', key, iv, { authTagLength: 16 }); // sec-integrate: a fixed 16-byte tag
   d.setAAD(aad);
   d.setAuthTag(data.subarray(data.length - 16));
   return Buffer.concat([d.update(data.subarray(0, data.length - 16)), d.final()]);

@@ -7,7 +7,7 @@ import { call } from '../server.js';
 import { can } from '../lib/perms.js';
 import { fmtWhen, fmtFull } from '../lib/util.js';
 import {
-  PRIVACY_DM, PRIVACY_FRIENDS, REPORT_REASONS, FILTER_ACTIONS, TIMEOUTS, INVITE_AGES, INVITE_USES, spell, left, cleanWord, MAX_WORDS,
+  PRIVACY_DM, PRIVACY_FRIENDS, PRIVACY_INVITES, REPORT_REASONS, FILTER_ACTIONS, TIMEOUTS, INVITE_AGES, INVITE_USES, spell, left, cleanWord, MAX_WORDS,
 } from '../lib/safety.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Seg, Switch, Empty } from '../ui/kit.js';
@@ -68,6 +68,9 @@ export function PrivacyPage() {
     <//>
     <${Row} label="Who can send you friend requests" top>
       <${Seg} label="Who can send you friend requests" value=${p.friends} options=${PRIVACY_FRIENDS} onChange=${(v) => set({ friends: v })} />
+    <//>
+    <${Row} label="Who can invite you to houses" hint="Personal invitations. Anyone can still share an invitation link with you." top>
+      <${Seg} label="Who can invite you to houses" value=${p.invites || 'everyone'} options=${PRIVACY_INVITES} onChange=${(v) => set({ invites: v })} />
     <//>
     <div class="set-head">Blocked <span class="faint" style="font-weight:400">${st.blocks.length || ''}</span></div>
     ${st.blocks.length

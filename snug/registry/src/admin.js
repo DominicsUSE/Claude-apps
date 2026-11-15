@@ -22,11 +22,20 @@ export const ADMIN_SCHEMA = [
     target TEXT, detail TEXT NOT NULL DEFAULT '{}')`,
   // Vault keys (vaultkey.js): one per GitHub account, wrapped at rest. Kept on release and renames.
   'CREATE TABLE IF NOT EXISTS vault_keys (ghh TEXT PRIMARY KEY, k TEXT NOT NULL, kid INTEGER NOT NULL DEFAULT 1, at INTEGER NOT NULL)',
+  // sec-registry REG-M2: an owner-armed forced move: the account's next GitHub-proved move completes at once.
+  'CREATE TABLE IF NOT EXISTS move_force (ghh TEXT PRIMARY KEY, until INTEGER NOT NULL, by TEXT NOT NULL, at INTEGER NOT NULL)',
+  // ... and the key it moved away from (the stolen device) gets no 'old' xfer role: it hands nothing over.
+  'CREATE TABLE IF NOT EXISTS forced_old (uid TEXT NOT NULL, ik TEXT NOT NULL, until INTEGER NOT NULL, PRIMARY KEY (uid, ik))',
 ];
+const FORCE_FOR = 7 * DAY;
 
 export const PERMS = ['stats', 'names', 'ban', 'ann', 'update'];
 const ALL = [...PERMS, 'grant'];
 const AUDIT_KEEP = 5000;
+// sec-registry hardening: high-impact actions are not part of the 5000-row rotation (an admin can't push their
+// own bans or renames out with reserve/unreserve spam); they are kept for a year instead.
+const AUDIT_KEEP_HIGH_MS = 365 * DAY;
+const HIGH_IMPACT = ['ban', 'unban', 'admin.grant', 'admin.revoke', 'min.set', 'name.rename', 'name.free', 'move.force', 'move.forced', 'vault.export'];
 const ANN_MAX = 5;
 const MAX_UNTIL = 10 * 365 * DAY;
 
@@ -50,6 +59,12 @@ const ACTIONS = {
   'admin.revoke': { perm: 'grant' },
   admins: { perm: 'grant', read: true },
   audit: { perm: 'stats', read: true },
+  // sec-registry REG-M2: account recovery when the current device is stolen (its key can cancel every move,
+  // and release needs it). Owner only ('grant' is never given to admins), audited, on a GitHub-proved move.
+  'move.force': { perm: 'grant' },
+  // sec-registry REG-L6: an owner-only, audited copy of the vault key rows, still wrapped under the registry
+  // secret (useless without it), so losing the Hub DO doesn't make every data file unreadable.
+  'vault.export': { perm: 'grant' },
 };
 
 const skelOf = (n) => (SHORT_NAMES.includes(n) ? `#${n}` : skeleton(n));
@@ -128,6 +143,8 @@ export const AdminMixin = {
   },
   adminSweep(t) {
     this.sql.exec('DELETE FROM bans WHERE until IS NOT NULL AND until<=?', t);
+    this.sql.exec('DELETE FROM move_force WHERE until<=?', t);
+    this.sql.exec('DELETE FROM forced_old WHERE until<=?', t);
     const gone = this.sql.exec('DELETE FROM announcements WHERE until IS NOT NULL AND until<=?', t).rowsWritten;
     if (gone) this._notices = null;
   },
@@ -160,7 +177,9 @@ export const AdminMixin = {
     let s = JSON.stringify(detail || {});
     if (s.length > 1000) s = JSON.stringify({ cut: s.slice(0, 990) });
     this.sql.exec('INSERT INTO audit(at, by, a, target, detail) VALUES(?,?,?,?,?)', this.now(), by, a, target ?? null, s);
-    this.sql.exec('DELETE FROM audit WHERE id <= (SELECT MAX(id) FROM audit) - ?', AUDIT_KEEP);
+    const high = HIGH_IMPACT.map(() => '?').join(',');
+    this.sql.exec(`DELETE FROM audit WHERE a NOT IN (${high}) AND id <= (SELECT MAX(id) FROM audit) - ?`, ...HIGH_IMPACT, AUDIT_KEEP);
+    this.sql.exec(`DELETE FROM audit WHERE a IN (${high}) AND at < ?`, ...HIGH_IMPACT, this.now() - AUDIT_KEEP_HIGH_MS);
   },
 
   /** The target account by uid, with the owner/admin rules applied. */
@@ -312,6 +331,8 @@ export const AdminMixin = {
       t.uid, until, reason, ctx.acc.uid, now,
     );
     if (until) this.ensureAlarm(until);
+    // sec-registry hardening: knocks the banned account left in other people's inboxes go too (except its own).
+    this.sql.exec('DELETE FROM knocks WHERE frm=? AND to_uid<>?', t.uid, t.uid);
     ctx.detail = { reason, until };
     ctx.after = () => {
       for (const w of this.sockets(t.uid, (a) => a.mode === 'normal' || a.mode === 'pending')) {
@@ -423,6 +444,51 @@ export const AdminMixin = {
       admins: this.rows('SELECT d.uid, d.perms, d.by, d.at, a.username FROM admins d LEFT JOIN accounts a ON a.uid=d.uid ORDER BY d.at')
         .map((r) => ({ uid: r.uid, username: r.username ?? null, perms: JSON.parse(r.perms), at: r.at, by: this.nameOf(r.by) })),
     };
+  },
+
+  /**
+   * sec-registry REG-M2. {uid}: a pending move completes now (unapproved: prev = null, so friends see a loud
+   * key change). With no pending move, the account's next move (it needs a fresh GitHub sign-in) within 7
+   * days completes at once, past the 24 h block and the old key's Stop. Owner only; never on the owner.
+   */
+  adm_move_force(d, ctx) {
+    if (!ctx.owner) fail('forbidden');
+    const t = this.targetAcc(d.uid, ctx);
+    const now = this.now();
+    if (this.pending(t.uid)) {
+      ctx.detail = { state: 'done' };
+      this.markForcedOld(t);
+      this.markVaultRotate(t.ghh); // REG-L1: the forced-out device holds the old vault key
+      ctx.after = () => this.completeRebind(t.uid, null);
+      return { state: 'done' };
+    }
+    this.sql.exec('INSERT OR REPLACE INTO move_force(ghh, until, by, at) VALUES(?,?,?,?)', t.ghh, now + FORCE_FOR, ctx.acc.uid, now);
+    this.metaUpsert(t.ghh, 'rebind_block_until', null);
+    ctx.detail = { state: 'armed', until: now + FORCE_FOR };
+    return { state: 'armed', until: now + FORCE_FOR };
+  },
+  markForcedOld(acc) {
+    this.sql.exec('INSERT OR REPLACE INTO forced_old(uid, ik, until) VALUES(?,?,?)', acc.uid, acc.ik, this.now() + 31 * DAY);
+  },
+  /** A forced move armed for this GitHub account (used once), or null. */
+  takeMoveForce(ghh) {
+    const r = this.row('SELECT * FROM move_force WHERE ghh=?', ghh);
+    if (!r) return null;
+    this.sql.exec('DELETE FROM move_force WHERE ghh=?', ghh);
+    return r.until > this.now() ? r : null;
+  },
+
+  adm_vault_export(d, ctx) {
+    if (!ctx.owner) fail('forbidden');
+    const after = d.after ?? '';
+    need(typeof after === 'string' && after.length <= 64);
+    const rows = this.rows('SELECT ghh, kid, k, at FROM vault_keys WHERE ghh>? ORDER BY ghh LIMIT 200', after);
+    const old = rows.length
+      ? this.rows('SELECT ghh, kid, k, at FROM vault_keys_old WHERE ghh>? AND ghh<=? ORDER BY ghh, kid', after, rows.at(-1).ghh)
+      : [];
+    ctx.detail = { after, n: rows.length };
+    const wrap = this.env.VAULT_WRAP_SECRET ? 'vault-wrap-v2 (VAULT_WRAP_SECRET), rows not yet re-wrapped: vault-wrap-v1' : 'vault-wrap-v1';
+    return { wrap, rows, old, next: rows.length === 200 ? rows.at(-1).ghh : null };
   },
 
   adm_audit(d) {

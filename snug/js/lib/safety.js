@@ -25,7 +25,9 @@ export const REPORT_REASONS = [
 ];
 export const PRIVACY_DM = [['everyone', 'Everyone'], ['houses', 'People in my houses'], ['friends', 'Friends only']];
 export const PRIVACY_FRIENDS = [['everyone', 'Everyone'], ['fof', 'Friends of friends'], ['nobody', 'Nobody']];
-export const DEFAULT_PRIVACY = { dm: 'houses', friends: 'everyone', requests: false };
+// sec-authz: who may send you a personal invitation to a house.
+export const PRIVACY_INVITES = [['everyone', 'Everyone'], ['houses', 'People in my houses'], ['friends', 'Friends only']];
+export const DEFAULT_PRIVACY = { dm: 'houses', friends: 'everyone', requests: false }; // invites: 'everyone' unless set (sec-authz)
 export const FILTER_ACTIONS = [['block', 'Block the message'], ['flag', 'Let it through and flag it'], ['timeout', 'Block it and time the person out']];
 export const MAX_WORDS = 200;
 export const WORD_MAX = 40;
@@ -55,7 +57,33 @@ export function cleanWord(w) {
   return /^[\p{L}\p{N}][\p{L}\p{N} '’-]*\*?$/u.test(s) ? s : '';
 }
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const LINK = /(?:https?:\/\/|www\.)\S+|\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:com|net|org|io|gg|co|me|app|dev|xyz|ly|tv|info|biz|ru|uk|de|link|site|online|shop|top|click)\b(?:\/\S*)?/i;
+// Is there a link? The same rule as the old single pattern
+// /(?:https?:\/\/|www\.)\S+|\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:tld)\b/i, but linear:
+// that pattern took quadratic time on text like "a-a-a-a-..." (sec-integrate;
+// semgrep ReDoS). A bare domain needs, right before a ".tld", a run of letters,
+// digits and hyphens (labels joined by dots) holding a letter or digit at a word boundary.
+const URLISH = /https?:\/\/\S|www\.\S/i;
+const TLD = /\.(?:com|net|org|io|gg|co|me|app|dev|xyz|ly|tv|info|biz|ru|uk|de|link|site|online|shop|top|click)\b/gi;
+const LABEL = /[a-z0-9-]/i, ALNUM = /[a-z0-9]/i, WORD = /[a-z0-9_]/i;
+export function hasLink(text) {
+  const t = String(text ?? '');
+  if (URLISH.test(t)) return true;
+  TLD.lastIndex = 0;
+  let floor = -1; // left of here was already checked by an earlier ".tld" (each character is looked at once)
+  for (let m; (m = TLD.exec(t));) {
+    // Walk left over the labels before this ".tld": letters, digits and hyphens,
+    // and dots between non-empty labels.
+    for (let i = m.index - 1, seg = 0; i > floor; i--) {
+      const c = t[i];
+      if (c === '.') { if (!seg) break; seg = 0; continue; }
+      if (!LABEL.test(c)) break;
+      seg++;
+      if (ALNUM.test(c) && (i === 0 || !WORD.test(t[i - 1]))) return true;
+    }
+    floor = m.index;
+  }
+  return false;
+}
 
 // Which rule a message breaks: { word } for a blocked word, { link: true } for
 // a link when links are blocked, or null. Matching is on whole words, ignoring
@@ -69,7 +97,7 @@ export function filterHit(text, cfg) {
     const re = new RegExp(`(^|[^\\p{L}\\p{N}])${body}${prefix ? '' : '(?![\\p{L}\\p{N}])'}`, 'u');
     if (re.test(t)) return { word: w };
   }
-  if (cfg.links && LINK.test(text)) return { link: true };
+  if (cfg.links && hasLink(text)) return { link: true };
   return null;
 }
 

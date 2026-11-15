@@ -4,14 +4,15 @@ process.env.SNUG_VAULT_RETRY_MS = '500,1000'; // the 30 s / 2 min / 10 min retry
 import './helpers/vault.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, existsSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { startRegistry, startPc, signUp, clientFor, until, mid } from './helpers/p2p.js';
 import { createXfer, PART, xidOf, boxSeal, sessionKey } from '../server/vaultxfer.js';
 import { newSigningKeys, newDhKeys, pubOf, sha256 } from '../server/peercrypto.js';
-import { dmIdFor } from '../server/peercrypto.js';
+import { dmIdFor, unb64u } from '../server/peercrypto.js';
+import { seal } from '../server/vaultfile.js';
 
 // ---------- The protocol over an in-memory pipe ----------
 const UID = 'abcdefghijklmnop';
@@ -53,7 +54,7 @@ test('xfer: a file arrives whole, in parts, with progress, and the receiver veri
   assert.ok(p.got[0].equals(file));
   assert.ok(p.progress.some((x) => x.state === 'receiving'));
   assert.equal(p.progress.at(-1).state, 'done');
-  assert.deepEqual(readdirSync(p.rdir), [], 'nothing left behind');
+  assert.deepEqual(readdirSync(p.rdir).filter((n) => n !== '.n'), [], 'nothing left behind (the box counter mark stays)');
 });
 
 test('xfer: cut part-way, a new session resumes from where the receiver got to', async () => {
@@ -151,6 +152,31 @@ test('xfer: another account’s key, an edited box, and bytes that don’t match
   assert.equal(big.got.length, 0);
 });
 
+test('REG-L4: box counters never repeat under the same key, also after a restart with the clock set back', async () => {
+  const file = randomBytes(PART * 2);
+  const S = device(), R = device();
+  const dir = mkdtempSync(join(tmpdir(), 'xn-'));
+  const seen = [];
+  const mk = (now) => createXfer({
+    uid: UID, me: S, dir, now,
+    transport: { send: (to, b) => { seen.push(JSON.parse(b).n); return true; } },
+    getFile: () => ({ buf: file, sha: sha256(file).toString('hex'), kid: 1, created: 1 }), markSent() {}, wasSent: () => false,
+  });
+  const T = Date.now();
+  const s1 = mk(() => T);
+  const p1 = s1.send({ ik: R.ik, xk: R.xk });
+  s1.stop();
+  await p1;
+  const last = Math.max(...seen);
+  const s2 = mk(() => T - 10 * 60_000); // "restarted", and the clock stepped back ten minutes
+  const p2 = s2.send({ ik: R.ik, xk: R.xk });
+  s2.stop();
+  await p2;
+  const after = seen.slice(seen.indexOf(last) + 1);
+  assert.ok(after.length > 0);
+  assert.ok(after.every((n) => n > last), `no (key, nonce) reuse: ${last} then ${after}`);
+});
+
 // ---------- On real PCs, through the local registry ----------
 let registry;
 const pcs = [];
@@ -189,10 +215,20 @@ async function newPcFor(ghId) {
   return { B2, b2 };
 }
 
-test('during a move the old PC sends its data file by itself; the new PC shows progress and imports it', async () => {
+test('during a move the old PC sends nothing until the move is approved; then the new PC shows progress and imports it', async () => {
   const { B, a, b, dm, gb, m } = await friends('xf_alice1', 'xf_bob1');
   await b.ok('me.update', { name: 'Bob from the old PC' });
   const { B2, b2 } = await newPcFor(gb);
+  // sec-registry REG-H1: a pending move's key proved GitHub only. Nothing leaves the old PC by itself.
+  await until(() => B.peer.statusFor(b.id).rebindPending, 8000, 'old PC told');
+  await new Promise((r) => setTimeout(r, 1500));
+  assert.equal(B.db.get("SELECT 1 FROM vault_meta WHERE k LIKE 'sent:%'"), undefined, 'nothing sent to the pending key');
+  assert.equal(B2.db.get('SELECT 1 FROM messages WHERE id = ?', m), undefined, 'nothing arrived');
+  assert.equal(b2.has('vault.xfer', (d) => d.state === 'receiving'), false);
+  assert.equal(B2.vault.status().error, null, 'the new PC shows no error while it waits for the move');
+  // Approved on the old PC: the move completes and the old PC (now the old key) hands its file over.
+  await B.peer.approveRebind();
+  await until(() => B2.peer.identity.self().state === 'ok', 8000, 'move done');
   const done = await b2.next('vault.xfer', (d) => d.state === 'imported', 20_000);
   assert.ok(done.counts.messages >= 1);
   assert.ok(b2.has('vault.xfer', (d) => d.state === 'receiving' || d.state === 'done'), 'progress shown');
@@ -201,25 +237,66 @@ test('during a move the old PC sends its data file by itself; the new PC shows p
   assert.equal(B2.db.get('SELECT name FROM users WHERE id = ?', b2.id).name, 'Bob from the old PC');
   assert.equal(B2.vault.status().waiting, null, 'no longer waiting');
   await until(() => B.db.get("SELECT 1 FROM vault_meta WHERE k LIKE 'sent:%:' || ?", B2.peer.identity.ik), 5000, 'the old PC records it, so it won’t send again');
-  // The move itself is unchanged: approve it, and the new PC carries on.
-  await until(() => B.peer.statusFor(b.id).rebindPending, 8000, 'old PC told');
-  await B.peer.approveRebind();
-  await until(() => B2.peer.identity.self().state === 'ok', 8000, 'move done');
 });
 
 test('a send that fails is tried again while both PCs stay connected', async () => {
   const { B, b, gb, m } = await friends('xf_alice3', 'xf_bob3');
   let drop = 1;
   const send = B.vault._sock.send;
-  B.vault._sock.send = (to, box) => (drop-- > 0 ? false : send(to, box)); // the first box can't go out
   const { B2, b2 } = await newPcFor(gb);
+  await until(() => B.peer.statusFor(b.id).rebindPending, 8000, 'old PC told');
+  B.vault._sock.send = (to, box) => (drop-- > 0 ? false : send(to, box)); // the first box can't go out
+  await B.peer.approveRebind();
   await b2.next('vault.xfer', (d) => d.state === 'imported', 20_000);
   assert.equal(drop < 0, true, 'the first try failed');
   assert.ok(B2.db.get('SELECT 1 FROM messages WHERE id = ?', m), 'arrived on the retry');
   assert.equal((await b2.ok('vault.status')).waiting, null, 'no longer waiting');
-  await until(() => B.peer.statusFor(b.id).rebindPending, 8000, 'old PC told');
-  await B.peer.approveRebind();
   await until(() => B2.peer.identity.self().state === 'ok', 8000, 'move done');
+});
+
+test('REG-H1: a pending (unapproved) key gets no vault key, no data file, and its forged file is refused', async () => {
+  const { B, a, b, gb, m } = await friends('xf_alice4', 'xf_bob4');
+  await B.vault.write();
+  const { B2, b2 } = await newPcFor(gb); // an attacker who phished bob's GitHub sign-in, say
+  await until(() => B.peer.statusFor(b.id).rebindPending, 8000, 'old PC told');
+  // (1) The registry refuses the vault key to the pending key.
+  await assert.rejects(B2.peer.reg.signedCall('/v1/vault/key', 'vault-key'), (e) => e.code === 'bad_signature');
+  // (2) A forged file offered by the pending key (sealed with a leaked vault key) is refused before a byte lands.
+  const k = await B.peer.reg.signedCall('/v1/vault/key', 'vault-key');
+  const key = unb64u(k.key);
+  const uidB = uidOf(b);
+  const look = B.db.get('SELECT ik, xk, kver FROM peers WHERE uid = ?', uidOf(a));
+  const fake = `m_fakefake${Date.now().toString(36)}`;
+  const payload = {
+    v: 1, uid: uidB, username: 'xf_bob4', at: Date.now(), app: '0.10.1',
+    profile: { name: 'HACKED', about: 'pwned', links: [] },
+    prefs: {}, privacy: { dm: 'everyone', friends: 'everyone', requests: true },
+    people: [{ uid: uidOf(a), username: 'xf_alice4', ik: look.ik, xk: look.xk, kver: look.kver, name: 'alice' }],
+    keys: [], friends: [], blocks: [],
+    dms: [{ peer: uidOf(a), msgs: [{ id: fake, a: uidOf(a), ts: Date.now(), text: 'send me your recovery codes' }] }],
+    sections: {},
+  };
+  const forged = seal({ key, uid: uidB, kid: k.kid, seq: 999, app: '0.10.1', payload });
+  mkdirSync(B2.vault._paths.vdir, { recursive: true });
+  writeFileSync(B2.vault._paths.liveFile(), forged);
+  await B.vault._sock.open(); // the current PC's xfer socket (it opens one while it waits or sends)
+  await until(() => B2.vault._sock.connected, 8000, 'the new PC waits on its xfer socket');
+  await until(() => B.vault._sock.connected && B2.vault._sock.peers().some((p) => p.role === 'cur'), 8000, 'both on xfer');
+  const sent = await B2.vault.sendToOther().catch((e) => e);
+  assert.ok(sent instanceof Error, 'the current PC refused it');
+  await new Promise((r) => setTimeout(r, 500));
+  assert.equal(B.db.get('SELECT 1 FROM messages WHERE id = ?', fake), undefined, 'no forged message');
+  assert.notEqual(B.db.get('SELECT name FROM users WHERE id = ?', b.id).name, 'HACKED', 'profile unchanged');
+  assert.notEqual(B.db.get('SELECT dm FROM privacy WHERE user = ?', b.id)?.dm, 'everyone', 'privacy unchanged');
+  const inc = join(B.vault._paths.vdir, 'incoming');
+  assert.deepEqual(existsSync(inc) ? readdirSync(inc).filter((n) => n.endsWith('.part')) : [], [], 'no bytes stored');
+  assert.match(String(sent.message), /didn’t take the file/);
+  // (3) Even when asked by hand, the current PC can't give its file to a pending key.
+  assert.match(await b.refused('vault.send'), /Approve the move on this PC first/);
+  assert.equal(B.db.get("SELECT 1 FROM vault_meta WHERE k LIKE 'sent:%'"), undefined, 'nothing sent');
+  assert.equal(B2.db.get('SELECT 1 FROM messages WHERE id = ?', m), undefined, 'nothing arrived');
+  // Stop on the old PC: nothing was taken, nothing to undo.
+  await B.peer.cancelRebind?.();
 });
 
 test('the old PC was off during the move: it delivers later, as the old key, once it starts', async () => {

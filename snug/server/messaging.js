@@ -32,6 +32,7 @@ import { limiter, safeDecode } from './auth.js';
 import { safeFetch, readMeta, previewLinks } from './linkpreview.js';
 import { emojiImage } from './emoji.js';
 import { sniff } from './media.js';
+import { stripInvisible, cleanFileName } from '../js/lib/util.js'; // sec-authz
 
 export const POLL_HOURS = [1, 4, 8, 24, 72, 168];
 export const POLL_MAX_ANSWERS = 10;
@@ -138,7 +139,7 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
   const idOf = (v, name) => (typeof v === 'string' && /^[\w:.-]{1,80}$/.test(v) ? v : fail(`That ${name} isn’t valid.`));
   const text = (v, { max, min = 0, name }) => {
     if (typeof v !== 'string') fail(`${name} is missing.`);
-    const s = v.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim();
+    const s = stripInvisible(v).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim(); // sec-authz: stripInvisible
     if (s.length < min) fail(`${name} can’t be empty.`);
     if (s.length > max) fail(`${name} can be at most ${max} characters.`);
     return s;
@@ -425,6 +426,7 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
   const baseContent = hub.sendHouseContent;
   if (baseContent) {
     hub.sendHouseContent = (u, houseId) => {
+      if (hub.connected && !hub.connected(u)) return; // sec-authz: nothing to build for someone with no socket open
       baseContent(u, houseId);
       hub.toUser(u, 'stickers', { house: houseId, list: stickersOf(houseId) });
     };
@@ -737,7 +739,7 @@ export function createMessagingHttp({ db, M, filesDir, sendJson, error, body, he
       if (!img || (img.type !== 'image/png' && img.type !== 'image/webp')) { error(res, 415, 'Stickers need to be PNG, APNG or WebP images.'); return true; }
       if (!img.w || !img.h) { error(res, 415, 'Snug couldn’t read that image’s size.'); return true; }
       if (img.w > MAX_STICKER_SIDE || img.h > MAX_STICKER_SIDE) { error(res, 422, `That image is ${img.w} by ${img.h} pixels. Stickers can be up to ${MAX_STICKER_SIDE} by ${MAX_STICKER_SIDE}.`); return true; }
-      const name = (safeDecode(String(req.headers['x-file-name'] || 'sticker')).replace(/[\u0000-\u001f\u007f/\\]/g, '').trim() || 'sticker').slice(0, 120);
+      const name = cleanFileName(safeDecode(String(req.headers['x-file-name'] || 'sticker')), 'sticker'); // sec-authz
       const id = newId('f');
       await writeFile(join(filesDir, id), data, { mode: 0o600 });
       db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -751,13 +753,12 @@ export function createMessagingHttp({ db, M, filesDir, sendJson, error, body, he
       const row = db.get('SELECT * FROM files WHERE id = ?', m[1]);
       const house = row?.conv.startsWith('sticker:') ? row.conv.slice(8) : null;
       if (!row || !house || !M.isMember(house, user) || !FILE_ID.test(row.id)) { error(res, 404, 'Not found'); return true; }
-      const { createReadStream } = await import('node:fs');
+      const { sendFile } = await import('./seclog.js'); // sec-web W1
       headers(res, {
         'Content-Type': row.type, 'Content-Length': String(row.size), 'Cache-Control': 'private, max-age=86400',
         'Content-Security-Policy': "default-src 'none'; sandbox",
       });
-      res.writeHead(200);
-      createReadStream(join(filesDir, row.id)).pipe(res);
+      sendFile(res, join(filesDir, row.id)); // sec-web W1: 404 when the bytes are gone, never an unhandled stream error (server/seclog.js)
       return true;
     }
     return false;

@@ -27,6 +27,7 @@ function copyApp() {
   fs.copyFileSync(path.join(ROOT, "icon.ico"), path.join(ROOT, "build", "icon.ico"));
   fs.copyFileSync(path.join(ROOT, "icon.png"), path.join(APP, "icon.png"));
   fs.copyFileSync(path.join(ROOT, "installer.nsh"), path.join(ROOT, "build", "installer.nsh")); // v0.10 C: the uninstall prompt (NSIS)
+  fs.copyFileSync(path.join(ROOT, "entitlements.mac.plist"), path.join(ROOT, "build", "entitlements.mac.plist")); // sec-desktop D4: the hardened runtime's entitlements
 }
 
 (async () => {

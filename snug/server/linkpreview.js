@@ -77,6 +77,12 @@ export function v6Blocked(a) {
   if (p[0] === 0x2002) return true;                                          // 6to4: may wrap anything
   if (p[0] === 0x2001 && p[1] === 0) return true;                            // Teredo
   if (p[0] === 0x0100 && p.slice(1, 4).every((x) => x === 0)) return true;   // discard prefix
+  // sec-web: past the forms above, only global unicast (2000::/3) is public. This
+  // also refuses ::ffff:0:a.b.c.d (IPv4-translated, used by SIIT translators),
+  // 64:ff9b:1::/48 (local NAT64) and anything assigned later outside 2000::/3.
+  if ((p[0] & 0xe000) !== 0x2000) return true;
+  if (p[0] === 0x2001 && p[1] < 0x0200) return true;                         // 2001::/23 IETF protocol assignments (benchmarking 2001:2::/48, ORCHID)
+  if (p[0] === 0x3fff && p[1] < 0x1000) return true;                         // 3fff::/20 documentation
   return false;
 }
 

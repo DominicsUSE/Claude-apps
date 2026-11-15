@@ -415,6 +415,28 @@ function Sessions() {
   ${list.length > 1 && html`<div class="acc-row-end"><button class="btn danger" onClick=${others}>Sign out all other devices</button></div>`}`;
 }
 
+// sec-auth: the account's recent sign-ins and security changes (server/account.js auth.recent).
+const AUTH_WORDS = {
+  login: (e) => (e.ok ? 'Signed in' : 'Sign-in refused'), 'login.code': (e) => (e.ok ? 'Two-factor code accepted' : 'Wrong two-factor code'),
+  logout: () => 'Signed out', 'logout-all': () => 'Signed out everywhere', stepup: () => 'Wrong password or code while signed in',
+  'password.change': () => 'Password changed', 'totp.enable': () => 'Two-factor sign-in turned on', 'totp.disable': () => 'Two-factor sign-in turned off',
+  'totp.codes': () => 'New backup codes', 'sessions.revoke': () => 'A device signed out', 'sessions.revokeOthers': () => 'Other devices signed out',
+  'github.link': (e) => (e.ok ? 'GitHub connected' : 'GitHub connection refused'),
+  alert: (e) => `Security alert: ${e.what || 'unusual activity'}`, // sec-integrate (server/seclog.js)
+};
+function RecentSignIns() {
+  const [list, setList] = useState(null);
+  useEffect(() => { call('auth.recent').then((r) => setList(r.events), () => setList([])); }, []);
+  if (!list?.length) return null;
+  return html`<div class="set-head">Recent activity</div>
+    <ul class="acc-sessions acc-events" aria-label="Recent sign-ins and security changes">
+      ${list.slice(0, 10).map((e, i) => html`<li key=${i} class="acc-event">
+        <span class="row-ic"><${Icon} name=${e.ok ? 'shield' : 'alert'} /></span>
+        <span class="grow"><b>${(AUTH_WORDS[e.event] || (() => e.event))(e)}</b><span class="faint">${fmtWhen(e.at)}${e.agent ? ` · ${e.agent}` : ''}${e.ip ? ` · ${e.ip}` : ''}</span></span>
+      </li>`)}
+    </ul>`;
+}
+
 export function SecurityPage() {
   const u = me();
   const a = acc();
@@ -427,6 +449,7 @@ export function SecurityPage() {
     ${p2pOwner() ? html`<${AccountRows} Row=${Row} signOut=${baseSignOut} />` : html`<${PasswordSecurity} a=${a} />`}
     <div class="set-head">Devices</div>
     <${Sessions} />
+    <${RecentSignIns} />
     ${!p2pOwner() && html`<div class="set-head">Sign out</div>
     <${Row} label="Sign out on this device" hint="Your houses and messages stay on the server.">
       <button class="btn" onClick=${() => baseSignOut?.(false)}>Sign out</button>

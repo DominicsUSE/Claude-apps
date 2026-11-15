@@ -20,7 +20,7 @@ export const XferMixin = {
     const p = this.pending(uid);
     if (p) cands.push({ role: 'pending', ik: p.ik, xk: p.xk });
     const old = this.row('SELECT ik, xk FROM keys WHERE uid=? AND kver=?', uid, acc.kver - 1);
-    if (old && this.now() - acc.key_at <= OLD_KEY_DAYS) cands.push({ role: 'old', ik: old.ik, xk: old.xk });
+    if (old && this.xferRole(acc, old.ik) === 'old') cands.push({ role: 'old', ik: old.ik, xk: old.xk });
     let hit = null;
     for (const c of cands) {
       if (await verifyEd25519(c.ik, f.sig, msg)) {
@@ -35,10 +35,12 @@ export const XferMixin = {
     if (!cur) return this.closeWs(ws, 4003, 'revoked');
     const role = this.xferRole(cur, hit.ik);
     if (!role) return this.closeWs(ws, 4001, 'bad auth');
-    if (!this.budgets.take(uid, 'connect', this.L.connect)) return this.closeWs(ws, 4029, 'rate limited');
+    // sec-registry REG-M1: per key and apart from signaling, so no xfer key can lock another key out.
+    if (!this.budgets.take(`${uid}|${hit.ik}`, 'connectX', this.L.connectXfer)) return this.closeWs(ws, 4029, 'rate limited');
     // At most PER_KEY sockets per (uid, ik): a new one pushes out the oldest.
     const same = this.sockets(uid, (x) => x.mode === 'xfer' && x.ik === hit.ik).map((w) => [this.att(w).at, w]).sort((x, y) => x[0] - y[0]);
     while (same.length >= PER_KEY) this.closeWs(same.shift()[1], 4002, 'replaced');
+    this.countFrame();
     const att = { uid, authed: true, mode: 'xfer', role, ik: hit.ik, xk: hit.xk, at: this.now() };
     ws.serializeAttachment(att);
     const p2 = this.pending(uid);
@@ -67,7 +69,8 @@ export const XferMixin = {
     const p = this.pending(acc.uid);
     if (p && p.ik === ik) return 'pending';
     const old = this.row('SELECT ik FROM keys WHERE uid=? AND kver=?', acc.uid, acc.kver - 1);
-    if (old && old.ik === ik && this.now() - acc.key_at <= OLD_KEY_DAYS) return 'old';
+    if (old && old.ik === ik && this.now() - acc.key_at <= OLD_KEY_DAYS
+      && !this.row('SELECT 1 AS x FROM forced_old WHERE uid=? AND ik=?', acc.uid, ik)) return 'old'; // REG-M2: not a forced-out key
     return null;
   },
 
@@ -98,6 +101,7 @@ export const XferMixin = {
       || !this.budgets.take(uid, 'xferB', this.L.xferBytesDay, f.box.length)) {
       return err('rate_limited');
     }
+    this.countFrame();
     const out = { t: 'xfer', from: a.ik, box: f.box };
     for (const w of to) this.send(w, out);
     return undefined;

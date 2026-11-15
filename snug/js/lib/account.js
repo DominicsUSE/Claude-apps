@@ -168,7 +168,7 @@ export function cleanPrefs(patch, fail = (m) => { throw new Error(m); }) {
   patch = upgradePrefs(patch);
   const out = {};
   for (const [k, v] of Object.entries(patch)) {
-    const rule = PREF_RULES[k];
+    const rule = Object.hasOwn(PREF_RULES, k) ? PREF_RULES[k] : null; // sec-authz: 'constructor' and 'toString' aren't settings
     if (!rule) fail(`“${String(k).slice(0, 40)}” isn’t a setting Snug knows.`);
     if (v === null) { out[k] = null; continue; }
     const [kind, spec] = rule;

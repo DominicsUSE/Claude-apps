@@ -89,6 +89,13 @@ async function startHost(lan) {
   const { net } = require("electron");
   const opts = {
     host: lan ? "0.0.0.0" : "127.0.0.1", dataDir: path.join(app.getPath("userData"), "data"), quiet: true,
+    // sec-desktop D5/D9: every security switch is set here, so a variable in this computer's environment
+    // (SNUG_SECURE, SNUG_TRUST_PROXY, SNUG_ORIGINS, SNUG_HOSTS, SNUG_PUSH_ALLOW_LOCAL) never changes them.
+    // hosts: [] makes the server answer only to IP addresses and localhost, in LAN mode too: a web page
+    // on a name it controls, re-pointed at this computer (DNS rebinding), gets 421.
+    secure: false, trustProxy: false, extraOrigins: [], hosts: [], pushAllowLocal: false, linkAllowLocal: false,
+    // sec-desktop D10: GitHub sign-in answers only this window (its per-launch cookie), not any program on this PC.
+    ghWindowOnly: true,
     ...p2pConfig(), keyStore, fetch: net.fetch.bind(net), resumeSecret, // p2p
   };
   // The same address every launch keeps you signed in; fall back to any free port if it is taken.
@@ -132,7 +139,16 @@ async function open(error) {
   return undefined;
 }
 
-const external = (url) => { if (/^https?:/i.test(url)) shell.openExternal(url); };
+// sec-desktop: at most 5 links to the browser per 10 seconds, so a hostile join server can't flood it.
+let externalTimes = [];
+const external = (url) => {
+  if (typeof url !== "string" || !/^https?:\/\//i.test(url) || url.length > 4096) return;
+  const t = Date.now();
+  externalTimes = externalTimes.filter((x) => t - x < 10_000);
+  if (externalTimes.length >= 5) return;
+  externalTimes.push(t);
+  shell.openExternal(url).catch(() => {});
+};
 const fromSnug = (url) => { try { return !!origin && new URL(url).origin === origin; } catch { return false; } };
 
 function createWindow() {
@@ -170,6 +186,14 @@ function createWindow() {
     ev.preventDefault();
     external(url);
   });
+  // sec-desktop D1: a server-side redirect never shows up in will-navigate. The window may only be
+  // redirected within the Snug address (a join server answering 302 to another site, or to file://, is stopped).
+  win.webContents.on("will-redirect", (ev, url) => {
+    if (ev.isMainFrame === false) return; // a frame inside the page: the page's own CSP decides
+    if (fromSnug(url) || url.startsWith(SETUP)) return;
+    ev.preventDefault();
+    external(url);
+  });
   win.on("closed", () => { win = null; });
   keepInTray(win); // closing hides to the tray (see "Running in the tray" below)
   open();
@@ -177,44 +201,63 @@ function createWindow() {
 
 // Snug may use the microphone and camera (voice rooms), share a screen and
 // show notifications. Nothing else, and only for the Snug address the window
-// was opened on. The camera needs the person's say-so when the server is
-// someone else's (join mode): asked once per address, each time the app runs.
-// The server this app runs itself (host mode) is trusted like the app.
-const cameraOk = new Set();      // origins allowed the camera this run
-const cameraAsking = new Map();  // origin -> the question on screen
-function askCamera(o) {
-  if (config?.mode === "host" || cameraOk.has(o)) return Promise.resolve(true);
-  if (!cameraAsking.has(o)) {
+// was opened on. The microphone and the camera each need the person's say-so
+// when the server is someone else's (join mode): asked once per address and
+// device, each time the app runs (sec-desktop D6: the microphone used to be
+// granted without asking). The server this app runs itself (host mode) is
+// trusted like the app.
+const mediaOk = new Set();      // "origin audio" / "origin video" allowed this run
+const mediaAsking = new Map();  // the same key -> the question on screen
+const MEDIA_WORDS = { audio: ["microphone", "Allow microphone", "Snug only uses it while you are in a call or a voice room."], video: ["camera", "Allow camera", "Snug only shares it while you have it turned on in a voice room."] };
+globalThis.snugMediaAsked = []; // for the desktop test
+function askMedia(o, kind) {
+  const key = `${o} ${kind}`;
+  if (config?.mode === "host" || mediaOk.has(key)) return Promise.resolve(true);
+  if (!mediaAsking.has(key)) {
+    const [what, allow, why] = MEDIA_WORDS[kind];
+    globalThis.snugMediaAsked.push(key);
     const q = dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
       type: "question",
-      buttons: ["Allow camera", "Don’t allow"],
+      buttons: [allow, "Don’t allow"],
       defaultId: 1,
       cancelId: 1,
-      message: "Let this Snug turn on your camera?",
-      detail: `${o} wants to use your camera. Snug only shares it while you have it turned on in a voice room.`,
+      message: `Let this Snug use your ${what}?`,
+      detail: `${o} wants to use your ${what}. ${why}`,
     }).then(({ response }) => {
-      if (response === 0) cameraOk.add(o);
+      if (response === 0) mediaOk.add(key);
       return response === 0;
-    }, () => false).finally(() => cameraAsking.delete(o));
-    cameraAsking.set(o, q);
+    }, () => false).finally(() => mediaAsking.delete(key));
+    mediaAsking.set(key, q);
   }
-  return cameraAsking.get(o);
+  return mediaAsking.get(key);
+}
+// Each kind asked in turn (never two dialogs at once); every one must be allowed.
+async function askMediaAll(o, kinds) {
+  for (const k of kinds) if (!(await askMedia(o, k))) return false;
+  return true;
 }
 function permissions() {
-  const allowed = new Set(["media", "notifications", "clipboard-sanitized-write", "fullscreen"]);
+  // display-capture: newer Electron asks it before getDisplayMedia reaches the picker below (Electron 45).
+  const allowed = new Set(["media", "display-capture", "notifications", "clipboard-sanitized-write", "fullscreen"]);
+  // sec-desktop: only the main window's page, never another webContents (a picker, a future window).
+  const ours = (wc) => !!wc && !!win && !win.isDestroyed() && wc === win.webContents;
   session.defaultSession.setPermissionRequestHandler((wc, permission, done, details) => {
     const url = details.requestingUrl || wc.getURL();
-    if (!allowed.has(permission) || !fromSnug(url)) return done(false);
-    if (permission === "media" && (details.mediaTypes || []).includes("video")) {
-      askCamera(new URL(url).origin).then(done, () => done(false));
+    if (!allowed.has(permission) || !ours(wc) || !fromSnug(url)) return done(false);
+    if (permission === "media") {
+      const kinds = ["audio", "video"].filter((k) => (details.mediaTypes || []).includes(k));
+      if (!kinds.length) return done(false);
+      askMediaAll(new URL(url).origin, kinds).then(done, () => done(false));
       return undefined;
     }
     return done(true);
   });
   session.defaultSession.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => {
-    if (!allowed.has(permission) || !fromSnug(requestingOrigin)) return false;
-    if (permission === "media" && details?.mediaType === "video") {
-      return config?.mode === "host" || cameraOk.has(new URL(requestingOrigin).origin);
+    if (!allowed.has(permission) || (wc && !ours(wc)) || !fromSnug(requestingOrigin)) return false;
+    if (permission === "media") {
+      const kind = details?.mediaType === "video" ? "video" : details?.mediaType === "audio" ? "audio" : null;
+      if (!kind) return config?.mode === "host" || [...mediaOk].some((k) => k.startsWith(`${new URL(requestingOrigin).origin} `));
+      return config?.mode === "host" || mediaOk.has(`${new URL(requestingOrigin).origin} ${kind}`);
     }
     return true;
   });
@@ -246,7 +289,8 @@ function screenSharing() {
       answer({});
     }
     return undefined;
-  }, { useSystemPicker: true });
+  // The system's own picker is asked for on macOS only (it is the only system that has one here).
+  }, { useSystemPicker: isMac });
 }
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -318,7 +362,7 @@ function buildMenu() {
         click: () => {
           const address = `http://${lanAddress()}:${server.port}`;
           clipboard.writeText(address);
-          dialog.showMessageBox(win, { type: "info", message: "Address copied", detail: `${address}\n\nPeople on the same network can open it in a browser, or choose “Join a Snug” in their own Snug app. Voice needs a secure (https) address, so over this address they can write but not talk.` });
+          dialog.showMessageBox(win, { type: "info", message: "Address copied", detail: `${address}\n\nPeople on the same network can open it in a browser, or choose “Join a Snug” in their own Snug app. Voice needs a secure (https) address, so over this address they can write but not talk.\n\nThis address isn’t encrypted: anyone on this network could read what is sent over it, passwords included. Use it only on a network you trust, like your home Wi-Fi.` });
         },
       }] : []),
       ...(hosting ? [{ label: "Open the data folder", click: () => shell.openPath(path.join(app.getPath("userData"), "data")) }] : []),
@@ -432,6 +476,12 @@ function keepInTray(w) {
 }
 
 app.on("before-quit", () => { quitting = true; });
+// sec-desktop: any webContents (the window, the screen picker, anything later) gets no <webview> and no
+// new windows of its own; the window's own handlers above add the narrower rules.
+app.on("web-contents-created", (_e, wc) => {
+  wc.on("will-attach-webview", (ev) => ev.preventDefault());
+  wc.setWindowOpenHandler(({ url }) => { external(url); return { action: "deny" }; });
+});
 app.on("activate", () => { if (win && !win.isVisible()) showWindow(); });
 
 // The Snug page's only bridge (preload.js, window.snugApp): show this window
@@ -592,8 +642,12 @@ ipcMain.handle("desktop:set", (e, patch) => {
   buildShellMenu();
   return { settings: publicPrefs() };
 });
+let restartAsked = 0;
 ipcMain.on("app:restart", (e) => {
   if (!fromSnug(e.senderFrame.url)) return;
+  // sec-desktop: a page can't restart-loop the app (the setting it applies takes one restart).
+  if (Date.now() - restartAsked < 60_000) return;
+  restartAsked = Date.now();
   app.relaunch();
   app.quit();
 });
@@ -820,13 +874,19 @@ app.on("open-url", (e, url) => { e.preventDefault(); deepLinkFrom([url]); if (wi
 // relaunches. Only update.html may drive it (its exact file:// URL, checked on
 // every message). SNUG_UPDATE_CHECK=0 turns the check off (development, tests).
 const UPDATE_PAGE = pathToFileURL(path.join(__dirname, "update.html")).toString();
-const { createUpdater } = require("./updater.js");
+const { createUpdater, updaterEnvFor } = require("./updater.js");
 const BUSY = new Set(["downloading", "verifying", "installing"]);
 const upd = { state: "none", info: null, phase: "ready", received: 0, total: 0, message: null };
 let updater = null;
 globalThis.snugUpdateLog = []; // phases, for the desktop test
+// sec-desktop D9: an installed app ignores the updater's test variables (SNUG_UPDATE_URL, SNUG_UPDATE_CHECK,
+// SNUG_UPDATE_KIND, ...) unless it was started with --dev-update, so a variable planted in this computer's
+// environment can't turn the mandatory updates off or point them somewhere else.
+const devUpdate = !app.isPackaged || process.argv.includes("--dev-update");
+const updaterEnv = () => updaterEnvFor(process.env, devUpdate);
 function getUpdater() {
   updater ||= createUpdater({
+    env: updaterEnv(),
     current: app.getVersion(), registryUrl: p2pConfig().registryUrl, tempDir: app.getPath("temp"),
     exePath: app.getPath("exe"), pid: process.pid,
     quit: () => { quitting = true; app.quit(); },
@@ -851,7 +911,7 @@ function showUpdatePage() {
 }
 globalThis.snugUpdateShown = () => !!(win && !win.isDestroyed() && win.webContents.getURL() === UPDATE_PAGE); // for the desktop test
 async function checkUpdate() {
-  if (process.env.SNUG_UPDATE_CHECK === "0") return null;
+  if (updaterEnv().SNUG_UPDATE_CHECK === "0") return null;
   // Running from source is not a release: only the installed app asks (or a test's own address).
   if (!app.isPackaged && !process.env.SNUG_UPDATE_URL) return null;
   if (BUSY.has(upd.phase)) return publicUpdate();
@@ -899,6 +959,8 @@ globalThis.snugUpdateState = publicUpdate;
 const fromUpdatePage = (e) => e.senderFrame?.url === UPDATE_PAGE;
 // The preload asks which page carries the bridge (file:// pages only).
 ipcMain.on("update:page", (e) => { e.returnValue = String(e.senderFrame?.url || "").startsWith("file:") ? UPDATE_PAGE : null; });
+// sec-desktop: and the setup page's exact address, so snugDesktop goes to that page only, not any file:// page.
+ipcMain.on("setup:page", (e) => { e.returnValue = String(e.senderFrame?.url || "").startsWith("file:") ? SETUP : null; });
 ipcMain.handle("update:info", (e) => (fromUpdatePage(e) ? publicUpdate() : null));
 ipcMain.handle("update:start", (e) => {
   if (!fromUpdatePage(e)) return null;

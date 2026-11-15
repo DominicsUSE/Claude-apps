@@ -175,3 +175,82 @@ test("bad calls fail: no platform, no files, a missing file", () => {
   assert.notEqual(r.status, 0);
   assert.ok(!s.log().some((c) => c[1] === "upload"), "nothing uploaded");
 });
+
+// ---------- sec-desktop D3: the signed checksum file ----------
+const { UPDATE_PUBKEYS, verifySums } = require("./updater.js");
+const newKey = () => {
+  const k = crypto.generateKeyPairSync("ed25519");
+  return { pem: k.privateKey.export({ type: "pkcs8", format: "pem" }), pub: k.publicKey.export({ type: "spki", format: "der" }).subarray(12).toString("base64") };
+};
+// release.sh, sign-sums.js and package.json next to an updater.js that pins `pins`.
+function pinnedCopy(name, pins) {
+  const d = path.join(tmp, name);
+  fs.mkdirSync(d, { recursive: true });
+  for (const f of ["release.sh", "sign-sums.js", "package.json"]) fs.copyFileSync(path.join(__dirname, f), path.join(d, f));
+  const src = fs.readFileSync(path.join(__dirname, "updater.js"), "utf8");
+  const pinned = src.replace(/^const UPDATE_PUBKEYS = \[\];$/m, `const UPDATE_PUBKEYS = ${JSON.stringify(pins)};`);
+  assert.notEqual(pinned, src, "updater.js has the UPDATE_PUBKEYS line");
+  fs.writeFileSync(path.join(d, "updater.js"), pinned);
+  return path.join(d, "release.sh");
+}
+const runAt = (s, script, platform, files, env) => spawnSync("bash", [script, platform, ...files], {
+  encoding: "utf8",
+  env: { ...process.env, PATH: `${path.join(tmp, s, "bin")}${path.delimiter}${process.env.PATH}`, FAKE_GH_DIR: path.join(tmp, s, "gh"), GITHUB_SHA: "abc123", GH_TOKEN: "fake", ...env },
+});
+
+test("D3: with SNUG_UPDATE_SIGNING_KEY, the checksum file gets a signature the updater accepts, uploaded before the sums", () => {
+  assert.deepEqual(UPDATE_PUBKEYS.filter((k) => Buffer.from(k, "base64").length !== 32), [], "pinned keys are 32 bytes");
+  const s = setup("signed");
+  const key = newKey();
+  const r = s.run("windows", winFiles(s), { SNUG_UPDATE_SIGNING_KEY: key.pem });
+  assert.equal(r.status, 0, r.stderr);
+  const sums = s.published("SHA256SUMS-windows.txt");
+  const sig = s.published("SHA256SUMS-windows.txt.sig").toString();
+  assert.equal(verifySums(sums, sig, [key.pub]), true);
+  assert.equal(verifySums(sums, sig, [newKey().pub]), false);
+  const uploads = s.log().filter((c) => c[1] === "upload").map((c) => path.basename(c[3]));
+  assert.deepEqual(uploads.slice(-2), ["SHA256SUMS-windows.txt.sig", "SHA256SUMS-windows.txt"], "signature, then the sums last");
+  assert.ok(!r.stdout.includes("PRIVATE KEY") && !r.stderr.includes("PRIVATE KEY"), "the key is never printed");
+});
+
+test("D3: once updater.js pins a key, release.sh refuses to publish without the signing key, or with another key", () => {
+  const key = newKey();
+  const script = pinnedCopy("pinned-copy", [key.pub]);
+  const s = setup("pinned");
+  const r = runAt("pinned", script, "windows", winFiles(s), { SNUG_UPDATE_SIGNING_KEY: "" });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /SNUG_UPDATE_SIGNING_KEY is not set/);
+  assert.equal(s.log().length, 0, "nothing created or uploaded");
+  const wrong = runAt("pinned", script, "windows", winFiles(s), { SNUG_UPDATE_SIGNING_KEY: newKey().pem });
+  assert.notEqual(wrong.status, 0);
+  assert.match(wrong.stderr, /not in UPDATE_PUBKEYS/);
+  assert.equal(s.log().length, 0, "still nothing");
+  const ok = runAt("pinned", script, "windows", winFiles(s), { SNUG_UPDATE_SIGNING_KEY: key.pem });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(verifySums(s.published("SHA256SUMS-windows.txt"), s.published("SHA256SUMS-windows.txt.sig").toString(), [key.pub]), true);
+});
+
+test("D3: a release whose checksum file is already published gets the signature of that published copy", () => {
+  const s = setup("sign-later");
+  s.seed({ releases: { [TAG]: { latest: true, target: "first", assets: { "SHA256SUMS-mac.txt": "abc  Snug-x-mac.dmg\n", [`Snug-${VERSION}-mac.dmg`]: "dmg" } } } });
+  const key = newKey();
+  const r = s.run("mac", [s.make(`Snug-${VERSION}-mac.dmg`)], { SNUG_UPDATE_SIGNING_KEY: key.pem });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(verifySums(Buffer.from("abc  Snug-x-mac.dmg\n"), s.published("SHA256SUMS-mac.txt.sig").toString(), [key.pub]), true);
+});
+
+// ---------- sec-desktop D1: a supported Electron ----------
+// Electron supports its newest three major lines; 38 had stopped getting fixes (43, 44 and 45 were current
+// in November 2026). Raise this as Electron moves on: Dependabot (.github/dependabot.yml) proposes the bumps.
+const MIN_SUPPORTED_ELECTRON = 43;
+test("D1: the app is built on a supported Electron line, and ws carries its security fixes", () => {
+  const pkg = require("./package.json");
+  const major = Number(/^(\d+)\./.exec(pkg.devDependencies.electron)?.[1]);
+  assert.ok(major >= MIN_SUPPORTED_ELECTRON, `electron ${pkg.devDependencies.electron} is older than ${MIN_SUPPORTED_ELECTRON}`);
+  assert.match(pkg.devDependencies.electron, /^\d+\.\d+\.\d+$/, "pinned exactly");
+  const [a, b] = pkg.dependencies.ws.split(".").map(Number);
+  assert.ok(a > 8 || (a === 8 && b >= 23), `ws ${pkg.dependencies.ws} has GHSA-58qx-3vcg-4xpx and GHSA-96hv-2xvq-fx4p`);
+  const lock = require("./package-lock.json");
+  assert.equal(lock.packages["node_modules/electron"].version, pkg.devDependencies.electron, "the lockfile matches");
+  assert.equal(lock.packages["node_modules/ws"].version, pkg.dependencies.ws);
+});

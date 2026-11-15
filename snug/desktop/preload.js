@@ -19,7 +19,8 @@ if (updatePage && location.href === updatePage) {
       }));
     },
   });
-} else if (location.protocol === "file:") {
+} else if (location.protocol === "file:" && location.href.split(/[?#]/)[0] === ipcRenderer.sendSync("setup:page")) {
+  // sec-desktop: setup.html only (at the address main.js serves it from), not any other file:// page.
   contextBridge.exposeInMainWorld("snugDesktop", {
     config: () => ipcRenderer.invoke("config:get"),
     save: (cfg) => ipcRenderer.invoke("config:save", cfg),

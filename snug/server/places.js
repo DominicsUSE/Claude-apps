@@ -25,7 +25,8 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { limiter } from './auth.js';
 import { newId, now } from './model.js';
 import { PERMS } from '../js/lib/perms.js';
-import { HUES } from '../js/lib/util.js';
+import { HUES, stripInvisible } from '../js/lib/util.js'; // sec-authz: stripInvisible
+import { secRecord } from './seclog.js'; // sec-integrate: refused hierarchy changes and filtered webhook posts
 import {
   resolveRoom, ROOM_PERM_IDS, ROOM_KINDS, VOICE_KINDS, PLACE_LIMITS as L, TEMPLATES, HUE_IDS, dayOf, railItems, roleMentioned,
 } from '../js/lib/places.js';
@@ -126,7 +127,7 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
   // ---------- Input checks (the same rules as server/ops.js) ----------
   const str = (v, { max = 200, min = 0, name = 'This' } = {}) => {
     if (typeof v !== 'string') fail(`${name} is missing.`);
-    const s = v.trim().replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '');
+    const s = stripInvisible(v).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim(); // sec-authz: stripInvisible
     if (s.length < min) fail(min === 1 ? `${name} can’t be empty.` : `${name} needs at least ${min} characters.`);
     if (s.length > max) fail(`${name} can be at most ${max} characters.`);
     return s;
@@ -216,6 +217,7 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
     return db.all('SELECT r.perms FROM member_roles mr JOIN roles r ON r.id = mr.role WHERE mr.house = ? AND mr.user = ?', houseId, user)
       .some((r) => json(r.perms, []).includes(perm));
   };
+  const placesCan = M.can; // sec-authz: every role a person really has, without another module's asIf grant
   const asManager = (user, room, fn) => {
     if (!M.roomPerms(user, room).manage) fail(`You can’t manage ${room.name}.`);
     if (M.can(user, room.house, 'rooms')) return fn();
@@ -353,7 +355,11 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
     v.house.interests = json(h.interests, []);
     if (joined) {
       v.house.extra = {};
-      for (const r of db.all('SELECT user, role FROM member_roles WHERE house = ?', houseId)) (v.house.extra[r.user] ||= []).push(r.role);
+      v.house.rankExtra = {}; // sec-authz: the roles that count for rank (not ones picked as interests; server/safety.js R.extra)
+      for (const r of db.all('SELECT user, role, via FROM member_roles WHERE house = ?', houseId)) {
+        (v.house.extra[r.user] ||= []).push(r.role);
+        if (r.via !== 'interest') (v.house.rankExtra[r.user] ||= []).push(r.role);
+      }
       v.house.profiles = {};
       for (const p of db.all('SELECT user, nick, emoji, hue FROM member_profiles WHERE house = ?', houseId)) {
         if (p.nick || p.emoji || p.hue != null) v.house.profiles[p.user] = { nick: p.nick || null, emoji: p.emoji || null, hue: p.hue ?? null };
@@ -400,12 +406,24 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
 
   // A permission or role change: everyone sees the house again, gets the
   // conversations they can now read, and leaves voice they may no longer join.
+  // sec-authz: voice is enforced at once for everyone (cheap, and it is the
+  // part that matters for safety); the content resend goes only to people
+  // with a socket open, at most once per window per house (hub.throttle).
   function accessChanged(houseId) {
     hub.houseChanged(houseId);
-    for (const r of db.all('SELECT user FROM members WHERE house = ?', houseId)) {
-      hub.sendHouseContent(r.user, houseId);
-      enforceVoice(r.user);
-    }
+    const resend = () => {
+      for (const r of db.all('SELECT user FROM members WHERE house = ?', houseId)) if (!hub.connected || hub.connected(r.user)) hub.sendHouseContent(r.user, houseId);
+    };
+    if (hub.throttle) hub.throttle(`access:${houseId}`, resend); else resend();
+    for (const r of db.all('SELECT user FROM members WHERE house = ?', houseId)) enforceVoice(r.user);
+  }
+  // One person's roles changed (interests they picked): only their own access
+  // changed, so only they get their content again; everyone else sees the
+  // new role list through the (throttled) house update.
+  function accessChangedFor(houseId, user) {
+    hub.houseChanged(houseId);
+    hub.sendHouseContent(user, houseId);
+    enforceVoice(user);
   }
   // Someone in a voice room or stage they may no longer join is taken out;
   // someone who may not speak there is muted by the server.
@@ -591,6 +609,7 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
   // ---------- Templates and copying a house ----------
   function createFrom(c, d) {
     slow('create', c.user);
+    if (M.ownedHouses && M.ownedHouses(c.user) >= 100) fail('You can own up to 100 houses. Delete or hand over one first.'); // sec-authz (ops.js MAX_OWNED_HOUSES)
     const name = str(d.name, { min: 1, max: 40, name: 'The name' });
     const hue = Number.isInteger(d.hue) && d.hue >= 0 && d.hue < 360 ? d.hue : fail('Pick one of the colours.');
     let plan;
@@ -689,9 +708,12 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
       target = id(d.target, 'role');
       const role = db.get('SELECT id, pos FROM roles WHERE id = ? AND house = ?', target, room.house) || fail('That role isn’t in this house.');
       if (role.pos === 0) fail('The owner role can always do everything.');
+      // sec-authz: below an owner, only roles under your own (no hiding a room from the people above you).
+      if (!M.isOwner(c.user, room.house) && !M.roleBelow(room.house, c.user, role.id)) { secRecord(db, 'access.refused', { user: c.user, detail: { op: 'room.override', why: 'role above' } }); fail('You can only set overrides for roles below your own.'); } // sec-integrate: logged
     } else {
       target = id(d.target, 'person');
       if (!M.isMember(room.house, target)) fail('That person isn’t in this house.');
+      if (!M.isOwner(c.user, room.house) && target !== c.user && !M.outranks(room.house, c.user, target)) { secRecord(db, 'access.refused', { user: c.user, detail: { op: 'room.override', why: 'person above' } }); fail('You can only set overrides for people below your role.'); } // sec-authz; sec-integrate: logged
     }
     const clean = (v, name) => {
       if (v === undefined) return [];
@@ -784,6 +806,7 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
     const nick = d.nick === undefined ? row.nick ?? null : d.nick === null || d.nick === '' ? null : str(d.nick, { max: L.nick, name: 'A nickname' }) || null;
     const emoji = d.emoji === undefined ? row.emoji ?? null : emojiOrNull(d.emoji, 'A picture');
     const hue = d.hue === undefined ? row.hue ?? null : hueOrNull(d.hue);
+    if (row.house && (row.nick ?? null) === nick && (row.emoji ?? null) === emoji && (row.hue ?? null) === hue) return {}; // sec-authz: unchanged, no broadcast
     db.run(`INSERT INTO member_profiles (house, user, nick, emoji, hue) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT (house, user) DO UPDATE SET nick = excluded.nick, emoji = excluded.emoji, hue = excluded.hue`, house, target, nick, emoji, hue);
     hub.houseChanged(house);
@@ -1032,6 +1055,19 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
     if (d.interests !== undefined) {
       if (!Array.isArray(d.interests) || d.interests.length > L.interests) fail(`A house can offer up to ${L.interests} interests.`);
       const roles = orderedRoles(house.id);
+      // sec-authz: an interest hands its roles to whoever picks it, the person
+      // setting it up included. Below an owner, a role that wasn't offered
+      // before needs the real 'roles' permission (not the 'house' stand-in,
+      // server/community.js) and must sit below the person's own role, as the
+      // role newcomers get must (house.update joinRole).
+      const owner = M.isOwner(c.user, house.id);
+      const offered = new Set(interests.flatMap((i) => (Array.isArray(i?.roles) ? i.roles : [])));
+      const mayOffer = (role) => {
+        if (owner || offered.has(role.id)) return;
+        const deny = (why, msg) => { secRecord(db, 'access.refused', { user: c.user, detail: { op: 'onboard.set', why } }); fail(msg); }; // sec-integrate: logged
+        if (!placesCan(c.user, house.id, 'roles')) deny('no roles permission', 'Your role can’t choose which roles interests hand out in this house.');
+        if (!M.roleBelow(house.id, c.user, role.id)) deny('role above', `You can only hand out roles below your own, and ${role.name} isn’t.`);
+      };
       interests = d.interests.map((i) => {
         if (!i || typeof i !== 'object') fail('That interest isn’t valid.');
         const label = str(i.label, { min: 1, max: L.interestLabel, name: 'An interest' });
@@ -1041,6 +1077,7 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
         const rs = [...new Set(i.roles)].map((r) => {
           const role = roles.find((x) => x.id === r) || fail('That role isn’t in this house.');
           if (role.pos === 0 || json(role.perms, []).some((p) => MANAGING.includes(p))) fail(`${role.name} can manage or moderate, so it can’t be handed out by an interest.`);
+          mayOffer(role);
           return role.id;
         });
         return { id: iid, label, ...(emoji ? { emoji } : {}), roles: rs };
@@ -1061,13 +1098,22 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
     const safe = (rid) => { const r = roles.find((x) => x.id === rid); return r && r.pos > 0 && !json(r.perms, []).some((p) => MANAGING.includes(p)); };
     const give = new Set(picked.flatMap((i) => i.roles).filter(safe));
     const primary = db.get('SELECT role FROM members WHERE house = ? AND user = ?', house.id, c.user).role;
+    // sec-authz: nothing changed, nothing to tell anyone.
+    const had = db.all("SELECT role FROM member_roles WHERE house = ? AND user = ? AND via = 'interest'", house.id, c.user).map((r) => r.role).sort();
+    const want = [...give].filter((r) => r !== primary).sort();
+    const pickIds = JSON.stringify(picked.map((i) => i.id));
+    const oldPicks = db.get('SELECT picks FROM member_profiles WHERE house = ? AND user = ?', house.id, c.user)?.picks ?? '[]';
+    const rolesSame = JSON.stringify(had) === JSON.stringify(want);
+    if (rolesSame && oldPicks === pickIds) return { roles: [...give] };
     db.tx(() => {
       db.run("DELETE FROM member_roles WHERE house = ? AND user = ? AND via = 'interest'", house.id, c.user);
       for (const r of give) if (r !== primary) db.run("INSERT OR IGNORE INTO member_roles (house, user, role, via) VALUES (?, ?, ?, 'interest')", house.id, c.user, r);
       db.run(`INSERT INTO member_profiles (house, user, picks) VALUES (?, ?, ?)
-        ON CONFLICT (house, user) DO UPDATE SET picks = excluded.picks`, house.id, c.user, JSON.stringify(picked.map((i) => i.id)));
+        ON CONFLICT (house, user) DO UPDATE SET picks = excluded.picks`, house.id, c.user, pickIds);
     });
-    accessChanged(house.id);
+    // sec-authz: only this person's access changed (or only their picks, which only they see).
+    if (rolesSame) hub.sendHouse(c.user, house.id);
+    else accessChangedFor(house.id, c.user);
     return { roles: [...give] };
   };
 
@@ -1135,13 +1181,13 @@ export function createPlacesHttp({ db, M, hub, sendJson, error, jsonBody, ipOf }
     if (!hook || !timingSafeEqual(want, got)) { error(res, 401, 'That webhook address isn’t valid.'); return true; }
     if (!perHook.take(hook.id)) { error(res, 429, 'Too many webhook messages. Slow down.'); return true; }
     const d = await jsonBody(req);
-    const content = typeof d?.content === 'string' ? d.content.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '') : '';
+    const content = typeof d?.content === 'string' ? stripInvisible(d.content).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '') : ''; // sec-authz: stripInvisible
     if (!content.trim()) { error(res, 400, 'content is missing.'); return true; }
     if (content.length > L.hookContent) { error(res, 400, `content can be at most ${L.hookContent} characters.`); return true; }
     let name = hook.name;
     if (d.username !== undefined) {
       if (typeof d.username !== 'string' || !d.username.trim() || d.username.trim().length > L.hookName) { error(res, 400, `username can be 1 to ${L.hookName} characters.`); return true; }
-      name = d.username.trim().replace(/[\u0000-\u001f\u007f]/g, '');
+      name = stripInvisible(d.username).replace(/[\u0000-\u001f\u007f]/g, '').trim() || 'Webhook'; // sec-authz: stripInvisible
     }
     let avatar = null;
     if (d.avatar_url !== undefined && d.avatar_url !== null) {
@@ -1152,6 +1198,8 @@ export function createPlacesHttp({ db, M, hub, sendJson, error, jsonBody, ipOf }
     }
     const room = M.room(hook.room);
     if (!room) { error(res, 404, 'That room is gone.'); return true; }
+    // sec-authz: webhook posts go through the house's word and link filter too.
+    if (M.filterBlocks?.(room.house, `${name}\n${content}`)) { secRecord(db, 'filter.blocked', { req, detail: { via: 'webhook', room: room.id } }); error(res, 422, 'That message has a word or link this house doesn’t allow.'); return true; }
     const mid = newId('m');
     const ts = now();
     db.run('INSERT INTO messages (id, conv, author, ts, text, fold, bot) VALUES (?, ?, ?, ?, ?, ?, ?)',

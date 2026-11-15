@@ -21,7 +21,7 @@ export function relaxedLimits() {
   const out = {};
   for (const [k, [n, ms]] of Object.entries(DEFAULT_LIMITS)) {
     if (k.startsWith('ip')) out[k] = [n * 1000, ms];
-    else if (k === 'authGlobal' || k === 'connect') out[k] = [n * 10, ms];
+    else if (k === 'authGlobal' || k === 'authBadGlobal' || k === 'connect' || k === 'connectXfer') out[k] = [n * 10, ms];
   }
   return out;
 }

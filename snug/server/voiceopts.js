@@ -21,10 +21,11 @@
 //   the room applies to its microphone.
 import { writeFile, unlink } from 'node:fs/promises';
 import { createHmac } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { sendFile } from './seclog.js'; // sec-web W1
 import { join } from 'node:path';
 import { newId } from './model.js';
 import { limiter, safeDecode } from './auth.js';
+import { stripInvisible, cleanFileName } from '../js/lib/util.js'; // sec-authz
 
 export const MAX_SOUNDS = 24;
 export const MAX_SOUND_BYTES = 512 * 1024;
@@ -107,7 +108,7 @@ export function createVoiceOptsOps({ db, M, hub, fail, ops = {} }) {
   };
   const nameOf = (v) => {
     if (typeof v !== 'string' || !v.trim()) fail('Give the sound a name.');
-    const n = v.trim().replace(/[\u0000-\u001f\u007f]/g, '');
+    const n = stripInvisible(v).replace(/[\u0000-\u001f\u007f]/g, '').trim(); // sec-authz: stripInvisible
     if (n.length > 32) fail('Sound names can be at most 32 characters.');
     if (!n) fail('Give the sound a name.');
     return n;
@@ -157,6 +158,7 @@ export function createVoiceOptsOps({ db, M, hub, fail, ops = {} }) {
   const baseContent = hub.sendHouseContent;
   if (baseContent) {
     hub.sendHouseContent = (u, houseId) => {
+      if (hub.connected && !hub.connected(u)) return; // sec-authz: nothing to build for someone with no socket open
       baseContent(u, houseId);
       hub.toUser(u, 'sounds', { house: houseId, list: R.list(houseId) });
     };
@@ -298,7 +300,7 @@ export function createVoiceOptsHttp({ db, M, filesDir, sendJson, error, body, he
       const info = wavInfo(data);
       if (!info) { error(res, 415, 'Snug couldn’t read that sound. Choose an audio file again.'); return true; }
       if (info.seconds > MAX_SOUND_SECONDS) { error(res, 422, `That sound is ${info.seconds.toFixed(1)} seconds long. Sounds can be up to ${MAX_SOUND_SECONDS} seconds.`); return true; }
-      const name = (safeDecode(String(req.headers['x-file-name'] || 'sound')).replace(/[\u0000-\u001f\u007f/\\]/g, '').trim() || 'sound').slice(0, 120);
+      const name = cleanFileName(safeDecode(String(req.headers['x-file-name'] || 'sound')), 'sound'); // sec-authz
       const id = newId('f');
       await writeFile(join(filesDir, id), data, { mode: 0o600 });
       db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -316,8 +318,7 @@ export function createVoiceOptsHttp({ db, M, filesDir, sendJson, error, body, he
         'Content-Type': 'audio/wav', 'Content-Length': String(row.size), 'Cache-Control': 'private, max-age=86400',
         'Content-Security-Policy': "default-src 'none'; sandbox",
       });
-      res.writeHead(200);
-      createReadStream(join(filesDir, row.id)).pipe(res);
+      sendFile(res, join(filesDir, row.id)); // sec-web W1: 404 when the bytes are gone, never an unhandled stream error (server/seclog.js)
       return true;
     }
     return false;

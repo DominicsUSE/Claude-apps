@@ -112,6 +112,12 @@ async function newPcFor(ghId) {
   B2.peer.start();
   return { B2, b2: await clientFor(B2, id) };
 }
+// sec-registry REG-H1: the vault key goes to the current key only, so a file can be opened on the new PC
+// once the move is done. The old PC is off in these tests: the move completes after 72 h.
+async function completeMove(B2) {
+  await registry.clock.advance(72 * 3600_000 + 1000);
+  await until(() => B2.peer.identity.self().state === 'ok', 10_000, 'move done');
+}
 
 test('the data file is written after changes (debounced), only when something changed, and on close', async () => {
   const { A, a, b, dm } = await friends('vlt_alice1', 'vlt_bob1');
@@ -155,6 +161,10 @@ test('import on a new PC of the same account: friends, keys and conversations co
   const ikA = B.db.get('SELECT ik FROM peers WHERE uid = ?', uidOf(a)).ik;
   await off(B, b); // the old PC is gone (no automatic transfer here; that is server-vault-xfer.test.js)
   const { B2, b2 } = await newPcFor(gb);
+  const early = await importFile(B2, b2.cookie, file);
+  assert.equal(early.status, 422, 'not while the move is pending: the registry gives the key to the current key only');
+  assert.equal(early.body.code, 'not_yet');
+  await completeMove(B2);
   const before = counts(B2);
   const r = await importFile(B2, b2.cookie, file);
   assert.equal(r.status, 200, JSON.stringify(r.body));
@@ -187,6 +197,7 @@ test('a refused file changes nothing: edited, cut, another account’s, or one a
   const withSection = (await download(B, b.cookie)).buf;
   await off(B, b);
   const { B2, b2 } = await newPcFor(gb);
+  await completeMove(B2);
   const before = counts(B2);
   const H = fileB.readUInt32BE(8);
   for (const [buf, code] of [
@@ -290,4 +301,66 @@ test('deleting the Snug account on this PC removes its data file, cached key and
   await new Promise((r) => setTimeout(r, 300));
   A.vault.flush();
   assert.equal(existsSync(live), false, 'not written again');
+});
+
+test('REG-L1: the vault key rotates (by hand, and when a move is stopped); older files and backups still import', async () => {
+  const { A, B, a, b, gb } = await friends('vlt_rot_a', 'vlt_rot_b');
+  await A.vault.write();
+  const before = (await download(A, a.cookie)).buf;
+  const kid0 = readHeader(before, uidOf(a)).header.kid;
+  await a.ok('vault.rotateKey');
+  const now = readLive(A);
+  assert.equal(readHeader(now, uidOf(a)).header.kid, kid0 + 1, 'the data file is written with the new key');
+  const r = await importFile(A, a.cookie, before);
+  assert.equal(r.status, 200, `an older file still opens: ${JSON.stringify(r.body)}`);
+  // Stop on a move someone else started: a new kid, so a key copied earlier can't open what comes next.
+  await B.vault.write();
+  const kidB = readHeader(readLive(B), uidOf(b)).header.kid;
+  await newPcFor(gb);
+  await until(() => B.peer.statusFor(b.id).rebindPending, 8000, 'old PC told');
+  await B.peer.cancelRebind();
+  await until(() => readHeader(readLive(B), uidOf(b)).header.kid === kidB + 1, 8000, 'rotated after Stop');
+});
+
+test('REG-L2: a data file can’t pin made-up keys: pins for people new to this PC are checked with the registry', async () => {
+  const { A, a } = await friends('vlt_pin_a', 'vlt_pin_b');
+  const C = await pc();
+  const c = await signUp(C, registry, 77_701, 'vlt_pin_c'); // on Snug, but A has never met them
+  const cUid = uidOf(c);
+  const k = await A.peer.reg.signedCall('/v1/vault/key', 'vault-key');
+  const fake = () => randomBytes(32).toString('base64url');
+  const fik = fake(), fxk = fake();
+  const payload = {
+    v: 1, uid: uidOf(a), username: 'vlt_pin_a', at: Date.now(), app: '0.10.1',
+    profile: null, prefs: {}, privacy: null,
+    people: [{ uid: cUid, username: 'vlt_pin_c', ik: fik, xk: fxk, kver: 999, name: 'c' }],
+    keys: [{ uid: cUid, kver: 999, ik: fik, xk: fxk }], friends: [], blocks: [], dms: [], sections: {},
+  };
+  const file = seal({ key: Buffer.from(k.key, 'base64url'), uid: uidOf(a), kid: k.kid, seq: 5, app: '0.10.1', payload });
+  const r = await importFile(A, a.cookie, file);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  await until(() => A.db.get('SELECT ik FROM peers WHERE uid = ?', cUid)?.ik === C.peer.identity.ik, 8000, 'pin corrected from the registry');
+  assert.equal(A.db.get('SELECT kver FROM peers WHERE uid = ?', cUid).kver, 1, 'no kver 999 downgrade trap');
+  assert.equal(A.db.get('SELECT 1 FROM peer_keys WHERE uid = ? AND ik = ?', cUid, fik), undefined, 'the made-up key is gone');
+});
+
+test('REG-L2: my own group ops in a data file must verify with my key chain from the registry', async () => {
+  const { A, a, b } = await friends('vlt_gop_a', 'vlt_gop_b');
+  const { gidFor, signOp, exportGroups } = await import('../server/grouplog.js');
+  const { newSigningKeys } = await import('../server/peercrypto.js');
+  const my = uidOf(a);
+  const id = 'o_forgedcreate0001';
+  const op = { g: gidFor(my, id), id, t: 'create', by: my, kver: 1, ts: Date.now() - 1000, d: { name: 'forged', members: [uidOf(b)] } };
+  const sig = signOp(newSigningKeys().priv, op); // not my key
+  const k = await A.peer.reg.signedCall('/v1/vault/key', 'vault-key');
+  const payload = {
+    v: 1, uid: my, username: 'vlt_gop_a', at: Date.now(), app: '0.10.1', profile: null, prefs: {}, privacy: null,
+    people: [], keys: [], friends: [], blocks: [], dms: [],
+    sections: { groups: exportGroups([{ g: op.g, name: 'forged', icon: null, ops: [{ body: JSON.stringify(op), sig }], msgs: [] }]) },
+  };
+  const file = seal({ key: Buffer.from(k.key, 'base64url'), uid: my, kid: k.kid, seq: 7, app: '0.10.1', payload });
+  const r = await importFile(A, a.cookie, file);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(A.db.get('SELECT 1 FROM grp_ops WHERE g = ?', op.g), undefined, 'a forged op “by me” is not taken');
+  assert.equal(A.db.get('SELECT 1 FROM dms WHERE id = ?', op.g), undefined);
 });

@@ -19,11 +19,14 @@ export const DEFAULT_LIMITS = {
   ipAdmin: [120, MIN],
   ipVault: [30, HOUR],
   // global (SQLite)
-  authGlobal: [300, HOUR],
+  authGlobal: [300, HOUR], // tokens GitHub accepted (REG-M4)
+  authBadGlobal: [3000, HOUR], // tokens GitHub refused: only bounds our calls to GitHub (REG-M4)
   // per uid (SQLite)
   lookupDay: [300, DAY],
   turnDay: [10, DAY],
-  connect: [30, HOUR],
+  turnGlobalDay: [3000, DAY], // REG-L5: all accounts together
+  connect: [30, HOUR], // per key: the current key's normal sockets; a pending key's apart (REG-M1)
+  connectXfer: [20, HOUR], // xfer sockets, per key (REG-M1)
   relayDay: [2000, DAY],
   relayBytesDay: [20 * 1024 * 1024, DAY],
   sigDay: [500, DAY],
@@ -32,6 +35,7 @@ export const DEFAULT_LIMITS = {
   knockPairDay: [5, DAY],
   adminDay: [1000, DAY],
   vaultDay: [20, DAY],
+  vaultRotDay: [5, DAY], // REG-L1
   xferDay: [3000, DAY],
   xferBytesDay: [64 * 1024 * 1024, DAY],
   // per uid (memory)
@@ -39,6 +43,8 @@ export const DEFAULT_LIMITS = {
   relayBurst: [50, 1000],
   watchHour: [30, HOUR],
   xferBurst: [60, 1000],
+  framesMin: [2400, MIN], // frames per authenticated socket mode; past it the socket closes (REG-M5)
+  xferFramesMin: [4800, MIN],
   // sizes / counts
   unauthPerUid: [4, 0],
   knockBox: [100, 0],

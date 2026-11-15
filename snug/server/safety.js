@@ -22,9 +22,10 @@
 import { limiter } from './auth.js';
 import { newId, now } from './model.js';
 import {
-  TIMEOUTS, SLOWMODES, INVITE_AGES, INVITE_USES, BAN_DELETE, REPORT_REASONS, PRIVACY_DM, PRIVACY_FRIENDS,
+  TIMEOUTS, SLOWMODES, INVITE_AGES, INVITE_USES, BAN_DELETE, REPORT_REASONS, PRIVACY_DM, PRIVACY_FRIENDS, PRIVACY_INVITES,
   DEFAULT_PRIVACY, FILTER_ACTIONS, MAX_WORDS, cleanWord, filterHit, outranks, roleBelow, slowWait, left,
 } from '../js/lib/safety.js';
+import { stripInvisible } from '../js/lib/util.js'; // sec-authz
 
 const json = (s, f) => { try { return s == null ? f : JSON.parse(s); } catch { return f; } };
 const values = (list) => list.map((x) => (Array.isArray(x) ? x[0] : x));
@@ -38,7 +39,7 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
   const text = (v, max, name) => {
     if (v == null) return '';
     if (typeof v !== 'string') fail(`${name} isn’t valid.`);
-    const s = v.trim().replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '');
+    const s = stripInvisible(v).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim(); // sec-authz: stripInvisible
     if (s.length > max) fail(`${name} can be at most ${max} characters.`);
     return s;
   };
@@ -71,7 +72,8 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
   R.either = (a, b) => R.blocked(a, b) || R.blocked(b, a);
   R.privacy = (u) => {
     const p = db.get('SELECT * FROM privacy WHERE user = ?', u);
-    return p ? { dm: p.dm, friends: p.friends, requests: !!p.requests } : { ...DEFAULT_PRIVACY };
+    // sec-authz: invites shows only once it is set to something other than everyone
+    return p ? { dm: p.dm, friends: p.friends, requests: !!p.requests, ...(p.invites && p.invites !== 'everyone' ? { invites: p.invites } : {}) } : { ...DEFAULT_PRIVACY };
   };
   R.shareHouse = (a, b) => !!db.get('SELECT 1 FROM members m1 JOIN members m2 ON m1.house = m2.house WHERE m1.user = ? AND m2.user = ? LIMIT 1', a, b);
   R.shareDm = (a, b) => !!db.get(`SELECT 1 FROM dm_members d1 JOIN dm_members d2 ON d1.dm = d2.dm
@@ -104,10 +106,14 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
     return out;
   };
   // Extra roles (server/places.js) count: a person acts with their best role.
+  // sec-authz: except roles picked as interests. Anyone can pick those for
+  // themselves, so they give their permissions but never rank: picking an
+  // interest whose role sits above the moderators doesn't put you out of
+  // their reach.
   R.extra = (house, users) => {
     const out = {};
     for (const u of new Set(users)) {
-      const list = db.all('SELECT role FROM member_roles WHERE house = ? AND user = ?', house, u).map((r) => r.role);
+      const list = db.all("SELECT role FROM member_roles WHERE house = ? AND user = ? AND via IS NOT 'interest'", house, u).map((r) => r.role);
       if (list.length) out[u] = list;
     }
     return out;
@@ -203,6 +209,13 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
     if (!R.accepted(house, user)) fail('Read and accept this house’s rules first. They’re at the top of the house.');
   }
 
+  // sec-authz: the house's word and link filter for text no member wrote
+  // (webhook posts, server/places.js): true when it would block it.
+  M.filterBlocks = (house, text) => {
+    const cfg = R.automod(house);
+    if (!cfg || (!cfg.words.length && !cfg.links) || cfg.action === 'flag') return false;
+    return !!filterHit(text, cfg);
+  };
   // The word and link filter. Returns a note when the message may go through
   // but should be flagged; fails when it is blocked.
   function filter(user, house, conv, body) {
@@ -469,13 +482,22 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
       return r;
     });
   }
+  // sec-authz: does this person take personal house invitations from that one?
+  // Blocks and their privacy setting (everyone, people in their houses, friends).
+  M.invitesFrom = (target, from) => {
+    if (R.either(target, from)) return false;
+    const p = R.privacy(target);
+    if (p.invites === 'friends') return !!db.get("SELECT 1 FROM friends WHERE user = ? AND other = ? AND state = 'friends'", target, from);
+    if (p.invites === 'houses') return R.shareHouse(target, from);
+    return true;
+  };
   wrap('invite.user', (c, d, base) => {
     const house = typeof d.house === 'string' ? d.house : '';
     const handle = typeof d.handle === 'string' ? d.handle.trim().replace(/^@/, '') : '';
     const target = handle && db.get('SELECT id, name FROM users WHERE handle = ?', handle);
     if (target && M.isMember(house, c.user)) {
       if (banned(house, target.id)) fail(`${target.name} is banned from this house. Unban them first, in House settings > Bans.`);
-      if (R.blocked(target.id, c.user)) fail(`${target.name} can’t be invited by you.`);
+      // sec-authz: a block gets the same answer as privacy and a missing name (ops.js invite.user).
     }
     const r = base(c, d);
     if (target) audit(house, c.user, 'invite.user', target.id, null);
@@ -558,10 +580,11 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
       dm: d.dm === undefined ? p.dm : oneOf(d.dm, values(PRIVACY_DM), 'Who can message you'),
       friends: d.friends === undefined ? p.friends : oneOf(d.friends, values(PRIVACY_FRIENDS), 'Who can send you friend requests'),
       requests: d.requests === undefined ? p.requests : (typeof d.requests === 'boolean' ? d.requests : fail('Message requests is yes or no.')),
+      invites: d.invites === undefined ? p.invites || 'everyone' : oneOf(d.invites, values(PRIVACY_INVITES), 'Who can invite you to houses'), // sec-authz
     };
     slow('settings', c.user);
-    db.run(`INSERT INTO privacy (user, dm, friends, requests) VALUES (?, ?, ?, ?)
-      ON CONFLICT (user) DO UPDATE SET dm = excluded.dm, friends = excluded.friends, requests = excluded.requests`, c.user, next.dm, next.friends, next.requests ? 1 : 0);
+    db.run(`INSERT INTO privacy (user, dm, friends, requests, invites) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT (user) DO UPDATE SET dm = excluded.dm, friends = excluded.friends, requests = excluded.requests, invites = excluded.invites`, c.user, next.dm, next.friends, next.requests ? 1 : 0, next.invites);
     sendState(c.user);
     return {};
   };
@@ -714,7 +737,7 @@ export function createSafetyOps({ db, M, hub, fail, ops, removeMember }) {
     if (!to || to.house !== room.house || to.kind !== 'voice') fail('Pick a voice room in the same house.');
     if (to.id === room.id) return {};
     hub.voiceLeave(t.id);
-    hub.toUser(t.id, 'voice.moved', { room: room.id, to: to.id, name: to.name });
+    hub.toUser(t.id, 'voice.moved', { room: room.id, to: to.id, name: M.canRead(t.id, to.id) ? to.name : 'another room' }); // sec-authz: a private room's name only to those who can see it
     audit(room.house, c.user, 'voice.move', t.id, { from: room.name, to: to.name, fromId: room.id, toId: to.id });
     return {};
   };

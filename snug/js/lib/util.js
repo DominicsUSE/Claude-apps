@@ -106,3 +106,36 @@ export function hueOf(h) {
   }
   return best;
 }
+
+// sec-authz: characters that change how text around them reads without being
+// seen: bidi overrides, embeddings and isolates (U+202A-202E, U+2066-2069),
+// direction marks (U+061C, U+200E, U+200F), zero-width space and the BOM
+// (U+200B, U+FEFF), word joiners and invisible operators (U+2060-2064), and
+// U+180E. Zero-width joiners stay inside emoji sequences (a family, a rainbow
+// flag), and joiners and non-joiners between letters of scripts that use them
+// (Sinhala, Malayalam, Persian, Hindi; never Latin, Greek or Cyrillic);
+// anywhere else they go too. Server and client both use this.
+const INVISIBLE = /[؜᠎​‎‏‪-‮⁠-⁤⁦-⁩﻿]/g;
+const EMOJI_END = /[\p{Extended_Pictographic}\p{Emoji_Modifier}️]$/u;
+const EMOJI_START = /^\p{Extended_Pictographic}/u;
+const JOINING_LETTER = /[\p{L}\p{M}]/u;
+const NO_ZWNJ_SCRIPT = /[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}]/u;
+export function stripInvisible(s) {
+  if (typeof s !== 'string') return s;
+  const t = s.replace(INVISIBLE, '');
+  if (!/[‌‍]/.test(t)) return t;
+  const cps = [...t];
+  return cps.filter((ch, i) => {
+    if (ch !== '‌' && ch !== '‍') return true;
+    const prev = cps[i - 1] || '', next = cps[i + 1] || '';
+    // sec-review: joiners also stay between letters of scripts that are written with them (the joiner in
+    // Sinhala ශ්‍රී, Malayalam chillu letters, Devanagari eyelash ra; the non-joiner in Persian, Hindi).
+    const between = JOINING_LETTER.test(prev) && JOINING_LETTER.test(next) && !NO_ZWNJ_SCRIPT.test(prev) && !NO_ZWNJ_SCRIPT.test(next);
+    if (ch === '‍') return (EMOJI_END.test(prev) && EMOJI_START.test(next)) || between;
+    return between;
+  }).join('');
+}
+// A file name as stored: no path, no control or invisible characters, at most 120 characters.
+export function cleanFileName(raw, fallback = 'file') {
+  return (stripInvisible(String(raw ?? '')).replace(/[\u0000-\u001f\u007f/\\]/g, '').trim() || fallback).slice(0, 120);
+}

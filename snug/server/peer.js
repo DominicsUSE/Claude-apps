@@ -24,7 +24,7 @@ import {
   canon, sha256, b64u, seal, parseBox, boxVerify, boxOpen, profileSign, profileVerify, newer, nextVer, keychangeSign,
   chainCheck, dmIdFor, remoteFileId, remoteMediaId, shadowId, randomEp, fingerprint, isUid, isKey, hsVerify,
 } from './peercrypto.js';
-import { UserError } from './ops.js';
+import { UserError, rtcSignal } from './ops.js'; // sec-integrate: rtcSignal, the same check a local call member gets
 import { limiter } from './auth.js';
 import { uploadType, AUDIO_TYPES, VIDEO_TYPES } from './media.js';
 import { imageInfo } from './messaging.js';
@@ -583,6 +583,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
 
   // ---------- Inbound frames (section 5.4: one explicit table, S12) ----------
   const callLimit = limiter({ capacity: 10, perSecond: 10 / 3600 });
+  const rtcPeerBytes = limiter({ capacity: 512 * 1024, perSecond: 64 * 1024 }); // sec-integrate: as server/ops.js rtcBytes
   const blobHourly = new Map(); // uid -> {at, bytes}
   const DURABLE = {
     'dm.msg': (uid, d, ts) => {
@@ -666,7 +667,11 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     rtc: (uid, d) => {
       const dm = inCall(uid);
       if (!dm || hub.voicePlaceOf(shadowId(uid)) !== dm || !d.data || typeof d.data !== 'object') fail('Not in the call.');
-      hub.rtcRelay(shadowId(uid), owner(), d.data);
+      // sec-integrate: a friend's PC gets the same signal check and byte budget as a call member here
+      // (server/ops.js rtcSignal), so it can't flood this browser with junk signalling either.
+      const data = rtcSignal(d.data);
+      if (!rtcPeerBytes.take(uid, JSON.stringify(data).length)) fail('Too fast.');
+      hub.rtcRelay(shadowId(uid), owner(), data);
     },
   };
   function ingestEphemeral(uid, Pf) {

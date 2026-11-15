@@ -32,6 +32,8 @@ const STALL_MS = 2000;
 const RESEND_MS = 3000;
 const PURGE_AFTER = 7 * 86_400_000;
 const XID = /^[A-Za-z0-9_-]{22}$/;
+// Receiver answers ({t:'no', why}) that are final for this sender: it is not allowed to send a file now.
+const REFUSALS = new Set(['not_yet', 'not_allowed', 'not_waiting']);
 
 export const xidOf = (senderIk, sha) => b64u(sha256(`${senderIk}\n${sha}`)).slice(0, 22);
 export function sessionKey({ myXkPriv, theirXk, xid, uid, senderIk, receiverIk }) {
@@ -52,7 +54,7 @@ export function boxSeal(K, xid, dir, n, frame) {
 export function boxOpen(K, xid, dir, n, c) {
   const data = unb64u(c);
   if (data.length < 16) throw new Error('short');
-  const d = createDecipheriv('aes-256-gcm', K, nonce(dir, n));
+  const d = createDecipheriv('aes-256-gcm', K, nonce(dir, n), { authTagLength: 16 }); // sec-integrate: a fixed 16-byte tag
   d.setAAD(Buffer.from(xid, 'utf8'));
   d.setAuthTag(data.subarray(data.length - 16));
   return JSON.parse(Buffer.concat([d.update(data.subarray(0, data.length - 16)), d.final()]).toString('utf8'));
@@ -68,18 +70,32 @@ function parseBox(box) {
 /**
  * createXfer({ uid, me: {ik, xkPriv}, transport, dir, log, now,
  *              getFile() -> {buf, sha, kid, created} | null,         // the sender's current file
+ *              mayReceive(fromIk) -> null | why,                       // may this key send me a file now?
  *              accept(buf, sha, fromIk) -> Promise<{ok:true}|{ok:false, why}>, // the receiver verifies and imports
  *              hasImported(sha) -> bool, wasSent(sha, ik) -> bool, markSent(sha, ik),
  *              onProgress({state, got, size, role, error?}) })
- * -> { send(peer:{ik, xk}) -> Promise<'done'|'have'|'failed'|'skipped'>, receive(fromIk, fromXk, box), stop(), purge() }
+ * -> { send(peer:{ik, xk}) -> Promise<'done'|'have'|'failed'|'refused'|'skipped'>, receive(fromIk, fromXk, box), stop(), purge() }
  */
 export function createXfer(o) {
   const { uid, me, transport, dir, log = () => {}, now = () => Date.now() } = o;
   const rate = o.rate || RATE;
   const stallMs = o.stallMs || STALL_MS;
+  // n only grows, also across restarts of either side: start from the clock, and (sec-registry REG-L4) from
+  // a high-water mark kept on disk, so a clock set back (NTP, by hand) can never reuse a (key, nonce) pair:
+  // the key for a (device pair, file) is the same in every session. Reserved in blocks: one write per 2^20.
+  const N_BLOCK = 2 ** 20;
+  const nFile = join(dir, '.n');
   let nextN = 0;
-  // n only grows, also across restarts of either side: start from the clock.
-  const takeN = () => { nextN = Math.max(nextN + 1, now() * 1024); return nextN; };
+  try { const v = Number(readFileSync(nFile, 'utf8')); if (Number.isSafeInteger(v) && v > 0) nextN = v; } catch { /* first run */ }
+  let nReserved = nextN;
+  const takeN = () => {
+    nextN = Math.max(nextN + 1, now() * 1024);
+    if (nextN >= nReserved) {
+      nReserved = nextN + N_BLOCK;
+      try { mkdirSync(dir, { recursive: true, mode: 0o700 }); writeFileSync(nFile, String(nReserved), { mode: 0o600 }); } catch (e) { log('vault', 'xfer counter', e.code || e.message); }
+    }
+    return nextN;
+  };
   const sends = new Map();   // receiverIk -> outgoing session
   const recvs = new Map();   // `${senderIk}|${xid}` -> incoming session
   let lastProgress = 0;
@@ -120,7 +136,8 @@ export function createXfer(o) {
         clearTimeout(s.pumpT);
         if (sends.get(s.ik) === s) sends.delete(s.ik);
         if (result === 'done' || result === 'have') o.markSent?.(s.sha, s.ik);
-        progress({ state: result === 'failed' ? 'failed' : 'done', role: 'sender', got: result === 'failed' ? s.acked : s.size, size: s.size, ...(error ? { error } : {}) }, true);
+        const failed = result === 'failed' || result === 'refused';
+        progress({ state: failed ? 'failed' : 'done', role: 'sender', got: failed ? s.acked : s.size, size: s.size, ...(error ? { error } : {}) }, true);
         resolve(result);
       };
     });
@@ -179,6 +196,7 @@ export function createXfer(o) {
       pump(s);
     } else if (fr.t === 'have') s.finish('have');
     else if (fr.t === 'done') s.finish('done');
+    else if (fr.t === 'no' && REFUSALS.has(fr.why)) s.finish('refused', fr.why); // final: retrying won't help
     else if (fr.t === 'no') s.finish('failed', typeof fr.why === 'string' ? fr.why.slice(0, 40) : 'refused');
     else if (fr.t === 'bad') s.finish('failed', typeof fr.why === 'string' ? fr.why.slice(0, 40) : 'bad');
   }
@@ -189,6 +207,10 @@ export function createXfer(o) {
       if (!Number.isSafeInteger(fr.size) || fr.size < 1 || typeof fr.sha !== 'string' || !/^[0-9a-f]{64}$/.test(fr.sha)) return reply(r, { t: 'bad', why: 'offer' });
       if (fr.size > MAX_FILE) return reply(r, { t: 'no', why: 'too_big' });
       if (xidOf(r.from, fr.sha) !== r.xid) return reply(r, { t: 'bad', why: 'xid' });
+      // sec-registry REG-H1: the receiver decides first whether this sender may give it a file at all
+      // (refused before a byte is stored, and before "have" tells the sender anything).
+      const no = o.mayReceive?.(r.from);
+      if (no) return reply(r, { t: 'no', why: String(no).slice(0, 40) });
       if (o.hasImported?.(fr.sha)) return reply(r, { t: 'have' });
       const busy = [...recvs.values()].some((x) => x !== r && x.from !== r.from && x.size && !x.ended && now() - x.lastIn < ACK_TIMEOUT);
       if (busy) return reply(r, { t: 'no', why: 'busy' });

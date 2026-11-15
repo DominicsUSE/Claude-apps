@@ -1,0 +1,17 @@
+# gitleaks (MIT, https://github.com/gitleaks/gitleaks) settings for Snug's secret scan
+# (.github/workflows/security.yml). The default rules, plus a few reviewed lines
+# that are not secrets.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Reviewed: public identifiers and test fixtures, not secrets"
+regexTarget = "line"
+regexes = [
+  # The GitHub OAuth app's client id is public by design (device flow); the secret is never in the repo.
+  '''^\s*GITHUB_CLIENT_ID\s*=''',
+  # Cloudflare TURN key id; its token is the TURN_KEY_TOKEN Worker secret.
+  '''^\s*TURN_KEY_ID\s*=''',
+  # A made-up per-launch secret in a desktop test.
+  '''per-launch-secret-0123456789abcdefghij''',
+]
