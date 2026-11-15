@@ -181,3 +181,31 @@ test('through the registry: one token, a bearer header, and only the registry’
   assert.ok(calls.every((c) => c.auth === 'Bearer tok-1' && c.url.startsWith('https://reg.example/v1/gif/')));
   assert.match((await p.fetch('https://evil.example/x.gif')).err, /isn’t one Snug fetches/);
 });
+
+test('a desktop PC searches through the registry end to end: the GIF site only ever hears from the registry', async () => {
+  const { startLocalRegistry } = await import('../registry/dev.js');
+  const { startPc, signUp } = await import('./helpers/p2p.js');
+  const registry = await startLocalRegistry({ env: { OWNER_GITHUB_IDS: '900001', GIF_OPENVERSE_BASE: here } });
+  const A = await startPc(registry);
+  try {
+    const a = await signUp(A, registry, 7101, 'gifdesk');
+    const get = (p) => fetch(A.base + p, { headers: { cookie: a.cookie } });
+    const cfg = await (await get('/api/gifs/config')).json();
+    assert.deepEqual(cfg.sources.map((x) => x.id), ['registry']);
+    seen.length = 0;
+    const found = await (await get('/api/gifs?q=cat')).json();
+    const r0 = found.results.find((g) => g.id === 'ov1');
+    assert.ok(r0, JSON.stringify(found));
+    assert.equal(r0.credit.text, 'Ada Lovelace, CC BY-SA 4.0, via Openverse');
+    const prev = await get(r0.preview);
+    assert.equal(prev.status, 200);
+    await prev.arrayBuffer();
+    const dm = (await a.ok('house.create', { name: 'Desk', hue: 10 })).room;
+    const imp = await fetch(`${A.base}/api/gifs/import`, { method: 'POST', headers: { cookie: a.cookie, origin: A.base, 'content-type': 'application/json' }, body: JSON.stringify({ conv: dm, url: r0.url, title: r0.title }) });
+    assert.equal(imp.status, 201, await imp.clone().text());
+    assert.equal((await imp.json()).credit.text, r0.credit.text);
+    assert.ok(seen.length >= 3);
+    assert.ok(seen.every((x) => x.ua.startsWith('Snug-registry/')), 'every request to the GIF site came from the registry');
+    a.close();
+  } finally { await A.close(); await registry.close(); }
+});

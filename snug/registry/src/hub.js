@@ -13,6 +13,7 @@ import { ApiError, fail, need, ID_RE, isUid, isKey, isSig, isTs, rawName, isUniq
 import { AdminMixin, ADMIN_SCHEMA } from './admin.js';
 import { XferMixin } from './xfer.js';
 import { VaultKeyMixin, VAULT_SCHEMA } from './vaultkey.js';
+import { GifMixin } from './gif.js'; // 0.12: GIF search tokens
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS accounts (
@@ -353,6 +354,7 @@ export class Hub {
       case '/v1/notices': return this.noticesHttp(ip);
       case '/v1/vault/key': return this.vaultKey(body, ip);
       case '/v1/vault/rotate': return this.vaultRotate(body, ip);
+      case '/v1/gif/token': return this.gifToken(body, ip); // 0.12 (src/gif.js)
       default: fail('not_found');
     }
   }
@@ -1065,4 +1067,4 @@ export class Hub {
 }
 
 // v0.10: admin, bans, notices (admin.js); xfer sockets (xfer.js); vault keys (vaultkey.js).
-Object.assign(Hub.prototype, AdminMixin, XferMixin, VaultKeyMixin);
+Object.assign(Hub.prototype, AdminMixin, XferMixin, VaultKeyMixin, GifMixin);
