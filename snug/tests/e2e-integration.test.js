@@ -65,7 +65,7 @@ test('settings: one structure in sections with a search; each room’s pace and 
   await robin.click('.me-row [aria-label="Settings"]');
   await robin.locator('.layer-body h1').waitFor();
   assert.deepEqual(await navText(robin), [
-    '# You', 'Profile', 'Account and security', 'Privacy and safety', 'Your data',
+    '# You', 'Profile', 'Account and security', 'Privacy and safety', 'Encryption', 'Your data', // Encryption: offered by default since 0.12
     '# App', 'Notifications', 'Voice and video', 'Appearance', 'Text and messages', 'Accessibility', 'Streamer mode', 'Keyboard',
   ]);
   // Contrast and motion have one home, on Accessibility.

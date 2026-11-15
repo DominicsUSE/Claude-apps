@@ -1210,7 +1210,7 @@ test("join mode, pinned: without the switch a plain-http LAN address is no secur
   // The switch is only ever for the configured join address: here the configured one is another.
   const { app } = await launchWith(userData, { config: { mode: "join", url: "http://127.0.0.1:9" }, args: ["--host-resolver-rules=MAP snug.test 127.0.0.1"], env: NO_PROXY_ENV });
   const secure = await app.evaluate(async ({ BrowserWindow }, url) => {
-    const w = new BrowserWindow({ show: false });
+    const w = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true, sandbox: true } });
     await w.loadURL(url);
     const v = await w.webContents.executeJavaScript("isSecureContext");
     w.destroy();

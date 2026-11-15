@@ -272,7 +272,8 @@ test('presence for a while: Focused for 1 hour from the presence menu shows "Foc
   await page.click('.pres-times .chip:has-text("1 hour")');
   await page.waitForFunction(() => window.snug.S.users.robin.presence === 'focus' && window.snug.S.users.robin.presenceUntil > Date.now());
   await page.click('.self');
-  await page.locator('.me-pop .pres-opt[aria-checked="true"] small:text-matches("Focused until \\\\d")').waitFor();
+  // After 23:00 the hour ends tomorrow, and the note names the day first (js/lib/inbox.js untilText).
+  await page.locator('.me-pop .pres-opt[aria-checked="true"] small:text-matches("Focused until (\\\\w+ )?\\\\d")').waitFor();
   await page.keyboard.press('Escape');
   const row = srv.db.get('SELECT presence, presence_until FROM users WHERE id = ?', 'robin');
   assert.equal(row.presence, 'focus');
