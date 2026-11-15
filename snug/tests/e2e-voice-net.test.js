@@ -260,8 +260,9 @@ test('data saver: voice at 24 kbit/s, the camera stays off on a video call, othe
   await robin.click('button[role="switch"][aria-label="Data saver"]');
   assert.equal(await robin.evaluate(() => window.snug.S.prefs.voice.lowData), true);
   await robin.keyboard.press('Escape');
-  await joinWheel(robin);
+  // Robin joins second, so the data saver signal reaches Ines before Robin's offer does.
   await joinWheel(ines);
+  await joinWheel(robin);
   await connected(robin, 1);
   await robin.waitForFunction(async () => (await window.snug.voiceStats()).ines?.voiceMax === 24000);
   // Ines's voice to Robin follows the room (Ines has no data saver).

@@ -32,6 +32,7 @@ import { sendCaps, adaptStep, hasTurn, relayWanted, relayInsisted, sdpSession } 
 //           adapt, wantCamera, restarts, graceTimer }
 const peers = new Map();
 const pendingKinds = new Map(); // user -> what their streams are, heard before the connection
+const pendingWant = new Map();  // user -> whether they want my camera (their data saver), heard before the connection
 let mic = null;
 let micLost = false; // both captures failed in restartMic: muted until a microphone works again
 let send = null;     // what the others receive for my voice: the processed microphone (js/voiceopts.js)
@@ -210,9 +211,10 @@ function peer(user, offering) {
     pc, audio: null, screenAudio: null, queue: [], stopLevel: null,
     polite: String(S.me) > String(user), makingOffer: false, ignoreOffer: false, settingAnswer: false,
     chain: Promise.resolve(), kinds: pendingKinds.get(user) || {}, video: {}, tx: {},
-    id: ++pcSeq, relay: relayOnly, noRelay: relayOnly && !turn, adapt: { level: 0, bad: 0, good: 0 }, wantCamera: true, restarts: [], graceTimer: null,
+    id: ++pcSeq, relay: relayOnly, noRelay: relayOnly && !turn, adapt: { level: 0, bad: 0, good: 0 }, wantCamera: pendingWant.get(user) ?? true, restarts: [], graceTimer: null,
   };
   pendingKinds.delete(user);
+  pendingWant.delete(user);
   peers.set(user, p);
   pc.onnegotiationneeded = async () => {
     try {
@@ -380,7 +382,8 @@ on('rtc', ({ from, data }) => {
   // Their data saver: whether they want my camera.
   if (data.want) {
     const p = peers.get(from);
-    if (p && typeof data.want.camera === 'boolean') { p.wantCamera = data.want.camera; capBitrate(p); }
+    if (typeof data.want.camera !== 'boolean') return;
+    if (p) { p.wantCamera = data.want.camera; capBitrate(p); } else pendingWant.set(from, data.want.camera);
     return;
   }
   if (!data.sdp && !data.candidate) return;
@@ -405,6 +408,7 @@ on('voice', ({ room, users, state }) => {
   if (S.call?.room !== room) return;
   for (const u of [...peers.keys()]) if (!users.includes(u)) dropPeer(u);
   for (const u of [...pendingKinds.keys()]) if (!users.includes(u)) pendingKinds.delete(u);
+  for (const u of [...pendingWant.keys()]) if (!users.includes(u)) pendingWant.delete(u);
   for (const u of users) {
     if (u === S.me) continue;
     const away = !!state?.[u]?.reconnecting;
@@ -499,6 +503,7 @@ function stop() {
   screen?.getTracks().forEach((t) => t.stop());
   screen = null;
   pendingKinds.clear();
+  pendingWant.clear();
   awayNow.clear();
   wasMany = false;
   out = null;
