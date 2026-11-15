@@ -180,7 +180,35 @@ Real, and covered by tests with separate users:
 - Events in houses, with who is going, live to everyone in the house.
 - Presence from real connections, typing notices, unread state and saved
   messages synced across a person's devices.
-- Search over every stored message a person may read.
+- Search over every stored message a person may read, with a full-text
+  index (SQLite FTS5): results in order of relevance (more of the words, in
+  shorter messages, gently favouring recent ones), the start of a word finds
+  the whole word (`thursd` finds *Thursday*), accents fold both ways (`zasis`
+  finds *žąsis*), and when nothing matches exactly it tries indexed words one
+  or two letters away and says *Showing close matches* (that is all the
+  typo tolerance there is). Operators, permissions and filters are as
+  before. One-letter words, emoji and symbols are matched as plain text, as
+  is everything if the SQLite in your Node has no FTS5 (`SNUG_FTS=0` forces
+  that). An existing database is indexed when 0.12 first opens it. Deleted
+  messages leave the index at once (FTS5 `secure-delete`).
+- **Disappearing messages** (0.12), per direct conversation, group or room
+  (people who may manage rooms): off, 1 hour, 1 day, 7 days or 30 days, set
+  from the conversation's More menu and shown as a timer in its header. New
+  messages are removed for everyone when their time is up: text, earlier
+  versions, reactions, polls, pins, saved marks and attachments, with no
+  undo. Devices hide them on time even offline. What it can't do, and the
+  dialog says so: people can copy or screenshot a message first, and the
+  encrypted daily database backups keep a copy for up to a week. With
+  friends on other PCs it is offered only when every friend's Snug is 0.12
+  or newer (their PC removes its copy when it gets the message and the
+  timer); an older one would keep the messages.
+- **Settings > Connection** (0.12): whether this device is connected, since
+  when, the round trip, reconnects, the last problem, changes waiting to
+  send, whether calls can use a relay (TURN), whether the app opens offline
+  and the server's version, in plain words, with *Copy details* (no
+  addresses, keys or passwords). The page pings the server every 10 seconds
+  and drops a connection that says nothing for 25 seconds, so a phone
+  changing networks reconnects within about half a minute.
 - In-app notes and desktop notifications while a tab is open.
 - Notifications when Snug is closed (Settings > Notifications > *Notify me
   when Snug is closed*): Web Push through the browser's own push service, with
@@ -720,7 +748,8 @@ Real, and covered by tests with separate users:
     button per row (the older single sound still applies until you pick);
     sounds off per house, message text in notifications on or off,
     **quiet hours** (no sounds, pop-ups or pushes; the server checks them for
-    pushes in your time zone), **highlight words** that count as mentions
+    pushes in your time zone; since 0.12 each weekday can follow the usual
+    hours, have none, be quiet all day or have its own times), **highlight words** that count as mentions
     (also for pushes), and **@everyone and @here** (from people who may post
     notices) counted as mentions unless you turn that off for a house.
   - **Streamer mode** (`Ctrl`/`⌘ Shift S`, Settings, or View in the desktop app): usernames,
