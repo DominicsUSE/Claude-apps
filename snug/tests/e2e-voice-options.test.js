@@ -162,6 +162,9 @@ test('push to talk: the key opens what is sent and closes it after the release d
   d = await debug(robin);
   assert.equal(d.ptt, true);
   await robin.keyboard.up('KeyV');
+  // The key talked: it typed nothing into the message box, so nobody saw "Robin is typing".
+  const draft = await robin.locator('.composer textarea').first().inputValue().catch(() => '');
+  assert.doesNotMatch(draft, /v/i, 'the push-to-talk key never types');
   // Still open just after letting go (the 300 ms delay), then closed.
   assert.equal((await debug(robin)).trackEnabled, true, 'the release delay keeps it open for a moment');
   await robin.waitForFunction(() => window.snug.voiceDebug().trackEnabled === false, null, { timeout: 3000 });

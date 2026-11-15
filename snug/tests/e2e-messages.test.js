@@ -258,3 +258,31 @@ test('gifs: "Recent in your places" shows a GIF someone else posted; reduced mot
   await gif.locator('canvas').waitFor();
   await robin.emulateMedia({ reducedMotion: 'no-preference' });
 });
+
+// Panel fixes: Ctrl+K in the message box opens the quick switcher and leaves the draft alone;
+// with text selected it makes a link and nothing else. The sample house's pictures load.
+test('Ctrl+K: the quick switcher without a selection, a link around a selection; sample pictures show', async () => {
+  const p = await person('robin');
+  await go(p, 'Glaze lab');
+  await box(p).fill('Heads up ');
+  await box(p).press('End');
+  await box(p).press('Control+k');
+  await p.locator('.quick').waitFor();
+  assert.equal(await box(p).inputValue(), 'Heads up ', 'the draft is untouched');
+  await p.keyboard.press('Escape');
+  await p.locator('.quick').waitFor({ state: 'detached' });
+  await box(p).fill('see the docs');
+  await box(p).evaluate((el) => { el.focus(); el.setSelectionRange(8, 12); });
+  await box(p).press('Control+k');
+  await p.waitForFunction(() => /\[docs\]\(/.test(document.querySelector('.main .composer textarea').value));
+  assert.equal(await p.locator('.quick').count(), 0, 'no quick switcher over a link');
+  await box(p).fill('');
+  // Every picture in the sample house loads (the sample art is SVG, shown inline under the sandbox policy).
+  await p.waitForFunction(() => {
+    const imgs = [...document.querySelectorAll('.main .msg img')].filter((i) => i.src.includes('/api/files/'));
+    return imgs.length > 0 && imgs.every((i) => i.complete);
+  }, null, { timeout: 15000 });
+  const broken = await p.evaluate(() => [...document.querySelectorAll('.main .msg img')].filter((i) => i.src.includes('/api/files/') && i.complete && i.naturalWidth === 0).map((i) => i.src));
+  assert.deepEqual(broken, [], 'no broken pictures');
+  await p.context().close();
+});

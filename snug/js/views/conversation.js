@@ -335,8 +335,8 @@ function Intro({ conv, meta }) {
     ${meta.user && html`<span class="start-mark" aria-hidden="true"><${Avatar} user=${meta.user} size=${56} /></span>`}
     <h2>${meta.title}</h2>
     <p>${meta.user
-      ? `This is the start of your conversation with ${meta.user.name.split(' ')[0]}. Only the two of you can read it.`
-      : `A group of ${meta.dm.members.length}. Only the people in it can read it.`}</p>
+      ? `This is the start of your conversation with ${meta.user.name.split(' ')[0]}. Only the two of you are in it.`
+      : `A group of ${meta.dm.members.length}. Only the people in it can see it here.`}</p>
   </div>`;
 }
 

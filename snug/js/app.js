@@ -361,7 +361,8 @@ function onKey(e) {
   if (S.auth !== 'in' || !S.ready) return undefined;
   const mod = e.metaKey || e.ctrlKey;
   const k = e.key;
-  const act = e.isComposing ? null : actionFor(e, S.prefs.keys, isMac);
+  // A key the focused control already used (Ctrl+K making a link around a selection) does nothing else.
+  const act = e.isComposing || e.defaultPrevented ? null : actionFor(e, S.prefs.keys, isMac);
   const layer = S.ui.modal || S.ui.layer || S.ui.quick || S.ui.menu || S.ui.pop || S.ui.lightbox;
   if (act && (!READY[act] || READY[act]())) {
     const a = actionById(act);

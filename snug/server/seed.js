@@ -60,8 +60,9 @@ export function seedDatabase(db, filesDir, { password = 'snug-demo-1', now = Dat
         const fid = `f_seed${f.art}${m.id.replace(/[^a-z0-9]/g, '')}`;
         const svg = decodeURIComponent(ART[f.art].slice('data:image/svg+xml,'.length));
         writeFileSync(join(filesDir, fid), svg, { mode: 0o600 });
-        db.run('INSERT INTO files (id, owner, conv, name, type, size, created) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          fid, m.author, conv, f.name.replace(/\.(jpg|png)$/, '.svg'), 'image/svg+xml', Buffer.byteLength(svg), m.ts);
+        // meta.seed: Snug's own sample pictures, the only SVG the server shows inline (server/index.js).
+        db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          fid, m.author, conv, f.name.replace(/\.(jpg|png)$/, '.svg'), 'image/svg+xml', Buffer.byteLength(svg), m.ts, JSON.stringify({ seed: 1 }));
         files.push({ kind: 'image', id: fid, name: f.name.replace(/\.(jpg|png)$/, '.svg'), size: Buffer.byteLength(svg), w: f.w, h: f.h });
       }
       db.run('INSERT INTO messages (id, conv, author, ts, text, fold, reply_to, files) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',

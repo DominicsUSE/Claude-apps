@@ -418,7 +418,9 @@ export async function startServer({
       if (!row || (!(conv && M.canRead(user, conv)) && !emojiR.fileReadable(user, row))) return error(res, 404, 'Not found');
       // p2p: a friend's attachment not fetched yet comes from their PC first (or 404 {offline} while they're away).
       if (peer.missing(row)) { if (await peer.serveMissing(req, res, row, user)) return undefined; row = db.get('SELECT * FROM files WHERE id = ?', row.id); }
-      const inline = INLINE.has(row.type);
+      // Uploaded SVG always downloads (it can carry script); the sample house's own pictures, written by
+      // server/seed.js and marked meta.seed, show inline, still under the sandbox policy below.
+      const inline = INLINE.has(row.type) || (row.type === 'image/svg+xml' && (() => { try { return JSON.parse(row.meta || '{}')?.seed === 1; } catch { return false; } })());
       // Range requests (206), so a voice message can seek.
       const range = parseRange(req.headers.range, row.size);
       if (range === 'bad') { headers(res, { 'Content-Range': `bytes */${row.size}` }); res.writeHead(416); res.end(); return undefined; }

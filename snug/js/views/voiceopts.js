@@ -321,16 +321,25 @@ export function MiniCall() {
 
 // ---------- Background work ----------
 
-// Push to talk from the keyboard, while Snug has focus. The key keeps working
-// in text boxes too (it still types), like a walkie-talkie button would.
+// Push to talk from the keyboard, while Snug has focus. It works in text boxes too, and while
+// you're in a push-to-talk call the key belongs to the microphone: it doesn't type, doesn't move
+// the focus into the message box and doesn't tell anyone you're typing.
 let capturingKey = false;
 export function setCapturingKey(on) { capturingKey = on; }
 const pttActive = () => S.call?.status === 'live' && vp().mode === 'ptt';
+const pttOwns = (e) => !capturingKey && pttActive() && e.code === vp().pttKey && !e.ctrlKey && !e.metaKey && !e.altKey;
 document.addEventListener('keydown', (e) => {
-  if (capturingKey || e.repeat || !pttActive() || e.code !== vp().pttKey) return;
-  pttPress('key');
+  if (!pttOwns(e)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (!e.repeat) pttPress('key');
 }, true);
-document.addEventListener('keyup', (e) => { if (e.code === vp().pttKey) pttRelease('key'); }, true);
+document.addEventListener('keypress', (e) => { if (pttOwns(e)) { e.preventDefault(); e.stopPropagation(); } }, true);
+document.addEventListener('keyup', (e) => {
+  if (e.code !== vp().pttKey) return;
+  if (pttOwns(e)) { e.preventDefault(); e.stopPropagation(); }
+  pttRelease('key');
+}, true);
 // Without focus there's no key-up to wait for: let go now (the desktop app's global key takes over).
 addEventListener('blur', () => pttRelease('key', 0));
 

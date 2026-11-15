@@ -517,11 +517,14 @@ export function applyFormat(el, text, update, kind) {
 }
 
 // Ctrl (or Cmd) + B, I, U, E (code), K (link), Shift+X (strikethrough). True if handled.
+// K makes a link only around selected text; with nothing selected it stays the quick switcher
+// (js/app.js), and the draft is left alone.
 export function formatKey(e, el, text, update) {
   if (!(e.ctrlKey || e.metaKey) || e.altKey || !el) return false;
   const k = e.key.toLowerCase();
   const kind = e.shiftKey ? (k === 'x' ? 'strike' : null) : { b: 'bold', i: 'italic', u: 'underline', e: 'code', k: 'link' }[k];
   if (!kind) return false;
+  if (kind === 'link' && !(el.selectionEnd > el.selectionStart)) return false;
   e.preventDefault();
   applyFormat(el, text, update, kind);
   return true;

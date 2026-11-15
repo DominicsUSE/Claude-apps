@@ -281,7 +281,7 @@ export function VoiceSettings() {
           </label>
         <//>`}`
       : html`
-        <${Row} label="Push to talk key" hint="Hold it to talk. It works anywhere in Snug, even while typing.">
+        <${Row} label="Push to talk key" hint="Hold it to talk. It works anywhere in Snug, even in the message box: during a push-to-talk call this key talks instead of typing.">
           <${KeyPicker} />
         <//>
         <${Row} label="Release delay" hint="How long your microphone stays open after you let go, so your last word isn’t cut off." top>
