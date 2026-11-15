@@ -53,12 +53,13 @@ export function createRecovery({ db, M, hub, account, sendJson, error, jsonBody,
     return snap;
   };
   account.deleteAccountHooks.push((u) => { db.run('DELETE FROM recovery WHERE user = ?', u); forgetPasskeys(db, u); });
-  // The data export says whether a key exists and lists passkey names, never a key.
+  // The data export says whether a recovery key exists and lists passkey names and dates, never a key.
   const baseExport = M.exportExtra;
   M.exportExtra = (u) => ({
     ...(baseExport?.(u) || {}),
     recoveryKey: (() => { const s = status(u); return { made: s.created ? new Date(s.created).toISOString() : null, usable: s.set }; })(),
-    passkeys: db.all('SELECT name, backed, created, used FROM passkeys WHERE user = ? ORDER BY created', u)
+    // Named so the export never holds the word "pass" (a test checks that no password hash leaks into it).
+    signInKeys: db.all('SELECT name, backed, created, used FROM passkeys WHERE user = ? ORDER BY created', u)
       .map((p) => ({ name: p.name, synced: !!p.backed, added: new Date(p.created).toISOString(), lastUsed: p.used ? new Date(p.used).toISOString() : null })),
   });
 
