@@ -61,6 +61,10 @@ const CSP = [
 const BASE_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 const SVG_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'none'";
 const WORKER_CSP = "default-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
+// Help pages (docs/*.html, e.g. docs/install.html): plain reading pages with Snug's own stylesheets, fonts
+// and pictures; no script, no inline style, no frames, no forms. (Belongs with the other policies in
+// server/csp.js once that file exists.)
+const DOCS_CSP = "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 const HSTS = 'max-age=31536000; includeSubDomains';
 // sec-web: a stricter page policy in report-only mode (no inline styles, Trusted
 // Types for script sinks). Nothing is blocked by it; what it would block is
@@ -305,6 +309,7 @@ export async function startServer({
         'Content-Security-Policy-Report-Only': CSP_STRICT, // sec-web
       } : {}),
       ...(extname(file) === '.svg' ? { 'Content-Security-Policy': SVG_CSP } : {}), // sec-web W6
+      ...(rel.startsWith('docs/') && extname(file) === '.html' ? { 'Content-Security-Policy': DOCS_CSP } : {}),
       ...(rel === 'sw.js' ? { 'Service-Worker-Allowed': '/', 'Content-Security-Policy': WORKER_CSP } : {}), // push notifications
     });
     await sendFile(res, file); // sec-web W1: a file gone since the stat is a 404, not a crash

@@ -1,0 +1,35 @@
+/* docs/install.html: a plain reading page on Snug's tokens (css/tokens.css), light or dark with the device.
+   No script and no inline styles: the docs pages' policy (server/index.js DOCS_CSP) allows neither. */
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--surface-rail); color: var(--text-1); font-family: var(--font); font-size: 100%; -webkit-text-size-adjust: 100%; }
+body { margin: 0; padding: var(--s-8) var(--s-4) var(--s-16); line-height: var(--lh-body); font-size: var(--t-15); }
+main { max-width: 46rem; margin: 0 auto; }
+header { display: grid; gap: var(--s-3); margin-bottom: var(--s-8); }
+header img { width: 128px; height: auto; }
+h1 { font-size: var(--t-32); line-height: var(--lh-display); font-weight: var(--w-bold); margin: 0; letter-spacing: -0.02em; }
+h2 { font-size: var(--t-20); line-height: var(--lh-heading); font-weight: var(--w-semibold); margin: var(--s-10) 0 var(--s-3); }
+h3 { font-size: var(--t-16); line-height: var(--lh-heading); font-weight: var(--w-semibold); margin: var(--s-6) 0 var(--s-2); }
+p, ul, ol { margin: 0 0 var(--s-3); }
+li + li { margin-top: var(--s-1); }
+.lead { font-size: var(--t-16); color: var(--text-2); }
+a { color: var(--link); text-underline-offset: 2px; }
+a:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 2px; }
+code, kbd, pre { font-family: var(--mono); font-size: var(--t-13); }
+code, kbd { background: var(--surface-float); border: 1px solid var(--line); border-radius: var(--r-row); padding: 0 var(--s-1); overflow-wrap: anywhere; }
+pre { background: var(--surface-float); border: 1px solid var(--line); border-radius: var(--r-input); padding: var(--s-3); margin: 0 0 var(--s-3); overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+pre code { background: none; border: 0; padding: 0; }
+.files { width: 100%; border-collapse: collapse; margin: 0 0 var(--s-3); font-size: var(--t-14); }
+.files th, .files td { text-align: left; vertical-align: top; padding: var(--s-2) var(--s-3) var(--s-2) 0; border-bottom: 1px solid var(--line); }
+.files th { color: var(--text-2); font-weight: var(--w-medium); }
+.files td:last-child { overflow-wrap: anywhere; }
+.note { border-left: 3px solid var(--amber); background: var(--surface-float); border-radius: var(--r-row); padding: var(--s-3) var(--s-4); margin: 0 0 var(--s-3); }
+.note p:last-child { margin-bottom: 0; }
+.muted { color: var(--text-2); }
+footer { margin-top: var(--s-12); color: var(--text-3); font-size: var(--t-13); }
+@media (max-width: 480px) {
+  body { padding-top: var(--s-6); }
+  h1 { font-size: var(--t-24); }
+  .files thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .files tr { display: grid; gap: var(--s-1); padding: var(--s-2) 0; border-bottom: 1px solid var(--line); }
+  .files th, .files td { border: 0; padding: 0; }
+}

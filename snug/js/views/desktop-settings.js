@@ -50,7 +50,7 @@ export function DesktopPage({ Row }) {
   const [errors, setErrors] = useState({});
   const [restart, setRestart] = useState(false);
   useEffect(() => { app()?.getDesktopSettings?.().then(setCfg, () => setCfg({})); }, []);
-  if (!app()?.desktop) return html`<h1>Desktop app</h1><p class="lead">These settings are in the Snug desktop app.</p>`;
+  if (!app()?.desktop) return html`<${GetTheApp} />`;
   if (!cfg) return html`<h1>Desktop app</h1><p class="lead" role="status">Loading…</p>`;
   const set = (patch) => {
     const before = cfg;
@@ -107,10 +107,23 @@ export function DesktopPage({ Row }) {
 
 // Settings (js/views/settings.js): the Desktop app page, shown only in the
 // desktop app, and the Username row on the Profile page.
+// In a browser the page says where the app comes from: the install page (docs/install.html, served by every
+// Snug server) has the files, the warnings and how to check a download.
+function GetTheApp() {
+  return html`
+    <h1>Desktop app</h1>
+    <p class="lead">Snug is also an app for Windows and Mac, with notifications while the window is closed and
+      mute keys that work in other apps. Its settings appear here when you use it.</p>
+    <p><a href="/docs/install.html" target="_blank" rel="noopener">How to download, check and install the app</a></p>`;
+}
+
 export function registerDesktopPage({ PAGES, VIEWS, Row }) {
   if (typeof window !== 'undefined' && window.snugApp?.desktop) {
     PAGES.push({ id: 'desktop', label: 'Desktop app', icon: 'screen', words: 'desktop app startup login boot minimise tray hardware acceleration gpu global shortcut mute deafen badge' });
     VIEWS.desktop = () => html`<${DesktopPage} Row=${Row} />`;
+  } else if (typeof window !== 'undefined') {
+    PAGES.push({ id: 'desktop', label: 'Desktop app', icon: 'screen', words: 'desktop app download install windows mac exe dmg' });
+    VIEWS.desktop = () => html`<${GetTheApp} />`;
   }
   const profile = VIEWS.profile;
   if (profile) VIEWS.profile = (p) => html`<${profile} ...${p} /><${HandleRow} Row=${Row} />`;

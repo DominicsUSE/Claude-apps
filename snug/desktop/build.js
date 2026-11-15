@@ -19,6 +19,10 @@ function copyApp() {
   for (const name of ["index.html", "sw.js", "brand", "css", "js", "fonts", "vendor", "server"]) {
     fs.cpSync(path.join(SNUG, name), path.join(APP, name), { recursive: true });
   }
+  // The install page (Settings > Desktop app links to it), so people joining this PC's Snug from a browser
+  // find it too. Only these two files: the rest of docs/ is the project's own reference.
+  fs.mkdirSync(path.join(APP, "docs"), { recursive: true });
+  for (const name of ["install.html", "install.css"]) fs.copyFileSync(path.join(SNUG, "docs", name), path.join(APP, "docs", name));
   // The server and page are ES modules; this marks the folder as such.
   fs.writeFileSync(path.join(APP, "package.json"), JSON.stringify({ type: "module", private: true }) + "\n");
   fs.mkdirSync(path.join(ROOT, "build"), { recursive: true });

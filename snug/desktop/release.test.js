@@ -117,6 +117,25 @@ test("no release yet: created at this commit, marked latest, files and checksums
   assert.ok(!calls.some((c) => c.includes("--clobber")), "never --clobber");
 });
 
+test("the release notes say which file to pick, the warnings honestly, and how to check a download", () => {
+  for (const platform of ["windows", "mac"]) {
+    const s = setup(`notes-${platform}`);
+    const files = platform === "windows" ? winFiles(s) : [s.make(`Snug-${VERSION}-mac.dmg`)];
+    const r = s.run(platform, files);
+    assert.equal(r.status, 0, r.stderr);
+    const notes = s.state().releases[TAG].notes;
+    // Whichever workflow creates the release, the notes cover both systems.
+    for (const want of [
+      `Snug-Setup-${VERSION}.exe`, `Snug-${VERSION}-portable.exe`, `Snug-${VERSION}-mac.dmg`,
+      "Windows protected your PC", "**More info**, then **Run anyway**", "Digital Signatures", // unsigned for now: say so
+      "not notarized", "Privacy & Security", "Open Anyway",
+      `Get-FileHash .\\Snug-Setup-${VERSION}.exe -Algorithm SHA256`, `shasum -a 256 -c SHA256SUMS-mac.txt`,
+      `gh attestation verify Snug-Setup-${VERSION}.exe -R DominicsUSE/Claude-apps`,
+      "/docs/install.html", "never goes back to an older version",
+    ]) assert.ok(notes.includes(want), `${platform}: notes mention ${want}`);
+  }
+});
+
 test("a release without this platform's files (the Mac workflow made it): nothing is created, only ours are added", () => {
   const s = setup("other-platform");
   s.seed({ releases: { [TAG]: { latest: false, target: "mac", assets: { [`Snug-${VERSION}-mac.dmg`]: "dmg", "SHA256SUMS-mac.txt": "sums" } } } });
