@@ -78,6 +78,11 @@ test('presence "friends only": a house-mate sees me offline with no activity lin
   assert.ok(await none(bex2, 'user', (d) => d.user.id === robin.id && d.user.presence !== 'offline'), 'bex never hears robin is online');
   const seen = bex2.events.filter((e) => e.ev === 'user' && e.d.user.id === robin.id);
   assert.ok(seen.length && seen.every((e) => e.d.user.hideActive === true), 'and keeps hiding his activity');
+  // Discover's "people you might know" follows it too.
+  const d = await bex2.ok('discover', {});
+  const card = d.people.find((x) => x.user.id === robin.id);
+  assert.ok(card, "robin is someone bex might know");
+  assert.equal(card.user.presence, "offline");
   // Robin still sees himself as he is.
   const me = new Client(srv, robin.cookie, robin.id); await me.connect();
   assert.equal(me.hello.users[robin.id].presence, 'focus');

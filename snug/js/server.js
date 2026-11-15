@@ -324,11 +324,12 @@ const EVENTS = {
     clearTimeout(typingTimers[`${conv}|${user}`]);
     typingTimers[`${conv}|${user}`] = setTimeout(() => { stopTyping(conv, user); emit(); }, 6000);
   },
-  presence({ user, presence }) {
-    if (S.users[user]) S.users[user].presence = presence;
+  presence({ user, presence, hideActive }) {
+    if (S.users[user]) { S.users[user].presence = presence; if (!hideActive) delete S.users[user].hideActive; }
   },
   user({ user }) {
     S.users[user.id] = { ...S.users[user.id], ...user };
+    if (!user.hideActive) delete S.users[user.id].hideActive; // privacy: they show their activity to you again (server/privacy.js)
   },
   house({ house, rooms, users }) {
     const before = S.houses[house.id];

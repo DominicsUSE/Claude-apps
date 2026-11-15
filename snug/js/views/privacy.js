@@ -75,7 +75,7 @@ export function PrivacyControls({ Row }) {
     <//>`}`;
 }
 
-// The full privacy page, for ordinary people. `standalone`: the /privacy address, signed in or not.
+// The full privacy page, for ordinary people: in Settings (Privacy guide) and on its own at /privacy (PrivacyDoc).
 export function PrivacyGuide({ level = 2 }) {
   const about = useAbout();
   const f = factsNow(about);
@@ -83,7 +83,7 @@ export function PrivacyGuide({ level = 2 }) {
   const other = whoSeesWhat({ ...f, mode: f.mode === 'p2p' ? 'host' : 'p2p' }).filter((s) => s.id === 'messages' || s.id === 'directory');
   return html`<div class="pv-guide" id="pv-guide" data-mode=${f.mode}>
     <p class="lead">What Snug stores, who can see it, and what you can do about it, in plain words. This page describes ${f.mode === 'p2p' ? 'the desktop app with friends on other PCs' : `this Snug at ${f.host}`}.</p>
-    <${Sections} sections=${whoSeesWhat(f)} level=${level + 1} />
+    <${Sections} sections=${whoSeesWhat(f)} level=${level} />
     <section class="pv-sect" data-pv="kept" aria-labelledby="pv-kept">
       <${H} id="pv-kept">What this Snug keeps, and for how long<//>
       <ul>${keptFor(about || {}).map((t, i) => html`<li key=${i}>${t}</li>`)}</ul>

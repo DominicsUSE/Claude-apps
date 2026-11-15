@@ -70,6 +70,9 @@ export function createPrivacy({ db, M, hub, ops, peer = null, facts = {}, filesD
     return to === 'friends' && M.areFriends(viewer, user);
   };
   M.presenceToAll = (user) => narrow.get(user) !== 'nobody';
+  // "How many are online" in Discover doesn't count people who show to nobody.
+  const baseOnline = hub.isOnline;
+  if (baseOnline) hub.isOnline = (u) => baseOnline(u) && M.presenceToAll(u);
   const quietTyping = (u) => prefs(u).typing === false || narrow.get(u) === 'nobody' || M.userRow(u)?.presence === 'offline';
 
   // ---------- Every frame out ----------
@@ -85,15 +88,32 @@ export function createPrivacy({ db, M, hub, ops, peer = null, facts = {}, filesD
     }
     return out;
   }
+  // A list of { user: view, ... } (Discover's people): each item masked; the same array when nothing changed.
+  function maskList(viewer, list) {
+    let out = list;
+    list.forEach((item, i) => {
+      if (!item || typeof item !== 'object' || !isView(item.user) || M.presenceVisible(viewer, item.user.id)) return;
+      if (out === list) out = [...list];
+      out[i] = { ...item, user: masked(item.user) };
+    });
+    return out;
+  }
+  // Where people appear in a frame: `user`, a `users` map, or lists of { user } one level down.
   function maskData(viewer, ev, d) {
     if (!d || typeof d !== 'object') return d;
+    if (Array.isArray(d)) return maskList(viewer, d);
     if (ev === 'typing') return M.presenceVisible(viewer, d.user) ? d : null;
     if (ev === 'presence') return M.presenceVisible(viewer, d.user) ? d : { ...d, presence: 'offline', hideActive: true };
     let out = d;
     if (isView(d.user) && !M.presenceVisible(viewer, d.user.id)) out = { ...out, user: masked(d.user) };
-    if (d.users && typeof d.users === 'object' && !Array.isArray(d.users)) {
-      const u = maskUsers(viewer, d.users);
-      if (u !== d.users) out = { ...out, users: u };
+    for (const [k, v] of Object.entries(d)) {
+      if (k === 'users' && v && typeof v === 'object' && !Array.isArray(v)) {
+        const u = maskUsers(viewer, v);
+        if (u !== v) out = { ...out, users: u };
+      } else if (Array.isArray(v) && v.length && isView(v[0]?.user)) {
+        const l = maskList(viewer, v);
+        if (l !== v) out = { ...out, [k]: l };
+      }
     }
     return out;
   }
