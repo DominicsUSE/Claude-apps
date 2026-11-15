@@ -6,7 +6,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { startRegistry, startPc, Client, signUp, until } from './helpers/p2p.js';
+import { startRegistry, startPc, Client, signUp, until, mid } from './helpers/p2p.js';
 import { solvePow, powOk } from '../server/pow.js';
 import { parseRecoveryKey } from '../js/lib/recovery.js';
 import { startLocalRegistry } from '../registry/dev.js';
@@ -120,6 +120,9 @@ test('pairing code: the new PC shows a code, the old PC types it, the account an
   const req = await fr.next('friend', (x) => x.friend?.state === 'incoming', 15000);
   await fr.ok('friend.accept', { user: req.id });
   await o.next('friend', (x) => x.friend?.state === 'friends', 15000);
+  // A message saved on the old PC: it should reach the new PC in the data file that follows the move.
+  const dm = (await o.ok('dm.open', { users: [fr.id] })).id; // her stand-in on this PC is u_<her uid>, as on hers
+  await o.ok('msg.send', { conv: dm, id: mid(), text: 'saved before the move' });
 
   const neu = await pc();
   const s = await post(neu, '/api/id/move/start');
@@ -142,6 +145,7 @@ test('pairing code: the new PC shows a code, the old PC types it, the account an
   await until(() => old.peer.identity.self()?.state === 'revoked', 10000, 'old PC revoked');
   // the friend came along (the restore list), and the friend's PC saw a quiet, verified key change
   await until(() => neu.db.get("SELECT 1 FROM friends f JOIN peers p ON p.user = f.other WHERE p.username = 'frieda' AND f.state = 'friends'"), 15000, 'friend restored');
+  await until(() => neu.db.get("SELECT 1 FROM messages WHERE text = 'saved before the move'"), 30000, 'the data file from the old PC');
   await until(async () => (await kindOf(neu)).kind === 'key', 5000, 'kind');
   assert.equal(neu.peer.statusFor(self.user).kind, 'key');
   o.close();
