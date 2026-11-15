@@ -181,6 +181,31 @@ function cacheData() {
   // Local image previews are only valid in this tab.
   return JSON.stringify(trimForCache(out), (k, v) => (k === 'src' && typeof v === 'string' && v.startsWith('blob:') ? undefined : v));
 }
+// Long conversations (0.12): what has been scrolled far back, or piled up in a
+// conversation that isn't open, is let go once it's all been read; scrolling
+// back loads it again from the server (S.more). Messages still waiting to
+// send are never let go. Returns true if anything went.
+export const KEEP_LOADED = 2 * PAGE;
+export function releaseOld(conv, keep = KEEP_LOADED) {
+  const list = S.msgs[conv];
+  if (!list || list.length <= keep) return false;
+  const cut = list.length - keep;
+  S.msgs[conv] = list.filter((m, i) => i >= cut || m.state);
+  S.more[conv] = true;
+  S.ui.win[conv] = PAGE;
+  scrollPos.delete(conv);
+  return true;
+}
+// Conversations not on screen, fully read, holding far more than they need.
+function releaseBackground() {
+  const open = new Set([S.ui.view?.id, S.ui.pane?.id].filter(Boolean));
+  for (const [conv, list] of Object.entries(S.msgs)) {
+    if (open.has(conv) || list.length <= 4 * PAGE) continue;
+    const last = list[list.length - 1];
+    if (last && (S.read[conv] || 0) >= last.ts) releaseOld(conv);
+  }
+}
+
 // Disappearing messages (0.12): hidden at their time on this device, even
 // offline, and left out of the device copy. A timer wakes for the next one.
 let expiryTimer;
@@ -207,6 +232,7 @@ export function persist() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     if (sweepExpired()) emit();
+    releaseBackground();
     local.set(KEYS.prefs, S.prefs);
     local.set(KEYS.drafts, S.drafts);
     local.set(KEYS.reply, S.ui.reply);

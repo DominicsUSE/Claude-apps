@@ -308,3 +308,42 @@ test('Settings > Connection: plain words for the socket, round trip, relay, vers
   assert.equal(/127\.0\.0\.1|snug_session|password/i.test(copied), false, 'no addresses or secrets');
   await ctx.close();
 });
+
+test('long conversations: scrolling far back loads pages, coming back to the bottom lets the old ones go, and jumping back still works', async () => {
+  const room = srv.db.get("SELECT id FROM rooms WHERE name = 'Marketplace'").id;
+  const authors = srv.db.all("SELECT id FROM users WHERE handle IN ('ines', 'tomasz', 'priya')").map((r) => r.id);
+  const t0 = Date.now() - 2 * 86_400_000;
+  srv.db.tx(() => {
+    for (let i = 1; i <= 900; i++) {
+      const text = `long line ${i}`;
+      srv.db.run('INSERT INTO messages (id, conv, author, ts, text, fold) VALUES (?, ?, ?, ?, ?, ?)', `m_long${String(i).padStart(6, '0')}`, room, authors[i % 3], t0 + i * 60_000, text, text);
+    }
+  });
+  const page = await person('sunniva');
+  await go(page, 'Marketplace');
+  await msg(page, 'long line 900').waitFor();
+  const count = () => page.evaluate(() => document.querySelectorAll('.main .msg').length);
+  const held = (r) => page.evaluate((c) => window.snug.S.msgs[c].length, r);
+  // Scroll to the top again and again: older pages come in.
+  for (let i = 0; i < 30 && (await count()) < 320; i++) {
+    const before = await count();
+    await page.evaluate(() => document.querySelector('.main .scroller').scrollTo(0, 0));
+    await page.waitForFunction((n) => document.querySelectorAll('.main .msg').length > n, before, { timeout: 4000 }).catch(() => {});
+  }
+  assert.ok((await count()) >= 320, `rendered ${await count()} after scrolling back`);
+  // Back to the bottom: what is far above is let go, on screen and in memory.
+  await page.evaluate(() => { const s = document.querySelector('.main .scroller'); s.scrollTop = s.scrollHeight; });
+  await page.waitForFunction(() => document.querySelectorAll('.main .msg').length <= 120, null, { timeout: 5000 });
+  assert.ok((await held(room)) <= 120, `holding ${await held(room)} messages`);
+  assert.equal(await page.evaluate((c) => window.snug.S.more[c], room), true, 'the rest loads again when scrolled to');
+  // Still at the bottom, with the newest showing.
+  await msg(page, 'long line 900').waitFor();
+  // Jumping to a message far back loads it again and shows it.
+  await page.evaluate(() => { window.snug.S.ui.view = { type: 'search', q: 'long line 42' }; window.snug.emit(); });
+  await page.locator('.search-results .item-text', { hasText: /^long line 42$/ }).first().click();
+  const target = page.locator('.main .msg', { has: page.locator('.body, .text, p', { hasText: /^long line 42$/ }) });
+  await page.locator('.main .msg[data-id="m_long000042"]').waitFor();
+  assert.ok(await page.locator('.main .msg[data-id="m_long000042"]').isVisible(), 'the old message is on screen');
+  void target;
+  await page.context().close();
+});

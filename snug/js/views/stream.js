@@ -2,7 +2,7 @@
 // messages and threads are all the same component.
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import {
-  S, person, emit, persist, PAGE, scrollPos, convMeta, findMsg, isSaved, isOnline, membersOf, markRead, markUnreadFrom,
+  S, person, emit, persist, PAGE, scrollPos, releaseOld, convMeta, findMsg, isSaved, isOnline, membersOf, markRead, markUnreadFrom,
   openThread, openMenu, openPop, closePop, react, toggleSave, toggleHighlight, deleteMsg, editMsg, setReply,
   setEditing, openLightbox, toast, setPresence, setStatus,
 } from '../store.js';
@@ -578,6 +578,10 @@ function msgZone(el) {
   return [...bar, ...all.filter((c) => !bar.includes(c))];
 }
 
+// Past this many messages on screen or in memory, coming back to the bottom
+// lets the older ones go (js/store.js releaseOld). Scrolling up loads them again.
+const MAX_RENDER = 300;
+
 export function Stream({ conv, intro, placeholder }) {
   const all = S.msgs[conv] || [];
   const win = S.ui.win[conv] || PAGE;
@@ -586,7 +590,7 @@ export function Stream({ conv, intro, placeholder }) {
   const scroller = useRef();
   const inner = useRef();
   const stick = useRef(true);
-  const prevLen = useRef(all.length);
+  const prevLast = useRef(all[all.length - 1]?.id ?? null);
   const prepend = useRef(null);
   const [below, setBelow] = useState(0);
   const [far, setFar] = useState(false);
@@ -626,11 +630,18 @@ export function Stream({ conv, intro, placeholder }) {
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el || !ready) return;
-    if (prepend.current != null) { el.scrollTop += el.scrollHeight - prepend.current; prepend.current = null; }
-    const added = all.length - prevLen.current;
-    prevLen.current = all.length;
-    if (added <= 0) return;
+    // While older messages are loading, the placeholder rows and then the
+    // messages arrive in separate renders: keep compensating until done.
+    if (prepend.current != null) { el.scrollTop += el.scrollHeight - prepend.current; prepend.current = older === 'loading' ? el.scrollHeight : null; }
+    // New messages are the ones after the last one seen: older pages loading in
+    // above, or old ones let go (0.12), aren't news.
     const last = all[all.length - 1];
+    const was = prevLast.current;
+    prevLast.current = last?.id ?? null;
+    if (!last || last.id === was) return;
+    const at = was ? all.findIndex((m) => m.id === was) : -1;
+    if (was && at < 0) return; // the last one was deleted or disappeared
+    const added = at >= 0 ? all.length - 1 - at : 1;
     if (stick.current || last.author === S.me) {
       el.scrollTop = el.scrollHeight;
       stick.current = true;
@@ -679,6 +690,8 @@ export function Stream({ conv, intro, placeholder }) {
       scrollPos.delete(conv);
       if (below) setBelow(0);
       markRead(conv);
+      // Back at the bottom after reading far back: let the far-off pages go (0.12).
+      if ((win > MAX_RENDER || all.length > MAX_RENDER) && !older && releaseOld(conv)) emit();
     } else scrollPos.set(conv, el.scrollTop);
     if (el.scrollTop < 120 && (start > 0 || S.more[conv]) && !older) loadOlder();
   };
