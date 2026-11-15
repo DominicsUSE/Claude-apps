@@ -32,6 +32,7 @@ import { joinVoice, toggleMute, toggleDeaf } from '../voice.js';
 import { leavingCall } from '../calls.js';
 import { groupMenu, roomMoveItems, roomDrag, groupDrag, mayArrange, GroupForm, HouseBanner } from './community.js'; // categories, moving rooms, the house banner
 import { muteItems, rolesOff, setRolesOff, orderDms } from '../inbox.js'; // timed mutes, @role suppression, pinned and closed conversations
+import { newcomerSees } from '../lib/onboarding.js'; // newcomers see starter and voice rooms
 import { dmManageItems, groupFace } from './dm-manage.js'; // close, pin, rename, icon, add people, leave
 import { EncInvite } from './e2ee-setup.js'; // the offer to turn on end-to-end encryption, above the direct messages
 
@@ -118,7 +119,7 @@ export function goBack() {
 const roomVisible = (id) => {
   const room = S.rooms[id];
   const h = room && S.houses[room.house];
-  return !!h?.joined && (!h.newcomer || h.starter.includes(id));
+  return !!h?.joined && newcomerSees(h, id, room.kind);
 };
 
 // Go to a place from the rail. Choosing the place you are already in goes to
@@ -132,7 +133,7 @@ export function openSpace(sp) {
   if (sp === 'discover') return go(last?.type === 'discover' ? last : { type: 'discover' });
   if (sp === 'messages') {
     if (again && S.ui.view.type === 'conv' && spaceOf(S.ui.view) === 'messages') return undefined;
-    const id = last?.type === 'conv' && S.dms[last.id] ? last.id : S.dmOrder[0];
+    const id = last?.type === 'conv' && S.dms[last.id] ? last.id : orderDms()[0];
     return id ? openConv(id) : go({ type: 'messages' });
   }
   if (!S.ui.phone && last?.type === 'conv' && roomVisible(last.id) && S.rooms[last.id].house === sp) return openConv(last.id);
@@ -319,7 +320,7 @@ export function Rail({ sp = S.ui.space, pick = openSpace } = {}) {
       <//>
       <div class="rail-sep" role="separator"></div>
       <${RailHouses} sp=${sp} RailItem=${RailItem} houseMenu=${houseMenu} openSpace=${pick} houseAttention=${houseAttention} />
-      <${RailItem} label="Create or join a community" cls="rail-add" attn=${{ needs: 0 }} onClick=${() => openModal(AddHouse)}>
+      <${RailItem} label="Start or join a house" cls="rail-add" attn=${{ needs: 0 }} onClick=${() => openModal(AddHouse)}>
         <${Icon} name="plus" size=${20} />
       <//>
     </div>
@@ -551,7 +552,10 @@ export function HouseRooms({ id }) {
   const h = S.houses[id];
   const cur = current();
   const mayAdd = can(S, id, 'rooms');
-  const hidden = h.newcomer ? roomIds(S, id).length - h.starter.length : 0;
+  // Newcomers see their starter rooms and every voice room; the rest can be
+  // read from Browse until their first message adds them (js/lib/onboarding.js).
+  const sees = (r) => newcomerSees(h, r, S.rooms[r]?.kind);
+  const hidden = h.newcomer ? roomIds(S, id).filter((r) => !sees(r)).length : 0;
   const now = Date.now();
   const events = upcomingEvents(S, now, { house: id });
   const live = events.some((e) => eventState(e, now) === 'now');
@@ -565,7 +569,7 @@ export function HouseRooms({ id }) {
     </div>
     ${h.groups.map((g) => {
       const gShut = !!S.prefs.groupShut[g.id];
-      let rooms = h.newcomer ? g.rooms.filter((r) => h.starter.includes(r)) : g.rooms;
+      let rooms = g.rooms.filter(sees);
       if (!rooms.length && !mayAdd) return null;
       const empty = !rooms.length;
       // A collapsed group still shows the room you are in and anything that needs you.
@@ -584,7 +588,8 @@ export function HouseRooms({ id }) {
         ${rooms.map((r) => (mayArrange(id) && !h.newcomer ? html`<div class="room-dnd" key=${r} ...${roomDrag(id, r)}><${RoomRow} id=${r} /></div>` : html`<${RoomRow} key=${r} id=${r} />`))}
       </div>`;
     })}
-    ${hidden > 0 && html`<div class="nav-group"><${Row} icon=${html`<${Icon} name="chev-r" size=${16} />`} label=${`Browse ${plural(hidden, 'more room')}`} onClick=${() => openModal(RoomBrowser, { house: id })} /></div>`}`;
+    ${hidden > 0 && html`<div class="nav-group newcomer-more"><${Row} icon=${html`<${Icon} name="chev-r" size=${16} />`} label=${`Browse ${plural(hidden, 'more room')}`}
+      line="Read them now. They join this list once you post." onClick=${() => openModal(RoomBrowser, { house: id })} /></div>`}`;
 }
 
 function HouseHead({ id }) {
@@ -702,7 +707,7 @@ export function contextPlaces() {
       ...recentConvs().map(conv),
     ];
   }
-  if (sp === 'messages') return S.dmOrder.map(conv);
+  if (sp === 'messages') return orderDms().map(conv);
   if (sp === 'discover') {
     return [
       ...DISCOVER_SECTIONS.map((s) => view({ type: 'discover', section: s.id }, v.type === 'discover' && !v.topic && v.section === s.id)),

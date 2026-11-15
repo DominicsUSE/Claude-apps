@@ -32,6 +32,7 @@ import {
   VERIFY_IDS, verifyWaitUntil, PAUSE_HOURS, NEVER, vanityProblem, SPAM_ACTION_IDS, SPAM_RULES, SPAM_DEFAULT,
   mentionCount, shouting, inviteCodes, flooding,
 } from '../js/lib/community.js';
+import { inviteProblem, inviteWhy } from '../js/lib/onboarding.js'; // why an invitation link doesn't work
 
 const json = (s, f) => { try { return s == null ? f : JSON.parse(s); } catch { return f; } };
 const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
@@ -1012,9 +1013,11 @@ export function createCommunityHttp({ db, M, hub, filesDir, sendJson, error, bod
     if (req.method === 'GET' && m) {
       const r = M.resolveInvite?.(m[1]);
       const inv = r?.invite;
-      if (!r || (inv && (inv.expires < Date.now() || inv.revoked || (inv.max_uses && inv.uses >= inv.max_uses)))) { error(res, 404, 'That invitation has expired. Ask for a new link.'); return true; }
-      const h = db.get('SELECT * FROM houses WHERE id = ?', r.house);
-      if (!h) { error(res, 404, 'That invitation has expired. Ask for a new link.'); return true; }
+      // Say why, so a dead link is never a silent sign-up form: unknown,
+      // expired, used up or turned off (js/lib/onboarding.js).
+      const why = !r ? 'unknown' : inv ? inviteProblem(inv) : null;
+      const h = !why && db.get('SELECT * FROM houses WHERE id = ?', r.house);
+      if (!h) { sendJson(res, 404, { error: inviteWhy(why || 'unknown'), reason: why || 'unknown' }); return true; }
       const count = db.get('SELECT COUNT(*) n FROM members WHERE house = ?', h.id).n;
       const by = inv ? db.get('SELECT name FROM users WHERE id = ?', inv.by)?.name : null;
       sendJson(res, 200, {

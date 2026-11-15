@@ -326,6 +326,9 @@ test('a house from the Study template; a welcome with interests that give a role
     await jonas.fill('#house-name', 'Glaze theory');
     await jonas.click('.modal .chip:has-text("Study group")');
     await jonas.click('.modal button:has-text("Create house")');
+    // A new house offers its invitation link straight away (js/views/modals.js Invite, fresh).
+    await jonas.locator('.modal h2:text-is("Glaze theory is ready")').waitFor();
+    await jonas.click('.modal button:text-is("Later")');
     await jonas.locator('.nav .ctx-house:has-text("Glaze theory")').waitFor();
     for (const room of ['Questions', 'Office hours', 'Study room', 'Notices']) await jonas.locator(`.nav .row:has-text("${room}")`).waitFor();
     await jonas.click('.nav .row:has-text("Questions")');

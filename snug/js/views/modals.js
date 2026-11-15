@@ -1,7 +1,7 @@
 // Dialogs. Each one asks for a single decision and has one main button.
 import { html, useEffect, useState } from '../../vendor/preact-htm.js';
 import {
-  S, closeModal, createRoom, updateRoom, createHouse, joinHouse, joinByCode, startDm, openConv, openModal, toast,
+  S, closeModal, createRoom, updateRoom, createHouse, joinHouse, joinByCode, startDm, openConv, openModal, toast, go,
 } from '../store.js';
 import { roomIds } from '../lib/attention.js';
 import { fuzzy, plural, HUES, hueOf } from '../lib/util.js';
@@ -11,6 +11,7 @@ import { TOPICS } from '../lib/social.js';
 import { call, api } from '../server.js';
 import { TemplatePick, startArgs } from './places-start.js'; // start a house from a template or another house
 import { LocalNote, p2pOwner } from './p2p.js'; // houses stay on this PC; groups can't include friends on other PCs yet
+import { parseInvite, inviteWhy, messageable, whyNotMessageable, localOnly } from '../lib/onboarding.js'; // pasted invitations, who can be messaged
 
 export function Confirm({ title, text, action, danger, onConfirm }) {
   return html`
@@ -80,7 +81,18 @@ export function RoomForm({ house, group, room }) {
   </form>`;
 }
 
-export function Invite({ house }) {
+// A note under an invitation made on an address only this computer or this
+// network can open (localhost, 127.x, a LAN address): the link won't work elsewhere.
+export function LocalAddressNote() {
+  const where = localOnly(location.hostname);
+  if (!where) return null;
+  return html`<p class="hint local-address" role="note"><${Icon} name="alert" size=${14} />${where === 'computer'
+    ? `This link uses ${location.host}, an address that only works on this computer. Send people the address they use to reach this Snug instead.`
+    : `This link uses ${location.host}, an address that only works on your own network (the same Wi-Fi or office).`}</p>`;
+}
+
+// `fresh`: straight after starting the house, so inviting is the next step, not a menu away.
+export function Invite({ house, fresh }) {
   const h = S.houses[house];
   const [link, setLink] = useState('');
   const [linkError, setLinkError] = useState('');
@@ -97,14 +109,18 @@ export function Invite({ house }) {
     call('invite.user', { house, handle: handle.trim() }).then((r) => { setSent(`${r.name} is invited. They\u2019ll find it in Catch up.`); setHandle(''); }, (err) => setError(err.offline ? 'You\u2019re offline. Try again when you\u2019re back.' : err.message));
     return undefined;
   };
+  const as = h.roles.find((r) => r.id === h.joinRole)?.name || 'a member';
   return html`
-    <h2>Invite people to ${h.name}</h2>
-    <p class="modal-lead">Anyone with this link can join as ${h.roles.find((r) => r.id === h.joinRole)?.name || 'a member'} for the next 14 days. They start with ${plural(h.starter.length, 'room')} and one first step, and the rest opens up once they take part.</p>
+    <h2>${fresh ? `${h.name} is ready` : `Invite people to ${h.name}`}</h2>
+    <p class="modal-lead">${fresh
+      ? `A house is better with your people in it. Send them this link: anyone who has it can join as ${as} for the next 14 days. You can make another link any time from the house menu.`
+      : `Anyone with this link can join as ${as} for the next 14 days. They can read every room straight away, and see the voice rooms and ${plural(h.starter.length, 'starter room')} in their list; the rest joins their list once they say hello.`}</p>
     <div class="copy-row">
       <input class="field" readonly value=${link || (linkError ? '' : 'Making a link\u2026')} aria-label="Invitation link" onFocus=${(e) => e.target.select()} />
       <button class="btn primary" data-autofocus disabled=${!link} onClick=${() => copyText(link)}><${Icon} name="copy" size=${16} />Copy link</button>
     </div>
     ${linkError && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${linkError}</div>`}
+    ${link && html`<${LocalAddressNote} />`}
     ${link && html`<div class="invite-app"><button class="btn quiet" onClick=${() => copyText(`snug://join/${link.split('/join/')[1]}`)}><${Icon} name="link" size=${16} />Copy app link</button><span class="hint">Opens straight in the Snug desktop app.</span></div>`}
     <form class="form invite-by-name" onSubmit=${byName} novalidate>
       <div>
@@ -117,22 +133,26 @@ export function Invite({ house }) {
         <${LocalNote} text="Friends on other PCs can’t join houses yet." />
       </div>
     </form>
-    <div class="modal-foot"><button class="btn" onClick=${closeModal}>Done</button></div>`;
+    <div class="modal-foot"><button class="btn" onClick=${closeModal}>${fresh ? 'Later' : 'Done'}</button></div>`;
 }
 
 // Arriving from an invitation link. The preview is public, so it works before joining.
-export function JoinByLink({ code }) {
+// `onBack`: shown inside "Join with an invite", where a bad link goes back to the field.
+export function JoinByLink({ code, onBack }) {
   const [info, setInfo] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  useEffect(() => { api(`/api/invite/${encodeURIComponent(code)}`).then(setInfo, (e) => setError(e.message)); }, []);
+  useEffect(() => {
+    api(`/api/invite/${encodeURIComponent(code)}`).then(setInfo, (e) => setError(e.status === 404 ? inviteWhy(e.data?.reason) : e.message));
+  }, []);
+  const dismiss = () => { S.ui.joinCode = null; if (onBack) onBack(); else closeModal(); };
   const go = () => {
     setBusy(true);
     joinByCode(code).catch((e) => { setBusy(false); setError(e.offline ? 'You\u2019re offline. Try again when you\u2019re back.' : e.message); });
   };
   if (error && !info) {
-    return html`<h2>That invitation doesn\u2019t work</h2><p class="modal-lead">${error}</p>
-      <div class="modal-foot"><button class="btn" data-autofocus onClick=${() => { S.ui.joinCode = null; closeModal(); }}>Close</button></div>`;
+    return html`<div class="join-bad" role="alert"><h2>That invitation doesn\u2019t work</h2><p class="modal-lead">${error}</p></div>
+      <div class="modal-foot"><button class="btn" data-autofocus onClick=${dismiss}>${onBack ? 'Try another link' : 'Close'}</button></div>`;
   }
   if (!info) return html`<div class="join-card" aria-busy="true"><div class="join-head"><span class="skel join-skel-tile"></span><div class="join-id"><span class="skel join-skel-line"></span><span class="skel join-skel-line short"></span></div></div></div>`;
   const h = info.house;
@@ -152,8 +172,8 @@ export function JoinByLink({ code }) {
     ${h.about && html`<p class="join-about">${h.about}</p>`}
     ${error && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${error}</div>`}
     <div class="modal-foot" style="margin-top:0">
-      <button class="btn" onClick=${() => { S.ui.joinCode = null; closeModal(); }}>Not now</button>
-      <button class="btn primary" data-autofocus disabled=${busy} onClick=${go}>${already ? 'Open' : `Join ${h.name}`}</button>
+      <button class="btn" onClick=${dismiss}>${onBack ? 'Back' : 'Not now'}</button>
+      <button class="btn primary" data-autofocus disabled=${busy} aria-busy=${busy ? 'true' : undefined} onClick=${go}>${busy ? 'Joining\u2026' : already ? 'Open' : `Join ${h.name}`}</button>
     </div>
   </div>`;
 }
@@ -179,7 +199,7 @@ export function JoinPreview({ house }) {
       <div class="join-rooms">
         ${h.starter.map((id) => html`<div key=${id}><${RoomIcon} kind=${S.rooms[id].kind} size=${16} /><span class="trunc"><b>${S.rooms[id].name}</b> ${S.rooms[id].topic}</span></div>`)}
       </div>
-      <div class="hint">The other ${plural(roomIds(S, house).length - h.starter.length, 'room')} appear once you’ve said hello.</div>
+      <div class="hint">You can read every room, and voice rooms are open to you from the start. The rest join your list once you’ve said hello.</div>
     </div>
     <div class="modal-foot" style="margin-top:0">
       <button class="btn" onClick=${closeModal}>Not now</button>
@@ -188,7 +208,55 @@ export function JoinPreview({ house }) {
   </div>`;
 }
 
-export function AddHouse() {
+// The rail's plus: two clear paths, starting a house or joining one with an
+// invitation someone sent. `mode`: 'join' opens on the second.
+export function AddHouse({ mode: first = 'start' } = {}) {
+  const [mode, setMode] = useState(first);
+  return html`<div class="add-house">
+    <h2 id="add-house-title">${mode === 'join' ? 'Join a house' : 'Start a house'}</h2>
+    <${Seg} label="Start or join" value=${mode} options=${[['start', 'Start a house'], ['join', 'Join with an invite']]} onChange=${setMode} />
+    ${mode === 'join' ? html`<${JoinWithInvite} />` : html`<${StartHouse} />`}
+  </div>`;
+}
+
+// Paste what you were sent: a link (https://…/join/abc, snug://join/abc) or the code alone.
+function JoinWithInvite() {
+  const [text, setText] = useState('');
+  const [error, setError] = useState('');
+  const [code, setCode] = useState(null);
+  const submit = (e) => {
+    e.preventDefault();
+    if (!text.trim()) { setError('Paste the invitation link or code you were sent.'); document.getElementById('join-invite')?.focus(); return; }
+    const c = parseInvite(text);
+    if (!c) { setError('That doesn\u2019t look like an invitation. They look like https://\u2026/join/abc123, or just the code at the end.'); document.getElementById('join-invite')?.focus(); return; }
+    setError('');
+    setCode(c);
+  };
+  if (code) return html`<${JoinByLink} key=${code} code=${code} onBack=${() => setCode(null)} />`;
+  return html`<form class="form" onSubmit=${submit} novalidate>
+    <p class="modal-lead" style="margin:0">Someone sent you a link to their house? Paste it here to see the house before you join.</p>
+    <div>
+      <label class="label" for="join-invite">Invitation link or code</label>
+      <input id="join-invite" class=${`field${error ? ' bad' : ''}`} data-autofocus autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="300"
+        placeholder="https://\u2026/join/abc123" value=${text} aria-invalid=${String(!!error)} aria-describedby="join-invite-msg"
+        onInput=${(e) => { setText(e.target.value); setError(''); }} />
+      ${error ? html`<div class="err" id="join-invite-msg" role="alert"><${Icon} name="alert" size=${14} />${error}</div>`
+        : html`<div class="hint" id="join-invite-msg">A whole link, a snug:// app link, or only the code all work.</div>`}
+    </div>
+    ${S.invites.length > 0 && html`<div>
+      <span class="label">Or accept an invitation you\u2019ve had</span>
+      ${S.invites.map((inv) => html`<button type="button" key=${inv.house} class="menu-item invite-pick" onClick=${() => openModal(JoinPreview, { house: inv.house })}>
+        <${Tile} house=${S.houses[inv.house]} /><span class="grow trunc">${S.houses[inv.house].name}</span><span class="end">from ${(S.users[inv.from]?.name || 'someone').split(' ')[0]}</span>
+      </button>`)}
+    </div>`}
+    <div class="modal-foot" style="margin-top:0">
+      <button type="button" class="btn" onClick=${closeModal}>Cancel</button>
+      <button type="submit" class="btn primary">Look at the house</button>
+    </div>
+  </form>`;
+}
+
+function StartHouse() {
   const [name, setName] = useState('');
   const [hue, setHue] = useState(HUES[5][0]);
   const [topic, setTopic] = useState(null);
@@ -208,22 +276,18 @@ export function AddHouse() {
         call('house.update', { house: id, public: open, topic: topic || null })
           .catch((err) => toast(err.offline ? 'Your house is ready, but being public wasn\u2019t saved. Change it in House settings.' : err.message));
       }
+      // A new house is empty: inviting people is the next step, so offer it now.
+      if (id && S.houses[id]) openModal(Invite, { house: id, fresh: true });
     }, (err) => { setBusy(false); setError(err.offline ? 'You\u2019re offline. Try again when you\u2019re back.' : err.message); });
     return undefined;
   };
   const mark = [...name.trim()][0]?.toUpperCase() || '?';
-  return html`<form class="form" onSubmit=${submit} novalidate>
+  return html`<form class="form" onSubmit=${submit} novalidate aria-labelledby="add-house-title">
     <div>
-      <h2>Start a house</h2>
-      <p class="modal-lead" style="margin:0">A place for your people. It starts with three rooms and a voice room.</p>
+      <p class="modal-lead" style="margin:0">A place for your people, with rooms to write in and a voice room. You\u2019ll get a link to invite them next.</p>
       <${LocalNote} />
     </div>
-    ${S.invites.length > 0 && html`<div>
-      <span class="label">Or accept an invitation</span>
-      ${S.invites.map((inv) => html`<button type="button" key=${inv.house} class="menu-item invite-pick" onClick=${() => openModal(JoinPreview, { house: inv.house })}>
-        <${Tile} house=${S.houses[inv.house]} /><span class="grow trunc">${S.houses[inv.house].name}</span><span class="end">from ${(S.users[inv.from]?.name || 'someone').split(' ')[0]}</span>
-      </button>`)}
-    </div>`}
+    ${S.invites.length > 0 && html`<p class="hint">You have ${plural(S.invites.length, 'invitation')} waiting. Choose Join with an invite to see ${S.invites.length === 1 ? 'it' : 'them'}.</p>`}
     <div class="house-name-row">
       <span class="tile lg" style=${`--hue:${hue}`} aria-hidden="true">${mark}</span>
       <div class="grow">
@@ -265,9 +329,14 @@ const MIX_TIP = 'A group can have friends on other PCs or people on this PC, not
 export function NewMessage() {
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState([]);
-  const people = Object.values(S.users).filter((u) => u.id !== S.me)
+  // Only people the server lets you message (js/lib/onboarding.js messageable);
+  // anyone else you've come across shows below, with what would change it.
+  const ok = messageable(S);
+  const found = Object.values(S.users).filter((u) => u.id !== S.me)
     .map((u) => ({ u, s: Math.max(fuzzy(q, u.name), fuzzy(q, u.handle)) }))
     .filter((x) => x.s >= 0).sort((a, b) => b.s - a.s || a.u.name.localeCompare(b.u.name)).map((x) => x.u);
+  const people = found.filter((u) => ok.has(u.id));
+  const others = q.trim() ? found.filter((u) => !ok.has(u.id)).slice(0, 5) : [];
   // A group has friends on other PCs (up to 24 besides you) or people on this PC, never both.
   const remotePick = picked.length > 0 && !!S.users[picked[0]]?.remote;
   const blocked = (u) => !picked.includes(u.id) && picked.length > 0 && (!!u.remote !== remotePick || (remotePick && picked.length >= 24));
@@ -286,8 +355,16 @@ export function NewMessage() {
         <${Avatar} user=${u} presence /><span class="grow trunc">${u.name}</span>
         ${picked.includes(u.id) && html`<span class="end"><${Icon} name="check" size=${16} /></span>`}
       </button>`)}
-      ${!people.length && html`<div class="picker-none">Nobody called “${q}”</div>`}
+      ${!people.length && (q.trim()
+        ? !others.length && html`<div class="picker-none">Nobody called “${q}” that you can message.</div>`
+        : html`<div class="picker-none">You can message friends and people you share a house with. <button class="btn quiet" onClick=${() => { closeModal(); go({ type: 'friends', tab: 'add' }); }}>Add a friend</button></div>`)}
     </div>
+    ${others.length > 0 && html`<div class="pick-others" role="group" aria-label="Can’t message yet">
+      <div class="label">Can\u2019t message yet</div>
+      ${others.map((u) => html`<div key=${u.id} class="menu-item pick-other" aria-disabled="true">
+        <${Avatar} user=${u} /><span class="grow"><span class="trunc" style="display:block">${u.name}</span><small class="faint">${whyNotMessageable(S, u.id)}</small></span>
+      </div>`)}
+    </div>`}
     ${p2pOwner() && picked.length > 0 && people.some(blocked) && html`<${LocalNote} text=${remotePick && picked.length > 1 ? 'A group between your PCs: every member’s PC keeps it, with no host. People in it see when you’re online.' : MIX_TIP} />`}
     <div class="modal-foot">
       <button class="btn" onClick=${closeModal}>Cancel</button>
@@ -299,7 +376,7 @@ export function RoomBrowser({ house }) {
   const h = S.houses[house];
   return html`
     <h2>Rooms in ${h.name}</h2>
-    <p class="modal-lead">${h.newcomer ? 'Have a look around. Every room joins your sidebar after your first message.' : 'Every room in this house.'}</p>
+    <p class="modal-lead">${h.newcomer ? 'You can open and read any of these now. They all join your sidebar after your first message.' : 'Every room in this house.'}</p>
     <div class="pick-list">
       ${roomIds(S, house).map((id) => {
         const r = S.rooms[id];

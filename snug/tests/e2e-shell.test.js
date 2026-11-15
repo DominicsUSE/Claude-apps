@@ -158,7 +158,7 @@ test('groups: rename and add a third person across two browsers; close and reope
   await ines.locator('.main .dmline:has-text("added Priya")').waitFor();
   await ines.waitForFunction(() => window.snug.S.dms.g_sat.members.includes('priya'));
   // The members popover lists four, with the owner marked.
-  await ines.click('.main .bar [aria-label^="Members"]');
+  await ines.click('.main .bar [aria-label^="Manage members"]');
   await ines.locator('.dm-members .dm-member').nth(3).waitFor();
   assert.equal(await ines.locator('.dm-members .dm-member').count(), 4);
   await ines.locator('.dm-members .tag:has-text("Owner")').waitFor();

@@ -4,7 +4,7 @@
 // checks every one of these again (server/inbox.js, server/dms.js).
 import { S, emit, toast, openMenu, checkView, resync, go } from './store.js';
 import { call, on } from './server.js';
-import { MUTE_FOR, MUTE_LABEL, PRESENCE_FOR, PRESENCE_FOR_LABEL, untilFor, untilText } from './lib/inbox.js';
+import { MUTE_FOR, MUTE_LABEL, PRESENCE_FOR, PRESENCE_FOR_LABEL, untilFor, untilText, byActivity } from './lib/inbox.js';
 
 const oops = (e) => toast(e?.offline ? 'You’re offline. Try again when you’re back.' : e?.message || 'That didn’t work.');
 const h12 = () => S.prefs.clock === '12';
@@ -119,13 +119,14 @@ export function presenceUntilNote(u = S.users[S.me]) {
 
 // ---------- Direct conversations and groups ----------
 // The list order: pinned first (in the order pinned), closed ones left out
-// unless open now, then the rest as the server sent them.
+// unless open now, then the rest newest activity first, so a new message
+// lifts its conversation at once (js/lib/inbox.js byActivity).
 export function orderDms(ids = S.dmOrder) {
   const v = S.ui.view;
   const open = v.type === 'conv' ? v.id : null;
   const shown = ids.filter((id) => S.dms[id] && (!S.dms[id].hidden || id === open));
   const pinned = shown.filter((id) => S.dms[id].pinned).sort((a, b) => S.dms[a].pinned - S.dms[b].pinned);
-  return [...pinned, ...shown.filter((id) => !S.dms[id].pinned)];
+  return [...pinned, ...byActivity(S, shown.filter((id) => !S.dms[id].pinned))];
 }
 export const isGroupDm = (id) => !!S.dms[id] && (S.dms[id].group || S.dms[id].members.length > 2);
 

@@ -12,7 +12,8 @@ import { mutualHouses, friendState, safeLink } from '../lib/social.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Pres, Tile, PRESENCE, presenceLabel } from '../ui/kit.js';
 import { nameAttrs, profileColours } from '../ui/kit.js'; // name styles and profile colours (css/appearance.css)
-import { Settings } from './settings.js';
+import { Settings, confirmSignOut } from './settings.js'; // confirmSignOut: Sign out from the menu under your name
+import { p2pOwner } from './p2p.js'; // the desktop's own account signs out from Settings only
 import { Confirm } from './modals.js';
 import { hueOf, MIN, DAY, plural } from '../lib/util.js';
 import { personItems } from './safety.js'; // block, report, moderate
@@ -290,6 +291,8 @@ export function MePop() {
     <button class="menu-item" role="menuitem" onClick=${() => openPerson(S.me)}><${Icon} name="user" /><span class="grow">Your profile</span></button>
     <button class="menu-item" role="menuitem" onClick=${() => openLayer({ C: Settings, props: { page: 'profile' } })}><${Icon} name="sliders" /><span class="grow">Settings</span></button>
     <button class="menu-item" role="menuitem" onClick=${() => openLayer({ C: Settings, props: { page: 'keys' } })}><${Icon} name="keys" /><span class="grow">Keyboard shortcuts</span></button>
+    ${!p2pOwner() && html`<div class="menu-sep"></div>
+    <button class="menu-item" role="menuitem" onClick=${() => { closePop(); confirmSignOut(); }}><${Icon} name="leave" /><span class="grow">Sign out<small>On this device. Sign out everywhere is in Settings, under Account.</small></span></button>`}
   </div>`;
 }
 

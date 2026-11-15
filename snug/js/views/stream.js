@@ -174,6 +174,42 @@ function Files({ files, conv, m }) {
   </div>`;
 }
 
+// The click that follows lifting a long-press finger is not a choice: swallow
+// it (and any within 350 ms of the lift), wherever it lands.
+function swallowRelease() {
+  const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
+  const end = () => { removeEventListener('click', stop, true); removeEventListener('pointerup', lifted, true); };
+  const lifted = () => { removeEventListener('pointerup', lifted, true); setTimeout(end, 350); };
+  addEventListener('click', stop, true);
+  addEventListener('pointerup', lifted, true);
+  setTimeout(end, 10_000); // a finger lifted somewhere we never heard about
+}
+
+// Phones: the menu rises as a sheet from the bottom. Move the pressed message
+// into the top half first (with room added below the last messages when the
+// list can't scroll that far), and say where it ends so the sheet stops below
+// it (js/ui/overlays.js Menu). `undo` takes the added room away again.
+function keepInView(el) {
+  if (!matchMedia('(max-width: 759px)').matches) return { avoid: null, undo: null };
+  const scroller = el.closest('.scroller');
+  const inner = scroller?.querySelector('.msgs');
+  let r = el.getBoundingClientRect();
+  const want = innerHeight * 0.5;
+  let undo = null;
+  if (scroller && inner && r.bottom > want) {
+    const move = Math.max(0, Math.min(r.top - scroller.getBoundingClientRect().top - 8, r.bottom - want));
+    const room = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop;
+    if (move > room) {
+      const was = inner.style.paddingBottom;
+      inner.style.paddingBottom = `${Math.ceil(move - room)}px`;
+      undo = () => { inner.style.paddingBottom = was; };
+    }
+    scroller.scrollTop += move;
+    r = el.getBoundingClientRect();
+  }
+  return { avoid: { top: r.top, bottom: r.bottom }, undo };
+}
+
 export function Message({ conv, m, grouped, inThread, tab, lit }) {
   const u = msgFace(m, convMeta(conv)?.house); // nickname and picture in this house, or a bot's name (js/views/places.js)
   const meta = convMeta(conv);
@@ -194,12 +230,18 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
     e.preventDefault();
     menu({ x: e.clientX, y: e.clientY });
   };
+  // A long press opens the menu while the finger is still down. Lifting it
+  // must not choose whatever sheet item is now under it, and the sheet must
+  // leave the pressed message in view.
   const onDown = (e) => {
     if (e.pointerType !== 'touch' || e.target.closest('button, a, textarea')) return;
     const x = e.clientX, y = e.clientY;
-    press.current = setTimeout(() => menu({ x, y }), 450);
+    const el = e.currentTarget;
+    press.current = { x, y, t: setTimeout(() => { swallowRelease(); const v = keepInView(el); menu({ x, y, avoid: v.avoid, onClose: v.undo }); }, 450) };
   };
-  const cancel = () => clearTimeout(press.current);
+  const cancel = () => { clearTimeout(press.current?.t); press.current = null; };
+  // A finger never stays perfectly still: only a real move cancels the hold.
+  const onMove = (e) => { const p = press.current; if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) cancel(); };
 
   const cls = `msg${grouped ? ' grouped' : ''}${toMe ? ' mention' : lit ? ' mention lit' : ''}${pending ? ' pending' : ''}${quoted ? ' has-ref' : ''}${S.ui.menu?.owner === m.id || S.ui.pop?.owner === m.id ? ' menu-open' : ''}${S.ui.reply[conv] === m.id ? ' replying' : ''}`;
   const reactions = Object.entries(m.reactions || {});
@@ -207,7 +249,7 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
   const authors = [...new Set(replies.map((r) => r.author))].map((id) => person(id));
 
   return html`<div class=${cls} data-id=${m.id} data-conv=${conv} tabindex=${tab ? 0 : -1}
-    onContextMenu=${onContext} onPointerDown=${onDown} onPointerUp=${cancel} onPointerMove=${cancel} onPointerCancel=${cancel}>
+    onContextMenu=${onContext} onPointerDown=${onDown} onPointerUp=${cancel} onPointerMove=${onMove} onPointerCancel=${cancel}>
     ${quoted && html`<button class="reply-ref" onClick=${() => { S.ui.jump = { conv, id: quoted.id, n: (S.ui.jump?.n || 0) + 1 }; emit(); }}>
       <${Avatar} user=${person(quoted.author)} />
       <b>${person(quoted.author).name}</b>
@@ -633,8 +675,11 @@ export function Stream({ conv, intro, placeholder }) {
     const el = scroller.current;
     const marker = el.querySelector('.newline');
     const saved = scrollPos.get(conv);
+    // A newcomer's welcome card is read from its title down, not from the latest message.
+    const welcome = el.querySelector('.welcome');
     if (saved != null) el.scrollTop = saved;
     else if (marker) el.scrollTop = Math.max(0, marker.offsetTop - el.clientHeight * 0.35);
+    else if (welcome) el.scrollTop = Math.max(0, welcome.offsetTop - 8);
     else el.scrollTop = el.scrollHeight;
     stick.current = atBottom(el);
     if (stick.current && document.hasFocus()) markRead(conv);

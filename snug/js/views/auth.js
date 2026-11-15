@@ -20,6 +20,7 @@ import { KeyAuth } from './keyauth.js'; // v0.12: accounts that need no GitHub a
 import { Tile } from '../ui/kit.js'; // the house's icon in its arch (server/community.js)
 import { ForgotPassword } from './recover.js'; // v0.12: "Forgot your password?" with a recovery key
 import { usePasskeySignIn } from './passkeys.js'; // v0.12: passkey sign-in where the server allows it
+import { signupProblems, signupField, inviteWhy } from '../lib/onboarding.js'; // every sign-up problem at once; why an invitation fails
 
 function entered(user) {
   S.me = user.id;
@@ -291,55 +292,66 @@ function PasswordAuth({ onGitHub }) {
   const [handle, setHandle] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
-  // { field: 'handle' | 'name' | 'password' | null, text }. null field = about the whole form.
-  const [error, setError] = useState(null);
+  const [shown, setShown] = useState(false); // the password in plain text, while they check it
+  // One problem per field, all shown at once: { handle, name, password, form }.
+  const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
   const [invite, setInvite] = useState(null);
+  const [badInvite, setBadInvite] = useState(null); // why the link they followed doesn't work
   const [ticket, setTicket] = useState(null); // two-factor sign-in: the password was right, a code is next
   const [forgot, setForgot] = useState(false);
   const pk = usePasskeySignIn(entered);
   const refs = { handle: useRef(null), name: useRef(null), password: useRef(null) };
 
   useEffect(() => {
-    if (S.ui.joinCode) api(`/api/invite/${encodeURIComponent(S.ui.joinCode)}`).then(setInvite, () => { S.ui.joinCode = null; });
+    if (!S.ui.joinCode) return;
+    // A dead link says so before anyone fills in a form for nothing.
+    api(`/api/invite/${encodeURIComponent(S.ui.joinCode)}`).then(setInvite, (e) => {
+      S.ui.joinCode = null;
+      setBadInvite(e.status === 404 ? inviteWhy(e.data?.reason) : e.message);
+    });
   }, []);
 
-  const fieldError = (field, text) => {
-    setError({ field, text });
-    refs[field].current?.focus();
+  const isNew = mode === 'new';
+  const show = (found) => {
+    setErrors(found);
+    const firstBad = ['handle', 'name', 'password'].find((f) => found[f]);
+    if (firstBad) refs[firstBad].current?.focus();
   };
 
   const submit = async (e) => {
     e.preventDefault();
     if (busy) return undefined;
-    if (!handle.trim()) return fieldError('handle', 'Type your username.');
-    if (mode === 'new' && !name.trim()) return fieldError('name', 'Tell people what to call you.');
-    if (password.length < 8) return fieldError('password', mode === 'new' ? 'Passwords need at least 8 characters.' : 'Type your password.');
+    const found = isNew ? signupProblems({ handle, name, password }) : {
+      ...(handle.trim() ? {} : { handle: 'Type your username.' }),
+      ...(password ? {} : { password: 'Type your password.' }),
+    };
+    if (Object.keys(found).length) return show(found);
     setBusy(true);
-    setError(null);
+    setErrors({});
     try {
-      const r = await api(mode === 'new' ? '/api/register' : '/api/login', { handle: handle.trim(), name: name.trim(), password });
+      const r = await api(isNew ? '/api/register' : '/api/login', { handle: handle.trim(), name: name.trim(), password });
       if (r.totp) { setBusy(false); setTicket(r.ticket); return undefined; }
       entered(r.user);
     } catch (err) {
       setBusy(false);
-      setError({ field: null, text: err.message });
+      const field = isNew ? signupField(err.message, err.status) : null;
+      show(field ? { [field]: err.message } : { form: err.message });
     }
     return undefined;
   };
   const swap = (m) => {
     setMode(m);
-    setError(null);
+    setErrors({});
     refs.handle.current?.focus();
   };
-  // Typing in a field clears the error that was about it.
+  // Typing in a field clears the problem that was about it.
   const edit = (field, set) => (e) => {
     set(e.target.value);
-    if (error?.field === field) setError(null);
+    if (errors[field] || errors.form) setErrors({ ...errors, [field]: undefined, form: undefined });
   };
-  const bad = (field) => error?.field === field;
+  const bad = (field) => !!errors[field];
   const described = (field, hint) => [bad(field) && `auth-${field}-err`, hint && `auth-${field}-hint`].filter(Boolean).join(' ') || undefined;
-  const isNew = mode === 'new';
 
   if (forgot) {
     return html`<div class="auth"><main class="auth-main"><div class="auth-panel" aria-labelledby="auth-title">
@@ -356,9 +368,13 @@ function PasswordAuth({ onGitHub }) {
           <div><b>${invite.by ? `${invite.by} invited you to ${invite.house.name}` : `You’re invited to ${invite.house.name}`}</b>
           <span>${isNew ? 'Create an account to join.' : 'Sign in to join.'}</span></div>
         </div>`}
+        ${badInvite && html`<div class="auth-invite bad" role="alert">
+          <${Icon} name="alert" size=${20} />
+          <div><b>That invitation doesn’t work</b><span>${badInvite} You can still create an account or sign in.</span></div>
+        </div>`}
         <div class="auth-head">
-          <h1 id="auth-title">${isNew ? 'Make yourself at home' : 'Welcome back'}</h1>
-          <p class="auth-sub">${onGitHub ? 'A password account lives on this PC only. It can’t reach friends on other PCs.' : isNew ? 'One account for every house you’re part of.' : 'Your people are here.'}</p>
+          <h1 id="auth-title">${isNew ? 'Make yourself at home' : 'Sign in to Snug'}</h1>
+          <p class="auth-sub">${onGitHub ? 'A password account lives on this PC only. It can’t reach friends on other PCs.' : isNew ? 'One account for every house you’re part of.' : 'A calm place for chat, voice and screen sharing with your people.'}</p>
         </div>
         ${ticket && html`<${TotpStep} ticket=${ticket} onDone=${entered} onBack=${() => { setTicket(null); setPassword(''); }} />`}
         <form class="form auth-form" hidden=${!!ticket} onSubmit=${submit} novalidate aria-labelledby="auth-title" aria-busy=${busy ? 'true' : undefined}>
@@ -367,27 +383,32 @@ function PasswordAuth({ onGitHub }) {
             <input id="auth-handle" ref=${refs.handle} class=${`field${bad('handle') ? ' bad' : ''}`} autocomplete=${isNew ? 'username' : 'username webauthn'} autocapitalize="none" spellcheck="false" maxlength="24" value=${handle}
               aria-invalid=${bad('handle') ? 'true' : undefined} aria-describedby=${described('handle', isNew)}
               onInput=${edit('handle', setHandle)} autofocus />
-            ${bad('handle') && html`<${Err} id="auth-handle-err" text=${error.text} />`}
-            ${isNew && html`<div class="hint" id="auth-handle-hint">Letters, numbers, dots, dashes or underscores. People use it to mention and invite you.</div>`}
+            ${bad('handle') && html`<${Err} id="auth-handle-err" text=${errors.handle} />`}
+            ${isNew && html`<div class="hint" id="auth-handle-hint">Letters, numbers, dots, dashes or underscores, no spaces. People use it to mention and invite you.</div>`}
           </div>
           ${isNew && html`<div class="auth-field">
             <label class="label" for="auth-name">Name</label>
             <input id="auth-name" ref=${refs.name} class=${`field${bad('name') ? ' bad' : ''}`} autocomplete="name" maxlength="40" value=${name}
               aria-invalid=${bad('name') ? 'true' : undefined} aria-describedby=${described('name', true)}
               onInput=${edit('name', setName)} />
-            ${bad('name') && html`<${Err} id="auth-name-err" text=${error.text} />`}
+            ${bad('name') && html`<${Err} id="auth-name-err" text=${errors.name} />`}
             <div class="hint" id="auth-name-hint">What people see next to your messages. You can change it later.</div>
           </div>`}
           <div class="auth-field">
             <label class="label" for="auth-pass">Password</label>
-            <input id="auth-pass" ref=${refs.password} class=${`field${bad('password') ? ' bad' : ''}`} type="password" autocomplete=${isNew ? 'new-password' : 'current-password'} maxlength="200" value=${password}
-              aria-invalid=${bad('password') ? 'true' : undefined} aria-describedby=${described('password', isNew)}
-              onInput=${edit('password', setPassword)} />
-            ${bad('password') && html`<${Err} id="auth-password-err" text=${error.text} />`}
-            ${isNew && html`<div class="hint" id="auth-password-hint">At least 8 characters.</div>`}
+            <div class="pass-wrap">
+              <input id="auth-pass" ref=${refs.password} class=${`field${bad('password') ? ' bad' : ''}`} type=${shown ? 'text' : 'password'} autocomplete=${isNew ? 'new-password' : 'current-password'} maxlength="200" value=${password}
+                autocapitalize="none" spellcheck="false" aria-invalid=${bad('password') ? 'true' : undefined} aria-describedby=${described('password', isNew)}
+                onInput=${edit('password', setPassword)} />
+              <button type="button" class="ib sm pass-show" aria-pressed=${String(shown)} aria-controls="auth-pass" aria-label=${shown ? 'Hide password' : 'Show password'}
+                data-tip=${shown ? 'Hide password' : 'Show password'} onClick=${() => setShown(!shown)}><${Icon} name="eye" size=${16} /></button>
+            </div>
+            ${bad('password') && html`<${Err} id="auth-password-err" text=${errors.password} />`}
+            ${isNew && html`<div class="hint" id="auth-password-hint">At least 8 characters, without your username or name. A few unrelated words work well.
+              <b class="auth-keep">Write your password down. Snug doesn’t ask for an email, so after you sign up it offers a recovery key instead: save it, and you can reset a forgotten password.</b></div>`}
             ${!isNew && html`<button type="button" class="auth-link auth-forgot" id="auth-forgot" onClick=${() => setForgot(true)}>Forgot your password?</button>`}
           </div>
-          ${error && !error.field && html`<${Err} id="auth-form-err" text=${error.text} />`}
+          ${errors.form && html`<${Err} id="auth-form-err" text=${errors.form} />`}
           <button class="btn primary auth-submit" type="submit" disabled=${busy} aria-busy=${busy ? 'true' : undefined}>
             ${busy ? (isNew ? 'Creating your account…' : 'Signing in…') : (isNew ? 'Create account' : 'Sign in')}
           </button>

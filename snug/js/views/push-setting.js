@@ -5,6 +5,7 @@
 import { html, useEffect } from '../../vendor/preact-htm.js';
 import { Switch } from '../ui/kit.js';
 import { push, refreshPush, enablePush, disablePush, setKeepRunning } from '../push.js';
+import { S } from '../store.js';
 
 const LABEL = 'Notify me when Snug is closed';
 const HINT = {
@@ -14,9 +15,20 @@ const HINT = {
   working: 'Setting up this device with the browser’s push service…',
   on: 'On for this device. Muted places and Focused stay quiet, and nothing arrives twice while Snug is open.',
   blocked: 'Your browser is blocking notifications for Snug. Open the site settings (the icon beside the address), set Notifications to Allow, then choose Check again.',
-  unsupported: 'This browser can’t notify you while Snug is closed. Desktop notifications above still work while a tab is open.',
+  unsupported: 'This browser can’t notify you while Snug is closed. Notifications while Snug is open, above, still work.',
   insecure: 'This needs a secure (https) address. Whoever runs this Snug can set one up; until then, notifications work while a tab is open.',
 };
+
+// Phones keep site settings in the browser's menu, not beside the address,
+// and iPhones and iPads only allow it for a site added to the Home Screen.
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const PHONE_HINT = {
+  blocked: 'Your browser is blocking notifications for Snug. In the browser’s menu, open the settings for this site, set Notifications to Allow, then choose Check again.',
+  unsupported: IOS
+    ? 'On iPhone and iPad, Snug can only notify you after you add it to your Home Screen (Share, then Add to Home Screen) and open it from there. That needs iOS 16.4 or later.'
+    : 'This browser can’t notify you while Snug is closed. Notifications while Snug is open, above, still work.',
+};
+const hintFor = (st) => (S.ui.phone && PHONE_HINT[st]) || HINT[st] || HINT.off;
 
 function Row({ label, hint, err, children, id, cls = '', state }) {
   return html`<div class=${`set-row ${cls}`} id=${id} data-state=${state}>
@@ -40,11 +52,11 @@ export function PushSetting() {
   if (st === 'asking' || st === 'working' || st === 'checking') {
     ctl = html`<button type="button" class="switch" role="switch" aria-checked=${String(st !== 'checking')} aria-label=${LABEL} aria-busy="true" disabled></button>`;
   } else if (st === 'blocked') {
-    ctl = html`<span class="sub">Blocked</span><button class="btn quiet" onClick=${() => refreshPush()}>Check again</button>`;
+    ctl = html`<span class="sub">Blocked</span><button class="btn" onClick=${() => refreshPush()}>Check again</button>`;
   } else if (st === 'unsupported' || st === 'insecure') {
     ctl = html`<span class="sub">Not available</span>`;
   } else {
     ctl = html`<${Switch} on=${st === 'on'} label=${LABEL} onChange=${(v) => (v ? enablePush() : disablePush())} />`;
   }
-  return html`<${Row} id="set-push" cls="push-set" state=${st} label=${LABEL} hint=${st === 'error' ? '' : HINT[st] || HINT.off} err=${push.error}>${ctl}<//>`;
+  return html`<${Row} id="set-push" cls="push-set" state=${st} label=${LABEL} hint=${st === 'error' ? '' : hintFor(st)} err=${push.error}>${ctl}<//>`;
 }

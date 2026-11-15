@@ -233,7 +233,7 @@ test('slowmode counts down in the composer; screening asks a newcomer to accept 
     aiko = await person('aiko');
     await follow(aiko);
     await aiko.locator('.modal h2:has-text("That invitation doesn’t work")').waitFor();
-    assert.match(await aiko.locator('.modal').textContent(), /expired/);
+    assert.match(await aiko.locator('.modal').textContent(), /used as many times as it allows/); // the reason, not a generic 'expired' (js/lib/onboarding.js)
     assert.equal(await aiko.evaluate(() => !!window.snug.S.houses.kiln?.joined), false);
   } finally {
     await close(robin); await close(priya);

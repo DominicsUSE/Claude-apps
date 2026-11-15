@@ -75,6 +75,15 @@
 .auth-invite { display: flex; gap: var(--s-3); align-items: center; padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-hover); border-color: transparent; }
 .auth-invite b { display: block; font-weight: var(--w-semibold); }
 .auth-invite span:not(.tile) { color: var(--text-2); font-size: var(--t-13); }
+/* A link that doesn't work: said plainly, above the form, before anyone fills it in. */
+.auth-invite.bad { align-items: flex-start; background: var(--error-soft); color: var(--text-1); }
+.auth-invite.bad > svg { color: var(--error); flex: none; margin-top: 2px; }
+/* The show-password eye sits inside the field's right edge. */
+.pass-wrap { position: relative; }
+.pass-wrap .field { width: 100%; padding-right: calc(var(--h-sm) + var(--s-2)); }
+.pass-wrap .pass-show { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); }
+.pass-show[aria-pressed="true"] { color: var(--text-1); }
+.auth-keep { display: block; margin-top: var(--s-1); font-weight: var(--w-medium, 500); color: var(--text-2); }
 
 @media (max-width: 720px) {
   /* Phone: the form is the page (no card), top-aligned. */

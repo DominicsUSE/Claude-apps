@@ -14,7 +14,10 @@ import { toast } from '../store.js';
 import { Doing, doingOf, SharedTiles, friendMenu, openPerson, lastActive, ago } from './people.js';
 import { PeopleYouMightKnow } from './discover.js';
 import { p2pOwner, atName } from './p2p.js'; // friends on other PCs: global Snug usernames
-import { Switch } from '../ui/kit.js';
+import { Switch, copyText } from '../ui/kit.js';
+import { can } from '../lib/perms.js';
+import { looksLikeEmail } from '../lib/onboarding.js'; // an email typed where a username goes
+import { LocalAddressNote } from './modals.js'; // a link made on localhost won't work elsewhere
 
 const Back = () => S.ui.phone && S.ui.depth > 0 && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
 const TABS = ['online', 'all', 'requests', 'blocked', 'add'];
@@ -217,6 +220,29 @@ function BlockedTab() {
   </div>`;
 }
 
+// Someone who isn't here yet: no dead end. Offer an invitation to one of your
+// houses, or this Snug's address, so they can make an account and come find you.
+function NotHereYet({ email, name, global }) {
+  const houses = S.houseOrder.filter((h) => S.houses[h]?.joined && can(S, h, 'invite')).slice(0, 3);
+  const [busy, setBusy] = useState(null);
+  const invite = (house) => {
+    setBusy(house);
+    call('invite.create', { house }).then((r) => copyText(`${location.origin}/join/${r.code}`),
+      (e) => toast(e.offline ? 'You’re offline, so a link can’t be made right now.' : e.message)).finally(() => setBusy(null));
+  };
+  return html`<div class="f-nothere" role="status">
+    <p><b>${email ? 'Snug doesn’t use email addresses' : `Nobody here is called @${name}`}</b>${email
+      ? ', so it can’t find people by email. Ask them for their Snug username, or invite them.'
+      : global ? '. Check the spelling with them. If they don’t have Snug yet, they need the app and a username first.' : '. They may not be on this Snug yet. Invite them, and add them once they’ve made an account.'}</p>
+    ${!global && html`<div class="f-nothere-acts">
+      ${houses.map((h) => html`<button type="button" key=${h} class="btn" disabled=${busy === h} aria-busy=${busy === h ? 'true' : undefined} onClick=${() => invite(h)}>
+        <${Icon} name="link" size=${16} />Copy an invite to ${S.houses[h].name}</button>`)}
+      <button type="button" class="btn quiet" onClick=${() => copyText(location.origin)}><${Icon} name="copy" size=${16} />Copy this Snug’s address</button>
+    </div>
+    <${LocalAddressNote} />`}
+  </div>`;
+}
+
 function AddTab({ title = 'Add a friend', lead = 'Friends see each other’s presence and can message any time, even without a house in common.', focus = true }) {
   const global = p2pOwner(); // this PC's Snug account: usernames are global unless "On this PC" (S27)
   const [local, setLocal] = useState(false);
@@ -234,6 +260,8 @@ function AddTab({ title = 'Add a friend', lead = 'Friends see each other’s pre
     e.preventDefault();
     const v = handle.trim().replace(/^@/, '');
     if (!v) { setSt({ status: 'error', text: 'Type a username first, like @ines.' }); input.current?.focus(); return; }
+    // Snug has no email addresses to look people up by: say so, and offer a way in instead.
+    if (looksLikeEmail(v)) { setSt({ status: 'notHere', email: true, name: v }); return; }
     setSt({ status: 'sending' });
     try {
       const r = await call('friend.request', global && local ? { handle: v, local: true } : { handle: v });
@@ -241,6 +269,7 @@ function AddTab({ title = 'Add a friend', lead = 'Friends see each other’s pre
       setSt({ status: 'done', user: r.user, friends: r.state === 'friends', name });
       setHandle('');
     } catch (err) {
+      if (!err.offline && /^Nobody is called/.test(err.message)) { setSt({ status: 'notHere', name: v }); return; }
       setSt({ status: 'error', text: err.offline ? 'You’re offline. Try again once you’re back.' : err.message });
       input.current?.focus();
     }
@@ -263,13 +292,14 @@ function AddTab({ title = 'Add a friend', lead = 'Friends see each other’s pre
       <div id="f-add-msg" class="f-add-msg" role=${bad ? 'alert' : 'status'} aria-live="polite">
         ${bad && html`<span class="err-line"><${Icon} name="alert" size=${16} />${st.text}</span>`}
         ${st.status === 'done' && html`<span class="ok-line"><${Icon} name="check" size=${16} />
-          ${st.friends ? html`You and <b>${st.name}</b> are friends now.` : html`Request sent to <b>${st.name}</b>. You’ll see it under Requests until they answer.`}
+          ${st.friends ? html`You and <b>${st.name}</b> are friends now.` : html`Request sent to <b>${st.name}</b>. You’ll see it under Pending until they answer.`}
           ${st.user && S.users[st.user] && html`<button class="btn quiet" type="button" onClick=${() => openPerson(st.user)}>View profile</button>`}
         </span>`}
         ${st.status === 'idle' && html`<span class="f-add-hint">${global && !local
           ? 'Snug usernames are unique, on every PC. Ask your friend for theirs; it’s in their Settings, under Account. Capitals don’t matter.'
           : 'Usernames are on every profile, under the name. Capitals don’t matter.'}</span>`}
       </div>
+      ${st.status === 'notHere' && html`<${NotHereYet} email=${st.email} name=${st.name} global=${global && !local} />`}
       ${global && html`<label class="f-add-toggle"><${Switch} on=${local} label="On this PC" onChange=${(v) => { setLocal(v); setSt({ status: 'idle' }); }} />
         <span>On this PC: someone with a password account here, over your network</span></label>`}
     </form>
