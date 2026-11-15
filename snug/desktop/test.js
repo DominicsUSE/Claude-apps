@@ -733,7 +733,11 @@ test("desktop shell: the window opens where it was; a place off every screen fal
   t.after(() => first.close().catch(() => {})); // even if a check below fails, so the data folder can be removed
   await page.waitForSelector(".nav");
   const b = await mainWin(app, (w) => w.getBounds());
-  assert.deepEqual({ w: b.width, h: b.height }, { w: 900, h: 700 }, "size kept");
+  // macOS shrinks a window that would run past the bottom of a small screen (CI runners): then it fills the room left.
+  const area0 = await app.evaluate(({ screen }) => screen.getPrimaryDisplay().workArea);
+  const roomH = Math.min(700, area0.y + area0.height - b.y);
+  assert.equal(b.width, 900, "width kept");
+  assert.ok(b.height === 700 || (process.platform === "darwin" && Math.abs(b.height - roomH) <= 2), `height kept (${b.height}, room ${roomH})`);
   assert.ok(Math.abs(b.x - 60) <= 40 && Math.abs(b.y - 40) <= 60, `place kept (${b.x}, ${b.y})`);
   assert.equal(await app.evaluate(() => globalThis.snugPlaceRestored), true);
   await app.close();
