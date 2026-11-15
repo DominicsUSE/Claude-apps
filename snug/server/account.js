@@ -524,9 +524,10 @@ export function createAccountOps({ db, M, hub, fail, ops = {} }) {
     'sessions.list'(c) {
       slow('sessions', c.user);
       const mine = currentHash(c);
+      // e2eeDevice: the end-to-end encryption device bound on that session (server/e2ee.js), so signing it out can remove its keys too.
       return {
-        sessions: db.all('SELECT hash, agent, created, seen FROM sessions WHERE user = ? AND expires > ? AND COALESCE(seen, created) > ? ORDER BY COALESCE(seen, created) DESC', c.user, Date.now(), Date.now() - idleMs(db))
-          .map((s) => ({ id: s.hash.slice(0, 16), agent: s.agent || 'Unknown device', created: s.created, seen: s.seen || s.created, current: s.hash === mine })),
+        sessions: db.all('SELECT * FROM sessions WHERE user = ? AND expires > ? AND COALESCE(seen, created) > ? ORDER BY COALESCE(seen, created) DESC', c.user, Date.now(), Date.now() - idleMs(db))
+          .map((s) => ({ id: s.hash.slice(0, 16), agent: s.agent || 'Unknown device', created: s.created, seen: s.seen || s.created, current: s.hash === mine, ...(s.e2ee_device ? { e2eeDevice: s.e2ee_device } : {}) })),
       };
     },
     'sessions.revoke'(c, d) {
@@ -865,6 +866,7 @@ export function createAccountHttp({
       db.run('DELETE FROM notify WHERE user = ?', user);
       db.run('DELETE FROM personal_invites WHERE user = ?', user);
       db.run('DELETE FROM scheduled WHERE user = ?', user); // nothing goes out later as "Deleted user"
+      M.e2eeForget?.(user); // end-to-end encryption keys, backup and their wraps (server/e2ee-conv.js)
       try { db.run('DELETE FROM push_subs WHERE user = ?', user); } catch { /* push not set up */ }
       endAllSessions(db, user);
     });
@@ -884,8 +886,10 @@ export function createAccountHttp({
       return w.house ? 'thread in a room' : 'thread in a direct conversation';
     };
     const places = new Map();
-    const messages = db.all('SELECT id, conv, ts, text, reply_to, files, edited FROM messages WHERE author = ? AND deleted IS NULL ORDER BY ts', user).map((m) => {
+    const messages = db.all('SELECT id, conv, ts, text, reply_to, files, edited, enc FROM messages WHERE author = ? AND deleted IS NULL ORDER BY ts', user).map((m) => {
       if (!places.has(m.conv)) places.set(m.conv, where(m.conv));
+      // End-to-end encrypted: the server has only the envelope, so that is what is exported (see encryptedNote).
+      if (m.enc) return { id: m.id, conv: m.conv, where: places.get(m.conv), at: new Date(m.ts).toISOString(), encrypted: json(m.enc, null) };
       return {
         id: m.id, conv: m.conv, where: places.get(m.conv), at: new Date(m.ts).toISOString(), text: m.text,
         ...(m.reply_to ? { replyTo: m.reply_to } : {}), ...(m.edited ? { edited: new Date(m.edited).toISOString() } : {}),
@@ -911,6 +915,7 @@ export function createAccountHttp({
       conversations: dms,
       sessions: db.all('SELECT agent, created, seen FROM sessions WHERE user = ?', user).map((s) => ({ device: s.agent, created: new Date(s.created).toISOString(), lastSeen: new Date(s.seen || s.created).toISOString() })),
       messages,
+      ...(messages.some((m) => m.encrypted) ? { encryptedNote: 'Messages in end-to-end encrypted conversations are exported as this server stores them: encrypted envelopes. The server can’t read them, so it can’t export their text; your devices can.' } : {}),
     };
   }
 

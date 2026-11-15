@@ -21,9 +21,19 @@ import { createCommunityOps } from './community.js'; // categories, house pictur
 import { createActivitiesOps } from './activities.js'; // whiteboard, games, voice reactions, ring again, who can ring, TURN refresh
 import { createInboxOps } from './inbox.js'; // unread counts, mentions inbox, timed mutes, presence for a while, mutual friends, username change
 import { createDmOps } from './dms.js'; // close, pin, rename, icon, add, leave and remove in direct conversations and groups
+import { createE2eeOps } from './e2ee.js'; // end-to-end encryption: the key directory
 
-export class UserError extends Error {}
-const fail = (msg) => { throw new UserError(msg); };
+// A refusal the person should read. An optional { code, data } goes back to
+// the client with it (the ack's code and data), for refusals a client handles
+// by itself, such as e2ee_stale (fetch newer keys and seal again).
+export class UserError extends Error {
+  constructor(message, extra = {}) {
+    super(message);
+    if (extra.code) this.code = extra.code;
+    if (extra.data !== undefined) this.data = extra.data;
+  }
+}
+const fail = (msg, extra) => { throw new UserError(msg, extra); };
 
 // Input checks
 const str = (v, { max = 200, min = 0, name = 'This', trim = true } = {}) => {
@@ -317,6 +327,7 @@ export function createOps({ db, M, hub }) {
           mid, conv, c.user, ts, text, M.foldText(text, files), replyTo, files.length ? JSON.stringify(files) : null);
         db.run('INSERT INTO reads (user, conv, ts) VALUES (?, ?, ?) ON CONFLICT (user, conv) DO UPDATE SET ts = excluded.ts', c.user, conv, ts);
         if (w.type === 'thread') db.run('INSERT OR IGNORE INTO follows (user, thread) VALUES (?, ?)', c.user, conv);
+        M.onMsgInsert?.(mid, c); // an encrypted message's envelope and keys (server/e2ee-conv.js), in the same transaction
       });
       const ev = msgEvent(conv, M.msg(mid));
       hub.toConv(conv, 'msg', ev);
@@ -336,7 +347,7 @@ export function createOps({ db, M, hub }) {
       if (!row || row.conv !== conv) fail('That message was deleted.');
       if (row.author !== c.user) fail('You can only edit your own messages.');
       const text = str(d.text, { max: 4000, name: 'A message', trim: false });
-      if (!text.trim() && !row.files) fail('Write something, or delete the message instead.');
+      if (!text.trim() && !row.files && !row.enc) fail('Write something, or delete the message instead.'); // enc: the new text is in its envelope (server/e2ee-conv.js)
       db.run('UPDATE messages SET text = ?, fold = ?, edited = ? WHERE id = ?', text, M.foldText(text, json(row.files, [])), Date.now(), row.id);
       hub.toConv(conv, 'msg', msgEvent(conv, M.msg(row.id)));
       return {};
@@ -1036,6 +1047,7 @@ export function createOps({ db, M, hub }) {
   Object.assign(ops, createCommunityOps({ db, M, hub, fail, ops })); // houses and community (server/community.js)
   Object.assign(ops, createInboxOps({ db, M, hub, fail, ops })); // inbox and notifications (server/inbox.js)
   Object.assign(ops, createDmOps({ db, M, hub, fail, ops })); // managing direct conversations and groups (server/dms.js)
+  Object.assign(ops, createE2eeOps({ db, M, hub, fail, ops, on: !!hub.e2eeOn })); // end-to-end encryption (server/e2ee.js); after dms so its wrappers are outermost
   // Changes made through the ops above go in the house log too (server/safety.js).
   M.auditLate?.();
 

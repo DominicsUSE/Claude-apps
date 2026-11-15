@@ -33,6 +33,7 @@ import { leavingCall } from '../calls.js';
 import { groupMenu, roomMoveItems, roomDrag, groupDrag, mayArrange, GroupForm, HouseBanner } from './community.js'; // categories, moving rooms, the house banner
 import { muteItems, rolesOff, setRolesOff, orderDms } from '../inbox.js'; // timed mutes, @role suppression, pinned and closed conversations
 import { dmManageItems, groupFace } from './dm-manage.js'; // close, pin, rename, icon, add people, leave
+import { EncInvite } from './e2ee-setup.js'; // the offer to turn on end-to-end encryption, above the direct messages
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
@@ -426,6 +427,7 @@ function dmLine(id, meta) {
 export function NavDirect({ drawer } = {}) {
   const cur = current();
   return html`<div class="nav-group">
+    <${EncInvite} />
     <div class="sect"><span>Direct messages</span>
       <button class="ib sm" aria-label="New message" data-tip="New message" onClick=${() => openModal(NewMessage)}><${Icon} name="plus" size=${16} /></button>
     </div>

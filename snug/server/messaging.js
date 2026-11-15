@@ -369,7 +369,8 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
   }
 
   // ---------- Scheduled messages ----------
-  const schedView = (r) => ({ id: r.id, conv: r.conv, text: r.text, replyTo: r.reply_to || undefined, at: r.at, created: r.created });
+  // M.schedView: an end-to-end encrypted one also carries its envelope (server/e2ee-conv.js).
+  const schedView = (r) => (M.schedView ? M.schedView(r) : { id: r.id, conv: r.conv, text: r.text, replyTo: r.reply_to || undefined, at: r.at, created: r.created });
   const schedFor = (user) => db.all('SELECT * FROM scheduled WHERE user = ? ORDER BY at', user).map(schedView);
   const schedChanged = (user) => hub.toUser(user, 'sched', { list: schedFor(user) });
 
@@ -383,7 +384,9 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
       if (!author || author.deleted || author.deactivated) continue;
       try {
         // Checked again now: the right to post may have gone since it was written.
-        ops['msg.send']({ user: r.user, ws: null }, { conv: r.conv, id: newId('m'), text: r.text, replyTo: r.reply_to || undefined });
+        // An end-to-end encrypted one is sent as it was sealed (server/e2ee-conv.js).
+        if (r.enc && M.sendScheduledEnc) M.sendScheduledEnc(r);
+        else ops['msg.send']({ user: r.user, ws: null }, { conv: r.conv, id: newId('m'), text: r.text, replyTo: r.reply_to || undefined });
       } catch (e) {
         hub.toUser(r.user, 'sched.failed', { id: r.id, conv: r.conv, text: r.text, reason: e.message || 'It couldn’t be sent.' });
       }

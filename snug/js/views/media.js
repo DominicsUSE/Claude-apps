@@ -14,6 +14,8 @@ import {
   S, emit, toast, person, convMeta, findMsg, jumpToMsg, openPop, closePop, closePane, togglePane, openLightbox,
 } from '../store.js';
 import { call, on as onEvent, sendMessage, uploadFile, resyncNow } from '../server.js';
+import { isEncrypted } from '../e2ee/conv.js'; // the GIF picker says what the server sees in an encrypted conversation
+import { COPY as E2COPY } from '../lib/e2ee/copy.js';
 import { can } from '../lib/perms.js';
 import { fmtWhen, plural } from '../lib/util.js';
 import { plain } from '../lib/format.js';
@@ -201,7 +203,7 @@ export function VoicePlayer({ f }) {
   const [dur, setDur] = useState(f.duration || 0);
   const [rate, setRate] = useState(speed);
   const [failed, setFailed] = useState(false);
-  const src = f.src || (f.id ? `/api/files/${f.id}` : null);
+  const src = f.src || (f.id && !f.encFile ? `/api/files/${f.id}` : null); // encFile: only its decrypted blob (js/e2ee/conv.js)
   const peaks = Array.isArray(f.peaks) && f.peaks.length ? f.peaks : Array(PEAKS).fill(60);
   const total = dur || f.duration || 0;
   const frac = total ? Math.min(1, t / total) : 0;
@@ -771,6 +773,7 @@ export function GifPicker({ conv, query = '' }) {
       ${tabs.map(([id, label]) => html`<button key=${id} role="tab" aria-selected=${String(tab === id)} class=${tab === id ? 'on' : ''} onClick=${() => setTab(id)}>${label}</button>`)}
     </div>
     <div class="gif-body" role="tabpanel">
+      ${isEncrypted(conv) && html`<p class="hint e2-gif-note">${E2COPY.gifNote}</p>`}
       ${tab !== 'search' && html`<input class="field gif-filter" ref=${input} placeholder="Find a GIF by name" aria-label="Find a GIF by name" value=${q} onInput=${(e) => setQ(e.target.value)} />`}
       ${tab === 'mine' && (favs.length ? (named(favs).length ? grid(named(favs), true) : html`<p class="gif-none">None of your GIFs is called “${q.trim()}”.</p>`) : html`<p class="gif-none">Star a GIF in any conversation to keep it here. Your GIFs follow you to every device.</p>`)}
       ${tab === 'recent' && (recent === null ? loading

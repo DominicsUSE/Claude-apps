@@ -8,6 +8,7 @@ import { S, person, convMeta, isOnline } from '../store.js';
 import { fmtTime, fmtFull, nameList } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Stack } from '../ui/kit.js';
+import { ServerNoteMark } from './e2ee-conv.js'; // call records in an encrypted conversation aren't encrypted
 import { startCall, acceptCall, joinCall, declineCall, incoming, dismissCallEnd, callTitle, callBody } from '../calls.js';
 
 const firstName = (id) => (id === S.me ? 'You' : person(id).name.split(' ')[0]);
@@ -203,6 +204,7 @@ export function CallLine({ conv, m }) {
   return html`<div class=${`callline${missed ? ' missed' : ''}`} role="note" data-id=${m.id} data-conv=${conv}>
     <span class="callline-ic" aria-hidden="true"><${Icon} name=${missed ? 'phone-missed' : m.call?.video ? 'camera' : 'phone'} size=${16} /></span>
     <span class="callline-text"><b>${t.title}</b> <span class="callline-sub">${t.sub}</span></span>
+    <${ServerNoteMark} conv=${conv} />
     <time class="callline-time" datetime=${new Date(m.ts).toISOString()} data-tip=${fmtFull(m.ts)}>${fmtTime(m.ts)}</time>
     ${missed && !live && S.call?.room !== conv && html`<button class="btn quiet callline-back" disabled=${!isOnline()} onClick=${() => startCall(conv, { video: !!m.call?.video })}>Call back</button>`}
   </div>`;

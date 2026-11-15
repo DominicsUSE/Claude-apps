@@ -43,6 +43,9 @@ import { openShortcuts, toggleStreamer } from './views/account.js'; // Ctrl+/ an
 import { openMessageLink } from './views/chat.js'; // message links: /m/<conversation>/<message>
 import './inbox.js'; // server unread counts, groups leaving, timed mutes (js/inbox.js)
 import './landmarks.js'; // Skip to messages, F6 between regions
+import { E2, safetyFor } from './e2ee/manager.js'; // end-to-end encryption on this device
+import { E2eeHost } from './views/e2ee-setup.js'; // opens the encryption sheets when they're needed
+import './e2ee/conv.js'; // end-to-end encrypted conversations: sealing and opening messages
 import { desktopTest } from './desktop.js'; // the desktop app's badge, global voice keys, idle, snug:// links
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
@@ -222,6 +225,7 @@ function Overlays() {
     <${Lightbox} />
     <${IncomingCall} />
     <${MiniCall} />
+    <${E2eeHost} />
     <${Toasts} />`;
 }
 
@@ -456,6 +460,7 @@ onServer('open', () => { if (S.p2p?.enabled && S.p2p.owner && !peerHost) peerHos
 window.snug = { S, emit, voiceStats, ringtone: ringtonePlaying };
 window.snug.voiceDebug = voiceDebug; // voice options (js/voiceopts.js)
 window.snug.account = { goIdle, sounds: () => soundsPlayed, soundLog }; // js/account.js
+window.snug.e2ee = { E2, safetyFor }; // end-to-end checks read the encryption state
 window.snug.toggleStreamer = toggleStreamer; // the desktop app's View > Streamer mode
 window.snug.desktop = desktopTest; // js/desktop.js
 window.snug.voiceAfk = afkCheck; // leaving a voice room after a while alone (js/views/voiceopts.js)

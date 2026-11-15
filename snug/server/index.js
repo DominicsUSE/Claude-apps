@@ -3,8 +3,9 @@
 // see the README.
 import { createServer } from 'node:http';
 import { writeFile, mkdir, stat } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
-import { join, normalize, extname, posix } from 'node:path';
+import { join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './db.js';
 import { createModel, newId } from './model.js';
@@ -31,14 +32,10 @@ import {
   loadDataKey, // sec-registry REG-L6: the snapshot key
 } from './auth.js';
 import { createSeclog, redactLog, redact, sendFile } from './seclog.js'; // sec-web: security events, log redaction, safe file sends
+import { PROTO, MIN_CLIENT } from '../js/lib/proto.js'; // GET /api/version
+import { staticRel, staticHeaders, BASE_HEADERS } from './static.js'; // the app's own files and their headers, shared with the desktop app's join mode
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const PUBLIC = ['index.html', 'css/', 'js/', 'fonts/', 'vendor/', 'docs/', 'brand/', 'sw.js'];
-const TYPES = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.txt': 'text/plain; charset=utf-8', '.json': 'application/json',
-  '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json',
-};
 // Uploaded images shown inline. Anything else downloads.
 // SVG is not among them: it can carry script and links, so it always downloads.
 const INLINE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
@@ -48,25 +45,10 @@ for (const t of [...AUDIO_TYPES, ...VIDEO_TYPES]) INLINE.add(t);
 const MAX_FILE = 10 * 1024 * 1024;
 const HANDLE = /^[a-z0-9](?:[a-z0-9_.-]{0,22}[a-z0-9])?$/;
 
-const CSP = [
-  "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:",
-  "media-src 'self' blob:", "connect-src 'self'", "font-src 'self'", "object-src 'none'", "base-uri 'none'",
-  "frame-ancestors 'none'", "form-action 'self'",
-  "worker-src 'self'", "manifest-src 'self'", "frame-src 'none'", // sec-web: no workers, manifests or frames from anywhere else
-].join('; ');
-// sec-web W6: every other response (API JSON, errors, scripts, styles) gets a
-// policy that allows nothing, so nothing served here can be framed or run as a
-// page; brand SVGs may style themselves but never run script; the service
-// worker may fetch from this origin only.
-const BASE_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
-const SVG_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'; base-uri 'none'";
-const WORKER_CSP = "default-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
 const HSTS = 'max-age=31536000; includeSubDomains';
-// sec-web: a stricter page policy in report-only mode (no inline styles, Trusted
-// Types for script sinks). Nothing is blocked by it; what it would block is
-// reported to /api/csp-report and kept as a security event, so an injection
-// attempt (or a page change that would break under it) shows up.
-const CSP_STRICT = `${CSP.replace("style-src 'self' 'unsafe-inline'", "style-src 'self'")}; require-trusted-types-for 'script'; report-uri /api/csp-report`; // report-uri: sent at once by every browser (report-to batches for up to a minute)
+// Snug's version: from package.json, or (in the desktop app, whose bundled copy has no version) the app's own one level up.
+const VERSION = [join(ROOT, 'package.json'), join(ROOT, '..', 'package.json')]
+  .map((f) => { try { return JSON.parse(readFileSync(f, 'utf8')).version; } catch { return null; } }).find(Boolean) || null;
 // sec-web W2: names a loopback server always answers to. An address typed as an
 // IP is always fine too: a DNS rebinding attack needs a name it controls.
 const LOCAL_NAMES = ['localhost'];
@@ -107,6 +89,9 @@ export async function startServer({
   // sec-desktop D10: the desktop app sets this: GitHub sign-in answers only its window (the resume cookie).
   ghWindowOnly = false,
   peerIdleMs = 120_000, peerDialMs = 8000, peerCacheMB = 1024, peerDirect = true, peerMaxLinks,
+  // End-to-end encryption for DMs and groups (server/e2ee.js). On by default since 0.12; the server's owner can
+  // turn it off with SNUG_E2EE=off. Off stops offering setup; it never downgrades anything already encrypted.
+  e2ee = !['0', 'off', 'false', 'no'].includes(String(process.env.SNUG_E2EE ?? 'on').trim().toLowerCase()),
 } = {}) {
   // sec-registry REG-L6: a damaged snug.db is replaced by the newest good encrypted snapshot before opening.
   // sec-integrate: the data key is loaded once (two-factor secrets, backup codes, snapshots). One that couldn't
@@ -159,7 +144,7 @@ export async function startServer({
   // sec-web: slow-header and slow-body clients are cut off sooner (Node's defaults are 60 s and 300 s);
   // an idle keep-alive socket is not affected by headersTimeout.
   const server = createServer({ keepAliveTimeout: 65_000, headersTimeout: 20_000, requestTimeout: 120_000, maxHeaderSize: 16 * 1024 }, handle);
-  const hub = createHub({ db, M, server, origins, ice, log, ringMs, voiceGraceMs, ipOf }); // sec-authz: ipOf for the socket rate limit
+  const hub = createHub({ db, M, server, origins, ice, log, ringMs, voiceGraceMs, ipOf, e2ee }); // sec-authz: ipOf for the socket rate limit
   // --- push notifications (server/push.js) ---
   // A new message that needs someone with no Snug open anywhere goes to their devices.
   const push = createPush({ db, M, hub, origins, log, allowLocal: pushAllowLocal });
@@ -195,20 +180,13 @@ export async function startServer({
     db.run('DELETE FROM sessions WHERE expires < ?', Date.now());
     push.prune(); // devices whose sign-in expired stop getting notifications
     peer.housekeep(); // p2p: outbox rows past 30 days, old knock ids
+    hub.e2ee?.sweep(); // end-to-end encryption: expired device requests (server/e2ee.js)
   }, 60_000);
 
   function headers(res, extra = {}) {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-    // Camera and screen capture for video in voice rooms; same origin only.
-    res.setHeader('Permissions-Policy', 'microphone=(self), camera=(self), display-capture=(self), fullscreen=(self), geolocation=()');
+    // The usual security headers (server/static.js BASE_HEADERS, shared with the desktop app's join mode).
+    for (const [k, v] of Object.entries(BASE_HEADERS)) res.setHeader(k, v);
     if (secure) res.setHeader('Strict-Transport-Security', HSTS); // sec-auth AUTH-11
-    // sec-web W6: no other origin may embed or frame anything served here, and
-    // nothing is a page unless it says so (callers pass their own policy).
-    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Content-Security-Policy', BASE_CSP);
     for (const [k, v] of Object.entries(extra)) res.setHeader(k, v);
   }
   function sendJson(res, status, body, extra = {}) {
@@ -244,6 +222,7 @@ export async function startServer({
   // Soundboard (server/voiceopts.js): uploads at POST /api/files?sound=<house>, files at GET /api/sounds/<file>.
   const voiceOptsHttp = createVoiceOptsHttp({ db, M, filesDir, sendJson, error, body, headers, uploadLimit });
   hub.messaging?.configure({ filesDir, previews: linkPreviews, allowLoopback: linkAllowLocal });
+  hub.e2ee?.conv?.configure({ filesDir }); // e2ee.file.copy (server/e2ee-conv.js)
   const placesHttp = createPlacesHttp({ db, M, hub, sendJson, error, jsonBody, ipOf }); // webhooks (server/places.js)
   const accountHttp = createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonBody, body, headers, ipOf, secure, authLimit, uploadLimit, log, dataDir, keyStore, dataKey, desktop: !!resumeSecret }); // server/account.js; sec-auth: the data key, sign-up, sign-in, sign-out, new password
   const appearanceHttp = createAppearanceHttp({ db, M, hub, filesDir, sendJson, error, body, headers, uploadLimit }); // server/appearance.js
@@ -285,28 +264,14 @@ export async function startServer({
   }
 
   async function staticFile(res, path, https = false) {
-    // /join/<code> and every other app path load the app itself.
-    // Web addresses always use forward slashes, whatever this machine's file paths look like.
-    // /m/<conversation>/<message> is a message link (js/app.js opens it after sign-in).
-    let rel = path === '/' || path.startsWith('/join/') || path.startsWith('/m/') ? 'index.html' : posix.normalize(path.replace(/\\/g, '/')).replace(/^\/+/, '');
-    if (rel.includes('..') || !PUBLIC.some((p) => (p.endsWith('/') ? rel.startsWith(p) : rel === p))) {
-      if (extname(rel)) return error(res, 404, 'Not found');
-      rel = 'index.html';
-    }
+    // Which file an address loads, and its headers: server/static.js (the desktop app's pinned join mode uses the same rules).
+    const rel = staticRel(path);
+    if (!rel) return error(res, 404, 'Not found');
     const file = join(ROOT, rel);
     let info;
     try { info = await stat(file); } catch { return error(res, 404, 'Not found'); }
     if (!info.isFile()) return error(res, 404, 'Not found');
-    headers(res, {
-      'Content-Type': TYPES[extname(file)] || 'application/octet-stream',
-      'Cache-Control': 'no-cache',
-      ...(rel === 'index.html' ? {
-        'Content-Security-Policy': https ? `${CSP}; upgrade-insecure-requests` : CSP,
-        'Content-Security-Policy-Report-Only': CSP_STRICT, // sec-web
-      } : {}),
-      ...(extname(file) === '.svg' ? { 'Content-Security-Policy': SVG_CSP } : {}), // sec-web W6
-      ...(rel === 'sw.js' ? { 'Service-Worker-Allowed': '/', 'Content-Security-Policy': WORKER_CSP } : {}), // push notifications
-    });
+    headers(res, staticHeaders(rel, https));
     await sendFile(res, file); // sec-web W1: a file gone since the stat is a 404, not a crash
     return undefined;
   }
@@ -322,6 +287,8 @@ export async function startServer({
     // sec-web: reads that need no sign-in, per address (a session cookie skips the general one).
     // sec-integrate: a live session skips it, not just any cookie by that name (a made-up one used to).
     if (!post && !userOf(req) && !openLimit.take(ipOf(req))) return error(res, 429, 'Too many requests. Wait a moment.');
+    // Which Snug this is, for the desktop app's join mode (it runs its own bundled client and checks they fit). Public.
+    if (req.method === 'GET' && path === '/api/version') return sendJson(res, 200, { version: VERSION, proto: PROTO, minClient: MIN_CLIENT, e2ee: e2ee ? 1 : 0 });
     // sec-web: signing out drops the browser's cached copies of private files.
     if (post && path === '/api/logout') res.setHeader('Clear-Site-Data', '"cache"');
 
@@ -397,16 +364,22 @@ export async function startServer({
       const conv = url.searchParams.get('conv') || '';
       const gate = M.postGate(user, conv.startsWith('t:') && !M.thread(conv) ? (M.liveMsg(conv.slice(2))?.conv || '') : conv);
       if (!gate.ok) return error(res, 403, gate.why);
+      // End-to-end encrypted conversations take only files encrypted on the device (?enc=1): stored as an
+      // opaque blob named "file", never sniffed; the name, type and key travel inside the encrypted message.
+      const encConv = !!hub.e2ee?.conv?.encrypted(conv);
+      const enc = url.searchParams.get('enc') === '1';
+      if (enc !== encConv) return error(res, 409, encConv ? 'This conversation is end-to-end encrypted. Reload Snug to attach files here.' : 'This conversation isn’t end-to-end encrypted.');
+      const max = enc ? MAX_FILE + 16 : MAX_FILE; // the AES-GCM tag
       const size = Number(req.headers['content-length']);
-      if (!size || size > MAX_FILE) return error(res, 413, 'Files can be up to 10 MB.');
-      const name = cleanFileName(safeDecode(String(req.headers['x-file-name'] || 'file'))); // sec-authz: no bidi or zero-width characters (js/lib/util.js)
-      const data = await body(req, MAX_FILE);
+      if (!size || size > max) return error(res, 413, 'Files can be up to 10 MB.');
+      const name = enc ? 'file' : cleanFileName(safeDecode(String(req.headers['x-file-name'] || 'file'))); // sec-authz: no bidi or zero-width characters (js/lib/util.js)
+      const data = await body(req, max);
       // Codec parameters are dropped; audio and video keep their type only if the bytes agree.
-      const type = uploadType(req.headers['content-type'], data);
+      const type = enc ? 'application/octet-stream' : uploadType(req.headers['content-type'], data);
       const id = newId('f');
       await writeFile(join(filesDir, id), data, { mode: 0o600 });
-      db.run('INSERT INTO files (id, owner, conv, name, type, size, created) VALUES (?, ?, ?, ?, ?, ?, ?)', id, user, conv, name, type, data.length, Date.now());
-      return sendJson(res, 201, { id, name, size: data.length, kind: fileKind(type) });
+      db.run('INSERT INTO files (id, owner, conv, name, type, size, created, enc) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, user, conv, name, type, data.length, Date.now(), enc ? 1 : null);
+      return sendJson(res, 201, { id, name, size: data.length, kind: enc ? 'file' : fileKind(type) });
     }
 
     const file = /^\/api\/files\/(f_[a-z0-9]{8,40})$/.exec(path);

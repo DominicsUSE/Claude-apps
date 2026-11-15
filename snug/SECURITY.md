@@ -62,6 +62,42 @@ Security fixes go into the newest release only; there are no backports.
   checked, time and size caps); rate limits per person and per
   address.
 
+### End-to-end encrypted conversations (0.12, offered by default; `SNUG_E2EE=off` stops offering it)
+
+Direct messages and groups whose members have all turned on encryption are end-to-end encrypted:
+messages, edits, replies, thread replies, attachments, GIFs, stickers and scheduled messages. Against
+theft of the database, WAL, snapshots, files folder or disk, an operator or admin who reads stored rows,
+logs or backups, and server bugs that leak rows, the server holds only ciphertext. The server can't alter
+a message, move it to another message, conversation, thread or revision, or forge its author (AEAD
+binding, a device signature, and a device list signed by the account key). Removed devices and members
+get nothing sent after their removal. Key substitution by the server is caught when two people compare
+safety numbers.
+
+It does not protect against whoever serves the browser's JavaScript (an operator who changes the code
+can read messages in a browser; the desktop app runs its own built-in code, also when it joins another server, except on a server's own page, which its window title names), membership decided by the
+server (ghost members), withheld or delayed messages, metadata (who, when, how much, group names,
+reactions, devices, IP addresses), compromised devices and people in the conversation, history readable
+with the history key (on by default) or the recovery key and password, messages sent before a
+conversation turned encrypted, and calls. There is no per-message forward secrecy and no deniability.
+
+**Protocol, briefly** (full design in the v0.12 e2ee spec; code in `js/lib/e2ee/`, `js/e2ee/`,
+`server/e2ee.js`, `server/e2ee-conv.js`): WebCrypto only (Ed25519, X25519, HKDF-SHA256, HMAC,
+AES-256-GCM); HPKE base mode (RFC 9180, suite X25519/HKDF-SHA256/AES-256-GCM) from the vendored
+`@hpke/core` (checked against the RFC's test vectors). Each account has an identity key (Ed25519) that
+signs its device list, and a history key (X25519) per weekly epoch. Each device has a non-extractable
+signing key and a weekly prekey (X25519) signed by it. A message gets a fresh 32-byte key; the body
+(padded) is sealed with AES-256-GCM with the signed header as associated data; the header names the
+conversation, place, message id, revision, author and device, recipients and declared mentions, and is
+signed by the device; the key is sealed with HPKE to every current trusted device of every member and to
+each member's current history key. The server refuses a recipient set that isn't exactly the current
+one (`e2ee_stale`), so a client fetches newer keys and seals again. Attachments are sealed whole with
+AES-256-GCM under a key carried in the message. Safety numbers follow libsignal's numeric fingerprint
+(version 0) over the account keys. A new device is added with a 12-character one-time code shown on a
+trusted device and typed on the new one (HMAC over the exact keys involved), or with the recovery key
+(160 random bits; it opens an AES-256-GCM backup of the account keys). No external audit has been done;
+the protocol description should be reviewed by someone outside the implementation before any wording
+stronger than "end-to-end encrypted" is used.
+
 ### What Snug cannot protect against
 
 - **A compromised device.** Malware running as you, or someone with your unlocked PC, can read what you can

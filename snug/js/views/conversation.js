@@ -33,6 +33,7 @@ import { togglePeople } from './people.js'; // the member list toggle, remembere
 import { vp } from '../voiceopts.js';
 import { DmHeaderButtons, dmHeaderItems } from './dm-manage.js'; // Add people and the members of a group (server/dms.js)
 import { DirectLine, KeyBanner, remoteOf, GroupLine, isPeerGroup } from './p2p.js'; // a friend on another PC: how it travels, and a changed security code
+import { EncLabel, EncDetail, RoomEncNote } from './e2ee-conv.js'; // end-to-end encryption labels in conversations
 
 const Back = () => S.ui.phone && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
 
@@ -387,6 +388,7 @@ export function Conversation({ conv }) {
         ${meta.user ? html`<${Avatar} user=${meta.user} size=${24} presence />` : meta.room ? html`<${RoomIcon} kind=${meta.kind} />` : html`<${Icon} name="people" />`}
         <span class="trunc">${meta.title}</span>
       </h1>
+      ${meta.dm && html`<${EncLabel} conv=${conv} onOpen=${() => togglePane('details')} />`}
       ${phone && meta.house && html`<button class="ib drawer-btn title-switch" aria-label="Rooms and places" data-tip="Rooms and places" onClick=${openDrawer}><${Icon} name="chev-d" size=${16} /></button>`}
       ${meta.topic && html`<span class="bar-sub trunc">${meta.topic}</span>`}
       ${meta.user && html`<span class="bar-sub trunc">${presenceLabel(meta.user)}${meta.user.status ? `. ${meta.user.status}` : ''}</span>`}
@@ -479,13 +481,15 @@ export function DetailsPane({ conv }) {
               <p class="sub">${room.topic || 'No description yet.'}</p>
               <p class="faint">In ${S.houses[room.house].name}</p>
               ${(can(S, room.house, 'rooms') || room.perms?.manage) && html`<div><button class="btn" onClick=${() => openModal(RoomForm, { room: conv })}><${Icon} name="edit" size=${16} />Edit room</button></div>`}
-              <${RoomPlaces} conv=${conv} />`
+              <${RoomPlaces} conv=${conv} />
+              <${RoomEncNote} />`
           : meta.user
             ? html`<button class="person" style="margin:0 -8px;width:calc(100% + 16px)" onClick=${(e) => showProfile(meta.user, e.currentTarget.getBoundingClientRect())}>
                 <${Avatar} user=${meta.user} presence /><span class="grow"><span class="person-name" style="display:block">${meta.user.name}</span><span class="person-sub" style="display:block">${presenceLabel(meta.user)}</span></span>
               </button>`
             : html`<h2>${meta.title}</h2><p class="sub">${meta.dm.members.map((id) => S.users[id].name.split(' ')[0]).join(', ')}</p>`}
       </div>
+      ${meta.dm && html`<${EncDetail} dm=${meta.dm} />`}
       <div class="detail">
         <h3>Notify me about</h3>
         <${NotifyControl} kind=${room ? 'room' : 'dm'} id=${conv} level=${level} />

@@ -12,8 +12,11 @@ const path = require("path");
 const { pathToFileURL } = require("url");
 const exporting = require("./vaultexport.js").maybeRun(app); // v0.10 C: `--export-vault` from the uninstaller (desktop/vaultexport.js)
 
+const pinned = require("./pinned.js"); // join mode runs the app's own bundled client at the host's address
 const PORT = 47821;
 const SETUP = pathToFileURL(path.join(__dirname, "setup.html")).toString();
+const FALLBACK = pathToFileURL(path.join(__dirname, "fallback.html")).toString(); // the join server's version doesn't fit (desktop/pinned.js)
+const APP_DIR = path.join(__dirname, "snug"); // the bundled Snug (desktop/build.js copyApp)
 const isMac = process.platform === "darwin";
 
 app.setAppUserModelId("com.snug.app");
@@ -46,6 +49,20 @@ let win = null;
 let server = null;      // the running in-app server, in host mode
 let origin = null;      // the Snug address the window is allowed to show
 let config = null;
+let pinnedOn = false;   // join mode: the window runs the app's own client at origin (desktop/pinned.js)
+let ownPage = false;    // join mode: the window runs the join server's own page (its version doesn't fit)
+let fallbackInfo = null; // what the fallback page says
+
+// Join mode's own session: cookies, storage and the bundled-client handler stay apart from host mode's and
+// from the server's own page (which runs in the default session and so never sees the pinned client's keys).
+let joinSes = null;
+const joinSession = () => (joinSes ||= session.fromPartition(pinned.PARTITION));
+// A plain-http join address on the network (not this computer) isn't a secure context, so the page would have
+// no WebCrypto and no encryption. The app's own code runs there, so that one origin is treated as secure. Read
+// before the app is ready, as the switch must be; choosing another such address restarts the app (config:save).
+const startConfig = readConfig();
+const insecureOrigin = pinned.insecureOrigin(startConfig?.mode === "join" ? startConfig.url : null);
+if (insecureOrigin) app.commandLine.appendSwitch("unsafely-treat-insecure-origin-as-secure", insecureOrigin);
 
 function lanAddress() {
   for (const list of Object.values(os.networkInterfaces())) {
@@ -96,6 +113,8 @@ async function startHost(lan) {
     secure: false, trustProxy: false, extraOrigins: [], hosts: [], pushAllowLocal: false, linkAllowLocal: false,
     // sec-desktop D10: GitHub sign-in answers only this window (its per-launch cookie), not any program on this PC.
     ghWindowOnly: true,
+    // End-to-end encryption for direct messages and groups is offered here (SNUG_E2EE in the environment doesn't change it).
+    e2ee: true,
     ...p2pConfig(), keyStore, fetch: net.fetch.bind(net), resumeSecret, // p2p
   };
   // The same address every launch keeps you signed in; fall back to any free port if it is taken.
@@ -119,24 +138,74 @@ async function stopHost() {
 async function open(error) {
   await stopHost();
   origin = null;
+  pinnedOn = false;
+  ownPage = false;
+  if (joinSes) pinned.unpin(joinSes);
   config = error ? null : readConfig();
   if (!config) {
     await win.loadURL(gated(error ? `${SETUP}?error=${encodeURIComponent(error)}` : SETUP));
     buildMenu();
     return;
   }
+  if (config.mode === "join") return openJoin();
   try {
-    origin = config.mode === "host" ? await startHost(config.lan) : config.url;
+    origin = await startHost(config.lan);
   } catch (e) {
     return open(`Snug couldn’t start on this computer. ${e.message}`);
   }
   buildMenu();
-  try {
-    await win.loadURL(gated(origin)); // an update that is installing, or must come first, shows its page instead (automatic updates, below)
-  } catch {
-    if (config.mode === "join") return open(`Couldn’t reach ${config.url}. Check the address and your connection.`);
-  }
+  await useSession(session.defaultSession);
+  await win.loadURL(gated(origin)).catch(() => {}); // an update that is installing, or must come first, shows its page instead (automatic updates, below)
   return undefined;
+}
+
+// Join mode: check the server's version, then run the app's own client at its address (pinned), or say why
+// not (the fallback page), or open the server's own page if the person chose that for this server and version.
+let rulesP = null;
+async function openJoin() {
+  const url = config.url;
+  const unreachable = () => open(`Couldn’t reach ${url}. Check the address and your connection.`);
+  const rules = await (rulesP ||= pinned.loadRules(APP_DIR));
+  const v = await pinned.checkVersion(joinSession(), url, rules);
+  if (v.state === "unreachable") return unreachable();
+  origin = url;
+  buildMenu();
+  if (v.state === "ok") {
+    pinned.pin(joinSession(), url, { net: require("electron").net, appDir: APP_DIR, rules });
+    pinnedOn = true;
+    await useSession(joinSession());
+    try { await win.loadURL(gated(url)); } catch { return unreachable(); }
+    return undefined;
+  }
+  fallbackInfo = { state: v.state, host: url, server: v.server?.version || null, app: app.getVersion() };
+  if (ownPageChosen(url) === ownPageKey(v)) return openOwnPage({ note: false });
+  fallbackInfo.key = ownPageKey(v);
+  await win.loadURL(gated(FALLBACK));
+  return undefined;
+}
+// The person's choice to use a server's own page is kept per server and version (desktop.json ownPage).
+const ownPageKey = (v) => `${v.state} ${v.server?.version || "?"}`;
+const ownPageChosen = (url) => { const m = rawConfig().ownPage; return m && typeof m === "object" && typeof m[url] === "string" ? m[url] : null; };
+async function openOwnPage({ note }) {
+  const url = config?.mode === "join" ? config.url : null;
+  if (!url) return;
+  origin = url;
+  ownPage = true;
+  await useSession(session.defaultSession);
+  win.setTitle(`Snug${pinned.OWN_PAGE_SUFFIX}`);
+  try { await win.loadURL(gated(url)); } catch { open(`Couldn’t reach ${url}. Check the address and your connection.`); return; }
+  if (note) {
+    const where = new URL(url).host;
+    dialog.showMessageBox(win, { type: "info", message: `This window runs code from ${where}. Encrypted conversations here depend on trusting it.`, detail: pinned.OWN_PAGE_NOTE(where) }).catch(() => {});
+  }
+}
+// The window's session can't change, so a window on another session is replaced by one on the right one
+// (in the same place, as visible as it was).
+async function useSession(ses) {
+  if (!win || win.isDestroyed() || win.webContents.session === ses) return;
+  const old = win;
+  createWindow({ ses, bounds: old.getNormalBounds(), maximized: old.isMaximized(), hidden: !old.isVisible() || old.isMinimized(), load: false });
+  old.destroy();
 }
 
 // sec-desktop: at most 5 links to the browser per 10 seconds, so a hostile join server can't flood it.
@@ -151,10 +220,12 @@ const external = (url) => {
 };
 const fromSnug = (url) => { try { return !!origin && new URL(url).origin === origin; } catch { return false; } };
 
-function createWindow() {
-  const place = savedPlace(); // where the window was last time, if that is still on a screen (desktop shell, below)
+// ses: the window's session (join mode's own partition when pinned, the default one otherwise); a window that
+// replaces another (useSession) takes its place and doesn't load anything itself.
+function createWindow({ ses = session.defaultSession, bounds, maximized, hidden = false, load = true } = {}) {
+  const place = bounds ? { bounds, maximized } : savedPlace(); // where the window was last time, if that is still on a screen (desktop shell, below)
   globalThis.snugStartColor = shellPrefs().themeColor; // the theme's colour from last time (desktop shell, below)
-  win = new BrowserWindow({
+  const w = win = new BrowserWindow({
     width: 1280,
     height: 860,
     ...place.bounds,
@@ -170,44 +241,52 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      session: ses,
     },
   });
-  win.once("ready-to-show", () => {
+  w.once("ready-to-show", () => {
+    if (hidden) return; // it replaces a window waiting in the tray or the taskbar
     // Started at login, "Start minimised", or back from an update that found it so: stay in the tray (or the
     // taskbar, with no tray, or when it was minimised there). maximize() would show the window, so a hidden
     // one is maximised when it is first shown.
     if (startHidden) {
       startHidden = false;
-      if (!tray || startMinimized) { startMinimized = false; if (place.maximized) win.maximize(); win.minimize(); } else if (place.maximized) win.once("show", () => win.maximize());
+      if (!tray || startMinimized) { startMinimized = false; if (place.maximized) w.maximize(); w.minimize(); } else if (place.maximized) w.once("show", () => w.maximize());
       return;
     }
-    if (startInactive) { startInactive = false; win.showInactive(); if (place.maximized) win.maximize(); return; } // back from an update: the keyboard stays where it was
-    if (place.maximized) win.maximize();
-    win.show();
+    if (startInactive) { startInactive = false; w.showInactive(); if (place.maximized) w.maximize(); return; } // back from an update: the keyboard stays where it was
+    if (place.maximized) w.maximize();
+    w.show();
   });
   // When the window last stopped being in front (automatic updates, below).
   blurredAt = Date.now();
-  win.on("blur", () => { blurredAt = Date.now(); });
-  win.on("focus", () => { blurredAt = 0; });
-  shellWindow(win); // window size and place, minimise to tray, flash on mention (desktop shell, below)
+  w.on("blur", () => { blurredAt = Date.now(); });
+  w.on("focus", () => { blurredAt = 0; });
+  // The join server's own page (not the app's code) says so in the window's title.
+  w.on("page-title-updated", (ev, title) => {
+    if (!ownPage || !fromSnug(w.webContents.getURL())) return;
+    ev.preventDefault();
+    w.setTitle(`${title}${pinned.OWN_PAGE_SUFFIX}`);
+  });
+  shellWindow(w); // window size and place, minimise to tray, flash on mention (desktop shell, below)
   // Links in messages open in the default browser, never inside the app.
-  win.webContents.setWindowOpenHandler(({ url }) => { external(url); return { action: "deny" }; });
-  win.webContents.on("will-navigate", (ev, url) => {
-    if (fromSnug(url) || url.startsWith(SETUP)) return;
+  w.webContents.setWindowOpenHandler(({ url }) => { external(url); return { action: "deny" }; });
+  w.webContents.on("will-navigate", (ev, url) => {
+    if (fromSnug(url) || url.startsWith(SETUP) || url.startsWith(FALLBACK)) return;
     ev.preventDefault();
     external(url);
   });
   // sec-desktop D1: a server-side redirect never shows up in will-navigate. The window may only be
   // redirected within the Snug address (a join server answering 302 to another site, or to file://, is stopped).
-  win.webContents.on("will-redirect", (ev, url) => {
+  w.webContents.on("will-redirect", (ev, url) => {
     if (ev.isMainFrame === false) return; // a frame inside the page: the page's own CSP decides
-    if (fromSnug(url) || url.startsWith(SETUP)) return;
+    if (fromSnug(url) || url.startsWith(SETUP) || url.startsWith(FALLBACK)) return;
     ev.preventDefault();
     external(url);
   });
-  win.on("closed", () => { win = null; });
-  keepInTray(win); // closing hides to the tray (see "Running in the tray" below)
-  open();
+  w.on("closed", () => { if (win === w) win = null; });
+  keepInTray(w); // closing hides to the tray (see "Running in the tray" below)
+  if (load) open();
 }
 
 // Snug may use the microphone and camera (voice rooms), share a screen and
@@ -252,7 +331,11 @@ function permissions() {
   const allowed = new Set(["media", "display-capture", "notifications", "clipboard-sanitized-write", "fullscreen"]);
   // sec-desktop: only the main window's page, never another webContents (a picker, a future window).
   const ours = (wc) => !!wc && !!win && !win.isDestroyed() && wc === win.webContents;
-  session.defaultSession.setPermissionRequestHandler((wc, permission, done, details) => {
+  // Both sessions the window can have: the default one, and join mode's own partition (pinned).
+  for (const ses of [session.defaultSession, joinSession()]) sessionPermissions(ses, allowed, ours);
+}
+function sessionPermissions(ses, allowed, ours) {
+  ses.setPermissionRequestHandler((wc, permission, done, details) => {
     const url = details.requestingUrl || wc.getURL();
     if (!allowed.has(permission) || !ours(wc) || !fromSnug(url)) return done(false);
     if (permission === "media") {
@@ -263,7 +346,7 @@ function permissions() {
     }
     return done(true);
   });
-  session.defaultSession.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => {
+  ses.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => {
     if (!allowed.has(permission) || (wc && !ours(wc)) || !fromSnug(requestingOrigin)) return false;
     if (permission === "media") {
       const kind = details?.mediaType === "video" ? "video" : details?.mediaType === "audio" ? "audio" : null;
@@ -272,7 +355,7 @@ function permissions() {
     }
     return true;
   });
-  screenSharing();
+  screenSharing(ses);
 }
 
 // ---------- Screen sharing ----------
@@ -280,8 +363,8 @@ function permissions() {
 // screens and windows (on recent macOS, the system's own picker). Only the
 // Snug page may ask. System sound comes along where Electron can capture it
 // (Windows).
-function screenSharing() {
-  session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
+function screenSharing(ses) {
+  ses.setDisplayMediaRequestHandler(async (request, callback) => {
     let answered = false;
     const answer = (streams) => { if (answered) return; answered = true; try { callback(streams); } catch { /* the page went away */ } };
     if (!fromSnug(request.securityOrigin || request.frame?.url || "")) return answer({});
@@ -582,6 +665,9 @@ ipcMain.handle("config:save", async (e, cfg) => {
     const url = validUrl(cfg.url);
     if (!url) return { error: "That doesn’t look like an address. Try something like snug.example.com." };
     writeConfig({ mode: "join", url });
+    // A plain-http address on the network needs the secure-origin switch for it (above), set only at startup.
+    const needs = pinned.insecureOrigin(url);
+    if (needs && needs !== insecureOrigin) { setImmediate(() => { quitting = true; app.relaunch(); app.quit(); }); return {}; }
   } else return { error: "Choose one of the two." };
   setImmediate(() => open());
   return {};
@@ -597,8 +683,10 @@ else {
   app.whenReady().then(() => {
     permissions();
     shellReady(); // snug:// links, idle and lock, the update check (desktop shell, below)
-    createWindow();
-    app.on("activate", () => { if (!win) createWindow(); });
+    // Join mode starts on its own session, so the usual (pinned) case needs no second window.
+    const windowSession = () => (readConfig()?.mode === "join" ? joinSession() : session.defaultSession);
+    createWindow({ ses: windowSession() });
+    app.on("activate", () => { if (!win) createWindow({ ses: windowSession() }); });
   });
   app.on("window-all-closed", () => { if (!isMac) app.quit(); });
   // Close the database cleanly before the app goes.
@@ -1085,6 +1173,36 @@ const fromUpdatePage = (e) => e.senderFrame?.url === UPDATE_PAGE;
 // The preload asks which page carries the bridge (file:// pages only).
 ipcMain.on("update:page", (e) => { e.returnValue = String(e.senderFrame?.url || "").startsWith("file:") ? UPDATE_PAGE : null; });
 // sec-desktop: and the setup page's exact address, so snugDesktop goes to that page only, not any file:// page.
+ipcMain.on("fallback:page", (e) => { e.returnValue = String(e.senderFrame?.url || "").startsWith("file:") ? FALLBACK : null; });
+// Whether the Snug page runs the app's own code: the in-app server's page (host mode) or the pinned client
+// (join mode), in the main window only. The server's own page never is. (js/e2ee/manager.js deviceKind)
+ipcMain.on("page:builtin", (e) => {
+  const main = !!win && !win.isDestroyed() && e.sender === win.webContents;
+  const ses = e.sender.session;
+  e.returnValue = main && fromSnug(e.senderFrame?.url || "") && !ownPage
+    && ((config?.mode === "host" && ses === session.defaultSession) || (pinnedOn && ses === joinSes));
+});
+// The fallback page (fallback.html): what to say, the server's own page, an app update, or another server.
+const fromFallback = (e) => String(e.senderFrame?.url || "").split(/[?#]/)[0] === FALLBACK;
+ipcMain.handle("fallback:info", (e) => (fromFallback(e) && fallbackInfo ? { ...pinned.fallbackText(fallbackInfo), host: new URL(fallbackInfo.host).host, note: pinned.OWN_PAGE_NOTE(new URL(fallbackInfo.host).host) } : null));
+ipcMain.handle("fallback:own", async (e) => {
+  if (!fromFallback(e) || !fallbackInfo || config?.mode !== "join") return false;
+  const raw = rawConfig();
+  const chosen = raw.ownPage && typeof raw.ownPage === "object" ? raw.ownPage : {};
+  saveTrayPrefs({ ownPage: { ...chosen, [fallbackInfo.host]: fallbackInfo.key } });
+  setImmediate(() => openOwnPage({ note: true }));
+  return true;
+});
+ipcMain.handle("fallback:update", async (e) => {
+  if (!fromFallback(e)) return null;
+  const r = await checkUpdate().catch(() => null);
+  return r ? { version: r.version, phase: r.phase } : { version: null };
+});
+ipcMain.on("fallback:change", (e) => {
+  if (!fromFallback(e)) return;
+  try { fs.writeFileSync(configPath(), JSON.stringify(trayPrefs(), null, 2)); } catch { /* already gone */ }
+  open();
+});
 ipcMain.on("setup:page", (e) => { e.returnValue = String(e.senderFrame?.url || "").startsWith("file:") ? SETUP : null; });
 ipcMain.handle("update:info", (e) => (fromUpdatePage(e) ? publicUpdate() : null));
 // "Try again" on the update page.
