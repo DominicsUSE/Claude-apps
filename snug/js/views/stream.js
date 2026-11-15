@@ -434,6 +434,8 @@ export function Composer({ conv, placeholder }) {
   // Each file uploads as soon as it is attached, so Send is instant.
   const patch = (key, d) => setFiles((cur) => cur.map((x) => (x.key === key ? { ...x, ...d } : x)));
   const addFiles = async (list) => {
+    const l = await uploadLimits(); // the server's limit, not the 10 MB guess, even right after loading
+    if (l?.maxFile) maxFile = l.maxFile;
     for (const f of list.slice(0, 6 - files.length)) {
       if (f.size > maxFile) { toast(`${f.name} is ${fileSize(f.size)}. Files can be up to ${limitText(maxFile)} here.`); continue; }
       const key = Math.random().toString(36).slice(2);
