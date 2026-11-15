@@ -21,7 +21,7 @@ export function relaxedLimits() {
   const out = {};
   for (const [k, [n, ms]] of Object.entries(DEFAULT_LIMITS)) {
     if (k.startsWith('ip')) out[k] = [n * 1000, ms];
-    else if (k === 'authGlobal' || k === 'authBadGlobal' || k === 'connect' || k === 'connectXfer') out[k] = [n * 10, ms];
+    else if (k === 'authGlobal' || k === 'authBadGlobal' || k === 'connect' || k === 'connectXfer' || k === 'moveWait') out[k] = [n * 10, ms];
   }
   return out;
 }
@@ -66,6 +66,9 @@ export async function startLocalRegistry(opts = {}) {
     GH_CLIENT_SECRET: github?.clientSecret || 'test-secret',
     OWNER_GITHUB_IDS: '900001',
     RELAY_OFF_AT: '60000',
+    // v0.12 keypair accounts on, as wrangler.toml has them, with an easy proof of work (production: 20 bits).
+    KEY_ACCOUNTS: '1',
+    POW_BITS: '10',
     ...userEnv,
   };
   if (limits === 'relaxed') env.TEST_LIMITS = { ...relaxedLimits(), ...(userEnv.TEST_LIMITS || {}) };

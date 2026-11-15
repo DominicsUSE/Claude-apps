@@ -16,7 +16,10 @@ import { normalize } from '../lib/usernames.js';
 import { localNameProblem, NAME_RULES } from '../lib/username-text.js';
 
 import { TotpStep } from './account.js'; // two-factor sign-in, the second step
+import { KeyAuth } from './keyauth.js'; // v0.12: accounts that need no GitHub account
 import { Tile } from '../ui/kit.js'; // the house's icon in its arch (server/community.js)
+import { ForgotPassword } from './recover.js'; // v0.12: "Forgot your password?" with a recovery key
+import { usePasskeySignIn } from './passkeys.js'; // v0.12: passkey sign-in where the server allows it
 
 function entered(user) {
   S.me = user.id;
@@ -29,22 +32,29 @@ function entered(user) {
 const Err = ({ id, text }) => html`<div class="err" id=${id} role="alert"><${Icon} name="alert" size=${16} /><span>${text}</span></div>`;
 
 export function Auth() {
-  // null while asking the server what it offers; then {enabled, owner, resume}.
+  // null while asking the server what it offers; then {enabled, owner, resume} for GitHub sign-in and
+  // (v0.12) {enabled, github, owner, resume} for keypair accounts (server/keyauth.js).
   const [gh, setGh] = useState(null);
-  const [password, setPassword] = useState(false); // GitHub is offered, but they chose a password account
+  const [id, setId] = useState(null);
+  // 'key' (the default when offered) | 'github' | 'password'
+  const [mode, setMode] = useState(null);
   useEffect(() => {
     let live = true;
     api('/api/gh/config').then((c) => live && setGh(c), () => live && setGh({ enabled: false }));
+    api('/api/id/config').then((c) => live && setId(c), () => live && setId({ enabled: false }));
     return () => { live = false; };
   }, []);
-  if (!gh) return html`<div class="auth"><main class="auth-main"><div class="auth-panel"><div class="auth-brand"><${Lockup} size=${24} /></div></div></main></div>`;
-  if (gh.enabled && !password) return html`<${GitHubAuth} gh=${gh} onPassword=${() => setPassword(true)} />`;
-  return html`<${PasswordAuth} onGitHub=${gh.enabled ? () => setPassword(false) : null} />`;
+  if (!gh || !id) return html`<div class="auth"><main class="auth-main"><div class="auth-panel"><div class="auth-brand"><${Lockup} size=${24} /></div></div></main></div>`;
+  const m = mode || (id.enabled ? 'key' : gh.enabled ? 'github' : 'password');
+  const first = id.enabled ? 'key' : gh.enabled ? 'github' : null;
+  if (m === 'key') return html`<${KeyAuth} cfg=${id} entered=${entered} onPassword=${() => setMode('password')} onGitHub=${() => setMode('github')} />`;
+  if (m === 'github' && gh.enabled) return html`<${GitHubAuth} gh=${gh} onPassword=${() => setMode('password')} onBack=${id.enabled ? () => setMode('key') : null} />`;
+  return html`<${PasswordAuth} onGitHub=${first ? () => setMode(first) : null} />`;
 }
 
 // ---------- Sign in with GitHub ----------
 
-function GitHubAuth({ gh, onPassword }) {
+function GitHubAuth({ gh, onPassword, onBack }) {
   // step: null (start) | {kind:'code', flow, userCode, uri} | {kind:'name', flow, owner} | {kind:'rebind', flow, username} | {kind:'stop', text}
   const [step, setStep] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -120,11 +130,13 @@ function GitHubAuth({ gh, onPassword }) {
         </button>
         ${error && html`<${Err} id="auth-form-err" text=${error} />`}
         <p class="auth-fine">GitHub only proves it’s you. Nobody on Snug sees your GitHub account, and Snug never posts anything there.</p>
+        ${onBack && html`<p class="auth-fine">No GitHub account? <button type="button" class="auth-link" id="auth-no-github" onClick=${onBack}>Create a Snug account without one</button></p>`}
       </div>
       <p class="auth-swap">
         ${gh.owner ? 'Someone else here?' : 'Only on this PC?'}
         <button type="button" class="auth-link" id="auth-use-password" onClick=${onPassword}>Use a password account</button>
-      </p>`;
+      </p>
+      ${onBack && html`<p class="auth-swap"><button type="button" class="auth-link" id="auth-github-back" onClick=${onBack}>Back</button></p>`}`;
   }
   return html`<div class="auth">
     <main class="auth-main">
@@ -149,7 +161,11 @@ export function CodeStep({ step, onCancel }) {
   return html`
     <div class="auth-head">
       <h1 id="auth-title">Type this code on GitHub</h1>
-      <p class="auth-sub">Paste this code on GitHub in your browser, sign in there if it asks, then come back here.</p>
+      <ol class="auth-steps">
+        <li>Choose <b>Copy code and open GitHub</b>. Your code is copied for you.</li>
+        <li>Paste it on GitHub and choose <b>Authorize</b>. Sign in there first if it asks.</li>
+        <li>Come back here.</li>
+      </ol>
     </div>
     <div class="auth-code-box">
       <output class="auth-device-code" id="auth-device-code" aria-label=${`Your code: ${step.userCode.split('').join(' ')}`}>${step.userCode}</output>
@@ -168,7 +184,9 @@ export function CodeStep({ step, onCancel }) {
 }
 
 // Pick the Snug username: the rules locally as they type, then the registry.
-export function NameStep({ step, onCancel, onDone }) {
+// v0.12: a keypair sign-up (js/views/keyauth.js) passes its own `check` and `submit` (which resolves with the
+// whole answer for onDone), the rules it adds (`nameProblem`), and while it works `busy` text with a Cancel.
+export function NameStep({ step, onCancel, onDone, check: checkName, submit: submitName, nameProblem, busyText, onBusyCancel }) {
   const [name, setName] = useState('');
   // {state: 'idle'|'checking'|'ok'|'bad'|'unknown', text}
   const [st, setSt] = useState({ state: 'idle' });
@@ -179,13 +197,13 @@ export function NameStep({ step, onCancel, onDone }) {
   useEffect(() => {
     const n = normalize(name);
     if (!n) { setSt({ state: 'idle' }); return undefined; }
-    const local = localNameProblem(n, { owner: step.owner });
+    const local = localNameProblem(n, { owner: step.owner }) || nameProblem?.(n);
     if (local) { setSt({ state: 'bad', text: local }); return undefined; }
     setSt({ state: 'checking' });
     const my = ++seq.current;
     // A short pause after typing, then one question to the registry.
     const t = setTimeout(() => {
-      api(`/api/gh/check?name=${encodeURIComponent(n)}&flow=${encodeURIComponent(step.flow)}`).then((r) => {
+      (checkName ? checkName(n) : api(`/api/gh/check?name=${encodeURIComponent(n)}&flow=${encodeURIComponent(step.flow)}`)).then((r) => {
         if (my !== seq.current) return;
         if (r.ok) setSt({ state: 'ok', text: `@${n} is available.` });
         else if (r.ok === false) setSt({ state: 'bad', text: r.message });
@@ -197,15 +215,16 @@ export function NameStep({ step, onCancel, onDone }) {
   const submit = async (e) => {
     e.preventDefault();
     const n = normalize(name);
-    const local = localNameProblem(n, { owner: step.owner });
+    const local = localNameProblem(n, { owner: step.owner }) || nameProblem?.(n);
     if (local) { setSt({ state: 'bad', text: local }); input.current?.focus(); return; }
     setBusy(true);
     try {
-      const r = await api('/api/gh/claim', { flow: step.flow, username: n });
-      onDone(r.user);
+      if (submitName) onDone(await submitName(n));
+      else onDone((await api('/api/gh/claim', { flow: step.flow, username: n })).user);
     } catch (x) {
       setBusy(false);
       seq.current++;
+      if (x.code === 'cancelled') { setSt({ state: 'idle' }); return; }
       if (/took too long|start again/i.test(x.message)) setSt({ state: 'bad', text: x.message, restart: true });
       else setSt({ state: 'bad', text: x.message });
       input.current?.focus();
@@ -234,7 +253,9 @@ export function NameStep({ step, onCancel, onDone }) {
         </div>
         <div class="hint" id="auth-username-hint">${NAME_RULES} Capitals become lowercase. You can change it once a week.</div>
       </div>
-      <button class="btn primary auth-submit" type="submit" disabled=${busy || bad || !name.trim()} aria-busy=${busy ? 'true' : undefined}>${busy ? 'Saving…' : 'Continue'}</button>
+      <button class="btn primary auth-submit" type="submit" disabled=${busy || bad || !name.trim()} aria-busy=${busy ? 'true' : undefined}>${busy ? (busyText ? 'Setting up…' : 'Saving…') : 'Continue'}</button>
+      ${busy && busyText && html`<p class="auth-wait" role="status" id="auth-setting-up"><span class="spinner" aria-hidden="true"></span>${busyText}</p>`}
+      ${busy && onBusyCancel && html`<button type="button" class="btn auth-submit" id="auth-setup-cancel" onClick=${onBusyCancel}>Cancel</button>`}
     </form>
     <p class="auth-fine">Your display name is separate and can be anything. Set it any time in Settings.</p>
     <p class="auth-swap"><button type="button" class="auth-link" onClick=${onCancel}>${st.restart ? 'Start again' : 'Cancel'}</button></p>`;
@@ -275,6 +296,8 @@ function PasswordAuth({ onGitHub }) {
   const [busy, setBusy] = useState(false);
   const [invite, setInvite] = useState(null);
   const [ticket, setTicket] = useState(null); // two-factor sign-in: the password was right, a code is next
+  const [forgot, setForgot] = useState(false);
+  const pk = usePasskeySignIn(entered);
   const refs = { handle: useRef(null), name: useRef(null), password: useRef(null) };
 
   useEffect(() => {
@@ -318,6 +341,12 @@ function PasswordAuth({ onGitHub }) {
   const described = (field, hint) => [bad(field) && `auth-${field}-err`, hint && `auth-${field}-hint`].filter(Boolean).join(' ') || undefined;
   const isNew = mode === 'new';
 
+  if (forgot) {
+    return html`<div class="auth"><main class="auth-main"><div class="auth-panel" aria-labelledby="auth-title">
+      <div class="auth-brand"><${Lockup} size=${24} /></div>
+      <${ForgotPassword} onDone=${entered} onBack=${() => setForgot(false)} />
+    </div></main></div>`;
+  }
   return html`<div class="auth">
     <main class="auth-main">
       <div class="auth-panel">
@@ -335,7 +364,7 @@ function PasswordAuth({ onGitHub }) {
         <form class="form auth-form" hidden=${!!ticket} onSubmit=${submit} novalidate aria-labelledby="auth-title" aria-busy=${busy ? 'true' : undefined}>
           <div class="auth-field">
             <label class="label" for="auth-handle">Username</label>
-            <input id="auth-handle" ref=${refs.handle} class=${`field${bad('handle') ? ' bad' : ''}`} autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="24" value=${handle}
+            <input id="auth-handle" ref=${refs.handle} class=${`field${bad('handle') ? ' bad' : ''}`} autocomplete=${isNew ? 'username' : 'username webauthn'} autocapitalize="none" spellcheck="false" maxlength="24" value=${handle}
               aria-invalid=${bad('handle') ? 'true' : undefined} aria-describedby=${described('handle', isNew)}
               onInput=${edit('handle', setHandle)} autofocus />
             ${bad('handle') && html`<${Err} id="auth-handle-err" text=${error.text} />`}
@@ -356,17 +385,24 @@ function PasswordAuth({ onGitHub }) {
               onInput=${edit('password', setPassword)} />
             ${bad('password') && html`<${Err} id="auth-password-err" text=${error.text} />`}
             ${isNew && html`<div class="hint" id="auth-password-hint">At least 8 characters.</div>`}
+            ${!isNew && html`<button type="button" class="auth-link auth-forgot" id="auth-forgot" onClick=${() => setForgot(true)}>Forgot your password?</button>`}
           </div>
           ${error && !error.field && html`<${Err} id="auth-form-err" text=${error.text} />`}
           <button class="btn primary auth-submit" type="submit" disabled=${busy} aria-busy=${busy ? 'true' : undefined}>
             ${busy ? (isNew ? 'Creating your account…' : 'Signing in…') : (isNew ? 'Create account' : 'Sign in')}
           </button>
         </form>
+        ${!isNew && !ticket && pk.offered && html`<div class="auth-passkey">
+          <button type="button" class="btn auth-submit" id="auth-passkey" disabled=${pk.busy} aria-busy=${pk.busy ? 'true' : undefined} onClick=${pk.start}>
+            <${Icon} name="shield" size=${16} />${pk.busy ? 'Waiting for your passkey…' : 'Sign in with a passkey'}
+          </button>
+          ${pk.error && html`<${Err} id="auth-passkey-err" text=${pk.error} />`}
+        </div>`}
         <p class="auth-swap" hidden=${!!ticket}>
           ${isNew ? 'Already have an account?' : 'New to Snug?'}
           <button type="button" class="auth-link" onClick=${() => swap(isNew ? 'in' : 'new')}>${isNew ? 'Sign in' : 'Create an account'}</button>
         </p>
-        ${onGitHub && html`<p class="auth-swap" hidden=${!!ticket}><button type="button" class="auth-link" id="auth-back-github" onClick=${onGitHub}>Back to GitHub sign-in</button></p>`}
+        ${onGitHub && html`<p class="auth-swap" hidden=${!!ticket}><button type="button" class="auth-link" id="auth-back-github" onClick=${onGitHub}>Back</button></p>`}
       </div>
     </main>
   </div>`;

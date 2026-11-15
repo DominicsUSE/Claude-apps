@@ -3,9 +3,11 @@
 A small Cloudflare Worker with one SQLite Durable Object (`Hub`, a single instance). It is the only
 central piece of Snug P2P. It does four things:
 
-1. **Accounts.** Signs people in with GitHub (OAuth Device Flow). It checks the token once against
-   our OAuth App, keeps only an HMAC of the numeric GitHub id, then revokes the token. Snug never
-   shows a GitHub identity, and the registry never stores one.
+1. **Accounts.** Since v0.12 an account needs no GitHub account: a sign-up sends the PC's device key and
+   the public half of a recovery key, plus a proof of work (`src/keyacct.js`, on when `KEY_ACCOUNTS = "1"`).
+   Signing in with GitHub (OAuth Device Flow) still works: the registry checks the token once against our
+   OAuth App, keeps only an HMAC of the numeric GitHub id, then revokes the token. Snug never shows a GitHub
+   identity, and the registry never stores one.
 2. **Usernames.** Keeps them globally unique, using the rules in `../js/lib/usernames.js` plus a
    unique look-alike "skeleton". One name per GitHub account. A rename frees the old name at once.
    One rename per 7 days. `1` and `a` are reserved for `OWNER_GITHUB_IDS`.
@@ -14,7 +16,8 @@ central piece of Snug P2P. It does four things:
    signaling, sealed friend-request "knocks" (kept up to 30 days), and, only as a fallback, relayed
    end-to-end-encrypted link frames. The registry never sees plaintext.
 
-What it stores: accounts (uid, GitHub-id HMAC, username, public keys), the last 5 public keys per
+What it stores: accounts (uid, GitHub-id HMAC or `a:<uid>`, username, public keys), v0.12 recovery
+public keys, optional GitHub links (HMACs), pairing codes (hashed, 10 min) and spent proof-of-work challenges, the last 5 public keys per
 account with continuity signatures, any pending PC move (up to 72 h), short-lived sign-in tickets
 (stored as hashes, valid 10 min), sealed knocks, the watch list of each connected user (deleted on
 disconnect), per-uid daily counters (kept 2 days), and a per-GitHub-hash record of rename and
@@ -142,7 +145,20 @@ usage alert first.** Without it, `/v1/turn` answers 404 and calls use STUN only.
   new name starts an empty registry. See `SECURITY.md` for the recovery plan.
 - Optional: `npx wrangler secret put VAULT_WRAP_SECRET` (32+ characters) wraps data-file keys apart from
   `GH_HMAC_SECRET` (rows re-wrap as they are read). Once set, never change or remove it.
-- `GH_CLIENT_SECRET` can be rotated in GitHub at any time. Put the new one, then delete the old one.
+- `GH_CLIENT_SECRET` can be rotated in GitHub at any time, with no code change and no downtime (an OAuth App
+  allows two client secrets at once). By hand, and never pasted into a chat, issue or command line:
+  1. GitHub > Settings > Developer settings > OAuth Apps > Snug's app > **Generate a new client secret**.
+  2. `npx wrangler secret put GH_CLIENT_SECRET` and paste it at the hidden prompt (or the Cloudflare
+     dashboard: Workers & Pages > snug-registry > Settings > Variables and Secrets, type *Secret*,
+     then Save and deploy). Don't pass it as a command argument or through `echo` (it would land in the
+     shell history). Either way a new version deploys and the Hub restarts with the new value.
+  3. Check: sign in with GitHub from the desktop app. `config_error` or `github_invalid` means the new
+     value is wrong; the old secret still works, so put the right one again.
+  4. Delete the old secret in GitHub.
+  5. If the old one may have leaked, also **Revoke all user tokens** on the OAuth App. People just sign
+     in again; Snug never stores GitHub tokens.
+  The registry needs this secret only to ask GitHub whether a token belongs to Snug's app (and to revoke
+  it); the desktop app never holds it.
 - `OWNER_GITHUB_IDS` changes take effect on the next request.
 
 ### Logging
@@ -236,6 +252,54 @@ key (role `cur`), the pending move's key (`pending`) or the key just before the 
 Banned accounts and old apps may use xfer and the vault key (their own data). Budgets: `xferDay`,
 `xferBytesDay`, `xferBurst`; `RELAY_OFF_AT` applies. Two xfer sockets per key at most (a third: 4002).
 `/v1/health` is `{ok:true, v:3}`.
+
+### v0.12: accounts with no GitHub (`src/keyacct.js`)
+
+On only when `KEY_ACCOUNTS = "1"` (wrangler.toml `[vars]`); otherwise every route below answers exactly like
+an unknown path. No existing route, field, signed string, status or socket frame changes for 0.11 apps
+(`test/keyacct.test.js` runs a whole 0.11 flow with the feature on and off and compares the answers).
+A keypair account is an ordinary `accounts` row whose `ghh` is `a:<uid>` (never a GitHub hash), so vault
+keys, renames, bans and `move.force` work for it unchanged. `rk` is an Ed25519 key whose seed the app
+derives from the recovery secret (`js/lib/recovery.js`); the registry stores only its public half.
+
+| Call | Body | Signed by / string |
+|---|---|---|
+| `POST /v1/pow` | `{purpose:"register"}` | none (20 an hour per address) → `{c, bits, exp}` (10 min, MAC-protected, single use) |
+| `POST /v1/register` | `{ik, xk, rk, username, c, nonce, ts, sig, rsig}` | `ik` **and** `rk` over `register\n{ik}\n{xk}\n{rk}\n{username}\n{c}\n{nonce}\n{ts}`; `SHA-256("snug-pow-v1\n"+c+"\n"+ik+"\n"+nonce)` starts with `bits` zero bits → `{account}` |
+| `POST /v1/recover` | `{rk, ik, xk, ts, sig, rsig}` | `rk` and the new `ik` over `recover\n{rk}\n{ik}\n{xk}\n{ts}` → `{status:"pending", uid, account, at}`: a 72 h move (the old PC gets the usual `rebind` frame and can stop it); at once when the owner armed `move.force` |
+| `POST /v1/move/hello` | `{ik, xk, ts, sig}` | new `ik`, `move-hello\n{ik}\n{xk}\n{ts}` → `{code:"XXXXX-XXXXX", hid, exp}` (10 min, Crockford base32) |
+| `POST /v1/move/wait` | `{hid, ts, sig}` | the hello's `ik`, `move-wait\n{hid}\n{ts}` → `{state: waiting \| done (+account) \| expired}` |
+| `POST /v1/move/peek` | `{uid, ts, p:{code}, sig}` | current key, `move-peek` → `{ik, xk, kver}` (5 tries a code, 10 codes a day) |
+| `POST /v1/move/accept` | `{uid, ts, p:{code, prev, knock?}, sig}` | current key, `move-accept`, mutating; `prev` as `/v1/rebind/approve` → `{ok}`: the move completes now; `knock {id, box}` is the restore list for the new key |
+| `POST /v1/recovery/set` | `{uid, ts, p:{rk, rsigNew, rsigOld?}, sig}` | current key; both rsigs over `recovery-set\n{uid}\n{rk}\n{ts}` → `{state:"set"}` (no key yet, or with the old one), else `{state:"pending", at}` (7 days) |
+| `POST /v1/recovery/cancel` | `{uid, ts, rsig}` | current `rk`, `recovery-cancel\n{uid}\n{ts}`, mutating → `{ok}` |
+| `POST /v1/link/github` | `{uid, ts, p:{ticket}, sig}` | current key, `link-github`; a fresh `new` ticket issued to the same key → `{ok}`. A linked GitHub signs in to (and can move) the account |
+| `POST /v1/link/github/remove` | `{uid, ts, p:{}, sig}` | current key, `unlink-github` → `{ok}` |
+| `POST /v1/release/key` | `{uid, ts, p:{}, sig, rsig}` | current key **and** `rk` over `release-key\n{uid}\n{ts}\n{p}` → `{ok}` (the name is free at once) |
+| `POST /v1/account/kind` | `{uid, ts, p:{}, sig}` | current key → `{kind, recovery:{set, pendingAt}, github:{linked}, move:{via, at}\|null}` |
+
+Errors added: `pow_invalid` 400, `too_new` 409 (`{retryAt?, what?}`), `key_in_use` 409, `recovery_pending`
+409, `move_pending` 409. New frame, only to sockets whose auth `v` is 0.12.0 or newer: `{t:'recovery', state}`.
+
+After a move that completed without the old PC's approval, the proof that started it wins: a recovery move
+drops a linked GitHub; a GitHub move drops a GitHub account's recovery key. Every such move also rotates the
+account's data-file key (old files stay readable by `kid`).
+
+Abuse limits (`src/limits.js`; raise `POW_BITS` or lower `regGlobal` without a code change):
+
+| Control | Value |
+|---|---|
+| Proof of work | `POW_BITS` (20) + 1 per doubling of sign-ups past 30 in the last hour, at most 28 |
+| Per address | `ipAccount` 5/h, `ipRegister` 3/day (IPv6 by /48), both kept in SQLite |
+| Global | `regGlobal` 300 sign-ups an hour (GitHub sign-up is not counted) |
+| New accounts (72 h) | knocks 10/day (2 per person), lookups 60/day, TURN 3/day |
+| Names | 2 or 3 characters only after 30 days; the first rename after 7 days |
+| Never connected | deleted after 7 days (the name is freed); banned accounts are kept |
+| Idle | optional `KEY_ACCOUNT_IDLE_DAYS` frees names of accounts with no connection for that long |
+
+None of this makes one person equal one account: someone with many addresses and spare CPU can still make
+accounts slowly. The registry can still read nothing of what friends send each other, and, as for GitHub
+accounts, it holds every data-file key (wrapped with its secrets).
 
 ### Differences from the design document (v2, section 2)
 - `knocks` has the primary key `(to_uid, frm, id)`, so nobody can block a knock id another sender uses.

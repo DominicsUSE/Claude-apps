@@ -23,6 +23,9 @@ import { HUES, cleanFileName } from '../js/lib/util.js'; // sec-authz: cleanFile
 import { createPeer } from './peer.js'; // p2p: friends, DMs, profiles and calls with people on other PCs
 import { createGroups } from './peergroups.js'; // v0.10 B: groups across PCs
 import { createGhAuth } from './ghauth.js'; // p2p: Sign in with GitHub and the Snug username
+import { createPasskeys } from './passkeys.js'; // v0.12: passkey sign-in for password accounts
+import { createRecovery } from './recovery.js'; // v0.12: "Forgot your password?" with a recovery key, no email
+import { createKeyAuth } from './keyauth.js'; // v0.12: desktop accounts that need no GitHub account
 import { createNotices } from './notices.js'; // v0.10 A: registry notices, bans and admin
 import { createVault } from './vault.js'; // v0.10 C: the account's data file
 import { restoreIfDamaged, scheduleSnapshots } from './dbbackup.js'; // sec-registry REG-L6: database snapshots
@@ -66,6 +69,9 @@ export async function startServer({
   // A server bound to loopback always checks the Host header (localhost, IPs, SNUG_ORIGINS
   // hosts, these); one bound to a public or wildcard address checks it once this is set.
   hosts = process.env.SNUG_HOSTS ? process.env.SNUG_HOSTS.split(',').map((x) => x.trim()).filter(Boolean) : null,
+  // v0.12: the passkey RP ID (server/webauthn.js passkeyPlace). Without it, the only SNUG_HOSTS name, or
+  // "localhost" on a server that listens on this machine only. Changing it later breaks existing passkeys.
+  rpId = process.env.SNUG_RP_ID || null,
   quiet = false,
   // Tests only: let push subscriptions point at a mock push service on http://127.0.0.1.
   pushAllowLocal = process.env.SNUG_PUSH_ALLOW_LOCAL === '1',
@@ -88,6 +94,7 @@ export async function startServer({
   resumeSecret = null,
   // sec-desktop D10: the desktop app sets this: GitHub sign-in answers only its window (the resume cookie).
   ghWindowOnly = false,
+  movePollMs = 3000, // v0.12: how often a new PC asks whether its pairing code was used (tests: shorter)
   peerIdleMs = 120_000, peerDialMs = 8000, peerCacheMB = 1024, peerDirect = true, peerMaxLinks,
   // End-to-end encryption for DMs and groups (server/e2ee.js). On by default since 0.12; the server's owner can
   // turn it off with SNUG_E2EE=off. Off stops offering setup; it never downgrades anything already encrypted.
@@ -225,10 +232,14 @@ export async function startServer({
   hub.e2ee?.conv?.configure({ filesDir }); // e2ee.file.copy (server/e2ee-conv.js)
   const placesHttp = createPlacesHttp({ db, M, hub, sendJson, error, jsonBody, ipOf }); // webhooks (server/places.js)
   const accountHttp = createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonBody, body, headers, ipOf, secure, authLimit, uploadLimit, log, dataDir, keyStore, dataKey, desktop: !!resumeSecret }); // server/account.js; sec-auth: the data key, sign-up, sign-in, sign-out, new password
+  const passkeys = createPasskeys({ db, M, hub, account: accountHttp, sendJson, error, jsonBody, ipOf, authLimit, httpsReq, rpId, hosts, loopback: isLoopbackBind(host), desktop: !!resumeSecret, extraOrigins });
+  const recovery = createRecovery({ db, M, hub, account: accountHttp, sendJson, error, jsonBody, ipOf, authLimit, log });
   const appearanceHttp = createAppearanceHttp({ db, M, hub, filesDir, sendJson, error, body, headers, uploadLimit }); // server/appearance.js
   const communityHttp = createCommunityHttp({ db, M, hub, filesDir, sendJson, error, body, headers, uploadLimit, userOf: (req) => userOf(req) }); // server/community.js
   // p2p: GitHub sign-in, the username picker and the owner's account rules (server/ghauth.js).
   const gh = createGhAuth({ db, M, hub, peer, opts: { registryUrl, githubClientId, githubBase, fetch: fetchFn, resumeSecret, trustProxy, ghWindowOnly /* sec-desktop */ }, secure, log, agentOf: accountHttp.agentOf, userOf });
+  // v0.12: keypair accounts, the recovery key and moving with a pairing code (server/keyauth.js).
+  const keyAuth = createKeyAuth({ db, M, hub, peer, gh, opts: { registryUrl, ghWindowOnly, movePollMs }, secure, log, agentOf: accountHttp.agentOf });
   // v0.10 A: registry notices, bans and admin (server/notices.js)
   const notices = createNotices({ db, M, hub, peer, log });
 
@@ -327,14 +338,20 @@ export async function startServer({
     }
 
     if (await gh.open(req, res, path, url)) return undefined; // p2p: /api/gh/* (server/ghauth.js)
+    if (await keyAuth.open(req, res, path, url)) return undefined; // v0.12: /api/id/* (server/keyauth.js)
     // Webhooks carry their own secret instead of a session (server/places.js).
     if (await placesHttp(req, res, path)) return undefined;
     if (await accountHttp.open(req, res, path)) return undefined; // POST /api/login/totp
+    if (await passkeys.open(req, res, path)) return undefined; // v0.12: /api/passkey/{config,options,login}
+    if (await recovery.open(req, res, path)) return undefined; // v0.12: /api/recover, /api/recover/finish
 
     const user = userOf(req);
     if (!user) return error(res, 401, 'Sign in first.');
     if (await gh.authed(req, res, path, user)) return undefined; // p2p: no password for GitHub accounts; sliding sign-in on /api/me
+    if (await keyAuth.authed(req, res, path, user)) return undefined; // v0.12: the recovery key until it is saved
     if (await accountHttp.authed(req, res, path, url, user)) return undefined; // export, deactivate, delete, banners
+    if (await passkeys.authed(req, res, path, user)) return undefined; // v0.12: Settings > Passkeys
+    if (await recovery.authed(req, res, path, user)) return undefined; // v0.12: Settings > Recovery key
     if (await appearanceHttp(req, res, path, url, user)) return undefined; // profile pictures (server/appearance.js)
     if (await communityHttp.authed(req, res, path, url, user)) return undefined; // house pictures and event covers (server/community.js)
     // v0.10 C: /api/vault/*
@@ -437,8 +454,8 @@ export async function startServer({
     vault, // v0.10 C: the data file (server/vault.js)
     dbSnapshots, // sec-registry REG-L6: dbSnapshots?.now() writes a snapshot (tests)
     // For tests: forget every rate limit, the socket ones and the sign-in ones.
-    resetLimits: () => { hub.resetLimits(); authLimit.reset(); uploadLimit.reset(); mediaHttp.reset(); accountHttp.reset(); openLimit.reset(); inviteLimit.reset(); cspLimit.reset(); sec.reset(); }, // sec-web: openLimit, inviteLimit, cspLimit, sec
-    close: () => new Promise((r) => { vault.flush(); vault.close(); dbSnapshots?.stop(); clearInterval(sweep); gh.close(); notices.close(); peer.close(); hub.close(); server.close(() => { db.close(); r(); }); server.closeAllConnections?.(); }),
+    resetLimits: () => { hub.resetLimits(); authLimit.reset(); uploadLimit.reset(); mediaHttp.reset(); accountHttp.reset(); passkeys.reset(); recovery.reset(); openLimit.reset(); inviteLimit.reset(); cspLimit.reset(); sec.reset(); }, // sec-web: openLimit, inviteLimit, cspLimit, sec
+    close: () => new Promise((r) => { vault.flush(); vault.close(); dbSnapshots?.stop(); clearInterval(sweep); gh.close(); keyAuth.close(); notices.close(); peer.close(); hub.close(); server.close(() => { db.close(); r(); }); server.closeAllConnections?.(); }),
   };
 }
 

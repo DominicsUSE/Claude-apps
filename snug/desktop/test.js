@@ -798,9 +798,13 @@ test("p2p: the in-app server uses the registry through net.fetch, the OS key sto
   const page = await app.firstWindow();
   page.setDefaultTimeout(15000);
   t.after(() => app.close().catch(() => {}));
-  // With a registry, signing in starts with GitHub (js/views/auth.js); password accounts are one link away.
-  assert.equal((await page.locator("#auth-github").textContent()).trim(), "Continue with GitHub");
+  // v0.12: with a registry, the first screen is "Create my account" (no GitHub needed; js/views/keyauth.js).
+  // GitHub is under "I already have an account"; password accounts are one link away.
+  assert.equal((await page.locator("#auth-create").textContent()).trim(), "Create my account");
   await page.waitForSelector("#auth-use-password");
+  await page.click("#auth-have");
+  await page.click("#auth-github-path");
+  assert.equal((await page.locator("#auth-github").textContent()).trim(), "Continue with GitHub");
   const token = reg.github.issueToken({ id: 4242 });
   const r = await app.evaluate(async ({ safeStorage }, token) => {
     const peer = globalThis.snugHostForTest().peer;
@@ -819,6 +823,45 @@ test("p2p: the in-app server uses the registry through net.fetch, the OS key sto
   assert.doesNotMatch(fs.readFileSync(path.join(userData, "data", "identity.json"), "utf8"), /PRIVATE KEY/);
   const [resume] = await app.evaluate(({ session }) => session.defaultSession.cookies.get({ name: "snug_resume" }));
   assert.ok(resume && resume.httpOnly, "the per-launch resume cookie is set, httpOnly");
+});
+
+test("p2p: Create my account works in the app: the proof of work runs in a worker thread, the recovery key is wrapped like the device key", async (t) => {
+  const { pathToFileURL } = require("url");
+  const { startLocalRegistry } = await import(pathToFileURL(path.join(__dirname, "..", "registry", "dev.js")).href);
+  const reg = await startLocalRegistry();
+  t.after(() => reg.close());
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-key-"));
+  t.after(() => removeDir(userData));
+  fs.writeFileSync(path.join(userData, "desktop.json"), JSON.stringify({ mode: "host" }));
+  const env = { SNUG_REGISTRY_URL: reg.url, SNUG_GITHUB_CLIENT_ID: reg.github.clientId, SNUG_GITHUB_URL: reg.github.url };
+  Object.assign(process.env, env);
+  delete process.env.SNUG_P2P;
+  const bin = process.env.SNUG_BIN && path.resolve(process.env.SNUG_BIN);
+  let app;
+  try {
+    app = await electron.launch({
+      executablePath: bin || require("electron"),
+      args: [...(bin ? [] : [__dirname]), "--no-sandbox", `--user-data-dir=${userData}`, "--dev-registry"],
+      cwd: __dirname,
+    });
+  } finally { for (const k of Object.keys(env)) delete process.env[k]; process.env.SNUG_P2P = "off"; }
+  const page = await app.firstWindow();
+  page.setDefaultTimeout(30000);
+  t.after(() => app.close().catch(() => {}));
+  await page.click("#auth-create");
+  await page.fill("#auth-username", "desk_key");
+  await page.locator("#auth-username-ok").waitFor();
+  await page.click(".auth-form button[type=submit]");
+  await page.locator("#rk-key").waitFor();
+  const code = (await page.locator("#rk-key > span").allTextContents()).join("-");
+  assert.match(code, /^([A-Z2-7]{4}-){8}[A-Z2-7]{4}$/);
+  const file = JSON.parse(fs.readFileSync(path.join(userData, "data", "recovery.json"), "utf8"));
+  const id = JSON.parse(fs.readFileSync(path.join(userData, "data", "identity.json"), "utf8"));
+  assert.equal(file.enc, id.enc, "the recovery secret is wrapped exactly like the device key");
+  await page.fill("#rk-last", code.slice(-4));
+  await page.click("#rk-saved");
+  await page.waitForFunction(() => window.snug?.S?.auth === "in" && window.snug.S.p2p?.kind === "key", null, { timeout: 30000 });
+  assert.ok(!fs.existsSync(path.join(userData, "data", "recovery.json")), "gone once saved");
 });
 
 // ---------- Automatic updates (desktop/updater.js, update.html) ----------

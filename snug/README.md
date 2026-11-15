@@ -106,6 +106,28 @@ On first run it asks where Snug should run:
 
 **Snug > Change where Snug runs** brings the choice back.
 
+**Friends on other PCs (v0.12).** The app's first screen offers **Create my
+account**: pick a Snug username and you're in. No email, phone number or
+GitHub account is needed. The account lives on this PC; Snug's directory (the
+registry, `registry/`) keeps only your username and public keys. Then Snug
+shows a **recovery key** once (36 letters and numbers): save it as a file,
+print it or copy it, and type its last 4 characters back. It is the only way to
+get the account back if you lose the PC. Snug can't reset it, and anyone who
+has it can start moving your account (your old PC is told and can stop it).
+
+- **New PC, old one at hand:** on the new PC choose **I already have an
+  account > My other PC is here**; type the code it shows in Settings >
+  Account and security > **Move to a new PC** on the old one. It moves at
+  once, and your saved chats are copied over.
+- **Old PC lost:** **I lost my other PC**, then the recovery key. The move
+  finishes after 72 hours, or sooner if the old PC says yes.
+- **GitHub** is optional: **I used GitHub before** signs in as in 0.11, and an
+  account made without GitHub can link one in Settings as a second way to move.
+
+New accounts cost a few seconds of computer work (a "proof of work") and are
+limited per network address, which slows down mass sign-ups but doesn't stop
+a determined person from making several accounts.
+
 Closing the window keeps Snug running in the system tray (the menu bar on a
 Mac), so its connection stays open and notifications keep arriving; the
 first close says so. The tray menu has **Open Snug** and **Quit**; Quit stops
@@ -736,6 +758,34 @@ Real, and covered by tests with separate users:
     (the password alone gets a five-minute ticket good for five tries). The
     **devices** list shows each session's browser and system and when it was
     last used; sign one out, or every other one, and their sockets close at once.
+  - **Recovery key** (v0.12, password accounts on a server): no email needed. Home
+    reminds you to make one; Settings > Account and security makes a new one (the
+    password, and a code when two-factor is on, unless you signed in in the last ten
+    minutes). It is 36 letters and numbers in 9 groups of 4 (`js/lib/recovery.js`),
+    shown once: save it as a file, print it or copy it, then type the last group back.
+    The browser sends only a key derived from it (HKDF, label `web-auth-v1`); the
+    server keeps a scrypt hash of that, so whoever runs the server can't read or use
+    it. **Forgot your password?** on the sign-in screen takes your username and the
+    key (a typo is caught by its check characters before anything is sent), then a
+    new password: every other device signs out, your passkeys are removed (in case
+    someone else added one), and, if you tick "I lost my authenticator app too",
+    two-factor sign-in turns off. A key works once; you make a new one straight
+    after. Wrong keys count per account (5 free, then waits from 15 minutes) and per
+    address. Anyone with your key and username can get in, as with a password, and
+    the screens say so. The same key will open the end-to-end encryption backup
+    (a different derived key, `e2ee-backup-v1`, which the server can't compute).
+  - **Passkeys** (v0.12, password accounts on a server): **Sign in with a passkey**
+    on the sign-in screen, and the username field offers your passkeys too. Add,
+    rename and remove them in Settings > Account and security (adding or removing
+    needs the password, and a code when two-factor is on; up to 10). A passkey
+    sign-in needs no code: the device already checked your PIN, fingerprint or face.
+    Your password keeps working. Checked with `node:crypto` only (`server/webauthn.js`:
+    challenge, origin, RP ID, user verification, signature, and a counter that goes
+    backwards is refused as a copied authenticator). Passkeys need HTTPS with a
+    domain name (or `http://localhost`); reached by an IP address or plain `http`,
+    Settings says so and the sign-in screen shows no button. They aren't used in the
+    desktop app, which signs you in on its own PC. Passkeys in the desktop app's
+    "join a server" window depend on the system and were not tested.
   - **Your data**: download everything you wrote as one JSON file (three times
     an hour); **deactivate** (signed out everywhere, shown offline, back when
     you sign in); **delete** with your password, your typed username and a code
@@ -938,8 +988,9 @@ Real, and covered by tests with separate users:
 
 Not built yet, on purpose, because each needs outside infrastructure:
 
-- **Email.** No address verification and no "forgot password". Until then an
-  owner of the server resets a password in the database.
+- **Email.** No address verification. "Forgot your password?" works with a
+  recovery key instead (above), and an owner of the server can reset a password
+  with `npm run reset-password`.
 - **A TURN relay for voice.** Voice connects directly between people. People
   behind strict company or mobile networks need a relay; set the `SNUG_TURN_*`
   variables below once you run one (coturn is the usual choice). With
@@ -980,6 +1031,7 @@ behind a reverse proxy that terminates TLS and passes WebSocket upgrades on
 | `SNUG_TRUST_PROXY=<n>` | `n` reverse proxies in front (usually `1`): the client address is the `n`th entry from the right of `X-Forwarded-For`, believed only when the connection comes from a loopback or private address; `X-Forwarded-Proto: https` makes the cookie `Secure` | off |
 | `SNUG_DATA_KEY` | 32 bytes (base64 or hex) that encrypt two-factor secrets and key the backup-code hashes; without it Snug makes `data/secret.key` | `data/secret.key` |
 | `SNUG_ORIGINS` | Extra allowed page origins, comma separated | none |
+| `SNUG_RP_ID` | The domain passkeys belong to (for example `example.org` to share them across `snug.example.org` and `chat.example.org`). Without it: the one `SNUG_HOSTS` name, or `localhost` on a server that only listens on this machine. Changing it later stops existing passkeys from working (passwords keep working) | the `SNUG_HOSTS` name |
 | `SNUG_HOSTS` | Host names this server answers to, comma separated (for example `snug.example.org`). Any other `Host` gets 421, which stops DNS-rebinding pages. A server bound to loopback always checks (localhost, IP addresses and `SNUG_ORIGINS` hosts pass). A server bound to a public address checks once this is set, and logs a warning until then | none |
 | `SNUG_STUN` | STUN servers for voice | Google's public server |
 | `SNUG_TURN_URL`, `SNUG_TURN_USER`, `SNUG_TURN_PASS` | TURN relay for voice | none |
@@ -988,6 +1040,13 @@ behind a reverse proxy that terminates TLS and passes WebSocket upgrades on
 | `SNUG_E2EE=off` | Stop offering end-to-end encryption for direct messages and groups (conversations already encrypted stay encrypted) | on |
 | `SNUG_DEMO_PASSWORD` | Password for the sample accounts when seeding | `snug-demo-1` |
 | `SNUG_GIF_PROVIDER=tenor`, `SNUG_TENOR_KEY` | Turn on GIF search through Tenor (v2 API). Searches and previews go through the server; media is fetched only from Tenor's media hosts, at most 10 MB, GIF, WebP or MP4 by content | off: no Search tab |
+
+**Someone lost their password and their recovery key?** After checking who is
+asking (Snug can't do that part), run `npm run reset-password -- <username>`
+(add `--two-factor` to also turn off their two-factor sign-in). It prints a
+temporary password once, signs out every device, removes their passkeys and
+records it in the account's activity. It can't bring back anything that was
+end-to-end encrypted.
 
 Back up the `data` folder; it is the whole state. Keep `data/secret.key` (or
 `SNUG_DATA_KEY`) with it but stored apart: without it two-factor sign-in can't be
@@ -1009,6 +1068,12 @@ before seeding anything that faces the internet, or better, do not seed there.
   are HMACs, both under the data key outside the database. Ten wrong codes per
   account, then waits from 15 minutes. Every password or code check by someone
   already signed in shares one counter (5 free).
+- **Recovery keys and passkeys** (v0.12): the server stores only a scrypt hash
+  of a key derived from the recovery key, and only the public half of each
+  passkey (with a random WebAuthn user id, never the account id). Recovery
+  tries are limited per address and per account; a used key is spent once,
+  even when two attempts race. Passkey challenges are single use and last 5
+  minutes; the RP ID never comes from the `Host` header alone.
 - **Audit**: sign-ins, failures and security changes go to the `auth_events`
   table (90 days, addresses truncated) and the log as JSON lines, never with a
   password, code or token; bursts log a `suspicious` line, and other devices
@@ -1265,6 +1330,11 @@ server/
                     forums, stages, webhooks, rail, welcome, templates, insights
   voiceopts.js      soundboard, voice room limit and bitrate
   account.js        settings sync, status, idle, notes, sessions, two-factor, your data
+  webauthn.js       passkey checks with node:crypto: CBOR, authenticator data, COSE keys,
+                    signatures, and where passkeys can work (the RP ID)
+  passkeys.js       adding, renaming and removing passkeys; signing in with one
+  recovery.js       "Forgot your password?" with a recovery key; the key's hash
+  tools/reset-password.js  the owner's reset: npm run reset-password -- <username>
   appearance.js     profile pictures, decorations, name styles, profile colours, saved
                     themes and the accent (checked for contrast on the server)
   chat.js           silent messages, reply mentions, per-file spoiler and alt text,

@@ -16,12 +16,12 @@
 // Ops: id.rename {username}, id.rebind {approve}.
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { HUES } from '../js/lib/util.js';
 import { normalize, check } from '../js/lib/usernames.js';
 import { nameMessage, localNameProblem } from '../js/lib/username-text.js';
 import { createSession, sessionCookie, readCookie, COOKIE, tokenHash, SESSION_DAYS, recentAuth } from './auth.js';
 import { secRecord } from './seclog.js'; // sec-integrate
 import { UserError } from './ops.js';
+import { createOwnerRows } from './ownerrow.js';
 
 const VERSION = (() => { try { return JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version; } catch { return '0'; } })();
 const DAY = 86_400_000;
@@ -43,6 +43,15 @@ function regMessage(e, name) {
     case 'github_invalid': return 'GitHub didn’t accept that sign-in. Start again.';
     case 'github_unavailable': return 'GitHub is busy. Try again in a few minutes.';
     case 'stale': return 'This PC’s clock is off. Set it to the right time, then try again.';
+    // v0.12 keypair accounts (registry/src/keyacct.js)
+    case 'too_new': return e.what === 'short_name'
+      ? 'Usernames of 2 or 3 characters are open to new accounts after 30 days. Pick a longer one for now.'
+      : `New accounts can change their username after their first week.${e.retryAt ? ` From ${new Date(e.retryAt).toDateString()}.` : ''}`;
+    case 'key_in_use': return 'That key already belongs to a Snug account.';
+    case 'pow_invalid': return 'The setup check didn’t work. Try again.';
+    case 'move_pending': return 'Someone started moving your account with your recovery key. Stop that move first, then make a new key with your old one.';
+    case 'recovery_pending': return 'A new recovery key is already waiting to take effect.';
+    case 'rate_limited': return 'Too many tries right now. Wait a while, then try again.';
     default: return 'Can’t reach Snug’s directory right now. Try again soon.';
   }
 }
@@ -50,7 +59,11 @@ function regMessage(e, name) {
 export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log = () => {}, agentOf = () => '', userOf }) {
   const { registryUrl, githubClientId, githubBase = 'https://github.com', resumeSecret = null, trustProxy = false, ghWindowOnly = false } = opts;
   const fetchFn = opts.fetch || globalThis.fetch;
-  const enabled = !!(registryUrl && githubClientId && peer?.enabled);
+  const enabled = !!(registryUrl && githubClientId && peer?.enabled); // GitHub sign-in is offered
+  // v0.12: the owner's account rules apply to every registry account, GitHub or keypair (keyauth.js).
+  const accounts = !!(registryUrl && peer?.enabled);
+  const keyAccount = () => identity?.get?.('kind') === 'key';
+  const secured = () => (keyAccount() ? 'Your account has no password. Your recovery key brings it back on a new PC.' : 'Your account is secured by GitHub sign-in.');
   const deviceUri = `${githubBase}/login/device`;
   const flows = new Map(); // flow id -> {deviceCode, interval, expires, status, timer, waiters, ...}
   const identity = peer?.identity;
@@ -168,7 +181,7 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
   const self = () => identity.self();
   // Once, the first time P2P is on and this PC has no Snug account yet: sign every
   // password account out, so the app opens on "Sign in with GitHub" (upgrade from 0.8).
-  if (enabled) {
+  if (accounts) {
     db.raw.exec('CREATE TABLE IF NOT EXISTS app_flags (k TEXT PRIMARY KEY)');
     if (!db.get("SELECT 1 FROM app_flags WHERE k = 'p2p_signout'")) {
       if (!self()?.uid) db.run('DELETE FROM sessions');
@@ -177,7 +190,7 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
   }
   // At start: if the registry no longer has this PC's account (it was reset), stop P2P and sign
   // everyone out, so the app opens on "Continue with GitHub"; that sign-in reuses the local account.
-  if (enabled && self()?.uid && self().state !== 'gone') {
+  if (accounts && self()?.uid && self().state !== 'gone') {
     accountGone().then((gone) => {
       if (!gone) return;
       log('gh', 'this PC’s account is gone from the registry; signing out');
@@ -186,41 +199,8 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
       db.run('DELETE FROM sessions');
     }, () => {});
   }
-  const userRow = (id) => (id ? M.userRow(id) : null);
-  // A password account on this PC (local only, never on the registry) doesn't block a Snug username:
-  // claiming the name moves that account aside to <name>-old. Friends' and the owner's rows do block.
-  const holder = (handle, id) => db.get('SELECT id, remote, pass FROM users WHERE handle = ? AND id != ?', handle, id || '');
-  const movable = (h) => !!h && h.remote !== 1 && h.pass !== '!';
-  const handleFree = (handle, id) => { const h = holder(handle, id); return !h || movable(h); };
-  function clearHandle(handle, id) {
-    const h = holder(handle, id);
-    if (!movable(h)) return;
-    let next;
-    for (let n = 1; ; n++) { next = `${handle}-old${n > 1 ? n : ''}`; if (!db.get('SELECT 1 FROM users WHERE handle = ?', next)) break; }
-    db.run('UPDATE users SET handle = ? WHERE id = ?', next, h.id);
-    hub.userChanged(h.id);
-    log('gh', 'moved a local account aside for its username');
-  }
-  // The owner's local row for a registry account: u_<uid>, created on first sign-in.
-  function ensureOwnerRow(uid, username) {
-    const s = self();
-    const id = s?.uid === uid && s.user && userRow(s.user) ? s.user : `u_${uid}`;
-    clearHandle(username, id);
-    if (!userRow(id)) {
-      const handle = handleFree(username, id) ? username : `${username}.${uid.slice(0, 4)}`.slice(0, 32);
-      const hue = HUES[Math.floor(Math.random() * HUES.length)][0];
-      db.run("INSERT INTO users (id, handle, name, pass, hue, created) VALUES (?, ?, ?, '!', ?, ?)", id, handle, username, hue, Date.now());
-    } else if (userRow(id).deleted) {
-      // Deleted here without freeing the name (no GitHub check then): signing in again starts the row afresh.
-      const handle = handleFree(username, id) ? username : `${username}.${uid.slice(0, 4)}`.slice(0, 32);
-      db.run('UPDATE users SET deleted = NULL, deactivated = NULL, handle = ?, name = ?, presence = ? WHERE id = ?', handle, username, 'around', id);
-      hub.userChanged(id);
-    } else if (userRow(id).deactivated) {
-      db.run('UPDATE users SET deactivated = NULL WHERE id = ?', id);
-      hub.userChanged(id);
-    }
-    return id;
-  }
+  // The owner's local row and the handles it needs (server/ownerrow.js, shared with keyauth.js).
+  const { userRow, handleFree, clearHandle, ensureOwnerRow } = createOwnerRows({ db, M, hub, identity, log });
   // Someone else's account already lives here: one Snug account per PC (design section 0).
   const otherAccount = (uid) => { const s = self(); return !!(s?.uid && s.uid !== uid); };
 
@@ -230,6 +210,12 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
     if (f.purpose === 'release') {
       if (a.status === 'ok' && uid && uid === self()?.uid) settle(f, 'confirmed', { ticket: a.ticket });
       else settle(f, 'error', { message: 'That’s not the GitHub account this Snug account uses.' });
+      return;
+    }
+    // v0.12: a keypair account links a GitHub account as a second way to move (keyauth.js id.linkGithub).
+    if (f.purpose === 'link-account') {
+      if (a.status === 'new') settle(f, 'confirmed', { ticket: a.ticket });
+      else settle(f, 'error', { message: uid === self()?.uid ? 'That GitHub account is already linked to your Snug account.' : 'That GitHub account already has a Snug username. Use another GitHub account.' });
       return;
     }
     if (f.link && a.status !== 'new') { settle(f, 'error', { message: 'That GitHub account already has a Snug username. Use another GitHub account to connect this one.' }); return; }
@@ -288,12 +274,13 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
     if (post && path === '/api/gh/start') {
       const d = await json(req);
       const f = { status: 'pending', waiters: new Set(), trouble: 0 };
-      if (d.purpose === 'release' || d.link === true) {
+      if (d.purpose === 'release' || d.purpose === 'link-account' || d.link === true) {
         const user = userOf(req);
         if (!user) { err(res, 401, 'Sign in first.'); return true; }
-        if (d.purpose === 'release') {
+        if (d.purpose === 'release' || d.purpose === 'link-account') {
           if (!peer.isOwner(user)) { err(res, 403, 'Only this PC’s Snug account can do that.'); return true; }
-          f.purpose = 'release';
+          if (d.purpose === 'link-account' && !keyAccount()) { err(res, 409, 'Your account already signs in with GitHub.'); return true; }
+          f.purpose = d.purpose;
         } else {
           if (!isLocal(user)) { err(res, 403, 'This account can’t connect GitHub.'); return true; }
           if (self()?.uid) { err(res, 409, 'This PC is linked to another Snug account.'); return true; }
@@ -466,9 +453,9 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
   async function authed(req, res, path, user) {
     // Sliding sign-in (S23): a session that is used keeps going, up to 90 days from sign-in.
     // sec-auth AUTH-13: only in the desktop app (P2P on, or its resume secret); web sessions end at 30 days.
-    if (req.method === 'GET' && path === '/api/me' && (enabled || resumeSecret)) refresh(req, res);
-    if (!enabled || !peer.isOwner(user)) return false;
-    if (req.method === 'POST' && path === '/api/password') { err(res, 403, 'Your account is secured by GitHub sign-in.'); return true; }
+    if (req.method === 'GET' && path === '/api/me' && (accounts || resumeSecret)) refresh(req, res);
+    if (!accounts || !peer.isOwner(user)) return false;
+    if (req.method === 'POST' && path === '/api/password') { err(res, 403, secured()); return true; }
     return false;
   }
   function refresh(req, res) {
@@ -484,7 +471,7 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
   }
 
   // ---------- Ops ----------
-  if (enabled) {
+  if (accounts) {
     const ownerOnly = (c) => { if (!peer.isOwner(c.user) || c.peer) fail('Only this PC’s Snug account can do that.'); };
     // Change the Snug username: the registry first (7-day rule, uniqueness), then this PC.
     hub.ops['id.rename'] = async (c, d) => {
@@ -519,36 +506,49 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
     const noPassword = (name, text) => {
       const base = hub.ops[name];
       if (!base) return;
-      hub.ops[name] = (c, d) => { if (peer.isOwner(c.user) && !c.peer) fail(text); return base(c, d); };
+      hub.ops[name] = (c, d) => { if (peer.isOwner(c.user) && !c.peer) fail(text === null ? secured() : text); return base(c, d); };
     };
-    for (const n of ['totp.begin', 'totp.enable', 'totp.disable', 'totp.codes']) noPassword(n, 'Your account is secured by GitHub sign-in.');
+    for (const n of ['totp.begin', 'totp.enable', 'totp.disable', 'totp.codes']) noPassword(n, null);
     noPassword('me.handle', 'Your Snug username changes in Settings, under Account.');
 
     // Account delete and deactivate (server/account.js) for the P2P owner.
     M.p2pOwner = (u) => peer.isOwner(u);
-    // sec-auth AUTH-10: a delete confirmed on GitHub (the release flow).
-    M.p2pConfirmed = (flow) => typeof flow === 'string' && flows.get(flow)?.status === 'confirmed';
+    // sec-auth AUTH-10: a delete confirmed on GitHub (the release flow), or (v0.12) with the recovery key
+    // (keyauth.js sets M.p2pKeyConfirmed and M.p2pKeyRelease).
+    const releaseFlow = (flow) => { const f = typeof flow === 'string' ? flows.get(flow) : null; return f?.status === 'confirmed' && f.purpose === 'release' ? f : null; };
+    M.p2pConfirmed = (flow) => !!releaseFlow(flow) || !!M.p2pKeyConfirmed?.(flow);
     M.p2pDelete = async (u, d, run) => {
-      const f = typeof d.flow === 'string' ? flows.get(d.flow) : null;
-      const ticket = f?.status === 'confirmed' ? f.ticket : null;
+      const f = releaseFlow(d.flow);
+      const ticket = f ? f.ticket : null;
       if (f) dropFlow(d.flow);
+      const viaKey = !ticket ? M.p2pKeyRelease?.(d.flow) : null;
       await peer.leaveAll().catch(() => {}); // every friend hears it as an unfriend
       let released = false;
       if (ticket) {
         try { await reg.release(ticket); released = true; } catch (e) { log('gh', 'release', e.code || 'error'); }
+      } else if (viaKey) {
+        try { await viaKey(); released = true; } catch (e) { log('id', 'release', e.code || 'error'); }
       }
       peer.stop();
       run();
       db.run('DELETE FROM peer_knocks'); // already sent above; nothing waits for a later sign-in
       // Without the GitHub check the keys stay, so signing in again later can free the name.
-      if (released) identity.forget();
+      if (released) { identity.forget(); identity.dropRecovery?.(); }
       identity.clearSelf();
       return { released };
     };
   }
 
+  // v0.12: a confirmed link-account flow's ticket, once (keyauth.js id.linkGithub).
+  function takeTicket(flow, purpose) {
+    const f = typeof flow === 'string' ? flows.get(flow) : null;
+    if (!f || f.status !== 'confirmed' || f.purpose !== purpose) return null;
+    dropFlow(flow);
+    return f.ticket;
+  }
+
   return {
-    enabled, open, authed,
+    enabled, open, authed, takeTicket, regMessage, loopback, resumeOk, // v0.12: shared with keyauth.js
     close() { for (const id of [...flows.keys()]) dropFlow(id); },
   };
 }

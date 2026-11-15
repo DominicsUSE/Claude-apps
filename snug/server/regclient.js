@@ -37,7 +37,7 @@ export function createRegClient({ url, identity, fetch: fetchFn = globalThis.fet
     else if (Number.isFinite(data?.now)) skew = data.now - Date.now();
     if (!res.ok) {
       const d = data || {};
-      throw new RegError(d.error || (res.status >= 500 ? 'unavailable' : 'bad_request'), d.message, { status: res.status, retryAt: d.retryAt, retryAfter: d.retryAfter });
+      throw new RegError(d.error || (res.status >= 500 ? 'unavailable' : 'bad_request'), d.message, { status: res.status, retryAt: d.retryAt, retryAfter: d.retryAfter, what: d.what });
     }
     return data || {};
   }
@@ -101,10 +101,46 @@ export function createRegClient({ url, identity, fetch: fetchFn = globalThis.fet
       } catch (e) { if (e.status === 404) return null; throw e; }
     },
     // v0.10 endpoints: the payload travels as one JSON string `p`, signed whole (registry hub.js signedP()).
-    async signedCall(path, op, payload = {}) {
+    // v0.12: `payload` may be a function of (ts, uid) when it carries signatures over the ts, and `rsign`
+    // (a recovery key's signer) adds `rsig` over the same string, for calls that need both keys.
+    async signedCall(path, op, payload = {}, { rsign } = {}) {
       const u = uid();
-      const p = JSON.stringify(payload);
-      return signed('POST', path, () => { const t = ts(); return { uid: u, ts: t, p, sig: sign(op, u, t, p) }; });
+      return signed('POST', path, () => {
+        const t = ts();
+        const p = JSON.stringify(typeof payload === 'function' ? payload(t, u) : payload);
+        const msg = ['snug-reg-v1', op, u, t, p].join('\n');
+        return { uid: u, ts: t, p, sig: identity.sign(msg), ...(rsign ? { rsig: rsign(msg) } : {}) };
+      });
+    },
+    // ---------- v0.12 keypair accounts (registry/src/keyacct.js) ----------
+    async pow() { return send('POST', '/v1/pow', { purpose: 'register' }); },
+    // rk: {pub, sign(str)}: the recovery key. Both keys sign the same string.
+    async register({ username, c, nonce, rk }) {
+      const { ik, xk } = identity.ensureKeys();
+      return signed('POST', '/v1/register', () => {
+        const t = ts();
+        const msg = ['snug-reg-v1', 'register', ik, xk, rk.pub, username, c, nonce, t].join('\n');
+        return { ik, xk, rk: rk.pub, username, c, nonce, ts: t, sig: identity.sign(msg), rsig: rk.sign(msg) };
+      });
+    },
+    async recover(rk) {
+      const { ik, xk } = identity.ensureKeys();
+      return signed('POST', '/v1/recover', () => {
+        const t = ts();
+        const msg = ['snug-reg-v1', 'recover', rk.pub, ik, xk, t].join('\n');
+        return { rk: rk.pub, ik, xk, ts: t, sig: identity.sign(msg), rsig: rk.sign(msg) };
+      });
+    },
+    async moveHello() {
+      const { ik, xk } = identity.ensureKeys();
+      return signed('POST', '/v1/move/hello', () => { const t = ts(); return { ik, xk, ts: t, sig: sign('move-hello', ik, xk, t) }; });
+    },
+    async moveWait(hid) {
+      return signed('POST', '/v1/move/wait', () => { const t = ts(); return { hid, ts: t, sig: sign('move-wait', hid, t) }; });
+    },
+    async recoveryCancel(rk) {
+      const u = uid();
+      return signed('POST', '/v1/recovery/cancel', () => { const t = ts(); return { uid: u, ts: t, rsig: rk.sign(['snug-reg-v1', 'recovery-cancel', u, t].join('\n')) }; });
     },
     wsUrl() { return `${base.replace(/^http/, 'ws')}/v1/ws?uid=${uid()}`; },
   };

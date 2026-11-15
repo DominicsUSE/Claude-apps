@@ -16,6 +16,7 @@ import { EventRow } from './events.js';
 import { joinVoice } from '../voice.js';
 import { leavingCall } from '../calls.js';
 import { openHouse, onlineIn, OnlineCount } from './nav.js';
+import { RecoveryReminder } from './recover.js'; // v0.12: a password account with no recovery key yet
 
 const first = (name) => (name || '').split(' ')[0];
 
@@ -274,6 +275,7 @@ export function Home() {
     </header>
     <div class="view-body">
       <div class="home-col">
+        <${RecoveryReminder} />
         <div class="home-hello">
           <h2 class="home-greet">${greeting(now)}, ${first(u.name) || 'you'}</h2>
           ${(summary.length > 0 || forYou > 0 || requests.length > 0) && html`<p class="home-summary">

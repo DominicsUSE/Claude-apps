@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning server/index.js",
     "seed": "node --disable-warning=ExperimentalWarning server/seed.js",
+    "reset-password": "node --disable-warning=ExperimentalWarning server/tools/reset-password.js",
     "test": "node --disable-warning=ExperimentalWarning --test tests/logic*.test.js tests/server*.test.js registry/test/*.test.js",
     "test:registry": "node --disable-warning=ExperimentalWarning --test registry/test/*.test.js",
     "registry": "node --disable-warning=ExperimentalWarning registry/dev.js",
@@ -21,6 +22,7 @@
     "test:e2e:places": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-places.test.js",
     "test:e2e:voice-options": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-voice-options.test.js",
     "test:e2e:account": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-account.test.js",
+    "test:e2e:passkeys": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-passkeys.test.js",
     "test:e2e:community": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-community.test.js",
     "test:e2e:e2ee": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-e2ee.test.js",
     "test:e2e:integration": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-integration.test.js",

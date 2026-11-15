@@ -9,10 +9,13 @@ import { b64u, fromB64u, sha256, hmacHex, verifyEd25519, randomBytes, randomId }
 import { checkToken, githubMode, GhError, TOKEN_RE } from './github.js';
 import { DEFAULT_LIMITS, Windows, Budgets, HOUR, DAY } from './limits.js';
 import { platform, now as clockNow } from './platform.js';
-import { ApiError, fail, need, ID_RE, isUid, isKey, isSig, isTs, rawName, isUnique } from './common.js';
+import {
+  ApiError, fail, need, ID_RE, isUid, isKey, isSig, isTs, rawName, isUnique, REBIND_DELAY, REBIND_BLOCK, KNOCK_TTL, MAX_KNOCK_BOX,
+} from './common.js';
 import { AdminMixin, ADMIN_SCHEMA } from './admin.js';
 import { XferMixin } from './xfer.js';
 import { VaultKeyMixin, VAULT_SCHEMA } from './vaultkey.js';
+import { KeyAcctMixin, KEY_SCHEMA, KEY_STATUS, KEY_MESSAGES } from './keyacct.js';
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS accounts (
@@ -38,6 +41,7 @@ const SCHEMA = [
     uid TEXT NOT NULL, win INTEGER NOT NULL, kind TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (uid, win, kind))`,
   ...ADMIN_SCHEMA, // v0.10: admins, bans, reserved names, announcements, settings, audit, vault keys (admin.js)
   ...VAULT_SCHEMA, // older vault keys, pending rotations (vaultkey.js, REG-L1)
+  ...KEY_SCHEMA, // v0.12: keypair accounts, recovery keys, pairing codes (keyacct.js)
 ];
 
 const STATUS = {
@@ -45,6 +49,7 @@ const STATUS = {
   rename_too_soon: 409, rebind_blocked: 409, github_invalid: 401, github_unavailable: 502, bad_signature: 401,
   stale: 401, bad_ticket: 401, not_found: 404, rate_limited: 429, config_error: 500, turn_unavailable: 502,
   forbidden: 403, banned: 403,
+  ...KEY_STATUS, // v0.12 (keyacct.js): only its new routes return these
 };
 const MESSAGES = {
   bad_request: 'The request was malformed.',
@@ -66,21 +71,18 @@ const MESSAGES = {
   turn_unavailable: 'Relay servers are unavailable.',
   forbidden: 'You don’t have that admin right.',
   banned: 'This Snug account is suspended.',
+  ...KEY_MESSAGES,
 };
 
 const TS_WINDOW = 5 * 60_000;
 const TICKET_TTL = 10 * 60_000;
-const REBIND_DELAY = 72 * HOUR;
-const REBIND_BLOCK = 24 * HOUR;
 const RENAME_EVERY = 7 * DAY;
-const KNOCK_TTL = 30 * DAY;
 const AUTH_TIMEOUT = 10_000;
 const KEEP_KEYS = 5;
 const MAX_FRAME = 65536 + 1024; // relay box plus envelope
 const MAX_SMALL_FRAME = 20 * 1024;
 const MAX_SIG_BOX = 16 * 1024;
 const MAX_RELAY_BOX = 65536;
-const MAX_KNOCK_BOX = 4096;
 const OK_MAX = 20; // invisible senders: peers they contacted this session may reply
 
 const isTicket = isKey; // 32 random bytes, b64url
@@ -98,10 +100,10 @@ export function ipPrefix(ip, groups = 4) {
 }
 // sec-registry REG-M4: the sign-in and account limits count a whole IPv6 /48 as one address (a /64 is
 // nearly free to get many of); every other limit keeps the /64.
-const WIDE_KINDS = new Set(['ipAuth', 'ipAccount']);
+const WIDE_KINDS = new Set(['ipAuth', 'ipAccount', 'ipRegister']);
 // sec-registry REG-L3: these per-address limits live in SQLite (the Budgets table, keyed by the HMACed
 // prefix), so a Hub that sleeps and wakes doesn't hand every address a fresh allowance. The rest stay in memory.
-const PERSIST_KINDS = new Set(['ipAuth', 'ipAccount', 'ipVault', 'ipAdmin', 'ipRename']);
+const PERSIST_KINDS = new Set(['ipAuth', 'ipAccount', 'ipVault', 'ipAdmin', 'ipRename', 'ipRegister']);
 
 export class Hub {
   constructor(ctx, env) {
@@ -220,7 +222,8 @@ export class Hub {
     return this.settle(this.row('SELECT * FROM accounts WHERE uid=?', uid));
   }
   accountByGhh(ghh) {
-    return this.settle(this.row('SELECT * FROM accounts WHERE ghh=?', ghh));
+    // v0.12: a GitHub account linked to a keypair account proves that account (gh_links is empty until then).
+    return this.settle(this.row('SELECT * FROM accounts WHERE ghh=?', ghh) || this.linkedAccount(ghh));
   }
   accountByName(name) {
     return this.settle(this.row('SELECT * FROM accounts WHERE username=?', name));
@@ -353,7 +356,7 @@ export class Hub {
       case '/v1/notices': return this.noticesHttp(ip);
       case '/v1/vault/key': return this.vaultKey(body, ip);
       case '/v1/vault/rotate': return this.vaultRotate(body, ip);
-      default: fail('not_found');
+      default: return this.keyRoute(url.pathname, body, ip); // v0.12 keypair accounts (keyacct.js); not_found when off
     }
   }
 
@@ -461,11 +464,13 @@ export class Hub {
       if (acc.ik === t.ik && acc.xk === t.xk) fail('bad_request');
       const now = this.now();
       // sec-registry REG-M2: an owner-armed recovery: this GitHub-proved move completes at once (audited).
-      const forced = this.row('SELECT 1 AS x FROM move_force WHERE ghh=? AND until>?', t.ghh, now) && this.takeMoveForce(t.ghh);
+      // v0.12: by the account's ghh, which is the ticket's for a GitHub account and "a:<uid>" for a linked keypair one.
+      const forced = this.row('SELECT 1 AS x FROM move_force WHERE ghh=? AND until>?', acc.ghh, now) && this.takeMoveForce(acc.ghh);
       if (forced) {
         this.tx(() => {
           this.sql.exec('INSERT OR REPLACE INTO pending_rebind(uid,ik,xk,at,created) VALUES(?,?,?,?,?)', acc.uid, t.ik, t.xk, now, now);
           this.sql.exec('DELETE FROM tickets WHERE h=?', h);
+          this.setVia(acc.uid, null); // a GitHub-proved move (keyacct.js afterMove)
           this.audit(forced.by, 'move.forced', acc.uid, { kver: acc.kver + 1 });
           this.markForcedOld(acc);
           this.markVaultRotate(acc.ghh); // REG-L1: the forced-out device holds the old vault key
@@ -474,7 +479,7 @@ export class Hub {
         this.completeRebind(acc.uid, null);
         return { status: 'pending', uid: acc.uid, at: now };
       }
-      const meta = this.row('SELECT rebind_block_until FROM ghh_meta WHERE ghh=?', t.ghh);
+      const meta = this.row('SELECT rebind_block_until FROM ghh_meta WHERE ghh=?', acc.ghh);
       if (meta?.rebind_block_until > now) fail('rebind_blocked', { retryAt: meta.rebind_block_until });
       const old = this.pending(acc.uid);
       const same = old && old.ik === t.ik && old.xk === t.xk;
@@ -482,6 +487,7 @@ export class Hub {
       this.tx(() => {
         this.sql.exec('INSERT OR REPLACE INTO pending_rebind(uid,ik,xk,at,created) VALUES(?,?,?,?,?)', acc.uid, t.ik, t.xk, at, same ? old.created : now);
         this.sql.exec('DELETE FROM tickets WHERE h=?', h);
+        this.setVia(acc.uid, null);
       });
       if (old && !same) this.closeSockets(acc.uid, (a) => a.mode === 'pending' || (a.mode === 'xfer' && a.ik === old.ik), 4006, 'move stopped');
       if (!same) {
@@ -537,6 +543,7 @@ export class Hub {
       this.refuseBanned(uid);
       const name = normalize(username);
       if (name === acc.username) return { account: this.view(acc) };
+      this.keyRenameRule(acc, name); // v0.12: keypair accounts' first rename and short names wait (keyacct.js)
       const now = this.now();
       if (acc.renamed_at && now - acc.renamed_at < RENAME_EVERY) fail('rename_too_soon', { retryAt: acc.renamed_at + RENAME_EVERY });
       const isOwner = owners.includes(acc.ghh);
@@ -565,9 +572,10 @@ export class Hub {
     return this.signed(uid, ts, sig, `snug-reg-v1\nrelease\n${uid}\n${ticket}\n${ts}`, true, (acc) => {
       this.refuseBanned(uid);
       const t = this.ticket(h);
-      if (!t || t.ghh !== acc.ghh) fail('bad_ticket');
+      if (!t || (t.ghh !== acc.ghh && t.ghh !== this.linkedGhh(uid))) fail('bad_ticket'); // v0.12: or its linked GitHub
       this.tx(() => {
         for (const q of ['accounts', 'keys', 'pending_rebind', 'watch']) this.sql.exec(`DELETE FROM ${q} WHERE uid=?`, uid);
+        this.dropKeyRows(uid);
         this.sql.exec('DELETE FROM knocks WHERE to_uid=?', uid);
         this.sql.exec('DELETE FROM tickets WHERE h=?', h);
         this.metaUpsert(acc.ghh, 'released_at', this.now());
@@ -603,9 +611,9 @@ export class Hub {
       need(isUid(q.uid));
       qs = q.uid;
     }
-    return this.signed(uid, ts, sig, `snug-reg-v1\nlookup\n${uid}\n${ts}\n${qs}`, false, () => {
+    return this.signed(uid, ts, sig, `snug-reg-v1\nlookup\n${uid}\n${ts}\n${qs}`, false, (me) => {
       this.refuseBanned(uid);
-      if (!this.budgets.take(uid, 'lookup', this.L.lookupDay)) fail('rate_limited', { retryAfter: this.retryAfter(DAY) });
+      if (!this.budgets.take(uid, 'lookup', this.limitFor(me, 'lookupDay'))) fail('rate_limited', { retryAfter: this.retryAfter(DAY) });
       const r = typeof q.name === 'string' ? this.accountByName(normalize(q.name)) : this.accountByUid(q.uid);
       if (!r) fail('not_found');
       const chain = this.rows('SELECT kver, ik, xk, prev FROM keys WHERE uid=? ORDER BY kver', r.uid)
@@ -620,14 +628,14 @@ export class Hub {
     this.ipLimit('ipTurn', ip);
     const { uid, peer, ts, sig } = b;
     need(isUid(peer));
-    await this.signed(uid, ts, sig, `snug-reg-v1\nturn\n${uid}\n${peer}\n${ts}`, false, () => {
+    await this.signed(uid, ts, sig, `snug-reg-v1\nturn\n${uid}\n${peer}\n${ts}`, false, (me) => {
       this.refuseBanned(uid);
       if (peer === uid || !this.accountByUid(peer)) fail('not_found');
       // sec-registry REG-L5: only for a peer we're both connected to and watch each other (friends or
       // group co-members, online now): the same answer as a missing uid otherwise. And a global daily cap,
       // so free accounts can't turn the TURN service into a paid open relay.
       if (!this.watchSet(uid)?.has(peer) || !this.watchSet(peer)?.has(uid)) fail('not_found');
-      if (!this.budgets.take(uid, 'turn', this.L.turnDay)) fail('rate_limited', { retryAfter: this.retryAfter(DAY) });
+      if (!this.budgets.take(uid, 'turn', this.limitFor(me, 'turnDay'))) fail('rate_limited', { retryAfter: this.retryAfter(DAY) });
       if (!this.budgets.take('*', 'turnAll', this.L.turnGlobalDay)) fail('rate_limited', { retryAfter: this.retryAfter(DAY) });
     });
     const ttl = 7200;
@@ -666,6 +674,7 @@ export class Hub {
       this.sql.exec('INSERT OR REPLACE INTO keys(uid,kver,ik,xk,prev,at) VALUES(?,?,?,?,?,?)', uid, kver, p.ik, p.xk, prev, now);
       this.sql.exec('DELETE FROM keys WHERE uid=? AND kver<=?', uid, kver - KEEP_KEYS);
       this.sql.exec('DELETE FROM pending_rebind WHERE uid=?', uid);
+      this.afterMove(acc, prev); // v0.12: which proof won an unapproved move (keyacct.js)
     });
     this.closeSockets(uid, (a) => a.mode === 'normal', 4003, 'revoked');
     this.closeSockets(uid, (a) => a.mode === 'pending' && a.ik === p.ik, 4004, 'rebound');
@@ -906,6 +915,7 @@ export class Hub {
     for (const w of this.sockets(uid, (x) => x.mode === 'normal')) if (w !== ws) this.closeWs(w, 4002, 'replaced');
     if (p2) ready.rebind = { at: p2.at, kver: cur.kver + 1, ik: p2.ik, xk: p2.xk };
     this.send(ws, ready);
+    this.afterReady(ws, cur, v); // v0.12 (keyacct.js): new frames for 0.12+ apps only
     const mine = this.watchSet(uid);
     if (mine) for (const u of mine) this.exchangePresence(ws, att, u);
     for (const k of this.rows('SELECT frm, id, box, ts FROM knocks WHERE to_uid=? ORDER BY ts LIMIT 100', uid)) {
@@ -1003,7 +1013,8 @@ export class Hub {
       this.ensureAlarm(now + KNOCK_TTL);
       return this.send(ws, { t: 'ok', id });
     }
-    if (!this.budgets.take(me, 'knock', this.L.knockDay) || !this.budgets.take(`${me}>${f.to}`, 'knockP', this.L.knockPairDay)) {
+    const meAcc = this.row('SELECT ghh, claimed_at FROM accounts WHERE uid=?', me); // v0.12: new keypair accounts knock less
+    if (!this.budgets.take(me, 'knock', this.limitFor(meAcc, 'knockDay')) || !this.budgets.take(`${me}>${f.to}`, 'knockP', this.limitFor(meAcc, 'knockPairDay'))) {
       return this.send(ws, { t: 'err', id, code: 'rate_limited' });
     }
     this.countFrame();
@@ -1054,6 +1065,7 @@ export class Hub {
     this.sql.exec('DELETE FROM knocks WHERE ts<=?', t - KNOCK_TTL);
     this.sql.exec('DELETE FROM budget WHERE win<?', t - 2 * DAY);
     this.adminSweep(t);
+    next = Math.min(next, this.keySweep(t)); // v0.12 (keyacct.js)
     const r = this.row(`SELECT (SELECT MIN(at) FROM pending_rebind) AS p, (SELECT MIN(exp) FROM tickets) AS e,
       (SELECT MIN(ts) FROM knocks) AS k`);
     if (r.p != null) next = Math.min(next, r.p);
@@ -1064,5 +1076,5 @@ export class Hub {
   }
 }
 
-// v0.10: admin, bans, notices (admin.js); xfer sockets (xfer.js); vault keys (vaultkey.js).
-Object.assign(Hub.prototype, AdminMixin, XferMixin, VaultKeyMixin);
+// v0.10: admin, bans, notices (admin.js); xfer sockets (xfer.js); vault keys (vaultkey.js). v0.12: keypair accounts (keyacct.js).
+Object.assign(Hub.prototype, AdminMixin, XferMixin, VaultKeyMixin, KeyAcctMixin);

@@ -25,6 +25,8 @@ import { setLook } from '../account.js';
 import { Confirm } from './modals.js';
 import { RevokeSheet, hasKeys } from './e2ee-revoke.js'; // signing out a device can remove its encryption keys too
 import { p2pOwner, AccountRows, ConnectRow, DeleteP2p } from './p2p.js'; // GitHub-secured accounts: no password; the Snug username
+import { PasskeyRows } from './passkeys.js'; // v0.12: passkey sign-in (server/passkeys.js)
+import { RecoveryRows } from './recover.js'; // v0.12: the recovery key for a forgotten password (server/recovery.js)
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
 const MOD = isMac ? '⌘' : 'Ctrl';
@@ -427,6 +429,9 @@ const AUTH_WORDS = {
   'password.change': () => 'Password changed', 'totp.enable': () => 'Two-factor sign-in turned on', 'totp.disable': () => 'Two-factor sign-in turned off',
   'totp.codes': () => 'New backup codes', 'sessions.revoke': () => 'A device signed out', 'sessions.revokeOthers': () => 'Other devices signed out',
   'github.link': (e) => (e.ok ? 'GitHub connected' : 'GitHub connection refused'),
+  'recovery.set': () => 'New recovery key', 'recovery.use': (e) => (e.ok ? 'Password reset with the recovery key' : 'Wrong recovery key'),
+  'passkey.add': (e) => (e.ok ? 'Passkey added' : 'Passkey refused'), 'passkey.remove': () => 'Passkey removed', 'passkey.rename': () => 'Passkey renamed',
+  'passkey.clone': () => 'A copied passkey was refused', 'password.reset.owner': () => 'Password reset by the server’s owner',
   alert: (e) => `Security alert: ${e.what || 'unusual activity'}`, // sec-integrate (server/seclog.js)
 };
 function RecentSignIns() {
@@ -489,6 +494,8 @@ function PasswordSecurity({ a }) {
       : html`<${Row} label="Off" hint="Ask for a code from your phone as well as your password when you sign in.">
           <button class="btn primary" onClick=${() => openModal(TotpSetup)}>Set up</button>
         <//>`}
+    <${RecoveryRows} Row=${Row} />
+    <${PasskeyRows} Row=${Row} />
     ${S.p2p?.enabled && html`<${ConnectRow} Row=${Row} />`}`;
 }
 

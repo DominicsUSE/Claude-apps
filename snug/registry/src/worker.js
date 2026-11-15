@@ -1,6 +1,7 @@
 // Snug registry Worker. Thin front door: path allowlist, body cap, uid shape check, then the single Hub DO.
 import { Hub } from './hub.js';
 import { now } from './platform.js';
+import { KEY_ROUTES, keyAccountsOn } from './keyacct.js';
 
 export { Hub };
 
@@ -68,7 +69,8 @@ export default {
     const url = new URL(req.url);
     const path = url.pathname;
     if (path === '/v1/health') return json(env, 200, { ok: true, v: 3 });
-    const method = ROUTES[path];
+    // v0.12 keypair accounts (keyacct.js): POST routes, answered exactly like unknown paths unless KEY_ACCOUNTS = "1".
+    const method = ROUTES[path] || (Object.hasOwn(KEY_ROUTES, path) && keyAccountsOn(env) ? 'POST' : null);
     if (!method) return err(env, 404, 'not_found');
     if (req.method !== method) return err(env, 405, 'bad_request');
 

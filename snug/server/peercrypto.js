@@ -66,6 +66,13 @@ export function newDhKeys() {
 export const privToPkcs8 = (k) => k.export({ format: 'der', type: 'pkcs8' }).toString('base64');
 export const privFromPkcs8 = (b64) => createPrivateKey({ key: Buffer.from(b64, 'base64'), format: 'der', type: 'pkcs8' });
 export const pubOf = (priv) => createPublicKey(priv).export({ format: 'jwk' }).x;
+// v0.12: an Ed25519 private key from a raw 32-byte seed (the recovery key's, js/lib/recovery.js deriveP2pSeed).
+// Node takes raw seeds only inside PKCS#8: this fixed prefix plus the seed is that structure.
+const ED_PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
+export function edFromSeed(seed) {
+  if (!seed || seed.length !== 32) throw new TypeError('ed25519 seed: 32 bytes');
+  return createPrivateKey({ key: Buffer.concat([ED_PKCS8_PREFIX, Buffer.from(seed)]), format: 'der', type: 'pkcs8' });
+}
 // Raw public keys, parsed once and kept in a small LRU (section 11: 256).
 const keyCache = new Map();
 function pubKey(crv, x) {
