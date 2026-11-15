@@ -107,3 +107,14 @@ export function acceleratorOf(e, isMac = false) {
   const acc = [...mods.slice(0, 2), k].join('+');
   return validAccelerator(acc) ? acc : null;
 }
+
+// The Messages list: newest activity first. A conversation's time is its last
+// message, or when it was started if nobody has written yet; ties keep the
+// server's order. `ids` comes from the server (server/model.js dmIdsOf).
+export function byActivity(S, ids) {
+  const when = (id) => {
+    const list = S.msgs?.[id] || [];
+    return Math.max(list.length ? list[list.length - 1].ts : 0, S.dms?.[id]?.created || 0);
+  };
+  return ids.map((id, i) => [id, when(id), i]).sort((a, b) => (b[1] - a[1]) || (a[2] - b[2])).map(([id]) => id);
+}

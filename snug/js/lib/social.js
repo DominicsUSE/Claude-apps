@@ -123,3 +123,7 @@ export function safeLink(url) {
   if (u.protocol !== 'https:' || u.username || u.password || !u.hostname.includes('.')) return null;
   return u.href;
 }
+
+// What "busy" counts: distinct people who wrote in the last 15 minutes. Not
+// who is online, so it never reads as presence (server/ops.js houseCard).
+export const wroteLately = (n) => `${n} ${n === 1 ? 'person' : 'people'} wrote in the last 15 minutes`;
