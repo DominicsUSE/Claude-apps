@@ -1,0 +1,42 @@
+/* End-to-end encryption: the setup and recovery-key sheets, adding a device,
+   approving one, Settings > Encryption and safety numbers. Tokens only. */
+.e2-sheet { display: grid; gap: var(--s-3); }
+.e2-sheet h2 { margin: 0; }
+.e2-mark { width: var(--h-lg); height: var(--h-lg); border-radius: var(--r-full); display: grid; place-items: center; background: var(--brand-soft); color: var(--brand); }
+.e2-check { display: flex; gap: var(--s-3); align-items: flex-start; cursor: pointer; }
+.e2-check input { margin-top: 3px; flex: none; width: 16px; height: 16px; accent-color: var(--brand); }
+.e2-check > span { display: grid; gap: 2px; }
+.e2-check b { font-weight: var(--w-medium); }
+.e2-key-field, .e2-code-field, .e2-last { font-family: var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+.e2-last { max-width: 8em; }
+textarea.e2-key-field { resize: vertical; min-height: calc(var(--h-field) * 1.6); }
+.e2-rk { display: grid; grid-template-columns: repeat(3, auto); justify-content: start; gap: var(--s-2) var(--s-3); padding: var(--s-3) var(--s-4); background: var(--surface-input); border: 1px solid var(--line); border-radius: var(--r-md); user-select: all; }
+.e2-rk code, .e2-number code { font-family: var(--mono); font-size: var(--t-16); letter-spacing: 0.08em; color: var(--text-1); }
+:root[data-streamer] .e2-rk { filter: blur(8px); }
+.e2-choices { display: grid; gap: var(--s-2); }
+.e2-choice { display: flex; gap: var(--s-3); align-items: center; justify-content: flex-start; text-align: left; height: auto; min-height: var(--touch); padding: var(--s-3); white-space: normal; }
+.e2-choice > span { display: grid; gap: 2px; }
+.e2-choice b { font-weight: var(--w-medium); }
+.e2-steps { margin: 0; padding-left: var(--s-5); display: grid; gap: var(--s-1); color: var(--text-2); }
+.e2-code { margin: 0; font-family: var(--mono); font-size: var(--t-24); letter-spacing: 0.12em; color: var(--text-1); text-align: center; padding: var(--s-3); background: var(--surface-input); border-radius: var(--r-md); }
+.e2-number { display: grid; grid-template-columns: repeat(4, auto); justify-content: start; gap: var(--s-2) var(--s-4); padding: var(--s-3) var(--s-4); background: var(--surface-input); border-radius: var(--r-md); }
+.e2-qr-row { display: flex; gap: var(--s-4); align-items: center; flex-wrap: wrap; }
+.e2-qr-row .acc-qr { width: calc(var(--s-20) * 1.6); height: calc(var(--s-20) * 1.6); }
+.e2-qr-row .hint { flex: 1 1 12em; margin: 0; }
+.e2-state, .e2-ok { display: flex; gap: var(--s-2); align-items: center; margin: 0; color: var(--text-2); }
+.e2-ok { color: var(--mint-ink, var(--text-1)); padding: var(--s-2) 0; }
+.e2-warn { display: flex; gap: var(--s-2); align-items: flex-start; margin: 0; padding: var(--s-2) var(--s-3); border-radius: var(--r-md); background: var(--amber-soft); color: var(--text-1); }
+.e2-warn svg { color: var(--amber); flex: none; margin-top: 2px; }
+.e2-h2, .e2-h3 { font-size: var(--t-section); margin: var(--s-4) 0 var(--s-2); }
+.e2-devs { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }
+.e2-devs li { display: grid; gap: 2px; }
+.e2-dev { display: flex !important; gap: var(--s-3); align-items: center; padding: var(--s-2) 0; border-bottom: 1px solid var(--line-subtle); }
+.e2-dev .grow { display: grid; gap: 2px; min-width: 0; }
+.e2-keep { border: 0; padding: 0; margin: 0; display: grid; gap: var(--s-2); }
+.e2-limits ul { margin: 0; padding-left: var(--s-5); display: grid; gap: var(--s-2); color: var(--text-2); }
+.e2-detail-people { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-2); }
+@media (max-width: 759px) {
+  .e2-rk { grid-template-columns: repeat(3, auto); padding: var(--s-3); }
+  .e2-number { grid-template-columns: repeat(3, auto); }
+  .e2-code { font-size: var(--t-20); }
+}

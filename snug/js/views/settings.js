@@ -33,6 +33,7 @@ import { CommunityOverview } from './community-settings.js'; // House settings >
 import { registerDesktopPage } from './desktop-settings.js'; // the desktop app's settings, and changing your username
 import { registerAdminPage } from './admin.js'; // v0.10 A: Settings > Admin, only for accounts with admin rights
 import { registerVaultPage } from './vault-settings.js'; // v0.10 C: Settings > Your data > Data file
+import { registerE2eePage } from './e2ee-settings.js'; // Settings > Encryption (end-to-end encryption), when the server offers it
 
 
 function Row({ label, hint, children, top }) {
@@ -342,10 +343,12 @@ function arrange(pages, plan) {
   pages.sort((a, b) => (at.get(a.id)?.n ?? 1e4) - (at.get(b.id)?.n ?? 1e4));
 }
 arrange(PAGES, [
-  ['You', ['profile', 'account', 'privacy', 'data']],
+  ['You', ['profile', 'account', 'privacy', 'e2ee', 'data']],
   ['App', ['notify', 'voice', 'look', 'chat', 'a11y', 'streamer', 'keys', 'desktop']],
   ['Admin', ['admin']],
 ]);
+
+registerE2eePage({ PAGES, VIEWS, Row }); // after arrange: it comes and goes with the server's setting, placed after Privacy
 
 export function Settings({ page: start }) {
   const [page, setPage] = useState(start || 'profile');

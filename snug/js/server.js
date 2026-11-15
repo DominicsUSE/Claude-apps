@@ -73,6 +73,7 @@ function connect() {
       attempt = 0;
       S.conn.socket = 'open';
       applySnapshot(msg.d);
+      fire('hello', msg.d); // js/e2ee/manager.js binds this device to the new socket
       fire('open');
       flushQueue();
     } else if (msg.t === 'ack') {
