@@ -58,7 +58,7 @@ jobs:
         timeout-minutes: 6
         env:
           SNUG_BIN: dist/win-unpacked/Snug.exe
-        run: node --test --test-timeout=120000 --test-force-exit test.js
+        run: node --test --test-timeout=400000 --test-force-exit test.js # on this runner the limit also covers the whole file
 
   # Publishes snug-v<version> with both files and SHA256SUMS-windows.txt (desktop/release.sh): only files the
   # release doesn't have yet, then marks it latest. The app's mandatory updater reads this release.

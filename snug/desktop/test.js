@@ -10,6 +10,22 @@ const os = require("os");
 const path = require("path");
 const { _electron: electron } = require("playwright");
 
+// Every launched app, so removing a user-data folder can close its apps first: t.after hooks run in the
+// order they were added, and Windows can't delete a database the app still has open.
+const live = new Set();
+const realLaunch = electron.launch.bind(electron);
+electron.launch = async (opts) => {
+  const app = await realLaunch(opts);
+  const entry = { app, args: (opts.args || []).join(" ") };
+  live.add(entry);
+  app.on("close", () => live.delete(entry));
+  return app;
+};
+const removeDir = async (p) => {
+  await Promise.all([...live].filter((e) => e.args.includes(p)).map((e) => e.app.close().catch(() => {})));
+  fs.rmSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+};
+
 // These tests cover local-only mode; the P2P test below turns P2P back on with a local registry.
 process.env.SNUG_P2P = "off";
 // The mandatory update check is off too (a packaged build would ask GitHub); the update test turns it on against a stub.
@@ -38,6 +54,8 @@ test("first run: choose to run Snug on this computer, create an account, send a 
   if (shots) await page.screenshot({ path: path.join(shots, "desktop-setup.png") });
   await page.click("#go");
 
+  // setup.html has an .auth-form too: wait for the in-app server's page first.
+  await page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//);
   await page.waitForSelector(".auth-form");
   assert.match(page.url(), /^http:\/\/127\.0\.0\.1:\d+\//);
   assert.equal(await page.evaluate(() => typeof window.snugDesktop), "undefined", "the Snug page gets no desktop bridge");
@@ -119,6 +137,7 @@ test("voice: the camera turns on, and the screen picker shares a screen", async 
   const step = (s) => process.env.CI && process.stderr.write(`[voice test] ${s}\n`);
   await page.waitForSelector("#setup");
   await page.click("#go");
+  await page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//);
   await page.waitForSelector(".auth-form");
   await page.click('.auth-link:has-text("Create an account")');
   await page.fill("#auth-handle", "vic");
@@ -212,6 +231,7 @@ test("tray: closing hides the window, notifications still arrive and open the co
   page.setDefaultTimeout(15000);
   await page.waitForSelector("#setup");
   await page.click("#go");
+  await page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//);
   await page.waitForSelector(".auth-form");
   const origin = new URL(page.url()).origin;
   await page.click('.auth-link:has-text("Create an account")');
@@ -342,6 +362,7 @@ test("incoming call: the hidden window comes back from the tray with a notificat
   page.setDefaultTimeout(15000);
   await page.waitForSelector("#setup");
   await page.click("#go");
+  await page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//);
   await page.waitForSelector(".auth-form");
   const origin = new URL(page.url()).origin;
   await page.click('.auth-link:has-text("Create an account")');
@@ -430,6 +451,7 @@ test("push to talk: a global key is held only while in voice in push-to-talk mod
   page.setDefaultTimeout(20000);
   await page.waitForSelector("#setup");
   await page.click("#go");
+  await page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//);
   await page.waitForSelector(".auth-form");
   await page.click('.auth-link:has-text("Create an account")');
   await page.fill("#auth-handle", "pat");
@@ -475,7 +497,7 @@ test("push to talk: a global key is held only while in voice in push-to-talk mod
 const shellDir = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-shell-"));
 test("mandatory update during a call: the blocking screen waits until the call ends", async (t) => {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-update-call-"));
-  t.after(() => fs.rmSync(userData, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }));
+  t.after(() => removeDir(userData));
   upd.badSums = false;
   const { app, page } = await launchUpdate(userData);
   t.after(() => app.close().catch(() => {}));
@@ -551,6 +573,7 @@ test("desktop shell: badge and flash, theme colour, settings, global voice keys,
   t.after(async () => { other?.terminate(); await app.close().catch(() => {}); });
   await page.waitForSelector("#setup");
   await page.click("#go");
+  await page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//);
   await page.waitForSelector(".auth-form");
   const origin = new URL(page.url()).origin;
   await page.click('.auth-link:has-text("Create an account")');
@@ -738,7 +761,7 @@ test("p2p: the in-app server uses the registry through net.fetch, the OS key sto
   const reg = await startLocalRegistry();
   t.after(() => reg.close());
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-p2p-"));
-  t.after(() => fs.rmSync(userData, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }));
+  t.after(() => removeDir(userData));
   fs.writeFileSync(path.join(userData, "desktop.json"), JSON.stringify({ mode: "host" }));
   const env = { SNUG_REGISTRY_URL: reg.url, SNUG_GITHUB_CLIENT_ID: reg.github.clientId, SNUG_GITHUB_URL: reg.github.url };
   Object.assign(process.env, env);
@@ -799,7 +822,7 @@ async function launchUpdate(userData) {
 
 test("mandatory update: the blocking screen downloads with progress, verifies and installs; a bad checksum installs nothing", async (t) => {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-update-"));
-  t.after(() => fs.rmSync(userData, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }));
+  t.after(() => removeDir(userData));
   upd.badSums = false;
   let { app, page } = await launchUpdate(userData);
   const first = app;
