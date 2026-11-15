@@ -511,8 +511,8 @@ test("mandatory update during a call: the blocking screen waits until the call e
   await new Promise((res) => setTimeout(res, 800));
   assert.equal(await app.evaluate(() => globalThis.snugUpdateShown()), false, "the call keeps its window");
   assert.doesNotMatch(page.url(), /update\.html$/);
-  // The call ends: the update screen comes up.
-  await page.evaluate(() => window.snugApp.voiceActive(false));
+  // The call ends: the update screen comes up. That navigation can end the page before the call answers.
+  await page.evaluate(() => window.snugApp.voiceActive(false)).catch(() => {});
   await page.waitForURL(/update\.html$/);
   await page.locator('h1:has-text("Snug 9.9.9 is ready")').waitFor();
 });

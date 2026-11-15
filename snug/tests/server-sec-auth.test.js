@@ -90,9 +90,11 @@ test('AUTH-1 server: a locked account stays locked after 50,010 cheap requests f
   assert.ok(locked, 'the account locked');
   // The flood: register with an empty body, each from a new address (it never reaches scrypt).
   const agent = [];
-  for (let i = 0; i < 50_010; i += 500) {
+  // 100 at a time, and a refused connection is tried again: Windows runners drop some of a 500-wide burst.
+  const again = async (fn, n = 5) => { for (;;) { try { return await fn(); } catch (e) { if (--n <= 0) throw e; await new Promise((r) => setTimeout(r, 50)); } } };
+  for (let i = 0; i < 50_010; i += 100) {
     const batch = [];
-    for (let j = i; j < Math.min(i + 500, 50_010); j++) batch.push(post('/api/register', {}, { ip: `10.${(j >> 16) & 255}.${(j >> 8) & 255}.${j & 255}` }).then((r) => r.status));
+    for (let j = i; j < Math.min(i + 100, 50_010); j++) batch.push(again(() => post('/api/register', {}, { ip: `10.${(j >> 16) & 255}.${(j >> 8) & 255}.${j & 255}` })).then((r) => r.status));
     agent.push(...await Promise.all(batch));
   }
   assert.equal(agent.length, 50_010);
@@ -174,7 +176,11 @@ test('AUTH-4 password checks do not block the event loop', async () => {
   const t = setInterval(() => { const now = Date.now(); worst = Math.max(worst, now - last); last = now; }, 1);
   await Promise.all(Array.from({ length: 5 }, (_, i) => login('loop-check', i % 2 ? PW : 'not it at all')));
   clearInterval(t);
-  assert.ok(worst < 25, `longest pause ${worst} ms`);
+  // One hash on the main thread would hold the loop for its whole run; slow runners get that as the yardstick.
+  const t0 = Date.now();
+  scryptSync('x', 'salt', 64, { N: 2 ** 15, r: 8, p: 3, maxmem: 64 * 1024 * 1024 });
+  const one = Date.now() - t0;
+  assert.ok(worst < Math.max(25, one / 2), `longest pause ${worst} ms (one hash: ${one} ms)`);
 });
 
 // ---------- AUTH-5: common passwords ----------
