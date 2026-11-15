@@ -391,16 +391,22 @@ export async function startServer({
       const conv = url.searchParams.get('conv') || '';
       const gate = M.postGate(user, conv.startsWith('t:') && !M.thread(conv) ? (M.liveMsg(conv.slice(2))?.conv || '') : conv);
       if (!gate.ok) return error(res, 403, gate.why);
+      // End-to-end encrypted conversations take only files encrypted on the device (?enc=1): stored as an
+      // opaque blob named "file", never sniffed; the name, type and key travel inside the encrypted message.
+      const encConv = !!hub.e2ee?.conv?.encrypted(conv);
+      const enc = url.searchParams.get('enc') === '1';
+      if (enc !== encConv) return error(res, 409, encConv ? 'This conversation is end-to-end encrypted. Reload Snug to attach files here.' : 'This conversation isn’t end-to-end encrypted.');
+      const max = enc ? MAX_FILE + 16 : MAX_FILE; // the AES-GCM tag
       const size = Number(req.headers['content-length']);
-      if (!size || size > MAX_FILE) return error(res, 413, 'Files can be up to 10 MB.');
-      const name = cleanFileName(safeDecode(String(req.headers['x-file-name'] || 'file'))); // sec-authz: no bidi or zero-width characters (js/lib/util.js)
-      const data = await body(req, MAX_FILE);
+      if (!size || size > max) return error(res, 413, 'Files can be up to 10 MB.');
+      const name = enc ? 'file' : cleanFileName(safeDecode(String(req.headers['x-file-name'] || 'file'))); // sec-authz: no bidi or zero-width characters (js/lib/util.js)
+      const data = await body(req, max);
       // Codec parameters are dropped; audio and video keep their type only if the bytes agree.
-      const type = uploadType(req.headers['content-type'], data);
+      const type = enc ? 'application/octet-stream' : uploadType(req.headers['content-type'], data);
       const id = newId('f');
       await writeFile(join(filesDir, id), data, { mode: 0o600 });
-      db.run('INSERT INTO files (id, owner, conv, name, type, size, created) VALUES (?, ?, ?, ?, ?, ?, ?)', id, user, conv, name, type, data.length, Date.now());
-      return sendJson(res, 201, { id, name, size: data.length, kind: fileKind(type) });
+      db.run('INSERT INTO files (id, owner, conv, name, type, size, created, enc) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, user, conv, name, type, data.length, Date.now(), enc ? 1 : null);
+      return sendJson(res, 201, { id, name, size: data.length, kind: enc ? 'file' : fileKind(type) });
     }
 
     const file = /^\/api\/files\/(f_[a-z0-9]{8,40})$/.exec(path);

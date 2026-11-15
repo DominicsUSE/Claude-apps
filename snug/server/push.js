@@ -143,7 +143,7 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
     const level = levelFor(user, w);
     if (level === 'muted') return false;
     if (missed) return true;
-    const forMe = mentions(row.text, u.handle)
+    const forMe = mentions(row.text, u.handle) || !!M.pinged?.(user, row) // pinged: a declared mention in an encrypted message (server/e2ee-conv.js)
       || (!!row.reply_to && row.reply_ping !== 0 && db.get('SELECT author FROM messages WHERE id = ?', row.reply_to)?.author === user)
       || !!M.forMeExtra?.(user, row, w); // role mentions (server/places.js), highlight words and @everyone (server/account.js)
     if (w.type === 'dm') {
@@ -181,7 +181,8 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
     // (as the open app does, js/server.js).
     const prefs = M.prefsOf?.(user) || {};
     const hide = prefs.preview === false || !!prefs.streamer;
-    const text = row.sys && missedBy(row, user) ? 'Missed call' : hide ? 'New message' : plain(row.text) || 'Sent an attachment';
+    // An end-to-end encrypted message: the server can't read it, so the note never says more than this.
+    const text = row.sys && missedBy(row, user) ? 'Missed call' : hide || row.enc ? 'New message' : plain(row.text) || 'Sent an attachment';
     return {
       title: where ? `${who} ${where}` : who,
       body: text.length > PREVIEW ? `${text.slice(0, PREVIEW - 1)}…` : text,
@@ -348,5 +349,7 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
     const w = row && M.where(row.conv);
     return !!w && needs(user, row.conv, w, row);
   };
-  return { http, onMessage, onRing, onRingStop, onNote, prune, publicKey: keys.publicKey, stats, wouldPush, reset: () => { rate.reset(); subsLimit.reset(); } };
+  // Tests: the note a message would make for this person.
+  const noteOf = (user, msgId) => { const row = M.msg(msgId); const w = row && M.where(row.conv); return w ? noteFor(user, row.conv, w, row) : null; };
+  return { http, onMessage, onRing, onRingStop, onNote, prune, publicKey: keys.publicKey, stats, wouldPush, noteOf, reset: () => { rate.reset(); subsLimit.reset(); } };
 }

@@ -327,6 +327,7 @@ export function createOps({ db, M, hub }) {
           mid, conv, c.user, ts, text, M.foldText(text, files), replyTo, files.length ? JSON.stringify(files) : null);
         db.run('INSERT INTO reads (user, conv, ts) VALUES (?, ?, ?) ON CONFLICT (user, conv) DO UPDATE SET ts = excluded.ts', c.user, conv, ts);
         if (w.type === 'thread') db.run('INSERT OR IGNORE INTO follows (user, thread) VALUES (?, ?)', c.user, conv);
+        M.onMsgInsert?.(mid, c); // an encrypted message's envelope and keys (server/e2ee-conv.js), in the same transaction
       });
       const ev = msgEvent(conv, M.msg(mid));
       hub.toConv(conv, 'msg', ev);
@@ -346,7 +347,7 @@ export function createOps({ db, M, hub }) {
       if (!row || row.conv !== conv) fail('That message was deleted.');
       if (row.author !== c.user) fail('You can only edit your own messages.');
       const text = str(d.text, { max: 4000, name: 'A message', trim: false });
-      if (!text.trim() && !row.files) fail('Write something, or delete the message instead.');
+      if (!text.trim() && !row.files && !row.enc) fail('Write something, or delete the message instead.'); // enc: the new text is in its envelope (server/e2ee-conv.js)
       db.run('UPDATE messages SET text = ?, fold = ?, edited = ? WHERE id = ?', text, M.foldText(text, json(row.files, [])), Date.now(), row.id);
       hub.toConv(conv, 'msg', msgEvent(conv, M.msg(row.id)));
       return {};

@@ -20,6 +20,7 @@ import { listProblem, prekeyProblem, isDeviceId, MAX_DEVICES, PREKEY_MAX_AGE } f
 import { PROTO } from '../js/lib/proto.js';
 import { limiter, tokenHash, recentAuth } from './auth.js';
 import { secRecord } from './seclog.js';
+import { createE2eeConv } from './e2ee-conv.js';
 
 export const MAX_PENDING = 3;
 export const LINK_MS = 10 * 60_000;
@@ -91,7 +92,7 @@ export function verifyEd(pubB64u, sigB64u, text) {
 const unsignedCanon = (o) => { const { sig, ...rest } = o; return canon(rest); }; // eslint-disable-line no-unused-vars
 const objectSigned = (pub, t, o) => verifyEd(pub, o?.sig, `${PREFIX}${t}\n${unsignedCanon(o)}`);
 
-export function createE2eeOps({ db, M, hub, fail, on = false }) {
+export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
   const now = () => Date.now();
   const json = (s) => { try { return JSON.parse(s); } catch { return null; } };
   const account = (u) => db.get('SELECT * FROM e2ee_accounts WHERE user = ?', u);
@@ -136,10 +137,12 @@ export function createE2eeOps({ db, M, hub, fail, on = false }) {
   });
   // The people who need to know when this person's devices change: themselves and everyone sharing a DM.
   const audienceOf = (u) => [u, ...db.all('SELECT DISTINCT d2.user AS id FROM dm_members d1 JOIN dm_members d2 ON d1.dm = d2.dm WHERE d1.user = ? AND d2.user != ?', u, u).map((r) => r.id)];
+  let conv = null; // encrypted conversations (server/e2ee-conv.js), made below
   const devicesChanged = (u) => {
     const a = account(u);
     hub.toUsers(audienceOf(u), 'e2ee.devices', { user: u, ver: a?.ver || 0 });
     hub.toUser(u, 'e2ee.me', meView(u));
+    conv?.readyChanged(u); // DMs whose last member just became ready turn encrypted
   };
   // Sockets of this person bound to one of their trusted devices.
   const trustedSockets = (u) => [...hub.socketsOf(u)].filter((ws) => ws.e2eeDevice && deviceRow(ws.e2eeDevice)?.state === 'trusted');
@@ -545,11 +548,14 @@ export function createE2eeOps({ db, M, hub, fail, on = false }) {
       db.run("DELETE FROM e2ee_devices WHERE state = 'pending' AND expires < ?", t);
       db.run('DELETE FROM e2ee_links WHERE expires < ?', t - 86_400_000);
       db.run('DELETE FROM e2ee_asb_boxes WHERE created < ?', t - ASB_BOX_DAYS * 86_400_000);
+      conv.sweep(t);
     },
     meView,
     prekeyMaxAge: PREKEY_MAX_AGE,
   };
-  return ops;
+  conv = createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, account, deviceRow });
+  hub.e2ee.conv = conv;
+  return { ...ops, ...conv.ops };
 }
 
 export { parseCanon };

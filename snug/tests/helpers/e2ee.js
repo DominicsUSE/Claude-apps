@@ -125,3 +125,39 @@ export async function nextList(acct, change) {
 }
 
 export { b64u, b64uOf, random, canon, sig, obj, backup };
+
+// --- encrypted conversations (spec sections 7 and 8) ---------------------------
+import { seal, open as openEnvelope } from '../../js/lib/e2ee/envelope.js';
+const cmp = (a, b) => (a.join('\u0000') < b.join('\u0000') ? -1 : 1);
+
+/** The recipients of a message to `users`, from their bundles as the server hands them out. */
+export async function recipientsFor(sock, users) {
+  const r = await sock.ok('e2ee.bundles', { users });
+  const to = [], ar = [], lv = {};
+  for (const u of users) {
+    const b = r.users[u];
+    if (!b?.list) continue;
+    lv[u] = b.list.ver;
+    for (const e of b.list.devs) { const p = b.prekeys[e.d]; if (p) to.push([u, e.d, p.kid, b64uOf(p.pub, 32)]); }
+    if (b.list.arc) ar.push([u, b.list.arc.e, b64uOf(b.list.arc.pub, 32)]);
+  }
+  return { to: to.sort(cmp), ar: ar.sort(cmp), lv };
+}
+
+/** Seals a message from person p (with p.dev and p.sock) to `users`; returns the msg.send `e2ee` field. */
+export async function sealFrom(p, { conv, place = conv, id, users, body = {}, kind = 'msg', rev = 0, ping = [], re = null, at, recipients, ts = Date.now() }) {
+  const rc = recipients || await recipientsFor(p.sock, users);
+  const header = { conv, place, id, kind, rev, from: { u: p.id, d: p.dev.d }, ts, lv: rc.lv || {}, ping, re, ...(at !== undefined ? { at } : {}) };
+  const { env, k, K } = await seal({ header, body: { text: '', mentions: ping, ...body }, dsk: p.dev.dsk.privateKey, recipients: rc });
+  return { e2ee: { ...env, k }, K };
+}
+
+/** Opens a delivered message view `m` (with its wraps `k`) as person p. */
+export async function openAs(p, m, { conv, place = conv, wraps = m.k || {}, senderDsk } = {}) {
+  return openEnvelope({
+    env: m.e2ee, expect: { conv, place, id: m.id, author: m.author }, senderDsk,
+    me: { u: p.id, d: p.dev.d },
+    keys: { device: (kid) => p.dev.prekeys[kid]?.pair || null, history: (e) => p.acct?.keys.ahk[e] || null },
+    wraps,
+  });
+}

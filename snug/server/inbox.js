@@ -227,7 +227,7 @@ export function createInboxOps({ db, M, hub, fail, ops: all }) {
   // you follow and in a direct conversation (a group set to "Only what needs
   // me" excepted).
   function forMe(user, handle, row, w, p) {
-    if (mentions(row.text, handle)) return 'mention';
+    if (mentions(row.text, handle) || M.pinged?.(user, row)) return 'mention'; // pinged: an encrypted message's declared mention (server/e2ee-conv.js)
     if (row.reply_to && row.reply_ping !== 0 && (row.reply_author !== undefined ? row.reply_author : db.get('SELECT author FROM messages WHERE id = ?', row.reply_to)?.author) === user) return 'reply';
     if (M.forMeExtra(user, row, w)) return everyonePing(row.text) === 'everyone' && !row.noping ? 'everyone' : 'role';
     if (w?.house && everyonePing(row.text) === 'here' && !row.noping && !p.everyoneOff?.[w.house] && M.can(row.author, w.house, 'announce')) return 'everyone';
@@ -350,7 +350,7 @@ export function createInboxOps({ db, M, hub, fail, ops: all }) {
     for (;;) {
       const rows = db.all(`SELECT * FROM messages WHERE conv IN (SELECT value FROM json_each(?)) AND seq < ? AND ts > ?
           AND author != ? AND deleted IS NULL AND sys IS NULL${noBlocks}
-          AND (text LIKE '%@%' OR (reply_to IS NOT NULL AND COALESCE(reply_ping, 1) != 0 AND reply_to IN (SELECT id FROM messages WHERE author = ?)))
+          AND (text LIKE '%@%' OR ping IS NOT NULL OR (reply_to IS NOT NULL AND COALESCE(reply_ping, 1) != 0 AND reply_to IN (SELECT id FROM messages WHERE author = ?)))
           AND id NOT IN (SELECT msg FROM mention_dismiss WHERE user = ?)
         ORDER BY seq DESC LIMIT 200`, JSON.stringify(convs), cursor, since, c.user, ...blocks, c.user, c.user); // sec-authz: one bound array, no variable limit
       for (const row of rows) {
