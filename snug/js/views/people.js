@@ -31,7 +31,10 @@ export const editProfile = () => { closePop(); openLayer({ C: Settings, props: {
 
 // The newest message this person wrote that this device has seen.
 // Where and when someone last wrote, among the conversations you can read.
+// Neither for someone who hides their activity from you (server/privacy.js), nor for a deleted account.
+const quiet = (id) => !!(S.users[id]?.hideActive || S.users[id]?.deleted);
 export function lastWrote(id) {
+  if (quiet(id)) return null;
   let best = null;
   for (const [conv, list] of Object.entries(S.msgs)) {
     for (let i = list.length - 1; i >= 0; i--) {
@@ -42,6 +45,7 @@ export function lastWrote(id) {
 }
 
 export function lastActive(id) {
+  if (quiet(id)) return 0;
   let t = 0;
   for (const list of Object.values(S.msgs)) {
     for (let i = list.length - 1; i >= 0; i--) {

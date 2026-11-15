@@ -31,17 +31,23 @@
 //   signed-in session (step-up) shares one counter. The TOTP secret is stored
 //   encrypted (AES-256-GCM) and backup codes as HMACs, both under the data
 //   key kept outside the database (<data>/secret.key). Every sign-in, failure
-//   and security change goes to the auth_events table (90 days, addresses
-//   truncated) and the log as one JSON line, never with a password, code,
+//   and security change goes to the auth_events table (30 days by default,
+//   SNUG_LOG_DAYS; addresses truncated) and the log as one JSON line, never with a password, code,
 //   secret or token; a burst of failures logs a "suspicious" line; other
 //   devices hear about a new sign-in.
-// - Data: export everything you wrote as JSON; deactivate (sign in again to
-//   come back); delete (your messages stay, as "Deleted user").
+// - Data: export everything you wrote as JSON, or as a zip with the files you
+//   uploaded and a readable copy of your messages; deactivate (sign in again
+//   to come back); delete (your messages stay, as "Deleted user", unless you
+//   choose to erase them: server/privacy.js eraseAuthored).
+// - Failure counters (privacy): the address part of a per-account-and-address
+//   key is an HMAC under the data key, never the address itself.
 import { createHmac, randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { sendFile, suspicious, securityEvent } from './seclog.js'; // sec-web W1; sec-integrate: the audit trail feeds the detectors directly
 import { join } from 'node:path';
+import { createReadStream } from 'node:fs';
 import { newId } from './model.js';
+import { zipWriter } from './zip.js'; // privacy: Download my data as one zip
 import {
   limiter, verifyPassword, hashPasswordAsync, burnPasswordCheck, passwordProblem, tokenHash, createSession, sessionCookie, endAllSessions, endSession,
   readCookie, COOKIE, sessionValid, recentAuth, markAuth, createAuthGuard, POLICIES, loadDataKey, subKey, seal, unseal, isSealed, maskIp,
@@ -58,6 +64,7 @@ export const TICKET_MS = 5 * 60_000;
 const json = (s, f) => { try { return s == null ? f : JSON.parse(s); } catch { return f; } };
 const EMOJI = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|‍|️|⃣|[#*0-9])+$/u;
 const FILE_ID = /^f_[a-z0-9]{8,40}$/;
+const likeSafe = (v) => String(v).replace(/[\\%_]/g, (ch) => `\\${ch}`); // a value inside LIKE, matched as itself
 
 // ---------- TOTP (RFC 4226 / RFC 6238) ----------
 const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -134,14 +141,21 @@ const tooMany = (ms) => `Too many tries. Wait ${ms > 90_000 ? `${Math.ceil(ms / 
 function core(db) {
   let c = CORES.get(db);
   if (c) return c;
-  c = { key: null, derived: null, log: () => {}, guard: createAuthGuard(db), windows: new Map(), pruned: 0 };
+  c = { key: null, derived: null, log: () => {}, guard: createAuthGuard(db), windows: new Map(), pruned: 0, keepDays: 30 };
+  // privacy: an address as a failure-counter key: an HMAC, so the table never holds the address.
+  c.addrKey = (ip) => createHmac('sha256', c.keys().addr).update(String(ip || '')).digest('base64url').slice(0, 22);
+  // The hourly sweep: sign-in history past keepDays (SNUG_LOG_DAYS), failure counters past two days.
+  c.prune = (now = Date.now()) => {
+    c.pruned = now;
+    try { db.run('DELETE FROM auth_events WHERE ts < ?', now - c.keepDays * 86_400_000); c.guard.prune(); } catch { /* closing */ }
+  };
   c.setKey = (k) => { c.key = k; c.derived = null; };
   // sec-review: false while the data key is a throwaway (secret.key couldn't be read, server/auth.js): nothing
   // may then be sealed or wrapped with it, or it would stay unreadable once the real key is back.
   c.usable = () => !c.key?.unusable;
   c.keys = () => {
     if (!c.key) c.key = randomBytes(32); // only when the ops run without the HTTP side (never in the server)
-    return (c.derived ||= { enc: subKey(c.key, 'totp-secret'), backup: subKey(c.key, 'backup-codes'), device: subKey(c.key, 'known-device') });
+    return (c.derived ||= { enc: subKey(c.key, 'totp-secret'), backup: subKey(c.key, 'backup-codes'), device: subKey(c.key, 'known-device'), addr: subKey(c.key, 'failure-address') });
   };
   // A burst of failures for one account or one address: one "suspicious" line an hour.
   const bump = (k, limit, what, extra) => {
@@ -169,10 +183,7 @@ function core(db) {
       if (user) bump(`u:${user}`, 20, 'auth failures for one account', { user });
       if (ip) bump(`i:${masked}`, 100, 'auth failures from one address', { ip: masked });
     }
-    if (now - c.pruned > 3_600_000) {
-      c.pruned = now;
-      try { db.run('DELETE FROM auth_events WHERE ts < ?', now - 90 * 86_400_000); c.guard.prune(); } catch { /* closing */ }
-    }
+    if (now - c.pruned > 3_600_000) c.prune(now);
   };
   CORES.set(db, c);
   return c;
@@ -661,10 +672,12 @@ export function createAccountHttp({
   db, M, hub, filesDir, sendJson, error, jsonBody, body, headers, ipOf, secure, authLimit, uploadLimit, log = () => {},
   dataDir = null, keyStore = null, desktop = false,
   dataKey = null, // sec-integrate: the key server/index.js already loaded (one load, one log line)
+  logDays = 30, // privacy: how long sign-in history is kept (SNUG_LOG_DAYS)
 }) {
   const R = reads(db);
   const C = core(db);
   C.log = log;
+  C.keepDays = logDays;
   C.setKey(dataKey || loadDataKey({ dataDir, keyStore, log }));
   // On the desktop (one person, their own PC) a session may sit unused as long as it lasts.
   configureSessions(db, { idleDays: desktop ? SESSION_DAYS : undefined });
@@ -786,7 +799,7 @@ export function createAccountHttp({
     if (!LOGIN_HANDLE.test(handleV) || !password || password.length > MAX_PASSWORD) { await burnPasswordCheck(password); C.audit('login', { ...who(req), ok: false, why: 'unknown' }); return nope(); }
     const row = db.get('SELECT * FROM users WHERE handle = ?', handleV);
     const acct = row ? `pw:${row.id}` : `pwh:${handleV}`;
-    const pair = `${acct}|${ip}`;
+    const pair = `${acct}|${C.addrKey(ip)}`; // privacy: never the address itself
     const wait = Math.max(G.waitMs(pair, POLICIES.pair), row && knownDevice(req, row.id) ? 0 : G.waitMs(acct, POLICIES.password));
     if (wait) { C.audit('login', { ...who(req, row?.id), ok: false, why: 'locked' }); return tooManyRes(res, wait); }
     const v = row ? await verifyPassword(password, row.pass) : { ok: await burnPasswordCheck(password) };
@@ -846,8 +859,14 @@ export function createAccountHttp({
     return out;
   }
 
-  function deleteAccount(user) {
+  // Failure counters name the account or the handle typed; once it's gone they have no use (privacy).
+  function forgetFailures(user, handle) {
+    db.run("DELETE FROM auth_failures WHERE key IN (?, ?, ?, ?) OR key LIKE ? ESCAPE '\\' OR key LIKE ? ESCAPE '\\'",
+      `pw:${user}`, `su:${user}`, `code:${user}`, `pwh:${handle}`, `${likeSafe(`pw:${user}`)}|%`, `${likeSafe(`pwh:${handle}`)}|%`);
+  }
+  function deleteAccount(user, { erase = false } = {}) {
     const c = { user, ws: null };
+    const handle = M.userRow(user)?.handle || '';
     hub.voiceLeave?.(user);
     for (const m of db.all('SELECT house FROM members WHERE user = ?', user)) {
       try { hub.ops['house.leave'](c, { house: m.house }); } catch (e) { log('account delete: leave', e.message); db.run('DELETE FROM members WHERE house = ? AND user = ?', m.house, user); }
@@ -871,8 +890,11 @@ export function createAccountHttp({
       try { db.run('DELETE FROM push_subs WHERE user = ?', user); } catch { /* push not set up */ }
       for (const f of deleteAccountHooks) f(user); // v0.12: passkeys and the recovery key (server/passkeys.js, server/recovery.js)
       endAllSessions(db, user);
+      forgetFailures(user, handle);
     });
     hub.endSessions(user);
+    // privacy: "erase what I wrote" (server/privacy.js): messages, files, reactions, sign-in and security history.
+    if (erase && M.eraseAuthored) M.eraseAuthored(user);
     hub.userChanged(user);
   }
 
@@ -898,10 +920,32 @@ export function createAccountHttp({
         ...(m.files ? { files: json(m.files, []).map((f) => f.name || f.id || f) } : {}),
       };
     });
+    const iso = (t) => (t ? new Date(t).toISOString() : null);
+    // privacy: the whole of every direct conversation I'm in, both sides (and their threads); nobody else's.
+    const convMsgs = (conv) => db.all('SELECT id, conv, author, ts, text, reply_to, files, edited FROM messages WHERE (conv = ? OR conv IN (SELECT id FROM threads WHERE conv = ?)) AND deleted IS NULL ORDER BY ts', conv, conv)
+      .map((m) => ({
+        id: m.id, ...(m.conv !== conv ? { thread: m.conv } : {}), from: handleOf(m.author), at: iso(m.ts), text: m.text,
+        ...(m.reply_to ? { replyTo: m.reply_to } : {}), ...(m.edited ? { edited: iso(m.edited) } : {}),
+        ...(m.files ? { files: json(m.files, []).map((f) => f.name || f.id || f) } : {}),
+      }));
     const dms = db.all('SELECT dm FROM dm_members WHERE user = ?', user).map((r) => ({
       id: r.dm, name: db.get('SELECT name FROM dms WHERE id = ?', r.dm)?.name || null,
       members: db.all('SELECT user FROM dm_members WHERE dm = ? ORDER BY rowid', r.dm).map((x) => handleOf(x.user)),
+      messages: convMsgs(r.dm),
     }));
+    const tryAll = (sql, ...a) => { try { return db.all(sql, ...a); } catch { return []; } }; // tables a module may not have made
+    const extra = {
+      signIns: tryAll('SELECT ts, event, ok, ip, agent, why FROM auth_events WHERE user = ? ORDER BY ts DESC', user)
+        .map((e) => ({ at: iso(e.ts), event: e.event, ok: !!e.ok, address: e.ip, device: e.agent, ...(e.why ? { why: e.why } : {}) })),
+      securityEvents: tryAll('SELECT ts, kind, ip, agent, detail FROM security_events WHERE user = ? ORDER BY ts DESC', user)
+        .map((e) => ({ at: iso(e.ts), kind: e.kind, address: e.ip, device: e.agent, detail: json(e.detail, {}) })),
+      reactions: tryAll('SELECT msg, emoji, ts FROM reactions WHERE user = ? ORDER BY ts', user).map((r) => ({ message: r.msg, emoji: r.emoji, at: iso(r.ts) })),
+      pollVotes: tryAll('SELECT msg, answer, ts FROM poll_votes WHERE user = ? ORDER BY ts', user).map((r) => ({ poll: r.msg, answer: r.answer, at: iso(r.ts) })),
+      scheduled: tryAll('SELECT conv, text, at, created FROM scheduled WHERE user = ? ORDER BY at', user).map((r) => ({ conv: r.conv, where: where(r.conv), text: r.text, at: iso(r.at), made: iso(r.created) })),
+      pushDevices: tryAll('SELECT created FROM push_subs WHERE user = ?', user).map((r) => ({ added: iso(r.created) })),
+      files: tryAll('SELECT id, conv, name, type, size, created FROM files WHERE owner = ? ORDER BY created', user)
+        .map((f) => ({ id: f.id, name: f.name, type: f.type, size: f.size, added: iso(f.created), where: /^[a-z]+:/.test(f.conv) && !f.conv.startsWith('t:') ? f.conv.split(':')[0] : where(f.conv) })),
+    };
     return {
       app: 'Snug', exported: new Date().toISOString(),
       account: {
@@ -918,7 +962,71 @@ export function createAccountHttp({
       sessions: db.all('SELECT agent, created, seen FROM sessions WHERE user = ?', user).map((s) => ({ device: s.agent, created: new Date(s.created).toISOString(), lastSeen: new Date(s.seen || s.created).toISOString() })),
       messages,
       ...(messages.some((m) => m.encrypted) ? { encryptedNote: 'Messages in end-to-end encrypted conversations are exported as this server stores them: encrypted envelopes. The server can’t read them, so it can’t export their text; your devices can.' } : {}),
+      ...extra,
     };
+  }
+
+  // privacy: the same data as one zip: snug-data.json, a readable messages.txt,
+  // README.txt, and the files I uploaded under files/. Written entry by entry.
+  async function exportZip(res, user) {
+    const data = exportFor(user);
+    headers(res, {
+      'Content-Type': 'application/zip', 'Cache-Control': 'no-store',
+      'Content-Disposition': `attachment; filename="snug-${data.account.handle}-${new Date().toISOString().slice(0, 10)}.zip"`,
+    });
+    res.writeHead(200);
+    const write = (buf) => new Promise((resolve, reject) => {
+      if (res.destroyed) { reject(new Error('gone')); return; }
+      if (res.write(buf)) resolve(); else res.once('drain', resolve);
+    });
+    const z = zipWriter(write);
+    try {
+      await z.add('README.txt', exportReadme(data));
+      await z.add('snug-data.json', JSON.stringify(data, null, 2));
+      await z.add('messages.txt', exportText(data));
+      const MAX = 1024 * 1024 * 1024; // 1 GB of files; the list in snug-data.json names every one either way
+      let total = 0;
+      for (const f of data.files) {
+        if (total + f.size > MAX) break;
+        const bytes = await readAll(join(filesDir, f.id));
+        if (!bytes) continue; // gone from the files folder
+        total += bytes.length;
+        await z.add(`files/${f.id}-${f.name.replace(/[\/\\:*?"<>|\u0000-\u001f]/g, '_').slice(0, 100) || 'file'}`, bytes, new Date(f.added));
+      }
+      await z.end();
+      res.end();
+    } catch { try { res.destroy(); } catch { /* gone */ } }
+  }
+  const readAll = (path) => new Promise((resolve) => {
+    const chunks = [];
+    createReadStream(path).on('data', (c) => chunks.push(c)).on('end', () => resolve(Buffer.concat(chunks))).on('error', () => resolve(null));
+  });
+  const exportReadme = (d) => [
+    `Your Snug data, as of ${d.exported}.`,
+    '',
+    'snug-data.json  Everything below in one file a program can read: your profile, settings,',
+    '                notes, friends, houses, every message you wrote, the whole of each direct',
+    '                conversation you are in, your reactions and poll votes, scheduled messages,',
+    '                sign-in history (addresses shortened, as stored), security events and devices.',
+    'messages.txt    The same messages, to read: your messages in houses, and your direct conversations.',
+    'files/          The files you uploaded (pictures, documents, voice messages).',
+    '',
+    'Other people\'s messages in houses are not included: they are theirs. Messages in your',
+    'direct conversations are included because you are in them.',
+  ].join('\n');
+  function exportText(d) {
+    const out = [];
+    const line = (m, who) => `${m.at.slice(0, 16).replace('T', ' ')}  ${who}: ${m.text}${m.files ? ` [files: ${m.files.join(', ')}]` : ''}`;
+    const byPlace = new Map();
+    for (const m of d.messages) { if (!byPlace.has(m.where)) byPlace.set(m.where, []); byPlace.get(m.where).push(m); }
+    for (const [place, list] of byPlace) {
+      if (place === 'direct conversation' || place === 'thread in a direct conversation') continue; // below, with both sides
+      out.push(`== ${place} (your messages) ==`, ...list.map((m) => line(m, d.account.handle)), '');
+    }
+    for (const c of d.conversations) {
+      out.push(`== ${c.name || c.members.join(', ')} (direct conversation) ==`, ...c.messages.map((m) => line(m, m.from)), '');
+    }
+    return out.join('\n');
   }
 
   // Routes that need no session: the second step of signing in.
@@ -961,6 +1069,11 @@ export function createAccountHttp({
       sendJson(res, 200, data, { 'Content-Disposition': `attachment; filename="snug-${data.account.handle}-${new Date().toISOString().slice(0, 10)}.json"` });
       return true;
     }
+    if (req.method === 'GET' && path === '/api/account/export.zip') {
+      if (!exportLimit.take(user)) { error(res, 429, 'You can download your data three times an hour. Try again later.'); return true; }
+      await exportZip(res, user);
+      return true;
+    }
     if (post && path === '/api/password') { await changePassword(req, res, user); return true; } // sec-auth: from server/index.js
     if (post && (path === '/api/account/delete' || path === '/api/account/deactivate')) {
       if (!authLimit.take(`acct:${user}`)) { error(res, 429, 'Too many attempts. Wait a few minutes and try again.'); return true; }
@@ -973,8 +1086,9 @@ export function createAccountHttp({
         const owned = soleOwnerOf(user);
         if (owned.length) { error(res, 409, `You’re the only owner of ${owned.join(', ')}. Give someone else the owner role first, or remove everyone else.`); return true; }
         // p2p: friends on other PCs hear it first; the username is freed after a fresh GitHub check (server/ghauth.js).
-        if (M.p2pOwner?.(user)) { const r = await M.p2pDelete(user, d, () => deleteAccount(user)); sendJson(res, 200, { released: r.released }, cookieGone()); return true; }
-        deleteAccount(user);
+        const erase = d.erase === true; // privacy: erase what I wrote, or keep it by "Deleted user"
+        if (M.p2pOwner?.(user)) { const r = await M.p2pDelete(user, d, () => deleteAccount(user, { erase })); sendJson(res, 200, { released: r.released }, cookieGone()); return true; }
+        deleteAccount(user, { erase });
       } else {
         db.run('UPDATE users SET deactivated = 1 WHERE id = ?', user);
         db.run('DELETE FROM scheduled WHERE user = ?', user); // a deactivated account doesn't post
@@ -1024,5 +1138,6 @@ export function createAccountHttp({
     signIn: signedIn, reactivate, strip, guard: G, prunePush, deleteAccountHooks,
     // Tests: forget every rate limit, the failure counters included.
     reset: () => { exportLimit.reset(); G.reset(); C.windows.clear(); },
+    prune: () => C.prune(), // privacy: tests run the sign-in history sweep
   };
 }

@@ -122,8 +122,9 @@ stronger than "end-to-end encrypted" is used.
 - **The registry operator.** The registry holds every account's vault key (wrapped under its own secrets). Its
   operator, or anyone who obtains both the Durable Object data and those secrets, could decrypt a data file
   they also obtain. The registry never sees messages between PCs.
-- **Metadata.** The registry sees who is online, which accounts signal each other and when, and IP addresses
-  (stored only as keyed hashes or truncated). Voice and video go peer to peer, so the other side of a call
+- **Metadata.** The registry sees who is online, which accounts signal each other and when, each account's
+  list of friends and group co-members (to tell them who is online), and IP addresses (stored only as keyed
+  hashes or truncated). Cloudflare, which runs the registry and the TURN relays, sees connecting addresses. Voice and video go peer to peer, so the other side of a call
   sees your IP address unless "Hide my IP from friends" is on and a relay server is set up.
 - **People you talk to.** Anyone in a conversation can copy, screenshot or forward it. Deleting a message
   removes it from Snug, not from someone else's copy.
@@ -138,6 +139,27 @@ stronger than "end-to-end encrypted" is used.
   (with no GitHub linked) means the account is gone: nobody, including Snug, can reset it.
 - **One person, many accounts.** Accounts without GitHub cost a proof of work, an address budget (3 a day per
   /48) and a global budget. These slow down mass sign-ups; they do not stop someone with many addresses.
+
+### Privacy and data kept
+
+The plain-language version for people using Snug is the privacy page (Settings > Privacy guide, or `/privacy`),
+built from `js/lib/privacy.js` and `GET /api/privacy` (`server/privacy.js`).
+
+- Sign-in history (`auth_events`) and security events are kept 30 days by default (`SNUG_LOG_DAYS`, 1 to 365),
+  with addresses truncated (1.2.3.x, /48). Failed sign-in counters last 2 days and hold an address only as an
+  HMAC under the data key. Sessions store a device label, never an address. Logs never print a full address.
+- Who sees that someone is online (everyone sharing a place, friends only, nobody) and typing are applied to
+  every frame the server sends (`hub.outFilter`), not only in the browser.
+- In P2P mode, link previews for links friends send are off unless the PC's owner turns them on, since the
+  fetch reveals the PC's address to the linked site.
+- Deleting an account can erase what the person wrote (messages, files, reactions, poll votes, sign-in and
+  security history); report rows moderators already hold and copies on other PCs stay. Encrypted database
+  snapshots keep up to 7 days, so erased content can survive that long in a snapshot.
+- Snug sends no telemetry, analytics or crash reports, and the web client loads nothing from other origins
+  (CSP `default-src 'self'`; tested in `tests/e2e-privacy.test.js`). Outside parties it does reach: the STUN
+  server (Google by default, `SNUG_STUN=none` turns it off), a TURN relay if configured, the browser's push
+  service, the registry and Cloudflare (P2P), GitHub (desktop updates), and Tenor (only server-side, only if
+  the server owner enables GIF search).
 
 ## Controls in place
 

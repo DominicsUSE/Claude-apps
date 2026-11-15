@@ -21,6 +21,7 @@ import { pushSignOut } from '../push.js';
 import { HouseEmoji } from './emoji-settings.js'; // House settings > Emoji
 import { withStickers } from './messaging.js'; // stickers on the Emoji page
 import { PrivacyPage, SAFETY_PAGES, SAFETY_VIEWS } from './safety-settings.js'; // privacy, blocks, moderation pages
+import { PrivacyGuide } from './privacy.js'; // the full privacy page
 import { personItems, mayAct } from './safety.js'; // Remove lives in the Moderate menu when you may kick
 import { PLACES_PAGES, PLACES_VIEWS, WelcomePage } from './places-settings.js'; // roles with order and icons, rooms and access, welcome, insights
 import { VoiceSettings, HouseVoice } from './voiceopts-settings.js'; // Voice and video; House settings > Voice
@@ -317,8 +318,11 @@ async function signOut(everywhere) {
 // Appearance and Account and security are drawn by js/views/account.js (registerAccountPages below).
 const VIEWS = { profile: Profile, notify: Notify, keys: Keys };
 // Privacy and safety (js/views/safety-settings.js), before Account.
-PAGES.splice(PAGES.findIndex((p) => p.id === 'account'), 0, { id: 'privacy', label: 'Privacy and safety', icon: 'shield', words: 'privacy block blocked unblock messages requests friend requests dm safety' });
-VIEWS.privacy = PrivacyPage;
+PAGES.splice(PAGES.findIndex((p) => p.id === 'account'), 0, { id: 'privacy', label: 'Privacy and safety', icon: 'shield', words: 'privacy block blocked unblock messages requests friend requests dm safety who can see encrypt encryption end to end data stored server ip address online presence last seen last active recently here typing link previews' },
+  // The full privacy page (js/views/privacy.js), also at /privacy for anyone.
+  { id: 'guide', label: 'Privacy guide', icon: 'info', words: 'privacy policy data stored kept retention how long logs ip address diagnostics analytics tracking anonymous law police court encrypt' });
+VIEWS.privacy = () => html`<${PrivacyPage} openGuide=${() => goPage?.('guide')} />`;
+VIEWS.guide = () => html`<h1>Privacy guide</h1><${PrivacyGuide} level=${2} />`;
 // Voice and video (js/views/voiceopts-settings.js), after Notifications.
 PAGES.splice(PAGES.findIndex((p) => p.id === 'notify') + 1, 0, { id: 'voice', label: 'Voice and video', icon: 'voice', words: 'voice video microphone mic speaker headphones camera webcam push to talk ptt sensitivity noise suppression echo gain volume screen share quality sounds afk deafen calls ringtone ring volume ring on who can ring muted warning camera quality resolution frame rate mirror microphone volume output volume reconnect' });
 VIEWS.voice = VoiceSettings;
@@ -353,8 +357,10 @@ arrange(PAGES, [
 
 registerE2eePage({ PAGES, VIEWS, Row }); // after arrange: it comes and goes with the server's setting, placed after Privacy
 
+let goPage = null; // the open Settings layer's page switch, for links between pages
 export function Settings({ page: start }) {
   const [page, setPage] = useState(start || 'profile');
+  goPage = setPage;
   const V = VIEWS[page];
   return html`<${Layer} title="Settings" icon=${html`<${Icon} name="sliders" />`} pages=${PAGES} page=${page} setPage=${setPage} startOpen=${!!start}
     foot=${html`<${Nook} size=${16} /><span>Snug${S.conn.version || S.version ? ` ${S.conn.version || S.version}` : ''}</span>`}>

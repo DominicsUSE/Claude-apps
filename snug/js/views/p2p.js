@@ -13,6 +13,7 @@ import { normalize } from '../lib/usernames.js';
 import { localNameProblem, NAME_RULES } from '../lib/username-text.js';
 import { CodeStep, NameStep } from './auth.js'; // the same code screen and username picker as signing in
 import { RecoverySave } from './keyauth.js'; // v0.12: the recovery key screen, also used from Settings
+import { EraseChoice } from './privacy.js'; // deleting: keep or erase what I wrote
 
 addIcons({
   lock: 'M5.500 9h9a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z|M7 9V6.500a3 3 0 0 1 6 0V9',
@@ -158,7 +159,7 @@ export function PeerCode({ id }) {
   const k = S.peerKeys?.[id];
   return html`<section class="pp-sect" aria-labelledby="pp-peer">
     <h3 id="pp-peer">On another PC</h3>
-    <p class="p2p-local"><${Icon} name="lock" size=${14} /><span>Messages and calls go straight between your PCs, encrypted end to end.</span></p>
+    <p class="p2p-local"><${Icon} name="lock" size=${14} /><span>Messages and calls are encrypted end to end between your PCs. Calls sometimes go through a relay, which can’t hear them. Messages are stored readable on each PC.</span></p>
     ${k?.fingerprint && html`<div class="p2p-peer-code"><span class="p2p-local">Security code${k.changedAt ? `, changed ${day(k.changedAt)}` : ''}</span>
       <div class="p2p-fp">${groups(k.fingerprint).map((g, i) => html`<span key=${i}>${g}</span>`)}</div></div>`}
   </section>`;
@@ -546,6 +547,7 @@ export function DeleteP2p({ onGone }) {
 }
 function DeleteKey({ onGone }) {
   const p = S.p2p;
+  const [erase, setErase] = useState('keep'); // privacy: keep or erase what I wrote on this PC
   const [typed, setTyped] = useState('');
   const [code, setCode] = useState('');
   const [flow, setFlow] = useState(null);
@@ -558,15 +560,16 @@ function DeleteKey({ onGone }) {
   const del = async () => {
     setBusy(true);
     try {
-      const r = await api('/api/account/delete', { confirm: typed, flow: flow || undefined });
+      const r = await api('/api/account/delete', { confirm: typed, flow: flow || undefined, erase: erase === 'erase' });
       if (!r.released) toast('Deleted on this PC. Your username stays reserved, because the recovery key wasn’t used.');
       await onGone();
     } catch (e) { setErr(e.message); setBusy(false); }
   };
   return html`<div>
     <h2>Delete your account?</h2>
-    <p class="modal-lead">This can’t be undone. Friends on other PCs see you leave. Your messages stay where you wrote them, by “Deleted user”.</p>
+    <p class="modal-lead">This can’t be undone. Friends on other PCs see you leave.</p>
     <div class="form">
+      <${EraseChoice} value=${erase} onChange=${setErase} p2p />
       <div><label class="label" for="cf-handle">Type your username, <b>${p.username}</b>, to confirm</label>
         <input id="cf-handle" class="field" autocapitalize="none" spellcheck="false" data-autofocus value=${typed} onInput=${(e) => { setTyped(e.target.value); setErr(''); }} /></div>
       ${!flow && html`<div><label class="label" for="cf-recovery">Recovery key, to free @${p.username} for anyone (optional)</label>
@@ -583,6 +586,7 @@ function DeleteKey({ onGone }) {
 }
 function DeleteGh({ onGone }) {
   const p = S.p2p;
+  const [erase, setErase] = useState('keep'); // privacy: keep or erase what I wrote on this PC
   const [typed, setTyped] = useState('');
   const [step, setStep] = useState(null); // {flow, userCode, uri, state}
   const [err, setErr] = useState('');
@@ -608,15 +612,16 @@ function DeleteGh({ onGone }) {
   const del = async () => {
     setBusy(true);
     try {
-      const r = await api('/api/account/delete', { confirm: typed, flow: step?.state === 'confirmed' ? step.flow : undefined });
+      const r = await api('/api/account/delete', { confirm: typed, flow: step?.state === 'confirmed' ? step.flow : undefined, erase: erase === 'erase' });
       if (!r.released) toast('Deleted on this PC. Your username stays reserved until you sign in with GitHub again and delete it.');
       await onGone();
     } catch (e) { setErr(e.message); setBusy(false); }
   };
   return html`<div>
     <h2>Delete your account?</h2>
-    <p class="modal-lead">This can’t be undone. Friends on other PCs see you leave. Your messages stay where you wrote them, by “Deleted user”.</p>
+    <p class="modal-lead">This can’t be undone. Friends on other PCs see you leave.</p>
     <div class="form">
+      <${EraseChoice} value=${erase} onChange=${setErase} p2p />
       <div><label class="label" for="cf-handle">Type your username, <b>${p.username}</b>, to confirm</label>
         <input id="cf-handle" class="field" autocapitalize="none" spellcheck="false" data-autofocus value=${typed} onInput=${(e) => { setTyped(e.target.value); setErr(''); }} /></div>
       <div class="hint">To free @${p.username} for anyone, confirm on GitHub first.</div>

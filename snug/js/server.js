@@ -263,6 +263,7 @@ function flushQueue() {
 
 const typingAt = {};
 export function sendTyping(conv) {
+  if (S.prefs.typing === false) return; // privacy: typing off (the server drops it too, server/privacy.js)
   if (Date.now() - (typingAt[conv] || 0) < 3000) return;
   typingAt[conv] = Date.now();
   call('typing', { conv }).catch(() => {});
@@ -396,15 +397,17 @@ const EVENTS = {
     if (m && emoji) m.emoji = { ...m.emoji, ...emoji }; // custom emoji used in reactions (js/views/emoji-custom.js)
   },
   typing({ conv, user }) {
+    if (S.prefs.typing === false) return; // privacy: typing off means not seeing other people's either
     S.typing[conv] = [...new Set([...(S.typing[conv] || []), user])];
     clearTimeout(typingTimers[`${conv}|${user}`]);
     typingTimers[`${conv}|${user}`] = setTimeout(() => { stopTyping(conv, user); emit(); }, 6000);
   },
-  presence({ user, presence }) {
-    if (S.users[user]) S.users[user].presence = presence;
+  presence({ user, presence, hideActive }) {
+    if (S.users[user]) { S.users[user].presence = presence; if (!hideActive) delete S.users[user].hideActive; }
   },
   user({ user }) {
     S.users[user.id] = { ...S.users[user.id], ...user };
+    if (!user.hideActive) delete S.users[user.id].hideActive; // privacy: they show their activity to you again (server/privacy.js)
   },
   house({ house, rooms, users }) {
     const before = S.houses[house.id];

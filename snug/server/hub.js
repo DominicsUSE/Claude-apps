@@ -87,7 +87,12 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
   const pref = (u) => M.userRow(u)?.presence || 'offline';
   const presenceOf = (u) => (online(u) && pref(u) !== 'offline' ? pref(u) : 'offline');
 
-  const send = (ws, msg) => { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); };
+  // hub.outFilter (server/privacy.js) may change or drop a frame for the person it goes to.
+  const send = (ws, msg) => {
+    if (ws.readyState !== 1) return;
+    const out = hub.outFilter ? hub.outFilter(ws.user, msg) : msg;
+    if (out) ws.send(JSON.stringify(out));
+  };
   const hub = {};
   // p2p: extra per-op token buckets (server/peer.js: the link host's peer.* ops).
   hub.addLimits = (more) => { for (const [op, l] of Object.entries(more)) { limits[op] = l; (hub.extraLimits ||= []).push(l); } };

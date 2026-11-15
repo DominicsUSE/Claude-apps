@@ -24,6 +24,7 @@ import { bindings, comboKeys, ACTIONS } from '../lib/keys.js'; // the person's s
 import { setLook } from '../account.js';
 import { Confirm } from './modals.js';
 import { RevokeSheet, hasKeys } from './e2ee-revoke.js'; // signing out a device can remove its encryption keys too
+import { EraseChoice } from './privacy.js'; // deleting: keep or erase what I wrote
 import { p2pOwner, AccountRows, ConnectRow, DeleteP2p } from './p2p.js'; // GitHub-secured accounts: no password; the Snug username
 import { PasskeyRows } from './passkeys.js'; // v0.12: passkey sign-in (server/passkeys.js)
 import { RecoveryRows } from './recover.js'; // v0.12: the recovery key for a forgotten password (server/recovery.js)
@@ -409,7 +410,8 @@ function TotpSetup() {
 }
 
 // Password (and a code) before something that matters.
-function Confirmed({ title, lead, action, danger, needCode, needHandle, run, noPassword }) {
+function Confirmed({ title, lead, action, danger, needCode, needHandle, run, noPassword, erase: offerErase = false }) {
+  const [erase, setErase] = useState('keep'); // privacy: keep or erase what I wrote (deleting only)
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [handle, setHandle] = useState('');
@@ -419,13 +421,14 @@ function Confirmed({ title, lead, action, danger, needCode, needHandle, run, noP
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
-    try { const r = await run({ password, code, confirm: handle }); if (r) setResult(r); else closeModal(); } catch (x) { setErr(x.message); setBusy(false); }
+    try { const r = await run({ password, code, confirm: handle, ...(offerErase ? { erase: erase === 'erase' } : {}) }); if (r) setResult(r); else closeModal(); } catch (x) { setErr(x.message); setBusy(false); }
   };
   if (result) return result;
   return html`<form onSubmit=${submit}>
     <h2>${title}</h2>
     <p class="modal-lead">${lead}</p>
     <div class="form">
+      ${offerErase && html`<${EraseChoice} value=${erase} onChange=${setErase} />`}
       ${!noPassword && html`<div><label class="label" for="cf-pw">Password</label><input id="cf-pw" class="field" type="password" data-autofocus autocomplete="current-password" value=${password} onInput=${(e) => { setPassword(e.target.value); setErr(''); }} /></div>`}
       ${needHandle && html`<div><label class="label" for="cf-handle">Type your username, <b class="secret">${me().handle}</b>, to confirm</label><input id="cf-handle" class="field" autocapitalize="none" spellcheck="false" data-autofocus=${noPassword || undefined} value=${handle} onInput=${(e) => { setHandle(e.target.value); setErr(''); }} /></div>`}
       ${needCode && html`<div><label class="label" for="cf-code">Code from your app, or a backup code</label><input id="cf-code" class="field" autocomplete="one-time-code" value=${code} onInput=${(e) => { setCode(e.target.value); setErr(''); }} /></div>`}
@@ -554,10 +557,10 @@ export function DataPage() {
   const download = async () => {
     setBusy(true);
     try {
-      const res = await fetch('/api/account/export', { credentials: 'same-origin' });
+      const res = await fetch('/api/account/export.zip', { credentials: 'same-origin' }); // privacy: one zip with the files too
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'That didn’t work. Try again.');
       const blob = await res.blob();
-      const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '')?.[1] || 'snug-export.json';
+      const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '')?.[1] || 'snug-export.zip';
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = name;
@@ -572,7 +575,7 @@ export function DataPage() {
   return html`
     <h1>Your data</h1>
     <p class="lead">What Snug keeps about you, and how to take it with you or end it.</p>
-    <${Row} label="Download your data" hint="One JSON file: your profile, settings, notes, friends, houses, conversations, devices and every message you wrote. Three times an hour.">
+    <${Row} label="Download your data" hint="One zip file: your profile, settings, notes, friends, houses, every message you wrote, the whole of each direct conversation you’re in, files you uploaded, reactions, sign-in history and devices, as data and as text you can read. Three times an hour.">
       <button class="btn" disabled=${busy} onClick=${download}><${Icon} name="file" size=${16} />${busy ? 'Preparing…' : 'Download'}</button>
     <//>
     <div class="set-head">End your account</div>
@@ -582,9 +585,9 @@ export function DataPage() {
         run: async (d) => { await api('/api/account/deactivate', d); await leaveLocally(); },
       })}>Deactivate</button>
     <//>
-    <${Row} label="Delete your account" hint="For good. Your messages stay where you wrote them, by “Deleted user”. If you own a house with other people in it, hand it over first.">
+    <${Row} label="Delete your account" hint="For good. You choose whether your messages stay, by “Deleted user”, or are erased with your files and reactions. If you own a house with other people in it, hand it over first.">
       <button class="btn danger" onClick=${() => (p2p ? openModal(DeleteP2p, { onGone: leaveLocally }) : openModal(Confirmed, {
-        title: 'Delete your account?', lead: 'This can’t be undone. Your profile, settings, friends and houses go; your messages stay, by “Deleted user”.', action: 'Delete my account', danger: true, needCode, needHandle: true,
+        title: 'Delete your account?', lead: 'This can’t be undone. Your profile, settings, friends and houses go.', action: 'Delete my account', danger: true, needCode, needHandle: true, erase: true,
         run: async (d) => { await api('/api/account/delete', d); await leaveLocally(); },
       }))}>Delete account</button>
     <//>`;

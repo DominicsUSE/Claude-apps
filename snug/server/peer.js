@@ -844,11 +844,13 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     if (u === owner() && active()) {
       pushProfile();
       // Invisible: the registry stops announcing me (section 7.3).
-      const vis = ownerRow()?.presence !== 'offline';
+      const vis = visibleNow();
       if (vis !== lastVisible) { lastVisible = vis; signal.send({ t: 'visible', on: vis }); }
     }
   };
   let lastVisible = true;
+  // Invisible, or "who sees that I'm online: nobody" (server/privacy.js): the directory doesn't announce me.
+  const visibleNow = () => ownerRow()?.presence !== 'offline' && M.presenceToAll?.(owner()) !== false;
   const baseSnap = hub.snapshotFor;
   hub.snapshotFor = (u) => {
     const snap = baseSnap(u);
@@ -1186,7 +1188,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     }
     if (self.state !== 'ok') identity.setSelf({ state: 'ok' });
     if (Number.isSafeInteger(m.kver) && m.kver !== self.kver) identity.setSelf({ kver: m.kver });
-    lastVisible = ownerRow()?.presence !== 'offline';
+    lastVisible = visibleNow();
     sendWatch();
     if (!lastVisible) signal.send({ t: 'visible', on: false });
     resendKnocks();

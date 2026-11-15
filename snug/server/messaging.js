@@ -324,6 +324,8 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
   async function buildEmbeds(conv, mid) {
     const row = M.liveMsg(mid);
     if (!row || row.noembed || row.sys) return;
+    // privacy: a link a friend on another PC sent is fetched only if this PC's owner said so (server/privacy.js).
+    if (M.previewAllowed && !M.previewAllowed(row.author)) return;
     const links = previewLinks(row.text, 3, { anyPort: cfg.allowLoopback });
     const out = [];
     if (links.length && cfg.previews && cfg.filesDir && previewLimit.take(row.author, links.length)) {

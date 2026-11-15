@@ -31,7 +31,7 @@ import { createRecovery } from './recovery.js'; // v0.12: "Forgot your password?
 import { createKeyAuth } from './keyauth.js'; // v0.12: desktop accounts that need no GitHub account
 import { createNotices } from './notices.js'; // v0.10 A: registry notices, bans and admin
 import { createVault } from './vault.js'; // v0.10 C: the account's data file
-import { restoreIfDamaged, scheduleSnapshots } from './dbbackup.js'; // sec-registry REG-L6: database snapshots
+import { restoreIfDamaged, scheduleSnapshots, KEEP as KEEP_SNAPSHOTS } from './dbbackup.js'; // sec-registry REG-L6: database snapshots
 import {
   sessionUser, endAllSessions, readCookie, sessionCookie, COOKIE, limiter, safeDecode,
   clientIp, ipKey, secureCookies, // sec-auth
@@ -40,6 +40,7 @@ import {
 import { createSeclog, redactLog, redact, sendFile } from './seclog.js'; // sec-web: security events, log redaction, safe file sends
 import { PROTO, MIN_CLIENT } from '../js/lib/proto.js'; // GET /api/version
 import { staticRel, staticHeaders, BASE_HEADERS, PUBLIC } from './static.js'; // the app's own files and their headers, shared with the desktop app's join mode
+import { createPrivacy, logDaysFrom, iceFacts } from './privacy.js'; // privacy: who sees you online, typing, friends' link previews, erasing, what is kept
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // Uploaded images shown inline. Anything else downloads.
@@ -87,6 +88,8 @@ export async function startServer({
   linkPreviews = process.env.SNUG_LINK_PREVIEWS !== '0',
   // Tests only: let previews fetch a local stand-in site on 127.0.0.1 (every other private address stays refused).
   linkAllowLocal = false,
+  // privacy: days sign-in history and security events are kept (SNUG_LOG_DAYS, 1 to 365; 30 by default).
+  logDays = logDaysFrom(process.env.SNUG_LOG_DAYS ?? 30),
   // p2p (server/peer.js): the registry, GitHub sign-in, the device key wrapper and link tuning.
   registryUrl = process.env.SNUG_REGISTRY_URL || null,
   githubClientId = process.env.SNUG_GITHUB_CLIENT_ID || null,
@@ -130,7 +133,7 @@ export async function startServer({
   const cspLimit = limiter({ capacity: 30, perSecond: 0.5 });
   const ipOf = (req) => ipKey(clientIp(req, trustProxy)); // sec-auth: the proxy's own entry, IPv4-mapped as IPv4, IPv6 per /64
   // sec-web W4: security events and the suspicious-activity detectors (server/seclog.js).
-  const sec = createSeclog({ db, log, ipOf: (req) => clientIp(req, trustProxy) });
+  const sec = createSeclog({ db, log, ipOf: (req) => clientIp(req, trustProxy), keepDays: logDays });
   // sec-web W2: the Host header must name this server, or a page on a name the
   // attacker controls (re-pointed at 127.0.0.1) would pass every Origin check.
   const hostNames = new Set([...LOCAL_NAMES, ...(hosts || []).map((h) => h.toLowerCase().replace(/:\d+$/, '')),
@@ -191,6 +194,12 @@ export async function startServer({
   });
   // v0.10 B: groups across PCs (server/peergroups.js)
   createGroups({ db, M, hub, ops: hub.ops, peer, log });
+  // privacy: last, so its typing rule covers friends on other PCs too (server/privacy.js).
+  const privacy = createPrivacy({
+    db, M, hub, ops: hub.ops, peer, filesDir, log,
+    facts: { mode: peer.enabled ? 'desktop' : 'host', logDays, linkPreviews, ...iceFacts(ice), backupDays: dbKey ? KEEP_SNAPSHOTS : 0 },
+  });
+  M.eraseAuthored = privacy.eraseAuthored; // account deletion, when asked to erase (server/account.js)
 
   // Deleted messages can be restored for ten minutes; after that their content is gone for good.
   const sweepFiles = createFileSweep({ db, filesDir, log }); // sec-authz: deleted attachments and never-sent uploads (server/media.js)
@@ -249,7 +258,7 @@ export async function startServer({
   hub.messaging?.configure({ filesDir, previews: linkPreviews, allowLoopback: linkAllowLocal });
   hub.e2ee?.conv?.configure({ filesDir }); // e2ee.file.copy (server/e2ee-conv.js)
   const placesHttp = createPlacesHttp({ db, M, hub, sendJson, error, jsonBody, ipOf }); // webhooks (server/places.js)
-  const accountHttp = createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonBody, body, headers, ipOf, secure, authLimit, uploadLimit, log, dataDir, keyStore, dataKey, desktop: !!resumeSecret }); // server/account.js; sec-auth: the data key, sign-up, sign-in, sign-out, new password
+  const accountHttp = createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonBody, body, headers, ipOf, secure, authLimit, uploadLimit, log, dataDir, keyStore, dataKey, desktop: !!resumeSecret, logDays }); // server/account.js; sec-auth: the data key, sign-up, sign-in, sign-out, new password
   const passkeys = createPasskeys({ db, M, hub, account: accountHttp, sendJson, error, jsonBody, ipOf, authLimit, httpsReq, rpId, hosts, loopback: isLoopbackBind(host), desktop: !!resumeSecret, extraOrigins });
   const recovery = createRecovery({ db, M, hub, account: accountHttp, sendJson, error, jsonBody, ipOf, authLimit, log });
   const appearanceHttp = createAppearanceHttp({ db, M, hub, filesDir, sendJson, error, body, headers, uploadLimit }); // server/appearance.js
@@ -367,6 +376,8 @@ export async function startServer({
       return sendJson(res, 200, { house: { ...h, members: count }, by });
     }
 
+    // privacy: what this Snug keeps and for how long, for the privacy page (no sign-in needed).
+    if (req.method === 'GET' && path === '/api/privacy') return sendJson(res, 200, privacy.about());
     if (await gh.open(req, res, path, url)) return undefined; // p2p: /api/gh/* (server/ghauth.js)
     if (await keyAuth.open(req, res, path, url)) return undefined; // v0.12: /api/id/* (server/keyauth.js)
     // Webhooks carry their own secret instead of a session (server/places.js).
@@ -459,6 +470,7 @@ export async function startServer({
     sweepFiles, // sec-authz: tests run the attachment sweep with their own clock
     sweepUploads: (now) => uploads.sweep(now), // tests: abandoned chunked uploads
     expiry, // 0.12: tests run the disappearing-messages sweep with their own clock
+    accountPrune: () => accountHttp.prune(), // privacy: tests run the sign-in history sweep now
     peer, // p2p: srv.peer.stats() for tests, srv.peer.wake() for desktop main
     vaultBusy: () => vault.busy?.() === true, // desktop main: no update restart during a data-file transfer
     voiceBusy: () => hub.voiceBusy(), // ... or while anyone is in a voice room or a call on this server
