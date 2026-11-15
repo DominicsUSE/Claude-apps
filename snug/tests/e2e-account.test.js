@@ -118,10 +118,12 @@ test('quick switcher: Ctrl+K finds places by fuzzy search, offers recent ones fi
   await a.locator('.main .bar-title:has-text("Glaze lab")').waitFor();
   await a.keyboard.press('Control+k');
   await a.locator('.quick input').fill('firing');
+  await a.locator('.quick .menu-item.act:has-text("Firing schedule")').waitFor();
   await a.keyboard.press('Enter');
   await a.locator('.main .bar-title:has-text("Firing schedule")').waitFor();
   await a.keyboard.press('Control+k');
   await a.locator('.quick input').fill('front desk');
+  await a.locator('.quick .menu-item.act:has-text("Front desk")').waitFor();
   await a.keyboard.press('Enter');
   await a.locator('.main .bar-title:has-text("Front desk")').waitFor();
   // Nothing typed: the places you were just in come first, newest first (not the one you're in).

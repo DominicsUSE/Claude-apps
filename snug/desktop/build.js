@@ -26,6 +26,7 @@ function copyApp() {
   // Windows wants a multi-size .ico so the 16-32px entries use the small-size drawing.
   fs.copyFileSync(path.join(ROOT, "icon.ico"), path.join(ROOT, "build", "icon.ico"));
   fs.copyFileSync(path.join(ROOT, "icon.png"), path.join(APP, "icon.png"));
+  fs.copyFileSync(path.join(ROOT, "installer.nsh"), path.join(ROOT, "build", "installer.nsh")); // v0.10 C: the uninstall prompt (NSIS)
 }
 
 (async () => {

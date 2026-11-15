@@ -1,7 +1,7 @@
 {
   "name": "snug-desktop",
   "productName": "Snug",
-  "version": "0.9.7",
+  "version": "0.10.0",
   "description": "A calm place for your people",
   "author": "Snug",
   "main": "main.js",
@@ -39,6 +39,10 @@
       "preload.js",
       "setup.html",
       "setup.js",
+      "vaultexport.js",
+      "updater.js",
+      "update.html",
+      "update-page.js",
       "snug/**/*",
       "package.json"
     ],
@@ -65,6 +69,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Snug",
+      "include": "build/installer.nsh",
       "artifactName": "Snug-Setup-${version}.exe"
     },
     "portable": {

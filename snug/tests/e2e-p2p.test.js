@@ -385,6 +385,7 @@ test('move notice: someone signs in as Alice on a third PC; "Stop it" stops the 
 
 test('key change: Bob loses his PC, moves after 72 h, re-adds Alice; Alice sees the security-code banner', async () => {
   const { alice } = pages;
+  pcs.B.vault.close(); // v0.10: a lost PC can't send its data file (otherwise the old PC hands Alice over and re-add says "already friends")
   const B2 = await pc('B2');
   const bob2 = await open('bob2', B2);
   await github(bob2, 1001);

@@ -9,8 +9,13 @@ import { Icon } from '../ui/icons.js';
 import { Avatar } from '../ui/kit.js';
 import { Confirm } from './modals.js';
 import { hideDm, pinDm, renameDm, iconDm, addToDm, leaveDm, kickFromDm, isGroupDm } from '../inbox.js';
+import { isPeerGroup, remoteOf } from './p2p.js'; // groups with friends on other PCs (server/peergroups.js)
 
 export const MAX_GROUP = 10;
+export const MAX_PEER_GROUP = 25; // a group between PCs (server/grouplog.js)
+// A conversation with friends on other PCs takes only friends on other PCs; any other takes only people here.
+const acrossPcs = (id) => isPeerGroup(id) || !!remoteOf(id);
+const maxFor = (id) => (acrossPcs(id) ? MAX_PEER_GROUP : MAX_GROUP);
 const firstName = (u) => person(u).name.split(' ')[0];
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 
@@ -122,15 +127,19 @@ export function AddPeople({ dm: id }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   if (!dm) return null;
-  const room = MAX_GROUP - dm.members.length;
+  const max = maxFor(id);
+  const room = max - dm.members.length;
   const blocks = new Set(S.safety?.blocks || []);
-  const people = Object.values(S.users).filter((u) => u.id !== S.me && !dm.members.includes(u.id) && !blocks.has(u.id) && u.handle !== 'gone')
+  const across = acrossPcs(id);
+  // Across PCs: friends on other PCs only (the server checks friendship again).
+  const fits = (u) => (across ? !!u.remote && S.friends?.[u.id]?.state === 'friends' : !u.remote);
+  const people = Object.values(S.users).filter((u) => u.id !== S.me && !dm.members.includes(u.id) && !blocks.has(u.id) && u.handle !== 'gone' && fits(u))
     .map((u) => ({ u, s: Math.max(fuzzy(q, u.name), fuzzy(q, u.handle)) }))
     .filter((x) => x.s >= 0).sort((a, b) => b.s - a.s || a.u.name.localeCompare(b.u.name)).map((x) => x.u).slice(0, 50);
   const toggle = (uid) => {
     setError('');
     if (picked.includes(uid)) setPicked(picked.filter((x) => x !== uid));
-    else if (picked.length >= room) setError(`A group can have up to ${MAX_GROUP} people.`);
+    else if (picked.length >= room) setError(`A group can have up to ${max} people.`);
     else setPicked([...picked, uid]);
   };
   const add = () => {
@@ -140,7 +149,8 @@ export function AddPeople({ dm: id }) {
   const group = isGroupDm(id);
   return html`
     <h2>Add people</h2>
-    <p class="modal-lead">${group ? `Up to ${MAX_GROUP} people in a group. They can read what was said before.` : 'This starts a new group. Your conversation with the two of you stays as it is.'}</p>
+    <p class="modal-lead">${across && group ? `Up to ${max} people, friends on other PCs only. They see messages from now on, not what was said before.`
+      : group ? `Up to ${max} people in a group. They can read what was said before.` : 'This starts a new group. Your conversation with the two of you stays as it is.'}</p>
     <input class="field" data-autofocus placeholder="Find someone" aria-label="Find someone" value=${q} onInput=${(e) => setQ(e.target.value)}
       onKeyDown=${(e) => { if (e.key === 'Enter' && people[0] && q) { e.preventDefault(); toggle(people[0].id); setQ(''); } }} />
     <div class="picked">
@@ -167,7 +177,7 @@ export function MembersPop({ dm: id }) {
   const owner = dm.owner;
   return html`<div class="dm-members">
     <div class="dm-members-head"><b>${dm.members.length} ${dm.members.length === 1 ? 'person' : 'people'}</b>
-      ${dm.members.length < MAX_GROUP && html`<button class="btn sm" data-autofocus onClick=${() => { closePop(); openModal(AddPeople, { dm: id }); }}><${Icon} name="user-plus" size=${16} />Add</button>`}
+      ${dm.members.length < maxFor(id) && html`<button class="btn sm" data-autofocus onClick=${() => { closePop(); openModal(AddPeople, { dm: id }); }}><${Icon} name="user-plus" size=${16} />Add</button>`}
     </div>
     <ul class="dm-members-list" aria-label="People in this conversation">
       ${dm.members.map((uid) => {

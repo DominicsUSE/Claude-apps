@@ -100,6 +100,12 @@ export function createRegClient({ url, identity, fetch: fetchFn = globalThis.fet
         return await signed('POST', '/v1/turn', () => { const t = ts(); return { uid: u, peer: peerUid, ts: t, sig: sign('turn', u, peerUid, t) }; });
       } catch (e) { if (e.status === 404) return null; throw e; }
     },
+    // v0.10 endpoints: the payload travels as one JSON string `p`, signed whole (registry hub.js signedP()).
+    async signedCall(path, op, payload = {}) {
+      const u = uid();
+      const p = JSON.stringify(payload);
+      return signed('POST', path, () => { const t = ts(); return { uid: u, ts: t, p, sig: sign(op, u, t, p) }; });
+    },
     wsUrl() { return `${base.replace(/^http/, 'ws')}/v1/ws?uid=${uid()}`; },
   };
   return R;

@@ -8,6 +8,10 @@ import {
 import { api, startTransport } from './server.js';
 import { on as onServer } from './server.js'; // p2p: the link host loads on socket open
 import { P2pNotice } from './views/p2p.js'; // p2p: moving here, moved away, a move waiting for an answer
+// v0.10 C: data file notice
+import { VaultNotice } from './views/vault-settings.js'; // a data file on its way between PCs
+// v0.10 A: admin button, notices
+import { AdminButton, NoticeBar } from './views/admin.js'; // the Admin pill, announcements, suspended / too old
 import { voiceStats, toggleMute, toggleDeaf, toggleCamera, leaveVoice } from './voice.js';
 import { incoming, acceptCall } from './calls.js';
 import { actionFor, actionById } from './lib/keys.js'; // changeable shortcuts (Settings > Keyboard)
@@ -40,7 +44,6 @@ import { openMessageLink } from './views/chat.js'; // message links: /m/<convers
 import './inbox.js'; // server unread counts, groups leaving, timed mutes (js/inbox.js)
 import './landmarks.js'; // Skip to messages, F6 between regions
 import { desktopTest } from './desktop.js'; // the desktop app's badge, global voice keys, idle, snug:// links
-import { UpdateStrip } from './views/desktop-settings.js'; // a newer Snug is out
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 
@@ -219,7 +222,6 @@ function Overlays() {
     <${Lightbox} />
     <${IncomingCall} />
     <${MiniCall} />
-    <${UpdateStrip} />
     <${Toasts} />`;
 }
 
@@ -275,7 +277,7 @@ function App() {
   syncSpace();
   const needs = totalNeeds(S);
   document.title = needs ? `(${needs}) Snug` : 'Snug';
-  return html`${S.ui.phone ? html`<${Phone} />` : html`<${Desktop} />`}<${Overlays} /><${P2pNotice} />`; // p2p: account notice
+  return html`${S.ui.phone ? html`<${Phone} />` : html`<${Desktop} />`}<${Overlays} /><${P2pNotice} /><${NoticeBar} /><${AdminButton} /><${VaultNotice} />`; // p2p: account notice; v0.10 A: notices, Admin pill; v0.10 C: data file on its way
 }
 
 // Keyboard

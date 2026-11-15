@@ -21,11 +21,18 @@ addIcons({
 // ---------- State from the server ----------
 // The snapshot carries p2p, peerKeys, peerWaiting and peerHeld (server/peer.js); these keep them current.
 const drop = (o, conv, id) => { if (o?.[conv]) { o[conv] = o[conv].filter((x) => x !== id); if (!o[conv].length) delete o[conv]; } };
-on('msg.state', ({ conv, id, state }) => {
+on('msg.state', ({ conv, id, state, waiting, failed }) => {
   S.peerWaiting ||= {}; S.peerHeld ||= {}; S.peerFailed ||= {};
   for (const o of [S.peerWaiting, S.peerHeld, S.peerFailed]) drop(o, conv, id);
   const into = { waiting: S.peerWaiting, held: S.peerHeld, failed: S.peerFailed }[state];
   if (into) (into[conv] ||= []).push(id);
+  // Groups across PCs (0.10): how many people a message still waits for, or didn't reach.
+  if (isPeerGroup(conv)) {
+    S.peerWaitingN ||= {}; S.peerFailedN ||= {};
+    for (const o of [S.peerWaitingN, S.peerFailedN]) { if (o[conv]) { delete o[conv][id]; if (!Object.keys(o[conv]).length) delete o[conv]; } }
+    if (state === 'waiting' && waiting > 0) (S.peerWaitingN[conv] ||= {})[id] = waiting;
+    if (failed > 0 || (state === 'failed' && failed === undefined)) (S.peerFailedN[conv] ||= {})[id] = failed || 1;
+  }
 });
 on('peer.key', ({ user, fingerprint, at, quiet }) => {
   S.peerKeys ||= {};
@@ -36,13 +43,15 @@ on('p2p', (d) => {
   S.p2p = { ...(S.p2p || {}), ...d };
   if (d.state === 'ok' && was === 'moving') toast('Your Snug account is on this PC now.');
 });
-signOutHooks.push(() => { for (const k of ['p2p', 'peerKeys', 'peerWaiting', 'peerHeld', 'peerFailed']) delete S[k]; });
+signOutHooks.push(() => { for (const k of ['p2p', 'peerKeys', 'peerWaiting', 'peerHeld', 'peerFailed', 'peerWaitingN', 'peerFailedN']) delete S[k]; });
 
 // ---------- Small helpers other views use ----------
 export const p2pOwner = () => !!(S.p2p?.enabled && S.p2p.owner);
 export const isRemote = (id) => !!S.users[id]?.remote;
 // A friend on another PC is named by their Snug username (S27); a local person by their handle.
 export const atName = (u) => (u?.remote ? (u.username || u.handle) : u?.handle) || '';
+// A group with friends on other PCs (server/peergroups.js): its id says so.
+export const isPeerGroup = (conv) => typeof conv === 'string' && /^dg_[a-z2-7]{26}$/.test(conv);
 export const remoteOf = (conv) => {
   const others = (S.dms[conv]?.members || []).filter((u) => u !== S.me);
   return others.length === 1 && isRemote(others[0]) ? others[0] : null;
@@ -59,6 +68,7 @@ export const LocalNote = ({ text = 'Houses live on this PC. People join over you
 // ---------- A message of mine that hasn't reached them yet ----------
 export function PeerState({ conv, m }) {
   if (m.author !== S.me || m.state) return null;
+  if (isPeerGroup(conv)) return html`<${GroupState} conv=${conv} m=${m} />`;
   const st = S.peerHeld?.[conv]?.includes(m.id) ? 'held' : S.peerWaiting?.[conv]?.includes(m.id) ? 'waiting' : S.peerFailed?.[conv]?.includes(m.id) ? 'failed' : null;
   if (!st) return null;
   const who = remoteOf(conv);
@@ -70,6 +80,24 @@ export function PeerState({ conv, m }) {
   }
   if (st === 'held') return html`<div class="msg-state msg-wait held" data-peer-state="held"><${Icon} name="lock" size=${14} />Held until you confirm ${name}’s new security code</div>`;
   return html`<div class="msg-state msg-wait failed" data-peer-state="failed"><${Icon} name="alert" size=${14} />Not delivered</div>`;
+}
+
+// In a group across PCs: "Waiting for N people" on any of mine, "Sent to everyone" on my latest only.
+const people = (n) => `${n} ${n === 1 ? 'person' : 'people'}`;
+function GroupState({ conv, m }) {
+  const n = S.peerWaitingN?.[conv]?.[m.id] || 0;
+  const f = S.peerFailedN?.[conv]?.[m.id] || 0;
+  if (n) return html`<div class="msg-state msg-wait" data-peer-state="waiting" data-waiting=${n}><${Icon} name="clock" size=${14} />Waiting for ${people(n)}</div>`;
+  if (f) return html`<div class="msg-state msg-wait failed" data-peer-state="failed"><${Icon} name="alert" size=${14} />Not delivered to ${people(f)}</div>`;
+  const mine = (S.msgs[conv] || []).filter((x) => x.author === S.me && !x.call && !x.dmLine && !x.sys);
+  if (mine[mine.length - 1]?.id !== m.id) return null;
+  return html`<div class="msg-state msg-sent-all" data-peer-state="delivered"><${Icon} name="check" size=${14} />Sent to everyone</div>`;
+}
+
+// The header line of a group across PCs.
+export function GroupLine({ conv }) {
+  if (!isPeerGroup(conv)) return null;
+  return html`<span class="p2p-direct p2p-group" data-tip="No host: every member’s PC keeps the group. Messages are signed by who wrote them and encrypted between PCs. People in your groups see when you’re online."><${Icon} name="lock" size=${12} />Group between your PCs</span>`;
 }
 
 // ---------- In a conversation with a friend on another PC ----------

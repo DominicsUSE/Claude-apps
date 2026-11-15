@@ -3,7 +3,11 @@
 // Reconnects with backoff (2 s up to 5 min, with jitter), reset once ready;
 // a "ping" every ready.ping seconds is the only timer while idle.
 import { EventEmitter } from 'node:events';
+import { readFileSync } from 'node:fs';
 import WebSocket from 'ws';
+
+// v0.10: the app version goes in the auth frame; the registry refuses apps below its minimum (close 4011).
+export const APP_VERSION = (() => { try { return JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version; } catch { return '0.0.0'; } })();
 
 const MIN_BACKOFF = 2000, MAX_BACKOFF = 5 * 60_000;
 
@@ -15,6 +19,7 @@ export function createSignal({ reg, identity, log = () => {} }) {
   let retry = null;
   let pingT = null, pongT = null;
   let ready = null;      // the last ready frame, while connected
+  let lastBanned = null, lastUpdate = null; // v0.10: the frame sent just before a 4010 / 4011 close
 
   const clearTimers = () => { clearTimeout(retry); clearInterval(pingT); clearTimeout(pongT); retry = pingT = pongT = null; };
   function schedule(ms) {
@@ -40,14 +45,17 @@ export function createSignal({ reg, identity, log = () => {} }) {
       if (s.length > 80 * 1024) return;
       let m;
       try { m = JSON.parse(s); } catch { return; }
-      if (!m || typeof m.t !== 'string' || ['error', 'newListener', 'removeListener'].includes(m.t)) return;
+      if (!m || typeof m.t !== 'string' || ['error', 'newListener', 'removeListener', 'outdated'].includes(m.t)) return;
       if (m.t === 'challenge') {
         if (typeof m.n !== 'string' || m.n.length !== 22) return;
         reg.sawNow?.(m.now); // F9: the registry's clock
         const uid = identity.self()?.uid;
-        sock.send(JSON.stringify({ t: 'auth', uid, sig: identity.sign(`snug-reg-v1\nsignal\n${uid}\n${m.n}`) }));
+        sock.send(JSON.stringify({ t: 'auth', uid, sig: identity.sign(`snug-reg-v1\nsignal\n${uid}\n${m.n}`), v: APP_VERSION }));
         return;
       }
+      // v0.10: kept until the close that follows (4010 banned, 4011 update), emitted then as one event.
+      if (m.t === 'banned') { lastBanned = m; return; }
+      if (m.t === 'update') { lastUpdate = m; return; }
       if (m.t === 'ready') {
         attempt = 0;
         reg.sawNow?.(m.now);
@@ -77,6 +85,15 @@ export function createSignal({ reg, identity, log = () => {} }) {
       if (code === 4003) { stopped = true; ev.emit('revoked'); return; }
       if (code === 4006) { stopped = true; ev.emit('stopped'); return; }
       if (code === 4004) { ev.emit('rebound'); attempt = 0; schedule(0); return; }
+      // v0.10: suspended (until a time, or for good) or too old for the network: stop; notices.js shows why.
+      if (code === 4010 || code === 4011) {
+        stopped = true;
+        ev.emit('offline', code);
+        if (code === 4010) ev.emit('banned', { until: Number.isSafeInteger(lastBanned?.until) ? lastBanned.until : null, reason: typeof lastBanned?.reason === 'string' ? lastBanned.reason.slice(0, 200) : '' });
+        else ev.emit('outdated', { min: typeof lastUpdate?.min === 'string' ? lastUpdate.min.slice(0, 32) : null });
+        lastBanned = lastUpdate = null;
+        return;
+      }
       ev.emit('offline', code);
       schedule();
     });

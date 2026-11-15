@@ -20,7 +20,10 @@ import { createAppearanceHttp } from './appearance.js'; // profile pictures: POS
 import { createCommunityHttp } from './community.js'; // house pictures, event covers, invitation previews with custom links
 import { HUES } from '../js/lib/util.js';
 import { createPeer } from './peer.js'; // p2p: friends, DMs, profiles and calls with people on other PCs
+import { createGroups } from './peergroups.js'; // v0.10 B: groups across PCs
 import { createGhAuth } from './ghauth.js'; // p2p: Sign in with GitHub and the Snug username
+import { createNotices } from './notices.js'; // v0.10 A: registry notices, bans and admin
+import { createVault } from './vault.js'; // v0.10 C: the account's data file
 import {
   hashPassword, checkPassword, burnPasswordCheck, createSession, sessionUser, endSession, endAllSessions,
   readCookie, sessionCookie, COOKIE, limiter, safeDecode,
@@ -120,6 +123,8 @@ export async function startServer({
     db, M, hub, ops: hub.ops, filesDir, log,
     opts: { dataDir, registryUrl, githubClientId, githubBase, keyStore, fetch: fetchFn, resumeSecret, peerIdleMs, peerDialMs, peerCacheMB, peerDirect, peerMaxLinks },
   });
+  // v0.10 B: groups across PCs (server/peergroups.js)
+  createGroups({ db, M, hub, ops: hub.ops, peer, log });
 
   // Deleted messages can be restored for ten minutes; after that their content is gone for good.
   const sweep = setInterval(() => {
@@ -176,6 +181,11 @@ export async function startServer({
   const communityHttp = createCommunityHttp({ db, M, hub, filesDir, sendJson, error, body, headers, uploadLimit, userOf: (req) => userOf(req) }); // server/community.js
   // p2p: GitHub sign-in, the username picker and the owner's account rules (server/ghauth.js).
   const gh = createGhAuth({ db, M, hub, peer, opts: { registryUrl, githubClientId, githubBase, fetch: fetchFn, resumeSecret, trustProxy }, secure, log, agentOf: accountHttp.agentOf, userOf });
+  // v0.10 A: registry notices, bans and admin (server/notices.js)
+  const notices = createNotices({ db, M, hub, peer, log });
+
+  // v0.10 C: the data file (server/vault.js). Last, so its op wrapper sees every other op.
+  const vault = createVault({ db, M, hub, peer, dataDir, filesDir, keyStore, log, http: { sendJson, error, body, headers } });
 
   async function handle(req, res) {
     let url, path;
@@ -284,6 +294,8 @@ export async function startServer({
     if (await accountHttp.authed(req, res, path, url, user)) return undefined; // export, deactivate, delete, banners
     if (await appearanceHttp(req, res, path, url, user)) return undefined; // profile pictures (server/appearance.js)
     if (await communityHttp.authed(req, res, path, url, user)) return undefined; // house pictures and event covers (server/community.js)
+    // v0.10 C: /api/vault/*
+    if (await vault.http(req, res, path, url, user)) return undefined; // the data file: download and import (server/vault.js)
 
     if (req.method === 'GET' && path === '/api/me') {
       const row = M.userRow(user);
@@ -375,9 +387,12 @@ export async function startServer({
     port: address.port, db, M, hub, server,
     peer, // p2p: srv.peer.stats() for tests, srv.peer.wake() for desktop main
     push, // push notifications: tests read push.stats and push.publicKey
+    // v0.10 A/C: srv.notices, srv.vault
+    notices, // v0.10 A: announcements, bans, admin rights (server/notices.js)
+    vault, // v0.10 C: the data file (server/vault.js)
     // For tests: forget every rate limit, the socket ones and the sign-in ones.
     resetLimits: () => { hub.resetLimits(); authLimit.reset(); uploadLimit.reset(); mediaHttp.reset(); accountHttp.reset(); },
-    close: () => new Promise((r) => { clearInterval(sweep); gh.close(); peer.close(); hub.close(); server.close(() => { db.close(); r(); }); server.closeAllConnections?.(); }),
+    close: () => new Promise((r) => { vault.flush(); vault.close(); clearInterval(sweep); gh.close(); notices.close(); peer.close(); hub.close(); server.close(() => { db.close(); r(); }); server.closeAllConnections?.(); }),
   };
 }
 

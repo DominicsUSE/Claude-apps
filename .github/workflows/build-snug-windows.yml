@@ -1,8 +1,8 @@
 # Builds the Snug Windows app on a real Windows machine: an installer and a portable exe.
 # It runs Snug's own tests on Windows, builds, uploads the files, then drives the packaged
 # app (first run, account, message, reopen) before publishing a release. Every build attaches both files to the run
-# (Actions > Snug Windows app > Artifacts). On the default branch it also publishes them
-# as a release, so there is a stable download link.
+# (Actions > Snug Windows app > Artifacts). On pushes to the default branch or claude/stoic-newton-6zup7j
+# it also publishes them, with their checksums, as the release the app updates itself from.
 name: Snug Windows app
 
 on:
@@ -60,16 +60,28 @@ jobs:
           SNUG_BIN: dist/win-unpacked/Snug.exe
         run: node --test --test-timeout=120000 --test-force-exit test.js
 
-      - name: Publish a release (default branch only)
-        if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-        shell: bash
+  # Publishes snug-v<version> with both files and SHA256SUMS-windows.txt (desktop/release.sh): only files the
+  # release doesn't have yet, then marks it latest. The app's mandatory updater reads this release.
+  release:
+    needs: windows
+    if: github.event_name == 'push' && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.ref == 'refs/heads/claude/stoic-newton-6zup7j')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: snug-release-windows
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Snug-Windows-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           v=$(node -p "require('./snug/desktop/package.json').version")
-          tag="snug-v$v"
-          if ! gh release view "$tag" >/dev/null 2>&1; then
-            gh release create "$tag" --target "$GITHUB_SHA" --title "Snug $v for Windows" --notes \
-              "Download **Snug-Setup-$v.exe** to install Snug (Start menu and desktop shortcuts), or **Snug-$v-portable.exe** to run it without installing. Windows may say it protected your PC because the app is not signed: choose **More info**, then **Run anyway**."
-          fi
-          gh release upload "$tag" snug/desktop/dist/Snug-Setup-*.exe snug/desktop/dist/Snug-*-portable.exe --clobber
+          bash snug/desktop/release.sh windows "dist/Snug-Setup-$v.exe" "dist/Snug-$v-portable.exe"

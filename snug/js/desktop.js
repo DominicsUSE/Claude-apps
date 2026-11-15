@@ -75,15 +75,6 @@ export function routeDeepLink(raw) {
 let pending = null;
 app()?.onDeepLink?.((raw) => routeDeepLink(raw));
 
-// ---------- A newer Snug ----------
-export const update = { info: null, dismissed: false };
-app()?.onUpdate?.((info) => {
-  if (!info || typeof info.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(info.version)) return;
-  update.info = { version: info.version };
-  emit();
-});
-export function dismissUpdate() { update.dismissed = true; emit(); }
-
 subscribe(() => {
   syncBadge();
   syncVoice();
@@ -91,4 +82,4 @@ subscribe(() => {
 });
 
 // For the end-to-end checks (js/app.js puts it on window.snug.desktop).
-export const desktopTest = { badgeCount, routeDeepLink, update };
+export const desktopTest = { badgeCount, routeDeepLink }; // updates are mandatory now: desktop/update.html, not a strip here

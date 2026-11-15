@@ -90,14 +90,5 @@
 .handle-field .field { width: 100%; }
 .handle-acts { display: flex; justify-content: flex-end; gap: var(--s-2); }
 
-/* ---------- A newer Snug (desktop app) ---------- */
-.update-strip {
-  position: fixed; left: 50%; top: var(--s-2); transform: translateX(-50%); z-index: 900;
-  display: flex; align-items: center; gap: var(--s-2); max-width: calc(100vw - 32px);
-  padding: var(--s-1) var(--s-1) var(--s-1) var(--s-3); min-height: 40px;
-  background: var(--bg-2); color: var(--text-1); border: 1px solid var(--cyan); border-radius: var(--r-md); box-shadow: var(--shadow-md);
-}
-.update-strip > svg:first-child { color: var(--cyan); flex: none; }
-
 /* ---------- Invite: the snug:// link for the desktop app ---------- */
 .invite-app { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); margin-top: var(--s-2); }

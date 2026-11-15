@@ -87,6 +87,12 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
   let registry = 'offline';
   let started = false;
   const p2pEvent = (extra = {}) => toOwner('p2p', { state: self?.state || null, registry, ...extra });
+  // v0.10 B: groups across PCs (server/peergroups.js) fill these in; the defaults keep 0.9 behaviour.
+  const G = {
+    contact: () => false,          // uid -> true when they share a group across PCs with me
+    watch: () => [],               // extra uids to watch (co-members)
+    acked: () => {}, expired: () => {}, up: () => {}, online: () => {},
+  };
 
   // ---------- Shadows (section 4) ----------
   function shadowHandle(uid, username) {
@@ -123,6 +129,8 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
   }
   const friendState = (shadow) => M.friendRow(owner(), shadow)?.state || null;
   const isFriend = (shadow) => friendState(shadow) === 'friends';
+  // A friend, or someone I share a group across PCs with (design 0.10 4.4).
+  const isContact = (shadow) => isFriend(shadow) || !!G.contact(uidOf(shadow) || String(shadow).slice(2));
   const blockedEither = (shadow) => !!db.get('SELECT 1 FROM blocks WHERE (user = ? AND other = ?) OR (user = ? AND other = ?)', owner(), shadow, shadow, owner());
   // The one-to-one conversation with a friend on another PC: both PCs compute the same id (section 7.2).
   function ensureDm(uid) {
@@ -230,6 +238,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     onAcked: (uid, rows) => {
       const dm = dmIdFor(myUid(), uid);
       for (const r of rows) if (r.kind === 'dm.msg' && r.ref) toOwner('msg.state', { conv: dm, id: r.ref, state: 'delivered' });
+      G.acked(uid, rows);
     },
     onUp: (uid, hs) => {
       retryN.delete(uid);
@@ -239,6 +248,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       if (p && newer([hs.kver, hs.pv], [p.profile_kver, p.profile_ver]) && hs.pv > 0) links.sendEph(uid, 'profile.want', { have: [p.profile_kver, p.profile_ver] });
       syncMedia(uid);
       fetchPending(uid);
+      G.up(uid);
     },
     onDown: (uid, why, wasUp) => { if (wasUp) blobs.peerDown(uid); if (why !== 'stopped') retrySoon(uid); },
     opts: { idleMs: opts.peerIdleMs, dialMs: opts.peerDialMs, maxLinks: opts.peerMaxLinks, direct: opts.peerDirect, hideIp: () => !!self?.hideIp },
@@ -267,10 +277,10 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     sendEph: (uid, t, d) => links.sendEph(uid, t, d),
     canServe: (uid, row) => {
       const shadow = shadowId(uid);
-      if (!isFriend(shadow)) return false;
+      if (!isContact(shadow)) return false;
       const me = M.userRow(owner());
-      if (row.conv === `avatar:${owner()}`) return me?.avatar === row.id;
-      if (row.conv === `banner:${owner()}`) return me?.banner === row.id;
+      if (row.conv === `avatar:${owner()}`) return isFriend(shadow) && me?.avatar === row.id;
+      if (row.conv === `banner:${owner()}`) return isFriend(shadow) && me?.banner === row.id;
       return !json(row.meta, {}).remote && M.canRead(shadow, row.conv);
     },
   });
@@ -547,6 +557,11 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       WHERE f.user = ? AND f.state IN ('friends', 'outgoing') AND u.remote = 1
       AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.user = f.user AND b.other = f.other) OR (b.user = f.other AND b.other = f.user))
       LIMIT 500`, owner()).map((r) => uidOf(r.user)).filter(Boolean);
+    // Co-members of groups across PCs are watched too (presence is shared with them).
+    for (const uid of G.watch()) {
+      if (uids.length >= 500) break;
+      if (isUid(uid) && uid !== myUid() && !uids.includes(uid) && remote.has(shadowId(uid)) && !blockedEither(shadowId(uid))) uids.push(uid);
+    }
     signal.send({ t: 'watch', uids });
     // Anyone no longer watched is no longer online to me.
     for (const uid of [...online]) if (!uids.includes(uid)) setOnline(uid, false);
@@ -563,6 +578,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     const shadow = shadowId(uid);
     if (remote.has(shadow)) hub.presenceChanged(shadow);
     if (on && (outbox.after(shadow, 0, 1).length)) links.want(uid);
+    G.online(uid, on);
   }
 
   // ---------- Inbound frames (section 5.4: one explicit table, S12) ----------
@@ -574,20 +590,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       if (!isFriend(shadow)) fail('Not friends.');
       if (typeof d.id !== 'string' || !MSG_ID.test(d.id)) fail('Bad message id.');
       const dm = ensureDm(uid);
-      const files = [];
-      for (const f of (Array.isArray(d.files) ? d.files : []).slice(0, 6)) {
-        if (!f || typeof f.id !== 'string' || !FILE_ID.test(f.id) || !Number.isSafeInteger(f.size) || f.size < 0 || f.size > MAX_ATTACH || typeof f.hash !== 'string' || !HASH.test(f.hash)) fail('Bad attachment.');
-        const id = remoteFileId(uid, f.id);
-        const was = db.get('SELECT owner, conv FROM files WHERE id = ?', id);
-        if (was && (was.owner !== shadow || was.conv !== dm)) fail('That attachment id is taken.');
-        if (!was) {
-          const name = (typeof f.name === 'string' ? f.name : 'file').replace(/[\u0000-\u001f\u007f/\\]/g, '').trim().slice(0, 120) || 'file';
-          const type = typeof f.type === 'string' && SHOWN_TYPES.has(f.type) ? f.type : 'application/octet-stream';
-          db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            id, shadow, dm, name, type, f.size, Date.now(), JSON.stringify({ hash: f.hash, size: f.size, remote: 1, have: 0, rid: f.id, used: Date.now(), decl: type }));
-        }
-        files.push({ id, ...(Number.isInteger(f.w) && Number.isInteger(f.h) ? { w: f.w, h: f.h } : {}) });
-      }
+      const files = acceptFiles(uid, dm, d.files);
       ops['msg.send']({ ...asShadow(shadow), ts: Math.min(ts, Date.now() + 60_000) }, {
         conv: dm, id: d.id, text: typeof d.text === 'string' ? d.text : '', files, ...(typeof d.replyTo === 'string' ? { replyTo: d.replyTo } : {}),
       });
@@ -599,6 +602,25 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     'dm.react': (uid, d) => ops.react(asShadow(shadowId(uid)), { conv: dmIdFor(myUid(), uid), id: d.id, emoji: d.emoji, on: d.on === true }),
     profile: (uid, d) => applyProfile(uid, d),
   };
+  // Attachment metadata from a friend's PC (bytes come later from their PC): local file rows owned by their shadow.
+  function acceptFiles(uid, conv, list) {
+    const shadow = shadowId(uid);
+    const files = [];
+    for (const f of (Array.isArray(list) ? list : []).slice(0, 6)) {
+      if (!f || typeof f.id !== 'string' || !FILE_ID.test(f.id) || !Number.isSafeInteger(f.size) || f.size < 0 || f.size > MAX_ATTACH || typeof f.hash !== 'string' || !HASH.test(f.hash)) fail('Bad attachment.');
+      const id = remoteFileId(uid, f.id);
+      const was = db.get('SELECT owner, conv FROM files WHERE id = ?', id);
+      if (was && (was.owner !== shadow || was.conv !== conv)) fail('That attachment id is taken.');
+      if (!was) {
+        const name = (typeof f.name === 'string' ? f.name : 'file').replace(/[\u0000-\u001f\u007f/\\]/g, '').trim().slice(0, 120) || 'file';
+        const type = typeof f.type === 'string' && SHOWN_TYPES.has(f.type) ? f.type : 'application/octet-stream';
+        db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          id, shadow, conv, name, type, f.size, Date.now(), JSON.stringify({ hash: f.hash, size: f.size, remote: 1, have: 0, rid: f.id, used: Date.now(), decl: type }));
+      }
+      files.push({ id, ...(Number.isInteger(f.w) && Number.isInteger(f.h) ? { w: f.w, h: f.h } : {}) });
+    }
+    return files;
+  }
   function ingestDurable(uid, Pf) {
     const fn = Object.hasOwn(DURABLE, Pf.t) ? DURABLE[Pf.t] : null;
     if (!fn) fail('Unknown frame.');
@@ -863,7 +885,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     const others = [...new Set(Array.isArray(d.users) ? d.users : [])].filter((u) => u !== c.user);
     if (c.peer || !others.some(isRemote)) return base(c, d);
     if (!mine(c)) fail('You can only message friends and people you share a house with.');
-    if (others.length > 1) fail('Group chats with friends on other PCs aren’t available yet.');
+    if (others.length > 1) fail(others.every(isRemote) ? 'Group chats with friends on other PCs aren’t available yet.' : 'A group can have friends on other PCs or people on this PC, not both.');
     const shadow = others[0];
     if (!isFriend(shadow)) fail('You can only message friends on other PCs.');
     if (blockedEither(shadow)) fail(`You can’t message ${M.userRow(shadow).name}.`);
@@ -1068,7 +1090,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     if (typeof obj.id !== 'string' || sigSeen.has(obj.id) || !Number.isSafeInteger(obj.ts) || Math.abs(obj.ts - reg.now()) > 5 * 60_000) return;
     sigSeen.set(obj.id, 1);
     if (sigSeen.size > 2000) sigSeen.delete(sigSeen.keys().next().value);
-    if (isFriend(shadowId(m.from))) links.onSig(m.from, obj);
+    if (isContact(shadowId(m.from))) links.onSig(m.from, obj);
   });
   signal.on('knock', (m) => { onKnock(m).catch((e) => log('peer', 'knock', e.message)); });
   signal.on('ok', (m) => {
@@ -1190,14 +1212,24 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       const t = Date.now();
       db.run('DELETE FROM peer_seen WHERE exp < ?', t);
       if (!myUid()) return;
-      for (const r of outbox.expire(t)) {
+      const gone = outbox.expire(t);
+      for (const r of gone) {
         if (r.kind === 'dm.msg' && r.ref) { const p = db.get('SELECT uid FROM peers WHERE user = ?', r.peer); if (p) toOwner('msg.state', { conv: dmIdFor(myUid(), p.uid), id: r.ref, state: 'failed' }); }
       }
+      G.expired(gone);
       db.run('DELETE FROM peer_knocks WHERE created < ?', t - 30 * DAY);
     },
     stats: () => ({ ...stats, links: links.count(), linksOpened: stats.links, outbox: db.get('SELECT COUNT(*) n FROM peer_outbox').n, held: db.get(`SELECT COUNT(*) n FROM peer_outbox WHERE kind LIKE 'held:%'`).n }),
     // For tests and Track C: the internals that are safe to reach.
     _links: links, _signal: signal, _outbox: outbox, _ensureShadow: ensureShadow, _pushProfile: pushProfile,
+    // Who is watched changed (Track C's import, groups across PCs).
+    friendsChanged: () => watchSoon(),
+    // v0.10 B: what server/peergroups.js needs from here.
+    _g: {
+      hooks: G, DURABLE, EPHEMERAL, owner, myUid, active, isRemote, uidOf, peerOf, isFriend, isContact, blockedEither,
+      ensureShadow, shadowFor, verifyFrom, acceptFiles, fetchPending, later, toOwner, asShadow, outbox, links, online,
+      hashOf: (id) => blobs.hashOf(id), now: () => reg.now(), watchSoon, kver: () => Number(self?.kver) || 1,
+    },
   });
 
   // Signed in on this PC already: connect at boot.

@@ -10,6 +10,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { pathToFileURL } = require("url");
+const exporting = require("./vaultexport.js").maybeRun(app); // v0.10 C: `--export-vault` from the uninstaller (desktop/vaultexport.js)
 
 const PORT = 47821;
 const SETUP = pathToFileURL(path.join(__dirname, "setup.html")).toString();
@@ -113,7 +114,7 @@ async function open(error) {
   origin = null;
   config = error ? null : readConfig();
   if (!config) {
-    await win.loadURL(error ? `${SETUP}?error=${encodeURIComponent(error)}` : SETUP);
+    await win.loadURL(gated(error ? `${SETUP}?error=${encodeURIComponent(error)}` : SETUP));
     buildMenu();
     return;
   }
@@ -124,7 +125,7 @@ async function open(error) {
   }
   buildMenu();
   try {
-    await win.loadURL(origin);
+    await win.loadURL(gated(origin)); // a required update shows its page instead (mandatory updates, below)
   } catch {
     if (config.mode === "join") return open(`Couldn’t reach ${config.url}. Check the address and your connection.`);
   }
@@ -526,7 +527,7 @@ ipcMain.handle("config:save", async (e, cfg) => {
 });
 
 // One window and one database: opening Snug again brings the running one to the front.
-if (!app.requestSingleInstanceLock()) app.quit();
+if (exporting) { /* --export-vault: desktop/vaultexport.js does the work and exits */ } else if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on("second-instance", (_e, argv) => {
     if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
@@ -549,11 +550,11 @@ else {
   });
 }
 
-// ---------- Desktop shell: settings, window place, badge, global voice keys, idle, snug:// links, updates ----------
+// ---------- Desktop shell: settings, window place, badge, global voice keys, idle, snug:// links, mandatory updates ----------
 // Settings live in desktop.json next to keepRunning. Everything the Snug page
 // sends is checked here again; only the Snug page (fromSnug) may ask.
 const { screen, powerMonitor } = require("electron");
-const SHELL_DEFAULTS = { openAtLogin: false, startMinimized: false, minimizeToTray: false, hardwareAcceleration: true, updateCheck: true };
+const SHELL_DEFAULTS = { openAtLogin: false, startMinimized: false, minimizeToTray: false, hardwareAcceleration: true }; // an old updateCheck is ignored: updates are mandatory
 const HEX = /^#[0-9a-fA-F]{6}$/;
 function rawConfig() { try { return JSON.parse(fs.readFileSync(configPath(), "utf8")) || {}; } catch { return {}; } }
 function shellPrefs() {
@@ -745,7 +746,7 @@ ipcMain.handle("voicekeys:set", (e, keys) => {
 });
 ipcMain.handle("voicekeys:active", (e, on) => {
   if (!fromSnug(e.senderFrame.url)) return null;
-  if (on !== true) { releaseVoiceKeys(); voiceFrom = null; return {}; }
+  if (on !== true) { releaseVoiceKeys(); voiceFrom = null; if (upd.state === "required") showUpdatePage(); return {}; }
   e.sender.once("destroyed", () => { releaseVoiceKeys(); voiceFrom = null; });
   return registerVoiceKeys(e.sender);
 });
@@ -810,48 +811,100 @@ ipcMain.on("deeplink:ready", (e) => {
 });
 app.on("open-url", (e, url) => { e.preventDefault(); deepLinkFrom([url]); if (win) showWindow(); });
 
-// ---------- A newer Snug ----------
-// Once a day at most: the latest release from the project's GitHub page, at a
-// fixed address (an environment variable may point elsewhere, for tests only),
-// 10 seconds and 1 MB at most. Nothing is downloaded; the page shows a strip
-// and opens the release page in the browser. Off in Settings, or with SNUG_UPDATE_CHECK=0.
-const UPDATE_URL = process.env.SNUG_UPDATE_URL || "https://api.github.com/repos/DominicsUSE/Claude-apps/releases/latest";
-const RELEASES = "https://github.com/DominicsUSE/Claude-apps/releases";
-let updateInfo = null;
-const semver = (s) => { const m = /(\d+)\.(\d+)\.(\d+)/.exec(String(s || "")); return m ? m.slice(1, 4).map(Number) : null; };
-const newer = (a, b) => { for (let i = 0; i < 3; i++) { if (a[i] !== b[i]) return a[i] > b[i]; } return false; };
+// ---------- Mandatory updates (desktop/updater.js) ----------
+// At start (after 8 s) and every 4 hours: one request for the latest GitHub
+// release, one for the registry's minimum version. When a newer release has
+// this computer's file and its checksum file, the update is required: the
+// window shows update.html instead of Snug (the in-app server keeps running).
+// "Update" downloads the file, checks its size and sha256, installs it and
+// relaunches. Only update.html may drive it (its exact file:// URL, checked on
+// every message). SNUG_UPDATE_CHECK=0 turns the check off (development, tests).
+const UPDATE_PAGE = pathToFileURL(path.join(__dirname, "update.html")).toString();
+const { createUpdater } = require("./updater.js");
+const BUSY = new Set(["downloading", "verifying", "installing"]);
+const upd = { state: "none", info: null, phase: "ready", received: 0, total: 0, message: null };
+let updater = null;
+globalThis.snugUpdateLog = []; // phases, for the desktop test
+function getUpdater() {
+  updater ||= createUpdater({
+    current: app.getVersion(), registryUrl: p2pConfig().registryUrl, tempDir: app.getPath("temp"),
+    exePath: app.getPath("exe"), pid: process.pid,
+    quit: () => { quitting = true; app.quit(); },
+    log: (...a) => console.warn("[snug]", ...a),
+  });
+  return updater;
+}
+function gated(url) { return upd.state === "required" ? UPDATE_PAGE : url; }
+const publicUpdate = () => ({ version: upd.info?.version || null, current: app.getVersion(), phase: upd.phase, received: upd.received, total: upd.total, message: upd.message });
+function setUpdate(patch) {
+  const before = upd.phase;
+  Object.assign(upd, patch);
+  if (upd.phase !== before) { globalThis.snugUpdateLog.push(upd.phase); if (globalThis.snugUpdateLog.length > 50) globalThis.snugUpdateLog.shift(); }
+  if (win && !win.isDestroyed() && win.webContents.getURL() === UPDATE_PAGE) win.webContents.send("update:progress", publicUpdate());
+}
+// Not in the middle of a call: the page says when it is in voice (voicekeys:active); the update page
+// comes up when the call ends (review 0.10 #9).
+const inCall = () => !!(voiceFrom && !voiceFrom.isDestroyed());
+function showUpdatePage() {
+  if (inCall()) return;
+  if (win && !win.isDestroyed() && win.webContents.getURL() !== UPDATE_PAGE) win.loadURL(UPDATE_PAGE).catch(() => {});
+}
+globalThis.snugUpdateShown = () => !!(win && !win.isDestroyed() && win.webContents.getURL() === UPDATE_PAGE); // for the desktop test
 async function checkUpdate() {
-  if (process.env.SNUG_UPDATE_CHECK === "0" || !shellPrefs().updateCheck) return null;
+  if (process.env.SNUG_UPDATE_CHECK === "0") return null;
   // Running from source is not a release: only the installed app asks (or a test's own address).
   if (!app.isPackaged && !process.env.SNUG_UPDATE_URL) return null;
+  if (BUSY.has(upd.phase)) return publicUpdate();
+  let r;
+  if (!cleaned) { cleaned = true; try { getUpdater().cleanup(); } catch { /* best effort */ } }
+  try { r = await getUpdater().check(); } catch { return null; }
+  // Once required it stays required: offline or an odd reply never lifts the block.
+  if (r.state !== "required") return upd.state === "required" ? publicUpdate() : null;
+  if (BUSY.has(upd.phase)) return publicUpdate();
+  upd.state = "required";
+  const same = upd.info?.version === r.version && upd.phase !== "ready"; // a later check keeps an error or a manual step on screen
+  setUpdate(same ? { info: r } : { info: r, phase: "required", received: 0, total: r.asset.size });
+  // The last try's helper couldn't put the new version in place: say so instead of starting over silently.
+  if (getUpdater().takeFailure()) setUpdate({ phase: "error", message: UPDATE_ERRORS.install });
+  showUpdatePage();
+  return publicUpdate();
+}
+const UPDATE_ERRORS = {
+  checksum: "The download didn’t match its checksum, so Snug didn’t install it. Try again.",
+  size: "The download wasn’t the size it should be, so Snug didn’t install it. Try again.",
+  network: "Snug couldn’t download the update. Check your connection and try again.",
+  space: "There isn’t enough space on this computer for the update. Free some space and try again.",
+  write: "Snug couldn’t save the update on this computer. Try again.",
+  install: "Snug couldn’t install the update. Try again, or download Snug from GitHub.",
+};
+let cleaned = false;
+async function startUpdate() {
+  if (upd.state !== "required" || BUSY.has(upd.phase) || upd.phase === "installed") return;
+  setUpdate({ phase: "downloading", received: 0, total: upd.info.asset.size, message: null });
   try {
-    const res = await fetch(UPDATE_URL, { headers: { accept: "application/vnd.github+json", "user-agent": "Snug-desktop" }, signal: AbortSignal.timeout(10_000), redirect: "follow" });
-    if (!res.ok || !res.body) return null;
-    const reader = res.body.getReader();
-    const chunks = [];
-    let size = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.length;
-      if (size > 1_000_000) { reader.cancel().catch(() => {}); return null; }
-      chunks.push(value);
-    }
-    const data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    const latest = semver(data.tag_name || data.name);
-    const mine = semver(app.getVersion());
-    if (!latest || !mine || !newer(latest, mine)) return null;
-    let page = RELEASES;
-    try { const u = new URL(data.html_url); if (u.protocol === "https:" && u.hostname === "github.com") page = u.href; } catch { /* keep the releases page */ }
-    updateInfo = { version: latest.join("."), url: page };
-    buildShellMenu();
-    if (win && !win.isDestroyed() && fromSnug(win.webContents.getURL())) win.webContents.send("update:available", { version: updateInfo.version });
-    return updateInfo;
-  } catch { return null; } // offline, slow or odd: say nothing
+    const file = await getUpdater().download(upd.info, (p) => setUpdate(p.verifying ? { phase: "verifying", received: p.received } : { received: p.received, total: p.total }));
+    globalThis.snugUpdateLog.push("verified");
+    setUpdate({ phase: "installing" });
+    const r = await getUpdater().install(file, upd.info);
+    if (r?.manual) setUpdate({ phase: "manual", message: r.message });
+    else if (r?.dry) setUpdate({ phase: "installed" }); // SNUG_UPDATE_DRY_INSTALL: recorded, nothing spawned
+    // Otherwise the helper or the installer takes over and the app is quitting.
+  } catch (e) {
+    console.warn("[snug] update failed:", e.code, e.message);
+    setUpdate({ phase: "error", message: UPDATE_ERRORS[e.code] || UPDATE_ERRORS.network });
+  }
 }
 globalThis.snugCheckUpdate = checkUpdate; // for the desktop test
-globalThis.snugUpdateInfo = () => updateInfo;
-ipcMain.on("update:open", (e) => { if (fromSnug(e.senderFrame.url) && updateInfo) shell.openExternal(updateInfo.url); });
+globalThis.snugUpdateState = publicUpdate;
+const fromUpdatePage = (e) => e.senderFrame?.url === UPDATE_PAGE;
+// The preload asks which page carries the bridge (file:// pages only).
+ipcMain.on("update:page", (e) => { e.returnValue = String(e.senderFrame?.url || "").startsWith("file:") ? UPDATE_PAGE : null; });
+ipcMain.handle("update:info", (e) => (fromUpdatePage(e) ? publicUpdate() : null));
+ipcMain.handle("update:start", (e) => {
+  if (!fromUpdatePage(e)) return null;
+  startUpdate();
+  return publicUpdate();
+});
 
 // ---------- The Snug menu mirrors these settings ----------
 const baseBuildMenu = buildMenu;
@@ -866,8 +919,6 @@ function buildShellMenu() {
     { label: "Open Snug at login", type: "checkbox", checked: p.openAtLogin, click: (it) => { saveTrayPrefs({ openAtLogin: it.checked }); applyLoginItem(it.checked); } },
     { label: "Start minimised", type: "checkbox", checked: p.startMinimized, click: (it) => saveTrayPrefs({ startMinimized: it.checked }) },
     { label: "Minimise to the tray", type: "checkbox", checked: p.minimizeToTray, click: (it) => saveTrayPrefs({ minimizeToTray: it.checked }) },
-    { label: "Check for a newer Snug", type: "checkbox", checked: p.updateCheck, click: (it) => { saveTrayPrefs({ updateCheck: it.checked }); if (it.checked) checkUpdate(); } },
-    ...(updateInfo ? [{ label: `Get Snug ${updateInfo.version}…`, click: () => shell.openExternal(updateInfo.url) }] : []),
   ];
   // Rebuild the whole menu with these before Quit.
   const template = menu.items.map((top) => {
@@ -892,9 +943,9 @@ function shellReady() {
   }
   deepLinkFrom(process.argv);
   watchIdle();
-  // A little after starting, then once a day.
+  // A little after starting, then every 4 hours. Nothing else polls.
   setTimeout(() => { checkUpdate(); }, 8_000).unref?.();
-  setInterval(() => { checkUpdate(); }, 86_400_000).unref?.();
+  setInterval(() => { checkUpdate(); }, 4 * 3_600_000).unref?.();
   const p = shellPrefs();
   if (p.openAtLogin) applyLoginItem(true);
 }

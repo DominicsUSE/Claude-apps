@@ -32,7 +32,8 @@ function load(append = false) {
       Object.assign(S.users, Object.fromEntries(Object.entries(r.users || {}).filter(([id]) => !S.users[id])));
       Object.assign(S.threads, r.threads || {});
       for (const it of r.items) if (!S.cache[it.m.id]) S.cache[it.m.id] = it.m;
-      state.items = append ? [...state.items, ...r.items] : r.items;
+      const items = r.items.filter((it) => !gone.has(it.m.id)); // a list asked for before a dismiss never brings it back
+      state.items = append ? [...state.items, ...items] : items;
       state.more = r.more;
       state.next = r.next;
       state.status = 'done';
@@ -45,14 +46,16 @@ function load(append = false) {
     });
 }
 
+const gone = new Set(); // dismissed on this page (until undone)
 function dismiss(it, i) {
   const was = state.items;
+  gone.add(it.m.id);
   state.items = state.items.filter((x) => x !== it);
   emit();
   focusRow(i);
   call('mention.dismiss', { id: it.m.id }).then(() => {
-    toast('Mention dismissed', { undo: () => { call('mention.dismiss', { id: it.m.id, undo: true }).then(() => load(), () => {}); state.items = was; emit(); } });
-  }, (e) => { state.items = was; emit(); toast(e.offline ? 'You’re offline. Try again once you’re back.' : e.message); });
+    toast('Mention dismissed', { undo: () => { gone.delete(it.m.id); call('mention.dismiss', { id: it.m.id, undo: true }).then(() => load(), () => {}); state.items = was; emit(); } });
+  }, (e) => { gone.delete(it.m.id); state.items = was; emit(); toast(e.offline ? 'You’re offline. Try again once you’re back.' : e.message); });
 }
 
 function focusRow(i) {

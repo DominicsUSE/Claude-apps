@@ -1,16 +1,15 @@
 // Settings > Desktop app: only in the desktop app (window.snugApp.desktop).
 // Opening at login, starting minimised, minimising to the tray, hardware
 // acceleration (applies after a restart), global mute and deafen keys, the
-// unread number on the icon, and checking for a newer Snug. The app keeps
-// these in desktop.json and checks every value again (desktop/main.js).
-// Also the cyan "a newer Snug is out" strip.
+// unread number on the icon. The app keeps these in desktop.json and checks
+// every value again (desktop/main.js). Updates are mandatory and handled by the
+// app itself (desktop/update.html), so there is no setting for them here.
 import { html, useEffect, useLayoutEffect, useState } from '../../vendor/preact-htm.js';
 import { S, emit, toast } from '../store.js';
 import { call } from '../server.js';
 import { Icon } from '../ui/icons.js';
 import { Switch } from '../ui/kit.js';
 import { acceleratorOf } from '../lib/inbox.js';
-import { update, dismissUpdate } from '../desktop.js';
 import { HandleRow } from './handle.js';
 
 const app = () => window.snugApp;
@@ -103,27 +102,14 @@ export function DesktopPage({ Row }) {
     <//>
     ${restart && html`<div class="banner" role="status"><${Icon} name="info" size=${16} /><span>Snug needs to restart for this to apply.</span>
       <button class="btn primary" style="margin-left:auto" onClick=${() => app().restart?.()}>Restart now</button></div>`}
-    <${Row} label="Check for a newer Snug" hint="Looks once a day. Nothing is downloaded; Snug tells you and links to the download page.">
-      <${Switch} on=${cfg.updateCheck !== false} label="Check for a newer Snug" onChange=${(v) => set({ updateCheck: v })} />
-    <//>`;
-}
-
-// The strip at the top when a newer Snug is out.
-export function UpdateStrip() {
-  if (!update.info || update.dismissed || !app()?.desktop) return null;
-  return html`<div class="update-strip" role="status">
-    <${Icon} name="info" size=${16} />
-    <span class="grow">Snug ${update.info.version} is out.</span>
-    <button class="btn sm" onClick=${() => app().openUpdate?.()}>Get it<${Icon} name="external" size=${14} /></button>
-    <button class="ib sm" aria-label="Dismiss" data-tip="Dismiss" onClick=${dismissUpdate}><${Icon} name="x" size=${16} /></button>
-  </div>`;
+`;
 }
 
 // Settings (js/views/settings.js): the Desktop app page, shown only in the
 // desktop app, and the Username row on the Profile page.
 export function registerDesktopPage({ PAGES, VIEWS, Row }) {
   if (typeof window !== 'undefined' && window.snugApp?.desktop) {
-    PAGES.push({ id: 'desktop', label: 'Desktop app', icon: 'screen', words: 'desktop app startup login boot minimise tray hardware acceleration gpu global shortcut mute deafen badge update' });
+    PAGES.push({ id: 'desktop', label: 'Desktop app', icon: 'screen', words: 'desktop app startup login boot minimise tray hardware acceleration gpu global shortcut mute deafen badge' });
     VIEWS.desktop = () => html`<${DesktopPage} Row=${Row} />`;
   }
   const profile = VIEWS.profile;

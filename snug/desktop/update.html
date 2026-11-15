@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:">
+<meta name="color-scheme" content="light dark">
+<title>Update Snug</title>
+<link rel="stylesheet" href="snug/css/tokens.css">
+<link rel="stylesheet" href="snug/css/base.css">
+<link rel="stylesheet" href="snug/css/views.css">
+<link rel="stylesheet" href="snug/css/brand.css"><!-- .auth, .auth-panel: the sign-in layout this page reuses -->
+</head>
+<body>
+<!-- The mandatory update (desktop/main.js, desktop/updater.js). This page's only bridge is window.snugUpdate. -->
+<div class="auth">
+  <main class="auth-main">
+    <div class="auth-panel" aria-labelledby="title">
+      <div class="auth-brand logo">
+        <svg class="ic" width="24" height="24" viewBox="0 0 16 16" aria-hidden="true">
+          <path fill="var(--brand)" fill-rule="evenodd" d="M2 14V8a6 6 0 0 1 12 0v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1ZM4 11a2 2 0 1 0 4 0a2 2 0 1 0-4 0ZM9 11.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0Z"/>
+        </svg>
+        <span>Snug</span>
+      </div>
+      <div class="auth-head">
+        <h1 id="title">A new Snug is ready</h1>
+        <p class="auth-sub" id="lead">This update is required.</p>
+      </div>
+      <form class="form auth-form" id="update" novalidate>
+        <div id="bar" hidden>
+          <progress id="progress" max="1" value="0" aria-labelledby="status"></progress>
+          <div class="hint" id="status" role="status" aria-live="polite"></div>
+        </div>
+        <div class="err" id="error" role="alert" hidden></div>
+        <button class="btn primary auth-submit" type="submit" id="go">Update</button>
+      </form>
+    </div>
+  </main>
+</div>
+<script src="update-page.js"></script>
+</body>
+</html>

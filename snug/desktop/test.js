@@ -12,6 +12,8 @@ const { _electron: electron } = require("playwright");
 
 // These tests cover local-only mode; the P2P test below turns P2P back on with a local registry.
 process.env.SNUG_P2P = "off";
+// The mandatory update check is off too (a packaged build would ask GitHub); the update test turns it on against a stub.
+process.env.SNUG_UPDATE_CHECK = "0";
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-"));
 const shots = process.env.SNUG_SHOTS;
 const launch = async (userData = dir) => {
@@ -455,14 +457,58 @@ test("push to talk: a global key is held only while in voice in push-to-talk mod
 // The unread number on the icon and a flash for a mention while unfocused,
 // the window colour following the theme, desktop settings (open at login,
 // minimise to tray), global mute and deafen keys while in voice, snug:// links
-// from a second launch, the update check against a local stand-in, and the
-// window's size and place kept across launches.
+// from a second launch, no update strip or update bridge on the Snug page, and
+// the window's size and place kept across launches.
 const shellDir = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-shell-"));
-let updateReply = { status: 200, body: { tag_name: "v9.9.9", html_url: "https://github.com/DominicsUSE/Claude-apps/releases/tag/v9.9.9" } };
+test("mandatory update during a call: the blocking screen waits until the call ends", async (t) => {
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-update-call-"));
+  t.after(() => fs.rmSync(userData, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }));
+  upd.badSums = false;
+  const { app, page } = await launchUpdate(userData);
+  t.after(() => app.close().catch(() => {}));
+  // The page says it is in a call (as js/desktop.js does when S.call is set).
+  await page.evaluate(() => window.snugApp.voiceActive(true));
+  const r = await app.evaluate(() => globalThis.snugCheckUpdate());
+  assert.equal(r.phase, "required");
+  await new Promise((res) => setTimeout(res, 800));
+  assert.equal(await app.evaluate(() => globalThis.snugUpdateShown()), false, "the call keeps its window");
+  assert.doesNotMatch(page.url(), /update\.html$/);
+  // The call ends: the update screen comes up.
+  await page.evaluate(() => window.snugApp.voiceActive(false));
+  await page.waitForURL(/update\.html$/);
+  await page.locator('h1:has-text("Snug 9.9.9 is ready")').waitFor();
+});
+
+// A stand-in for GitHub's releases API and the registry's notices (the mandatory update test below).
+// The shell tests point at it too, with the update check off.
+const crypto = require("crypto");
+const upd = { version: "9.9.9", bytes: crypto.randomBytes(3 * 1048576), badSums: false, min: null };
+const updName = () => `Snug-${upd.version}-portable.exe`;
 const updateStub = require("http").createServer((req, res) => {
-  if (updateReply.status === 0) { req.socket.destroy(); return; }
-  res.writeHead(updateReply.status, { "content-type": "application/json" });
-  res.end(JSON.stringify(updateReply.body));
+  const base = `http://127.0.0.1:${updateStub.address().port}`;
+  if (req.url === "/latest") {
+    res.writeHead(200, { "content-type": "application/json" });
+    return res.end(JSON.stringify({ tag_name: `snug-v${upd.version}`, assets: [
+      { name: updName(), size: upd.bytes.length, browser_download_url: `${base}/dl/${updName()}` },
+      { name: "SHA256SUMS-windows.txt", size: 100, browser_download_url: `${base}/dl/SHA256SUMS-windows.txt` },
+    ] }));
+  }
+  if (req.url === "/notices") { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ min: upd.min, ann: [] })); }
+  if (req.url === "/dl/SHA256SUMS-windows.txt") {
+    const h = upd.badSums ? "0".repeat(64) : crypto.createHash("sha256").update(upd.bytes).digest("hex");
+    res.writeHead(200);
+    return res.end(`${h}  ${updName()}\n`);
+  }
+  if (req.url === `/dl/${updName()}`) {
+    // Slowly enough that the page shows its progress.
+    res.writeHead(200, { "content-length": upd.bytes.length });
+    let i = 0;
+    const step = 128 * 1024;
+    const next = () => { if (i >= upd.bytes.length) return res.end(); res.write(upd.bytes.subarray(i, i + step)); i += step; setTimeout(next, 60); };
+    return next();
+  }
+  res.writeHead(404);
+  return res.end();
 });
 const stubReady = new Promise((r) => updateStub.listen(0, "127.0.0.1", r));
 test.after(() => { updateStub.close(); fs.rmSync(shellDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); });
@@ -484,7 +530,7 @@ const mainWin = (app, fn, arg) => app.evaluate(({ BrowserWindow }, [src, a]) => 
   return new Function("w", "a", `return (${src})(w, a);`)(w, a);
 }, [fn.toString(), arg]);
 
-test("desktop shell: badge and flash, theme colour, settings, global voice keys, snug:// links, update check", async (t) => {
+test("desktop shell: badge and flash, theme colour, settings, global voice keys, snug:// links, no update strip", async (t) => {
   const WebSocket = require("ws");
   const { spawn } = require("child_process");
   const { app, page } = await launchShell();
@@ -501,7 +547,7 @@ test("desktop shell: badge and flash, theme colour, settings, global voice keys,
   await page.click(".auth-form button[type=submit]");
   await page.waitForSelector(".nav");
   await page.waitForFunction(() => window.snug.S.conn.socket === "open");
-  for (const fn of ["setBadge", "setThemeColor", "getDesktopSettings", "setDesktopSettings", "setVoiceKeys", "voiceActive", "onVoiceToggle", "onSystemIdle", "onDeepLink", "onUpdate"]) {
+  for (const fn of ["setBadge", "setThemeColor", "getDesktopSettings", "setDesktopSettings", "setVoiceKeys", "voiceActive", "onVoiceToggle", "onSystemIdle", "onDeepLink"]) {
     assert.equal(await page.evaluate((f) => typeof window.snugApp[f], fn), "function", fn);
   }
   await page.click(".rail-add");
@@ -578,7 +624,8 @@ test("desktop shell: badge and flash, theme colour, settings, global voice keys,
   if (hasLoginItems) assert.equal(await loginItem(), false);
   // The Snug menu mirrors them.
   const labels = await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.find((i) => i.label === "Snug").submenu.items.map((i) => i.label));
-  for (const l of ["Open Snug at login", "Start minimised", "Minimise to the tray", "Check for a newer Snug"]) assert.ok(labels.includes(l), l);
+  for (const l of ["Open Snug at login", "Start minimised", "Minimise to the tray"]) assert.ok(labels.includes(l), l);
+  assert.ok(!labels.some((l) => /newer Snug/.test(l)), "updates are mandatory: no on/off item");
 
   // Settings > Desktop app is there in the desktop app.
   await page.click(".self");
@@ -633,19 +680,11 @@ test("desktop shell: badge and flash, theme colour, settings, global voice keys,
   assert.equal(await app.evaluate(() => globalThis.snugParseLink("snug://open/a/b/c")), null);
   await page.keyboard.press("Escape");
 
-  // A newer Snug: a strip with its version; the same version, or a failure, says nothing.
-  updateReply = { status: 200, body: { tag_name: "v9.9.9", html_url: "https://github.com/DominicsUSE/Claude-apps/releases/tag/v9.9.9" } };
-  assert.equal((await app.evaluate(() => globalThis.snugCheckUpdate())).version, "9.9.9");
-  await page.locator('.update-strip:has-text("Snug 9.9.9 is out")').waitFor();
-  const version = await app.evaluate(({ app: a }) => a.getVersion());
-  updateReply = { status: 200, body: { tag_name: `v${version}`, html_url: "https://github.com/x" } };
-  assert.equal(await app.evaluate(() => globalThis.snugCheckUpdate()), null, "the same version is not news");
-  updateReply = { status: 0 };
-  assert.equal(await app.evaluate(() => globalThis.snugCheckUpdate()), null, "a failed check is silent");
-  updateReply = { status: 500, body: {} };
-  assert.equal(await app.evaluate(() => globalThis.snugCheckUpdate()), null);
-  await page.click('.update-strip [aria-label="Dismiss"]');
-  await page.locator(".update-strip").waitFor({ state: "detached" });
+  // Updates are mandatory (the test below): the Snug page has no strip, no update bridge, no setting.
+  assert.equal(await page.evaluate(() => typeof window.snugUpdate), "undefined");
+  assert.equal(await page.evaluate(() => typeof window.snugApp.openUpdate), "undefined");
+  assert.equal(await page.locator(".update-strip").count(), 0);
+  assert.match((await page.evaluate(() => window.snugApp.setDesktopSettings({ updateCheck: false }))).error, /isn’t a desktop setting/);
 
   // Leave a known size and place for the next test.
   await mainWin(app, (w) => { w.unmaximize(); w.setBounds({ x: 60, y: 40, width: 900, height: 700 }); });
@@ -725,4 +764,90 @@ test("p2p: the in-app server uses the registry through net.fetch, the OS key sto
   assert.doesNotMatch(fs.readFileSync(path.join(userData, "data", "identity.json"), "utf8"), /PRIVATE KEY/);
   const [resume] = await app.evaluate(({ session }) => session.defaultSession.cookies.get({ name: "snug_resume" }));
   assert.ok(resume && resume.httpOnly, "the per-launch resume cookie is set, httpOnly");
+});
+
+// ---------- Mandatory updates (desktop/updater.js, update.html) ----------
+// Against the stand-in above, as a portable app with a dry install: the window
+// shows the blocking page, Update downloads with progress, the checksum is
+// verified and the install is recorded. A bad checksum shows the error, records
+// nothing, and Try again works once the release is right.
+async function launchUpdate(userData) {
+  await stubReady;
+  fs.writeFileSync(path.join(userData, "desktop.json"), JSON.stringify({ mode: "host" }));
+  const bin = process.env.SNUG_BIN && path.resolve(process.env.SNUG_BIN);
+  const env = { ...process.env, SNUG_UPDATE_URL: `http://127.0.0.1:${updateStub.address().port}/latest`, SNUG_NOTICES_URL: `http://127.0.0.1:${updateStub.address().port}/notices`, SNUG_UPDATE_KIND: "portable", SNUG_UPDATE_DRY_INSTALL: "1" };
+  delete env.SNUG_UPDATE_CHECK;
+  const app = await electron.launch({ executablePath: bin || require("electron"), args: [...(bin ? [] : [__dirname]), "--no-sandbox", `--user-data-dir=${userData}`], cwd: __dirname, env });
+  const page = await app.firstWindow();
+  page.setDefaultTimeout(20000);
+  await page.waitForSelector(".auth-form");
+  return { app, page };
+}
+
+test("mandatory update: the blocking screen downloads with progress, verifies and installs; a bad checksum installs nothing", async (t) => {
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-update-"));
+  t.after(() => fs.rmSync(userData, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }));
+  upd.badSums = false;
+  let { app, page } = await launchUpdate(userData);
+  const first = app;
+  t.after(() => first.close().catch(() => {}));
+  const origin = new URL(page.url()).origin;
+  assert.equal(await page.evaluate(() => typeof window.snugUpdate), "undefined", "no update bridge on the Snug page");
+
+  // The check (8 s after start, every 4 h; called here at once) finds 9.9.9: the window shows the blocking page.
+  const r = await app.evaluate(() => globalThis.snugCheckUpdate());
+  assert.equal(r.version, "9.9.9");
+  assert.equal(r.phase, "required");
+  await page.waitForURL(/update\.html$/);
+  await page.locator('h1:has-text("Snug 9.9.9 is ready")').waitFor();
+  assert.match(await page.locator("#lead").textContent(), /This update is required/);
+  assert.equal(await page.evaluate(() => typeof window.snugApp), "undefined", "the update page gets only its own bridge");
+  assert.equal(await page.evaluate(() => typeof window.snugDesktop), "undefined");
+  assert.equal(await page.evaluate(() => typeof window.snugUpdate.start), "function");
+  assert.equal((await fetch(`${origin}/`)).status, 200, "the in-app server keeps running");
+  // Reloading or reopening where Snug runs still shows the update.
+  await page.reload();
+  await page.locator('h1:has-text("Snug 9.9.9 is ready")').waitFor();
+
+  await page.click("#go");
+  await page.locator('#status:has-text("Downloading…")').waitFor();
+  assert.match(await page.locator("#status").textContent(), /of 3\.0 MB/);
+  await page.waitForSelector('body[data-phase="installed"]', { timeout: 30000 });
+  const log = await app.evaluate(() => globalThis.snugUpdateLog);
+  for (const p of ["required", "downloading", "verifying", "verified", "installing", "installed"]) assert.ok(log.includes(p), `phase ${p} (${log.join(", ")})`);
+  assert.ok(log.indexOf("verified") < log.indexOf("installing"), "installed only after the checksum matched");
+  const rec = await app.evaluate(() => globalThis.snugUpdateInstalled);
+  assert.equal(rec.kind, "portable");
+  assert.match(rec.file, /snug-update-9\.9\.9[\\/]Snug-9\.9\.9-portable\.exe$/);
+  assert.equal(crypto.createHash("sha256").update(fs.readFileSync(rec.file)).digest("hex"), crypto.createHash("sha256").update(upd.bytes).digest("hex"));
+  assert.match(rec.script, /copy \/Y/);
+  fs.rmSync(path.dirname(rec.file), { recursive: true, force: true });
+  await app.close();
+
+  // A release whose checksum doesn't match: the error, Try again, nothing recorded.
+  upd.version = "9.9.10";
+  upd.badSums = true;
+  ({ app, page } = await launchUpdate(userData));
+  t.after(() => app.close().catch(() => {}));
+  await app.evaluate(() => globalThis.snugCheckUpdate());
+  await page.locator('h1:has-text("Snug 9.9.10 is ready")').waitFor();
+  await page.click("#go");
+  await page.waitForSelector('body[data-phase="error"]', { timeout: 30000 });
+  assert.match(await page.locator("#error").textContent(), /didn’t match its checksum/);
+  assert.equal(await page.locator("#go").textContent(), "Try again");
+  assert.equal(await app.evaluate(() => globalThis.snugUpdateInstalled ?? null), null, "nothing installed");
+  const temp = await app.evaluate(({ app: a }) => a.getPath("temp"));
+  const dir = path.join(temp, "snug-update-9.9.10");
+  assert.deepEqual(fs.existsSync(dir) ? fs.readdirSync(dir) : [], [], "the bad download is gone");
+  assert.ok(!(await app.evaluate(() => globalThis.snugUpdateLog)).includes("verified"));
+  // A later check never lifts the block.
+  await app.evaluate(() => globalThis.snugCheckUpdate());
+  assert.equal(await page.evaluate(() => document.body.dataset.phase), "error");
+  // The release gets fixed; Try again installs.
+  upd.badSums = false;
+  await page.click("#go");
+  await page.waitForSelector('body[data-phase="installed"]', { timeout: 30000 });
+  assert.equal((await app.evaluate(() => globalThis.snugUpdateInstalled)).kind, "portable");
+  fs.rmSync(dir, { recursive: true, force: true });
+  upd.version = "9.9.9";
 });

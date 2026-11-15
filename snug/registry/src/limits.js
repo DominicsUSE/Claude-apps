@@ -16,6 +16,8 @@ export const DEFAULT_LIMITS = {
   ipLookup: [60, MIN],
   ipTurn: [30, MIN],
   ipWs: [30, MIN],
+  ipAdmin: [120, MIN],
+  ipVault: [30, HOUR],
   // global (SQLite)
   authGlobal: [300, HOUR],
   // per uid (SQLite)
@@ -28,10 +30,15 @@ export const DEFAULT_LIMITS = {
   watchDay: [200, DAY],
   knockDay: [50, DAY],
   knockPairDay: [5, DAY],
+  adminDay: [1000, DAY],
+  vaultDay: [20, DAY],
+  xferDay: [3000, DAY],
+  xferBytesDay: [64 * 1024 * 1024, DAY],
   // per uid (memory)
   sigMin: [60, MIN],
   relayBurst: [50, 1000],
   watchHour: [30, HOUR],
+  xferBurst: [60, 1000],
   // sizes / counts
   unauthPerUid: [4, 0],
   knockBox: [100, 0],

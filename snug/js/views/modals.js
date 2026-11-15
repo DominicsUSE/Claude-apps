@@ -261,14 +261,16 @@ export function AddHouse() {
   </form>`;
 }
 
+const MIX_TIP = 'A group can have friends on other PCs or people on this PC, not both.';
 export function NewMessage() {
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState([]);
   const people = Object.values(S.users).filter((u) => u.id !== S.me)
     .map((u) => ({ u, s: Math.max(fuzzy(q, u.name), fuzzy(q, u.handle)) }))
     .filter((x) => x.s >= 0).sort((a, b) => b.s - a.s || a.u.name.localeCompare(b.u.name)).map((x) => x.u);
-  // A friend on another PC can only be messaged one to one for now.
-  const blocked = (u) => !picked.includes(u.id) && picked.length > 0 && (!!u.remote || picked.some((id) => S.users[id]?.remote));
+  // A group has friends on other PCs (up to 24 besides you) or people on this PC, never both.
+  const remotePick = picked.length > 0 && !!S.users[picked[0]]?.remote;
+  const blocked = (u) => !picked.includes(u.id) && picked.length > 0 && (!!u.remote !== remotePick || (remotePick && picked.length >= 24));
   const toggle = (id) => { if (!picked.includes(id) && blocked(S.users[id])) return; setPicked(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]); };
   return html`
     <h2>New message</h2>
@@ -280,13 +282,13 @@ export function NewMessage() {
     </div>
     <div class="pick-list" role="listbox" aria-multiselectable="true">
       ${people.map((u) => html`<button key=${u.id} class="menu-item" role="option" aria-selected=${String(picked.includes(u.id))} onClick=${() => toggle(u.id)}
-        aria-disabled=${blocked(u) ? 'true' : undefined} data-tip=${blocked(u) ? 'Group chats with friends on other PCs are coming later.' : undefined}>
+        aria-disabled=${blocked(u) ? 'true' : undefined} data-tip=${blocked(u) ? MIX_TIP : undefined}>
         <${Avatar} user=${u} presence /><span class="grow trunc">${u.name}</span>
         ${picked.includes(u.id) && html`<span class="end"><${Icon} name="check" size=${16} /></span>`}
       </button>`)}
       ${!people.length && html`<div class="picker-none">Nobody called “${q}”</div>`}
     </div>
-    ${p2pOwner() && picked.length > 0 && people.some(blocked) && html`<${LocalNote} text="Group chats with friends on other PCs are coming later." />`}
+    ${p2pOwner() && picked.length > 0 && people.some(blocked) && html`<${LocalNote} text=${remotePick && picked.length > 1 ? 'A group between your PCs: every member’s PC keeps it, with no host. People in it see when you’re online.' : MIX_TIP} />`}
     <div class="modal-foot">
       <button class="btn" onClick=${closeModal}>Cancel</button>
       <button class="btn primary" disabled=${!picked.length} onClick=${() => startDm(picked)}>${picked.length > 1 ? 'Start group' : 'Start conversation'}</button>

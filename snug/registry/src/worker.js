@@ -17,6 +17,9 @@ const ROUTES = {
   '/v1/release': 'POST',
   '/v1/lookup': 'POST',
   '/v1/turn': 'POST',
+  '/v1/admin': 'POST', // v0.10: admin actions (signed, permission-checked in the Hub)
+  '/v1/vault/key': 'POST', // v0.10: the account's data file key
+  '/v1/notices': 'GET', // v0.10: announcements + minimum app version (public)
   '/v1/check': 'GET',
   '/v1/ws': 'GET',
 };
@@ -35,7 +38,7 @@ export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     const path = url.pathname;
-    if (path === '/v1/health') return json(env, 200, { ok: true, v: 2 });
+    if (path === '/v1/health') return json(env, 200, { ok: true, v: 3 });
     const method = ROUTES[path];
     if (!method) return err(env, 404, 'not_found');
     if (req.method !== method) return err(env, 405, 'bad_request');

@@ -9,6 +9,10 @@ import { b64u, fromB64u, sha256, hmacHex, verifyEd25519, randomBytes, randomId }
 import { checkToken, githubMode, GhError, TOKEN_RE } from './github.js';
 import { DEFAULT_LIMITS, Windows, Budgets, HOUR, DAY } from './limits.js';
 import { platform, now as clockNow } from './platform.js';
+import { ApiError, fail, need, ID_RE, isUid, isKey, isSig, isTs, rawName, isUnique } from './common.js';
+import { AdminMixin, ADMIN_SCHEMA } from './admin.js';
+import { XferMixin } from './xfer.js';
+import { VaultKeyMixin } from './vaultkey.js';
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS accounts (
@@ -32,12 +36,14 @@ const SCHEMA = [
   // win = start of the counting window in ms (a day or an hour); uid '*' = global. Purged after 2 days.
   `CREATE TABLE IF NOT EXISTS budget (
     uid TEXT NOT NULL, win INTEGER NOT NULL, kind TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (uid, win, kind))`,
+  ...ADMIN_SCHEMA, // v0.10: admins, bans, reserved names, announcements, settings, audit, vault keys (admin.js)
 ];
 
 const STATUS = {
   bad_request: 400, invalid_name: 400, reserved: 400, owner_only: 403, taken: 409, already_claimed: 409,
   rename_too_soon: 409, rebind_blocked: 409, github_invalid: 401, github_unavailable: 502, bad_signature: 401,
   stale: 401, bad_ticket: 401, not_found: 404, rate_limited: 429, config_error: 500, turn_unavailable: 502,
+  forbidden: 403, banned: 403,
 };
 const MESSAGES = {
   bad_request: 'The request was malformed.',
@@ -57,11 +63,10 @@ const MESSAGES = {
   rate_limited: 'Too many requests. Try again later.',
   config_error: 'The registry is not configured correctly.',
   turn_unavailable: 'Relay servers are unavailable.',
+  forbidden: 'You don’t have that admin right.',
+  banned: 'This Snug account is suspended.',
 };
 
-const UID_RE = /^[a-z2-7]{16}$/;
-const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-const RAW_NAME_RE = /^[A-Za-z0-9_.]{1,32}$/;
 const TS_WINDOW = 5 * 60_000;
 const TICKET_TTL = 10 * 60_000;
 const REBIND_DELAY = 72 * HOUR;
@@ -77,26 +82,7 @@ const MAX_RELAY_BOX = 65536;
 const MAX_KNOCK_BOX = 4096;
 const OK_MAX = 20; // invisible senders: peers they contacted this session may reply
 
-class ApiError extends Error {
-  constructor(code, extra) {
-    super(code);
-    this.code = code;
-    this.extra = extra;
-  }
-}
-const fail = (code, extra) => {
-  throw new ApiError(code, extra);
-};
-const need = (cond) => {
-  if (!cond) fail('bad_request');
-};
-const isUid = (s) => typeof s === 'string' && UID_RE.test(s);
-const isKey = (s) => typeof s === 'string' && s.length === 43 && fromB64u(s)?.length === 32;
-const isSig = (s) => typeof s === 'string' && s.length === 86 && fromB64u(s)?.length === 64;
 const isTicket = isKey; // 32 random bytes, b64url
-const isTs = (n) => Number.isSafeInteger(n) && n > 0;
-const rawName = (s) => typeof s === 'string' && RAW_NAME_RE.test(s);
-const isUnique = (e) => /UNIQUE/i.test(String(e && e.message));
 
 /** IPv4 -> the address (/32); IPv6 -> its /64. Never stored; only fed to an HMAC for memory buckets. */
 export function ipPrefix(ip) {
@@ -245,6 +231,44 @@ export class Hub {
     return fn(cur);
   }
 
+  /**
+   * v0.10 endpoints: the payload is one JSON string `p`, signed whole as
+   * "snug-reg-v1\n<op>\n<uid>\n<ts>\n<p>" (regclient signedCall). Runs fn(account, payload, ik) synchronously.
+   * pending: the pending move's key may sign too (vault key: both keys proved GitHub at sign-in).
+   */
+  async signedP(b, op, { mutating, pending = false, maxP = 8192 }, fn) {
+    const { uid, ts, p, sig } = b;
+    need(isUid(uid) && isTs(ts) && isSig(sig) && typeof p === 'string' && p.length <= maxP);
+    let payload;
+    try {
+      payload = JSON.parse(p);
+    } catch {
+      fail('bad_request');
+    }
+    need(payload && typeof payload === 'object' && !Array.isArray(payload));
+    this.fresh(ts);
+    const acc = this.accountByUid(uid);
+    if (!acc) fail('not_found');
+    const msg = `snug-reg-v1\n${op}\n${uid}\n${ts}\n${p}`;
+    let ik = null;
+    if (await verifyEd25519(acc.ik, sig, msg)) ik = acc.ik;
+    else {
+      const pr = pending && this.pending(uid);
+      if (pr && (await verifyEd25519(pr.ik, sig, msg))) ik = pr.ik;
+    }
+    if (!ik) fail('bad_signature');
+    // --- synchronous from here ---
+    const cur = this.accountByUid(uid);
+    const pr2 = cur && this.pending(uid);
+    if (!cur || (cur.ik !== ik && !(pending && pr2 && pr2.ik === ik))) fail('bad_signature');
+    if (mutating) {
+      if (ts <= cur.last_ts) fail('stale');
+      this.sql.exec('UPDATE accounts SET last_ts=? WHERE uid=?', ts, uid);
+      cur.last_ts = ts;
+    }
+    return fn(cur, payload, ik);
+  }
+
   /** Verify a request signed by the key a ticket was issued to, then run fn(ticketRow) synchronously. */
   async withTicket(ticket, ts, sig, msgFor, fn) {
     need(isTicket(ticket) && isTs(ts) && isSig(sig));
@@ -299,6 +323,9 @@ export class Hub {
       case '/v1/check': return this.checkName(url.searchParams.get('name'), ip);
       case '/v1/lookup': return this.lookup(body, ip);
       case '/v1/turn': return this.turn(body, ip);
+      case '/v1/admin': return this.admin(body, ip);
+      case '/v1/notices': return this.noticesHttp(ip);
+      case '/v1/vault/key': return this.vaultKey(body, ip);
       default: fail('not_found');
     }
   }
@@ -349,7 +376,9 @@ export class Hub {
     need(typeof username === 'string');
     if (!rawName(username)) fail('invalid_name');
     return this.withTicket(ticket, ts, sig, () => `snug-reg-v1\nclaim\n${ticket}\n${username}\n${ts}`, (t, h) => {
-      if (this.accountByGhh(t.ghh)) fail('already_claimed');
+      const existing = this.accountByGhh(t.ghh);
+      if (existing) this.refuseBanned(existing.uid);
+      if (existing) fail('already_claimed');
       const meta = this.row('SELECT * FROM ghh_meta WHERE ghh=?', t.ghh);
       const last = Math.max(meta?.renamed_at || 0, meta?.released_at || 0);
       if (last && this.now() - last < RENAME_EVERY) fail('rename_too_soon', { retryAt: last + RENAME_EVERY });
@@ -357,6 +386,7 @@ export class Hub {
       const ce = check(name, { owner: !!t.owner });
       if (ce) fail(ce);
       const skel = SHORT_NAMES.includes(name) ? `#${name}` : skeleton(name);
+      if (!t.owner && this.reservedHit(name, skel)) fail('reserved');
       const now = this.now();
       for (let i = 0; ; i++) {
         const uid = randomId(16);
@@ -387,6 +417,7 @@ export class Hub {
     return this.withTicket(ticket, ts, sig, () => `snug-reg-v1\nrebind\n${ticket}\n${ts}`, (t, h) => {
       const acc = this.accountByGhh(t.ghh);
       if (!acc) fail('not_found');
+      this.refuseBanned(acc.uid);
       if (acc.ik === t.ik && acc.xk === t.xk) fail('bad_request');
       const now = this.now();
       const meta = this.row('SELECT rebind_block_until FROM ghh_meta WHERE ghh=?', t.ghh);
@@ -398,7 +429,7 @@ export class Hub {
         this.sql.exec('INSERT OR REPLACE INTO pending_rebind(uid,ik,xk,at,created) VALUES(?,?,?,?,?)', acc.uid, t.ik, t.xk, at, same ? old.created : now);
         this.sql.exec('DELETE FROM tickets WHERE h=?', h);
       });
-      if (old && !same) this.closeSockets(acc.uid, (a) => a.mode === 'pending', 4006, 'move stopped');
+      if (old && !same) this.closeSockets(acc.uid, (a) => a.mode === 'pending' || (a.mode === 'xfer' && a.ik === old.ik), 4006, 'move stopped');
       if (!same) {
         const msg = { t: 'rebind', state: 'pending', at, kver: acc.kver + 1, ik: t.ik, xk: t.xk };
         for (const w of this.sockets(acc.uid, (a) => a.mode === 'normal')) this.send(w, msg);
@@ -434,7 +465,7 @@ export class Hub {
           this.sql.exec('DELETE FROM pending_rebind WHERE uid=?', uid);
           this.metaUpsert(acc.ghh, 'rebind_block_until', this.now() + REBIND_BLOCK);
         });
-        this.closeSockets(uid, (a) => a.mode === 'pending', 4006, 'move stopped');
+        this.closeSockets(uid, (a) => a.mode === 'pending' || (a.mode === 'xfer' && a.ik === p.ik), 4006, 'move stopped');
         for (const w of this.sockets(uid, (a) => a.mode === 'normal')) this.send(w, { t: 'rebind', state: 'stopped' });
       }
       return { ok: true };
@@ -448,13 +479,16 @@ export class Hub {
     if (!rawName(username)) fail('invalid_name');
     const owners = await this.owners();
     return this.signed(uid, ts, sig, `snug-reg-v1\nrename\n${uid}\n${username}\n${ts}`, true, (acc) => {
+      this.refuseBanned(uid);
       const name = normalize(username);
       if (name === acc.username) return { account: this.view(acc) };
       const now = this.now();
       if (acc.renamed_at && now - acc.renamed_at < RENAME_EVERY) fail('rename_too_soon', { retryAt: acc.renamed_at + RENAME_EVERY });
-      const ce = check(name, { owner: owners.includes(acc.ghh) });
+      const isOwner = owners.includes(acc.ghh);
+      const ce = check(name, { owner: isOwner });
       if (ce) fail(ce);
       const skel = SHORT_NAMES.includes(name) ? `#${name}` : skeleton(name);
+      if (!isOwner && this.reservedHit(name, skel)) fail('reserved');
       try {
         this.tx(() => {
           this.sql.exec('UPDATE accounts SET username=?, skel=?, renamed_at=? WHERE uid=?', name, skel, now, uid);
@@ -474,6 +508,7 @@ export class Hub {
     need(isTicket(ticket));
     const h = await sha256(ticket);
     return this.signed(uid, ts, sig, `snug-reg-v1\nrelease\n${uid}\n${ticket}\n${ts}`, true, (acc) => {
+      this.refuseBanned(uid);
       const t = this.ticket(h);
       if (!t || t.ghh !== acc.ghh) fail('bad_ticket');
       this.tx(() => {
@@ -497,6 +532,7 @@ export class Hub {
     // Taken before owner_only, so the owner's PC can tell whether its own "a"/"1" still exists.
     if (this.row('SELECT 1 AS x FROM accounts WHERE username=? OR skel=?', n, skeleton(n))) return { ok: false, error: 'taken' };
     if (ce) return { ok: false, error: ce };
+    if (this.reservedHit(n, SHORT_NAMES.includes(n) ? `#${n}` : skeleton(n))) return { ok: false, error: 'reserved' };
     return { ok: true };
   }
 
@@ -513,6 +549,7 @@ export class Hub {
       qs = q.uid;
     }
     return this.signed(uid, ts, sig, `snug-reg-v1\nlookup\n${uid}\n${ts}\n${qs}`, false, () => {
+      this.refuseBanned(uid);
       if (!this.budgets.take(uid, 'lookup', this.L.lookupDay)) fail('rate_limited', { retryAfter: this.retryAfter(DAY) });
       const r = typeof q.name === 'string' ? this.accountByName(normalize(q.name)) : this.accountByUid(q.uid);
       if (!r) fail('not_found');
@@ -529,6 +566,7 @@ export class Hub {
     const { uid, peer, ts, sig } = b;
     need(isUid(peer));
     await this.signed(uid, ts, sig, `snug-reg-v1\nturn\n${uid}\n${peer}\n${ts}`, false, () => {
+      this.refuseBanned(uid);
       if (peer === uid || !this.accountByUid(peer)) fail('not_found');
       if (!this.budgets.take(uid, 'turn', this.L.turnDay)) fail('rate_limited', { retryAfter: this.retryAfter(DAY) });
     });
@@ -571,6 +609,7 @@ export class Hub {
     });
     this.closeSockets(uid, (a) => a.mode === 'normal', 4003, 'revoked');
     this.closeSockets(uid, (a) => a.mode === 'pending' && a.ik === p.ik, 4004, 'rebound');
+    this.xferRoles(uid, acc.ik, p.ik); // xfer sockets stay; their roles move (xfer.js)
   }
 
   // ---------- sockets ----------
@@ -659,6 +698,7 @@ export class Hub {
       this.sql.exec('DELETE FROM watch WHERE uid=?', a.uid);
       this.watchCache.delete(a.uid);
     }
+    if (a && a.authed && a.mode === 'xfer') this.xferGone(a);
     this.budgets.flush();
   }
 
@@ -708,6 +748,7 @@ export class Hub {
         return;
       }
       if (!a.authed) return await this.onAuth(ws, a, f);
+      if (a.mode === 'xfer') return this.onXfer(ws, a, f, msg);
       if (a.mode !== 'normal') return;
       const id = typeof f.id === 'string' && ID_RE.test(f.id) ? f.id : null;
       if (f.t !== 'relay' && msg.length > MAX_SMALL_FRAME) return this.send(ws, { t: 'err', id, code: 'too_big' });
@@ -742,6 +783,7 @@ export class Hub {
 
   async onAuth(ws, a, f) {
     if (f.t !== 'auth' || f.uid !== a.uid || !isSig(f.sig)) return this.closeWs(ws, 4001, 'bad auth');
+    if (f.mode === 'xfer') return this.onXferAuth(ws, a, f); // v0.10: device-to-device data transfer (xfer.js)
     const uid = a.uid;
     const acc = this.accountByUid(uid);
     if (!acc) return this.closeWs(ws, 4003, 'revoked');
@@ -757,6 +799,7 @@ export class Hub {
       }
       return this.closeWs(ws, 4001, 'bad auth');
     }
+    await this.owners().catch(() => {}); // cached: ready.admin needs the owner hashes below
     // --- synchronous from here ---
     if (ws.readyState !== 1 || this.gone.has(ws)) return undefined;
     const cur = this.accountByUid(uid);
@@ -765,10 +808,25 @@ export class Hub {
     if (mode === 'pending' && cur.ik === ik) mode = 'normal'; // the move completed meanwhile
     if (mode === 'normal' && cur.ik !== ik) return this.closeWs(ws, 4003, 'revoked');
     if (mode === 'pending' && (!p2 || p2.ik !== ik)) return this.closeWs(ws, 4006, 'move stopped');
+    // v0.10: suspended accounts and apps below the minimum version get no signaling (admin.js).
+    const ban = this.banOf(uid);
+    if (ban) {
+      this.send(ws, { t: 'banned', until: ban.until ?? null, reason: ban.reason });
+      return this.closeWs(ws, 4010, 'banned');
+    }
+    const v = typeof f.v === 'string' && f.v.length <= 32 ? f.v : null;
+    const min = this.minVersion();
+    if (min && this.below(v, min) && !this.isOwnerAcc(cur)) {
+      this.send(ws, { t: 'update', min });
+      return this.closeWs(ws, 4011, 'update');
+    }
     if (!this.budgets.take(uid, 'connect', this.L.connect)) return this.closeWs(ws, 4029, 'rate limited');
-    const att = { uid, authed: true, mode, visible: f.visible !== false, at: this.now(), ik };
+    const att = { uid, authed: true, mode, visible: f.visible !== false, at: this.now(), ik, ...(v ? { v } : {}) };
     ws.serializeAttachment(att);
     const ready = { t: 'ready', mode, kver: cur.kver, ping: Number(this.env.PING_SECONDS) || 90, now: this.now() };
+    const perms = this.permsOfSync(cur);
+    if (perms.length) ready.admin = perms;
+    ready.notices = this.notices();
     if (mode === 'pending') {
       ready.rebind = { at: p2.at };
       return this.send(ws, ready);
@@ -919,6 +977,7 @@ export class Hub {
     this.sql.exec('DELETE FROM tickets WHERE exp<=?', t);
     this.sql.exec('DELETE FROM knocks WHERE ts<=?', t - KNOCK_TTL);
     this.sql.exec('DELETE FROM budget WHERE win<?', t - 2 * DAY);
+    this.adminSweep(t);
     const r = this.row(`SELECT (SELECT MIN(at) FROM pending_rebind) AS p, (SELECT MIN(exp) FROM tickets) AS e,
       (SELECT MIN(ts) FROM knocks) AS k`);
     if (r.p != null) next = Math.min(next, r.p);
@@ -928,3 +987,6 @@ export class Hub {
     if (next < Infinity) this.ensureAlarm(Math.max(next, t + 1));
   }
 }
+
+// v0.10: admin, bans, notices (admin.js); xfer sockets (xfer.js); vault keys (vaultkey.js).
+Object.assign(Hub.prototype, AdminMixin, XferMixin, VaultKeyMixin);

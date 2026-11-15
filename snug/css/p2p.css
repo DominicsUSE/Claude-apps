@@ -97,6 +97,10 @@
 .msg-wait { display: flex; gap: var(--s-1); align-items: center; margin-top: 2px; font-size: var(--t-12); color: var(--text-2); }
 .msg-wait.held .ic { color: var(--amber); }
 .msg-wait.failed { color: var(--error); }
+/* Groups across PCs (0.10): "Sent to everyone" on my latest message; the header line. */
+.msg-sent-all { display: flex; gap: var(--s-1); align-items: center; margin-top: 2px; font-size: var(--t-12); color: var(--text-3); }
+.msg-sent-all .ic { color: var(--mint); }
+.p2p-group { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; }
 .pick-list .menu-item[aria-disabled="true"] { opacity: 0.5; cursor: default; }
 
 /* The GitHub device page, written out so it can be typed or clicked. */

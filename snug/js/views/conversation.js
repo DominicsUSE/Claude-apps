@@ -32,7 +32,7 @@ import { openMenu } from '../store.js';
 import { togglePeople } from './people.js'; // the member list toggle, remembered (shell track)
 import { vp } from '../voiceopts.js';
 import { DmHeaderButtons, dmHeaderItems } from './dm-manage.js'; // Add people and the members of a group (server/dms.js)
-import { DirectLine, KeyBanner, remoteOf } from './p2p.js'; // a friend on another PC: how it travels, and a changed security code
+import { DirectLine, KeyBanner, remoteOf, GroupLine, isPeerGroup } from './p2p.js'; // a friend on another PC: how it travels, and a changed security code
 
 const Back = () => S.ui.phone && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
 
@@ -391,8 +391,9 @@ export function Conversation({ conv }) {
       ${meta.topic && html`<span class="bar-sub trunc">${meta.topic}</span>`}
       ${meta.user && html`<span class="bar-sub trunc">${presenceLabel(meta.user)}${meta.user.status ? `. ${meta.user.status}` : ''}</span>`}
       ${meta.dm && !phone && remoteOf(conv) && html`<${DirectLine} conv=${conv} />`}
+      ${meta.dm && !phone && isPeerGroup(conv) && html`<${GroupLine} conv=${conv} />`}
       <div class="bar-end">
-        ${meta.dm && html`<${CallButtons} conv=${conv} />`}
+        ${meta.dm && !isPeerGroup(conv) && html`<${CallButtons} conv=${conv} />`}
         ${meta.dm && !phone && html`<${DmHeaderButtons} conv=${conv} />`}
         ${!phone && html`<${PinsButton} conv=${conv} />`}
         ${!phone && html`<button class=${`ib${level === 'muted' ? ' is-muted' : ''}`} aria-label="Notifications" aria-haspopup="menu" data-tip=${level === 'muted' ? 'Muted' : 'Notifications'}

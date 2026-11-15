@@ -27,6 +27,10 @@ release times. It stores no messages, no profiles, no IP addresses and no long-t
 | `wrangler.toml` | Worker config. Account-specific values are placeholders; secrets are listed but never stored here. |
 | `src/worker.js` | Front door: path allowlist, 16 KB body cap, `?uid=` shape check, `/v1/health`. Exports `Hub`. |
 | `src/hub.js` | The Durable Object: HTTP API, sockets, presence, relay, knocks, moves, alarm. |
+| `src/admin.js` | v0.10: admin rights, bans and timeouts, reserved names, announcements, minimum app version, audit log. |
+| `src/xfer.js` | v0.10: `xfer` sockets between two device keys of the same account (data file transfer). |
+| `src/vaultkey.js` | v0.10: one wrapped data-file key per GitHub account (`POST /v1/vault/key`). |
+| `src/common.js` | Errors and shape checks shared by the Hub and its v0.10 parts. |
 | `src/github.js` | Token check (`POST/DELETE /applications/{client_id}/token`) and dev mode. |
 | `src/crypto.js` | WebCrypto helpers: base64url, Ed25519 verify, SHA-256, HMAC, random ids. |
 | `src/limits.js` | Every rate limit in one table, memory windows, and budgets kept in SQLite. |
@@ -34,7 +38,7 @@ release times. It stores no messages, no profiles, no IP addresses and no long-t
 | `shim.js` | Durable Object runtime for Node (`node:sqlite`, alarms, hibernatable sockets). Tests and dev only. |
 | `dev.js` | `startLocalRegistry()`: the real Worker and Hub behind Node `http` + `ws`. Tests and dev only. |
 | `mock-github.js` | `startMockGithub()`: device flow, app-token check and revoke, `/user`, and a fake TURN endpoint. |
-| `test/*.test.js` | `node:test` suites (rules, accounts, sockets). No network. |
+| `test/*.test.js` | `node:test` suites (rules, accounts, sockets, admin, vault keys + xfer). No network. |
 
 Only `src/` and `../js/lib/usernames.js` are deployed. `wrangler deploy` bundles them with esbuild.
 The deployed bundle is about 50 KiB (14 KiB gzipped).
@@ -189,6 +193,40 @@ Socket frames, client → Hub: `watch {uids}`, `visible {on}`, `sig {id,to,box}`
 replaced, 4003 revoked, 4004 rebound (reconnect now), 4005 auth timeout, 4006 move stopped, 4029 rate limited.
 
 Every limit is in `src/limits.js` (`DEFAULT_LIMITS`).
+
+### v0.10: admin, bans, notices, data file keys, xfer
+
+v0.10 calls send their arguments as one JSON string `p`, signed whole: `{op}\n{uid}\n{ts}\n{p}`.
+
+| Call | Body | Signed by / string |
+|---|---|---|
+| `POST /v1/admin` | `{uid, ts, p, sig}`, `p` = `{a, ...}` ≤ 8192 chars | current key, `admin`, mutating (a captured call never replays). Actions below. |
+| `POST /v1/vault/key` | `{uid, ts, p:"{}", sig}` | current **or pending** key, `vault-key` → `{key, kid}` (created on first use, one per GitHub account) |
+| `GET /v1/notices` | | public → `{min, ann:[{id, text, level, at, until}]}` |
+
+Admin actions (`a`) and the right each needs: `me` (anyone → `{perms}`), `stats` (stats), `user.find {q}`
+(names or ban), `name.rename {uid, name}`, `name.free {name}`, `name.reserve {name, note?}`,
+`name.unreserve {name}`, `name.reserved` (names), `ban {uid, reason, until|null}`, `unban {uid}`, `bans`
+(ban), `ann.add {text, level, until?}`, `ann.remove {id}` (ann), `min.set {v|null, app}` (update; never
+above `app`, the caller's own version), `admin.grant {uid, perms}`, `admin.revoke {uid}`, `admins`
+(owner only), `audit {before?}` (stats). The owner (`OWNER_GITHUB_IDS`) has every right; nobody acts on
+the owner; only the owner acts on an admin. Changes are written to `audit` (newest 5000 kept); plain
+reads (`me`, `stats`, `bans`, `name.reserved`, `admins`, `audit`) are not. Errors: `forbidden` 403,
+`banned` 403 (`{until, reason}`), `not_found`, `bad_request`.
+
+Enforcement: a banned account's signal auth gets `{t:'banned', until, reason}` and close 4010; its
+`lookup`, `turn`, `claim`, `rename`, `rebind` and `release` answer `banned`. With a minimum version set,
+an auth frame whose `v` is missing or lower gets `{t:'update', min}` and close 4011 (sockets below a new
+minimum are closed the same way). `ready` carries `notices {min, ann}` and, for admins, `admin: [perms]`.
+Live frames: `notices`, `admin {perms}`, `account {username}` (a forced rename).
+
+`xfer` sockets: auth `{t:'auth', uid, mode:'xfer', sig, v}` over `signal-xfer\n{uid}\n{n}`, by the current
+key (role `cur`), the pending move's key (`pending`) or the key just before the current one for 30 days
+(`old`). `ready {mode:'xfer', role, kver, keys:{chain, pending}, others}`; `xfer-peer {ik, xk, role, on}`;
+`xfer {id, to:<ik>, box ≤ 64 KB}` → `xfer {from:<ik>, box}` to the same account's socket(s) of that key only.
+Banned accounts and old apps may use xfer and the vault key (their own data). Budgets: `xferDay`,
+`xferBytesDay`, `xferBurst`; `RELAY_OFF_AT` applies. Two xfer sockets per key at most (a third: 4002).
+`/v1/health` is `{ok:true, v:3}`.
 
 ### Differences from the design document (v2, section 2)
 - `knocks` has the primary key `(to_uid, frm, id)`, so nobody can block a knock id another sender uses.

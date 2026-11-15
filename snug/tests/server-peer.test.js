@@ -154,10 +154,11 @@ test('offline outbox: messages wait, then arrive in order with delivered notices
   assert.equal(A.peer.stats().outbox, 0);
 });
 
-test('rules: no remote groups; LAN guests never see a remote friend; a block purges and drops', async () => {
+test('rules: no mixed groups; LAN guests never see a remote friend; a block purges and drops', async () => {
   const { A, B, a, b, dm } = await friends('alice5', 'bob5');
   const g = await guest(A, 'languest5');
-  assert.match(await a.refused('dm.open', { users: [b.id, g.id] }), /Group chats with friends on other PCs/);
+  // 0.10: groups with friends on other PCs exist, but never mixed with people on this PC.
+  assert.equal(await a.refused('dm.open', { users: [b.id, g.id] }), 'A group can have friends on other PCs or people on this PC, not both.');
   await g.refused('dm.open', { users: [b.id] });
   await g.refused('friend.request', { user: b.id });
   assert.equal(await g.refused('friend.request', { handle: 'bob5' }), 'Nobody is called @bob5.');

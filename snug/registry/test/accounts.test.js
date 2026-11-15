@@ -14,7 +14,7 @@ after(() => reg.close());
 test('health is answered by the Worker without a DO request', async () => {
   const before = reg.runtime.stats.doRequests;
   const r = await reg.call('/v1/health');
-  assert.deepEqual(r.body, { ok: true, v: 2 });
+  assert.deepEqual(r.body, { ok: true, v: 3 });
   assert.equal(reg.runtime.stats.doRequests, before);
   assert.equal((await reg.call('/v1/nope')).status, 404);
   assert.equal((await reg.call('/v1/claim')).status, 405);

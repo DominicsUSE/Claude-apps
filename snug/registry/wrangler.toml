@@ -26,7 +26,7 @@ HUB_NAME = "hub-2"
 # Secrets (wrangler secret put NAME), never committed:
 #   GH_HMAC_SECRET    required. >= 32 random bytes. NEVER ROTATE (it keys every account's GitHub hash).
 #   GH_CLIENT_SECRET  required. The OAuth App client secret; used only to check and revoke tokens.
-#   OWNER_GITHUB_IDS  required for the owner-only names "1" and "a". Comma-separated numeric GitHub ids.
+#   OWNER_GITHUB_IDS  required for the owner-only name "a" and every admin right (v0.10). Comma-separated numeric GitHub ids.
 #   TURN_KEY_TOKEN    optional. Cloudflare TURN key API token.
 
 [[durable_objects.bindings]]

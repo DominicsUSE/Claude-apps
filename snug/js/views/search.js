@@ -234,6 +234,7 @@ function candidates(q) {
   return order.flatMap((g) => top.filter((r) => r.group === g));
 }
 
+let lastPtr = ''; // Chromium fires mousemove when the list re-renders under a still pointer: only a real move picks a row
 export function QuickJump() {
   const [q, setQ] = useState(S.ui.quick.q || '');
   const [i, setI] = useState(0);
@@ -266,7 +267,7 @@ export function QuickJump() {
         ${rows.flatMap((row, n) => [
           term && row.group && row.group !== rows[n - 1]?.group && html`<div class="menu-label quick-group" role="presentation" key=${`g-${row.group}`}>${row.group}</div>`,
           html`<button key=${row.key} role="option" aria-selected=${String(n === at)} class=${`menu-item${n === at ? ' act' : ''}`}
-            onMouseMove=${() => n !== at && setI(n)} onClick=${() => run(row)}>
+            onMouseMove=${(e) => { const p = e.screenX + ',' + e.screenY; if (p === lastPtr) return; lastPtr = p; if (n !== at) setI(n); }} onClick=${() => run(row)}>
             ${row.icon}<span class="grow trunc">${row.label}</span><span class="end">${row.hint}</span>
           </button>`,
         ].filter(Boolean))}

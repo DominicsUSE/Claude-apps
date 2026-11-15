@@ -1,9 +1,25 @@
 // Bridges. The first-run setup page gets snugDesktop (read and save where Snug
-// runs). The Snug page itself (local or on someone else's server) gets only
-// snugApp, below: nothing that reads files, settings or the network.
+// runs). The mandatory update page gets snugUpdate. The Snug page itself (local
+// or on someone else's server) gets only snugApp, below: nothing that reads
+// files, settings or the network.
 const { contextBridge, ipcRenderer } = require("electron");
 
-if (location.protocol === "file:") {
+// update.html, at exactly the address main.js serves it from (main.js checks every message again).
+const updatePage = location.protocol === "file:" ? ipcRenderer.sendSync("update:page") : null;
+if (updatePage && location.href === updatePage) {
+  contextBridge.exposeInMainWorld("snugUpdate", {
+    info: () => ipcRenderer.invoke("update:info"),
+    start: () => ipcRenderer.invoke("update:start"),
+    onProgress: (fn) => {
+      if (typeof fn !== "function") return;
+      ipcRenderer.on("update:progress", (_e, s) => fn({
+        version: String(s?.version || "").slice(0, 20), current: String(s?.current || "").slice(0, 20),
+        phase: String(s?.phase || "").slice(0, 20), received: Number(s?.received) || 0, total: Number(s?.total) || 0,
+        message: s?.message ? String(s.message).slice(0, 300) : null,
+      }));
+    },
+  });
+} else if (location.protocol === "file:") {
   contextBridge.exposeInMainWorld("snugDesktop", {
     config: () => ipcRenderer.invoke("config:get"),
     save: (cfg) => ipcRenderer.invoke("config:save", cfg),
@@ -40,7 +56,7 @@ if (location.protocol === "http:" || location.protocol === "https:") {
     setBadge: (n) => ipcRenderer.send("badge:set", Math.max(0, Math.min(999, Math.floor(Number(n)) || 0))),
     // The window's colour behind the page, following the Snug theme: #rrggbb only.
     setThemeColor: (hex) => ipcRenderer.invoke("theme:color", typeof hex === "string" && hex.length <= 16 ? hex.trim() : ""),
-    // Desktop settings: open at login, start minimised, minimise to tray, hardware acceleration, update check.
+    // Desktop settings: open at login, start minimised, minimise to tray, hardware acceleration.
     getDesktopSettings: () => ipcRenderer.invoke("desktop:get"),
     setDesktopSettings: (patch) => {
       const clean = {};
@@ -66,8 +82,5 @@ if (location.protocol === "http:" || location.protocol === "https:") {
       ipcRenderer.on("deeplink", (_e, raw) => fn(String(raw || "").slice(0, 300)));
       ipcRenderer.send("deeplink:ready");
     },
-    // A newer Snug is out: its version, and opening its page in the browser.
-    onUpdate: (fn) => { if (typeof fn === "function") ipcRenderer.on("update:available", (_e, info) => fn({ version: String(info?.version || "").slice(0, 20) })); },
-    openUpdate: () => ipcRenderer.send("update:open"),
   });
 }
