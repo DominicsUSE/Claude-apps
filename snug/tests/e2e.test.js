@@ -361,11 +361,16 @@ test('phone: tabs, a room pushed on top, back button and back gesture return', a
   await phone.click('.home-house:has-text("Kiln & Co.")');
   await phone.click('.screen.push .row:has-text("Glaze lab")');
   await phone.locator('.screen.push .composer textarea').waitFor();
+  // Back goes to the house's room list first, then Home.
+  await phone.click('.screen.push [aria-label="Back"]');
+  await phone.locator('.screen.push .phone-house').waitFor();
   await phone.click('.screen.push [aria-label="Back"]');
   assert.equal(await phone.locator('.screen.push').count(), 0);
   await phone.click('.home-house:has-text("Ridgeline Riders")');
   await phone.click('.screen.push .row:has-text("Ride plans")');
   await phone.locator('.screen.push .composer textarea').waitFor();
+  await phone.goBack();
+  await phone.locator('.screen.push .phone-house').waitFor();
   await phone.goBack();
   await phone.waitForFunction(() => !document.querySelector('.screen.push'));
   assert.match(phone.url(), new RegExp(`127.0.0.1:${port}`));
@@ -448,7 +453,7 @@ test('home shows friends who are around and conversations going, live', async ()
   await say(ines2, 'Kiln is unloaded, come and look.');
   const row = robin.locator('.home-sect[aria-labelledby="home-active"] .home-row:has-text("Glaze lab")');
   await row.locator('text=Kiln is unloaded').waitFor();
-  assert.match(await row.textContent(), /talking/);
+  assert.match(await row.textContent(), /wrote in the last 15 minutes/, 'says what is counted');
   await ines2.context().close();
   await friend.waitFor({ state: 'detached', timeout: 9000 });
   // Offline now, but she just wrote: she moves to "Recently here" instead of vanishing.
@@ -470,7 +475,8 @@ test('a friend request reaches the other person live, and accepting makes both f
   await robin.click('.f-tab:has-text("Add friend")');
   await robin.fill('#f-add-handle', 'nobody-by-this-name');
   await robin.click('.f-add-form button[type=submit]');
-  await robin.locator('#f-add-handle[aria-invalid="true"]').waitFor();
+  // Not a dead end: someone not here yet gets an invitation offer (js/views/friends.js NotHereYet).
+  await robin.locator('.f-nothere:has-text("Nobody here is called @nobody-by-this-name")').waitFor();
   await robin.fill('#f-add-handle', 'tomasz');
   await robin.click('.f-add-form button[type=submit]');
   await robin.locator('.ok-line:has-text("Request sent")').waitFor();

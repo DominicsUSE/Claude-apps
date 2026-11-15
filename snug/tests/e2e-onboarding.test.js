@@ -333,7 +333,7 @@ test('a group’s header: no two buttons look or read the same', async () => {
     await robin.locator('.main .bar-title:has-text("Saturday load")').waitFor();
     const labels = await robin.locator('.main .bar-end button[aria-label]').evaluateAll((els) => els.filter((e) => e.offsetParent).map((e) => e.getAttribute('aria-label')));
     assert.equal(new Set(labels).size, labels.length, `labels: ${labels.join(' | ')}`);
-    assert.ok(labels.some((l) => /^Member list, \d+ of 2 others online/.test(l)), labels.join(' | '));
+    assert.ok(labels.some((l) => /^People, \d+ of 2 others online/.test(l)), labels.join(' | '));
     assert.ok(labels.includes('Manage members, 3'));
     // No two buttons draw the same icon (it was two identical "people" icons).
     const icons = await robin.locator('.main .bar-end button[aria-label]').evaluateAll((els) => els.filter((e) => e.offsetParent).map((e) => e.querySelector('svg')?.innerHTML || ''));
@@ -341,7 +341,7 @@ test('a group’s header: no two buttons look or read the same', async () => {
     // Phone: the rarely used ones live in More.
     await phone.evaluate(() => import('/js/store.js').then((s) => s.openConv('g_sat')));
     await phone.locator('.screen.push .bar-title:has-text("Saturday load")').waitFor();
-    assert.equal(await phone.locator('.screen.push .bar-end button[aria-label^="Member list"]').count(), 0);
+    assert.equal(await phone.locator('.screen.push .bar-end button[aria-label^="People"]').count(), 0);
     await phone.click('.screen.push .bar-end button[aria-label="More"]');
     await phone.locator('.menu-item:has-text("Members (3)")').waitFor();
   } finally { await close(robin); await close(phone); }

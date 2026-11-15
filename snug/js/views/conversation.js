@@ -407,7 +407,7 @@ export function Conversation({ conv }) {
         ${!phone && html`<button class=${`ib${level === 'muted' ? ' is-muted' : ''}`} aria-label="Notifications" aria-haspopup="menu" data-tip=${level === 'muted' ? 'Muted' : 'Notifications'}
           onClick=${(e) => notifyMenu(conv, { anchor: e.currentTarget.getBoundingClientRect() })}><${Icon} name=${level === 'muted' ? 'bell-off' : 'bell'} /></button>`}
         <span class="bar-date-src" aria-hidden="true"><${JumpToDate} conv=${conv} /></span>
-        ${!meta.user && !(phone && meta.dm) && html`<button class=${`ib${pane === 'people' ? ' on' : ''}`} aria-pressed=${String(pane === 'people')} aria-label=${`Member list, ${onlineNote(here.length, members.length - 1, inVoice)}`}
+        ${!meta.user && !(phone && meta.dm) && html`<button class=${`ib${pane === 'people' ? ' on' : ''}`} aria-pressed=${String(pane === 'people')} aria-label=${`People, ${onlineNote(here.length, members.length - 1, inVoice)}`}
           data-tip=${pane === 'people' ? 'Hide the member list' : `Show the member list (${onlineNote(here.length, members.length - 1, inVoice)})`} onClick=${togglePeople}><${Icon} name="people" /></button>`}
         ${phone
           ? html`<button class="ib" aria-label="More" aria-haspopup="menu" data-tip="More" onClick=${(e) => headerMore(conv, meta, level, e.currentTarget.getBoundingClientRect())}><${Icon} name="more-v" /></button>`
