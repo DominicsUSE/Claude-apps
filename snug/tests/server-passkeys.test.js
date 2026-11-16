@@ -303,3 +303,58 @@ test('passkeys: sign-in challenges asked for from one /48 can’t push out anyon
     rmSync(d2, { recursive: true, force: true });
   }
 });
+
+// ---------- v0.13: a passkey as step-up, and the passkey user id for the provider ----------
+async function stepProof(who, a, opts = {}) {
+  const s = await call('POST', '/api/passkeys/step', {}, { cookie: who.cookie });
+  assert.equal(s.status, 200, JSON.stringify(s.body));
+  assert.equal(s.body.options.userVerification, 'required');
+  return { ticket: s.body.ticket, credential: a.get(s.body.options, { origin: ORIGIN, ...opts }) };
+}
+
+test('passkeys (v0.13): a fresh passkey check replaces the password and code for a new password; a replayed or another person\'s is refused', async () => {
+  const who = await register('pk-stepper');
+  const { a } = await addPasskey(who);
+  const NEXT = 'a much newer passkey password';
+  // a valid assertion changes the password with no current password
+  const proof = await stepProof(who, a);
+  const ok = await call('POST', '/api/password', { passkey: proof, next: NEXT }, { cookie: who.cookie });
+  assert.equal(ok.status, 200, JSON.stringify(ok.body));
+  const fresh = ok.cookie;
+  assert.equal((await call('POST', '/api/login', { handle: 'pk-stepper', password: NEXT })).status, 200);
+  // the same assertion again: its challenge is spent
+  const again = await call('POST', '/api/password', { passkey: proof, next: 'yet another passkey password' }, { cookie: fresh });
+  assert.equal(again.status, 401);
+  // another person's passkey, on a challenge made for this account
+  const other = await register('pk-other');
+  const { a: b } = await addPasskey(other);
+  const s = await call('POST', '/api/passkeys/step', {}, { cookie: fresh });
+  const wrong = await call('POST', '/api/password', { passkey: { ticket: s.body.ticket, credential: b.get(s.body.options, { origin: ORIGIN }) }, next: 'yet another passkey password' }, { cookie: fresh });
+  assert.equal(wrong.status, 401);
+  // a challenge made for the other account, answered by that account's passkey, can't be used here
+  const theirs = await stepProof(other, b);
+  assert.equal((await call('POST', '/api/password', { passkey: theirs, next: 'yet another passkey password' }, { cookie: fresh })).status, 401);
+  // no PIN check: refused
+  const s2 = await call('POST', '/api/passkeys/step', {}, { cookie: fresh });
+  a.uv = false;
+  const unverified = await call('POST', '/api/password', { passkey: { ticket: s2.body.ticket, credential: a.get(s2.body.options, { origin: ORIGIN }) }, next: 'yet another passkey password' }, { cookie: fresh });
+  a.uv = true;
+  assert.equal(unverified.status, 401);
+  assert.equal((await call('POST', '/api/login', { handle: 'pk-stepper', password: NEXT })).status, 200, 'the password is unchanged');
+  // a passkey check also works for removing a passkey
+  srv.resetLimits(); // the per-account limit (6 quick calls) is not what this checks
+  const list = (await call('GET', '/api/passkeys', null, { cookie: fresh })).body.list;
+  const rm = await call('POST', '/api/passkeys/remove', { id: list[0].id, passkey: await stepProof({ cookie: fresh }, a) }, { cookie: fresh });
+  assert.equal(rm.status, 200, JSON.stringify(rm.body));
+  // with no passkeys, there is nothing to check with
+  assert.equal((await call('POST', '/api/passkeys/step', {}, { cookie: fresh })).status, 400);
+});
+
+test('passkeys (v0.13): Settings learns the passkey user id, so a new name can be passed to the provider', async () => {
+  const who = await register('pk-renamer');
+  assert.equal((await call('GET', '/api/passkeys', null, { cookie: who.cookie })).body.userId, null, 'none before a passkey');
+  const { begin } = await addPasskey(who);
+  const g = await call('GET', '/api/passkeys', null, { cookie: who.cookie });
+  assert.equal(g.body.userId, begin.body.options.user.id);
+  assert.equal(g.body.rpId, 'localhost');
+});

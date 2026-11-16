@@ -169,8 +169,8 @@ export function createRecovery({ db, M, hub, account, sendJson, error, jsonBody,
     // of signing up or recovering. Replacing a key, or any later save, needs the password (and a code).
     const token = tokenOf(req);
     const sessionOk = !status(user).set && recentAuth(db, token) && ['register', 'recovery'].includes(sessionHow(db, token));
-    if (d.password !== undefined || !sessionOk) {
-      const r = await M.stepUp(user, { password: d.password, code: typeof d.code === 'string' ? d.code.replace(/\s/g, '') : '', token });
+    if (d.password !== undefined || d.passkey != null || !sessionOk) {
+      const r = await M.stepUp(user, { password: d.password, code: typeof d.code === 'string' ? d.code.replace(/\s/g, '') : '', passkey: d.passkey ?? undefined, token });
       if (r) { error(res, r.status === 429 ? 429 : 401, r.message); return true; }
     }
     try { M.onRecoverySet?.(user, d); } catch (e) { error(res, 400, e.message); return true; } // e2ee: the backup under the new key, when that ships

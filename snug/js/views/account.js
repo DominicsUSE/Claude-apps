@@ -27,7 +27,7 @@ import { Confirm } from './modals.js';
 import { RevokeSheet, hasKeys } from './e2ee-revoke.js'; // signing out a device can remove its encryption keys too
 import { EraseChoice } from './privacy.js'; // deleting: keep or erase what I wrote
 import { p2pOwner, AccountRows, ConnectRow, DeleteP2p } from './p2p.js'; // GitHub-secured accounts: no password; the Snug username
-import { PasskeyRows } from './passkeys.js'; // v0.12: passkey sign-in (server/passkeys.js)
+import { PasskeyRows, PasskeyStepButton } from './passkeys.js'; // v0.12: passkey sign-in (server/passkeys.js); v0.13: passkey as step-up
 import { RecoveryRows } from './recover.js'; // v0.12: the recovery key for a forgotten password (server/recovery.js)
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
@@ -313,11 +313,12 @@ function PasswordForm() {
   const [code, setCode] = useState('');
   const [msg, setMsg] = useState(null);
   const need = acc().totp;
-  const submit = async (e) => {
-    e.preventDefault();
+  // v0.13: or a passkey checked now, instead of the current password (and the code)
+  const submit = async (e, passkey) => {
+    e?.preventDefault();
     if (next.length < 8) return setMsg({ bad: true, text: 'Passwords need at least 8 characters.' });
     try {
-      await api('/api/password', { current: cur, next, code });
+      await api('/api/password', passkey ? { passkey, next } : { current: cur, next, code });
       setCur(''); setNext(''); setCode('');
       setMsg({ text: 'Password changed. Every other device has been signed out.' });
     } catch (err) { setMsg({ bad: true, text: err.message }); }
@@ -329,6 +330,7 @@ function PasswordForm() {
     ${need && html`<div><label class="label" for="pw-code">Code from your app</label><input id="pw-code" class="field" inputmode="numeric" autocomplete="one-time-code" value=${code} onInput=${(e) => setCode(e.target.value)} /></div>`}
     ${msg && html`<div class=${msg.bad ? 'err' : 'hint'} role=${msg.bad ? 'alert' : 'status'}>${msg.text}</div>`}
     <div><button class="btn" type="submit" disabled=${!cur || !next || (need && !code)}>Change password</button></div>
+    ${next.length >= 8 && html`<${PasskeyStepButton} id="pw-passkey" label="Change it with a passkey instead" onProof=${(proof) => submit(null, proof)} />`}
   </form>`;
 }
 

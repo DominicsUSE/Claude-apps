@@ -3,7 +3,7 @@
 // Where they can't work (plain http, an IP address, the desktop app), Settings says why and
 // the sign-in screen shows no button: passwords always keep working.
 import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
-import { S, toast, openModal, closeModal } from '../store.js';
+import { S, toast, openModal, closeModal, subscribe } from '../store.js';
 import { api } from '../server.js';
 import { Icon } from '../ui/icons.js';
 import { fmtWhen } from '../lib/util.js';
@@ -70,6 +70,50 @@ export function usePasskeySignIn(entered, { autofill = true } = {}) {
   return { offered, busy, error, start };
 }
 
+// ---------- v0.13: a passkey instead of the password where Snug asks again ----------
+// Offered when this account has passkeys and this browser can use them here. The server checks a fresh
+// assertion with user verification (server/passkeys.js /api/passkeys/step), once, for this account only.
+export const canStepWithPasskey = () => (S.account?.passkeys || 0) > 0 && passkeysHere();
+export async function passkeyStep() {
+  const s = await api('/api/passkeys/step', {});
+  let credential;
+  try { credential = await getPasskey(s.options); } catch (x) { throw new Error(passkeyProblem(x)); }
+  if (!credential) throw new Error('The passkey wasn’t used. Try again when you’re ready.');
+  return { ticket: s.ticket, credential };
+}
+/** "Use a passkey instead": runs the check, then onProof({ticket, credential}) sends it with the change. */
+export function PasskeyStepButton({ onProof, id = 'pk-step', label = 'Use a passkey instead' }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  if (!canStepWithPasskey()) return null;
+  const go = async () => {
+    setBusy(true); setErr('');
+    try { await onProof(await passkeyStep()); } catch (x) { setErr(x.message); }
+    setBusy(false);
+  };
+  return html`<div class="pk-step">
+    <button type="button" class="btn" id=${id} disabled=${busy} aria-busy=${String(busy)} onClick=${go}><${Icon} name="shield" size=${16} />${busy ? 'Waiting for your device…' : label}</button>
+    ${err && html`<${Err} id=${`${id}-err`} text=${err} />`}
+  </div>`;
+}
+
+// v0.13: after a username or name change (on this device or another), tell the passkey provider, so the
+// passkey it lists shows the new name. Best effort, only where the browser has signalCurrentUserDetails.
+let named = null; // {me, handle, name} last seen
+subscribe(() => {
+  const u = S.me ? S.users?.[S.me] : null;
+  if (!u) { named = null; return; }
+  const now = { me: S.me, handle: u.handle, name: u.name };
+  const was = named;
+  named = now;
+  if (!was || was.me !== now.me || (was.handle === now.handle && was.name === now.name)) return;
+  if (!S.account?.passkeys || !passkeysHere() || typeof globalThis.PublicKeyCredential?.signalCurrentUserDetails !== 'function') return;
+  api('/api/passkeys').then((d) => {
+    if (!d.ok || !d.userId || !d.list?.length) return undefined;
+    return PublicKeyCredential.signalCurrentUserDetails({ rpId: d.rpId || location.hostname, userId: d.userId, name: now.handle, displayName: now.name || now.handle });
+  }).catch(() => { /* not supported, or offline: the provider keeps the old name */ });
+});
+
 // ---------- Settings ----------
 export function PasskeyRows({ Row }) {
   const [data, setData] = useState(null);
@@ -97,8 +141,9 @@ export function PasskeyRows({ Row }) {
     </ul>`}`;
 }
 
-function StepUp({ password, setPassword, code, setCode }) {
+function StepUp({ password, setPassword, code, setCode, onPasskey }) {
   return html`
+    ${onPasskey && html`<${PasskeyStepButton} onProof=${onPasskey} id="pk-step" />`}
     <div><label class="label" for="pk-pw">Password</label><input id="pk-pw" class="field" type="password" data-autofocus autocomplete="current-password" value=${password} onInput=${(e) => setPassword(e.target.value)} /></div>
     ${S.account?.totp && html`<div><label class="label" for="pk-code">Code from your app, or a backup code</label><input id="pk-code" class="field" autocomplete="one-time-code" value=${code} onInput=${(e) => setCode(e.target.value)} /></div>`}`;
 }
@@ -142,11 +187,11 @@ function RemovePasskey({ p, onDone }) {
   const [code, setCode] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const submit = async (e) => {
-    e.preventDefault();
+  const submit = async (e, passkey) => {
+    e?.preventDefault();
     setBusy(true);
     try {
-      await api('/api/passkeys/remove', { id: p.id, password, code });
+      await api('/api/passkeys/remove', passkey ? { id: p.id, passkey } : { id: p.id, password, code });
       // Best effort: tell the password manager this passkey is gone, so it stops offering it.
       try { await globalThis.PublicKeyCredential?.signalUnknownCredential?.({ rpId: location.hostname, credentialId: p.id }); } catch { /* not supported */ }
       closeModal(); toast('Passkey removed.'); onDone?.();
@@ -155,7 +200,7 @@ function RemovePasskey({ p, onDone }) {
   return html`<form onSubmit=${submit}>
     <h2>Remove “${p.name}”?</h2>
     <p class="modal-lead">It stops signing you in here. You may also want to delete it from that device or password manager.</p>
-    <div class="form"><${StepUp} password=${password} setPassword=${setPassword} code=${code} setCode=${setCode} />${err && html`<${Err} id="pk-rm-err" text=${err} />`}</div>
+    <div class="form"><${StepUp} password=${password} setPassword=${setPassword} code=${code} setCode=${setCode} onPasskey=${(proof) => submit(null, proof)} />${err && html`<${Err} id="pk-rm-err" text=${err} />`}</div>
     <div class="modal-foot"><button type="button" class="btn" onClick=${closeModal}>Cancel</button><button type="submit" class="btn danger" id="pk-rm-go" disabled=${busy || !password}>${busy ? 'Removing…' : 'Remove'}</button></div>
   </form>`;
 }

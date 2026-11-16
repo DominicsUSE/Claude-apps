@@ -242,6 +242,11 @@ export function migrateAccount(db) {
 }
 
 // Reads shared by the ops and the HTTP routes.
+// v0.13: a fresh passkey check as step-up. server/passkeys.js registers, per database, the function that
+// checks one ({ticket, credential} -> true/false); stepUp asks it when the caller passes `passkey`.
+const passkeySteps = new WeakMap();
+export function setPasskeyStep(db, fn) { passkeySteps.set(db.raw ?? db, fn); }
+
 function reads(db) {
   const R = {};
   const C = core(db);
@@ -306,9 +311,21 @@ function reads(db) {
     void what;
   };
   R.stepWait = (u) => G.waitMs(`su:${u}`, POLICIES.stepUp);
-  R.stepUp = async (u, { password, code, token = null, needPassword = true, needCode = true, what = '' } = {}) => {
+  R.stepUp = async (u, { password, code, passkey, token = null, needPassword = true, needCode = true, what = '' } = {}) => {
     const wait = R.stepWait(u);
     if (wait) { C.audit('stepup', { user: u, ok: false, why: 'locked' }); return { status: 429, field: 'wait', message: tooMany(wait) }; }
+    // A passkey checked just now with user verification (a PIN, fingerprint or face) stands for the password and
+    // the code, as it does at sign-in. Its challenge works once and only for this account.
+    if (passkey != null) {
+      const check = passkeySteps.get(db.raw ?? db);
+      if (!check || !(await check(u, passkey))) {
+        R.stepFail(u, 'passkey', what);
+        return { status: 401, field: 'passkey', message: 'That passkey didn’t confirm it’s you. Try again, or use your password.' };
+      }
+      G.clear(`su:${u}`);
+      markAuth(db, token);
+      return null;
+    }
     const row = db.get('SELECT pass FROM users WHERE id = ?', u);
     if (needPassword) {
       const r = await verifyPassword(typeof password === 'string' ? password : '', row?.pass);
@@ -832,13 +849,22 @@ export function createAccountHttp({
     if (!authLimit.take(`pw:${user}`)) return error(res, 429, 'Too many attempts. Wait a few minutes and try again.');
     const d = await jsonBody(req);
     const row = M.userRow(user);
-    const r = await R.stepUp(user, { password: d.current, token: tokenOf(req), needCode: false });
-    if (r) return r.field === 'wait' ? error(res, 429, r.message) : error(res, 401, 'Your current password isn’t right.');
     const next = String(d.next || '');
-    const weak = passwordProblem(next, { handle: row.handle, name: row.name, current: String(d.current) });
-    if (weak) return error(res, 400, weak);
-    const c = await R.stepUp(user, { code: d.code, token: tokenOf(req), needPassword: false });
-    if (c) return error(res, c.status, c.field === 'wait' ? c.message : 'Type a code from your authenticator app, or a backup code.');
+    // v0.13: or a passkey checked just now, instead of the current password and the code (checked after the
+    // new password, so a weak one doesn't spend the passkey check).
+    if (d.passkey != null) {
+      const weak = passwordProblem(next, { handle: row.handle, name: row.name });
+      if (weak) return error(res, 400, weak);
+      const p = await R.stepUp(user, { passkey: d.passkey, token: tokenOf(req) });
+      if (p) return error(res, p.status, p.message);
+    } else {
+      const r = await R.stepUp(user, { password: d.current, token: tokenOf(req), needCode: false });
+      if (r) return r.field === 'wait' ? error(res, 429, r.message) : error(res, 401, 'Your current password isn’t right.');
+      const weak = passwordProblem(next, { handle: row.handle, name: row.name, current: String(d.current) });
+      if (weak) return error(res, 400, weak);
+      const c = await R.stepUp(user, { code: d.code, token: tokenOf(req), needPassword: false });
+      if (c) return error(res, c.status, c.field === 'wait' ? c.message : 'Type a code from your authenticator app, or a backup code.');
+    }
     db.run('UPDATE users SET pass = ? WHERE id = ?', await hashPasswordAsync(next), user);
     // Every other device has to sign in again with the new password.
     endAllSessions(db, user);

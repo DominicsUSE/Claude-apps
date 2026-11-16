@@ -13,6 +13,7 @@ import { api } from '../server.js';
 import { Icon } from '../ui/icons.js';
 import { newRecoveryKey, parseRecoveryKey, deriveAuthKey, deriveAuthKeyV2 } from '../lib/recovery.js';
 import { RecoverySave } from './keyauth.js';
+import { PasskeyStepButton } from './passkeys.js'; // v0.13: a passkey instead of the password
 
 export const recoveryHooks = [];
 const Err = ({ id, text }) => html`<div class="err" id=${id} role="alert"><${Icon} name="alert" size=${16} /><span>${text}</span></div>`;
@@ -66,11 +67,11 @@ export function MakeRecoveryKey({ onDone = closeModal, onLater = null, replace =
       throw e;
     }
   };
-  const finish = async (e) => {
-    e.preventDefault();
+  const finish = async (e, passkey) => {
+    e?.preventDefault();
     setBusy(true);
     try {
-      await saveKey(key, { password, code: code.replace(/\s/g, '') });
+      await saveKey(key, passkey ? { passkey } : { password, code: code.replace(/\s/g, '') });
       toast(replace ? 'Your new recovery key is saved. The old one no longer works.' : 'Your recovery key is saved.');
       onDone();
     } catch (x) { setAsk({ message: x.message, bad: true }); setBusy(false); }
@@ -82,6 +83,7 @@ export function MakeRecoveryKey({ onDone = closeModal, onLater = null, replace =
       <div><label class="label" for="rk-pw">Password</label><input id="rk-pw" class="field" type="password" data-autofocus autocomplete="current-password" value=${password} onInput=${(e) => setPassword(e.target.value)} /></div>
       ${S.account?.totp && html`<div><label class="label" for="rk-code">Code from your app, or a backup code</label><input id="rk-code" class="field" autocomplete="one-time-code" value=${code} onInput=${(e) => setCode(e.target.value)} /></div>`}
       ${ask.bad && html`<${Err} id="rk-pw-err" text=${ask.message} />`}
+      <${PasskeyStepButton} id="rk-passkey" onProof=${(proof) => finish(null, proof)} />
       <div class="modal-foot"><button type="button" class="btn" onClick=${closeModal}>Cancel</button><button type="submit" class="btn primary" id="rk-pw-go" disabled=${busy || !password}>${busy ? 'Saving…' : 'Save my key'}</button></div>
     </form>`;
   }

@@ -13,6 +13,7 @@
 // and don't use this.
 import { randomBytes, createHash } from 'node:crypto';
 import { limiter, readCookie, COOKIE } from './auth.js';
+import { setPasskeyStep } from './account.js';
 import { verifyRegistration, verifyAuthentication, passkeyPlace, WebAuthnError, ALGS, b64u } from './webauthn.js';
 import { deviceLabel } from '../js/lib/account.js';
 
@@ -128,6 +129,28 @@ export function createPasskeys({
   // A passkey is for a password account: desktop GitHub and keypair accounts have none.
   const passwordAccount = (user) => !M.p2pOwner?.(user) && db.get('SELECT pass FROM users WHERE id = ?', user)?.pass !== '!';
 
+  // v0.13: a passkey as step-up (server/account.js stepUp {passkey}). {ticket, credential}: the ticket from
+  // /api/passkeys/step, made for this account, single use; one of this account's passkeys with user
+  // verification. The counter is updated as at sign-in, so a copied authenticator trips it here too.
+  setPasskeyStep(db, async (user, proof) => {
+    const c = takeChallenge(typeof proof?.ticket === 'string' ? proof.ticket : '', 'step');
+    if (!c || c.user !== user) return false;
+    const id = typeof proof.credential?.id === 'string' && proof.credential.id.length <= 1400 ? proof.credential.id : '';
+    const row = id ? db.get('SELECT * FROM passkeys WHERE id = ? AND user = ?', id, user) : null;
+    if (!row) return false;
+    const uh = proof.credential?.response?.userHandle;
+    if (uh != null && uh !== db.get('SELECT handle FROM passkey_users WHERE user = ?', user)?.handle) return false;
+    let v;
+    try {
+      v = verifyAuthentication({ credential: proof.credential, challenge: c.challenge, origins: c.origins, rpId: c.rpId, passkey: { id: row.id, jwk: JSON.parse(row.pub), alg: row.alg, counter: row.counter } });
+    } catch (e) {
+      if (e instanceof WebAuthnError && e.code === 'counter') M.audit?.('passkey.clone', null, user, { ok: false, why: 'passkey' });
+      return false;
+    }
+    db.run('UPDATE passkeys SET counter = ?, backed = ?, used = ? WHERE id = ?', v.counter, v.backedUp ? 1 : 0, Date.now(), row.id);
+    return true;
+  });
+
   // ---------- No session: signing in ----------
   async function open(req, res, path) {
     if (req.method === 'GET' && path === '/api/passkey/config') {
@@ -189,17 +212,35 @@ export function createPasskeys({
     const post = req.method === 'POST';
     if (req.method === 'GET' && path === '/api/passkeys') {
       const p = place(req);
-      sendJson(res, 200, { ok: p.ok, message: p.ok ? null : p.message, passwordAccount: passwordAccount(user), list: listOf(user), max: MAX_PASSKEYS });
+      // userId and rpId (v0.13): so the page can tell the passkey provider about a new name
+      // (PublicKeyCredential.signalCurrentUserDetails). Only once the account has a passkey user id.
+      sendJson(res, 200, {
+        ok: p.ok, message: p.ok ? null : p.message, passwordAccount: passwordAccount(user), list: listOf(user), max: MAX_PASSKEYS,
+        userId: db.get('SELECT handle FROM passkey_users WHERE user = ?', user)?.handle || null, rpId: p.ok ? p.rpId : null,
+      });
       return true;
     }
     if (!post || !path.startsWith('/api/passkeys/')) return false;
     if (!userLimit.take(user)) { error(res, 429, 'You’re going a little fast. Wait a moment and try again.'); return true; }
     const d = await jsonBody(req);
     const step = async () => {
-      const r = await M.stepUp(user, { password: d.password, code: typeof d.code === 'string' ? d.code.replace(/\s/g, '') : '', token: tokenOf(req) });
+      const r = await M.stepUp(user, { password: d.password, code: typeof d.code === 'string' ? d.code.replace(/\s/g, '') : '', passkey: d.passkey ?? undefined, token: tokenOf(req) });
       if (r) error(res, r.status === 429 ? 429 : 401, r.message);
       return !r;
     };
+    // v0.13: a challenge for step-up with one of this account's passkeys (instead of the password and code).
+    if (path === '/api/passkeys/step') {
+      const p = place(req);
+      if (!p.ok) { error(res, 400, p.message); return true; }
+      const have = db.all('SELECT id, transports FROM passkeys WHERE user = ?', user);
+      if (!have.length) { error(res, 400, 'You have no passkeys here. Use your password.'); return true; }
+      const { ticket, challenge } = newChallenge({ kind: 'step', user, rpId: p.rpId, origins: p.origins }, `u:${user}`);
+      sendJson(res, 200, {
+        ticket,
+        options: { challenge, rpId: p.rpId, timeout: CHALLENGE_MS, userVerification: 'required', allowCredentials: have.map((k) => ({ type: 'public-key', id: k.id, transports: JSON.parse(k.transports || '[]') })) },
+      });
+      return true;
+    }
     if (path === '/api/passkeys/begin') {
       if (!passwordAccount(user)) { error(res, 400, 'Passkeys are for accounts that sign in with a password.'); return true; }
       const p = place(req);
