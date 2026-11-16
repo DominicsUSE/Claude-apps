@@ -58,6 +58,8 @@ if (location.protocol === "http:" || location.protocol === "https:") {
       e2eeStoreKey: () => ipcRenderer.invoke("e2ee:storekey").then((r) => (r && typeof r === "object"
         ? { protected: r.protected === true, key: typeof r.key === "string" ? r.key.slice(0, 64) : null, why: String(r.why || "").slice(0, 20) || null }
         : null)),
+      // While this computer's keys are locked and the person removes them: put the secret aside (main.js).
+      e2eeStoreReset: () => ipcRenderer.invoke("e2ee:storekey:reset").then((r) => r === true),
     } : {}),
     show: () => ipcRenderer.send("window:show"),
     getKeepRunning: () => ipcRenderer.invoke("keep:get"),

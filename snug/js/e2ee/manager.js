@@ -80,8 +80,11 @@ const osKey = () => (builtInCode() && typeof window.snugApp?.e2eeStoreKey === 'f
  * recovery key). Nothing is deleted on the server.
  */
 export async function forgetLockedKeys() {
+  const locked = store?.protection() === 'locked';
   store?.close(); store = null;
   await deleteStore(userId());
+  // The desktop app puts aside the secret its key store can't open, so the new keys are protected again.
+  if (locked && builtInCode()) await window.snugApp?.e2eeStoreReset?.().catch(() => false);
   location.reload();
 }
 

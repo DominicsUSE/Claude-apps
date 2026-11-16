@@ -134,6 +134,16 @@ function e2eeStoreSecret() {
   } catch { return { protected: false, why: "unavailable" }; }
   return { protected: true, key };
 }
+// "Remove this computer's keys" while locked (js/e2ee/manager.js forgetLockedKeys): a kept secret that this
+// working key store can't open is put aside as e2ee-store.json.locked, so the keys made next get a new,
+// protected secret instead of none. A key store that is only unavailable now (or a file from a newer version)
+// changes nothing. Another account on this computer sealed under the old secret was locked already and stays so.
+function e2eeStoreReset() {
+  let file = null;
+  try { file = JSON.parse(fs.readFileSync(e2eeStoreFile(), "utf8")); } catch { return false; }
+  if (file?.v !== 1 || !e2eeKeyStore.available() || e2eeStoreSecret().protected) return false;
+  try { fs.renameSync(e2eeStoreFile(), `${e2eeStoreFile()}.locked`); return true; } catch { return false; }
+}
 // A per-launch secret in an httpOnly cookie lets this window sign back in after signing out (F5).
 const resumeSecret = require("crypto").randomBytes(32).toString("base64url");
 
@@ -1214,6 +1224,7 @@ function builtInPage(e) {
 ipcMain.on("page:builtin", (e) => { e.returnValue = builtInPage(e); });
 // The encryption storage key's secret (above): the app's own page only, never a server's own page.
 ipcMain.handle("e2ee:storekey", (e) => (builtInPage(e) ? e2eeStoreSecret() : null));
+ipcMain.handle("e2ee:storekey:reset", (e) => (builtInPage(e) ? e2eeStoreReset() : false));
 // The fallback page (fallback.html): what to say, the server's own page, an app update, or another server.
 const fromFallback = (e) => String(e.senderFrame?.url || "").split(/[?#]/)[0] === FALLBACK;
 ipcMain.handle("fallback:info", (e) => (fromFallback(e) && fallbackInfo ? { ...pinned.fallbackText(fallbackInfo), host: new URL(fallbackInfo.host).host, note: pinned.OWN_PAGE_NOTE(new URL(fallbackInfo.host).host) } : null));

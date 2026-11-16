@@ -1396,6 +1396,7 @@ test("join mode, fallback: an older server gets a local page, never its code sil
   assert.equal(await own.evaluate(() => typeof window.snugApp?.builtIn), "boolean");
   assert.equal(await own.evaluate(() => window.snugApp.builtIn), false, "the server's own code is not the app's");
   assert.equal(await own.evaluate(() => typeof window.snugApp.e2eeStoreKey), "undefined", "and gets no key store secret");
+  assert.equal(await own.evaluate(() => typeof window.snugApp.e2eeStoreReset), "undefined", "and can't put it aside");
   await app.close();
 
   // The choice is remembered for this server and version: next time it opens straight away, with no new note.
@@ -1518,6 +1519,25 @@ test("encryption keys and the OS key store: a 0.12.0 profile is upgraded without
   // 4. A key store again: it opens as before.
   ({ app, page } = await launchWith(userData, { env: { SNUG_KEYSTORE: "test" } }));
   await page.waitForFunction(() => window.snug?.e2ee.E2.status === "ready", null, { timeout: 30000 });
+  await app.close();
+
+  // 5. The key store works but can't open the kept secret (it was reset): locked. Removing this computer's
+  // keys puts that secret aside, so the keys made next are protected by the key store again, not left plain.
+  const kept = JSON.parse(fs.readFileSync(storeFile, "utf8"));
+  fs.writeFileSync(storeFile, JSON.stringify({ ...kept, key: Buffer.from("not a secret this key store kept").toString("base64") }));
+  ({ app, page } = await launchWith(userData, { env: { SNUG_KEYSTORE: "test" } }));
+  await page.waitForSelector(".nav");
+  await page.waitForFunction(() => window.snug.e2ee.E2.support?.reason === "locked", null, { timeout: 30000 });
+  await encryptionPage(page);
+  await page.locator('.e2-locked button:has-text("Remove")').click();
+  await page.locator('.modal[role=dialog] button:has-text("Remove")').click();
+  await page.waitForFunction(() => window.snug?.e2ee.E2.status === "new-device", null, { timeout: 30000 });
+  assert.equal(await page.evaluate(() => window.snug.e2ee.E2.keyStore), "os", "protected by the key store again");
+  const dev5 = await devStore(page);
+  assert.equal(dev5.sk, undefined, "no plain storage key");
+  assert.equal(dev5.skw, "check,salt,v");
+  assert.notEqual(JSON.parse(fs.readFileSync(storeFile, "utf8")).key, JSON.parse(fs.readFileSync(`${storeFile}.locked`, "utf8")).key, "a new secret");
+  assert.equal(fs.existsSync(`${storeFile}.locked`), true, "the secret that couldn't be opened is put aside, not deleted");
   await app.close();
 });
 
