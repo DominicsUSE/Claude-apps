@@ -121,7 +121,7 @@ export function GroupLine({ conv }) {
 export function DirectLine({ conv }) {
   const who = remoteOf(conv);
   if (!who) return null;
-  return html`<span class="p2p-direct" data-tip="Messages go straight between your PCs, encrypted end to end."><${Icon} name="lock" size=${12} />Direct between your PCs · @${atName(S.users[who])}</span>`;
+  return html`<span class="p2p-direct" data-tip="Messages go between your PCs directly, or through the directory's relay when they can't connect; either way they are sealed so only your PC and theirs can read them."><${Icon} name="lock" size=${12} />Direct between your PCs · @${atName(S.users[who])}</span>`;
 }
 
 // Their security code changed without their old PC confirming it (section 6.1).

@@ -711,6 +711,7 @@ test('review H2, L2: an opened envelope shown elsewhere, as someone else, with a
   const MARK = `REPLAY-${Date.now().toString(36)}`;
   await say(robinA, `${MARK} original`);
   await textOf(robinA, `${MARK} original`).waitFor();
+  await msgIdOf(robinA, `${MARK} original`); // the server has it (Arrow Up edits the last one it has)
   await robinA.locator('.main [data-composer] textarea').press('ArrowUp');
   await robinA.locator('.main .msg-edit textarea').fill(`${MARK} edited`);
   await robinA.locator('.main .msg-edit textarea').press('Enter');

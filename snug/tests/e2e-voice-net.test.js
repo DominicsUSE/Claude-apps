@@ -307,13 +307,13 @@ test('adaptive quality: reported loss steps the caps down on that line, steady p
   assert.equal((await statsOf(robin, 'ines')).voiceMax, 64000);
   // Two polls with 12% loss: one step down.
   await robin.evaluate(() => { for (let i = 0; i < 2; i++) window.snug.voiceTest.quality('ines', { loss: 12, rtt: 60 }); });
-  await robin.waitForFunction(async () => { const s = (await window.snug.voiceStats()).ines; return s.level === 1 && s.voiceMax === 32000 && s.caps.camera.maxBitrate === 450000; });
+  await robin.waitForFunction(async () => { const s = (await window.snug.voiceStats()).ines; return s.level === 1 && s.voiceMax === 32000 && s.caps.camera?.maxBitrate === 450000; });
   // Two more with a slow round trip: step 2, fewer pixels.
   await robin.evaluate(() => { for (let i = 0; i < 2; i++) window.snug.voiceTest.quality('ines', { loss: 0, rtt: 700 }); });
-  await robin.waitForFunction(async () => { const s = (await window.snug.voiceStats()).ines; return s.level === 2 && s.voiceMax === 24000 && s.caps.camera.scaleResolutionDownBy === 2; });
+  await robin.waitForFunction(async () => { const s = (await window.snug.voiceStats()).ines; return s.level === 2 && s.voiceMax === 24000 && s.caps.camera?.scaleResolutionDownBy === 2; });
   // Ten good polls: back to full.
   await robin.evaluate(() => { for (let i = 0; i < 10; i++) window.snug.voiceTest.quality('ines', { loss: 0, rtt: 40 }); });
-  await robin.waitForFunction(async () => { const s = (await window.snug.voiceStats()).ines; return s.level === 0 && s.voiceMax === 64000 && s.caps.camera.maxBitrate === 900000 && (s.caps.camera.scaleResolutionDownBy ?? 1) === 1; });
+  await robin.waitForFunction(async () => { const s = (await window.snug.voiceStats()).ines; return s.level === 0 && s.voiceMax === 64000 && s.caps.camera?.maxBitrate === 900000 && (s.caps.camera?.scaleResolutionDownBy ?? 1) === 1; });
 });
 
 // ---------- 4. Hiding your IP behind a relay ----------
