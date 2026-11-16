@@ -18,9 +18,10 @@ goes back to an older version on its own (README, "Install, update, go back").
   wrote it, its pictures and files, and a sticker. Older PCs show it as quoted text with the files.
 - The **data file** keeps the disappearing-messages timer and when each message disappears, so a move to a
   new PC keeps them; messages whose time has passed aren't brought back. 0.11 and 0.12 still read the file.
-- **Erasing your account** now asks friends' PCs that are online to delete their copies of your messages.
-  PCs that are offline at that moment, or that run a changed copy of Snug, keep theirs; the dialog says
-  which friends' PCs are offline.
+- **Erasing your account** now asks friends' PCs that are online to delete their copies of your most recent
+  messages (up to 5,000 with each friend and 2,000 in each group). PCs that are offline at that moment, or
+  that run a changed copy of Snug, keep theirs, and so do older messages; the dialog says which friends' PCs
+  are offline.
 - Fixes: a forward with no note didn't reach a friend's PC; a copy of a friend's file couldn't be passed
   on and could be dropped from the cache; with presence for friends only and an older directory, group
   messages between people who aren't friends waited for a link to reopen.

@@ -1462,8 +1462,9 @@ mode you're in. The short version:
   or erase them with your files, reactions, poll votes, sign-in history and
   security events. Copies other people already have can't always be erased: in
   the desktop app (0.13), friends' PCs that are online are asked to delete
-  their copies, but a PC that is offline then, or runs a changed copy of Snug,
-  keeps them, and so do forwards and screenshots.
+  their copies of your most recent messages (up to 5,000 with each friend and
+  2,000 in each group), but a PC that is offline then, or runs a changed copy
+  of Snug, keeps them, and so do older messages, forwards and screenshots.
 - **What is kept**: sign-in history and security events 30 days
   (`SNUG_LOG_DAYS`), addresses shortened; failed sign-in counters 2 days,
   addresses only as a keyed hash; sessions store the kind of device, never an

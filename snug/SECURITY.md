@@ -237,15 +237,20 @@ built from `js/lib/privacy.js` and `GET /api/privacy` (`server/privacy.js`).
 - Deleting an account can erase what the person wrote (messages, files, reactions, poll votes, sign-in and
   security history); report rows moderators already hold stay. Encrypted database snapshots keep up to 7
   days, so erased content can survive that long in a snapshot. In P2P mode (0.13), before the account is
-  released, each friend's PC gets a delete for each of the person's messages (and groups across PCs a signed
-  delete item); the PC waits up to 8 seconds for those online to take them. A PC that is offline then keeps
-  its copy, and a modified Snug can ignore the request: it is a request, not a guarantee. Deleted messages'
+  released, each friend's PC gets a delete for the person's messages in their conversation (and groups across
+  PCs a signed delete item); the PC waits up to 8 seconds for those online to take them. Only the most recent
+  messages are asked for: up to 5,000 per friend (fewer if that friend's PC already has frames waiting) and
+  2,000 per group, and a member whose PC has 5,000 frames waiting gets none; older ones stay on their PCs. A
+  PC that is offline then keeps its copy, and a modified Snug can ignore the request: it is a request, not a
+  guarantee. Deleted messages'
   text is cleared on those PCs after the usual 10-minute undo window.
 - 0.13 frames between PCs (polls and votes, group-call signalling, forwarded cards) are sent only to PCs
   whose signed profile (or, for group co-members who aren't friends, link-authenticated inventory frame)
   lists the capability. They are checked like other frames: a vote only counts for the voter's own stand-in
   and only before the poll ended, only the poll's author can end it, and group-call signalling is accepted
-  only from members whose stand-in is in that call.
+  only from members whose stand-in is in that call. "Before the poll ended" is judged by the time the voter's
+  PC puts on the vote (at most a minute ahead of the receiving PC's clock), since a vote made offline arrives
+  late and still counts; so a modified PC can backdate a vote and have it counted after the poll ended.
 - A forwarded card from a friend's PC says who wrote the forwarded message, and a modified PC can put any
   name and words there. The receiving PC ties the card to someone's account (their picture and name as this
   PC knows them) only when it holds a message of theirs with those exact words; otherwise the card shows the

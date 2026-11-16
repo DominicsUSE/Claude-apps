@@ -157,7 +157,7 @@ export function EraseChoice({ value, onChange, p2p = false, offline = [] }) {
   return html`<fieldset class="erase-choice">
     <legend>What you wrote</legend>
     ${opt('keep', 'Keep my messages', 'They stay where you wrote them, by “Deleted user”, so conversations still make sense.')}
-    ${opt('erase', 'Erase what I wrote', `Your messages${p2p ? ' on this PC' : ''} (direct ones too), files you uploaded, reactions, poll votes, sign-in history and security log go. They show as “Message deleted”.${p2p ? ' Friends’ PCs that are online now are asked to delete their copies too.' : ''}`)}
+    ${opt('erase', 'Erase what I wrote', `Your messages${p2p ? ' on this PC' : ''} (direct ones too), files you uploaded, reactions, poll votes, sign-in history and security log go. They show as “Message deleted”.${p2p ? ' Friends’ PCs that are online now are asked to delete their copies of your most recent messages too (up to 5,000 with each friend and 2,000 in each group).' : ''}`)}
     ${p2p && value === 'erase' && offline.length > 0 && html`<p class="hint erase-offline">${listOf(offline)}${offline.length === 1 ? '’s PC is' : '’s PCs are'} offline now, so ${offline.length === 1 ? 'it keeps its' : 'they keep their'} copy of your messages.</p>`}
     <p class="hint">${p2p
       ? 'Copies can’t always be erased: a PC that’s offline when you delete, or one running a changed copy of Snug, keeps them, and anyone may have saved or forwarded something.'
