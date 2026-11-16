@@ -200,6 +200,12 @@ test("voice: the camera turns on, and the screen picker shares a screen", async 
   await picker.waitForSelector("button[data-i]", { timeout: 30000 });
   assert.equal(await picker.title(), "Share your screen");
   assert.equal(await picker.evaluate(() => typeof window.snugDesktop), "undefined", "the picker gets no desktop bridge");
+  // A bundled page (not a data: page) whose policy runs only its own script file: no inline script.
+  const pickerCsp = await picker.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content || "");
+  const scriptSrc = (pickerCsp.split(";").map((x) => x.trim()).find((x) => x.startsWith("script-src")) || "");
+  assert.equal(scriptSrc, "script-src 'self'", pickerCsp);
+  assert.ok(picker.url().startsWith("file:") && picker.url().endsWith("/picker.html"), picker.url());
+  assert.equal(await picker.evaluate(() => Object.keys(window.snugPicker || {}).join()), "list", "only the list of what can be shared");
   await choose(picker, ".cancel");
   await page.waitForFunction(() => !window.snug.S.call.screenBusy);
   assert.equal(await page.locator(".stage .vc.scr").getAttribute("aria-pressed"), "false");

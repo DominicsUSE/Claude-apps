@@ -27,6 +27,9 @@ if (updatePage && location.href === updatePage) {
     checkUpdate: () => ipcRenderer.invoke("fallback:update"),
     change: () => ipcRenderer.send("fallback:change"),
   });
+} else if (location.protocol === "file:" && location.href.split(/[?#]/)[0] === ipcRenderer.sendSync("picker:page")) {
+  // picker.html only: what can be shared on screen (main.js pickSource answers only the open picker).
+  contextBridge.exposeInMainWorld("snugPicker", { list: () => ipcRenderer.invoke("picker:list") });
 } else if (location.protocol === "file:" && location.href.split(/[?#]/)[0] === ipcRenderer.sendSync("setup:page")) {
   // sec-desktop: setup.html only (at the address main.js serves it from), not any other file:// page.
   contextBridge.exposeInMainWorld("snugDesktop", {
