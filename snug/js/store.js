@@ -10,7 +10,7 @@ import { plain } from './lib/format.js';
 import { unreadOf, isThread, roomIds } from './lib/attention.js';
 import { upgradePrefs } from './lib/account.js';
 import { dropExpired } from './lib/expiry.js'; // 0.12: disappearing messages
-import { cacheJson, queueOp, replayOp, QUEUED_OPS } from './lib/offline.js'; // 0.12: the device copy and offline changes
+import { cacheJson, queueOp, replayOp, QUEUED_OPS, splitUnsent } from './lib/offline.js'; // 0.12: the device copy and offline changes
 import { landingRoom } from './lib/onboarding.js'; // where a newcomer lands after joining
 
 export const PAGE = 40;
@@ -171,6 +171,11 @@ function ask(op, d) {
   });
 }
 
+// 0.13: encrypted conversations' drafts and unsent messages never go to localStorage as text.
+// js/e2ee/local.js sets these: private(conv) says which conversations; keep() seals what they have.
+export const unsentHooks = { private: null, keep: null };
+const isPrivate = (conv) => !!unsentHooks.private?.(conv);
+
 // Change notification and the device copy
 const subs = new Set();
 let queued = false;
@@ -181,7 +186,7 @@ function cacheData() {
   const out = {};
   for (const k of DATA) out[k] = S[k];
   // Local image previews are only valid in this tab; decrypted messages are kept as envelopes only.
-  return cacheJson(out);
+  return cacheJson(out, undefined, unsentHooks.private ? (conv, m) => !!m.state && isPrivate(conv) : null);
 }
 // Long conversations (0.12): what has been scrolled far back, or piled up in a
 // conversation that isn't open, is let go once it's all been read; scrolling
@@ -236,9 +241,11 @@ export function persist() {
     if (sweepExpired()) emit();
     releaseBackground();
     local.set(KEYS.prefs, S.prefs);
-    local.set(KEYS.drafts, S.drafts);
-    local.set(KEYS.reply, S.ui.reply);
-    local.set(KEYS.files, S.draftFiles);
+    const { open } = splitUnsent({ drafts: S.drafts, reply: S.ui.reply, files: S.draftFiles }, isPrivate);
+    local.set(KEYS.drafts, open.drafts);
+    local.set(KEYS.reply, open.reply);
+    local.set(KEYS.files, open.files);
+    unsentHooks.keep?.();
     if (!cacheTimer) cacheTimer = setTimeout(writeCache, Math.max(0, 2000 - (Date.now() - cacheAt)));
   }, 400);
 }

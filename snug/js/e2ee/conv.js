@@ -26,6 +26,7 @@ import { encryptFile, decryptFile } from '../lib/e2ee/attach.js';
 import { sniff } from '../lib/sniff.js';
 import { mentions } from '../lib/format.js';
 import { E2, ring, readyHooks, pinHooks } from './manager.js';
+import './local.js'; // drafts and unsent messages of encrypted conversations, sealed (review L2)
 
 // ---------- which conversations are encrypted ----------
 /** The DM a conversation lives in (itself, or the DM a thread hangs off), or null for rooms. */
@@ -141,6 +142,11 @@ async function recipients(users, fresh) {
 
 // ---------- attachments ----------
 const fileKeys = new Map(); // uploaded file id -> body part { k, n, csha, name, type, size }
+// An unsent message's attachment keys, kept sealed with it across a reload (js/e2ee/local.js).
+export const fileKeyOf = (id) => fileKeys.get(id) || null;
+export function keepFileKey(id, part) {
+  if (typeof id === 'string' && part && typeof part.k === 'string' && typeof part.n === 'string' && !fileKeys.has(id)) fileKeys.set(id, part);
+}
 const blobs = new Map(); // file id -> blob: URL of the decrypted bytes
 const kindOf = (type, voice) => (type.startsWith('image/') ? 'image' : type.startsWith('video/') ? 'video' : type.startsWith('audio/') || voice ? 'audio' : 'file');
 const SHOWABLE = { 'image/png': 1, 'image/jpeg': 1, 'image/gif': 1, 'image/webp': 1 };

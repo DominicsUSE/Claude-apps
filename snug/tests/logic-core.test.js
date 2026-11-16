@@ -164,3 +164,26 @@ test('SVG sniffing: the prolog is skipped piece by piece, and hostile prologs st
   looksLikeSvg(`${'<!---->'.repeat(300)}x`);
   assert.ok(performance.now() - t0 < 200);
 });
+
+// 0.13 (review L2): drafts, replies and unsent messages of encrypted conversations never go to localStorage.
+import { splitUnsent } from '../js/lib/offline.js';
+test('the device copy leaves out what an encrypted conversation has unsent; drafts split by conversation', () => {
+  const isPrivate = (c) => c === 'd_enc' || c === 't:m_root';
+  const s = splitUnsent({
+    drafts: { r_room: 'hello room', d_enc: 'SECRET draft', 't:m_root': 'SECRET thread' },
+    reply: { r_room: 'm_1', d_enc: 'm_2' },
+    files: { r_room: [{ id: 'f_1' }], d_enc: [{ id: 'f_2', name: 'SECRET.png' }] },
+  }, isPrivate);
+  assert.deepEqual(s.open, { drafts: { r_room: 'hello room' }, reply: { r_room: 'm_1' }, files: { r_room: [{ id: 'f_1' }] } });
+  assert.deepEqual(Object.keys(s.sealed.drafts).sort(), ['d_enc', 't:m_root']);
+  assert.deepEqual(s.sealed.reply, { d_enc: 'm_2' });
+  const data = { me: 'u_me', msgs: {
+    d_enc: [{ id: 'm_a', author: 'u_me', text: 'SECRET queued', state: 'queued' }, { id: 'm_b', author: 'u_x', text: '', e2ee: { h: {} } }],
+    r_room: [{ id: 'm_c', author: 'u_me', text: 'room queued', state: 'queued' }],
+  } };
+  const json = cacheJson(data, undefined, (conv, m) => !!m.state && isPrivate(conv));
+  assert.equal(json.includes('SECRET'), false);
+  assert.ok(json.includes('room queued'), 'a room keeps its waiting messages in the copy, as before');
+  assert.ok(json.includes('m_b'), 'delivered envelopes stay');
+  assert.ok(cacheJson(data).includes('SECRET queued'), 'without the rule nothing is left out (0.12 behaviour)');
+});

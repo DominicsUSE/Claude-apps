@@ -12,9 +12,12 @@
 
 export const CACHE_PER_CONV = 40;
 
-export function trimForCache(data, keep = CACHE_PER_CONV) {
+// skip(conv, m): messages left out of the copy altogether (0.13: unsent ones in encrypted conversations,
+// which js/e2ee/local.js keeps sealed instead).
+export function trimForCache(data, keep = CACHE_PER_CONV, skip = null) {
   const out = { ...data, msgs: {}, more: { ...(data.more || {}) }, cache: {} };
-  for (const [conv, list] of Object.entries(data.msgs || {})) {
+  for (const [conv, all] of Object.entries(data.msgs || {})) {
+    const list = skip ? all.filter((m) => !skip(conv, m)) : all;
     if (list.length <= keep) { out.msgs[conv] = list; continue; }
     const cut = list.length - keep;
     out.msgs[conv] = list.filter((m, i) => i >= cut || m.state);
@@ -28,8 +31,8 @@ export function trimForCache(data, keep = CACHE_PER_CONV) {
 // sits (conversations, pins, saved, the scheduled list). Local previews (blob: URLs) only work in
 // this tab, so they are left out too.
 const OPENED = ['text', 'files', 'sticker', 'fwd', 'enc', 'encRev', 'encFlags', 'encWhy', 'k'];
-export function cacheJson(data, keep = CACHE_PER_CONV) {
-  return JSON.stringify(trimForCache(data, keep), (k, v) => {
+export function cacheJson(data, keep = CACHE_PER_CONV, skip = null) {
+  return JSON.stringify(trimForCache(data, keep, skip), (k, v) => {
     if (k === 'src' && typeof v === 'string' && v.startsWith('blob:')) return undefined;
     if (v && typeof v === 'object' && !Array.isArray(v) && v.e2ee && typeof v.id === 'string') {
       const out = { ...v };
@@ -81,4 +84,16 @@ export function replayOp(S, op, d) {
     if (room) room.highlights = d.on ? [d.id, ...room.highlights.filter((x) => x !== d.id)] : room.highlights.filter((x) => x !== d.id);
   }
   // msg.restore: the snapshot has no deleted message to put back; the server's reply brings it.
+}
+
+// What this device keeps for a conversation that isn't sent yet (0.13): drafts, what each replies to, and
+// attachments uploaded for a draft are split by conversation. For a private one (end-to-end encrypted, or
+// seen encrypted) they never go to localStorage: js/e2ee/local.js keeps the text and reply sealed, and a
+// private draft's attachments stay in this tab only. { open, sealed } with the same fields.
+export function splitUnsent({ drafts = {}, reply = {}, files = {} }, isPrivate) {
+  const open = { drafts: {}, reply: {}, files: {} }, sealed = { drafts: {}, reply: {}, files: {} };
+  for (const [k, src] of Object.entries({ drafts, reply, files })) {
+    for (const [conv, v] of Object.entries(src || {})) (isPrivate(conv) ? sealed : open)[k][conv] = v;
+  }
+  return { open, sealed };
 }
