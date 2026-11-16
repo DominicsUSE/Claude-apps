@@ -227,9 +227,9 @@ test('H3: a GitHub account\'s first recovery key waits 7 days; the GitHub accoun
 test('H3: an armed forced move completes only for the key it was armed for', async () => {
   const owner = await theOwner();
   const g = await reg.signUp(nextGh++, uniq('ghfo'));
-  // no move waiting and no key named: nothing to bind the force to
+  // no key named: refused (second pass: never "whatever move is waiting now")
   const none = await adm(owner, { a: 'move.force', uid: g.uid });
-  assert.equal(none.status, 404, JSON.stringify(none.body));
+  assert.equal(none.status, 400, JSON.stringify(none.body));
   const mine = makeKeys();
   const armed = await adm(owner, { a: 'move.force', uid: g.uid, ik: mine.ik });
   assert.equal(armed.body.state, 'armed', JSON.stringify(armed.body));
@@ -304,9 +304,11 @@ test('M6: proof-of-work challenges count per /48; sign-ups also count per IPv6 /
     for (let i = 0; i < 20; i++) assert.equal((await R.call('/v1/pow', { purpose: 'register' }, { ip: `2001:db8:77:${i.toString(16)}::1` })).status, 200);
     assert.equal((await R.call('/v1/pow', { purpose: 'register' }, { ip: '2001:db8:77:ff::1' })).status, 429, 'the same /48');
     for (let i = 0; i < 4; i++) await account(uniq('w'), { R, ipAddr: `2001:db9:${(i + 1).toString(16)}::1` });
-    const fifth = await register(uniq('w'), { R, ipAddr: '2001:db9:99::1' });
-    assert.equal(fifth.res.status, 429, 'the same /32');
-    assert.equal((await register(uniq('w'), { R, ipAddr: '2001:dba:1::1' })).res.status, 200, 'another /32');
+    // second pass: the /32 count raises the proof of work instead of refusing (identity-fixes2.test.js)
+    const pw = (await R.call('/v1/pow', { purpose: 'register' }, { ip: '2001:db9:99::1' })).body;
+    assert.ok(pw.bits > 2, `the same /32: ${pw.bits} bits`);
+    assert.equal((await register(uniq('w'), { R, ipAddr: '2001:db9:99::1', pw })).res.status, 200, 'still allowed');
+    assert.equal((await R.call('/v1/pow', { purpose: 'register' }, { ip: '2001:dba:1::1' })).body.bits, 2, 'another /32');
   } finally {
     await R.close();
   }

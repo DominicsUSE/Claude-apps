@@ -20,7 +20,10 @@ export const DEFAULT_LIMITS = {
   ipVault: [30, HOUR],
   ipPow: [20, HOUR], // v0.12 keypair accounts (keyacct.js): proof-of-work challenges
   ipRegister: [3, DAY], // v0.12: keypair sign-ups per /48 (persisted)
-  ipRegisterWide: [20, DAY], // v0.12 review M6: keypair sign-ups per IPv6 /32 (persisted; IPv4: the address)
+  // v0.12 review M6: keypair sign-ups per IPv6 /32 (persisted; IPv4: the address). Second pass: not a cap; at
+  // this count in a day the proof of work of that /32 gets harder (keyacct.js wideBits).
+  ipRegisterWide: [20, DAY],
+  ipRegTry: [30, HOUR], // v0.12 review (second pass): sign-up attempts per /48 (memory), name refusals included
   ipMoveWait: [60, MIN], // v0.12: a new PC polling for its pairing code
   // global (SQLite)
   authGlobal: [300, HOUR], // tokens GitHub accepted (REG-M4)
@@ -153,6 +156,17 @@ export class Budgets {
       this._store(c, ahead);
     }
     return true;
+  }
+  /** Give one back (a refused call that should not count). The stored value stays ahead: a wake can't refund. */
+  refund(uid, kind, ms) {
+    const c = this._get(uid, kind, ms);
+    if (c.n > 0) c.n -= 1;
+  }
+  /** Count one and store it at once (rare events that must survive a wake, with no cap). */
+  count(uid, kind, ms) {
+    const c = this._get(uid, kind, ms);
+    c.n += 1;
+    this._store(c, c.n);
   }
   /** Add without a cap (usage counters). */
   bump(uid, kind, ms, amount = 1) {

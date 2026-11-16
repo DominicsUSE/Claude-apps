@@ -108,7 +108,7 @@ export function ipPrefix(ip, groups = 4) {
 }
 // sec-registry REG-M4: the sign-in and account limits count a whole IPv6 /48 as one address (a /64 is
 // nearly free to get many of); every other limit keeps the /64.
-const WIDE_KINDS = new Set(['ipAuth', 'ipAccount', 'ipRegister', 'ipPow']); // v0.12 review M6: ipPow too
+const WIDE_KINDS = new Set(['ipAuth', 'ipAccount', 'ipRegister', 'ipPow', 'ipRegTry']); // v0.12 review M6: ipPow too
 // v0.12 review M6: keypair sign-ups also count per IPv6 /32 (a /48 is free from tunnel brokers; IPv4: the address).
 const WIDER_KINDS = new Set(['ipRegisterWide']);
 // sec-registry REG-L3: these per-address limits live in SQLite (the Budgets table, keyed by the HMACed
@@ -195,6 +195,10 @@ export class Hub {
   /** Spends one of a persisted per-address budget once the call has succeeded. */
   ipSpend(kind, ip) {
     if (!this.budgets.take(`ip:${this.ipKeyOf(kind, ip)}`, kind, this.L[kind])) fail('rate_limited', { retryAfter: this.retryAfter(this.L[kind][1]) });
+  }
+  /** Gives back one of a persisted per-address budget taken by ipLimit (v0.12 review, second pass). */
+  ipRefund(kind, ip) {
+    if (PERSIST_KINDS.has(kind)) this.budgets.refund(`ip:${this.ipKeyOf(kind, ip)}`, kind, this.L[kind][1]);
   }
   ipLimit(kind, ip) {
     ip = this.ipKeyOf(kind, ip);

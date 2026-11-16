@@ -450,12 +450,13 @@ export const AdminMixin = {
   },
 
   /**
-   * sec-registry REG-M2. {uid, fp? | ik?}: a pending move completes now (unapproved: prev = null, so friends
-   * see a loud key change). v0.12 review H3: the force is bound to one key. Without fp/ik it completes the
-   * move waiting right now and nothing else (no move waiting: not_found). With fp (the security code the new
-   * PC shows) or ik (its device key), the account's next move of exactly that key within 7 days completes at
+   * sec-registry REG-M2. {uid, fp | ik}: a pending move completes now (unapproved: prev = null, so friends
+   * see a loud key change). v0.12 review H3: the force is bound to one key, fp (the security code the new
+   * PC shows) or ik (its device key): the account's next move of exactly that key within 7 days completes at
    * once, past the 24 h block and the old key's Stop; a move of that key already waiting completes now.
-   * Moves of any other key get the normal wait.
+   * Moves of any other key get the normal wait. Second pass: {uid} alone is refused (bad_request), since
+   * someone with the recovery key or the GitHub login can swap their own key into the waiting move between
+   * the owner checking the account and running the force.
    * Owner only; never on the owner.
    */
   adm_move_force(d, ctx) {
@@ -464,18 +465,18 @@ export const AdminMixin = {
     const fp = d.fp === undefined ? null : normFp(d.fp);
     if (d.fp !== undefined) need(fp && d.ik === undefined);
     const bind = d.ik !== undefined ? `ik:${d.ik}` : fp ? `fp:${fp}` : null;
+    if (!bind) fail('bad_request', { message: 'Name the new PC: fp (its security code) or ik.' });
     const t = this.targetAcc(d.uid, ctx);
     const now = this.now();
     const p = this.pending(t.uid);
     const same = bind === `ik:${p?.ik}` || (ctx.pendFp?.ik === p?.ik && bind === `fp:${ctx.pendFp?.fp}`);
-    if (p && (!bind || same)) {
+    if (p && same) {
       ctx.detail = { state: 'done' };
       this.markForcedOld(t);
       this.markVaultRotate(t.ghh); // REG-L1: the forced-out device holds the old vault key
       ctx.after = () => this.completeRebind(t.uid, null);
       return { state: 'done' };
     }
-    if (!bind) fail('not_found', { what: 'move' }); // nothing waiting to bind the force to
     this.tx(() => {
       this.sql.exec('INSERT OR REPLACE INTO move_force(ghh, until, by, at) VALUES(?,?,?,?)', t.ghh, now + FORCE_FOR, ctx.acc.uid, now);
       this.sql.exec('INSERT OR REPLACE INTO move_force_key(ghh, k) VALUES(?,?)', t.ghh, bind);
