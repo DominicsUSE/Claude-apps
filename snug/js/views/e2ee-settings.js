@@ -8,6 +8,7 @@ import { Icon } from '../ui/icons.js';
 import { Switch } from '../ui/kit.js';
 import { Confirm } from './modals.js';
 import { E2, removeDevice, setHistory, newRecoveryKeyFlow, deviceKind, resetEncryption, keysExposed, repairMeta, forgetLockedKeys } from '../e2ee/manager.js';
+import { renewDevice, deviceKeySealed } from '../e2ee/manager.js'; // 0.14: this device's keys sealed under the OS key store
 import { COPY } from '../lib/e2ee/copy.js';
 import { SetupSheet, RecoveryKeyScreen } from './e2ee-setup.js';
 import { LinkScreen, RecoverScreen } from './e2ee-link.js';
@@ -156,6 +157,14 @@ function EncryptionPage({ Row }) {
     title: 'Make a new recovery key?', text: 'Your old recovery key stops working. Save the new one somewhere safe.', action: 'Make a new key',
     onConfirm: () => keyChange(newRecoveryKeyFlow),
   });
+  // 0.14: a desktop device made before 0.14 keeps its signing key as a plain browser key; renewing re-adds it under sealed keys.
+  const others = (E2.me?.devices || []).filter((x) => x.state === 'trusted' && x.d !== E2.device?.d).length;
+  const canRenew = ready && deviceKind() === 'app' && E2.keyStore === 'os' && !deviceKeySealed() && others > 0;
+  const renew = () => openModal(Confirm, {
+    title: 'Renew this computer’s key?', action: 'Renew',
+    text: 'This computer is removed from your devices and added again with new keys that its system key store protects. You’ll approve it from another device, or use your recovery key. Your messages stay.',
+    onConfirm: () => renewDevice().catch((e) => toast(failText(e))),
+  });
   const exposed = () => openModal(Confirm, {
     title: `${COPY.exposedTitle}?`, text: COPY.exposedBody, action: COPY.exposedAction,
     onConfirm: () => keyChange(keysExposed),
@@ -178,6 +187,9 @@ function EncryptionPage({ Row }) {
         <${Switch} on=${hist} label=${COPY.history} disabled=${busy} onChange=${flip} />
       <//>`}
     ${(ready || E2.status === 'pending' || E2.status === 'new-device') && html`<${Devices} Row=${Row} />`}
+    ${canRenew && html`<${Row} label="Renew this computer’s key" hint="This computer’s device key was made before Snug kept device keys under the system key store, so a copy of Snug’s data folder includes it. Renewing makes new keys that the key store protects." top>
+      <button class="btn" id="e2-renew" onClick=${renew}>Renew</button>
+    <//>`}
     ${ready && html`<${Row} label=${COPY.exposedTitle} hint=${COPY.exposedBody} top>
       <button class="btn" onClick=${exposed}>${COPY.exposedAction}</button>
     <//>`}

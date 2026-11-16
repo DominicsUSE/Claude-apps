@@ -29,7 +29,7 @@ export const COPY = {
 
   browserNote: 'In a browser, Snug’s code comes from this server each time you open it. Whoever runs the server could change it to read your messages. The Snug app uses its own built-in code.',
   plainHttp: 'This server’s address isn’t https. Encrypted messages and attachments stay encrypted, but everything else (your password, room messages, names, who talks to whom) crosses the network readable to anyone on it.',
-  storageNote: 'Script running in Snug’s page can use the keys on this device. They can’t be copied out of the browser, but your account keys (needed on all your devices) can be read by that script.',
+  storageNote: 'Script running in Snug’s page can use the keys on this device and read your account keys (needed on all your devices). In a browser, this device’s own keys can’t be copied out; in the app, they are sealed with the system key store, which that script can open too.',
   unsupported: {
     insecure: 'This address isn’t secure (http), so the browser won’t do encryption here. Use the https address, or the Snug app.',
     old: 'This browser is too old for end-to-end encryption. Update it, or use the Snug app.',

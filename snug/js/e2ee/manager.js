@@ -25,7 +25,7 @@ import { sealKey, openKey } from '../lib/e2ee/hpke.js';
 import { safetyNumber } from '../lib/e2ee/fingerprint.js';
 import { supported } from '../lib/e2ee/support.js';
 import { newRecoveryKey, parseRecoveryKey, deriveBackupKey } from '../lib/recovery.js';
-import { openStore, deleteStore, memStore, StoreLocked } from './store.js';
+import { sharedStore, deleteStore, memStore, StoreLocked } from './store.js'; // 0.14: one store shared with the device copy (js/devicecopy.js)
 import { metaCheck, listCheck, metaWriteVer } from '../lib/e2ee/highwater.js';
 import { random } from '../lib/e2ee/bytes.js';
 
@@ -89,26 +89,73 @@ export async function forgetLockedKeys() {
 }
 
 // --- this device's keys ------------------------------------------------------
+// 0.14: where the storage key is under the OS key store (the desktop app), a new signing key and new prekeys
+// are made extractable only to be sealed at once: PKCS#8 under the storage key in the device record, imported
+// non-extractable for use when the keys are opened. IndexedDB then holds no usable private key for them, so a
+// copy of the data folder without the key store's secret opens nothing sent to this device. Keys made before
+// stay as they were: old prekeys age out (14 days after retiring); the signing key is renewed by re-adding
+// the device (renewDevice).
+const sealsKeys = () => store?.protection?.() === 'os';
+const dskLabel = (d) => `snug-e2ee-v1/dsk\n${d}`;
+const prekeyLabel = (d, kid) => `snug-e2ee-v1/prekey\n${d}\n${kid}`;
+async function sealPrivate(label, priv, importer) {
+  const pkcs8 = await sig.pkcs8Of(priv);
+  try { return { box: await store.sealBytes(label, pkcs8), key: await importer(pkcs8) }; } finally { pkcs8.fill(0); }
+}
+async function openPrivate(label, box, importer) {
+  const pkcs8 = await store.openBytes(label, box);
+  try { return await importer(pkcs8); } finally { pkcs8.fill(0); }
+}
+const importDh = (pub) => async (pkcs8) => (await sig.importDhPair(pkcs8, await sig.rawPublic(pub))).privateKey;
 async function makeDevice() {
   const d = obj.newDeviceId();
-  const dsk = await sig.newSigningPair(false);
-  const nd = { d, dsk, dskPub: b64u(await sig.rawPublic(dsk.publicKey)), label: deviceLabel(), kind: deviceKind(), kid: 0, prekeys: {} };
+  const sealed = sealsKeys();
+  let dsk = await sig.newSigningPair(sealed), dskSealed = null;
+  if (sealed) {
+    const s = await sealPrivate(dskLabel(d), dsk.privateKey, (k) => sig.importSigning(k));
+    dsk = { publicKey: dsk.publicKey, privateKey: s.key };
+    dskSealed = s.box;
+  }
+  const nd = { d, dsk, dskPub: b64u(await sig.rawPublic(dsk.publicKey)), label: deviceLabel(), kind: deviceKind(), kid: 0, prekeys: {}, ...(dskSealed ? { dskSealed } : {}) };
   await addPrekey(nd);
   return nd;
 }
 async function addPrekey(target) {
-  const pair = await sig.newDhPair(false);
+  const sealed = sealsKeys();
+  let pair = await sig.newDhPair(sealed), box = null;
   const kid = target.kid + 1;
+  if (sealed) {
+    const s = await sealPrivate(prekeyLabel(target.d, kid), pair.privateKey, importDh(pair.publicKey));
+    pair = { publicKey: pair.publicKey, privateKey: s.key };
+    box = s.box;
+  }
   const t = Date.now();
   const signed = await obj.makePrekey(target.dsk.privateKey, { u: userId(), d: target.d, kid, pub: b64u(await sig.rawPublic(pair.publicKey)), ts: t });
   for (const p of Object.values(target.prekeys)) if (!p.retired) p.retired = t;
-  target.prekeys[kid] = { pair, signed, created: t, retired: null };
+  target.prekeys[kid] = { pair, signed, created: t, retired: null, ...(box ? { sealed: box } : {}) };
   target.kid = kid;
   return signed;
 }
+// The device record as kept: sealed private keys without their in-memory CryptoKey.
+const kept = (x) => x && ({
+  ...x,
+  dsk: x.dskSealed ? { publicKey: x.dsk.publicKey } : x.dsk,
+  prekeys: Object.fromEntries(Object.entries(x.prekeys || {}).map(([kid, p]) => [kid, p.sealed ? { ...p, pair: { publicKey: p.pair.publicKey } } : p])),
+});
+// The device record opened: sealed private keys imported, non-extractable.
+async function opened(x) {
+  if (!x) return x;
+  if (x.dskSealed && !x.dsk?.privateKey) x.dsk = { publicKey: x.dsk.publicKey, privateKey: await openPrivate(dskLabel(x.d), x.dskSealed, (k) => sig.importSigning(k)) };
+  for (const [kid, p] of Object.entries(x.prekeys || {})) {
+    if (p.sealed && !p.pair?.privateKey) p.pair = { publicKey: p.pair.publicKey, privateKey: await openPrivate(prekeyLabel(x.d, kid), p.sealed, importDh(p.pair.publicKey)) };
+  }
+  return x;
+}
+/** 0.14: whether this device's signing key is sealed under the storage key (made in a 0.14 desktop app). */
+export const deviceKeySealed = () => !!dev?.dskSealed;
 const entryOf = (x) => ({ d: x.d, dsk: x.dskPub, kind: x.kind, label: x.label, added: Date.now() });
 const publicOf = (x) => ({ d: x.d, dsk: x.dskPub, label: x.label, kind: x.kind });
-const save = () => store.putDevice(dev);
+const save = () => store.putDevice(kept(dev));
 
 async function bindHere() {
   const nonce = S.e2ee?.nonce;
@@ -149,7 +196,7 @@ async function onHello(d) {
   if (!E2.on && info.me.state === 'none') { E2.status = 'off'; emit(); return; }
   E2.support ||= await supported().catch(() => ({ ok: false, reason: 'old' }));
   if (!E2.support.ok) { E2.status = 'unsupported'; emit(); return; }
-  try { store ||= await openStore(userId(), osKey()); } catch { E2.support = { ok: false, reason: 'storage' }; E2.status = 'unsupported'; emit(); return; }
+  try { store ||= await sharedStore(userId(), osKey()); } catch { E2.support = { ok: false, reason: 'storage' }; E2.status = 'unsupported'; emit(); return; }
   // The storage key (js/e2ee/store.js): under the OS key store in the desktop app; locked if that store can't open it now.
   try { await store.ready(); } catch (e) {
     E2.keyStore = store.protection();
@@ -157,7 +204,7 @@ async function onHello(d) {
   }
   E2.keyStore = store.protection();
   if (E2.support?.reason === 'locked') E2.support = { ok: true };
-  dev = await store.getDevice();
+  dev = await opened(await store.getDevice());
   const known = dev && info.me.devices.find((x) => x.d === dev.d);
   if (dev && !known) {
     // Removed from another device, reset, or a request that ran out: start over on this device.
@@ -386,6 +433,24 @@ export async function removeDevice(d) {
   await refreshMe();
   emit();
   return { recoveryKey: x.rk?.text || null };
+}
+
+/**
+ * 0.14 "Renew this device's key": a signing key made before 0.14 can't be exported to be sealed, so this
+ * device is removed (a new history key, as for any removal) and added again, with another device or the
+ * recovery key, under new keys sealed by the OS key store. Offered in the desktop app while another trusted
+ * device remains to approve it, or a recovery key can.
+ */
+export async function renewDevice() {
+  const { list, prekeys } = await ownList();
+  const x = await nextKeys(list, list.devs.filter((e) => e.d !== dev.d), prekeys, { epoch: true, sync: false, bk: false });
+  await call('e2ee.device.remove', { d: dev.d, devlist: x.devlist, boxes: x.boxes, backup: x.backup, ...(x.meta ? { meta: x.meta } : {}) });
+  await forgetLocal();
+  local.set(askedKey(), null);
+  local.set(skipKey(), null);
+  Object.assign(E2, { status: 'new-device', device: null, prompt: 'new-device' });
+  await refreshMe();
+  emit();
 }
 
 /**

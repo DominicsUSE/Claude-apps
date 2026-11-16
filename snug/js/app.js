@@ -45,6 +45,7 @@ import { openMessageLink } from './views/chat.js'; // message links: /m/<convers
 import { orderDms } from './inbox.js'; // server unread counts, groups leaving, timed mutes; the Messages order (js/inbox.js)
 import { newcomerSees } from './lib/onboarding.js'; // which rooms a newcomer's sidebar lists
 import './landmarks.js'; // Skip to messages, F6 between regions
+import './devicecopy.js'; // 0.14: the desktop app keeps this device's copy of messages sealed under its storage key
 import { E2, safetyFor } from './e2ee/manager.js'; // end-to-end encryption on this device
 import { E2eeHost, OwnAddedAlert } from './views/e2ee-setup.js'; // opens the encryption sheets when they're needed
 import './e2ee/conv.js'; // end-to-end encrypted conversations: sealing and opening messages
@@ -456,11 +457,11 @@ async function boot() {
     S.ice = r.ice;
     S.version = r.version; // 0.12: the server's version (Settings)
     S.auth = 'in';
-    loadCache(r.user.id);
+    await loadCache(r.user.id); // 0.14: the sealed device copy opens asynchronously (js/devicecopy.js)
     startTransport();
   } catch (e) {
     if (e.status === 401) S.auth = 'out';
-    else if (loadCache()) { S.auth = 'in'; startTransport(); } else S.auth = 'unreachable';
+    else if (await loadCache()) { S.auth = 'in'; startTransport(); } else S.auth = 'unreachable';
   }
   emit();
 }
