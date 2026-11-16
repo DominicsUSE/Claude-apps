@@ -23,6 +23,9 @@ goes back to an older version on its own (README, "Install, update, go back").
   browser storage isn't protected against someone copying the profile. Off keeps the copy in this tab only.
 - Tests check that saving, using and adopting a recovery key never sends the key, its text or its backup
   key, and that what the server keeps can't open the encryption backup.
+- **Going back to 0.13 or older**: files 0.14 stored or sealed can't be opened there (attachments, avatars,
+  stickers, emoji, sounds, link-preview pictures), and the desktop app's copy of messages, drafts and changes
+  waiting to send don't carry back. Returning to 0.14 makes them readable again.
 
 ## 0.13.0
 

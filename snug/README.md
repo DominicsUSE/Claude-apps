@@ -118,7 +118,14 @@ from **Settings > Desktop app**). Every release's notes carry the same steps.
   desktop app's encryption keys under the system key store, 0.12 can't open
   them, so encrypted messages can't be read in that app until it is updated
   again, or until that computer is removed from another device (Settings >
-  Encryption) and added again. Because updates are required, the app
+  Encryption) and added again. Going back from 0.14 to 0.13 or older: files
+  0.14 stored (attachments, avatars, stickers, emoji, sounds, link-preview
+  pictures, and older files once the background job has sealed them, within
+  hours) can't be opened by the older version, and the desktop app's copy of
+  messages, drafts and changes waiting to send don't carry back (0.14 moved
+  them into sealed storage). Turning off `SNUG_FILES_REENCRYPT` doesn't prevent
+  this, since new files are always sealed. Returning to 0.14 makes them
+  readable again. Because updates are required, the app
   takes the newest release again at its next check, so a person can go back
   only for a while. **To stop a broken release for everyone**, the owner edits
   it on GitHub and ticks **Set as a pre-release** (or saves it as a draft): the
