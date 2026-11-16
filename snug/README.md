@@ -1301,7 +1301,23 @@ server stores only ciphertext and refuses plain text there, so a stale tab or an
 version can't quietly send readable messages. Each device signs what it sends; each
 account signs its list of devices; safety numbers (in a conversation's Details) let
 two people check that nobody, the server included, put different keys between them.
-Removed devices and people who leave get nothing sent after that.
+When someone's safety number changes or they add or remove a device, a line says so
+in your conversations with them and stays there. Each device remembers (encrypted on
+the device) what it has seen: your synced settings, your device list, each contact's
+keys and devices, and which conversations are encrypted. If the server later shows
+something older, or says an encrypted conversation isn't encrypted any more, Snug
+says so and won't send there in plain text. A message the server puts into an
+encrypted conversation without encryption shows "Not encrypted – delivered by the
+server". People who leave get nothing sent after that.
+
+**Removing a device.** A removed device gets no new messages, and history and synced
+settings sent from then on use new keys it doesn't have. It keeps what it already
+had, including your account keys. If it was lost or stolen, tick "It was lost or
+stolen": Snug also makes a new recovery key, because until then whoever has the
+device and your password could open your recovery backup. Someone who had a stolen
+device can still use your account key; only "Reset encryption" replaces that.
+"My keys may be exposed" (Settings > Encryption) makes new history, settings and
+recovery keys for what is sent from then on.
 
 **What the server still sees.** Who talks to whom and when, how many messages and
 roughly how long (sizes are padded), who is in each group, group names and icons,
@@ -1324,8 +1340,11 @@ and call signalling. Push notifications say only "New message".
   default), a new device or the recovery key opens earlier messages too, so someone
   who later gets an unlocked device of yours, or your recovery key and password, can
   read that history. There is no per-message forward secrecy: Snug does not use a
-  ratchet. History keys and device prekeys are replaced weekly, so someone who copied
-  a device's keys once and lost access stops reading new messages within about a week.
+  ratchet, and nothing recovers by itself after keys were copied. Device prekeys are
+  replaced weekly, but senders may still use one for up to 30 days, and the account
+  keys (identity, history, synced settings, recovery backup key) stay valid until you
+  remove the device, use "My keys may be exposed", or reset. Someone who copied a
+  device's keys can keep reading what is sealed to them until then.
 - *Endpoints and people.* A compromised device, or anyone in the conversation, can
   read, copy or screenshot what they receive.
 - *Messages from before.* Messages sent before a conversation turned encrypted stay

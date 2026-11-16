@@ -185,7 +185,8 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
   }
   const metaOk = (m) => (typeof m === 'string' && m.length <= MAX_BLOB && b64uOf(m) ? m : fail('Those settings aren’t valid.'));
   const listEntry = (list, d) => list.devs.find((x) => x.d === d);
-  // A list's devices must be this account's registered devices, with the keys and labels they registered.
+  // A list's devices must be this account's registered devices, with the signing keys and kinds they
+  // registered (labels aren't compared: the account key signs them, and the link code's tag covers them).
   function devicesMatch(u, list, allowPending = null) {
     for (const e of list.devs) {
       const row = deviceRow(e.d);
