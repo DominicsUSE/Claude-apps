@@ -138,7 +138,17 @@ function capBitrate(p) {
         if (want.maxFramerate) enc.maxFramerate = want.maxFramerate; else delete enc.maxFramerate;
         enc.active = want.active !== false;
       }
-      s.setParameters(prm).catch(() => {});
+      s.setParameters(prm).catch(() => {
+        // A browser that refuses the preference still gets the caps.
+        if (!keep) return;
+        try {
+          const again = s.getParameters();
+          if (!again.encodings?.[0]) return;
+          Object.assign(again.encodings[0], enc);
+          if (enc.maxFramerate == null) delete again.encodings[0].maxFramerate;
+          s.setParameters(again).catch(() => {});
+        } catch { /* the browser picks */ }
+      });
     } catch { /* not supported here: the browser picks */ }
   }
 }

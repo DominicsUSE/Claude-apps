@@ -22,6 +22,18 @@ const PASSWORD = 'snug-demo-1';
 const dir = mkdtempSync(join(tmpdir(), 'snug-e2e-voicex-'));
 let srv, browser, url;
 const errors = [];
+// Playwright's waitForFunction doesn't wait for a promise, so an async check
+// would pass at once: this one polls it until it is true.
+async function waitAsync(page, fn, arg, { timeout = 15000, polling = 250 } = {}) {
+  const end = Date.now() + timeout;
+  for (;;) {
+    // One check that doesn't answer in 5 s (a busy machine) counts as not yet.
+    const ok = await Promise.race([page.evaluate(fn, arg), new Promise((r) => setTimeout(r, 5000, false))]);
+    if (ok) return ok;
+    if (Date.now() > end) throw new Error(`waitAsync: timed out after ${timeout} ms: ${String(fn).slice(0, 160)}`);
+    await new Promise((r) => setTimeout(r, typeof polling === 'number' ? polling : 100));
+  }
+}
 
 // Ten seconds of a 440 Hz tone at about -12 dBFS, as the fake microphone.
 function toneWav(path) {
@@ -86,7 +98,7 @@ async function joinWheel(page) {
   await page.click('.stage .btn.primary:has-text("Join voice")');
   await page.locator('.stage [aria-label="Leave voice"]').waitFor();
 }
-const connected = (page, n) => page.waitForFunction(async (want) => {
+const connected = (page, n) => waitAsync(page, async (want) => {
   const peers = Object.values(await window.snug.voiceStats());
   return peers.length === want && peers.every((p) => p.state === 'connected' && p.bytes > 1000);
 }, n, { timeout: 25000, polling: 300 });
@@ -122,7 +134,7 @@ test('reconnect: a dropped connection comes back into the same voice room, still
   const before = Object.values(await ines.evaluate(() => window.snug.voiceStats()))[0]?.bytes || 0;
   await connected(robin, 1);
   await connected(ines, 1);
-  await ines.waitForFunction(async (b) => (Object.values(await window.snug.voiceStats())[0]?.bytes || 0) > b + 2000, before, { timeout: 15000, polling: 300 });
+  await waitAsync(ines, async (b) => (Object.values(await window.snug.voiceStats())[0]?.bytes || 0) > b + 2000, before, { timeout: 15000, polling: 300 });
   await ines.locator('.stage-person:has-text("Robin") .stage-note:has-text("Reconnecting")').waitFor({ state: 'detached' });
   const room = await robin.evaluate(() => window.snug.S.call.room);
   assert.equal(srv.hub.voiceStateOf('robin').muted, true, 'the server kept the mute');
@@ -178,7 +190,7 @@ test('quality and clock: real round trip and loss per person, the connection pop
   await joinWheel(robin);
   await joinWheel(ines);
   await connected(robin, 1);
-  await robin.waitForFunction(async () => {
+  await waitAsync(robin, async () => {
     const p = Object.values(await window.snug.voiceStats())[0];
     return p && typeof p.rtt === 'number' && typeof p.loss === 'number' && typeof p.relay === 'boolean' && !!p.quality;
   }, null, { timeout: 15000, polling: 500 });

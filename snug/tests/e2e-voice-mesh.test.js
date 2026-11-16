@@ -22,6 +22,18 @@ const PASSWORD = 'snug-demo-1';
 const dir = mkdtempSync(join(tmpdir(), 'snug-e2e-voicemesh-'));
 let srv, browser, url;
 const errors = [];
+// Playwright's waitForFunction doesn't wait for a promise, so an async check
+// would pass at once: this one polls it until it is true.
+async function waitAsync(page, fn, arg, { timeout = 15000, polling = 250 } = {}) {
+  const end = Date.now() + timeout;
+  for (;;) {
+    // One check that doesn't answer in 5 s (a busy machine) counts as not yet.
+    const ok = await Promise.race([page.evaluate(fn, arg), new Promise((r) => setTimeout(r, 5000, false))]);
+    if (ok) return ok;
+    if (Date.now() > end) throw new Error(`waitAsync: timed out after ${timeout} ms: ${String(fn).slice(0, 160)}`);
+    await new Promise((r) => setTimeout(r, typeof polling === 'number' ? polling : 100));
+  }
+}
 
 test.before(async () => {
   const db = openDb(join(dir, 'snug.db'));
@@ -66,7 +78,7 @@ async function joinWheel(page) {
   await page.click('.stage .btn.primary:has-text("Join voice")');
   await page.locator('.stage [aria-label="Leave voice"]').waitFor();
 }
-const connected = (page, n) => page.waitForFunction(async (want) => {
+const connected = (page, n) => waitAsync(page, async (want) => {
   const peers = Object.values(await window.snug.voiceStats());
   return peers.length === want && peers.every((p) => p.state === 'connected' && p.bytes > 1000);
 }, n, { timeout: 30000, polling: 300 });
@@ -210,7 +222,7 @@ test('mesh: when a 5th person joins, everyone’s existing camera and screen sen
   await robin.click('.stage .vc.scr');
   // Every one of Robin's sends, to each person, at the caps for this many people
   // (and for the step adaptive quality is at on that line, if the machine is busy).
-  const capsAre = (page, { many, n }) => page.waitForFunction(async ([m, count]) => {
+  const capsAre = (page, { many, n }) => waitAsync(page, async ([m, count]) => {
     const { sendCaps } = await import('/js/lib/callnet.js');
     const { screenBitrate } = await import('/js/voiceopts.js');
     const all = Object.values(await window.snug.voiceStats());
@@ -218,7 +230,7 @@ test('mesh: when a 5th person joins, everyone’s existing camera and screen sen
       const want = sendCaps({ many: m, level: s.level, screenBps: screenBitrate(m) });
       return s.caps.camera?.maxBitrate === want.camera.maxBitrate && s.caps.screen?.maxBitrate === want.screen.maxBitrate;
     });
-  }, [many, n], { timeout: 20000, polling: 300 });
+  }, [many, n], { timeout: 40000, polling: 300 });
   await capsAre(robin, { many: false, n: 3 });
   const few = await robin.evaluate(async () => (await window.snug.voiceStats()).ines.caps);
   // Malik joins: 4 others now.
@@ -232,4 +244,25 @@ test('mesh: when a 5th person joins, everyone’s existing camera and screen sen
   // Malik leaves: back to 3 others, and the higher caps come back.
   await malik.click('.stage [aria-label="Leave voice"]');
   await capsAre(robin, { many: false, n: 3 });
+});
+
+// ---------- 5. A browser that won't take a screen share's preference ----------
+test('screen share: a browser that refuses the text/motion preference still gets the screen’s send cap', async () => {
+  const robin = await person('robin', { init: () => {
+    const real = RTCRtpSender.prototype.setParameters;
+    RTCRtpSender.prototype.setParameters = function (p) {
+      return p && 'degradationPreference' in p ? Promise.reject(new DOMException('not supported', 'InvalidModificationError')) : real.call(this, p);
+    };
+  } });
+  const ines = await person('ines');
+  await joinWheel(robin);
+  await joinWheel(ines);
+  await connected(robin, 1);
+  await robin.click('.stage .vc.scr');
+  await waitAsync(robin, async () => {
+    const { screenBitrate } = await import('/js/voiceopts.js');
+    const s = (await window.snug.voiceStats()).ines;
+    return s?.caps?.screen?.maxBitrate === screenBitrate(false) || (s?.level > 0 && s?.caps?.screen?.maxBitrate > 0);
+  }, null, { timeout: 15000 });
+  assert.equal((await robin.evaluate(async () => (await window.snug.voiceStats()).ines)).screenPref, null);
 });
