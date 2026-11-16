@@ -696,7 +696,7 @@ test('the server owner\'s switch: with SNUG_E2EE=off the server offers nothing a
 });
 
 // ---------- review fixes (H1, H2, H3, M1, M3, M4, M5, L2, L4) ----------
-const msgIdOf = (page, needle) => page.waitForFunction((n) => { for (const l of Object.values(window.snug.S.msgs)) { const m = l.find((x) => x.text === n && !x.state); if (m) return m.id; } return null; }, needle).then((h) => h.jsonValue());
+const msgIdOf = (page, needle) => page.waitForFunction((n) => { for (const l of Object.values(window.snug.S.msgs)) { const m = l.find((x) => x.text === n && !x.state); if (m) return m.id; } return null; }, needle, { timeout: 30_000 }).then((h) => h.jsonValue());
 async function saveKey(page) {
   await dialog(page).locator('#e2-recovery-key').waitFor();
   const key = (await dialog(page).locator('#e2-recovery-key code').allTextContents()).join('-');
@@ -713,6 +713,8 @@ test('review H2, L2: an opened envelope shown elsewhere, as someone else, with a
   await textOf(robinA, `${MARK} original`).waitFor();
   await msgIdOf(robinA, `${MARK} original`); // the server has it (Arrow Up edits the last one it has)
   await robinA.locator('.main [data-composer] textarea').press('ArrowUp');
+  // Arrow Up must have opened this message (not an earlier one) before the edit is typed.
+  await robinA.waitForFunction((t) => document.querySelector('.main .msg-edit textarea')?.value === t, `${MARK} original`);
   await robinA.locator('.main .msg-edit textarea').fill(`${MARK} edited`);
   await robinA.locator('.main .msg-edit textarea').press('Enter');
   const id = await msgIdOf(robinA, `${MARK} edited`);

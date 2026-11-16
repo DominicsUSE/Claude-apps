@@ -453,15 +453,19 @@ export function openDb(path, { fts = process.env.SNUG_FTS !== '0' } = {}) {
     return s;
   };
   let depth = 0;
+  // After close(), work still in flight (a peer frame, a timer, a fetch that was already under way) gets no
+  // rows and writes nothing, instead of throwing "statement has been finalized" from a callback.
+  let closed = false;
   return {
     raw: db,
     fts: hasFts, // full-text search is available (server/fts.js)
-    get: (sql, ...p) => stmt(sql).get(...p),
-    all: (sql, ...p) => stmt(sql).all(...p),
-    run: (sql, ...p) => stmt(sql).run(...p),
+    get: (sql, ...p) => (closed ? undefined : stmt(sql).get(...p)),
+    all: (sql, ...p) => (closed ? [] : stmt(sql).all(...p)),
+    run: (sql, ...p) => (closed ? { changes: 0, lastInsertRowid: 0 } : stmt(sql).run(...p)),
     // One transaction; a tx inside another becomes a savepoint, so an op that
     // wraps another (and both use tx) still rolls back as one.
     tx(fn) {
+      if (closed) return fn();
       if (depth > 0) {
         const sp = `tx${depth}`;
         db.exec(`SAVEPOINT ${sp}`);
@@ -472,6 +476,7 @@ export function openDb(path, { fts = process.env.SNUG_FTS !== '0' } = {}) {
       depth++;
       try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } finally { depth--; }
     },
-    close: () => db.close(),
+    get closed() { return closed; },
+    close: () => { closed = true; db.close(); },
   };
 }

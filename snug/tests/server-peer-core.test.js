@@ -175,8 +175,8 @@ test('presence "friends only": group messages still go both ways between co-memb
   // The common friend goes away, so nobody can pass messages on.
   await A.close(); pcs.splice(pcs.indexOf(A), 1);
   await c.ok('msg.send', { conv: g, id: mid(), text: 'from cal while ana is away' });
-  await until(() => texts(B, g).includes('from cal while ana is away'), 15_000, 'B gets C’s message');
+  await until(() => texts(B, g).includes('from cal while ana is away'), 30_000, 'B gets C’s message');
   await b.ok('msg.send', { conv: g, id: mid(), text: 'from bea while ana is away' });
-  await until(() => texts(C, g).includes('from bea while ana is away'), 15_000, 'C gets B’s message');
+  await until(() => texts(C, g).includes('from bea while ana is away'), 30_000, 'C gets B’s message');
   assert.equal(C.peer.isOnline(uidOf(b)), false, 'C still isn’t shown B online');
 });

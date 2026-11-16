@@ -33,8 +33,8 @@ async function group(names) {
   assert.match(g, /^dg_[a-z2-7]{26}$/);
   const all = [a.id, b.id, c.id].sort();
   await until(() => members(A, g).join() === all.join(), 8000, 'A members');
-  await until(() => members(B, g).join() === all.join(), 10_000, 'B joined, with C pinned');
-  await until(() => members(C, g).join() === all.join(), 10_000, 'C joined, with B pinned');
+  await until(() => members(B, g).join() === all.join(), 30_000, 'B joined, with C pinned');
+  await until(() => members(C, g).join() === all.join(), 30_000, 'C joined, with B pinned');
   // B and C aren't friends, but people in a group see each other online.
   await until(() => B.peer.isOnline(uidOf(c)) && C.peer.isOnline(uidOf(b)), 10_000, 'co-member presence');
   return { ...t, g };

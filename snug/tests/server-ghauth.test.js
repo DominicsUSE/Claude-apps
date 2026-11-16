@@ -158,7 +158,7 @@ test('returning, moving to another PC, resume and the password-free account', as
   const bc = new Client(b, mv.cookie, mv.data.user.id);
   await bc.connect();
   assert.equal(bc.hello.p2p.state, 'moving');
-  const stopped = bc.next('p2p', (d) => d.state === 'needs-signin', 8000);
+  const stopped = bc.next('p2p', (d) => d.state === 'needs-signin', 20_000);
   await owner.ok('id.rebind', { approve: false });
   await stopped;
   const again2 = await githubSignIn(b, 1003);

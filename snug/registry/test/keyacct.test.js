@@ -137,7 +137,9 @@ test('pow: the difficulty rises with the sign-ups of the last hour', async () =>
     assert.equal((await r2.call('/v1/pow', { purpose: 'register' })).body.bits, 2);
     for (let i = 0; i < 31; i++) await account(uniq('rush'), { R: r2 });
     assert.equal((await r2.call('/v1/pow', { purpose: 'register' })).body.bits, 3);
-    await r2.clock.advance(HOUR);
+    // The count is a sliding estimate over two fixed windows (the previous one weighted by how much of it is
+    // still in the last hour), so one hour later part of it can remain; two hours later none does.
+    await r2.clock.advance(2 * HOUR);
     assert.equal((await r2.call('/v1/pow', { purpose: 'register' })).body.bits, 2);
   } finally {
     await r2.close();

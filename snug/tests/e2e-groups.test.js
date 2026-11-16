@@ -54,7 +54,8 @@ test('start a group with two friends on other PCs; waiting for 1 person; sent to
   await alice.locator('.main .p2p-group:has-text("Group between your PCs")').waitFor();
   const g = await alice.evaluate(() => window.snug.S.view?.id || Object.keys(window.snug.S.dms).find((id) => id.startsWith('dg_')));
   assert.match(g, /^dg_/);
-  assert.equal(await alice.locator('.main .bar [aria-label="Start a voice call"]').count(), 0, 'no group calls across PCs yet');
+  // 0.13: group calls work across PCs, so the call button is there.
+  await alice.locator('.main .bar [aria-label="Start a voice call"]').first().waitFor();
   const joined = (s) => s.db.all('SELECT user FROM dm_members WHERE dm = ?', g).length === 3;
   await until(() => joined(B) && joined(C), 15_000, 'B and C have the group');
 
