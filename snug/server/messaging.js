@@ -32,6 +32,7 @@ import { limiter, safeDecode } from './auth.js';
 import { safeFetch, readMeta, previewLinks } from './linkpreview.js';
 import { emojiImage } from './emoji.js';
 import { sniff } from './media.js';
+import { embedFileRefs } from './expiry.js'; // review-media 3
 import { stripInvisible, cleanFileName } from '../js/lib/util.js'; // sec-authz
 
 export const POLL_HOURS = [1, 4, 8, 24, 72, 168];
@@ -170,7 +171,7 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
   const baseView = M.msgView;
   M.msgView = (row, rx) => {
     const m = baseView(row, rx);
-    if (row.embeds && !row.noembed) { const e = json(row.embeds, null); if (e?.length) m.embeds = e; }
+    if (row.embeds && !row.noembed) { const e = json(row.embeds, null)?.filter?.((x) => x?.kind !== 'gone'); if (e?.length) m.embeds = e; }
     if (row.noembed) m.noEmbeds = true;
     const x = extras.get(row.id);
     if (row.fwd || x?.fwd) m.fwd = row.fwd ? json(row.fwd, undefined) : x.fwd;
@@ -406,7 +407,14 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
     // Earlier versions go with a deleted message's content (ten minutes of undo, then gone).
     if (++ticks % 30 === 0) {
       db.run('DELETE FROM msg_edits WHERE msg IN (SELECT id FROM messages WHERE deleted IS NOT NULL AND deleted < ?)', t - 11 * 60_000);
-      db.run('UPDATE messages SET embeds = NULL, fwd = NULL, sticker = NULL WHERE deleted IS NOT NULL AND deleted < ? AND (embeds IS NOT NULL OR fwd IS NOT NULL OR sticker IS NOT NULL)', t - 11 * 60_000);
+      // A preview's picture stays named (id only) until the file sweep removes it (review-media 3).
+      for (const r of db.all("SELECT id, embeds FROM messages WHERE deleted IS NOT NULL AND deleted < ? AND embeds IS NOT NULL AND embeds NOT LIKE '[{\"kind\":\"gone\"%' LIMIT 500", t - 11 * 60_000)) {
+        db.run('UPDATE messages SET embeds = ? WHERE id = ?', embedFileRefs(r.embeds), r.id);
+      }
+      db.run('UPDATE messages SET fwd = NULL, sticker = NULL WHERE deleted IS NOT NULL AND deleted < ? AND (fwd IS NOT NULL OR sticker IS NOT NULL)', t - 11 * 60_000);
+      if (db.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'forum_posts'")) {
+        db.run("UPDATE forum_posts SET title = '', tags = '[]' WHERE title != '' AND msg IN (SELECT id FROM messages WHERE deleted IS NOT NULL AND deleted < ?)", t - 11 * 60_000);
+      }
     }
   }
 

@@ -275,8 +275,8 @@ Real, and covered by tests with separate users:
   (people who may manage rooms): off, 1 hour, 1 day, 7 days or 30 days, set
   from the conversation's More menu and shown as a timer in its header. New
   messages are removed for everyone when their time is up: text, earlier
-  versions, reactions, polls, pins, saved marks and attachments, with no
-  undo. Devices hide them on time even offline. What it can't do, and the
+  versions, reactions, polls, pins, saved marks, attachments, link previews
+  and their pictures, and a forum post's title and tags, with no undo. Devices hide them on time even offline. What it can't do, and the
   dialog says so: people can copy or screenshot a message first, and the
   encrypted daily database backups keep a copy for up to a week. With
   friends on other PCs it is offered only when every friend's Snug is 0.12

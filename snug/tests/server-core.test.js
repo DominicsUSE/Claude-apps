@@ -264,6 +264,34 @@ test('disappearing: new messages get an expiry; the sweep (fake clock) removes t
   assert.equal(srv.db.get('SELECT expires FROM messages WHERE id = ?', keep).expires, null);
 });
 
+// review-media 3: a disappearing message's link-preview picture and its forum title and tags go too.
+test('disappearing: link-preview files and forum titles and tags go with the message', async () => {
+  const t0 = Date.now();
+  const f = await (await upload(ada.cookie, lounge, 'preview bytes', 'preview.txt')).json();
+  const id = await send(ada, lounge, 'see https://example.org/page');
+  srv.db.run('UPDATE messages SET expires = ?, embeds = ? WHERE id = ?', t0 + HOUR, JSON.stringify([{ kind: 'link', url: 'https://example.org/page', host: 'example.org', title: 'Secret title', image: { id: f.id, w: 1, h: 1 } }]), id);
+  srv.db.run("INSERT INTO forum_posts (msg, room, title, tags) VALUES (?, ?, 'Hidden forum title', '[\"private\"]')", id, lounge);
+  const later = t0 + HOUR + 60_000;
+  srv.expiry.sweep(later);
+  const row = srv.db.get('SELECT text, embeds FROM messages WHERE id = ?', id);
+  assert.equal(row.text, '');
+  assert.doesNotMatch(row.embeds || '', /Secret title|example\.org/, 'the preview’s words go at once');
+  assert.deepEqual({ ...srv.db.get('SELECT title, tags FROM forum_posts WHERE msg = ?', id) }, { title: '', tags: '[]' });
+  srv.sweepFiles(later);
+  assert.equal(srv.db.get('SELECT 1 FROM files WHERE id = ?', f.id), undefined, 'the preview’s picture is removed');
+  assert.equal(srv.db.get('SELECT embeds FROM messages WHERE id = ?', id).embeds, null);
+});
+
+test('deleted messages: a preview’s picture is still removed once the undo window has passed', async () => {
+  const f = await (await upload(ada.cookie, lounge, 'preview bytes 2', 'preview.txt')).json();
+  const id = await send(ada, lounge, 'look https://example.org/two');
+  srv.db.run('UPDATE messages SET deleted = ?, embeds = ? WHERE id = ?', Date.now() - 12 * 60_000, JSON.stringify([{ kind: 'link', url: 'https://example.org/two', host: 'example.org', title: 'Words', image: { id: f.id, w: 1, h: 1 } }]), id);
+  for (let i = 0; i < 30; i++) srv.hub.messaging.tick(); // the background tick tidies deleted messages every 30th time
+  assert.doesNotMatch(srv.db.get('SELECT embeds FROM messages WHERE id = ?', id).embeds || '', /Words|example\.org/);
+  srv.sweepFiles(Date.now());
+  assert.equal(srv.db.get('SELECT 1 FROM files WHERE id = ?', f.id), undefined, 'the preview’s picture is removed');
+});
+
 test('disappearing: a database from before 0.12 gains the column and keeps its messages', () => {
   const d = mkdtempSync(join(tmpdir(), 'snug-ttl-'));
   try {
