@@ -332,6 +332,9 @@ test('E6 notifications: an encrypted DM or group names only the sender; "Hide na
   const hidden = srv.push.noteOf(b.id, id);
   assert.deepEqual([hidden.title, hidden.body], ['Snug', 'New message']);
   assert.equal(srv.push.ringNoteOf(b.id, { from: a.id, dm: g, group: true, call: 'c2' }).title, 'Snug');
+  // The quiet note that replaces a ring note when the ring ends doesn't name the caller either.
+  assert.deepEqual([srv.push.ringOverNoteOf(b.id, { from: a.id, dm: g, call: 'c2', reason: 'timeout' }).title, srv.push.ringOverNoteOf(b.id, { from: a.id, dm: g, call: 'c2', reason: 'timeout' }).body], ['Snug', 'Missed call']);
+  assert.equal(srv.push.ringOverNoteOf(c.id, { from: a.id, dm: g, call: 'c2', reason: 'timeout' }).title, 'push-0', 'with names on, the caller');
   await close([a, b, c]);
 });
 

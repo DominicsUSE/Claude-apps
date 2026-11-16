@@ -285,12 +285,14 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
     if (!pushedRings.delete(`${user}\n${ring.call}`)) return Promise.resolve();
     const subs = db.all('SELECT p.* FROM push_subs p JOIN sessions s ON s.hash = p.session AND s.expires > ? WHERE p.user = ?', Date.now(), user);
     if (!subs.length) return Promise.resolve();
-    const note = {
-      title: M.userRow(ring.from)?.name || 'Someone', body: RING_OVER[ring.reason] || 'Call ended',
-      conv: ring.dm, tag: `snug:${ring.dm}`, ringOver: ring.call,
-    };
+    const note = ringOverNoteFor(user, ring);
     return Promise.all(subs.map((s) => deliver(s, note)));
   }
+  // "Hide names in notifications" holds here too: no caller's name.
+  const ringOverNoteFor = (user, ring) => ({
+    title: (M.prefsOf?.(user) || {}).notifyNames === false ? 'Snug' : M.userRow(ring.from)?.name || 'Someone', body: RING_OVER[ring.reason] || 'Call ended',
+    conv: ring.dm, tag: `snug:${ring.dm}`, ringOver: ring.call,
+  });
 
   // Forget devices whose sign-in has ended (signed out, signed out
   // everywhere, a new password, or expired).
@@ -364,5 +366,6 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
   // Tests: the note a message would make for this person.
   const noteOf = (user, msgId) => { const row = M.msg(msgId); const w = row && M.where(row.conv); return w ? noteFor(user, row.conv, w, row) : null; };
   const ringNoteOf = (user, ring) => ringNoteFor(user, ring);
-  return { http, onMessage, onRing, onRingStop, onNote, prune, publicKey: keys.publicKey, stats, wouldPush, noteOf, ringNoteOf, reset: () => { rate.reset(); subsLimit.reset(); } };
+  const ringOverNoteOf = (user, ring) => ringOverNoteFor(user, ring);
+  return { http, onMessage, onRing, onRingStop, onNote, prune, publicKey: keys.publicKey, stats, wouldPush, noteOf, ringNoteOf, ringOverNoteOf, reset: () => { rate.reset(); subsLimit.reset(); } };
 }

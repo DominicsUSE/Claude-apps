@@ -182,7 +182,7 @@ function EncryptionPage({ Row }) {
     ${ready && html`<${Row} label=${COPY.exposedTitle} hint=${COPY.exposedBody} top>
       <button class="btn" onClick=${exposed}>${COPY.exposedAction}</button>
     <//>`}
-    <${Row} label="Hide names in notifications" hint="Notifications pushed to your devices say only “New message”, without who sent it. For encrypted conversations they never name the group or who else is in it.">
+    <${Row} label="Hide names in notifications" hint="Notifications pushed to your devices don’t say who sent the message or where. Whether they show the message text is up to “Show message text” (Settings, Notifications). For encrypted conversations they never show it, and never name the group or who else is in it.">
       <${Switch} on=${S.prefs.notifyNames === false} label="Hide names in notifications" onChange=${(v) => setPref('notifyNames', !v)} />
     <//>
     ${(ready || E2.status === 'pending' || E2.status === 'new-device') && html`<${Row} label=${COPY.resetTitle} hint=${COPY.resetBody} top>
