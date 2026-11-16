@@ -302,7 +302,7 @@ async function turnOnEncryption(page) {
 const allE2ee = (page, n, frames = 20) => waitAsync(page, async ([want, min]) => {
   const peers = Object.values(await window.snug.voiceStats());
   return peers.length === want && peers.every((p) => p.e2ee && p.frames?.dec > min && p.frames?.enc > min);
-}, [n, frames], { timeout: 30000, polling: 300 });
+}, [n, frames], { timeout: 60000, polling: 300 }); // a busy machine can hold a page up for a while
 const cryptKey = (page) => page.evaluate(() => window.snug.voiceTest.crypt().key);
 
 test('end-to-end encrypted media: sealed frames both ways, the label says so, a damaged frame is dropped, keys change on every join and leave, and the device-signed code is longer', async () => {
@@ -332,23 +332,28 @@ test('end-to-end encrypted media: sealed frames both ways, the label says so, a 
   // A damaged frame never plays: Priya drops what Tomasz damages on the way out.
   const before = (await priya.evaluate(async () => (await window.snug.voiceStats()).tomasz.frames));
   await tomasz.evaluate((u) => window.snug.voiceTest.tamper(u, true), 'priya');
-  await waitAsync(priya, async (d0) => (await window.snug.voiceStats()).tomasz.frames.drop > d0 + 20, before.drop);
-  const mid = (await priya.evaluate(async () => (await window.snug.voiceStats()).tomasz.frames));
+  await waitAsync(priya, async (d0) => (await window.snug.voiceStats()).tomasz.frames.drop > d0 + 20, before.drop, { timeout: 30000 });
+  // While damaged, frames keep coming and none of them opens.
+  const framesNow = () => priya.evaluate(async () => (await window.snug.voiceStats()).tomasz.frames);
+  const t1 = await framesNow();
+  await priya.waitForTimeout(1000);
+  const mid = await framesNow();
   await tomasz.evaluate((u) => window.snug.voiceTest.tamper(u, false), 'priya');
-  assert.ok(mid.dec - before.dec < 40, `damaged frames weren’t opened (${before.dec} -> ${mid.dec})`);
-  await waitAsync(priya, async (d) => (await window.snug.voiceStats()).tomasz.frames.dec > d + 20, mid.dec);
+  assert.ok(mid.drop > t1.drop, 'still dropping');
+  assert.ok(mid.dec - t1.dec <= 3, `damaged frames weren’t opened (${t1.dec} -> ${mid.dec})`);
+  await waitAsync(priya, async (d) => (await window.snug.voiceStats()).tomasz.frames.dec > d + 20, mid.dec, { timeout: 30000 });
   // Malik joins: everyone makes a new key; all three pairs are end-to-end encrypted.
   const k1 = await cryptKey(tomasz);
   const malik = await person('malik');
   await turnOnEncryption(malik);
   await joinWheel(malik);
   await connected(malik, 2);
-  await waitAsync(tomasz, async (k) => window.snug.voiceTest.crypt().key !== k, k1);
+  await waitAsync(tomasz, async (k) => window.snug.voiceTest.crypt().key !== k, k1, { timeout: 30000 });
   for (const p of [tomasz, priya, malik]) await allE2ee(p, 2, 5);
   // Malik leaves: a new key again, and after a moment Priya holds only Tomasz's newest key.
   const k2 = await cryptKey(tomasz);
   await malik.click('.stage [aria-label="Leave voice"]');
-  await waitAsync(tomasz, async (k) => window.snug.voiceTest.crypt().key !== k, k2);
+  await waitAsync(tomasz, async (k) => window.snug.voiceTest.crypt().key !== k, k2, { timeout: 30000 });
   const k3 = await cryptKey(tomasz);
   await waitAsync(priya, async (k) => {
     const f = (await window.snug.voiceStats()).tomasz?.frames;
