@@ -77,6 +77,9 @@ export function migrateE2ee(db) {
     CREATE TABLE IF NOT EXISTS e2ee_meta (user TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       ver INTEGER NOT NULL, blob TEXT NOT NULL, updated INTEGER NOT NULL);
   `);
+  // The public half of the current history key, kept while history is off too, so the same epoch
+  // number can never come back with another key (review M2). Additive; empty for older rows.
+  add('e2ee_accounts', 'epoch_pub', 'TEXT');
 }
 
 // --- signatures (node:crypto, the same check as server/peercrypto.js) -------
@@ -203,10 +206,12 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
     const prev = account(u);
     const arc = list.arc;
     const epochAt = arc ? (prev?.epoch === arc.e ? prev.epoch_at : arc.at) : null;
-    db.run(`INSERT INTO e2ee_accounts (user, aik, ver, list, sig, hist, epoch, epoch_at, reset_at, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    const epochPub = arc ? arc.pub : reset ? null : prev?.epoch_pub ?? null;
+    db.run(`INSERT INTO e2ee_accounts (user, aik, ver, list, sig, hist, epoch, epoch_at, reset_at, updated, epoch_pub) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user) DO UPDATE SET aik = excluded.aik, ver = excluded.ver, list = excluded.list, sig = excluded.sig, hist = excluded.hist,
-      epoch = excluded.epoch, epoch_at = excluded.epoch_at, reset_at = COALESCE(excluded.reset_at, e2ee_accounts.reset_at), updated = excluded.updated`,
-    u, list.aik, list.ver, canon(list), list.sig, arc ? 1 : 0, arc?.e ?? prev?.epoch ?? null, epochAt, reset ? t : null, t);
+      epoch = excluded.epoch, epoch_at = excluded.epoch_at, reset_at = COALESCE(excluded.reset_at, e2ee_accounts.reset_at), updated = excluded.updated,
+      epoch_pub = excluded.epoch_pub`,
+    u, list.aik, list.ver, canon(list), list.sig, arc ? 1 : 0, arc?.e ?? (reset ? null : prev?.epoch ?? null), epochAt, reset ? t : null, t, epochPub);
   }
   function addPrekey(d, prekey) {
     const t = now();
@@ -235,6 +240,28 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
     db.run('INSERT INTO e2ee_backup (user, ver, blob, updated) VALUES (?, ?, ?, ?) ON CONFLICT(user) DO UPDATE SET ver = excluded.ver, blob = excluded.blob, updated = excluded.updated',
       u, backup.ver, canon(backup), now());
   }
+  // History keys only move forward (review M2): never an older epoch, never another key under the
+  // current epoch number (a device would take the newer box for the old key), and after a device
+  // leaves the list a new epoch, so the key it holds seals nothing new (review H3).
+  function checkArc(a, list, { leaving = false } = {}) {
+    if (!list.arc || !a.epoch) return;
+    const old = json(a.list);
+    const curPub = a.epoch_pub || (old?.arc?.e === a.epoch ? old.arc.pub : null);
+    if (list.arc.e < a.epoch) fail('That history key is older than the current one.');
+    if (list.arc.e === a.epoch && curPub && list.arc.pub !== curPub) fail('A new history key needs a new epoch. Reload Snug and try again.');
+    if (leaving && list.arc.e === a.epoch) fail('Removing a device needs a new history key. Reload Snug and try again.');
+  }
+  // Synced settings rewritten in the same step as the account keys (a new SYNC key): compare-and-swap.
+  function checkMeta(u, m) {
+    if (m === undefined) return null;
+    obj(m, 'The settings');
+    const cur = db.get('SELECT ver FROM e2ee_meta WHERE user = ?', u)?.ver || 0;
+    if (m.ver !== cur + 1) fail('Your encryption settings changed on another device. Try again.', { code: 'e2ee_conflict', data: { ver: cur } });
+    return { ver: m.ver, blob: metaOk(m.blob) };
+  }
+  const storeMeta = (u, m) => { if (m) db.run('INSERT OR REPLACE INTO e2ee_meta (user, ver, blob, updated) VALUES (?, ?, ?, ?)', u, m.ver, m.blob, now()); };
+  const metaChanged = (u, m, exceptWs) => { if (m) for (const ws of hub.socketsOf(u)) if (ws !== exceptWs) sendTo([ws], 'e2ee.meta', { ver: m.ver }); };
+
   // A device that may no longer read anything: no prekeys, no pending keys, signed out.
   function removeDevice(u, d) {
     db.run("UPDATE e2ee_devices SET state = 'removed', expires = NULL WHERE id = ? AND user = ?", d, u);
@@ -333,12 +360,15 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
       if (!listEntry(list, me.id)) fail('A device can’t leave itself out of the list here. Use Remove instead.');
       const old = json(a.list);
       if (list.devs.length !== old.devs.length || list.devs.some((e) => !listEntry(old, e.d))) fail('Add or remove devices with their own steps.');
-      if (list.arc && a.epoch && list.arc.e < a.epoch) fail('That history key is older than the current one.');
+      checkArc(a, list);
+      const meta = checkMeta(c.user, d.meta);
       db.tx(() => {
         saveAccount(c.user, list);
         storeBoxes(c.user, list, d.boxes, me.id);
         storeBackup(c.user, d.backup, a.aik);
+        storeMeta(c.user, meta);
       });
+      metaChanged(c.user, meta, c.ws);
       devicesChanged(c.user);
       return { ver: list.ver };
     },
@@ -354,12 +384,16 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
       const want = old.devs.filter((e) => e.d !== gone.id).map((e) => e.d).sort();
       if (canon(list.devs.map((e) => e.d).sort()) !== canon(want) || !want.length) fail(want.length ? 'That list must be your devices without that one.' : 'That’s your only device. Reset encryption instead.');
       devicesMatch(c.user, list);
+      checkArc(a, list, { leaving: true });
+      const meta = checkMeta(c.user, d.meta);
       db.tx(() => {
         saveAccount(c.user, list);
         storeBoxes(c.user, list, d.boxes, me.id);
         storeBackup(c.user, d.backup, a.aik);
+        storeMeta(c.user, meta);
         removeDevice(c.user, gone.id);
       });
+      metaChanged(c.user, meta, c.ws);
       audit('e2ee.device.remove', c);
       devicesChanged(c.user);
       return { ver: list.ver };
@@ -448,6 +482,8 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
     // The recovery key route (spec 11.4): fetch the backup, then add this device with the account key it holds.
     'e2ee.backup.get': async (c, d) => {
       const b = db.get('SELECT * FROM e2ee_backup WHERE user = ?', c.user) || fail('There’s no recovery backup for your account.');
+      // Only a socket bound to one of the account's devices (a device being added proves its key first).
+      if (!bound(c)) fail('Start adding this device first, then enter your recovery key.');
       await freshAuth(c, d, 'e2ee.backup');
       if (!backupHour.take(c.user) || !backupDay.take(c.user)) { audit('e2ee.backup.get', c, false, 'rate'); fail('Too many tries with the recovery key. Wait an hour and try again.'); }
       audit('e2ee.backup.get', c);
@@ -474,12 +510,19 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
       for (const e of list.devs) if (e.d !== l.device && !listEntry(old, e.d)) fail('Recovery can only add this device (and leave others out).');
       devicesMatch(c.user, list, l.device);
       const dropped = old.devs.filter((e) => !listEntry(list, e.d)).map((e) => e.d);
+      checkArc(a, list, { leaving: dropped.length > 0 });
+      const meta = checkMeta(c.user, d.meta);
       db.tx(() => {
         saveAccount(c.user, list);
         db.run("UPDATE e2ee_devices SET state = 'trusted', expires = NULL WHERE id = ?", l.device);
         db.run("UPDATE e2ee_links SET state = 'done' WHERE id = ?", l.id);
         for (const x of dropped) removeDevice(c.user, x);
+        // The devices that stay get the new history key (and any new backup or settings key) in the same step.
+        storeBoxes(c.user, list, d.boxes, l.device);
+        storeBackup(c.user, d.backup, a.aik);
+        storeMeta(c.user, meta);
       });
+      metaChanged(c.user, meta, c.ws);
       audit('e2ee.recover', c);
       sendTo(trustedSockets(c.user).filter((ws) => ws.e2eeDevice !== l.device), 'e2ee.link.done', { linkId: l.id, state: 'recovered' });
       devicesChanged(c.user);

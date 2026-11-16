@@ -452,7 +452,8 @@ test('removing a device: a sender with the old list is told to refetch; the remo
   const { id } = await sendEnc(a, { dm, users: [a.id, b.id], text: 'to both devices' });
   assert.ok(srv.db.get('SELECT 1 FROM e2ee_wraps WHERE msg = ? AND target = ?', id, `d:${dev.d}`));
   const old = await recipientsFor(a.sock, [a.id, b.id]);
-  await b.sock.ok('e2ee.device.remove', { d: dev.d, devlist: await nextList(b.acct, (cur) => ({ devs: cur.devs.filter((x) => x.d !== dev.d) })) });
+  const pub = b64u(await (await import('../js/lib/e2ee/sig.js')).rawPublic((await (await import('../js/lib/e2ee/sig.js')).newDhPair(false)).publicKey));
+  await b.sock.ok('e2ee.device.remove', { d: dev.d, devlist: await nextList(b.acct, (cur) => ({ devs: cur.devs.filter((x) => x.d !== dev.d), arc: { e: cur.arc.e + 1, pub, at: Date.now() } })) });
   assert.equal(srv.db.get('SELECT COUNT(*) n FROM e2ee_wraps WHERE target = ?', `d:${dev.d}`).n, 0, 'nothing left for the removed device to open');
   const id2 = mid();
   const s = await sealFrom(a, { conv: dm, id: id2, users: [a.id, b.id], recipients: old });
@@ -513,4 +514,64 @@ test('deleting an account removes its key directory: list, devices, prekeys, bac
   assert.equal(srv.db.get('SELECT COUNT(*) n FROM e2ee_prekeys WHERE device = ?', b.dev.d).n, 0);
   assert.equal(srv.db.get('SELECT COUNT(*) n FROM e2ee_wraps WHERE target = ? OR target LIKE ?', `d:${b.dev.d}`, `a:${b.id}:%`).n, 0);
   await a.sock.close();
+});
+
+// ---------- review fixes ----------
+test('e2ee.wraps: two revisions of one message asked for together each get their own wraps', async () => {
+  const { a, b, dm } = await pair('ec-wraps-revs');
+  const users = [a.id, b.id];
+  const { id } = await sendEnc(a, { dm, users, text: 'first' });
+  const e = await sealFrom(a, { conv: dm, id, users, kind: 'edit', rev: 1, body: { text: 'second' } });
+  assert.equal((await a.sock.op('msg.edit', { conv: dm, id, e2ee: e.e2ee })).ok, true);
+  const hist = await b.sock.ok('msg.edits', { conv: dm, id });
+  const w = await b.sock.ok('e2ee.wraps', { ids: [{ id, rev: 0 }, { id, rev: 1 }] });
+  const r0 = w.revs?.[`${id}:0`], r1 = w.revs?.[`${id}:1`];
+  assert.ok(r0 && r1, 'both revisions answered');
+  assert.equal((await openAs(b, { id, author: a.id, e2ee: hist.edits[0].e2ee }, { conv: dm, senderDsk: dsk(a), wraps: r0.k })).body.text, 'first');
+  assert.equal((await openAs(b, { id, author: a.id, e2ee: hist.current.e2ee }, { conv: dm, senderDsk: dsk(a), wraps: r1.k })).body.text, 'second');
+  // The old shape stays (the last revision asked for), for clients that read it.
+  assert.equal(w.wraps[id].rev, 1);
+  await close(a, b);
+});
+
+test('history wraps go only to sockets bound to a trusted device: a device waiting to be added gets none', async () => {
+  const { a, b, dm } = await pair('ec-pending-hist');
+  const s = await new Sock(srv, await login(srv, b.handle)).connect();
+  const dev = await newDevice(b.id);
+  await s.ok('e2ee.link.start', { device: devicePublic(dev), prekey: dev.prekeys[1].signed });
+  await bind(s, dev);
+  const { id } = await sendEnc(a, { dm, users: [a.id, b.id], text: 'not for a pending device' });
+  const ev = await s.next('msg', (d) => d.m.id === id);
+  assert.equal(ev.m.k, undefined, 'no wraps in the event');
+  assert.deepEqual((await s.ok('e2ee.wraps', { ids: [id] })).wraps[id].k, {}, 'none from e2ee.wraps either');
+  assert.ok((await b.sock.ok('e2ee.wraps', { ids: [id] })).wraps[id].k[`a:${b.id}:1`], 'the trusted device still gets its history wrap');
+  // The scheduled list a pending device sees carries no history wraps either.
+  const at = Date.now() + 90_000;
+  const sid = mid();
+  const sealed = await sealFrom(b, { conv: dm, id: sid, users: [a.id, b.id], kind: 'sched', at, body: { text: 'later' } });
+  await b.sock.ok('sched.create', { conv: dm, id: sid, at, text: '', e2ee: sealed.e2ee });
+  const list = await s.next('sched', (d) => d.list?.some((x) => x.m?.id === sid));
+  assert.deepEqual(list.list.find((x) => x.m?.id === sid).m.k, {});
+  const mine = await b.sock.next('sched', (d) => d.list?.some((x) => x.m?.id === sid));
+  assert.ok(mine.list.find((x) => x.m?.id === sid).m.k[`a:${b.id}:1`]);
+  await s.close(); await close(a, b);
+});
+
+test('a scheduled message sent after a history epoch changed carries no wrap for the old history key', async () => {
+  const { a, b, dm } = await pair('ec-sched-epoch');
+  const at = Date.now() + 90_000;
+  const id = mid();
+  const s = await sealFrom(a, { conv: dm, id, users: [a.id, b.id], kind: 'sched', at, body: { text: 'sealed at epoch 1' } });
+  const r = await a.sock.ok('sched.create', { conv: dm, id, at, text: '', e2ee: s.e2ee });
+  // a starts a new history epoch (weekly, or after removing a device).
+  const pub = b64u(await (await import('../js/lib/e2ee/sig.js')).rawPublic((await (await import('../js/lib/e2ee/sig.js')).newDhPair(false)).publicKey));
+  await a.sock.ok('e2ee.publish', { devlist: await nextList(a.acct, (cur) => ({ arc: { e: cur.arc.e + 1, pub, at: Date.now() } })) });
+  srv.db.run('UPDATE scheduled SET at = ? WHERE id = ?', Date.now() - 1, r.id);
+  srv.hub.messaging.tick();
+  await b.sock.next('msg', (d) => d.m.id === id);
+  const targets = srv.db.all('SELECT target FROM e2ee_wraps WHERE msg = ?', id).map((x) => x.target).sort();
+  assert.equal(targets.includes(`a:${a.id}:1`), false, 'not the history key a removed device may still hold');
+  assert.ok(targets.includes(`a:${b.id}:1`), 'b’s history key is still current');
+  assert.ok(targets.includes(`d:${a.dev.d}`) && targets.includes(`d:${b.dev.d}`));
+  await close(a, b);
 });
