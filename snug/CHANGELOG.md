@@ -22,6 +22,7 @@ goes back to an older version on its own (README, "Install, update, go back").
 - **Smaller call records:** who started it, how it went, when, how long, and who missed it, no longer who took
   part. The disappearing-messages sweep and account erasure cut it down further. Older records still read.
 
+## 0.13.0
 
 ### Changed
 
