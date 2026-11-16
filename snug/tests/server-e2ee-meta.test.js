@@ -27,9 +27,9 @@ const ALPHA = 'abcdefghijklmnopqrstuvwxyz0123456789';
 const mid = () => `m_${[...random(16)].map((b) => ALPHA[b % 36]).join('')}`;
 const dsk = (p) => b64uOf(p.dev.dskPub, 32);
 
-async function enrolled(handle, { caps = obj.FEATURES } = {}) {
-  const p = await register(srv, handle);
-  p.sock = await new Sock(srv, p.cookie).connect();
+async function enrolled(handle, { caps = obj.FEATURES, on = srv } = {}) {
+  const p = await register(on, handle);
+  p.sock = await new Sock(on, p.cookie).connect();
   p.dev = await newDevice(p.id);
   const { acct, payload } = await setupPayload(p.id, p.dev);
   p.acct = acct;
@@ -271,6 +271,36 @@ test('E5 padded attachments: sizes fall into buckets, the file opens byte for by
   const row = srv.db.get('SELECT size, name, type FROM files WHERE id = ?', (await res.json()).id);
   assert.deepEqual({ ...row }, { size: 16_384 + TAG, name: 'file', type: 'application/octet-stream' });
   await close([a, b]);
+});
+
+test('E5: padding never takes a file past the server’s limit (a file just under it still uploads)', async () => {
+  const MB = 1024 * 1024;
+  // The default 100 MB server: a 90 MB file would pad to 103.4 MB; it pads to the limit instead.
+  assert.ok(padBucket(90 * MB + 5) > 100 * MB);
+  const big = await encryptFile(new Uint8Array(90 * MB), { pad: true, max: 100 * MB });
+  assert.equal(big.meta.p, 1);
+  assert.equal(big.ct.length, 100 * MB + TAG);
+  assert.equal((await decryptFile(big.ct, big.meta)).length, 90 * MB);
+  // Too close to the limit for the 5-byte header: sealed as it is (no padding), still within the limit.
+  const edge = await encryptFile(new Uint8Array(100 * MB - 2), { pad: true, max: 100 * MB });
+  assert.equal(edge.meta.p, undefined);
+  assert.equal(edge.ct.length, 100 * MB - 2 + TAG);
+  // Small files keep their size step.
+  const small = await encryptFile(new Uint8Array(5000), { pad: true, max: 100 * MB });
+  assert.equal(small.ct.length, padBucket(5005) + TAG);
+  // On a server with a 1 MB limit, a file just under it uploads padded (to the limit, plus the tag).
+  const s = await startServer({ port: 0, dataDir: tmp(), quiet: true, e2ee: true, maxFile: MB });
+  try {
+    const a = await enrolled('padmax-a', { on: s });
+    const b = await enrolled('padmax-b', { on: s });
+    await friends(a, b);
+    const { id: dm } = await a.sock.ok('dm.open', { users: [b.id] });
+    const f = await encryptFile(new Uint8Array(randomBytes(MB - 1000)), { pad: true, max: MB });
+    assert.equal(f.ct.length, MB + TAG);
+    const res = await fetch(`http://127.0.0.1:${s.port}/api/files?conv=${dm}&enc=1`, { method: 'POST', headers: { cookie: a.cookie, origin: `http://127.0.0.1:${s.port}`, 'content-type': 'application/octet-stream', 'x-file-name': 'file' }, body: f.ct });
+    assert.equal(res.status, 201, await res.clone().text());
+    await close([a, b]);
+  } finally { await s.close(); }
 });
 
 test('E6 notifications: an encrypted DM or group names only the sender; "Hide names in notifications" hides that too', async () => {

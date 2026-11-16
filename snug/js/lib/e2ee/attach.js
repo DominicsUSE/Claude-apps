@@ -8,6 +8,8 @@
 // is sealed as [version 1][length, 4 bytes][the file][zeros] grown to a size
 // bucket (padBucket), so the server sees roughly how big a file is, not its
 // exact size. The message says so (`p: 1`); files from before open as they were.
+// A bucket is never bigger than the server's file limit (`max`): a file near the limit is padded to the
+// limit itself, and one too close for the 5-byte header is sealed unpadded, so padding never stops an upload.
 import { b64u, b64uOf, equal, random, utf8 } from './bytes.js';
 import { aesSeal, aesOpen, sha256 } from './sig.js';
 
@@ -30,19 +32,23 @@ export function padBuckets(max) {
 /** AES-GCM adds a 16-byte tag: the ciphertext of a padded file is its bucket plus 16. */
 export const TAG = 16;
 
-function padded(bytes) {
+function padded(bytes, max) {
   if (bytes.length > 0xffffffff) throw new Error('file too large');
-  const out = new Uint8Array(padBucket(bytes.length + HEAD));
+  const out = new Uint8Array(Math.min(padBucket(bytes.length + HEAD), max));
   out[0] = 1;
   new DataView(out.buffer).setUint32(1, bytes.length);
   out.set(bytes, HEAD);
   return out;
 }
 
-/** bytes -> { ct, meta: { k, n, csha[, p] } } (meta values are b64u, ready for the message body). pad: grow to a bucket. */
-export async function encryptFile(bytes, { pad = false } = {}) {
+/**
+ * bytes -> { ct, meta: { k, n, csha[, p] } } (meta values are b64u, ready for the message body).
+ * pad: grow to a bucket, at most `max` bytes before the tag (the server's file limit).
+ */
+export async function encryptFile(bytes, { pad = false, max = Infinity } = {}) {
+  if (pad && bytes.length + HEAD > max) pad = false;
   const k = random(32), n = random(12);
-  const ct = await aesSeal(k, n, pad ? padded(bytes) : bytes, AAD);
+  const ct = await aesSeal(k, n, pad ? padded(bytes, max) : bytes, AAD);
   return { ct, meta: { k: b64u(k), n: b64u(n), csha: b64u(await sha256(ct)), ...(pad ? { p: 1 } : {}) } };
 }
 

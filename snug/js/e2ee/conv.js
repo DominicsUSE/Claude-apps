@@ -205,10 +205,13 @@ function shownType(bytes, f) {
 // A big file goes up in resumable parts (js/lib/upload.js), still only as ciphertext.
 export async function uploadEncrypted(conv, blob, name, { onProgress, signal } = {}) {
   const bytes = new Uint8Array(await blob.arrayBuffer());
-  const { ct, meta } = await encryptFile(bytes, { pad: await convCan(conv, 'pad') }); // 0.14: padded to a size step
+  const pad = await convCan(conv, 'pad');
+  const limits = pad ? await uploadLimits() : null;
+  // 0.14: padded to a size step, never past the server's file limit (10 MB when it can't be asked).
+  const { ct, meta } = await encryptFile(bytes, { pad, max: limits?.maxFile || 10 * 1024 * 1024 });
   let data;
   if (needsChunks(ct.length)) {
-    data = await uploadBlob({ fetch: (...a) => fetch(...a), conv, blob: new Blob([ct]), name, onProgress, signal, limits: await uploadLimits(), enc: true });
+    data = await uploadBlob({ fetch: (...a) => fetch(...a), conv, blob: new Blob([ct]), name, onProgress, signal, limits: limits || (await uploadLimits()), enc: true });
   } else {
     let res;
     try {
