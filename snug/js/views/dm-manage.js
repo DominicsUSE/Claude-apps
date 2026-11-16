@@ -4,6 +4,7 @@
 // The server checks every rule again (server/dms.js).
 import { html, useState } from '../../vendor/preact-htm.js';
 import { EncLine, ServerNoteMark } from './e2ee-conv.js';
+import { isEncrypted, setGroupInfo, convCan } from '../e2ee/conv.js'; // 0.14: a group's name and icon sealed to its members
 import { S, closeModal, closePop, openModal, openPop, openConv, convMeta, person, go } from '../store.js';
 import { fuzzy, HUES } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
@@ -54,6 +55,9 @@ export function groupFace(id, size) {
   return html`<${Avatar} user=${{ id, name: dm.name || 'Group', hue: dm.icon.hue ?? 165, emoji: dm.icon.emoji }} size=${size} />`;
 }
 
+// An encrypted group whose name is sealed already, or can be (every device on 0.14 or later).
+const sealedInfo = async (id) => isEncrypted(id) && (!!S.dms[id]?.info || (await convCan(id, 'info')));
+
 // ---------- Rename ----------
 export function RenameGroup({ dm: id }) {
   const dm = S.dms[id];
@@ -66,12 +70,13 @@ export function RenameGroup({ dm: id }) {
     const clean = name.trim();
     if ([...clean].length > 40) return setError('The name can be at most 40 characters.');
     setBusy(true);
-    renameDm(id, clean || null).then(closeModal, (err) => { setBusy(false); setError(err.offline ? 'You’re offline. Try again when you’re back.' : err.message); });
+    sealedInfo(id).then((sealed) => (sealed ? setGroupInfo(id, { name: clean || null }, 'name') : renameDm(id, clean || null)))
+      .then(closeModal, (err) => { setBusy(false); setError(err.offline ? 'You’re offline. Try again when you’re back.' : err.message); });
     return undefined;
   };
   return html`<form class="form" onSubmit=${submit} novalidate>
     <h2>Rename group</h2>
-    <p class="modal-lead">Everyone in it sees the new name. Leave it empty to show people’s names instead.</p>
+    <p class="modal-lead">Everyone in it sees the new name. Leave it empty to show people’s names instead.${dm.e2ee ? ' In an encrypted group the name is encrypted too, once everyone is on Snug 0.14 or later.' : ''}</p>
     <div>
       <label class="label" for="dm-name">Name</label>
       <input id="dm-name" class=${`field${error ? ' bad' : ''}`} data-autofocus maxlength="40" placeholder=${convMeta(id)?.title || 'Kiln crew'} value=${name}
@@ -96,7 +101,8 @@ export function GroupIcon({ dm: id }) {
   if (!dm) return null;
   const save = () => {
     setBusy(true);
-    iconDm(id, emoji, emoji ? hue : null).then(closeModal, (err) => { setBusy(false); setError(err.message); });
+    sealedInfo(id).then((sealed) => (sealed ? setGroupInfo(id, { icon: emoji, hue: emoji ? hue : null }, 'icon') : iconDm(id, emoji, emoji ? hue : null)))
+      .then(closeModal, (err) => { setBusy(false); setError(err.message); });
   };
   return html`
     <h2>Group icon</h2>
@@ -229,6 +235,7 @@ export function DmLine({ conv, m }) {
   const name = (u) => html`<b>${person(u).name}</b>`;
   let text;
   if (l.act === 'rename') text = l.name ? html`${name(by.id)} named the group <b>${l.name}</b>` : html`${name(by.id)} removed the group’s name`;
+  else if (l.act === 'info') text = html`${name(by.id)} renamed the group`; // the new name is sealed (0.14): the header shows it
   else if (l.act === 'icon') text = html`${name(by.id)} changed the group’s icon`;
   else if (l.act === 'add') text = html`${name(by.id)} added ${(l.users || []).map((u, i) => html`${i ? ', ' : ''}${name(u)}`)}`;
   else if (l.act === 'leave') text = html`${name(by.id)} left the group`;

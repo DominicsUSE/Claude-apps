@@ -254,7 +254,7 @@ export function runSlash(conv, body, { anchor } = {}) {
     if (name === 'silent') return { send: rest, silent: true };
     return { send: out };
   }
-  if ((name === 'roll' || name === 'poll') && isEncrypted(conv)) { toast(name === 'roll' ? E2COPY.rollOff : E2COPY.pollsOff); return { keep: true }; }
+  if (name === 'roll' && isEncrypted(conv)) { toast(E2COPY.rollOff); return { keep: true }; } // polls are sealed there since 0.14
   if (name === 'roll') {
     if (!parseRoll(rest)) { toast('Roll like /roll 2d6: up to 20 dice, each with 2 to 1000 sides.'); return { keep: true }; }
     call('cmd.roll', { conv, id: newId(), spec: rest || undefined }).catch((e) => toast(e.offline ? 'You’re offline. Roll again when you’re back.' : e.message));

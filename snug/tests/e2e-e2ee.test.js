@@ -347,13 +347,13 @@ test('encrypted DM: an edit, a reply quote and a thread reply all decrypt after 
   await ines.context().close();
 });
 
-test('encrypted DM: polls and /roll are off and say why; forwarding to a room warns and posts readable text; into the group it stays encrypted', async () => {
+test('encrypted DM: polls are sealed (0.14) and say so, /roll is off and says why; forwarding to a room warns and posts readable text; into the group it stays encrypted', async () => {
   await openDm(robinA, 'Ines Carvalho');
   await robinA.locator('.main .plus-btn').click();
-  const poll = robinA.locator('[role=menu] .menu-item:has-text("Polls aren’t available in encrypted conversations yet")');
-  await poll.waitFor();
-  assert.equal(await poll.isDisabled(), true);
-  await robinA.keyboard.press('Escape');
+  await robinA.locator('[role=menu] .menu-item:has-text("Poll")').click();
+  await dialog(robinA).locator('.hint:has-text("This poll is end-to-end encrypted")').waitFor();
+  assert.equal(await dialog(robinA).locator('text=Hide results until people vote').count(), 0, 'hiding results isn’t offered: nobody could enforce it');
+  await dialog(robinA).locator('button:has-text("Cancel")').click();
   await say(robinA, '/roll 2d6');
   await robinA.locator('.toast:has-text("a fair roll needs the server to see the result")').waitFor();
   assert.equal(await robinA.locator('.main [data-composer] textarea').inputValue(), '/roll 2d6', 'the command stays for editing');
