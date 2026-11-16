@@ -305,3 +305,42 @@ test('leaving stops the camera for everyone and frees the device', async () => {
   await ines.click('.stage [aria-label="Leave voice"]');
   await tomasz.click('.stage [aria-label="Leave voice"]');
 });
+
+// Robin shares here: Ines's screen picker was refused in a test above.
+test('screen share: Text and slides or Motion and games, and a new resolution, change a share that is already running', async () => {
+  await joinVoiceRoom(ines);
+  await joinVoiceRoom(robin, 1);
+  await robin.click('.stage .vc.scr');
+  await playing(ines, 'robin:screen');
+  const mine = () => robin.$eval('.vt[data-tile="robin:screen"] video', (v) => { const t = v.srcObject.getVideoTracks()[0]; return { id: t.id, hint: t.contentHint, height: t.getSettings().height }; });
+  const pref = () => robin.evaluate(async () => (await window.snug.voiceStats()).ines?.screenPref);
+  const before = await mine();
+  // Text and slides by default: sharp text, fewer frames when the line is tight.
+  assert.equal(before.hint, 'detail');
+  assert.equal(before.height, 1080, 'shared at 1080p');
+  await robin.waitForFunction(async () => (await window.snug.voiceStats()).ines?.screenPref === 'maintain-resolution');
+  // Motion and games, from the call's menu: smooth frames, fewer pixels when tight.
+  await robin.click('.stage [aria-label="Voice options"]');
+  await robin.click('.menu [role="menuitemradio"]:has-text("Motion and games")');
+  await robin.waitForFunction(async () => (await window.snug.voiceStats()).ines?.screenPref === 'maintain-framerate');
+  assert.equal((await mine()).hint, 'motion');
+  assert.equal(await robin.evaluate(() => window.snug.S.prefs.voice.screenHint), 'motion');
+  // 720p: the running share changes, without picking the screen again.
+  await robin.click('.stage [aria-label="Voice options"]');
+  await robin.click('.menu [role="menuitemradio"]:has-text("720p")');
+  await robin.waitForFunction(() => document.querySelector('.vt[data-tile="robin:screen"] video')?.srcObject?.getVideoTracks()[0]?.getSettings().height === 720);
+  assert.equal((await mine()).id, before.id, 'the same track, not a new share');
+  assert.equal(await pref(), 'maintain-framerate', 'the choice survives the change');
+  await playing(ines, 'robin:screen');
+  // Back to Text and slides and 1080p for the next share.
+  await robin.click('.stage [aria-label="Voice options"]');
+  await robin.click('.menu [role="menuitemradio"]:has-text("Text and slides")');
+  await robin.waitForFunction(async () => (await window.snug.voiceStats()).ines?.screenPref === 'maintain-resolution');
+  assert.equal((await mine()).hint, 'detail');
+  await robin.click('.stage [aria-label="Voice options"]');
+  await robin.click('.menu [role="menuitemradio"]:has-text("1080p")');
+  await robin.waitForFunction(() => document.querySelector('.vt[data-tile="robin:screen"] video')?.srcObject?.getVideoTracks()[0]?.getSettings().height === 1080);
+  await robin.click('.stage .vc.scr');
+  await robin.click('.stage [aria-label="Leave voice"]');
+  await ines.click('.stage [aria-label="Leave voice"]');
+});

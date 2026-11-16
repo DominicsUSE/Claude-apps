@@ -127,7 +127,10 @@ function capBitrate(p) {
       const enc = prm.encodings?.[0];
       if (!enc) continue;
       const want = caps[slot];
-      if (JSON.stringify(encView(enc, slot)) === JSON.stringify(encView(want, slot))) continue;
+      // A screen share of text keeps its resolution when the line is tight; one of motion its frame rate.
+      const keep = slot === 'screen' ? screenPref(v.screenHint).degradationPreference : null;
+      if (JSON.stringify(encView(enc, slot)) === JSON.stringify(encView(want, slot)) && (!keep || prm.degradationPreference === keep)) continue;
+      if (keep) prm.degradationPreference = keep;
       enc.maxBitrate = want.maxBitrate;
       if (slot !== 'voice') {
         // Keys a cap leaves out go back to the browser's choice (data saver off, a step back up).
@@ -814,6 +817,16 @@ export async function restartCamera() {
 }
 // Re-apply bitrate ceilings, after the room's bitrate or the screen quality changed.
 export function recapBitrates() { for (const p of peers.values()) capBitrate(p); }
+// The screen share's quality or kind changed: apply it to the share already
+// running (its resolution and frame rate, what it favours), not only the next one.
+export function applyScreen() {
+  const track = screen?.getVideoTracks()[0];
+  if (track) {
+    try { track.contentHint = screenPref(vp().screenHint).contentHint; } catch { /* hint only */ }
+    track.applyConstraints?.(screenConstraints().video).catch(() => { /* the browser keeps what it has */ });
+  }
+  recapBitrates();
+}
 
 // How the line to one person goes: asked to be relay-only, and the route measured once connected.
 export function lineOf(user) {
@@ -831,6 +844,7 @@ export function applyDataSaver() {
     signal(u, { want: { camera: !low || !!S.call.showCam?.[u] } });
     capBitrate(p);
   }
+  if (screen) applyScreen(); // a running share drops to (or back from) 720p and 10 frames a second
   emit();
 }
 // With data saver on, someone's camera is paused until you ask to see it.
@@ -950,7 +964,7 @@ export async function toggleScreen() {
   if (!stream || S.call !== c) { stream?.getTracks().forEach((t) => t.stop()); emit(); return; }
   screen = stream;
   const track = stream.getVideoTracks()[0];
-  try { track.contentHint = 'detail'; } catch { /* hint only */ }
+  try { track.contentHint = screenPref(vp().screenHint).contentHint; } catch { /* hint only */ }
   // The browser's own "Stop sharing" ends the track.
   track.onended = () => { if (screen === stream) stopScreen(); };
   c.screen = true;
@@ -1010,6 +1024,7 @@ export async function voiceStats() {
       pc: p.id, ufrag: /a=ice-ufrag:(\S+)/.exec(p.pc.localDescription?.sdp || '')?.[1] || null, restarts: p.restarted || 0, signaling: p.pc.signalingState,
       // Hiding my IP: relay-only or not; adaptive quality's step; what my sends are capped at; whether they want my camera.
       policy: p.pc.getConfiguration().iceTransportPolicy, level: p.adapt.level, wantCamera: p.wantCamera,
+      screenPref: (() => { try { return p.tx.screen?.sender?.track ? p.tx.screen.sender.getParameters().degradationPreference || null : null; } catch { return null; } })(),
       caps: Object.fromEntries(['camera', 'screen'].map((k) => { try { return [k, p.tx[k]?.sender?.track ? p.tx[k].sender.getParameters().encodings?.[0] || null : null]; } catch { return [k, null]; } })),
       sending: p.pc.getSenders().some((x) => x.track && x.track.kind === 'audio' && x.track.readyState === 'live'),
     };

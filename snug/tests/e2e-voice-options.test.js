@@ -128,6 +128,13 @@ test('settings: microphone, speaker and camera lists, a working level meter, a c
   assert.equal(await robin.getAttribute('button[role="switch"][aria-label="Noise suppression"]', 'aria-checked'), 'false');
   assert.equal(await robin.evaluate(() => window.snug.S.prefs.voice.noise), false);
   await robin.click('button[role="switch"][aria-label="Noise suppression"]');
+  // What a screen share favours: text and slides by default, motion and games on request.
+  const what = robin.locator('.set-row:has-text("What you share")');
+  assert.match(await what.locator('.seg button[aria-pressed="true"], .seg button[aria-checked="true"]').first().textContent(), /Text and slides/);
+  await what.locator('.seg button:has-text("Motion and games")').click();
+  assert.equal(await robin.evaluate(() => window.snug.S.prefs.voice.screenHint), 'motion');
+  await what.locator('.seg button:has-text("Text and slides")').click();
+  assert.equal(await robin.evaluate(() => window.snug.S.prefs.voice.screenHint), 'detail');
   await mic.selectOption('');
   await closeLayer(robin);
 });

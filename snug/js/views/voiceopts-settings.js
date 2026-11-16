@@ -8,7 +8,7 @@ import { can } from '../lib/perms.js';
 import { Icon } from '../ui/icons.js';
 import { Seg, Switch } from '../ui/kit.js';
 import { Confirm } from './modals.js';
-import { restartMic, restartCamera, recapBitrates, applyDataSaver } from '../voice.js';
+import { restartMic, restartCamera, applyScreen, applyDataSaver } from '../voice.js';
 import { hasTurn } from '../lib/callnet.js'; // whether this server has a relay to hide your IP
 import {
   vp, setVoice, micConstraints, cameraConstraints, audioCtx, meter, canPickSpeaker, preview, setPersonVolume, setPersonMuted,
@@ -337,11 +337,14 @@ export function VoiceSettings() {
     <${Row} label="Camera check" top><${CameraTest} /><//>
 
     <div class="set-head">Screen share</div>
+    <${Row} label="What you share" hint="Text and slides stay sharp when the connection is tight; motion and games stay smooth.">
+      <${Seg} label="What you share" value=${v.screenHint === 'motion' ? 'motion' : 'detail'} onChange=${(h) => { setVoice({ screenHint: h }); applyScreen(); }} options=${[['detail', 'Text and slides'], ['motion', 'Motion and games']]} />
+    <//>
     <${Row} label="Resolution" hint="Higher shows more detail and uses more of everyone’s connection.">
-      <${Seg} label="Screen share resolution" value=${v.screenRes} onChange=${(r) => { setVoice({ screenRes: r }); recapBitrates(); }} options=${Object.keys(RESOLUTIONS).map((r) => [r, r === 'source' ? 'Source' : `${r}p`])} />
+      <${Seg} label="Screen share resolution" value=${v.screenRes} onChange=${(r) => { setVoice({ screenRes: r }); applyScreen(); }} options=${Object.keys(RESOLUTIONS).map((r) => [r, r === 'source' ? 'Source' : `${r}p`])} />
     <//>
     <${Row} label="Frame rate" hint="60 suits games and video; 15 is plenty for documents.">
-      <${Seg} label="Screen share frame rate" value=${v.screenFps} onChange=${(f) => { setVoice({ screenFps: f }); recapBitrates(); }} options=${FRAME_RATES.map((f) => [f, `${f} fps`])} />
+      <${Seg} label="Screen share frame rate" value=${v.screenFps} onChange=${(f) => { setVoice({ screenFps: f }); applyScreen(); }} options=${FRAME_RATES.map((f) => [f, `${f} fps`])} />
     <//>
     <${Row} label="Share sound" hint="Include the sound of the tab or screen, where your browser offers it.">
       <${Switch} on=${v.screenAudio} label="Share sound with the screen" onChange=${(on) => setVoice({ screenAudio: on })} />

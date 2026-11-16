@@ -35,6 +35,7 @@ export const VOICE_DEFAULTS = {
   deafMutes: true,                     // deafening mutes me too
   afk: 0,                              // minutes alone in a voice room before leaving; 0 never
   screenRes: '1080', screenFps: 30, screenAudio: true,
+  screenHint: 'detail',                // what a screen share favours: 'detail' (text and slides) | 'motion' (motion and games)
   mini: null,                          // { x, y } where the floating call was left
   // --- voice and calls track ---
   camRes: '720', camFps: 24,           // camera quality: 360/720/1080, 15/24/30 frames a second
