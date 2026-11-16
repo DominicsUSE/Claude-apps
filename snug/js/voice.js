@@ -311,7 +311,10 @@ async function checkSdp(from, p, desc) {
   // The device that sealed their call key is the one in this call.
   if (st.ckDev && st.ckDev !== a.d) return 'refuse';
   const stmt = fpStatement({ place: S.call.room, fromUser: from, fromDevice: a.d, toUser: S.me, fingerprint, ufrag });
-  const ok = await verifyFingerprint(from, a.d, stmt, a.sig).catch(() => null);
+  const verify = () => verifyFingerprint(from, a.d, stmt, a.sig).catch(() => null);
+  let ok = await verify();
+  // Their key opened while this was being checked: their list is known now, so once more.
+  if (ok == null && st.ckSeen) ok = await verify();
   if (ok === false) return 'refuse';
   // A signature from a device they don't have (or no longer have) can't be checked: the same as none,
   // unless their key, when it opens, comes from that device and the signature then checks (onCallKey).
