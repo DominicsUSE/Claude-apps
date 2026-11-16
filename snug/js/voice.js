@@ -113,8 +113,8 @@ function signal(to, data) { call('rtc', { to, data }).catch(() => {}); }
 // browser without encoded transforms) gets the media as before, and the call
 // says so. Everything is forgotten when the call ends.
 const crypt = { worker: null, mode: null, why: null, key: null, req: 0, waits: new Map(), refused: new Set() };
-const ckOf = new Map(); // user -> { acked, keyed, ckSeen, unsigned, why }
-const ckState = (u) => { let x = ckOf.get(u); if (!x) ckOf.set(u, (x = { acked: null, keyed: false, ckSeen: false, unsigned: false, why: null })); return x; };
+const ckOf = new Map(); // user -> { acked, keyed, ckSeen, ckDev, unsigned, why }
+const ckState = (u) => { let x = ckOf.get(u); if (!x) ckOf.set(u, (x = { acked: null, keyed: false, ckSeen: false, ckDev: null, unsigned: false, why: null })); return x; };
 const transformMode = () => (typeof RTCRtpScriptTransform === 'function' ? 'script'
   : typeof RTCRtpSender !== 'undefined' && typeof RTCRtpSender.prototype.createEncodedStreams === 'function' ? 'streams' : null);
 // Called before joining (so before any connection of the call): whether its
@@ -184,8 +184,10 @@ function onCallKey(from, m) {
     const installed = new Promise((r) => crypt.waits.set(req, r));
     crypt.worker.postMessage({ t: 'recv', peer: from, id, raw: raw.buffer, req }, [raw.buffer]);
     st.ckSeen = true;
-    // A device that signs its keys signs its offers too (calls C2): an offer from them without it was changed on the way.
-    if (st.unsigned) { refusePeer(from); return undefined; }
+    st.ckDev = m.d;
+    // A device that signs its keys signs its offers too (calls C2): an offer from them without it, or signed by another device, was changed on the way.
+    const fp = peers.get(from)?.fp;
+    if (st.unsigned || (fp && fp.d !== m.d)) { refusePeer(from); return undefined; }
     return installed.then((ok) => {
       if (!ok || !crypt.worker || !peers.has(from)) return;
       st.keyed = true;
@@ -276,20 +278,25 @@ async function sendSdp(user, desc) { signal(user, { sdp: await sdpOut(user, desc
 // 'ok' to go on, or 'refuse'.
 async function checkSdp(from, p, desc) {
   const st = ckState(from);
-  const attr = readFpAttr(desc.sdp);
-  if (!attr) {
+  const unsigned = () => {
     if (st.ckSeen) return 'refuse';
     st.unsigned = true;
     p.fp = null;
     return 'ok';
-  }
+  };
+  const attr = readFpAttr(desc.sdp);
+  if (!attr) return unsigned();
   const a = parseFpAttr(attr);
   const fingerprint = sdpFingerprints(desc.sdp), ufrag = sdpUfrag(desc.sdp);
   if (!a || !fingerprint) return 'refuse';
+  // The device that sealed their call key is the one in this call.
+  if (st.ckDev && st.ckDev !== a.d) return 'refuse';
   const stmt = fpStatement({ place: S.call.room, fromUser: from, fromDevice: a.d, toUser: S.me, fingerprint, ufrag });
   const ok = await verifyFingerprint(from, a.d, stmt, a.sig).catch(() => null);
   if (ok === false) return 'refuse';
-  p.fp = ok ? { d: a.d, fingerprint, ufrag } : null;
+  // A signature from a device they don't have (or no longer have) can't be checked: the same as none.
+  if (ok !== true) return unsigned();
+  p.fp = { d: a.d, fingerprint, ufrag };
   return 'ok';
 }
 export const callAlarm = () => S.callAlarm || null;

@@ -402,25 +402,40 @@ test('in a call, calling someone else asks first; cancelling keeps the call', as
 });
 
 // ---------- calls C2: a server in the middle is caught ----------
-async function turnOnEncryption(page) {
+// Each account's recovery key, once it has one: a later browser of theirs is added with it.
+const recoveryKeys = {};
+async function turnOnEncryption(page, handle) {
   const dialog = page.locator('.modal[role=dialog]');
+  if (recoveryKeys[handle]) {
+    await dialog.locator('h2:has-text("Add this browser")').waitFor();
+    await dialog.locator('button:has-text("Use my recovery key")').click();
+    await dialog.locator('#e2-rk-in').fill(recoveryKeys[handle]);
+    await dialog.locator('button:has-text("Use recovery key")').click();
+    await dialog.locator('h2:has-text("Encryption is back")').waitFor();
+    await dialog.locator('button:has-text("Done")').click();
+    await page.waitForFunction(() => window.snug.e2ee.E2.status === 'ready');
+    return;
+  }
   await page.click('.rail-btn:has(.sr:text-matches("^Messages"))');
   await page.locator('.e2-invite button:has-text("Turn on")').click();
   await dialog.locator('h2:has-text("Turn on end-to-end encryption")').waitFor();
   await dialog.locator('button:has-text("Turn on")').click();
   await dialog.locator('#e2-recovery-key').waitFor();
   const key = (await dialog.locator('#e2-recovery-key code').allTextContents()).join('-');
+  recoveryKeys[handle] = key;
   await dialog.locator('#e2-last').fill(key.slice(-4).toLowerCase());
   await dialog.locator('button:has-text("I’ve saved it")').click();
   await dialog.waitFor({ state: 'detached' });
   await page.waitForFunction(() => window.snug.e2ee.E2.status === 'ready');
 }
 
-test('a server that swaps the certificate fingerprint on the way: the call refuses that connection and says so loudly, never a quiet fallback', async () => {
+// The server in the middle: Robin's offers reach Ines with another certificate's
+// fingerprint. `rewrite` changes the rest of the SDP as well (a forged signature line).
+async function swappedCertificateCall(rewrite = (s) => s) {
   const robin = await person('robin');
   const ines = await person('ines');
-  await turnOnEncryption(robin);
-  await turnOnEncryption(ines);
+  await turnOnEncryption(robin, 'robin');
+  await turnOnEncryption(ines, 'ines');
   const robinId = srv.db.get("SELECT id FROM users WHERE handle = 'robin'").id;
   // The server in the middle: Robin's offers reach Ines with another certificate's fingerprint.
   const real = srv.hub.rtcRelay;
@@ -428,7 +443,7 @@ test('a server that swaps the certificate fingerprint on the way: the call refus
   srv.hub.rtcRelay = (from, to, data) => {
     if (from === robinId && typeof data?.sdp?.sdp === 'string' && /a=fingerprint:/.test(data.sdp.sdp)) {
       swapped++;
-      data = { sdp: { ...data.sdp, sdp: data.sdp.sdp.replace(/^a=fingerprint:(\S+) ([0-9A-F:]+)/gm, (m, h, v) => `a=fingerprint:${h} ${v.split(':').reverse().join(':')}`) } };
+      data = { sdp: { ...data.sdp, sdp: rewrite(data.sdp.sdp.replace(/^a=fingerprint:(\S+) ([0-9A-F:]+)/gm, (m, h, v) => `a=fingerprint:${h} ${v.split(':').reverse().join(':')}`)) } };
     }
     return real(from, to, data);
   };
@@ -444,4 +459,9 @@ test('a server that swaps the certificate fingerprint on the way: the call refus
     await ines.waitForTimeout(1500);
     assert.notEqual((await robin.evaluate(() => window.snug.voiceStats())).ines?.state, 'connected', 'Robin never connects through the swapped certificate');
   } finally { srv.hub.rtcRelay = real; }
-});
+}
+
+test('a server that swaps the certificate fingerprint on the way: the call refuses that connection and says so loudly, never a quiet fallback', () => swappedCertificateCall());
+
+test('a swapped fingerprint whose signature line names a device Robin doesn\'t have is refused the same way, not taken as unsigned', () =>
+  swappedCertificateCall((s) => s.replace(/^a=x-snug-fp:v1 dv_[A-Za-z0-9]+ /m, 'a=x-snug-fp:v1 dv_FAKEFAKEFAKE ')));
