@@ -702,3 +702,8 @@ test('rules (0.14): a group’s information is sealed again only for someone it 
   assert.deepEqual(rules.resealed('name', prev, { name: 'Glaze night', icon: '🏺', hue: 30 }), { name: 'Glaze night', icon: '🏺', hue: 30 });
   assert.deepEqual(rules.resealed('members', null, { name: 'New here', icon: null, hue: null }), { name: 'New here', icon: null, hue: null });
 });
+
+test('copy (0.14): the conversation panel says reactions, polls and group names are encrypted once everyone is on 0.14', () => {
+  assert.doesNotMatch(COPY.convPanel, /Group names, reactions and pictures of the group aren’t encrypted/);
+  assert.match(COPY.convPanel, /Reactions, polls and a group’s name and icon are encrypted too once everyone here is on Snug 0\.14 or later/);
+});

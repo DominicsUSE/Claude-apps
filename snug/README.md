@@ -1419,12 +1419,32 @@ who renamed it, not to what), polls with their votes and their end (each device
 counts; "hide results" isn't offered there, since nobody can enforce it, and when a
 poll ends goes by each sender's clock), which message a reply answers (only a thread
 still names the message it hangs off), and attachment sizes (padded to 4 KiB steps up
-to 64 KiB, then steps of a quarter more; the quota counts the padded size). Until then
-the older form keeps working, and polls or a private group name say which device is
-still on an older Snug. Link previews are never made in encrypted conversations.
-Push notifications for an encrypted conversation name only the sender (never the
-group or who else is in it) and say "New message"; "Hide names in notifications"
-(Settings > Encryption) leaves out the sender too.
+to 64 KiB, then steps of a quarter more, never past the server's file limit; the quota
+counts the padded size). Until then the older form keeps working, and polls or a
+private group name say which device is still on an older Snug. When a group's name is
+first sealed, the server also takes it out of earlier "named the group" lines. A
+padded file forwarded to a conversation where a device can't read padding is sealed
+again unpadded. Link previews are never made in encrypted conversations. Push
+notifications for an encrypted conversation name only the sender (never the group or
+who else is in it) and say "New message". "Hide names in notifications" (Settings >
+Encryption) leaves out the sender and where, in every conversation; whether a
+notification shows the message text in unencrypted DMs and rooms is up to "Show
+message text" (Settings > Notifications).
+
+**Limits of the 0.14 sealing.**
+
+- A device keeps the features it has seen for each device, but the first time it sees
+  one, the server could hold its features back. Your device then quietly uses the older
+  form there, with no label: plain reactions, a plain group rename (the name reaches the
+  server) and plain reply links.
+- Revisions only go up from what each device has seen: a new device, or one that was
+  signed out, can be shown an older group name, reaction or vote.
+- Someone added to a group sees "Encrypted group" until a member's device seals the
+  name again for them (normally within seconds, when a member is online). A member's
+  device keeps the name when such a re-seal changes it, but someone just added can't
+  tell.
+- "Download your data" has encrypted messages as envelopes, and
+  leaves out sealed reactions, votes and group names.
 
 **What the server still sees.** For encrypted direct messages and groups, the one
 list (Settings > Encryption and `GET /api/privacy` show the same):

@@ -184,8 +184,8 @@ stronger than "end-to-end encrypted" is used.
 
 **Less metadata (0.14).** Each device publishes the features it handles as an object signed by its own
 signing key (`caps`, separate from the device list, which 0.12/0.13 clients check field by field); the
-server can't add a feature, and a client keeps the features it has seen for a device, so the server can't
-take one away to make it fall back. A feature is used in a conversation only when every trusted device of
+server can't add a feature, and a client keeps the features it has seen for a device, so once a device has
+seen them the server can't take one away to make it fall back. A feature is used in a conversation only when every trusted device of
 every member signed for it; until then the older form keeps working. Then: reactions are one sealed
 envelope per person and message (kind `react`, the person's set of emoji, at most 20); poll votes and a
 poll's end are sealed envelopes (kind `vote`; only the poll's author can end it, and both the server and
@@ -196,12 +196,24 @@ that a member's device seals again when someone joins, and the server keeps no n
 reply answers is inside the sealed body (a thread still names its root, since the server delivers it as its
 own conversation), and a reply's author is notified through a declared mention; attachments are padded
 before sealing (a version byte, a 4-byte length, the file, zeros up to 4 KiB steps to 64 KiB, then steps of
-1.25×; files sealed before open as before). Each of these envelopes is sealed and signed like a message,
+1.25×, never past the server's file limit; files sealed before open as before; a padded file forwarded to a
+conversation where a device can't read padding is decrypted and sealed again unpadded). Each of these envelopes is sealed and signed like a message,
 under an id that names its slot, message and author (so the server can't move one), with a revision that
 only goes up (the server refuses an older one; a device refuses one older than it has seen). Once a
 conversation can seal them, the server refuses the plain form (taking back an old plain reaction still
-works). Push notifications for encrypted conversations name only the sender, and with "Hide names in
-notifications" not even that. Link previews are never made there (the server has no text to look at).
+works). A re-seal of a group's information for members (it writes no line) is accepted only when someone in
+the group can't open the newest revision, and a member's device that knows the revision right before keeps
+that name and icon if a re-seal changes them. When a group's information is first sealed, the server
+rewrites earlier "named the group" lines to say only who renamed it. Push notifications for encrypted
+conversations name only the sender, and with "Hide names in notifications" not even that. Link previews are
+never made there (the server has no text to look at).
+
+Limits: the first time a device sees another device, the server can withhold that device's features; the
+client then uses the older form there with no label (plain reactions, a plain group rename whose name
+reaches the server, plain reply links). Revision checks are per device, so a new or signed-out device can be
+shown an older revision. Someone added to a group sees "Encrypted group" until a member's device seals the
+information again, and can't check that re-seal against the revision before. The data download has
+encrypted messages as envelopes and leaves out sealed reactions, votes and group information.
 
 **What the server still sees of encrypted conversations** (the list in `server/e2ee-conv.js`, served by
 `GET /api/privacy` and repeated in the README): who wrote each message and where; when it was sent, edited

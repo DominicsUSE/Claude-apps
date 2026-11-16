@@ -17,8 +17,17 @@ goes back to an older version on its own (README, "Install, update, go back").
     isn't offered there (nobody could enforce it). If someone is still on an older Snug, it names their device.
   - The message a reply answers is inside the encrypted message; its author is notified by a mention.
   - Encrypted attachments are padded to size steps, so the server sees roughly how big a file is.
+  - Padding never takes a file past the server's file limit, and a padded file forwarded to someone on an
+    older Snug is sealed again unpadded so it opens whole.
+  - When a group's name is first sealed, earlier "named the group" lines lose the name too.
+  - Limits (README, "Limits of the 0.14 sealing"): the first time your device sees a device, the server could
+    hold its features back and make yours use the older form; a new device can be shown an older revision;
+    someone added sees "Encrypted group" until a member's device seals the name again; the data download
+    leaves out sealed reactions, votes and group names.
 - Push notifications for encrypted conversations name only the sender, never the group or who else is in it.
-  New: **Hide names in notifications** (Settings > Encryption).
+  New: **Hide names in notifications** (Settings > Encryption): no sender or place in any pushed
+  notification, and the note that replaces a ring names no caller. Message text in unencrypted
+  conversations still follows *Show message text*.
 - One list of what the server still sees of encrypted conversations, in the README, Settings > Encryption
   and `GET /api/privacy`.
 
