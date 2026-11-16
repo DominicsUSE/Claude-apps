@@ -15,7 +15,7 @@
 // media travels in its own stream, and each person tells the others which
 // stream id is their microphone, camera and screen, so a tile can show the
 // right picture.
-import { S, emit, toast } from './store.js';
+import { S, emit, toast, subscribe, convMeta } from './store.js';
 import { call, on } from './server.js';
 // Devices, input mode, processing, per-person volume, soundboard mixing (js/voiceopts.js).
 import {
@@ -25,7 +25,7 @@ import {
 // Connection quality from WebRTC's statistics (js/lib/netquality.js).
 import { summarize, uplinkPoor } from './lib/netquality.js';
 // Send caps, adaptive steps, the relay choice, new connection or renegotiation (js/lib/callnet.js).
-import { sendCaps, adaptStep, hasTurn, relayWanted, relayInsisted, sdpSession } from './lib/callnet.js';
+import { sendCaps, adaptStep, hasTurn, relayWanted, relayInsisted, sdpSession, callCode, screenPref } from './lib/callnet.js';
 
 // user -> { pc, audio, screenAudio, queue, stopLevel, polite, makingOffer,
 //           ignoreOffer, settingAnswer, chain, kinds, video, tx, id, relay,
@@ -127,7 +127,10 @@ function capBitrate(p) {
       const enc = prm.encodings?.[0];
       if (!enc) continue;
       const want = caps[slot];
-      if (JSON.stringify(encView(enc, slot)) === JSON.stringify(encView(want, slot))) continue;
+      // A screen share of text keeps its resolution when the line is tight; one of motion its frame rate.
+      const keep = slot === 'screen' ? screenPref(v.screenHint).degradationPreference : null;
+      if (JSON.stringify(encView(enc, slot)) === JSON.stringify(encView(want, slot)) && (!keep || prm.degradationPreference === keep)) continue;
+      if (keep) prm.degradationPreference = keep;
       enc.maxBitrate = want.maxBitrate;
       if (slot !== 'voice') {
         // Keys a cap leaves out go back to the browser's choice (data saver off, a step back up).
@@ -135,7 +138,17 @@ function capBitrate(p) {
         if (want.maxFramerate) enc.maxFramerate = want.maxFramerate; else delete enc.maxFramerate;
         enc.active = want.active !== false;
       }
-      s.setParameters(prm).catch(() => {});
+      s.setParameters(prm).catch(() => {
+        // A browser that refuses the preference still gets the caps.
+        if (!keep) return;
+        try {
+          const again = s.getParameters();
+          if (!again.encodings?.[0]) return;
+          Object.assign(again.encodings[0], enc);
+          if (enc.maxFramerate == null) delete again.encodings[0].maxFramerate;
+          s.setParameters(again).catch(() => {});
+        } catch { /* the browser picks */ }
+      });
     } catch { /* not supported here: the browser picks */ }
   }
 }
@@ -290,6 +303,7 @@ function onLineState(user, p, state = p.pc.connectionState) {
     clearTimeout(p.graceTimer);
     p.graceTimer = null;
     capBitrate(p);
+    readCode(user, p);
     return;
   }
   if (state === 'disconnected') {
@@ -302,6 +316,18 @@ function onLineState(user, p, state = p.pc.connectionState) {
   }
   if (state === 'failed') { clearTimeout(p.graceTimer); p.graceTimer = null; restartLine(user, p); }
 }
+// The security code for this connection (js/lib/callnet.js callCode), from
+// both certificates' fingerprints as this side sees them; the same for one
+// connection's life, ICE restarts included.
+function readCode(user, p) {
+  if (p.code) return;
+  callCode(p.pc.currentLocalDescription, p.pc.currentRemoteDescription).then((code) => {
+    if (code && peers.get(user) === p && !p.code) { p.code = code; emit(); }
+  }).catch(() => {});
+}
+// The code to compare with one person, or null while there is none yet.
+export const codeOf = (user) => peers.get(user)?.code || null;
+
 function restartLine(user, p) {
   if (p.noRelay) return;
   const now = Date.now();
@@ -634,6 +660,65 @@ export function leaveVoice() {
   if (live) cue('leave');
 }
 
+// ---------- The screen kept on, and the system's call controls ----------
+// While in a call or voice, the screen stays on (Screen Wake Lock), asked for
+// again when the page comes back in front (the system lets go of it while
+// hidden). The system's own call controls (Media Session: a phone's lock
+// screen, a headset's button, the desktop's media controls, where the
+// browser offers them) mute, turn the camera on and off, and hang up. Both
+// follow the state, so every way in or out of a call is covered; a browser
+// without either just goes without.
+let wake = null;        // the wake lock held while in a call
+let wakeAsking = false;
+async function holdWake() {
+  if (!S.call || wake || wakeAsking || document.visibilityState !== 'visible' || !navigator.wakeLock?.request) return;
+  wakeAsking = true;
+  try {
+    const w = await navigator.wakeLock.request('screen');
+    if (!S.call) { w.release?.().catch?.(() => {}); return; }
+    wake = w;
+    w.addEventListener?.('release', () => { if (wake === w) wake = null; });
+  } catch { /* not allowed here (battery saver, no screen): the call goes on */ } finally { wakeAsking = false; }
+}
+function dropWake() {
+  const w = wake;
+  wake = null;
+  try { w?.release?.().catch?.(() => {}); } catch { /* already gone */ }
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') holdWake(); });
+
+const CALL_ACTIONS = { togglemicrophone: () => toggleMute(), togglecamera: () => toggleCamera(), hangup: () => leaveVoice() };
+let controls = null; // what the media session was last told: { title, mic, cam }
+function callTitle(c) {
+  if (!c.dm) return `Voice in ${S.rooms[c.room]?.name || 'a voice room'}`;
+  const meta = convMeta(c.room);
+  return meta?.kind === 'group' ? `Call in ${meta.title}` : `Call with ${meta?.title || 'someone'}`;
+}
+function syncControls() {
+  const ms = navigator.mediaSession;
+  const c = S.call?.status === 'live' || S.call?.status === 'reconnecting' ? S.call : null;
+  if (!ms || (!c && !controls)) return;
+  if (!c) {
+    controls = null;
+    for (const a of Object.keys(CALL_ACTIONS)) { try { ms.setActionHandler(a, null); } catch { /* not offered here */ } }
+    try { ms.metadata = null; } catch { /* read-only here */ }
+    return;
+  }
+  const next = { title: callTitle(c), mic: !c.muted, cam: !!c.camera };
+  if (!controls) for (const [a, fn] of Object.entries(CALL_ACTIONS)) { try { ms.setActionHandler(a, fn); } catch { /* this action isn't offered here */ } }
+  if (controls?.title !== next.title) {
+    try { ms.metadata = typeof MediaMetadata === 'function' ? new MediaMetadata({ title: next.title, artist: 'Snug' }) : null; } catch { /* no metadata here */ }
+  }
+  if (controls?.mic !== next.mic) { try { ms.setMicrophoneActive?.(next.mic); } catch { /* not offered */ } }
+  if (controls?.cam !== next.cam) { try { ms.setCameraActive?.(next.cam); } catch { /* not offered */ } }
+  controls = next;
+}
+let wakeFor = null; // the call the wake lock was asked for: once per call, then on coming back in front
+subscribe(() => {
+  if (S.call && wakeFor !== S.call) { wakeFor = S.call; holdWake(); } else if (!S.call && wakeFor) { wakeFor = null; dropWake(); }
+  syncControls();
+});
+
 function pushState() {
   if (!S.call) return;
   call('voice.state', { muted: S.call.muted, deaf: S.call.deaf, camera: !!S.call.camera, screen: !!S.call.screen, listen: !!S.call.listen }).catch(() => {});
@@ -742,6 +827,16 @@ export async function restartCamera() {
 }
 // Re-apply bitrate ceilings, after the room's bitrate or the screen quality changed.
 export function recapBitrates() { for (const p of peers.values()) capBitrate(p); }
+// The screen share's quality or kind changed: apply it to the share already
+// running (its resolution and frame rate, what it favours), not only the next one.
+export function applyScreen() {
+  const track = screen?.getVideoTracks()[0];
+  if (track) {
+    try { track.contentHint = screenPref(vp().screenHint).contentHint; } catch { /* hint only */ }
+    track.applyConstraints?.(screenConstraints().video).catch(() => { /* the browser keeps what it has */ });
+  }
+  recapBitrates();
+}
 
 // How the line to one person goes: asked to be relay-only, and the route measured once connected.
 export function lineOf(user) {
@@ -759,6 +854,7 @@ export function applyDataSaver() {
     signal(u, { want: { camera: !low || !!S.call.showCam?.[u] } });
     capBitrate(p);
   }
+  if (screen) applyScreen(); // a running share drops to (or back from) 720p and 10 frames a second
   emit();
 }
 // With data saver on, someone's camera is paused until you ask to see it.
@@ -878,7 +974,7 @@ export async function toggleScreen() {
   if (!stream || S.call !== c) { stream?.getTracks().forEach((t) => t.stop()); emit(); return; }
   screen = stream;
   const track = stream.getVideoTracks()[0];
-  try { track.contentHint = 'detail'; } catch { /* hint only */ }
+  try { track.contentHint = screenPref(vp().screenHint).contentHint; } catch { /* hint only */ }
   // The browser's own "Stop sharing" ends the track.
   track.onended = () => { if (screen === stream) stopScreen(); };
   c.screen = true;
@@ -938,6 +1034,7 @@ export async function voiceStats() {
       pc: p.id, ufrag: /a=ice-ufrag:(\S+)/.exec(p.pc.localDescription?.sdp || '')?.[1] || null, restarts: p.restarted || 0, signaling: p.pc.signalingState,
       // Hiding my IP: relay-only or not; adaptive quality's step; what my sends are capped at; whether they want my camera.
       policy: p.pc.getConfiguration().iceTransportPolicy, level: p.adapt.level, wantCamera: p.wantCamera,
+      screenPref: (() => { try { return p.tx.screen?.sender?.track ? p.tx.screen.sender.getParameters().degradationPreference || null : null; } catch { return null; } })(),
       caps: Object.fromEntries(['camera', 'screen'].map((k) => { try { return [k, p.tx[k]?.sender?.track ? p.tx[k].sender.getParameters().encodings?.[0] || null : null]; } catch { return [k, null]; } })),
       sending: p.pc.getSenders().some((x) => x.track && x.track.kind === 'audio' && x.track.readyState === 'live'),
     };

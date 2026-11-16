@@ -11,7 +11,7 @@ import { call, on } from '../server.js';
 import { can } from '../lib/perms.js';
 import { Icon, addIcons } from '../ui/icons.js';
 import { Avatar } from '../ui/kit.js';
-import { leaveVoice, toggleMute, toggleDeaf, mediaOf, recapBitrates, restartMic, restartCamera, applyDataSaver } from '../voice.js';
+import { leaveVoice, toggleMute, toggleDeaf, mediaOf, recapBitrates, restartMic, restartCamera, applyDataSaver, applyScreen } from '../voice.js';
 import { pttGlobalWait } from '../lib/callnet.js'; // how long the desktop app's global key waits between presses
 import { CallTimer, MutedBanner } from './activities.js'; // the call clock and the muted note (voice and calls track)
 import {
@@ -167,8 +167,10 @@ async function optionsMenu(e) {
       { label: `Push to talk (${v.pttLabel})`, checked: v.mode === 'ptt', onSelect: () => setVoice({ mode: 'ptt' }) },
       { sep: true },
       { heading: 'Screen share quality' },
-      ...Object.keys(RESOLUTIONS).map((r) => ({ label: r === 'source' ? 'Source resolution' : `${r}p`, checked: v.screenRes === r, onSelect: () => { setVoice({ screenRes: r }); recapBitrates(); } })),
-      ...FRAME_RATES.map((f) => ({ label: `${f} frames a second`, checked: v.screenFps === f, onSelect: () => { setVoice({ screenFps: f }); recapBitrates(); } })),
+      { label: 'Text and slides', checked: v.screenHint !== 'motion', onSelect: () => { setVoice({ screenHint: 'detail' }); applyScreen(); } },
+      { label: 'Motion and games', checked: v.screenHint === 'motion', onSelect: () => { setVoice({ screenHint: 'motion' }); applyScreen(); } },
+      ...Object.keys(RESOLUTIONS).map((r) => ({ label: r === 'source' ? 'Source resolution' : `${r}p`, checked: v.screenRes === r, onSelect: () => { setVoice({ screenRes: r }); applyScreen(); } })),
+      ...FRAME_RATES.map((f) => ({ label: `${f} frames a second`, checked: v.screenFps === f, onSelect: () => { setVoice({ screenFps: f }); applyScreen(); } })),
       { label: 'Share sound with the screen', checked: !!v.screenAudio, onSelect: () => setVoice({ screenAudio: !v.screenAudio }) },
       { sep: true },
       { label: 'Data saver', checked: !!v.lowData, onSelect: () => { setVoice({ lowData: !v.lowData }); applyDataSaver(); } },

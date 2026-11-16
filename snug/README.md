@@ -766,7 +766,10 @@ Real, and covered by tests with separate users:
     or camera, and the controls; **picture in picture** for a shared screen or
     camera where the browser supports it.
   - **Screen share quality**: 720p, 1080p or source; 15, 30 or 60 frames a
-    second; with or without sound.
+    second; with or without sound; **Text and slides** (stays sharp when the
+    connection is tight, with fewer frames) or **Motion and games** (stays
+    smooth, with fewer pixels). Changes apply to a share that is already
+    running, without picking the screen again.
   - **Sounds** for people joining and leaving and for muting (made with
     WebAudio), each switchable; **deafening mutes you too** (or not); hearing
     again puts your mute back how it was; **leave a voice room after a chosen
@@ -1112,8 +1115,25 @@ Real, and covered by tests with separate users:
     default; refused on the server and turned off mid-call when taken away);
     camera resolution and frame rate, mirror, microphone volume and output
     volume; and short-lived TURN credentials (below).
+  - **On phones and laptops (0.13):** the screen stays on while you are in a
+    call or voice (Screen Wake Lock, asked again when you come back to the
+    page; the desktop app allows it too), and the system's own call controls (a lock screen, a headset's
+    button, the desktop's media controls, where the browser offers them)
+    mute, turn the camera on and off and hang up. Without either API the
+    call works as before.
+  - **Security code (0.13):** the connection details show a 6-digit code per
+    person, made from both sides' DTLS certificate fingerprints. Read it out
+    loud: if both of you see the same code, it is much harder for anyone (the
+    server included) to sit in the middle of your connection. It is not a
+    guarantee: the code is only 6 digits and neither side commits to its
+    certificate first, so someone who controls the signalling and has enough
+    computing power could keep making certificates until the codes match. It
+    checks that one connection, not who the person is, and Snug doesn't
+    remember codes between calls.
   Tested by `tests/logic-voice.test.js` (5), `tests/server-voice.test.js`
-  (13), `tests/e2e-voice-extra.test.js` (8) and `tests/e2e-activities.test.js`
+  (13), `tests/e2e-voice-extra.test.js` (8), `tests/e2e-voice-mesh.test.js`
+  (6, with five browsers for a voice room growing past 3 others; the wake
+  lock and the media session are stand-ins there) and `tests/e2e-activities.test.js`
   (4, in two browsers). Not tested: a real network drop (the tests close the
   socket without a clean goodbye), a real device being unplugged (the track's
   end is simulated), the ring's output device, and TURN through a real relay.
@@ -1421,7 +1441,10 @@ and call signalling. Push notifications say only "New message".
   stored readable on the server (each says so in its menu), and database snapshots
   taken before keep them until they age out.
 - *Calls* are not end-to-end encrypted by this feature (they use WebRTC's own
-  encryption, but signalling passes the server).
+  encryption, but signalling passes the server). Since 0.13 the connection
+  details show a security code per person: matching codes, read out loud,
+  make it much harder to swap the connection's keys on the way, but with only
+  6 digits a server with enough computing power could still make them match.
 
 **Not encrypted, by design.** Rooms in houses (their pages say so), reactions,
 group names and pictures. Polls and `/roll` are off in encrypted conversations

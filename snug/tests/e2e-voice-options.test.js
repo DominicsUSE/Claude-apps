@@ -19,6 +19,23 @@ const PASSWORD = 'snug-demo-1';
 const dir = mkdtempSync(join(tmpdir(), 'snug-e2e-voiceopts-'));
 let srv, browser, url;
 const errors = [];
+// Playwright's waitForFunction doesn't wait for a promise, so an async check
+// would pass at once: this one polls it until it is true. Each check is
+// awaited to its answer, one at a time: on a busy machine a page can take tens
+// of seconds to answer (its WebRTC calls wait on a starved thread), and a slow
+// true still counts. Only a check still unanswered 30 s past the limit fails.
+async function waitAsync(page, fn, arg, { timeout = 15000, polling = 250 } = {}) {
+  const end = Date.now() + timeout;
+  const fail = (why) => new Error(`waitAsync: ${why} after ${timeout} ms: ${String(fn).slice(0, 160)}`);
+  for (;;) {
+    let timer;
+    const late = new Promise((_, no) => { timer = setTimeout(() => no(fail('a check did not answer')), Math.max(0, end - Date.now()) + 30000); });
+    const ok = await Promise.race([page.evaluate(fn, arg), late]).finally(() => clearTimeout(timer));
+    if (ok) return ok;
+    if (Date.now() > end) throw fail('timed out');
+    await new Promise((r) => setTimeout(r, typeof polling === 'number' ? polling : 100));
+  }
+}
 
 test.before(async () => {
   const db = openDb(join(dir, 'snug.db'));
@@ -60,7 +77,7 @@ async function openWheelRoom(page) {
   await page.click('.nav .row:has-text("Wheel room")');
   await page.locator('.stage').waitFor();
 }
-const connected = (page, n) => page.waitForFunction(async (want) => {
+const connected = (page, n) => waitAsync(page, async (want) => {
   const peers = Object.values(await window.snug.voiceStats());
   return peers.length === want && peers.every((p) => p.state === 'connected' && p.bytes > 1000);
 }, n, { timeout: 25000, polling: 300 });
@@ -128,6 +145,13 @@ test('settings: microphone, speaker and camera lists, a working level meter, a c
   assert.equal(await robin.getAttribute('button[role="switch"][aria-label="Noise suppression"]', 'aria-checked'), 'false');
   assert.equal(await robin.evaluate(() => window.snug.S.prefs.voice.noise), false);
   await robin.click('button[role="switch"][aria-label="Noise suppression"]');
+  // What a screen share favours: text and slides by default, motion and games on request.
+  const what = robin.locator('.set-row:has-text("What you share")');
+  assert.match(await what.locator('.seg button[aria-pressed="true"], .seg button[aria-checked="true"]').first().textContent(), /Text and slides/);
+  await what.locator('.seg button:has-text("Motion and games")').click();
+  assert.equal(await robin.evaluate(() => window.snug.S.prefs.voice.screenHint), 'motion');
+  await what.locator('.seg button:has-text("Text and slides")').click();
+  assert.equal(await robin.evaluate(() => window.snug.S.prefs.voice.screenHint), 'detail');
   await mic.selectOption('');
   await closeLayer(robin);
 });
@@ -210,24 +234,24 @@ test('each person’s volume: 50% and 150% on the element that plays them, a mut
   const stat = () => robin.evaluate(async (id) => (await window.snug.voiceStats())[id], inesId);
 
   await setTo(50);
-  await robin.waitForFunction(async (id) => (await window.snug.voiceStats())[id]?.volume === 0.5, inesId);
+  await waitAsync(robin, async (id) => (await window.snug.voiceStats())[id]?.volume === 0.5, inesId);
   let s = await stat();
   assert.equal(s.muted, false);
   assert.equal(s.boost, 0);
 
   await setTo(150);
-  await robin.waitForFunction(async (id) => (await window.snug.voiceStats())[id]?.boost === 1.5, inesId);
+  await waitAsync(robin, async (id) => (await window.snug.voiceStats())[id]?.boost === 1.5, inesId);
   s = await stat();
   assert.equal(s.volume, 1, 'the element plays at full volume...');
   assert.equal(s.muted, true, '...silenced, while WebAudio plays it louder');
 
   await robin.click('.pop button:has-text("Mute Ines for me")');
-  await robin.waitForFunction(async (id) => { const x = (await window.snug.voiceStats())[id]; return x.muted && x.boost === 0; }, inesId);
+  await waitAsync(robin, async (id) => { const x = (await window.snug.voiceStats())[id]; return x.muted && x.boost === 0; }, inesId);
   // Ines doesn't know: her own state is unchanged.
   assert.equal(await ines.evaluate(() => window.snug.S.call.muted), false);
   await robin.click('.pop button:has-text("Unmute Ines")');
   await setTo(80);
-  await robin.waitForFunction(async (id) => { const x = (await window.snug.voiceStats())[id]; return x.volume === 0.8 && !x.muted; }, inesId);
+  await waitAsync(robin, async (id) => { const x = (await window.snug.voiceStats())[id]; return x.volume === 0.8 && !x.muted; }, inesId);
   await robin.keyboard.press('Escape');
   // Remembered on this device for Ines.
   const saved = await robin.evaluate(() => new Promise((r) => setTimeout(() => r(JSON.parse(localStorage.getItem('snug.prefs')).voice), 600)));
@@ -271,7 +295,7 @@ test('soundboard: a sound added in House settings plays into the voice room and 
   await robin.locator('.vo-snd:has-text("Tada")').click();
   // Ines sees who played what, and hears it.
   await ines.locator('.stage-person:has-text("Robin") .vo-played:has-text("Tada")').waitFor();
-  await ines.waitForFunction(async ({ id, base }) => ((await window.snug.voiceStats())[id]?.energy || 0) - base > 0.05, { id: robinId, base: e0 + quiet }, { timeout: 8000, polling: 200 });
+  await waitAsync(ines, async ({ id, base }) => ((await window.snug.voiceStats())[id]?.energy || 0) - base > 0.05, { id: robinId, base: e0 + quiet }, { timeout: 8000, polling: 200 });
   // The cooldown: the board's sounds wait a moment before the next one.
   await robin.locator('.vo-board .vo-note:has-text("One sound every few seconds")').waitFor();
   assert.equal(await robin.locator('.vo-snd:has-text("Tada")').isDisabled(), true);
@@ -312,7 +336,7 @@ test('the floating call follows you to other places; a voice room’s user limit
   await robin.waitForFunction(() => Object.values(window.snug.S.rooms).find((r) => r.name === 'Wheel room')?.bitrate === 96);
   // The new bitrate becomes the ceiling on Robin's voice to Ines, without rejoining.
   const inesId = await ines.evaluate(() => window.snug.S.me);
-  await robin.waitForFunction(async (id) => (await window.snug.voiceStats())[id]?.voiceMax === 96000, inesId, { timeout: 5000 });
+  await waitAsync(robin, async (id) => (await window.snug.voiceStats())[id]?.voiceMax === 96000, inesId, { timeout: 5000 });
   await closeLayer(robin);
   const tomasz = await person('tomasz');
   await openWheelRoom(tomasz);
@@ -403,9 +427,9 @@ test('processing applies live in a call; deafening mutes (or not); mute, join an
   const inesId = await ines.evaluate(() => window.snug.S.me);
   await robin.click('.stage.call .stage-person:has-text("Ines") .vo-vol');
   await robin.$eval('.pop input.vo-range', (el) => { el.value = '40'; el.dispatchEvent(new Event('input', { bubbles: true })); });
-  await robin.waitForFunction(async (id) => (await window.snug.voiceStats())[id]?.volume === 0.4, inesId);
+  await waitAsync(robin, async (id) => (await window.snug.voiceStats())[id]?.volume === 0.4, inesId);
   await robin.click('.pop button:has-text("Mute Ines for me")');
-  await robin.waitForFunction(async (id) => (await window.snug.voiceStats())[id]?.muted === true, inesId);
+  await waitAsync(robin, async (id) => (await window.snug.voiceStats())[id]?.muted === true, inesId);
   assert.equal(await ines.evaluate(() => window.snug.S.call.muted), false, 'Ines isn’t told');
   await robin.keyboard.press('Escape');
   // A call never leaves on its own, however long alone.

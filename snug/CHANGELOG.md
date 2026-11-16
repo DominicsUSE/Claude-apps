@@ -79,6 +79,19 @@ goes back to an older version on its own (README, "Install, update, go back").
   app taken back to 0.12 can't read encrypted messages until it is updated again, or until that computer is
   removed from another device and added again.
 
+### Calls
+
+- The screen stays on while you are in a call or voice (where the browser allows it), and the system's call
+  controls (lock screen, headset button, desktop media controls, where offered) mute, turn the camera on and
+  off, and hang up.
+- A security code per person in the connection details: matching codes, read out loud, make it much harder for
+  anyone, the server included, to sit in the middle of the connection. It is only 6 digits, so it is not a
+  guarantee (see SECURITY.md).
+- Screen share: choose **Text and slides** or **Motion and games**; resolution, frame rate and data saver
+  now change a share that is already running.
+- New test: send limits drop when a voice room grows past 3 other people and come back when it shrinks
+  (five browsers).
+
 ## 0.12.0
 
 ### Private conversations

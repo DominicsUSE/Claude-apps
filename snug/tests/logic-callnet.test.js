@@ -1,10 +1,11 @@
 // A call's network rules (js/lib/callnet.js): send caps for data saver and
 // adaptive stepping, the relay decision for hiding an IP address, telling a
-// new connection from a renegotiation, and the global push-to-talk wait.
+// new connection from a renegotiation, the global push-to-talk wait, and the
+// call security code compared out loud.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  sendCaps, adaptStep, hasTurn, relayWanted, relayInsisted, sdpSession, pttGlobalWait,
+  sendCaps, adaptStep, hasTurn, relayWanted, relayInsisted, sdpSession, pttGlobalWait, sdpFingerprint, callCode, screenPref,
   LOW_DATA, FLOOR, MAX_LEVEL, PTT_FIRST_WAIT,
 } from '../js/lib/callnet.js';
 
@@ -90,4 +91,36 @@ test('global push to talk: waits out a slow key repeat after the first press, th
   assert.equal(pttGlobalWait(33), 120, 'fast repeats: never under 120 ms');
   assert.equal(pttGlobalWait(100), 300);
   assert.equal(pttGlobalWait(5000), PTT_FIRST_WAIT, 'a long gap is a new press');
+});
+
+// Two SDPs as a browser writes them: the fingerprint at the session level, or only in the media section.
+const FP_A = '23:36:D6:19:64:13:EC:B9:0D:72:7B:EA:98:2C:1A:16:FD:92:19:C1:38:4A:E6:EB:08:5F:87:75:F6:BA:BB:9E';
+const FP_B = 'A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90:01:12:23:34:45:56:67:78:89:9A:AB:BC:CD:DE:EF:F0';
+const sdpWith = (fp, where = 'session') => (where === 'session'
+  ? `v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\na=fingerprint:sha-256 ${fp}\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n`
+  : `v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=mid:0\r\na=fingerprint:sha-256 ${fp.toLowerCase()}\r\n`);
+
+test('security code: the DTLS fingerprint read from an SDP, wherever it sits; none in junk', () => {
+  assert.equal(sdpFingerprint(sdpWith(FP_A)), `sha-256 ${FP_A}`);
+  assert.equal(sdpFingerprint({ type: 'answer', sdp: sdpWith(FP_A, 'media') }), `sha-256 ${FP_A}`, 'case does not matter');
+  assert.equal(sdpFingerprint('v=0\r\n'), null);
+  assert.equal(sdpFingerprint(null), null);
+});
+
+test('security code: 6 digits, the same on both sides (order does not matter), different when either fingerprint changes', async () => {
+  const mine = await callCode(sdpWith(FP_A), sdpWith(FP_B, 'media'));
+  const theirs = await callCode(sdpWith(FP_B), sdpWith(FP_A, 'media'));
+  assert.match(mine, /^\d{6}$/);
+  assert.equal(mine, theirs, 'both people in the call see the same code');
+  const swapped = FP_B.replace(/^A1/, 'A2');
+  assert.notEqual(await callCode(sdpWith(FP_A), sdpWith(swapped)), mine, 'someone in the middle with another certificate changes it');
+  assert.notEqual(await callCode(sdpWith(FP_A.replace(/^23/, '24')), sdpWith(FP_B)), mine);
+  assert.equal(await callCode(sdpWith(FP_A), 'v=0\r\n'), null, 'no code without both fingerprints');
+  assert.equal(await callCode(sdpWith(FP_A), sdpWith(FP_A)), null, 'a connection to itself proves nothing');
+});
+
+test('screen share choice: text keeps the resolution, motion keeps the frame rate', () => {
+  assert.deepEqual(screenPref('detail'), { contentHint: 'detail', degradationPreference: 'maintain-resolution' });
+  assert.deepEqual(screenPref('motion'), { contentHint: 'motion', degradationPreference: 'maintain-framerate' });
+  assert.deepEqual(screenPref('junk'), screenPref('detail'), 'text and slides is the default');
 });

@@ -19,6 +19,23 @@ const PASSWORD = 'snug-demo-1';
 const dir = mkdtempSync(join(tmpdir(), 'snug-e2e-video-'));
 let srv, browser, url;
 const errors = [];
+// Playwright's waitForFunction doesn't wait for a promise, so an async check
+// would pass at once: this one polls it until it is true. Each check is
+// awaited to its answer, one at a time: on a busy machine a page can take tens
+// of seconds to answer (its WebRTC calls wait on a starved thread), and a slow
+// true still counts. Only a check still unanswered 30 s past the limit fails.
+async function waitAsync(page, fn, arg, { timeout = 15000, polling = 250 } = {}) {
+  const end = Date.now() + timeout;
+  const fail = (why) => new Error(`waitAsync: ${why} after ${timeout} ms: ${String(fn).slice(0, 160)}`);
+  for (;;) {
+    let timer;
+    const late = new Promise((_, no) => { timer = setTimeout(() => no(fail('a check did not answer')), Math.max(0, end - Date.now()) + 30000); });
+    const ok = await Promise.race([page.evaluate(fn, arg), late]).finally(() => clearTimeout(timer));
+    if (ok) return ok;
+    if (Date.now() > end) throw fail('timed out');
+    await new Promise((r) => setTimeout(r, typeof polling === 'number' ? polling : 100));
+  }
+}
 
 test.before(async () => {
   const db = openDb(join(dir, 'snug.db'));
@@ -61,7 +78,7 @@ async function openWheelRoom(page) {
   await page.locator('.stage').waitFor();
 }
 // Connected to `n` others, with audio flowing from each.
-const connected = (page, n) => page.waitForFunction(async (want) => {
+const connected = (page, n) => waitAsync(page, async (want) => {
   const peers = Object.values(await window.snug.voiceStats());
   return peers.length === want && peers.every((p) => p.state === 'connected' && p.bytes > 1000);
 }, n, { timeout: 25000, polling: 300 });
@@ -231,7 +248,7 @@ test('screen share from a late joiner reaches people already in the room, and th
   await playing(robin, 'tomasz:screen');
   await playing(ines, 'tomasz:screen');
   // The screen's sound (Chromium's fake one here) arrives too, played apart from the picture.
-  await robin.waitForFunction(async () => (await window.snug.voiceStats()).tomasz?.screenSound === true);
+  await waitAsync(robin, async () => (await window.snug.voiceStats()).tomasz?.screenSound === true);
   const priya = await person('priya');
   await joinVoiceRoom(priya, 3);
   await playing(priya, 'tomasz:screen');
@@ -239,7 +256,7 @@ test('screen share from a late joiner reaches people already in the room, and th
   await tomasz.click('.stage .vc.scr');
   await priya.locator('.vt[data-tile="tomasz:screen"]').waitFor({ state: 'detached' });
   await priya.click('.stage [aria-label="Leave voice"]');
-  await robin.waitForFunction(async () => Object.keys(await window.snug.voiceStats()).length === 2);
+  await waitAsync(robin, async () => Object.keys(await window.snug.voiceStats()).length === 2);
   await priya.context().close();
 });
 
@@ -304,4 +321,43 @@ test('leaving stops the camera for everyone and frees the device', async () => {
   assert.equal(await robin.evaluate(() => document.querySelectorAll('video').length), 0);
   await ines.click('.stage [aria-label="Leave voice"]');
   await tomasz.click('.stage [aria-label="Leave voice"]');
+});
+
+// Robin shares here: Ines's screen picker was refused in a test above.
+test('screen share: Text and slides or Motion and games, and a new resolution, change a share that is already running', async () => {
+  await joinVoiceRoom(ines);
+  await joinVoiceRoom(robin, 1);
+  await robin.click('.stage .vc.scr');
+  await playing(ines, 'robin:screen');
+  const mine = () => robin.$eval('.vt[data-tile="robin:screen"] video', (v) => { const t = v.srcObject.getVideoTracks()[0]; return { id: t.id, hint: t.contentHint, height: t.getSettings().height }; });
+  const pref = () => robin.evaluate(async () => (await window.snug.voiceStats()).ines?.screenPref);
+  const before = await mine();
+  // Text and slides by default: sharp text, fewer frames when the line is tight.
+  assert.equal(before.hint, 'detail');
+  assert.equal(before.height, 1080, 'shared at 1080p');
+  await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.screenPref === 'maintain-resolution');
+  // Motion and games, from the call's menu: smooth frames, fewer pixels when tight.
+  await robin.click('.stage [aria-label="Voice options"]');
+  await robin.click('.menu [role="menuitemradio"]:has-text("Motion and games")');
+  await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.screenPref === 'maintain-framerate');
+  assert.equal((await mine()).hint, 'motion');
+  assert.equal(await robin.evaluate(() => window.snug.S.prefs.voice.screenHint), 'motion');
+  // 720p: the running share changes, without picking the screen again.
+  await robin.click('.stage [aria-label="Voice options"]');
+  await robin.click('.menu [role="menuitemradio"]:has-text("720p")');
+  await robin.waitForFunction(() => document.querySelector('.vt[data-tile="robin:screen"] video')?.srcObject?.getVideoTracks()[0]?.getSettings().height === 720);
+  assert.equal((await mine()).id, before.id, 'the same track, not a new share');
+  assert.equal(await pref(), 'maintain-framerate', 'the choice survives the change');
+  await playing(ines, 'robin:screen');
+  // Back to Text and slides and 1080p for the next share.
+  await robin.click('.stage [aria-label="Voice options"]');
+  await robin.click('.menu [role="menuitemradio"]:has-text("Text and slides")');
+  await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.screenPref === 'maintain-resolution');
+  assert.equal((await mine()).hint, 'detail');
+  await robin.click('.stage [aria-label="Voice options"]');
+  await robin.click('.menu [role="menuitemradio"]:has-text("1080p")');
+  await robin.waitForFunction(() => document.querySelector('.vt[data-tile="robin:screen"] video')?.srcObject?.getVideoTracks()[0]?.getSettings().height === 1080);
+  await robin.click('.stage .vc.scr');
+  await robin.click('.stage [aria-label="Leave voice"]');
+  await ines.click('.stage [aria-label="Leave voice"]');
 });

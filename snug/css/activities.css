@@ -38,6 +38,10 @@
 .act-qtable .num { font-variant-numeric: tabular-nums; }
 .act-qwho { display: inline-flex; align-items: center; gap: var(--s-2); max-width: 120px; }
 .act-note { margin: 0; color: var(--text-3); font-size: var(--t-13); }
+.act-codes { display: grid; gap: var(--s-2); }
+.act-code-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-1); font-size: var(--t-13); }
+.act-code-row { display: flex; justify-content: space-between; gap: var(--s-3); min-width: 0; }
+.act-code { font-variant-numeric: tabular-nums; font-weight: var(--w-medium); letter-spacing: 0.06em; white-space: nowrap; }
 .act-hint { margin: 0; padding: var(--s-2) var(--s-3); border-radius: var(--r-md); background: var(--amber-soft); color: var(--amber-ink); font-size: var(--t-13); }
 
 /* ---------- "You're muted" ---------- */

@@ -22,6 +22,23 @@ const relayDir = mkdtempSync(join(tmpdir(), 'snug-e2e-voicenet-relay-'));
 let srv, browser, bare, url;
 let relaySrv = null, relayUrl = null;
 const errors = [];
+// Playwright's waitForFunction doesn't wait for a promise, so an async check
+// would pass at once: this one polls it until it is true. Each check is
+// awaited to its answer, one at a time: on a busy machine a page can take tens
+// of seconds to answer (its WebRTC calls wait on a starved thread), and a slow
+// true still counts. Only a check still unanswered 30 s past the limit fails.
+async function waitAsync(page, fn, arg, { timeout = 15000, polling = 250 } = {}) {
+  const end = Date.now() + timeout;
+  const fail = (why) => new Error(`waitAsync: ${why} after ${timeout} ms: ${String(fn).slice(0, 160)}`);
+  for (;;) {
+    let timer;
+    const late = new Promise((_, no) => { timer = setTimeout(() => no(fail('a check did not answer')), Math.max(0, end - Date.now()) + 30000); });
+    const ok = await Promise.race([page.evaluate(fn, arg), late]).finally(() => clearTimeout(timer));
+    if (ok) return ok;
+    if (Date.now() > end) throw fail('timed out');
+    await new Promise((r) => setTimeout(r, typeof polling === 'number' ? polling : 100));
+  }
+}
 
 // Ten seconds of a 440 Hz tone at about -12 dBFS, as the fake microphone.
 function toneWav(path) {
@@ -97,12 +114,12 @@ async function joinWheel(page, { listen = false } = {}) {
 }
 const stats = (page) => page.evaluate(() => window.snug.voiceStats());
 const statsOf = async (page, user) => (await stats(page))[user];
-const connected = (page, n) => page.waitForFunction(async (want) => {
+const connected = (page, n) => waitAsync(page, async (want) => {
   const peers = Object.values(await window.snug.voiceStats());
   return peers.length === want && peers.every((p) => p.state === 'connected' && p.bytes > 1000);
 }, n, { timeout: 25000, polling: 300 });
 // Audio from one person keeps arriving: more bytes than before, by a margin.
-const moreBytes = (page, user, before, by = 2000, timeout = 15000) => page.waitForFunction(async ([u, b, d]) => ((await window.snug.voiceStats())[u]?.bytes || 0) > b + d, [user, before, by], { timeout, polling: 200 });
+const moreBytes = (page, user, before, by = 2000, timeout = 15000) => waitAsync(page, async ([u, b, d]) => ((await window.snug.voiceStats())[u]?.bytes || 0) > b + d, [user, before, by], { timeout, polling: 200 });
 async function openVoiceSettings(page) {
   await page.click('.me-panel [aria-label="Settings"]');
   await page.click('.layer-nav .row:has-text("Voice and video")');
@@ -234,7 +251,7 @@ test('ICE restart: "failed" restarts at once, "disconnected" after a grace with 
   await connected(robin, 1);
   const before = await statsOf(robin, 'ines');
   await robin.evaluate(() => window.snug.voiceTest.line('ines', 'failed'));
-  await robin.waitForFunction(async (u) => { const s = (await window.snug.voiceStats()).ines; return s.ufrag && s.ufrag !== u && s.state === 'connected' && s.signaling === 'stable'; }, before.ufrag, { timeout: 15000 });
+  await waitAsync(robin, async (u) => { const s = (await window.snug.voiceStats()).ines; return s.ufrag && s.ufrag !== u && s.state === 'connected' && s.signaling === 'stable'; }, before.ufrag, { timeout: 15000 });
   const after = await statsOf(robin, 'ines');
   assert.equal(after.pc, before.pc, 'the same connection, new ICE credentials');
   assert.equal(after.restarts, 1);
@@ -246,9 +263,9 @@ test('ICE restart: "failed" restarts at once, "disconnected" after a grace with 
   await ines.locator('.stage-person:has-text("Robin") .stage-note:has-text("Reconnecting")').waitFor();
   await ines.waitForTimeout(600);
   assert.equal((await statsOf(ines, 'robin')).restarts, inBefore.restarts, 'not before the grace');
-  await ines.waitForFunction(async (n) => (await window.snug.voiceStats()).robin.restarts === n + 1, inBefore.restarts, { timeout: 5000 });
+  await waitAsync(ines, async (n) => (await window.snug.voiceStats()).robin.restarts === n + 1, inBefore.restarts, { timeout: 5000 });
   await ines.locator('.stage-person:has-text("Robin") .stage-note').waitFor({ state: 'detached', timeout: 15000 });
-  await ines.waitForFunction(async () => { const s = (await window.snug.voiceStats()).robin; return s.state === 'connected' && s.signaling === 'stable'; });
+  await waitAsync(ines, async () => { const s = (await window.snug.voiceStats()).robin; return s.state === 'connected' && s.signaling === 'stable'; });
   await moreBytes(ines, 'robin', (await statsOf(ines, 'robin')).bytes);
 });
 
@@ -264,25 +281,25 @@ test('data saver: voice at 24 kbit/s, the camera stays off on a video call, othe
   await joinWheel(ines);
   await joinWheel(robin);
   await connected(robin, 1);
-  await robin.waitForFunction(async () => (await window.snug.voiceStats()).ines?.voiceMax === 24000);
+  await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.voiceMax === 24000);
   // Ines's voice to Robin follows the room (Ines has no data saver).
-  await ines.waitForFunction(async () => (await window.snug.voiceStats()).robin?.voiceMax === 64000);
+  await waitAsync(ines, async () => (await window.snug.voiceStats()).robin?.voiceMax === 64000);
   // Ines turns her camera on: her sender to Robin is switched off, and Robin's tile says so.
   await ines.click('.stage .vc.cam');
-  await ines.waitForFunction(async () => (await window.snug.voiceStats()).robin?.caps?.camera?.active === false, null, { timeout: 15000 });
+  await waitAsync(ines, async () => (await window.snug.voiceStats()).robin?.caps?.camera?.active === false, null, { timeout: 15000 });
   await robin.locator('.stage .vt-paused:has-text("Camera paused to save data")').waitFor();
   assert.equal(await robin.locator('.stage .vt-camera video').count(), 0);
   // Show video: Ines's sender turns on and the picture plays for Robin.
   await robin.click('.stage .vt-paused button:has-text("Show video")');
-  await ines.waitForFunction(async () => (await window.snug.voiceStats()).robin?.caps?.camera?.active === true, null, { timeout: 15000 });
+  await waitAsync(ines, async () => (await window.snug.voiceStats()).robin?.caps?.camera?.active === true, null, { timeout: 15000 });
   await robin.waitForFunction(() => { const v = document.querySelector('.stage .vt-camera video'); return v && v.videoWidth > 0; }, null, { timeout: 15000 });
   // Robin's own camera: a quarter of the pixels, 15 fps, 250 kbit/s.
   await robin.click('.stage .vc.cam');
-  await robin.waitForFunction(async () => { const c = (await window.snug.voiceStats()).ines?.caps?.camera; return c && c.maxBitrate === 250000 && c.scaleResolutionDownBy === 2 && c.maxFramerate === 15; }, null, { timeout: 15000 });
+  await waitAsync(robin, async () => { const c = (await window.snug.voiceStats()).ines?.caps?.camera; return c && c.maxBitrate === 250000 && c.scaleResolutionDownBy === 2 && c.maxFramerate === 15; }, null, { timeout: 15000 });
   // Turned off mid-call from the call's menu: Robin's voice back to the room's bitrate.
   await robin.click('.stage [aria-label="Voice options"]');
   await robin.click('.menu [role="menuitemcheckbox"]:has-text("Data saver"), .menu .menu-item:has-text("Data saver")');
-  await robin.waitForFunction(async () => (await window.snug.voiceStats()).ines?.voiceMax === 64000);
+  await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.voiceMax === 64000);
 });
 
 test('data saver on a video call: the camera stays off when the call starts', async () => {
@@ -303,17 +320,17 @@ test('adaptive quality: reported loss steps the caps down on that line, steady p
   await joinWheel(ines);
   await connected(robin, 1);
   await robin.click('.stage .vc.cam');
-  await robin.waitForFunction(async () => (await window.snug.voiceStats()).ines?.caps?.camera?.maxBitrate === 900000, null, { timeout: 15000 });
+  await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.caps?.camera?.maxBitrate === 900000, null, { timeout: 15000 });
   assert.equal((await statsOf(robin, 'ines')).voiceMax, 64000);
   // Two polls with 12% loss: one step down.
   await robin.evaluate(() => { for (let i = 0; i < 2; i++) window.snug.voiceTest.quality('ines', { loss: 12, rtt: 60 }); });
-  await robin.waitForFunction(async () => { const s = (await window.snug.voiceStats()).ines; return s.level === 1 && s.voiceMax === 32000 && s.caps.camera?.maxBitrate === 450000; });
+  await waitAsync(robin, async () => { const s = (await window.snug.voiceStats()).ines; return s.level === 1 && s.voiceMax === 32000 && s.caps.camera?.maxBitrate === 450000; });
   // Two more with a slow round trip: step 2, fewer pixels.
   await robin.evaluate(() => { for (let i = 0; i < 2; i++) window.snug.voiceTest.quality('ines', { loss: 0, rtt: 700 }); });
-  await robin.waitForFunction(async () => { const s = (await window.snug.voiceStats()).ines; return s.level === 2 && s.voiceMax === 24000 && s.caps.camera?.scaleResolutionDownBy === 2; });
+  await waitAsync(robin, async () => { const s = (await window.snug.voiceStats()).ines; return s.level === 2 && s.voiceMax === 24000 && s.caps.camera?.scaleResolutionDownBy === 2; });
   // Ten good polls: back to full.
   await robin.evaluate(() => { for (let i = 0; i < 10; i++) window.snug.voiceTest.quality('ines', { loss: 0, rtt: 40 }); });
-  await robin.waitForFunction(async () => { const s = (await window.snug.voiceStats()).ines; return s.level === 0 && s.voiceMax === 64000 && s.caps.camera?.maxBitrate === 900000 && (s.caps.camera?.scaleResolutionDownBy ?? 1) === 1; });
+  await waitAsync(robin, async () => { const s = (await window.snug.voiceStats()).ines; return s.level === 0 && s.voiceMax === 64000 && s.caps.camera?.maxBitrate === 900000 && (s.caps.camera?.scaleResolutionDownBy ?? 1) === 1; });
 });
 
 // ---------- 4. Hiding your IP behind a relay ----------
@@ -343,7 +360,7 @@ test('relay: with a relay, voice rooms go relay-only by default (never direct), 
   // A voice room: relay-only, so with a dead relay it stays unconnected and says how it's trying.
   await joinWheel(robin);
   await joinWheel(ines);
-  await robin.waitForFunction(async () => (await window.snug.voiceStats()).ines?.policy === 'relay');
+  await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.policy === 'relay');
   await robin.locator('.stage-person:has-text("Ines") .stage-note:has-text("through the relay")').waitFor();
   await robin.waitForTimeout(1500);
   assert.notEqual((await statsOf(robin, 'ines')).state, 'connected', 'never direct');
@@ -354,7 +371,7 @@ test('relay: with a relay, voice rooms go relay-only by default (never direct), 
   await ines.evaluate(() => { window.snug.S.prefs.voice = { ...window.snug.S.prefs.voice, relay: 'off' }; });
   await joinWheel(robin);
   await joinWheel(ines);
-  await robin.waitForFunction(async () => (await window.snug.voiceStats()).ines?.policy === 'all');
+  await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.policy === 'all');
   await connected(robin, 1);
   await robin.locator('.stage .act-conn .act-routeword:has-text("Direct")').waitFor({ timeout: 10000 });
   await robin.click('.stage .act-conn');
@@ -369,13 +386,13 @@ test('relay: with a relay, voice rooms go relay-only by default (never direct), 
   await openDm(robin, 'Ines Carvalho');
   await robin.click('.main .bar .call-btn[aria-label="Start a voice call"]');
   await ines.locator('.incoming .inc-accept').click();
-  await robin.waitForFunction(async () => (await window.snug.voiceStats()).ines?.policy === 'all');
+  await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.policy === 'all');
   // Always: relay-only with a friend too.
   await robin.click('.stage [aria-label="Leave call"]');
   await robin.evaluate(() => { window.snug.S.prefs.voice = { ...window.snug.S.prefs.voice, relay: 'all' }; });
   await joinWheel(robin);
   await joinWheel(ines);
-  await robin.waitForFunction(async () => (await window.snug.voiceStats()).ines?.policy === 'relay');
+  await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.policy === 'relay');
 });
 
 test('relay: asked to hide my IP with no relay on the server, Snug doesn’t connect directly and says why', async () => {

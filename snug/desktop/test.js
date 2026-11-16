@@ -163,6 +163,9 @@ test("voice: the camera turns on, and the screen picker shares a screen", async 
   step("join voice");
   await page.click('.stage .btn.primary:has-text("Join voice")');
   await page.locator('.stage [aria-label="Leave voice"]').waitFor();
+  // In a call the page keeps the screen on (js/voice.js holdWake): the app lets its own page take the wake lock.
+  const wake = await page.evaluate(() => navigator.wakeLock.request("screen").then(async (w) => { await w.release(); return `granted:${w.type}`; }, (e) => `refused:${e.name}`));
+  assert.equal(wake, "granted:screen", "the screen wake lock is allowed in the app");
   // A video in this kind of tile has a picture and its time moves on.
   const plays = async (kind) => {
     const sel = `.vt[data-tile$=":${kind}"] video`;

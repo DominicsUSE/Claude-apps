@@ -5,7 +5,9 @@
 // - stepping that down and back up from measured loss and round trip,
 // - whether a connection should go only through a relay (to hide my IP),
 // - telling a brand-new connection's offer from a renegotiation,
-// - how long the desktop app's global push-to-talk key waits between presses.
+// - how long the desktop app's global push-to-talk key waits between presses,
+// - what a screen share favours (sharp text or smooth motion),
+// - the short security code two people in a call compare out loud.
 
 // Data saver: what it caps, whatever the room or the quality settings say.
 export const LOW_DATA = {
@@ -96,4 +98,31 @@ export const PTT_FIRST_WAIT = 1100;
 export function pttGlobalWait(gap) {
   if (!Number.isFinite(gap) || gap <= 0 || gap >= PTT_FIRST_WAIT) return PTT_FIRST_WAIT;
   return Math.max(120, Math.min(PTT_FIRST_WAIT, Math.round(gap * 3)));
+}
+
+// A screen share of text and slides keeps its resolution when the line is
+// tight (fewer frames); one of motion and games keeps its frame rate (fewer pixels).
+export function screenPref(hint) {
+  return hint === 'motion'
+    ? { contentHint: 'motion', degradationPreference: 'maintain-framerate' }
+    : { contentHint: 'detail', degradationPreference: 'maintain-resolution' };
+}
+
+// ---------- The call's security code ----------
+// WebRTC encrypts a call with DTLS-SRTP keys tied to each side's certificate,
+// whose fingerprint travels in the SDP, through the Snug server. A server (or
+// anyone on the way) that swapped the offers to sit in the middle would have
+// to swap the fingerprints too, and then the two people would see different
+// codes. Each side hashes the two fingerprints it sees, sorted so both sides
+// hash the same thing, and shows 6 digits to read out loud.
+export function sdpFingerprint(sdp) {
+  const m = /^a=fingerprint:(\S+) ([0-9A-Fa-f:]+)\s*$/m.exec(typeof sdp === 'string' ? sdp : sdp?.sdp || '');
+  return m ? `${m[1].toLowerCase()} ${m[2].toUpperCase()}` : null;
+}
+export async function callCode(localSdp, remoteSdp) {
+  const a = sdpFingerprint(localSdp), b = sdpFingerprint(remoteSdp);
+  if (!a || !b || a === b || !globalThis.crypto?.subtle) return null;
+  const data = new TextEncoder().encode(`snug-call-code-v1\n${[a, b].sort().join('\n')}`);
+  const h = new DataView(await crypto.subtle.digest('SHA-256', data));
+  return String(h.getUint32(0) % 1_000_000).padStart(6, '0');
 }

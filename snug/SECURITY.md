@@ -188,6 +188,14 @@ stronger than "end-to-end encrypted" is used.
   list of friends and group co-members (to tell them who is online), and IP addresses (stored only as keyed
   hashes or truncated). Cloudflare, which runs the registry and the TURN relays, sees connecting addresses. Voice and video go peer to peer, so the other side of a call
   sees your IP address unless "Hide my IP from friends" is on and a relay server is set up.
+- **Calls and the server in the middle.** Calls are encrypted between the people in them (DTLS-SRTP), but the
+  offers that carry each side's certificate fingerprint pass through the Snug server, so a server that
+  swapped them could sit in the middle. Since 0.13 the connection details show a 6-digit security code per
+  person (a hash of both fingerprints): if both people read out the same code, swapping the keys is much
+  harder, not impossible. The code is about 20 bits and neither side commits to its fingerprint before seeing
+  the other's, so a server in the middle can keep making certificates until both codes match (about a million
+  tries on average: seconds to minutes of computing). It only helps if people compare it, and it checks the
+  connection, not who the other person is.
 - **People you talk to.** Anyone in a conversation can copy, screenshot or forward it. Deleting a message
   removes it from Snug, not from someone else's copy.
 - **Disappearing messages are not unrecoverable.** The timer (0.12) removes a message from Snug's database,
