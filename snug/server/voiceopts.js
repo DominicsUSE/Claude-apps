@@ -19,13 +19,14 @@
 //   (0 = no limit beyond 12). People who can moderate voice may still join a
 //   full room. bitrate is the audio ceiling, in kbit/s, that every browser in
 //   the room applies to its microphone.
-import { writeFile, unlink } from 'node:fs/promises';
+import { unlink } from 'node:fs/promises';
 import { createHmac } from 'node:crypto';
 import { sendFile } from './seclog.js'; // sec-web W1
 import { join } from 'node:path';
 import { newId } from './model.js';
 import { limiter, safeDecode } from './auth.js';
 import { stripInvisible, cleanFileName } from '../js/lib/util.js'; // sec-authz
+import { writeStored } from './filecrypt.js'; // 0.14: files encrypted at rest
 
 export const MAX_SOUNDS = 24;
 export const MAX_SOUND_BYTES = 512 * 1024;
@@ -307,7 +308,7 @@ export function createVoiceOptsHttp({ db, M, filesDir, sendJson, error, body, he
       if (info.seconds > MAX_SOUND_SECONDS) { error(res, 422, `That sound is ${info.seconds.toFixed(1)} seconds long. Sounds can be up to ${MAX_SOUND_SECONDS} seconds.`); return true; }
       const name = cleanFileName(safeDecode(String(req.headers['x-file-name'] || 'sound')), 'sound'); // sec-authz
       const id = newId('f');
-      await writeFile(join(filesDir, id), data, { mode: 0o600 });
+      await writeStored(join(filesDir, id), data);
       db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         id, user, `sound:${house}`, name, 'audio/wav', data.length, Date.now(), JSON.stringify({ sound: true, seconds: info.seconds }));
       sendJson(res, 201, { id, name, size: data.length, seconds: Math.round(info.seconds * 100) / 100 });

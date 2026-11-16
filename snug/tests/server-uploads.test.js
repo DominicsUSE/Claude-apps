@@ -4,7 +4,7 @@
 // single-request upload with no 10 MB cap, and the sweep of abandoned uploads.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request } from 'node:http';
@@ -322,5 +322,68 @@ test('GIF copies made at the same time are counted while they are written', asyn
   const used = B.db.get('SELECT SUM(size) n FROM files WHERE owner = ?', owner).n;
   assert.ok(used <= 1000 * 1024, `stored ${used} bytes against a 1000 KB quota (${ok} copies accepted)`);
   assert.equal(ok, 2, 'two copies fit, the rest are refused');
+  p.close();
+});
+
+// ---------- 0.14 S1: attachment files are encrypted at rest (server/filecrypt.js) ----------
+const getRange = (p, id, range) => fetch(`${p.base}/api/files/${id}`, { headers: { cookie: p.cookie, ...(range ? { range } : {}) } });
+test('S1: uploads are stored encrypted, come back exactly, and Range reads work across 64 KiB segment boundaries', async () => {
+  const p = await person(B);
+  const before = (await (await p.json('GET', '/api/uploads')).json()).used;
+  const data = randomBytes(3 * 65536 + 1234);
+  // Chunked, and in one request.
+  const { id } = await (await p.json('POST', '/api/uploads', { conv: p.room, name: 'secret.bin', size: data.length, type: 'application/octet-stream' })).json();
+  await sendAll(p, id, data, 64 * 1024);
+  const f = await (await p.json('POST', `/api/uploads/${id}/done`)).json();
+  const one = await (await fetch(`${p.base}/api/files?conv=${p.room}`, { method: 'POST', headers: { cookie: p.cookie, origin: p.base, 'content-type': 'application/octet-stream', 'x-file-name': 'one.bin' }, body: data })).json();
+  for (const fid of [f.id, one.id]) {
+    const disk = readFileSync(join(dirB, 'files', fid));
+    assert.equal(disk.subarray(0, 6).toString(), 'SNUGF1', 'sealed on disk');
+    assert.ok(!disk.includes(data.subarray(1000, 1064)), 'no plaintext on disk');
+    assert.ok(Buffer.from(await (await getRange(p, fid)).arrayBuffer()).equals(data), 'the bytes come back exactly');
+  }
+  assert.equal(readdirSync(join(dirB, 'files', 'partial')).length, 0, 'nothing plaintext left from the upload');
+  // Quotas count the plaintext size.
+  assert.equal((await (await p.json('GET', '/api/uploads')).json()).used - before, 2 * data.length);
+  const cases = [[65530, 65545], [0, 65535], [65536, 131071], [131070, 196609], [196600, data.length - 1], [5, 5]];
+  for (const [a, b] of cases) {
+    const r = await getRange(p, f.id, `bytes=${a}-${b}`);
+    assert.equal(r.status, 206);
+    assert.equal(r.headers.get('content-range'), `bytes ${a}-${b}/${data.length}`);
+    assert.ok(Buffer.from(await r.arrayBuffer()).equals(data.subarray(a, b + 1)), `bytes ${a}-${b}`);
+  }
+  const tail = await getRange(p, f.id, 'bytes=-10');
+  assert.ok(Buffer.from(await tail.arrayBuffer()).equals(data.subarray(data.length - 10)));
+  p.close();
+});
+
+test('S1: a 0.13 file in plaintext is still served (and Range works); a tampered segment is refused; re-encrypt seals old files', async () => {
+  const p = await person(B);
+  const data = Buffer.concat([PNG, randomBytes(2 * 65536)]);
+  const up = await (await fetch(`${p.base}/api/files?conv=${p.room}`, { method: 'POST', headers: { cookie: p.cookie, origin: p.base, 'content-type': 'image/png', 'x-file-name': 'old.png' }, body: data })).json();
+  const path = join(dirB, 'files', up.id);
+  const sealed = readFileSync(path);
+  // As 0.13 left it: plaintext on disk.
+  writeFileSync(path, data, { mode: 0o600 });
+  assert.ok(Buffer.from(await (await getRange(p, up.id)).arrayBuffer()).equals(data), 'legacy file served');
+  const r = await getRange(p, up.id, 'bytes=65530-65545');
+  assert.equal(r.status, 206);
+  assert.ok(Buffer.from(await r.arrayBuffer()).equals(data.subarray(65530, 65546)));
+  // The background re-encrypt seals it in place; it still comes back the same.
+  const out = await B.reencryptFiles();
+  assert.ok(out.sealed >= 1);
+  assert.equal(readFileSync(path).subarray(0, 6).toString(), 'SNUGF1');
+  assert.ok(Buffer.from(await (await getRange(p, up.id)).arrayBuffer()).equals(data));
+  // A byte changed in segment 1: a read starting there is refused before any byte goes out.
+  const bad = Buffer.from(sealed);
+  bad[30 + 65536 + 16 + 100] ^= 0xff;
+  writeFileSync(path, bad);
+  const refused = await getRange(p, up.id, 'bytes=65536-65600');
+  assert.equal(refused.status, 500);
+  assert.match((await refused.json()).error, /damaged/);
+  // From the start, the good segment may go out but the connection is cut at the bad one: never the whole file.
+  const whole = await getRange(p, up.id).then((x) => x.arrayBuffer()).then((b) => Buffer.from(b), () => null);
+  assert.ok(!whole || !whole.equals(data), 'a tampered file never arrives whole');
+  assert.ok(!whole || whole.length <= 65536, 'nothing past the bad segment');
   p.close();
 });

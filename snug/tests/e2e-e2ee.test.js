@@ -8,6 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { readStoredSync } from '../server/filecrypt.js'; // 0.14: what a stored file holds under the at-rest layer
 const storedFiles = (d) => readdirSync(d).filter((f) => statSync(join(d, f)).isFile()); // files/partial holds uploads under way
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -261,7 +262,8 @@ function scanServer(needle) {
     const p = join(dir, f);
     if (existsSync(p)) assert.equal(readFileSync(p).includes(Buffer.from(needle)), false, `${f} holds the marker`);
   }
-  for (const f of storedFiles(join(dir, 'files'))) assert.equal(readFileSync(join(dir, 'files', f)).includes(Buffer.from(needle)), false, `files/${f} holds the marker`);
+  // 0.14: under the at-rest encryption too (server/filecrypt.js): the server can open that layer, not the message.
+  for (const f of storedFiles(join(dir, 'files'))) assert.equal(readStoredSync(join(dir, 'files', f)).includes(Buffer.from(needle)), false, `files/${f} holds the marker`);
 }
 const textOf = (page, needle) => page.locator(`.main .msg .msg-text:has-text("${needle}")`);
 
@@ -412,7 +414,7 @@ test('attachments: a picture sent in an encrypted DM shows from a blob on the ot
   const added = storedFiles(join(dir, 'files')).filter((f) => !before.has(f));
   assert.ok(added.length >= 1);
   for (const f of added) {
-    const bytes = readFileSync(join(dir, 'files', f));
+    const bytes = readStoredSync(join(dir, 'files', f)); // 0.14: under the at-rest layer, still ciphertext
     assert.equal(bytes.subarray(0, 4).equals(PNG_MAGIC), false, `files/${f} is a readable PNG`);
     assert.equal(srv.db.get('SELECT enc FROM files WHERE id = ?', f)?.enc, 1);
   }

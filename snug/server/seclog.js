@@ -19,6 +19,7 @@
 //   is cut to a sane length. redactLog() wraps a logger so every caller gets it.
 import { open } from 'node:fs/promises';
 import { pipeline } from 'node:stream';
+import { plainStream } from './filecrypt.js'; // 0.14: files encrypted at rest
 import { maskIp, limiter } from './auth.js';
 
 // ---------- Redaction ----------
@@ -209,29 +210,42 @@ export function suspicious(e, db) {
 // Headers already set with res.setHeader are kept for the 200; on a 404 the
 // file's own headers are dropped. Never throws or rejects.
 const KEEP_ON_404 = new Set(['x-content-type-options', 'referrer-policy', 'cross-origin-opener-policy', 'cross-origin-resource-policy', 'permissions-policy', 'strict-transport-security', 'x-frame-options', 'set-cookie']);
+function refuse(res, status, message) {
+  try {
+    if (res.headersSent) { res.destroy(); return; }
+    for (const h of res.getHeaderNames()) if (!KEEP_ON_404.has(h)) res.removeHeader(h);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+    res.writeHead(status);
+    res.end(JSON.stringify({ error: message }));
+  } catch { try { res.destroy(); } catch { /* gone */ } }
+}
+// 0.14: files encrypted at rest (server/filecrypt.js) are decrypted segment by segment as they go out; a
+// segment whose tag fails is never sent. One damaged where the read starts is a 500 before any byte goes out;
+// one further on cuts the connection there.
 export async function sendFile(res, path, { status = 200, range = null, onMissing = null } = {}) {
   let fh;
   try {
     fh = await open(path, 'r');
   } catch (e) {
     try { onMissing?.(e); } catch { /* ignore */ }
-    try {
-      if (res.headersSent) { res.destroy(); return false; }
-      for (const h of res.getHeaderNames()) if (!KEEP_ON_404.has(h)) res.removeHeader(h);
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.setHeader('Cache-Control', 'no-store');
-      res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
-      res.writeHead(404);
-      res.end(JSON.stringify({ error: 'Not found' }));
-    } catch { try { res.destroy(); } catch { /* gone */ } }
+    refuse(res, 404, 'Not found');
+    return false;
+  }
+  let src;
+  try {
+    ({ stream: src } = await plainStream(fh, path, range));
+  } catch (e) {
+    try { await fh.close(); } catch { /* closed */ }
+    refuse(res, 500, e.code === 'EFILEKEY' ? 'This file was encrypted with a key this server doesn’t have.' : 'This file is damaged, so Snug won’t send it.');
     return false;
   }
   try {
     if (!res.headersSent) res.writeHead(status);
-    const src = fh.createReadStream(range ? { start: range.start, end: range.end } : {});
     pipeline(src, res, (err) => { if (err) { try { res.destroy(); } catch { /* gone */ } } });
   } catch {
-    try { await fh.close(); } catch { /* closed */ }
+    try { src.destroy(); } catch { /* closed */ }
     try { res.destroy(); } catch { /* gone */ }
   }
   return true;

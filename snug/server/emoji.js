@@ -13,11 +13,12 @@
 //   its readers may see. A token for an emoji that is gone, or that its reader
 //   may not see, gets no metadata, and the browser shows the plain :name:.
 // - Reactions use the same token as their key: <:name:id>.
-import { writeFile, unlink } from 'node:fs/promises';
+import { unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { newId } from './model.js';
 import { safeDecode } from './auth.js';
 import { cleanFileName } from '../js/lib/util.js'; // sec-authz
+import { writeStored } from './filecrypt.js'; // 0.14: files encrypted at rest
 
 export const MAX_EMOJI = 100;
 export const MAX_EMOJI_BYTES = 256 * 1024;
@@ -285,7 +286,7 @@ export function createEmojiHttp({ db, M, filesDir, sendJson, error, body, upload
     }
     const name = cleanFileName(safeDecode(String(req.headers['x-file-name'] || 'emoji')), 'emoji'); // sec-authz
     const id = newId('f');
-    await writeFile(join(filesDir, id), data, { mode: 0o600 });
+    await writeStored(join(filesDir, id), data);
     db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       id, user, `emoji:${house}`, name, img.type, data.length, Date.now(), JSON.stringify({ emoji: true, w: img.w, h: img.h }));
     sendJson(res, 201, { id, name, size: data.length, w: img.w, h: img.h, type: img.type });

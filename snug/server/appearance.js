@@ -11,7 +11,7 @@
 //   js/lib/colour.js). me.update is wrapped; changes are rate limited.
 // - Settings: a "custom:<id>" theme has to name one of the person's saved
 //   themes; every other rule is in cleanPrefs (js/lib/account.js).
-import { writeFile, unlink } from 'node:fs/promises';
+import { unlink } from 'node:fs/promises';
 import { sendFile } from './seclog.js'; // sec-web W1
 import { join } from 'node:path';
 import { newId } from './model.js';
@@ -19,6 +19,7 @@ import { limiter } from './auth.js';
 import { imageInfo } from './messaging.js';
 import { cleanPrefs, mergePrefs } from '../js/lib/account.js';
 import { DECORATION_IDS, HUE_IDS, cleanNameStyle, cleanProfileColors, customId } from '../js/lib/theme.js';
+import { writeStored } from './filecrypt.js'; // 0.14: files encrypted at rest
 
 export const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 export const AVATAR_PX = [64, 2048];
@@ -186,7 +187,7 @@ export function createAppearanceHttp({ db, M, hub, filesDir, sendJson, error, bo
       if (!(img.w >= AVATAR_PX[0] && img.h >= AVATAR_PX[0])) { error(res, 422, `Pictures need to be at least ${AVATAR_PX[0]} pixels on each side.`); return true; }
       if (img.w > AVATAR_PX[1] || img.h > AVATAR_PX[1]) { error(res, 422, `Pictures can be up to ${AVATAR_PX[1]} pixels on each side.`); return true; }
       const id = newId('f');
-      await writeFile(join(filesDir, id), data, { mode: 0o600 });
+      await writeStored(join(filesDir, id), data);
       db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         id, user, `avatar:${user}`, 'avatar', img.type, data.length, Date.now(), JSON.stringify({ w: img.w, h: img.h }));
       sendJson(res, 201, { id, w: img.w, h: img.h, type: img.type });

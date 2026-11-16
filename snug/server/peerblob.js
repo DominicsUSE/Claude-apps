@@ -6,8 +6,10 @@
 // A transfer cut off by a dropped link keeps its .part file, and the next try
 // asks only for the rest (the hash check at the end still covers every byte).
 // Leftover .part files are swept (sweepParts): at once when their file is gone,
-// otherwise after a week.
-import { createReadStream, openSync, writeSync, closeSync, unlinkSync, renameSync, readSync, fstatSync, existsSync, statSync, readdirSync } from 'node:fs';
+// otherwise after a week. 0.14: a finished file is sealed into place (server/filecrypt.js); the hash is of the
+// plaintext, which is what is sent between PCs (inside the link's own encryption).
+import { openSync, writeSync, closeSync, unlinkSync, readSync, existsSync, statSync, readdirSync } from 'node:fs';
+import { storedReadStream, readStoredRangeSync, sealFile } from './filecrypt.js'; // 0.14: kept encrypted at rest
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
@@ -18,7 +20,7 @@ const HASH = /^[A-Za-z0-9_-]{43}$/;
 export function hashFile(path) {
   return new Promise((resolve, reject) => {
     const h = createHash('sha256');
-    createReadStream(path).on('data', (c) => h.update(c)).on('error', reject).on('end', () => resolve(h.digest('base64url')));
+    storedReadStream(path).on('data', (c) => h.update(c)).on('error', reject).on('end', () => resolve(h.digest('base64url')));
   });
 }
 
@@ -69,19 +71,17 @@ export function createBlobs({ db, filesDir, sendEph, canServe, log = () => {}, s
     if (!row || !canServe(uid, row) || o > row.size) { sendEph(uid, 'blob.miss', { h }); return; }
     if (serving >= 8) { sendEph(uid, 'blob.miss', { h, busy: true }); return; }
     serving++;
-    let fd;
     try {
-      fd = openSync(join(filesDir, row.id), 'r');
+      const path = join(filesDir, row.id);
       let off = o;
       for (let i = 0; i < n && off < row.size; i++) {
-        const buf = Buffer.alloc(Math.min(PART, row.size - off));
-        const got = readSync(fd, buf, 0, buf.length, off);
-        if (!sendEph(uid, 'blob.part', { h, o: off, d: buf.subarray(0, got).toString('base64') })) break;
-        off += got;
+        const buf = readStoredRangeSync(path, off, Math.min(PART, row.size - off));
+        if (!buf.length) break;
+        if (!sendEph(uid, 'blob.part', { h, o: off, d: buf.toString('base64') })) break;
+        off += buf.length;
         await new Promise((r) => setImmediate(r)); // F18: let the main thread breathe between parts
       }
     } catch (e) { log('peer', 'blob serve', e.code || e.message); sendEph(uid, 'blob.miss', { h }); } finally {
-      if (fd != null) try { closeSync(fd); } catch { /* closed */ }
       serving--;
     }
   }
@@ -161,13 +161,19 @@ export function createBlobs({ db, filesDir, sendEph, canServe, log = () => {}, s
   function onMiss(uid, d) { const t = active.get(uid); if (t && d?.h === t.job.h) end(t, false, 'missing'); }
   function finish(t) {
     if (t.hash.digest('base64url') !== t.job.h) { end(t, false, 'hash'); return; }
-    try { closeSync(t.fd); t.fd = null; renameSync(t.path, join(filesDir, t.job.id)); } catch { end(t, false, 'rename'); return; }
-    stats.blobsFetched++;
-    onProgress(t.job.id, t.job.size, t.job.size);
-    end(t, true);
+    try { closeSync(t.fd); t.fd = null; } catch { end(t, false, 'rename'); return; }
+    // Sealed into place; nothing else ends the transfer meanwhile (a dropped link no longer matters).
+    clearTimeout(t.timer);
+    t.sealing = true;
+    sealFile(t.path, join(filesDir, t.job.id)).then(() => {
+      t.sealing = false;
+      stats.blobsFetched++;
+      onProgress(t.job.id, t.job.size, t.job.size);
+      end(t, true);
+    }, () => { t.sealing = false; end(t, false, 'rename'); });
   }
   function end(t, ok, why) {
-    if (active.get(t.uid) !== t) return;
+    if (active.get(t.uid) !== t || t.sealing) return;
     clearTimeout(t.timer);
     active.delete(t.uid);
     total--;
@@ -188,8 +194,7 @@ export function createBlobs({ db, filesDir, sendEph, canServe, log = () => {}, s
   function head(fileId, n = 64 * 1024) {
     const p = join(filesDir, fileId);
     if (!existsSync(p)) return Buffer.alloc(0);
-    const fd = openSync(p, 'r');
-    try { const size = Math.min(n, fstatSync(fd).size); const b = Buffer.alloc(size); readSync(fd, b, 0, size, 0); return b; } finally { closeSync(fd); }
+    try { return readStoredRangeSync(p, 0, n); } catch { return Buffer.alloc(0); }
   }
   // .part files nothing will finish (review-media 5): one whose file row is gone (the message or picture was
   // deleted) goes at once, any other after a week untouched. A transfer in progress is left alone. Returns how

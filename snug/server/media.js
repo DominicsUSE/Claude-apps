@@ -10,13 +10,13 @@
 //   device. Search goes through a provider (server/gifs.js), and a GIF picked
 //   from search is downloaded by the server and stored as a normal Snug file,
 //   so no message ever loads from another site.
-import { copyFile, writeFile } from 'node:fs/promises';
 import { unlinkSync } from 'node:fs'; // sec-authz: the attachment sweep
 import { join } from 'node:path';
 import { newId } from './model.js';
 import { limiter } from './auth.js';
 import { stripInvisible } from '../js/lib/util.js'; // sec-authz
 import { gifProviders } from './gifs.js'; // Openverse, Wikimedia Commons, Tenor, the registry
+import { writeStored, copyStored } from './filecrypt.js'; // 0.14: files encrypted at rest
 
 export const AUDIO_TYPES = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg'];
 export const MAX_PINS = 50;
@@ -467,7 +467,7 @@ export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, he
       const meta = { gif: true, source: k.p, ...(k.credit ? { credit: k.credit } : {}) };
       if (Number.isInteger(d.w) && Number.isInteger(d.h) && d.w > 0 && d.h > 0) { meta.w = Math.min(8000, d.w); meta.h = Math.min(8000, d.h); }
       try {
-        await writeFile(join(filesDir, id), got.data, { mode: 0o600 });
+        await writeStored(join(filesDir, id), got.data);
         db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, user, conv, name, got.type, got.data.length, Date.now(), JSON.stringify(meta));
       } finally { held.release(); }
       sendJson(res, 201, view(id, { name, size: got.data.length, type: got.type }, meta));
@@ -491,7 +491,7 @@ export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, he
       const meta = { ...json(src.meta, {}), gif: true };
       if (Number.isInteger(d.w) && Number.isInteger(d.h) && d.w > 0 && d.h > 0) { meta.w = Math.min(8000, d.w); meta.h = Math.min(8000, d.h); }
       try {
-        await copyFile(join(filesDir, src.id), join(filesDir, id));
+        await copyStored(join(filesDir, src.id), join(filesDir, id));
         db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, user, conv, src.name, src.type, src.size, Date.now(), JSON.stringify(meta));
       } finally { held.release(); }
       sendJson(res, 201, view(id, src, meta));

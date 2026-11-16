@@ -4,6 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync, cpSync, rmSync, mkdtempSync } from 'node:fs';
+import { readStoredSync } from '../server/filecrypt.js'; // 0.14: files are encrypted at rest
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startRegistry, startPc, signUp, clientFor, guest, until, mid } from './helpers/p2p.js';
@@ -309,7 +310,7 @@ test('a hostile friend: borrowed file ids, unknown kinds and a profile flood cha
   await b.next('msg', (d) => d.m.id === evil);
   const row = B.db.get('SELECT * FROM files WHERE id = ?', mine.id);
   assert.equal(row.owner, b.id, 'B’s own file row is untouched');
-  assert.equal(readFileSync(join(B.dataDir, 'files', mine.id), 'utf8'), 'bob secret');
+  assert.equal(readStoredSync(join(B.dataDir, 'files', mine.id)).toString('utf8'), 'bob secret');
   const got = B.db.get('SELECT files FROM messages WHERE id = ?', evil);
   assert.notEqual(JSON.parse(got.files)[0].id, mine.id, 'the friend’s file gets its own local id');
   await until(() => B.peer.stats().rejected > rej, 8000, 'unknown kind refused');

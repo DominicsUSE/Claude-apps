@@ -6,6 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { readStoredSync } from '../server/filecrypt.js'; // 0.14: files are encrypted at rest
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startServer } from '../server/index.js';
@@ -394,7 +395,8 @@ test('e2ee.file.copy: ciphertext copied into another encrypted conversation; nev
   const r = await a.sock.ok('e2ee.file.copy', { id: up.id, to: dm2 });
   const row = srv.db.get('SELECT * FROM files WHERE id = ?', r.id);
   assert.deepEqual([row.conv, row.enc, row.owner, row.name], [dm2, 1, a.id, 'file']);
-  assert.deepEqual(readFileSync(join(dataDir, 'files', r.id)), readFileSync(join(dataDir, 'files', up.id)));
+  assert.deepEqual(readStoredSync(join(dataDir, 'files', r.id)), readStoredSync(join(dataDir, 'files', up.id))); // 0.14: the same ciphertext under the at-rest layer
+  assert.deepEqual(readStoredSync(join(dataDir, 'files', r.id)), Buffer.from(ct));
   const plain = await person('ec-copy-plain');
   await friends(a, plain);
   const { id: dm3 } = await a.sock.ok('dm.open', { users: [plain.id] });

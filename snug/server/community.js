@@ -17,7 +17,7 @@
 // - Verification levels for newcomers, two-factor for moderators, pausing
 //   invitations, a custom invitation link, join announcements and a default
 //   notification level for new members.
-import { writeFile, unlink } from 'node:fs/promises';
+import { unlink } from 'node:fs/promises';
 import { sendFile } from './seclog.js'; // sec-web W1
 import { join } from 'node:path';
 import { limiter } from './auth.js';
@@ -33,6 +33,7 @@ import {
   mentionCount, shouting, inviteCodes, flooding,
 } from '../js/lib/community.js';
 import { inviteProblem, inviteWhy } from '../js/lib/onboarding.js'; // why an invitation link doesn't work
+import { writeStored } from './filecrypt.js'; // 0.14: files encrypted at rest
 
 const json = (s, f) => { try { return s == null ? f : JSON.parse(s); } catch { return f; } };
 const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
@@ -1047,7 +1048,7 @@ export function createCommunityHttp({ db, M, hub, filesDir, sendJson, error, bod
       if (img.w > spec.maxPx || img.h > spec.maxPx) { error(res, 422, `${spec.label}s can be up to ${spec.maxPx} pixels on each side.`); return true; }
       if (spec.square && img.w !== img.h) { error(res, 422, 'Icons need to be square. Crop it to the same width and height.'); return true; }
       const fid = newId('f');
-      await writeFile(join(filesDir, fid), data, { mode: 0o600 });
+      await writeStored(join(filesDir, fid), data);
       db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         fid, user, `housepic:${h.id}:${kind}`, kind, img.type, data.length, Date.now(), JSON.stringify({ w: img.w, h: img.h }));
       db.run(`UPDATE houses SET ${kind} = ? WHERE id = ?`, fid, h.id); // kind is one of PICTURES' keys
@@ -1068,7 +1069,7 @@ export function createCommunityHttp({ db, M, hub, filesDir, sendJson, error, bod
       const { data, img } = got;
       if (img.w > 4096 || img.h > 4096) { error(res, 422, 'Covers can be up to 4096 pixels on each side.'); return true; }
       const fid = newId('f');
-      await writeFile(join(filesDir, fid), data, { mode: 0o600 });
+      await writeStored(join(filesDir, fid), data);
       db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         fid, user, `eventcover:${e.id}`, 'cover', img.type, data.length, Date.now(), JSON.stringify({ w: img.w, h: img.h }));
       db.run('UPDATE events SET cover = ? WHERE id = ?', fid, e.id);
