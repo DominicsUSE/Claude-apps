@@ -22,8 +22,9 @@ import { join } from 'node:path';
 import { canon, parseCanon } from '../js/lib/e2ee/canon.js';
 import { b64u, b64uOf } from '../js/lib/e2ee/bytes.js';
 import { envelopeProblem, CAPS } from '../js/lib/e2ee/envelope.js';
-import { requiredSet, checkRecipients, wrapKeys, editSet } from '../js/lib/e2ee/rules.js';
+import { requiredSet, checkRecipients, wrapKeys, editSet, uncovered } from '../js/lib/e2ee/rules.js';
 import { newId, now } from './model.js';
+import { limiter } from './auth.js';
 
 const P = 'snug-e2ee-v1/';
 const SKEW = 10 * 60_000;
@@ -443,13 +444,16 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
   // A group's name, icon and hue, sealed (kind info). The server keeps no name for it; older Snug
   // shows "Encrypted group". Lines in the conversation say who changed what, never the new name.
   const INFO_LABEL = 'Encrypted group';
-  const infoOf = (dm) => { const r = db.get('SELECT info_enc, info_rev FROM dms WHERE id = ?', dm); const e = r?.info_enc ? encEnv(r.info_enc) : null; return e ? { e2ee: e, rev: r.info_rev } : null; };
+  const infoOf = (dm) => { const r = db.get('SELECT info_enc, info_rev, info_what FROM dms WHERE id = ?', dm); const e = r?.info_enc ? encEnv(r.info_enc) : null; return e ? { e2ee: e, rev: r.info_rev, what: r.info_what || null } : null; };
+  // A sealed rename or icon change writes a line everyone hears, as dm.rename and dm.icon do: the same limit (server/dms.js).
+  const infoLimit = limiter({ capacity: 10, perSecond: 0.2 });
+  hub.extraLimits = [...(hub.extraLimits || []), infoLimit];
   const dmView2 = M.dmView;
   M.dmView = (id, viewer) => {
     const v = dmView2(id, viewer);
     if (!v) return v;
     const info = infoOf(id);
-    if (info) { v.info = { e2ee: info.e2ee }; v.name = INFO_LABEL; delete v.icon; }
+    if (info) { v.info = { e2ee: info.e2ee, ...(info.what ? { what: info.what } : {}) }; v.name = INFO_LABEL; delete v.icon; }
     return v;
   };
   const infoLine = (dm, by, what) => {
@@ -481,6 +485,10 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
     if (!capable(users, 'info')) fail(oldDevices('A private group name needs everyone here on Snug 0.14 or later', lacking(users, 'info')), { code: 'e2ee_old_devices' });
     const what = ['name', 'icon', 'members'].includes(d.what) ? d.what : fail('That isn’t valid.');
     const was = db.get('SELECT info_rev, info_enc FROM dms WHERE id = ?', dm);
+    // Sealed again for members writes no line: only for a group sealed for the first time, or when someone
+    // in it now can't open the newest revision. Members' devices check it kept the name and icon.
+    if (what === 'members' && was?.info_enc && !uncovered(users, encEnv(was.info_enc)?.h)) fail('Everyone here can already read the group’s name.');
+    if (what !== 'members' && !infoLimit.take(c.user)) fail('You’re going a little fast. Wait a moment and try again.');
     const prev = was?.info_rev ?? -1;
     const rev = d.e2ee?.h?.rev;
     if (!Number.isSafeInteger(rev) || rev <= prev) fail('The group was changed on another device. Snug is trying again.', { code: 'e2ee_side_rev', data: { rev: prev } });
@@ -489,7 +497,7 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
     if (v.h.ping.length) fail('That isn’t valid.');
     db.tx(() => {
       // The readable name and icon go: from now on only members' devices know them.
-      db.run('UPDATE dms SET info_enc = ?, info_rev = ?, name = NULL, icon = NULL, icon_hue = NULL WHERE id = ?', canon(v.env), rev, dm);
+      db.run('UPDATE dms SET info_enc = ?, info_rev = ?, info_what = ?, name = NULL, icon = NULL, icon_hue = NULL WHERE id = ?', canon(v.env), rev, what, dm);
       replaceWraps(key, v.h, v.k);
       if (!was?.info_enc) scrubNames(dm);
     });

@@ -203,6 +203,37 @@ test('E2: a group named before 0.14: sealing its information takes the name out 
   await close(ps);
 });
 
+test('E2: sealing again for members is accepted only when someone joined; sealed renames are slowed like plain ones', async () => {
+  const { ps, g, users } = await group('sr');
+  const [a, b] = ps;
+  const info = async (p, name, rev, what, us = users) => {
+    const { e2ee } = await sealFrom(p, { conv: g, id: `info:${g}`, users: us, kind: 'info', rev, body: { text: '', name, icon: null, hue: null } });
+    return p.sock.op('e2ee.info', { dm: g, what, e2ee });
+  };
+  assert.equal((await info(a, 'Pottery club', 0, 'name')).ok, true);
+  // Nobody joined: a "members" re-seal (which writes no line) is refused, so a rename can't hide as one.
+  const r = await info(b, 'Something else', 1, 'members');
+  assert.equal(r.ok, false);
+  assert.match(r.error, /Everyone here can already read/);
+  // The dm view says which kind the newest revision is, so members' devices can check a re-seal kept the name.
+  const ev = await b.sock.next('dm', (d) => d.dm.id === g && d.dm.info);
+  assert.equal(ev.dm.info.what, 'name');
+  // Someone joined: the re-seal for the new member set is accepted, and says so.
+  const d = await enrolled('sr-d');
+  await friends(a, d);
+  await a.sock.ok('dm.add', { dm: g, users: [d.id] });
+  const all4 = [...users, d.id].sort();
+  assert.equal((await info(b, 'Pottery club', 1, 'members', all4)).ok, true);
+  const ev2 = await d.sock.next('dm', (x) => x.dm.id === g && x.dm.info?.e2ee?.h?.rev === 1);
+  assert.equal(ev2.dm.info.what, 'members');
+  // Sealed renames use the same limiter as plain ones (10, then one every 5 seconds).
+  srv.resetLimits();
+  let ok = 0;
+  for (let i = 0; i < 20; i++) if ((await info(a, `n${i}`, 2 + i, 'name', all4)).ok) ok++;
+  assert.equal(ok, 10);
+  await close([...ps, d]);
+});
+
 test('E3 encrypted polls: refused naming older devices; votes and the end are sealed; counts agree for all three; the server has no question or answers', async () => {
   const mixed = await group('poll-old', [{}, {}, { caps: ['react'] }]);
   const p0 = mixed.ps[0];

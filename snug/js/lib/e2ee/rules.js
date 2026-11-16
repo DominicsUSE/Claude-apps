@@ -94,3 +94,19 @@ export function editSet(originalTo, members) {
   const now = new Set(members);
   return [...new Set(originalTo.map(([u]) => u))].filter((u) => now.has(u)).sort();
 }
+
+/** Whether someone among `members` isn't among those an envelope's header was sealed to (h.to, h.ar): a group's sealed information then needs sealing again for them. */
+export function uncovered(members, h) {
+  const covered = new Set([...(h?.to || []).map((t) => t[0]), ...(h?.ar || []).map((a) => a[0])]);
+  return members.some((u) => !covered.has(u));
+}
+/**
+ * The name, icon and hue to show for a group after opening a revision sealed for `what` (name | icon |
+ * members). One sealed again for members writes no line in the conversation, so it must keep what the
+ * revision before said: when it doesn't, the one before (`prev`, if this device knows it) stays.
+ */
+export function resealed(what, prev, next) {
+  if (what !== 'members' || !prev) return next;
+  const same = ['name', 'icon', 'hue'].every((k) => (prev[k] ?? null) === (next[k] ?? null));
+  return same ? next : prev;
+}

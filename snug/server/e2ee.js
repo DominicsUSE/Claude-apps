@@ -85,6 +85,7 @@ export function migrateE2ee(db) {
   // 0.14: an encrypted group's name, icon and hue, sealed to its members (server/e2ee-conv.js); empty for others.
   add('dms', 'info_enc', 'TEXT');
   add('dms', 'info_rev', 'INTEGER');
+  add('dms', 'info_what', 'TEXT'); // what the newest revision changed: name | icon | members (sealed again for someone who joined)
   // 0.14: sealed reactions, poll votes and a poll's end, one envelope per message, person and slot.
   db.exec(`CREATE TABLE IF NOT EXISTS e2ee_side (msg TEXT NOT NULL, user TEXT NOT NULL, slot TEXT NOT NULL,
     rev INTEGER NOT NULL, env TEXT NOT NULL, PRIMARY KEY (msg, user, slot))`);

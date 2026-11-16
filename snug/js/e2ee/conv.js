@@ -21,7 +21,7 @@ import { canon } from '../lib/e2ee/canon.js';
 import { COPY } from '../lib/e2ee/copy.js';
 import * as obj from '../lib/e2ee/objects.js';
 import { seal, open, OpenFailure, SIDE_KINDS } from '../lib/e2ee/envelope.js';
-import { editSet, cmpTuple } from '../lib/e2ee/rules.js';
+import { editSet, cmpTuple, uncovered, resealed } from '../lib/e2ee/rules.js';
 import { encryptFile, decryptFile } from '../lib/e2ee/attach.js';
 import { sniff } from '../lib/sniff.js';
 import { mentions } from '../lib/format.js';
@@ -804,8 +804,7 @@ const resealing = new Set();
 function checkCover(dm, env, body, view = S.dms[dm]) {
   const d = view || S.dms[dm];
   if (!d?.e2ee || E2.status !== 'ready' || !d.members.includes(S.me)) return;
-  const covered = new Set([...env.h.to.map((t) => t[0]), ...env.h.ar.map((a) => a[0])]);
-  if (d.members.every((u) => covered.has(u))) return;
+  if (!uncovered(d.members, env.h)) return; // the same rule the server holds a re-seal to
   const key = `${dm}:${fingerprint(env)}`;
   if (resealing.has(key)) return;
   resealing.add(key);
@@ -816,14 +815,23 @@ function seeInfo(o) {
   const fp = fingerprint(e);
   const cur = infoState.get(o.id);
   if (cur?.fp === fp && cur.body) { patchDm(o, cur.body); checkCover(o.id, e, cur.body, o); return; }
-  infoState.set(o.id, { fp, body: null, view: o });
+  // What this device showed before, so a re-seal for members can be held to it (js/lib/e2ee/rules.js resealed):
+  // the revision before, or for a group sealed the first time, the name the server had for it.
+  // Only the revision right before counts (prevRev), so a rename not opened yet is never mistaken for a change.
+  const was = S.dms[o.id];
+  const [prev, prevRev] = cur?.body ? [cur.body, cur.rev] : cur?.prev ? [cur.prev, cur.prevRev]
+    : was && !was.info && !was.infoSealed ? [infoClean({ name: was.name, icon: was.icon?.emoji, hue: was.icon?.hue }), -1] : [null, null];
+  infoState.set(o.id, { fp, body: null, prev, prevRev, view: o });
   see({ id: `info:${o.id}`, author: e.h.from?.u, e2ee: e, infoOf: o.id, ...(o.info.k && Object.keys(o.info.k).length ? { k: o.info.k } : {}) }, o.id);
 }
 function infoOpened(v) {
-  const body = infoClean(v.sideBody);
   const st = infoState.get(v.infoOf);
   const fp = fingerprint(v.e2ee);
-  infoState.set(v.infoOf, { fp, body, view: st?.view });
+  // Sealed again for members (no line in the conversation) but with another name or icon: the one before stays.
+  const what = st?.view?.info?.e2ee && fingerprint(st.view.info.e2ee) === fp ? st.view.info.what : null;
+  const rev = v.e2ee.h.rev;
+  const body = resealed(what, st?.prevRev === rev - 1 ? st.prev : null, infoClean(v.sideBody));
+  infoState.set(v.infoOf, { fp, body, rev, view: st?.view });
   if (st?.view?.info?.e2ee && fingerprint(st.view.info.e2ee) === fp) patchDm(st.view, body);
   const d = S.dms[v.infoOf];
   if (d?.info?.e2ee && fingerprint(d.info.e2ee) === fp) patchDm(d, body);
