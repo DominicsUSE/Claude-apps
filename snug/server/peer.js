@@ -19,7 +19,7 @@ import { createRegClient } from './regclient.js';
 import { createSignal } from './peersignal.js';
 import { createLinks } from './peerlink.js';
 import { createBlobs } from './peerblob.js';
-import { migratePeer, createOutbox } from './peerdb.js';
+import { migratePeer, createOutbox, OUTBOX_MAX } from './peerdb.js';
 import {
   canon, sha256, b64u, seal, parseBox, boxVerify, boxOpen, profileSign, profileVerify, newer, nextVer, keychangeSign,
   chainCheck, dmIdFor, remoteFileId, remoteMediaId, shadowId, randomEp, fingerprint, isUid, isKey, hsVerify,
@@ -112,6 +112,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     contact: () => false,          // uid -> true when they share a group across PCs with me
     watch: () => [],               // extra uids to watch (co-members)
     acked: () => {}, expired: () => {}, up: () => {}, online: () => {},
+    erase: () => [],               // 0.13: delete my group messages on co-members' PCs; returns the uids asked
   };
 
   // ---------- Shadows (section 4) ----------
@@ -1536,6 +1537,32 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       rebindPending = null;
       p2pEvent({ rebindPending: null });
       return r;
+    },
+    // 0.13: "Erase what I wrote" on a deleted account. Before it goes, every friend's PC gets a delete for each
+    // of my messages in our conversation (0.11 PCs understand it too), and groups across PCs get delete items.
+    // Waits (at most `wait` ms) for the PCs that are online to take them; offline PCs keep their copies.
+    async eraseShared({ wait = 8000 } = {}) {
+      if (!active()) return { asked: 0, left: 0 };
+      const o = owner();
+      const at = Math.round(reg.now());
+      const asked = new Set();
+      for (const p of db.all('SELECT user, uid FROM peers')) {
+        if (!isFriend(p.user) || blockedEither(p.user)) continue;
+        const dm = dmIdFor(myUid(), p.uid);
+        const room = Math.max(0, OUTBOX_MAX - outbox.count(p.user));
+        const ids = db.all(`SELECT id FROM messages WHERE author = ? AND deleted IS NULL AND sys IS NULL
+          AND (conv = ? OR conv IN (SELECT id FROM threads WHERE conv = ?)) ORDER BY seq DESC LIMIT ?`, o, dm, dm, room).map((r) => r.id);
+        if (!ids.length) continue;
+        db.tx(() => { for (const id of ids) outbox.push(p.user, 'dm.delete', id, JSON.stringify({ id }), at); });
+        asked.add(p.uid);
+      }
+      for (const uid of G.erase()) asked.add(uid);
+      for (const uid of asked) if (online.has(uid)) links.want(uid);
+      const pendingFor = (uid) => online.has(uid) && outbox.count(shadowId(uid)) > 0;
+      const end = Date.now() + wait;
+      while (Date.now() < end && [...asked].some(pendingFor)) await new Promise((r) => setTimeout(r, 150));
+      const left = [...asked].filter((uid) => outbox.count(shadowId(uid)) > 0).length;
+      return { asked: asked.size, left };
     },
     // Account deleted: every friend hears it as an unfriend.
     async leaveAll() {

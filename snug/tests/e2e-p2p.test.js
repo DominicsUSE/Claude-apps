@@ -714,3 +714,29 @@ test('relay fallback: with direct links off on one PC, messages still go both wa
   await d.close();
   await e.close();
 });
+
+// 0.13: deleting with "Erase what I wrote" asks friends' PCs that are online to delete their copies.
+test('erase on delete: with Erin’s PC off the dialog says it keeps its copy; with it on, Dana’s messages go from Erin’s PC', async () => {
+  const { dana } = pages;
+  const D = pcs.D;
+  const eDir = pcs.E.dataDir;
+  const erinUid = D.db.get("SELECT uid FROM peers WHERE username = 'erin'").uid;
+  await pcs.E.close();
+  await dana.waitForFunction(() => Object.values(window.snug.S.users).some((u) => u.remote && u.username === 'erin' && u.presence === 'offline'), null, { timeout: 30000 });
+  await dana.evaluate(async () => { const s = await import('/js/store.js'); const p = await import('/js/views/p2p.js'); s.openModal(p.DeleteP2p, { onGone: async () => {} }); });
+  await dana.locator('.erase-choice input[value="erase"]').check();
+  const note = dana.locator('.erase-choice .erase-offline');
+  await note.waitFor();
+  assert.match(await note.textContent(), /erin’s PC is offline now, so it keeps its copy/);
+  await shot(dana, '31-erase-offline');
+  // Erin's PC starts again: the note goes, and erasing reaches it.
+  await pc('E', { dataDir: eDir, peerDirect: false });
+  await until(() => D.peer.isOnline(erinUid), 30000, 'Erin back online');
+  await note.waitFor({ state: 'detached', timeout: 20000 });
+  const mine = D.db.all("SELECT id FROM messages WHERE author = (SELECT id FROM users WHERE handle = 'dana') AND sys IS NULL").map((r) => r.id);
+  assert.ok(mine.length >= 2);
+  await until(() => mine.every((id) => rowsOf(pcs.E, id)[0] && !rowsOf(pcs.E, id)[0].deleted), 10000, 'Erin has Dana’s messages');
+  await dana.fill('#cf-handle', 'dana');
+  await dana.click('.modal button:has-text("Delete my account")');
+  await until(() => mine.every((id) => rowsOf(pcs.E, id)[0]?.deleted), 30000, 'Dana’s messages deleted on Erin’s PC');
+});

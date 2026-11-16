@@ -943,6 +943,9 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
   if (baseDelete) {
     M.p2pDelete = async (u, d, run) => {
       const uid = myUid();
+      // 0.13: erasing asks friends' PCs that are online to delete their copies first, while they still
+      // take frames from this account (server/peer.js eraseShared). Offline PCs keep theirs.
+      if (d?.erase === true) await peer.eraseShared?.().catch((e) => log('peer', 'erase', e.message));
       const r = await baseDelete(u, d, run);
       forget(uid);
       return r;

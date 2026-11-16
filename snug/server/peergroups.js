@@ -92,6 +92,19 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
   const invalidate = (g) => { if (g) cache.delete(g); else cache.clear(); contacts = null; };
   const shared = (uid) => myGroups().filter((g) => state(g).members.has(uid));
 
+  // 0.13: erase on delete (server/peer.js eraseShared): a signed delete item for each of my live messages in
+  // each group, to every member (0.11 PCs understand it). Returns the members asked.
+  X.hooks.erase = () => {
+    const asked = new Set();
+    for (const g of myGroups()) {
+      const ids = db.all(`SELECT id FROM messages WHERE author = ? AND deleted IS NULL AND sys IS NULL
+        AND (conv = ? OR conv IN (SELECT id FROM threads WHERE conv = ?)) ORDER BY seq DESC LIMIT 2000`, X.owner(), g, g).map((r) => r.id);
+      if (!ids.length) continue;
+      for (const id of ids) { try { myItem(g, 'delete', { id }); } catch (e) { if (!(e instanceof UserError)) throw e; } }
+      for (const u of state(g).members.keys()) if (u !== me()) asked.add(u);
+    }
+    return [...asked];
+  };
   X.hooks.contact = (uid) => contactSet().has(uid);
   X.hooks.watch = () => [...contactSet()];
 

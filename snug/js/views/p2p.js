@@ -628,6 +628,10 @@ function LinkGitHub() {
   </div>`;
 }
 
+// 0.13: erasing asks friends' PCs that are online to delete their copies; these are offline right now.
+const offlineFriends = () => Object.entries(S.friends || {}).filter(([id, f]) => f?.state === 'friends' && S.users[id]?.remote && S.users[id].presence === 'offline')
+  .map(([id]) => S.users[id].name).sort();
+
 // Delete for a GitHub account: type the username, and confirm on GitHub so the name is freed.
 // v0.12: an account with no GitHub confirms with its recovery key instead.
 export function DeleteP2p({ onGone }) {
@@ -658,7 +662,7 @@ function DeleteKey({ onGone }) {
     <h2>Delete your account?</h2>
     <p class="modal-lead">This can’t be undone. Friends on other PCs see you leave.</p>
     <div class="form">
-      <${EraseChoice} value=${erase} onChange=${setErase} p2p />
+      <${EraseChoice} value=${erase} onChange=${setErase} p2p offline=${offlineFriends()} />
       <div><label class="label" for="cf-handle">Type your username, <b>${p.username}</b>, to confirm</label>
         <input id="cf-handle" class="field" autocapitalize="none" spellcheck="false" data-autofocus value=${typed} onInput=${(e) => { setTyped(e.target.value); setErr(''); }} /></div>
       ${!flow && html`<div><label class="label" for="cf-recovery">Recovery key, to free @${p.username} for anyone (optional)</label>
@@ -710,7 +714,7 @@ function DeleteGh({ onGone }) {
     <h2>Delete your account?</h2>
     <p class="modal-lead">This can’t be undone. Friends on other PCs see you leave.</p>
     <div class="form">
-      <${EraseChoice} value=${erase} onChange=${setErase} p2p />
+      <${EraseChoice} value=${erase} onChange=${setErase} p2p offline=${offlineFriends()} />
       <div><label class="label" for="cf-handle">Type your username, <b>${p.username}</b>, to confirm</label>
         <input id="cf-handle" class="field" autocapitalize="none" spellcheck="false" data-autofocus value=${typed} onInput=${(e) => { setTyped(e.target.value); setErr(''); }} /></div>
       <div class="hint">To free @${p.username} for anyone, confirm on GitHub first.</div>
