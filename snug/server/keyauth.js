@@ -95,7 +95,12 @@ export function createKeyAuth({ db, M, hub, peer, gh, opts = {}, secure = false,
     identity.set('kind', k.kind === 'key' ? 'key' : 'github');
     identity.set('rk_set', k.recovery?.set ? '1' : '0');
     identity.set('rk_pending_at', k.recovery?.pendingAt || null);
+    // The current recovery key as the registry has it (v0.12 review): a key replaced since (a new one took
+    // effect after its 7 days, or the account moved) no longer signs anyone back in on this PC.
+    if (k.recovery && 'rk' in k.recovery) identity.set('rk', k.recovery.rk || null);
     identity.set('gh_linked', k.github?.linked && k.kind === 'key' ? '1' : '0');
+    // A GitHub link or unlink waiting its 7 days (v0.12 review H3).
+    identity.set('gh_change', k.kind === 'key' && k.github?.pending ? JSON.stringify(k.github.pending) : null);
     identity.set('move_via', k.move?.via || null);
     // A recovery key this PC never showed (made on another PC, or it moved here) counts as saved.
     if (k.recovery?.set && identity.get('rk_saved') == null) identity.set('rk_saved', '1');
@@ -268,6 +273,9 @@ export function createKeyAuth({ db, M, hub, peer, gh, opts = {}, secure = false,
         return true;
       }
       if (s?.uid && !['gone', 'revoked', 'needs-signin'].includes(s.state)) { err(res, 409, 'This PC is already linked to a Snug account.'); return true; }
+      // v0.12 review: a PC that still holds an account (moved away or stopped) takes only that account's own
+      // recovery key, checked here, before the registry starts a 72 h move of some other account to this PC.
+      if (s?.uid && s.state !== 'gone' && identity.get('rk') !== rk.pub) { err(res, 409, 'This PC is linked to another Snug account.'); return true; }
       let r;
       try { r = await reg.recover(rk); } catch (e) {
         log('id', 'recover', e.code || 'error');
@@ -382,6 +390,7 @@ export function createKeyAuth({ db, M, hub, peer, gh, opts = {}, secure = false,
       const rk = await recoverySigner((await keyOf(d.code)).raw);
       await reg2(() => reg.recoveryCancel(rk), { bad_signature: 'That isn’t your current recovery key.', not_found: 'Your account has no recovery key yet.' });
       identity.set('rk_pending_at', null);
+      identity.set('gh_change', null); // it also stops a GitHub link or unlink that was waiting (H3)
       identity.dropRecovery(); // the new key that was waiting is gone; the current one stays
       identity.set('rk_saved', '1');
       pushStatus();
@@ -406,16 +415,32 @@ export function createKeyAuth({ db, M, hub, peer, gh, opts = {}, secure = false,
       active();
       const ticket = gh?.takeTicket?.(d.flow, 'link-account');
       if (!ticket) fail('That GitHub sign-in took too long. Start again.');
-      await reg2(() => reg.signedCall('/v1/link/github', 'link-github', { ticket }), { already_claimed: 'That GitHub account already has a Snug username. Use another GitHub account.', forbidden: 'That GitHub account can’t be linked.' });
-      identity.set('gh_linked', '1');
+      const r = await reg2(() => reg.signedCall('/v1/link/github', 'link-github', { ticket }), { already_claimed: 'That GitHub account already has a Snug username. Use another GitHub account.', forbidden: 'That GitHub account can’t be linked.' });
+      // v0.12 review H3: the link works after 7 days (an older registry linked at once and said only ok)
+      if (r.state === 'pending') identity.set('gh_change', JSON.stringify({ change: 'link', at: r.at }));
+      else identity.set('gh_linked', '1');
       pushStatus();
-      return {};
+      return { state: r.state || 'set', at: r.at || null };
     };
     hub.ops['id.unlinkGithub'] = async (c) => {
       ownerOnly(c);
       active();
-      await reg2(() => reg.signedCall('/v1/link/github/remove', 'unlink-github', {}));
-      identity.set('gh_linked', '0');
+      const r = await reg2(() => reg.signedCall('/v1/link/github/remove', 'unlink-github', {}));
+      if (r.state === 'pending') identity.set('gh_change', JSON.stringify({ change: 'unlink', at: r.at }));
+      else { identity.set('gh_linked', '0'); identity.set('gh_change', null); }
+      pushStatus();
+      return { state: r.state || 'done', at: r.at || null };
+    };
+    // A GitHub account: its GitHub sign-in stops a recovery key waiting to take effect (one this PC's account
+    // didn't add, perhaps). The flow is /api/gh/start {purpose: 'recovery-cancel'} (server/ghauth.js).
+    hub.ops['id.recoveryCancelGh'] = async (c, d) => {
+      ownerOnly(c);
+      active();
+      const ticket = gh?.takeTicket?.(d.flow, 'recovery-cancel');
+      if (!ticket) fail('That GitHub sign-in took too long. Start again.');
+      await reg2(() => reg.recoveryCancelGh(ticket));
+      identity.set('rk_pending_at', null);
+      identity.dropRecovery();
       pushStatus();
       return {};
     };

@@ -27,7 +27,7 @@ export const SHORT_NAME_TEXT = 'Usernames of 2 or 3 characters are open to new a
  * `onDone` follows it. `onLater` (optional) skips with a warning; a reminder stays in the app.
  * `lead`, `warn` and `laterWarn` replace the desktop wording (a Snug server's password accounts use other words).
  */
-export function RecoverySave({ code, username, confirm, onDone, onLater, titleId = 'auth-title', pendingAt = null, lead = null, warn = null, laterWarn = null }) {
+export function RecoverySave({ code, username, confirm, onDone, onLater, titleId = 'auth-title', pendingAt = null, pendingNote = null, lead = null, warn = null, laterWarn = null }) {
   const [last, setLast] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -52,7 +52,7 @@ export function RecoverySave({ code, username, confirm, onDone, onLater, titleId
       <h1 id=${titleId}>Save your recovery key</h1>
       <p class="auth-sub">${lead || 'If you lose this PC, this key is the only way to get your account back. Snug can’t reset it for you.'}</p>
     </div>
-    ${pendingAt && html`<p class="auth-fine" id="rk-pending">This key starts working on ${when(pendingAt)}. Until then your old key still works, and it can cancel this one.</p>`}
+    ${pendingAt && html`<p class="auth-fine" id="rk-pending">This key starts working on ${when(pendingAt)}. ${pendingNote || 'Until then your old key still works, and it can cancel this one.'}</p>`}
     <div class="rk-key" id="rk-key" role="group" aria-label="Your recovery key, 9 groups of 4">
       ${groups.map((g, i) => html`<span key=${i} aria-label=${`Group ${i + 1}: ${g.split('').join(' ')}`}>${g}</span>`)}
     </div>

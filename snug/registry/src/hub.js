@@ -40,6 +40,10 @@ const SCHEMA = [
   // win = start of the counting window in ms (a day or an hour); uid '*' = global. Purged after 2 days.
   `CREATE TABLE IF NOT EXISTS budget (
     uid TEXT NOT NULL, win INTEGER NOT NULL, kind TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (uid, win, kind))`,
+  // v0.12 review C1/C2: the replay counter of every signer other than the account's current device key
+  // (whose counter stays accounts.last_ts): a recovery key, a pending move's key. One signer can't push
+  // another's counter into the future.
+  'CREATE TABLE IF NOT EXISTS signer_ts (uid TEXT NOT NULL, k TEXT NOT NULL, last_ts INTEGER NOT NULL, PRIMARY KEY (uid, k))',
   ...ADMIN_SCHEMA, // v0.10: admins, bans, reserved names, announcements, settings, audit, vault keys (admin.js)
   ...VAULT_SCHEMA, // older vault keys, pending rotations (vaultkey.js, REG-L1)
   ...KEY_SCHEMA, // v0.12: keypair accounts, recovery keys, pairing codes (keyacct.js)
@@ -76,6 +80,9 @@ const MESSAGES = {
 };
 
 const TS_WINDOW = 5 * 60_000;
+// v0.12 review C1/C2: a state-changing call may be dated at most this far ahead. Clients keep the registry's
+// clock from x-snug-now (regclient F9), so a minute is plenty, and a signer can push its counter only that far.
+const FUTURE_SKEW = 60_000;
 const TICKET_TTL = 10 * 60_000;
 const RENAME_EVERY = 7 * DAY;
 const AUTH_TIMEOUT = 10_000;
@@ -101,10 +108,12 @@ export function ipPrefix(ip, groups = 4) {
 }
 // sec-registry REG-M4: the sign-in and account limits count a whole IPv6 /48 as one address (a /64 is
 // nearly free to get many of); every other limit keeps the /64.
-const WIDE_KINDS = new Set(['ipAuth', 'ipAccount', 'ipRegister']);
+const WIDE_KINDS = new Set(['ipAuth', 'ipAccount', 'ipRegister', 'ipPow']); // v0.12 review M6: ipPow too
+// v0.12 review M6: keypair sign-ups also count per IPv6 /32 (a /48 is free from tunnel brokers; IPv4: the address).
+const WIDER_KINDS = new Set(['ipRegisterWide']);
 // sec-registry REG-L3: these per-address limits live in SQLite (the Budgets table, keyed by the HMACed
 // prefix), so a Hub that sleeps and wakes doesn't hand every address a fresh allowance. The rest stay in memory.
-const PERSIST_KINDS = new Set(['ipAuth', 'ipAccount', 'ipVault', 'ipAdmin', 'ipRename', 'ipRegister']);
+const PERSIST_KINDS = new Set(['ipAuth', 'ipAccount', 'ipVault', 'ipAdmin', 'ipRename', 'ipRegister', 'ipRegisterWide']);
 
 export class Hub {
   constructor(ctx, env) {
@@ -151,8 +160,44 @@ export class Hub {
     const t = this.now();
     if (Math.abs(ts - t) > TS_WINDOW) fail('stale');
   }
+  /** As fresh(), for a state-changing call: at most FUTURE_SKEW ahead (v0.12 review C1/C2). */
+  freshMut(ts) {
+    const t = this.now();
+    if (ts < t - TS_WINDOW || ts > t + FUTURE_SKEW) fail('stale');
+  }
+  /** The replay counter of signer k on account cur: accounts.last_ts for the current key, signer_ts otherwise. */
+  lastTsOf(cur, k) {
+    if (k === cur.ik) return cur.last_ts;
+    return this.row('SELECT last_ts FROM signer_ts WHERE uid=? AND k=?', cur.uid, k)?.last_ts ?? 0;
+  }
+  /** Moves signer k's counter to ts. Called only after the operation succeeded (a failed call never bumps it). */
+  bumpTs(uid, k, ts) {
+    if (this.sql.exec('UPDATE accounts SET last_ts=? WHERE uid=? AND ik=? AND last_ts<?', ts, uid, k, ts).rowsWritten) return;
+    if (this.row('SELECT 1 AS x FROM accounts WHERE uid=? AND ik=?', uid, k)) return;
+    if (!this.row('SELECT 1 AS x FROM accounts WHERE uid=?', uid)) return; // the call deleted the account
+    this.sql.exec('INSERT INTO signer_ts(uid,k,last_ts) VALUES(?,?,?) ON CONFLICT(uid,k) DO UPDATE SET last_ts=MAX(last_ts, excluded.last_ts)', uid, k, ts);
+  }
+  /** A mutating call by signer k: refused when replayed or older, run, and only then counted. */
+  replayGuard(cur, k, ts, fn) {
+    if (ts <= this.lastTsOf(cur, k)) fail('stale');
+    const out = fn();
+    this.bumpTs(cur.uid, k, ts);
+    return out;
+  }
+  ipKeyOf(kind, ip) {
+    return ip && typeof ip === 'object' ? (WIDER_KINDS.has(kind) ? ip.x : WIDE_KINDS.has(kind) ? ip.w : ip.n) : ip;
+  }
+  /** A persisted per-address budget that is used up: refused, and nothing of it is spent (v0.12 review). */
+  ipFull(kind, ip) {
+    const [n, ms] = this.L[kind];
+    if (this.budgets.value(`ip:${this.ipKeyOf(kind, ip)}`, kind, ms) >= n) fail('rate_limited', { retryAfter: this.retryAfter(ms) });
+  }
+  /** Spends one of a persisted per-address budget once the call has succeeded. */
+  ipSpend(kind, ip) {
+    if (!this.budgets.take(`ip:${this.ipKeyOf(kind, ip)}`, kind, this.L[kind])) fail('rate_limited', { retryAfter: this.retryAfter(this.L[kind][1]) });
+  }
   ipLimit(kind, ip) {
-    if (ip && typeof ip === 'object') ip = WIDE_KINDS.has(kind) ? ip.w : ip.n;
+    ip = this.ipKeyOf(kind, ip);
     if (PERSIST_KINDS.has(kind)) {
       if (!this.budgets.take(`ip:${ip}`, kind, this.L[kind])) fail('rate_limited', { retryAfter: this.retryAfter(this.L[kind][1]) });
     } else {
@@ -174,12 +219,14 @@ export class Hub {
   async ipKey(req) {
     return hmacHex(this.secret(), `ip\n${ipPrefix(req.headers.get('cf-connecting-ip'))}`);
   }
-  /** {n: the /64 (or IPv4) key, w: the /48 key}, both HMACed; ipLimit picks per kind. */
+  /** {n: the /64 (or IPv4) key, w: the /48 key, x: the /32 key}, all HMACed; ipLimit picks per kind. */
   async ipKeys(req) {
     const raw = req.headers.get('cf-connecting-ip');
     const n = await hmacHex(this.secret(), `ip\n${ipPrefix(raw)}`);
     const p48 = ipPrefix(raw, 3);
-    return { n, w: p48 === ipPrefix(raw) ? n : await hmacHex(this.secret(), `ip\n${p48}`) };
+    const p32 = ipPrefix(raw, 2);
+    const w = p48 === ipPrefix(raw) ? n : await hmacHex(this.secret(), `ip\n${p48}`);
+    return { n, w, x: p32 === p48 ? w : await hmacHex(this.secret(), `ip\n${p32}`) };
   }
   async owners() {
     if (!this.ownerHashes) {
@@ -247,18 +294,15 @@ export class Hub {
   /** Verify a request signed by uid's current key, then run fn(account) synchronously. */
   async signed(uid, ts, sig, msg, mutating, fn) {
     need(isUid(uid) && isTs(ts) && isSig(sig));
-    this.fresh(ts);
+    if (mutating) this.freshMut(ts);
+    else this.fresh(ts);
     const acc = this.accountByUid(uid);
     if (!acc) fail('not_found');
     if (!(await verifyEd25519(acc.ik, sig, msg))) fail('bad_signature');
     // --- synchronous from here ---
     const cur = this.accountByUid(uid);
     if (!cur || cur.ik !== acc.ik) fail('bad_signature');
-    if (mutating) {
-      if (ts <= cur.last_ts) fail('stale');
-      this.sql.exec('UPDATE accounts SET last_ts=? WHERE uid=?', ts, uid);
-      cur.last_ts = ts;
-    }
+    if (mutating) return this.replayGuard(cur, cur.ik, ts, () => fn(cur));
     return fn(cur);
   }
 
@@ -277,7 +321,8 @@ export class Hub {
       fail('bad_request');
     }
     need(payload && typeof payload === 'object' && !Array.isArray(payload));
-    this.fresh(ts);
+    if (mutating) this.freshMut(ts);
+    else this.fresh(ts);
     const acc = this.accountByUid(uid);
     if (!acc) fail('not_found');
     const msg = `snug-reg-v1\n${op}\n${uid}\n${ts}\n${p}`;
@@ -292,18 +337,14 @@ export class Hub {
     const cur = this.accountByUid(uid);
     const pr2 = cur && this.pending(uid);
     if (!cur || (cur.ik !== ik && !(pending && pr2 && pr2.ik === ik))) fail('bad_signature');
-    if (mutating) {
-      if (ts <= cur.last_ts) fail('stale');
-      this.sql.exec('UPDATE accounts SET last_ts=? WHERE uid=?', ts, uid);
-      cur.last_ts = ts;
-    }
+    if (mutating) return this.replayGuard(cur, ik, ts, () => fn(cur, payload, ik));
     return fn(cur, payload, ik);
   }
 
   /** Verify a request signed by the key a ticket was issued to, then run fn(ticketRow) synchronously. */
   async withTicket(ticket, ts, sig, msgFor, fn) {
     need(isTicket(ticket) && isTs(ts) && isSig(sig));
-    this.fresh(ts);
+    this.freshMut(ts); // claim, rebind: state-changing
     const h = await sha256(ticket);
     const t = this.ticket(h);
     if (!t) fail('bad_ticket');
@@ -467,7 +508,8 @@ export class Hub {
       const now = this.now();
       // sec-registry REG-M2: an owner-armed recovery: this GitHub-proved move completes at once (audited).
       // v0.12: by the account's ghh, which is the ticket's for a GitHub account and "a:<uid>" for a linked keypair one.
-      const forced = this.row('SELECT 1 AS x FROM move_force WHERE ghh=? AND until>?', acc.ghh, now) && this.takeMoveForce(acc.ghh);
+      // v0.12 review H3: only for the key the force was armed for (admin.js takeMoveForce).
+      const forced = this.row('SELECT 1 AS x FROM move_force WHERE ghh=? AND until>?', acc.ghh, now) && this.takeMoveForce(acc.ghh, t.ik);
       if (forced) {
         this.tx(() => {
           this.sql.exec('INSERT OR REPLACE INTO pending_rebind(uid,ik,xk,at,created) VALUES(?,?,?,?,?)', acc.uid, t.ik, t.xk, now, now);
@@ -575,6 +617,7 @@ export class Hub {
       this.refuseBanned(uid);
       const t = this.ticket(h);
       if (!t || (t.ghh !== acc.ghh && t.ghh !== this.linkedGhh(uid))) fail('bad_ticket'); // v0.12: or its linked GitHub
+      if (t.ghh !== acc.ghh) this.refuseYoungLink(uid); // v0.12 review H3: a link younger than the wait can't delete
       this.tx(() => {
         for (const q of ['accounts', 'keys', 'pending_rebind', 'watch']) this.sql.exec(`DELETE FROM ${q} WHERE uid=?`, uid);
         this.dropKeyRows(uid);
@@ -671,8 +714,11 @@ export class Hub {
     if (!acc || !p) return;
     const now = this.now();
     const kver = acc.kver + 1;
+    // The new key's replay counter: what it already signed as the pending key, and never ahead of now
+    // (whatever the old key pushed into the future is no reason to refuse the new one).
+    const lastTs = Math.max(Math.min(acc.last_ts, now), this.row('SELECT last_ts FROM signer_ts WHERE uid=? AND k=?', uid, p.ik)?.last_ts ?? 0);
     this.tx(() => {
-      this.sql.exec('UPDATE accounts SET ik=?, xk=?, kver=?, key_at=? WHERE uid=?', p.ik, p.xk, kver, now, uid);
+      this.sql.exec('UPDATE accounts SET ik=?, xk=?, kver=?, key_at=?, last_ts=? WHERE uid=?', p.ik, p.xk, kver, now, lastTs, uid);
       this.sql.exec('INSERT OR REPLACE INTO keys(uid,kver,ik,xk,prev,at) VALUES(?,?,?,?,?,?)', uid, kver, p.ik, p.xk, prev, now);
       this.sql.exec('DELETE FROM keys WHERE uid=? AND kver<=?', uid, kver - KEEP_KEYS);
       this.sql.exec('DELETE FROM pending_rebind WHERE uid=?', uid);

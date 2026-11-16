@@ -142,6 +142,11 @@ export function createRegClient({ url, identity, fetch: fetchFn = globalThis.fet
       const u = uid();
       return signed('POST', '/v1/recovery/cancel', () => { const t = ts(); return { uid: u, ts: t, rsig: rk.sign(['snug-reg-v1', 'recovery-cancel', u, t].join('\n')) }; });
     },
+    // A GitHub account's fresh GitHub sign-in (its ticket, issued to this PC's key) stops a recovery key that
+    // is waiting to take effect (registry keyacct.js recoveryCancelGh).
+    async recoveryCancelGh(ticket) {
+      return signed('POST', '/v1/recovery/cancel', () => { const t = ts(); return { ticket, ts: t, sig: sign('recovery-cancel-gh', ticket, t) }; });
+    },
     // 0.12: a short-lived token for GIF search through the registry (registry/src/gif.js); null when it has none.
     async gifToken() {
       try { return await R.signedCall('/v1/gif/token', 'gif-token', {}); } catch (e) { if (e.status === 404) return null; throw e; }

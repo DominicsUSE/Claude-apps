@@ -7,7 +7,7 @@
 // an admin can't change their own rights or ban themselves.
 import { check, normalize, skeleton, SHORT_NAMES } from '../../js/lib/usernames.js';
 import { randomId } from './crypto.js';
-import { fail, need, isUid, rawName, isUnique, isSemver, semverCmp } from './common.js';
+import { fail, need, isUid, isKey, rawName, isUnique, isSemver, semverCmp } from './common.js';
 import { DAY } from './limits.js';
 
 export const ADMIN_SCHEMA = [
@@ -144,6 +144,7 @@ export const AdminMixin = {
   adminSweep(t) {
     this.sql.exec('DELETE FROM bans WHERE until IS NOT NULL AND until<=?', t);
     this.sql.exec('DELETE FROM move_force WHERE until<=?', t);
+    this.sql.exec('DELETE FROM move_force_key WHERE ghh NOT IN (SELECT ghh FROM move_force)');
     this.sql.exec('DELETE FROM forced_old WHERE until<=?', t);
     const gone = this.sql.exec('DELETE FROM announcements WHERE until IS NOT NULL AND until<=?', t).rowsWritten;
     if (gone) this._notices = null;
@@ -447,34 +448,49 @@ export const AdminMixin = {
   },
 
   /**
-   * sec-registry REG-M2. {uid}: a pending move completes now (unapproved: prev = null, so friends see a loud
-   * key change). With no pending move, the account's next move (it needs a fresh GitHub sign-in) within 7
-   * days completes at once, past the 24 h block and the old key's Stop. Owner only; never on the owner.
+   * sec-registry REG-M2. {uid, ik?}: a pending move completes now (unapproved: prev = null, so friends see a
+   * loud key change). v0.12 review H3: the force is bound to one key. Without ik it completes the move
+   * waiting right now and nothing else (no move waiting: not_found). With ik (the new PC's device key, read
+   * from its security code), a waiting move of that key completes now; otherwise the account's next move
+   * of exactly that key within 7 days completes at once, past the 24 h block and the old key's Stop. Moves
+   * of any other key get the normal wait. Owner only; never on the owner.
    */
   adm_move_force(d, ctx) {
     if (!ctx.owner) fail('forbidden');
+    if (d.ik !== undefined) need(isKey(d.ik));
     const t = this.targetAcc(d.uid, ctx);
     const now = this.now();
-    if (this.pending(t.uid)) {
+    const p = this.pending(t.uid);
+    if (p && (d.ik === undefined || d.ik === p.ik)) {
       ctx.detail = { state: 'done' };
       this.markForcedOld(t);
       this.markVaultRotate(t.ghh); // REG-L1: the forced-out device holds the old vault key
       ctx.after = () => this.completeRebind(t.uid, null);
       return { state: 'done' };
     }
-    this.sql.exec('INSERT OR REPLACE INTO move_force(ghh, until, by, at) VALUES(?,?,?,?)', t.ghh, now + FORCE_FOR, ctx.acc.uid, now);
-    this.metaUpsert(t.ghh, 'rebind_block_until', null);
-    ctx.detail = { state: 'armed', until: now + FORCE_FOR };
+    if (d.ik === undefined) fail('not_found', { what: 'move' }); // nothing waiting to bind the force to
+    this.tx(() => {
+      this.sql.exec('INSERT OR REPLACE INTO move_force(ghh, until, by, at) VALUES(?,?,?,?)', t.ghh, now + FORCE_FOR, ctx.acc.uid, now);
+      this.sql.exec('INSERT OR REPLACE INTO move_force_key(ghh, ik) VALUES(?,?)', t.ghh, d.ik);
+      this.metaUpsert(t.ghh, 'rebind_block_until', null);
+    });
+    ctx.detail = { state: 'armed', until: now + FORCE_FOR, ik: d.ik };
     return { state: 'armed', until: now + FORCE_FOR };
   },
   markForcedOld(acc) {
     this.sql.exec('INSERT OR REPLACE INTO forced_old(uid, ik, until) VALUES(?,?,?)', acc.uid, acc.ik, this.now() + 31 * DAY);
   },
-  /** A forced move armed for this GitHub account (used once), or null. */
-  takeMoveForce(ghh) {
+  /**
+   * A forced move armed for this account and the moving key ik (used once), or null. A force bound to
+   * another key stays armed for it; one armed before forces were bound to a key (no move_force_key row)
+   * applies to no move (v0.12 review H3).
+   */
+  takeMoveForce(ghh, ik) {
     const r = this.row('SELECT * FROM move_force WHERE ghh=?', ghh);
     if (!r) return null;
+    if (this.row('SELECT ik FROM move_force_key WHERE ghh=?', ghh)?.ik !== ik) return null;
     this.sql.exec('DELETE FROM move_force WHERE ghh=?', ghh);
+    this.sql.exec('DELETE FROM move_force_key WHERE ghh=?', ghh);
     return r.until > this.now() ? r : null;
   },
 

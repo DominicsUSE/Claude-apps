@@ -1282,6 +1282,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
         kind: identity.get('kind') === 'key' ? 'key' : 'gh',
         recovery: { set: identity.get('rk_set') === '1', saved: identity.get('rk_saved') === '1', pendingAt: Number(identity.get('rk_pending_at')) || null },
         ghLinked: identity.get('gh_linked') === '1',
+        ghChange: (() => { try { return JSON.parse(identity.get('gh_change') || 'null'); } catch { return null; } })(), // {change, at} or null
       };
     },
     // The old PC says "That was me" (section 6.4): my friends go to the new PC, then the registry moves now.
