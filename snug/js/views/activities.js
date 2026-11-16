@@ -10,7 +10,7 @@ import { call } from '../server.js';
 import { Icon, addIcons } from '../ui/icons.js';
 import { Avatar } from '../ui/kit.js';
 import { can } from '../lib/perms.js';
-import { toggleMute, dismissMutedWarn } from '../voice.js';
+import { toggleMute, dismissMutedWarn, codeOf } from '../voice.js';
 import { act, startActivity, stopActivity, react } from '../activities.js';
 import { BOARD_COLOURS, BOARD_WIDTHS, BOARD_LIMITS, VOICE_REACTIONS, GAMES } from '../lib/games.js';
 import { QUALITY_LABEL, callClock, callClockWords } from '../lib/netquality.js';
@@ -152,6 +152,7 @@ function QualityPop({ room }) {
       : html`<p class="act-note">Nobody else is here yet, so there’s nothing to measure.</p>`}
     ${ids.length > 0 && html`<p class="act-note">${S.call?.listen ? 'You’re listening without a microphone.' : html`You’re sending <span class="num">${mine.sendKbps == null ? '…' : `${mine.sendKbps} kbit/s`}</span>.`}${vp().lowData ? ' Data saver is on.' : ''}</p>`}
     <${RouteNote} ids=${ids} />
+    <${CallCodes} ids=${ids} />
     ${mine.uplinkPoor && html`<p class="act-hint" role="note">Your connection is struggling, so others may hear you break up. Turning your camera off, or moving closer to your router, can help.</p>`}
   </div>`;
 }
@@ -164,6 +165,18 @@ function RouteNote({ ids }) {
     ? 'Relayed: your audio goes through a relay server, so people in the call don’t see your IP address. The relay’s operator sees that you connected and when, not what you say.'
     : 'Direct: your audio goes straight to each person, so they can see your IP address.'}
     Calls are encrypted between the people in them (DTLS-SRTP). That is transport encryption, not the end-to-end encryption of private messages.</p>`;
+}
+// A short code per person to read out loud (js/lib/callnet.js callCode): the
+// same on both sides unless something sits in the middle of the connection.
+function CallCodes({ ids }) {
+  const rows = ids.map((id) => [id, codeOf(id)]).filter(([, code]) => code);
+  if (!rows.length) return null;
+  return html`<div class="act-codes">
+    <b class="act-qpop-title">Security codes</b>
+    <ul class="act-code-list">${rows.map(([id, code]) => html`<li key=${id} class="act-code-row"><span class="trunc">${first(id)}</span>
+      <span class="act-code num" aria-label=${`${first(id)}: ${code.split('').join(' ')}`}>${code.slice(0, 3)} ${code.slice(3)}</span></li>`)}</ul>
+    <p class="act-note">Calls are encrypted between the people in them; matching codes show nobody is in the middle. Read your code out loud: the other person should see the same one for you.</p>
+  </div>`;
 }
 // "Voice connected", with the worst connection's bars; click for everyone's numbers.
 export function ConnHeader({ room }) {
