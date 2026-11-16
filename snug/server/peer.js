@@ -49,8 +49,8 @@ const MSG_ID = /^m_[a-z0-9]{8,40}$/;
 // 0.12: what this PC understands beyond 0.11, told to friends in its signed
 // profile. A friend's PC is only sent these frames once its profile lists them
 // (a 0.11 PC refuses a frame it doesn't know): thread replies over the link,
-// pins, and the disappearing-messages timer. 0.13: polls (a poll, its votes and its end).
-export const PEER_CAPS = ['thread', 'pin', 'ttl', 'poll'];
+// pins, and the disappearing-messages timer. 0.13: polls (a poll, its votes and its end), and group calls.
+export const PEER_CAPS = ['thread', 'pin', 'ttl', 'poll', 'gcall'];
 const TTLS = [0, 3_600_000, 86_400_000, 7 * 86_400_000, 30 * 86_400_000];
 const CALL_ID = /^call_[a-z0-9]{8,40}$/;
 const HASH = /^[A-Za-z0-9_-]{43}$/;
@@ -113,6 +113,8 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     watch: () => [],               // extra uids to watch (co-members)
     acked: () => {}, expired: () => {}, up: () => {}, online: () => {},
     erase: () => [],               // 0.13: delete my group messages on co-members' PCs; returns the uids asked
+    callOk: () => false,           // 0.13: (uid, place) -> place is a group call they may be in here
+    callTargets: () => [],         // 0.13: place -> uids whose PCs mirror my part in that group call
   };
 
   // ---------- Shadows (section 4) ----------
@@ -542,6 +544,15 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
   const capsOverride = new Map();
   const capsOf = (uid) => (capsOverride.has(uid) ? capsOverride.get(uid) : json(peerOf(uid)?.caps, []) || []);
   const can = (shadow, cap) => !!shadow && capsOf(uidOf(shadow)).includes(cap);
+  // 0.13: whether this PC knows what a PC understands at all (a friend's signed profile, or a co-member's
+  // inventory frame); a co-member never linked with is unknown, not old.
+  const capsKnown = (uid) => capsOverride.has(uid) || peerOf(uid)?.caps != null;
+  // A co-member who isn't a friend tells its capabilities in its inventory frames (0.13; none: older).
+  function noteCaps(uid, list) {
+    if (isFriend(shadowId(uid)) || !peerOf(uid)) return; // a friend's come signed, in their profile
+    const caps = Array.isArray(list) ? [...new Set(list.filter((x) => typeof x === 'string' && /^[a-z0-9.]{1,24}$/.test(x)))].slice(0, 32) : [];
+    db.run('UPDATE peers SET caps = ? WHERE uid = ?', JSON.stringify(caps), uid);
+  }
   // The conversation a thread hangs off, so a thread reply goes where its conversation goes.
   const threadParent = (conv) => (typeof conv === 'string' && conv.startsWith('t:') ? (M.thread(conv)?.conv || M.liveMsg(conv.slice(2))?.conv || null) : null);
   // A friend's message, edit or reaction lands in the thread its message is in, if it's one of this conversation's.
@@ -854,6 +865,12 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     const dm = dmIdFor(myUid(), uid);
     return hub.callOf(dm) ? dm : null;
   };
+  // Where a friend's stand-in is in a call here: our one-to-one call, or (0.13) a group call across PCs.
+  const callPlace = (uid) => {
+    const place = hub.voicePlaceOf(shadowId(uid));
+    if (!place || !hub.callOf(place)) return null;
+    return place === dmIdFor(myUid(), uid) || G.callOk(uid, place) ? place : null;
+  };
   const EPHEMERAL = {
     typing: (uid) => { const shadow = shadowId(uid); if (isFriend(shadow)) ops.typing(asShadow(shadow), { conv: dmIdFor(myUid(), uid) }); },
     'profile.want': (uid) => { const s = shadowId(uid); if (isFriend(s)) pushProfile([s], true); },
@@ -878,17 +895,19 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       if (!dm || hub.callOf(dm).id !== d.call) fail('No such call.');
       ops['call.decline'](asShadow(shadowId(uid)), { dm, call: d.call });
     },
-    'voice.leave': (uid) => { const dm = dmIdFor(myUid(), uid); if (hub.voicePlaceOf(shadowId(uid)) === dm) hub.voiceLeave(shadowId(uid)); },
+    // g (0.13): they left a group call; without it, our one-to-one call.
+    'voice.leave': (uid, d) => {
+      const place = typeof d.g === 'string' ? d.g : dmIdFor(myUid(), uid);
+      if (hub.voicePlaceOf(shadowId(uid)) === place && (!d.g || G.callOk(uid, place))) hub.voiceLeave(shadowId(uid));
+    },
     'voice.state': (uid, d) => {
-      const dm = inCall(uid);
-      if (!dm || hub.voicePlaceOf(shadowId(uid)) !== dm) fail('Not in the call.');
+      if (!callPlace(uid)) fail('Not in the call.');
       const s = {};
       for (const k of ['muted', 'deaf', 'camera', 'screen', 'listen']) if (typeof d[k] === 'boolean') s[k] = d[k];
       hub.voiceState(shadowId(uid), s);
     },
     rtc: (uid, d) => {
-      const dm = inCall(uid);
-      if (!dm || hub.voicePlaceOf(shadowId(uid)) !== dm || !d.data || typeof d.data !== 'object') fail('Not in the call.');
+      if (!callPlace(uid) || !d.data || typeof d.data !== 'object') fail('Not in the call.');
       // sec-integrate: a friend's PC gets the same signal check and byte budget as a call member here
       // (server/ops.js rtcSignal), so it can't flood this browser with junk signalling either.
       const data = rtcSignal(d.data);
@@ -1319,10 +1338,11 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     const r = base(c, d);
     const place = mine(c) ? hub.voicePlaceOf(c.user) : null;
     const shadow = place && remoteOfDm(place);
-    if (shadow) {
+    const to = shadow ? [uidOf(shadow)] : place ? G.callTargets(place) : []; // 0.13: everyone in a group call across PCs
+    if (to.length) {
       const s = {};
       for (const k of ['muted', 'deaf', 'camera', 'screen', 'listen']) if (typeof d[k] === 'boolean') s[k] = d[k];
-      links.sendEph(uidOf(shadow), 'voice.state', s);
+      for (const uid of to) links.sendEph(uid, 'voice.state', s);
     }
     return r;
   });
@@ -1330,6 +1350,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     if (u !== owner() || !active()) return;
     const shadow = remoteOfDm(place);
     if (shadow) links.sendEph(uidOf(shadow), 'voice.leave', {});
+    else for (const uid of G.callTargets(place)) links.sendEph(uid, 'voice.leave', { g: place }); // 0.13
   });
   if (ops['ice.refresh']) wrap('ice.refresh', (c, d, base) => { const r = base(c, d); return c.user === owner() && turn ? { ...r, iceExp: turn.exp - 5 * 60_000 } : r; });
 
@@ -1618,6 +1639,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       ensureShadow, shadowFor, verifyFrom, acceptFiles, fetchPending, later, toOwner, asShadow, outbox, links, online, fitsPeers, capsOf, threadParent, // fitsPeers, capsOf, threadParent: 0.12
       localOnly, applyPoll, applyVote, applyPollEnd, // 0.13: polls
       extrasOut, extrasIn, sendWithExtras, // 0.13: forwarded messages and stickers
+      proxyFor, turnFor, capsKnown, noteCaps, PEER_CAPS, // 0.13: group calls; what co-members' PCs understand
       hashOf: (id) => blobs.hashOf(id), now: () => reg.now(), watchSoon, kver: () => Number(self?.kver) || 1,
     },
   });

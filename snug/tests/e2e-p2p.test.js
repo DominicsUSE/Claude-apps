@@ -715,6 +715,54 @@ test('relay fallback: with direct links off on one PC, messages still go both wa
   await e.close();
 });
 
+// 0.13: group calls in a group across PCs: a mesh between the members' browsers, signalled over the PC links.
+test('a group call between three PCs connects with fake media: each person hears the two others', async () => {
+  const people = [['F', 'faye', 1011], ['G', 'gus', 1012], ['H', 'hana', 1013]];
+  const cs = {};
+  for (const [P, name, ghId] of people) {
+    const srv = await pc(P);
+    cs[name] = await signUp(srv, registry, ghId, name);
+    const ctx = await browser.newContext({ permissions: ['microphone', 'camera'] });
+    contexts.push(ctx);
+    await ctx.addCookies([{ name: 'snug_session', value: cs[name].cookie.split('=')[1], url: srv.base }]);
+    const page = await ctx.newPage();
+    page.setDefaultTimeout(15000);
+    page.on('pageerror', (err) => errors.push(`${name}: ${err.message}`));
+    await page.goto(srv.base);
+    await inApp(page);
+    pages[name] = page;
+  }
+  const { faye, gus, hana } = cs;
+  // Faye is friends with both; Gus and Hana only share the group.
+  for (const [x, y] of [[faye, gus], [faye, hana]]) {
+    await x.ok('friend.request', { handle: y.srv === pcs.G ? 'gus' : 'hana' });
+    const req = await y.next('friend', (d) => d.friend?.state === 'incoming', 15000);
+    await y.ok('friend.accept', { user: req.id });
+    await x.next('friend', (d) => d.id === y.id && d.friend?.state === 'friends', 15000);
+  }
+  const g = (await faye.ok('dm.open', { users: [gus.id, hana.id] })).id;
+  await until(() => pcs.G.db.get('SELECT 1 FROM dms WHERE id = ?', g) && pcs.H.db.get('SELECT 1 FROM dms WHERE id = ?', g), 20000, 'the group on every PC');
+  await until(() => pcs.F.peer.capsOf(gus.id.slice(2)).includes('gcall') && pcs.F.peer.capsOf(hana.id.slice(2)).includes('gcall'), 20000, 'caps');
+  await until(() => pcs.G.peer.isOnline(hana.id.slice(2)) && pcs.H.peer.isOnline(gus.id.slice(2)), 20000, 'co-members online to each other');
+  for (const name of ['faye', 'gus', 'hana']) await goto(pages[name], { type: 'conv', id: g });
+  await pages.faye.locator('.main .bar .call-btn[aria-label="Start a voice call"]').click();
+  for (const name of ['gus', 'hana']) {
+    const card = pages[name].locator('.incoming[role="alertdialog"]');
+    await card.waitFor({ timeout: 20000 });
+    await card.locator('.inc-accept').click();
+  }
+  for (const name of ['faye', 'gus', 'hana']) {
+    await pages[name].waitForFunction(async () => {
+      const peers = Object.values(await window.snug.voiceStats());
+      return peers.length === 2 && peers.every((x) => x.state === 'connected' && x.bytes > 1000);
+    }, null, { timeout: 45000, polling: 500 });
+  }
+  await shot(pages.faye, '32-group-call');
+  for (const name of ['faye', 'gus', 'hana']) await pages[name].click('.stage.call [aria-label="Leave call"]');
+  await until(() => !pcs.F.hub.callOf(g) && !pcs.G.hub.callOf(g) && !pcs.H.hub.callOf(g), 20000, 'the call is over on every PC');
+  for (const c of Object.values(cs)) await c.close();
+});
+
 // 0.13: deleting with "Erase what I wrote" asks friends' PCs that are online to delete their copies.
 test('erase on delete: with Erin’s PC off the dialog says it keeps its copy; with it on, Dana’s messages go from Erin’s PC', async () => {
   const { dana } = pages;

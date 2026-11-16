@@ -83,8 +83,7 @@ test('a group between three PCs: messages all ways, waiting then delivered, edit
   await until(() => A.db.get('SELECT icon FROM dms WHERE id = ?', g).icon === '🌲' && C.db.get('SELECT icon_hue FROM dms WHERE id = ?', g).icon_hue === 142, 10_000, 'icon everywhere');
   assert.ok(A.db.get("SELECT 1 FROM messages WHERE conv = ? AND sys LIKE '%rename%'", g), 'a line says who renamed it');
 
-  // What isn't available yet, and what is never allowed.
-  assert.match(await a.refused('call.start', { dm: g }), /Group calls with friends on other PCs/);
+  // What is never allowed. (Group calls across PCs work since 0.13: tests/server-peer-gcall.test.js.)
   const lan = await guest(A, 'gguest1');
   assert.equal(await a.refused('dm.add', { dm: g, users: [lan.id] }), 'A group can have friends on other PCs or people on this PC, not both.');
   assert.equal(await lan.refused('msg.send', { conv: g, id: mid(), text: 'x' }), 'You don’t have access to this conversation.');

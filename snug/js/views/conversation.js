@@ -421,7 +421,7 @@ export function Conversation({ conv }) {
       ${meta.dm && !phone && isPeerGroup(conv) && html`<${GroupLine} conv=${conv} />`}
       <div class="bar-end">
         <${TtlButton} conv=${conv} />
-        ${meta.dm && !isPeerGroup(conv) && html`<${CallButtons} conv=${conv} />`}
+        ${meta.dm && html`<${CallButtons} conv=${conv} />`}
         ${meta.dm && !phone && html`<${DmHeaderButtons} conv=${conv} />`}
         ${!phone && html`<${PinsButton} conv=${conv} />`}
         ${!phone && html`<button class=${`ib${level === 'muted' ? ' is-muted' : ''}`} aria-label="Notifications" aria-haspopup="menu" data-tip=${level === 'muted' ? 'Muted' : 'Notifications'}

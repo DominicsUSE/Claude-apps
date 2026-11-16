@@ -32,7 +32,7 @@ const json = (s, f) => { try { return s == null ? f : JSON.parse(s); } catch { r
 const ALNUM = 'abcdefghijklmnopqrstuvwxyz0123456789';
 const rid16 = () => { let s = ''; while (s.length < 16) for (const b of randomBytes(16)) if (b < 252 && s.length < 16) s += ALNUM[b % 36]; return s; }; // sec-integrate: unbiased
 const MIX = 'A group can have friends on other PCs or people on this PC, not both.';
-const NO_CALLS = 'Group calls with friends on other PCs aren’t available yet.';
+const CALL_ID = /^call_[a-z0-9]{8,40}$/;
 
 export function migrateGroups(wrapped) {
   const db = wrapped.raw || wrapped;
@@ -507,11 +507,13 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
   const digest = (g) => opsDigest(db.all('SELECT id FROM grp_ops WHERE g = ?', g).map((r) => r.id));
   function sendInv(uid) {
     // ids with their authors (bys): an id held from another author doesn't count as having it.
-    for (const g of shared(uid)) { const r = recent(g); links.sendEph(uid, 'grp.inv', { g, ids: r.map((x) => x.id), bys: r.map((x) => x.by), oh: digest(g) }); }
+    // caps (0.13): what this PC understands, for co-members who aren't friends (no signed profile between us).
+    for (const g of shared(uid)) { const r = recent(g); links.sendEph(uid, 'grp.inv', { g, ids: r.map((x) => x.id), bys: r.map((x) => x.by), oh: digest(g), caps: X.PEER_CAPS }); }
   }
   X.hooks.up = (uid) => { if (contactSet().has(uid)) sendInv(uid); };
   function onInv(from, d) {
     if (!isGroup(d.g) || !Array.isArray(d.ids)) return;
+    if (state(d.g).members.has(from)) X.noteCaps(from, d.caps);
     const g = d.g;
     const ids = d.ids.slice(0, 200).filter((x) => typeof x === 'string');
     if (!amIn(g)) {
@@ -562,7 +564,13 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
   // A co-member came online: if I hold recent items whose author is offline, open a link (after 0-20 s) to offer them.
   const fwdT = new Map();
   X.hooks.online = (uid, on) => {
-    if (!on) { clearTimeout(fwdT.get(uid)); fwdT.delete(uid); return; }
+    if (!on) {
+      clearTimeout(fwdT.get(uid)); fwdT.delete(uid);
+      // Their PC went away: their stand-in leaves any group call here (0.13).
+      const place = hub.voicePlaceOf(shadowId(uid));
+      if (place && isGroup(place)) hub.voiceLeave(shadowId(uid));
+      return;
+    }
     if (!contactSet().has(uid) || fwdT.has(uid)) return;
     const groups = shared(uid);
     if (!groups.length) return;
@@ -744,7 +752,8 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
   };
   // Polls (0.13): a poll item, then each member's votes (their whole choice; the latest counts) and its end.
   // Only once every other member's PC says it knows polls; otherwise the message names who needs to update.
-  const noPolls = (g) => [...state(g).members.keys()].filter((u) => u !== me() && !X.capsOf(u).includes('poll'));
+  // Members whose PCs are known to be older (a co-member never linked with is unknown: an older PC drops the items).
+  const noPolls = (g) => [...state(g).members.keys()].filter((u) => u !== me() && X.capsKnown(u) && !X.capsOf(u).includes('poll'));
   const OLD_POLLS = (uids) => `${uids.map((u) => M.userRow(localId(u))?.name || 'Someone').join(', ')} ${uids.length === 1 ? 'needs' : 'need'} to update Snug before you can share a poll here. Until then, they’d only see the question.`;
   wrap('poll.create', (c, d, base) => {
     if (!inGroup(c, d.conv)) return base(c, d);
@@ -782,8 +791,48 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
     if (was && !was.ended) X.later(() => myItem(g, 'pollend', { id: d.id }));
     return r;
   });
-  wrap('call.start', (c, d, base) => { if (isGroup(d.dm)) fail(NO_CALLS); return base(c, d); });
-  wrap('call.join', (c, d, base) => { if (isGroup(d.dm)) fail(NO_CALLS); return base(c, d); });
+  // Group calls (0.13): every member's PC keeps the call. Joining it here tells the others' PCs (grp.call), which
+  // put my stand-in in their copy of the call (ringing their owner if it's new); signalling then goes over the
+  // links (server/peer.js rtc, voice.state, voice.leave). Only once every other member's PC knows group calls.
+  const noCalls = (g) => [...state(g).members.keys()].filter((u) => u !== me() && X.capsKnown(u) && !X.capsOf(u).includes('gcall'));
+  const callsOk = (u) => !X.capsKnown(u) || X.capsOf(u).includes('gcall'); // unknown: sent anyway (an older PC ignores it)
+  const OLD_CALLS = (uids) => `${uids.map((u) => M.userRow(localId(u))?.name || 'Someone').join(', ')} ${uids.length === 1 ? 'needs' : 'need'} to update Snug before you can call this group.`;
+  const inCallHere = (g) => hub.voicePlaceOf(X.owner()) === g;
+  function announce(g, to = null) {
+    const call = hub.callOf(g);
+    if (!call || !inCallHere(g)) return;
+    for (const uid of to || state(g).members.keys()) {
+      if (uid === me() || !online.has(uid) || X.blockedEither(shadowId(uid)) || !callsOk(uid)) continue;
+      X.turnFor(uid);
+      links.ready(uid, 10_000).then((ok) => { if (ok && inCallHere(g)) links.sendEph(uid, 'grp.call', { g, call: hub.callOf(g)?.id || call.id, video: !!call.video }); });
+    }
+  }
+  const callOp = (name) => wrap(name, (c, d, base) => {
+    if (!isGroup(d.dm) || c.peer) return base(c, d);
+    if (!mineC(c) || !amIn(d.dm)) fail('You’re not in that conversation.');
+    const old = noCalls(d.dm);
+    if (old.length) fail(OLD_CALLS(old));
+    const r = base(c, d);
+    if (r?.call) announce(d.dm);
+    return r;
+  });
+  callOp('call.start');
+  callOp('call.join');
+  X.EPHEMERAL['grp.call'] = (uid, d) => {
+    if (!gate(uid) || !isGroup(d.g) || !amIn(d.g) || !state(d.g).members.has(uid) || typeof d.call !== 'string' || !CALL_ID.test(d.call)) return;
+    const shadow = shadowId(uid);
+    if (X.blockedEither(shadow) || !M.inDm(d.g, shadow) || hub.voicePlaceOf(shadow) === d.g) return;
+    X.turnFor(uid);
+    const c = { user: shadow, ws: X.proxyFor(uid), peer: true, callId: d.call };
+    try {
+      if (!hub.callOf(d.g)) ops['call.start'](c, { dm: d.g, video: d.video === true });
+      else ops['call.join'](c, { dm: d.g });
+    } catch (e) { if (!(e instanceof UserError)) throw e; log('groups', 'call', e.message); return; }
+    // They didn't have me in their copy of the call yet, if I'm in it: say so.
+    announce(d.g, [uid]);
+  };
+  X.hooks.callOk = (uid, place) => isGroup(place) && amIn(place) && state(place).members.has(uid);
+  X.hooks.callTargets = (place) => (isGroup(place) && amIn(place) ? [...state(place).members.keys()].filter((u) => u !== me() && online.has(u) && callsOk(u)) : []);
 
   // Snapshot: how many people each of my recent messages still waits for.
   const baseSnap = hub.snapshotFor;
