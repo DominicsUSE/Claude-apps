@@ -517,6 +517,73 @@ test('phone: a long press opens the sheet without choosing what lands under the 
   } finally { await close(phone); }
 });
 
+test('phone: a double tap on a message reacts with ❤️, and the other person sees it; the reaction can be changed or turned off', async () => {
+  const ines = await open({ handle: 'ines' });
+  const phone = await open({ handle: 'robin', phone: true });
+  try {
+    await ines.click('.rail-house:has-text("Kiln & Co.")');
+    await ines.click('.nav .row:has-text("Glaze lab")');
+    const box = ines.locator('.main .composer textarea');
+    await box.fill('Double tap this one');
+    await box.press('Enter');
+    await phone.click('.home-house:has-text("Kiln & Co.")');
+    await phone.click('.screen.push .row:has-text("Glaze lab")');
+    const msg = phone.locator('.screen.push .msg', { hasText: 'Double tap this one' });
+    await msg.waitFor();
+    await msg.scrollIntoViewIfNeeded();
+    await phone.waitForTimeout(400); // the screen finishes sliding in
+    const cdp = await phone.context().newCDPSession(phone);
+    const tap = async (loc) => {
+      const r = await loc.locator('.msg-text').boundingBox();
+      const pt = { x: Math.round(r.x + Math.min(r.width / 2, 60)), y: Math.round(r.y + r.height / 2) };
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [pt] });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    };
+    const doubleTap = async (loc) => { await tap(loc); await phone.waitForTimeout(80); await tap(loc); };
+    // One tap does nothing.
+    await tap(msg);
+    await phone.waitForTimeout(500);
+    assert.equal(await msg.locator('.rx').count(), 0);
+    await doubleTap(msg);
+    await msg.locator('.rx.mine:has-text("❤️")').waitFor();
+    await phone.waitForTimeout(400);
+    assert.equal(await phone.locator('.menu[role="menu"]').count(), 0, 'no sheet: that was not a long press');
+    assert.equal(await phone.evaluate(() => !window.snug.S.ui.pop && !window.snug.S.ui.menu), true, 'and the tap that followed opened nothing');
+    await ines.locator('.main .msg', { hasText: 'Double tap this one' }).locator('.rx:has-text("❤️")').waitFor();
+    // Another double tap doesn't take it away again.
+    await doubleTap(msg);
+    await phone.waitForTimeout(500);
+    const id = await msg.getAttribute('data-id');
+    assert.deepEqual(await phone.evaluate((i) => Object.values(window.snug.S.msgs).flat().find((x) => x.id === i)?.reactions, id), { '❤️': ['robin'] });
+
+    // Settings > Text and messages: 👍 instead, or off.
+    await phone.evaluate(() => { window.snug.S.prefs.quickReact = 'off'; window.snug.emit(); });
+    await box.fill('And this one');
+    await box.press('Enter');
+    const next = phone.locator('.screen.push .msg', { hasText: 'And this one' });
+    await next.waitFor();
+    await next.scrollIntoViewIfNeeded();
+    await doubleTap(next);
+    await phone.waitForTimeout(500);
+    assert.equal(await next.locator('.rx').count(), 0, 'off: nothing');
+  } finally { await close(phone); await close(ines); }
+});
+
+test('Settings > Text and messages: the double-tap reaction is chosen there, on this device', async () => {
+  const page = await open({ handle: 'malik' });
+  try {
+    await page.click('.me-row [aria-label="Settings"]');
+    await page.click('.layer-nav .row:has-text("Text and messages")');
+    const row = page.locator('.set-row:has-text("Double-tap to react")');
+    await row.waitFor();
+    assert.equal(await row.locator('[aria-pressed="true"], [aria-checked="true"]').first().textContent(), '❤️', 'a heart by default');
+    await row.locator('button:has-text("👍")').click();
+    assert.equal(await page.evaluate(() => window.snug.S.prefs.quickReact), '👍');
+    await row.locator('button:has-text("Off")').click();
+    assert.equal(await page.evaluate(() => window.snug.S.prefs.quickReact), 'off');
+  } finally { await close(page); }
+});
+
 test('phone: notification settings are written for a phone', async () => {
   const phone = await open({ handle: 'robin', phone: true });
   try {

@@ -16,7 +16,7 @@ import {
   parseCommand, suggestCommands, textCommand, parseRoll, parsePoll, parseSubst, parseReact, quoteText, argIndex, MAX_LEN, WARN_LEN,
 } from '../lib/commands.js';
 import { Icon } from '../ui/icons.js';
-import { Avatar, PRESENCE, copyText, Switch } from '../ui/kit.js';
+import { Avatar, PRESENCE, copyText, Switch, Seg } from '../ui/kit.js';
 import { customSuggest } from './emoji-custom.js';
 import { countUse } from './emoji.js';
 import { GifPicker } from './media.js';
@@ -280,6 +280,17 @@ export function runSlash(conv, body, { anchor } = {}) {
   return { keep: true };
 }
 
+// ---------------------------------------------------------------- Double-tap to react
+// On a touch screen, two quick taps on a message react with this emoji
+// (js/views/stream.js). Kept on this device only (S.prefs.quickReact, not a
+// synced setting), so an older server never sees a setting it doesn't know.
+export const QUICK_REACT = '❤️';
+export const QUICK_REACTS = ['❤️', '👍', '😂', '😮', '🙏'];
+export const quickReaction = () => {
+  const v = S.prefs.quickReact || QUICK_REACT;
+  return v === 'off' ? null : v;
+};
+
 // ---------------------------------------------------------------- Reply mention toggle
 const PING_KEY = 'snug.replyPing';
 export const replyPingOn = () => { try { return localStorage.getItem(PING_KEY) !== 'off'; } catch { return true; } };
@@ -402,6 +413,9 @@ export function ChatSettings({ Row }) {
       <${Switch} on=${!!p.textEmoticons} label="Turn emoticons into emoji" onChange=${(v) => set('textEmoticons', v)} />
     <//>
     <div class="set-head">Messages</div>
+    <${Row} label="Double-tap to react" hint="On a touch screen, tap a message twice to react with this. Not on links or pictures. This device only.">
+      <${Seg} label="Double-tap to react" value=${p.quickReact || QUICK_REACT} options=${QUICK_REACTS.map((e) => [e, e]).concat([['off', 'Off']])} onChange=${(v) => set('quickReact', v)} />
+    <//>
     <${Row} label="Show message IDs" hint="Adds Copy ID to every message’s menu, for bots and bug reports.">
       <${Switch} on=${!!p.showIds} label="Show message IDs" onChange=${(v) => set('showIds', v)} />
     <//>

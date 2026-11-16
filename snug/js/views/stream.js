@@ -23,7 +23,7 @@ import { emoticons, silentPrefix } from '../lib/commands.js';
 import { openViewer } from './viewer.js'; // the media viewer
 import {
   chatMenuItems, suggest, SuggestRow, ArgsRow, runSlash, quickEdit, ReplyPing, replyPingOn, AttachmentEdit, LengthNote, tooLong, textFile,
-  RollLine, isTextFile, TextPreview,
+  RollLine, isTextFile, TextPreview, quickReaction,
 } from './chat.js'; // mentions, slash commands, quick edits, reply mention, spoilers and alt text, message links, dice
 import { CodeBlock } from './rich.js';
 import { CustomEmoji, asTyped, customSuggest, parseKey, reactionFace, reactionLabel, resolveEmoji } from './emoji-custom.js'; // custom emoji per house
@@ -185,6 +185,13 @@ function swallowRelease() {
   addEventListener('pointerup', lifted, true);
   setTimeout(end, 10_000); // a finger lifted somewhere we never heard about
 }
+// The click after a double tap's second lift: the reaction row it adds can
+// move what is under the finger (an Add reaction button), so it is not a choice either.
+function swallowClick() {
+  const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
+  addEventListener('click', stop, true);
+  setTimeout(() => removeEventListener('click', stop, true), 350);
+}
 
 // Phones: the menu rises as a sheet from the bottom. Move the pressed message
 // into the top half first (with room added below the last messages when the
@@ -222,6 +229,7 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
   const saved = isSaved(m.id);
   const mine = m.author === S.me;
   const press = useRef();
+  const lastTap = useRef(); // the first of a double tap
   if (hiddenBlocked(m)) return html`<${BlockedLine} m=${m} />`; // from someone I blocked: folded away until shown
   const profile = (who) => (e) => showProfile(who, rectOf(e), meta?.house);
 
@@ -238,9 +246,27 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
     if (e.pointerType !== 'touch' || e.target.closest('button, a, textarea')) return;
     const x = e.clientX, y = e.clientY;
     const el = e.currentTarget;
-    press.current = { x, y, t: setTimeout(() => { swallowRelease(); const v = keepInView(el); menu({ x, y, avoid: v.avoid, onClose: v.undo }); }, 450) };
+    const p = { x, y, at: Date.now() };
+    p.t = setTimeout(() => { p.held = true; swallowRelease(); const v = keepInView(el); menu({ x, y, avoid: v.avoid, onClose: v.undo }); }, 450);
+    press.current = p;
   };
   const cancel = () => { clearTimeout(press.current?.t); press.current = null; };
+  // Two quick taps in the same spot react (Settings > Text and messages,
+  // js/views/chat.js quickReaction). Never on links, pictures or buttons, never
+  // after a long press, and never takes a reaction away.
+  const onUp = (e) => {
+    const p = press.current;
+    cancel();
+    if (!p || p.held || e.pointerType !== 'touch' || Date.now() - p.at > 300) return;
+    if (e.target.closest('a, img, video, canvas, button, textarea, input, .img')) return;
+    const last = lastTap.current;
+    if (last && p.at - last.at < 400 && Math.hypot(p.x - last.x, p.y - last.y) < 30) {
+      lastTap.current = null;
+      swallowClick();
+      const emoji = quickReaction();
+      if (emoji && !m.state && !(m.reactions?.[emoji] || []).includes(S.me)) react(conv, m.id, emoji);
+    } else lastTap.current = { at: Date.now(), x: p.x, y: p.y };
+  };
   // A finger never stays perfectly still: only a real move cancels the hold.
   const onMove = (e) => { const p = press.current; if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) cancel(); };
 
@@ -250,7 +276,7 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
   const authors = [...new Set(replies.map((r) => r.author))].map((id) => person(id));
 
   return html`<div class=${cls} data-id=${m.id} data-conv=${conv} tabindex=${tab ? 0 : -1}
-    onContextMenu=${onContext} onPointerDown=${onDown} onPointerUp=${cancel} onPointerMove=${onMove} onPointerCancel=${cancel}>
+    onContextMenu=${onContext} onPointerDown=${onDown} onPointerUp=${onUp} onPointerMove=${onMove} onPointerCancel=${cancel}>
     ${quoted && html`<button class="reply-ref" onClick=${() => { S.ui.jump = { conv, id: quoted.id, n: (S.ui.jump?.n || 0) + 1 }; emit(); }}>
       <${Avatar} user=${person(quoted.author)} />
       <b>${person(quoted.author).name}</b>
