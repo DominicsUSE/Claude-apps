@@ -127,7 +127,7 @@ function startCrypt() {
     crypt.worker = new Worker(new URL('./callcrypt-worker.js', import.meta.url), { type: 'module' });
   } catch { crypt.why = 'browser'; return; }
   crypt.mode = mode;
-  crypt.worker.onmessage = ({ data: m }) => { if (m?.t === 'stats') { crypt.waits.get(m.req)?.(m.stats); crypt.waits.delete(m.req); } };
+  crypt.worker.onmessage = ({ data: m }) => { if (m?.t === 'stats' || m?.t === 'done') { crypt.waits.get(m.req)?.(m.t === 'stats' ? m.stats : !m.failed); crypt.waits.delete(m.req); } };
   crypt.worker.onerror = () => { crypt.why = 'browser'; };
   newCallKey();
 }
@@ -165,13 +165,19 @@ function onCallKey(from, m) {
   const place = S.call.room;
   openCallKey(from, m, place).then(({ id, raw }) => {
     if (!crypt.worker || S.call?.room !== place) { raw.fill(0); return; }
-    crypt.worker.postMessage({ t: 'recv', peer: from, id, raw: raw.buffer }, [raw.buffer]);
-    st.keyed = true;
+    const req = ++crypt.req;
+    const installed = new Promise((r) => crypt.waits.set(req, r));
+    crypt.worker.postMessage({ t: 'recv', peer: from, id, raw: raw.buffer, req }, [raw.buffer]);
     st.ckSeen = true;
-    st.why = null;
-    signal(from, { ck: { v: 1, t: 'ack', id } });
     // A device that signs its keys signs its offers too (calls C2): an offer from them without it was changed on the way.
-    if (st.unsigned) refusePeer(from);
+    if (st.unsigned) { refusePeer(from); return undefined; }
+    return installed.then((ok) => {
+      if (!ok || !crypt.worker || !peers.has(from)) return;
+      st.keyed = true;
+      st.why = null;
+      // Acknowledged only once the worker holds it: they encrypt to me with it from then on.
+      signal(from, { ck: { v: 1, t: 'ack', id } });
+    });
   }).catch(() => { st.why = 'their-keys'; emit(); });
 }
 // Every sender and receiver of a connection goes through the worker, the
@@ -590,13 +596,14 @@ async function handleSignal(from, p, data) {
   try {
     if (data.sdp) {
       const desc = data.sdp;
+      // calls C2: checked first, so the collision below is judged on the state after this wait.
+      if ((await checkSdp(from, p, desc)) === 'refuse') { refusePeer(from); return; }
+      if (peers.get(from) !== p) return;
       const ready = !p.makingOffer && (pc.signalingState === 'stable' || p.settingAnswer);
       const collision = desc.type === 'offer' && !ready;
       if (collision) p.glare = (p.glare || 0) + 1;
       p.ignoreOffer = !p.polite && collision;
       if (p.ignoreOffer) return;
-      if ((await checkSdp(from, p, desc)) === 'refuse') { refusePeer(from); return; }
-      if (peers.get(from) !== p) return;
       p.settingAnswer = desc.type === 'answer';
       await pc.setRemoteDescription({ type: desc.type, sdp: withFpAttr(desc.sdp, null) }); // a polite peer rolls its own offer back here
       p.settingAnswer = false;
@@ -1258,7 +1265,12 @@ export async function voiceStats() {
   const cs = await cryptStats();
   for (const [u, p] of peers) {
     let bytes = 0, energy = 0;
-    (await p.pc.getStats()).forEach((r) => { if (r.type === 'inbound-rtp' && r.kind === 'audio') { bytes += r.bytesReceived; energy += r.totalAudioEnergy || 0; } });
+    const report = await p.pc.getStats();
+    const videoCodecs = new Set();
+    report.forEach((r) => {
+      if (r.type === 'inbound-rtp' && r.kind === 'audio') { bytes += r.bytesReceived; energy += r.totalAudioEnergy || 0; }
+      if (r.type === 'inbound-rtp' && r.kind === 'video' && r.codecId) { const c = report.get(r.codecId); if (c?.mimeType) videoCodecs.add(c.mimeType); }
+    });
     out[u] = {
       state: p.pc.connectionState, bytes, tx: p.pc.getTransceivers().length, screenSound: !!p.screenAudio?.srcObject?.getAudioTracks().length, glare: p.glare || 0,
       // The remote voice really playing: its element's clock moves on.
@@ -1277,7 +1289,7 @@ export async function voiceStats() {
       caps: Object.fromEntries(['camera', 'screen'].map((k) => { try { return [k, p.tx[k]?.sender?.track ? p.tx[k].sender.getParameters().encodings?.[0] || null : null]; } catch { return [k, null]; } })),
       sending: p.pc.getSenders().some((x) => x.track && x.track.kind === 'audio' && x.track.readyState === 'live'),
       // calls C1/C2: end-to-end encryption of the media with this person, and why not; the code and whether the device signed.
-      e2ee: !!p.e2ee?.on, e2eeWhy: p.e2ee?.why ?? null, frames: cs[u] || null, code: p.code || null, verified: !!p.verified, fpSigned: !!p.fp,
+      e2ee: !!p.e2ee?.on, e2eeWhy: p.e2ee?.why ?? null, videoCodecs: [...videoCodecs], frames: cs[u] || null, code: p.code || null, verified: !!p.verified, fpSigned: !!p.fp,
     };
   }
   return out;

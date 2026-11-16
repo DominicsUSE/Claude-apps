@@ -302,10 +302,7 @@ async function turnOnEncryption(page) {
 const allE2ee = (page, n, frames = 20) => waitAsync(page, async ([want, min]) => {
   const peers = Object.values(await window.snug.voiceStats());
   return peers.length === want && peers.every((p) => p.e2ee && p.frames?.dec > min && p.frames?.enc > min);
-}, [n, frames], { timeout: 30000, polling: 300 }).catch(async (e) => {
-  console.log('DEBUG', JSON.stringify(await page.evaluate(async () => ({ c: window.snug.voiceTest.crypt(), s: Object.fromEntries(Object.entries(await window.snug.voiceStats()).map(([k, v]) => [k, { e2ee: v.e2ee, why: v.e2eeWhy, f: v.frames, st: v.state }])) }))));
-  throw e;
-});
+}, [n, frames], { timeout: 30000, polling: 300 });
 const cryptKey = (page) => page.evaluate(() => window.snug.voiceTest.crypt().key);
 
 test('end-to-end encrypted media: sealed frames both ways, the label says so, a damaged frame is dropped, keys change on every join and leave, and the device-signed code is longer', async () => {
@@ -368,10 +365,7 @@ test('end-to-end encryption fallback: a browser without encoded transforms conne
   await joinWheel(dara);
   await connected(sunniva, 1);
   await connected(dara, 1);
-  await waitAsync(sunniva, async () => (await window.snug.voiceStats()).dara?.e2eeWhy === 'their-browser').catch(async (e) => {
-    for (const p of [sunniva, dara]) console.log('DEBUG', JSON.stringify(await p.evaluate(async () => ({ ce: window.snug.S.callE2ee, c: window.snug.voiceTest.crypt(), s: Object.fromEntries(Object.entries(await window.snug.voiceStats()).map(([k, v]) => [k, { e2ee: v.e2ee, why: v.e2eeWhy, f: v.frames, st: v.state }])) }))));
-    throw e;
-  });
+  await waitAsync(sunniva, async () => (await window.snug.voiceStats()).dara?.e2eeWhy === 'their-browser');
   assert.equal((await dara.evaluate(async () => (await window.snug.voiceStats()).sunniva)).e2ee, false);
   await dara.locator('.stage .act-conn .act-e2ee.off:has-text("Encrypted in transit only")').waitFor();
   await dara.click('.stage .act-conn');

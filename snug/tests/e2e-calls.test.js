@@ -373,7 +373,7 @@ test('a group call I declined is a quiet line, not a violet missed call', async 
   await malik.click('.stage.call [aria-label="Leave call"]');
   // calls C5: the record keeps only who missed the call, so Ines (who declined) sees the call, not a missed call.
   const line = ines.locator('.callline').last();
-  await ines.locator('.callline:has-text("Robin started it")').waitFor().catch(async (e) => { console.log("DEBUG", await ines.locator(".callline").allTextContents(), JSON.stringify(await ines.evaluate(() => Object.values(window.snug.S.msgs).flat().filter((m) => m.call).map((m) => m.call)))); throw e; });
+  await ines.locator('.callline:has-text("Robin started it")').waitFor();
   assert.equal(await line.evaluate((el) => el.classList.contains('missed')), false);
   assert.match(await line.textContent(), /Call · .*Robin started it/);
   assert.equal(await line.locator('button:has-text("Call back")').count(), 0);

@@ -36,6 +36,11 @@ test('round trip: header in the clear, payload and tag sealed, trailer of counte
   }
   await assert.rejects(openFrame(await frameKey(raw(2)), sealed, 10), 'another key');
   await assert.rejects(openFrame(key, sealed.subarray(0, 20), 10), 'too short');
+  // A frame shorter than the codec header (an empty or 2-byte frame) still round-trips.
+  for (const n of [0, 2]) {
+    const tiny = frame(n);
+    assert.deepEqual([...(await openFrame(key, await sealFrame(key, 7, { hi: 0, lo: 50 + n }, tiny, 3), 3))], [...tiny], `${n} bytes`);
+  }
 });
 
 test('FrameCrypto: nothing is encrypted to a person until they acknowledged a key; then always, with a counter that never repeats', async () => {
@@ -76,6 +81,7 @@ test('FrameCrypto: a receiver passes plain frames until the first frame opens, t
   other.useFor('bob', 9);
   assert.equal((await b.decrypt('ann', (await other.encrypt('bob', pt, 3)).data, 3)).data, null, 'a frame under another key with the same id: dropped');
   assert.equal(b.stats().ann.drop, 3);
+  assert.equal((await b.decrypt('ann', new Uint8Array(0), 1)).data.length, 0, 'an empty frame (the browser makes some) carries nothing: it goes on');
   assert.equal(b.stats().ann.strict, true);
   // Someone else's frames are judged on their own.
   assert.equal((await b.decrypt('cleo', s, 3)).e2ee, false);

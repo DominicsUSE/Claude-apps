@@ -73,11 +73,13 @@ export async function sealFrame(key, keyId, ctr, data, clear) {
   return join(head, ct, trailer);
 }
 /** The key id a sealed frame says it is under (its last byte), or null for one too short to be sealed. */
-export const keyIdOf = (data, clear) => (data.length >= clear + TAG + TRAILER ? data[data.length - 1] : null);
+export const keyIdOf = (data, clear) => (data.length >= TAG + TRAILER ? data[data.length - 1] : null);
 /** The frame as it was sealed. Throws when anything (key, header, payload, trailer) is wrong. */
 export async function openFrame(key, data, clear) {
   const d = data instanceof Uint8Array ? data : new Uint8Array(data);
-  if (d.length < clear + TAG + TRAILER) throw new Error('short frame');
+  if (d.length < TAG + TRAILER) throw new Error('short frame');
+  // A frame shorter than its codec header (an empty video frame) was sealed with all of it readable.
+  clear = Math.min(clear, d.length - TAG - TRAILER);
   const head = d.subarray(0, clear);
   const trailer = d.subarray(d.length - TRAILER);
   const pt = new Uint8Array(await subtle().decrypt({ name: 'AES-GCM', iv: ivOf(trailer), additionalData: join(head, trailer) }, key, d.subarray(clear, d.length - TRAILER)));
@@ -147,6 +149,7 @@ export class FrameCrypto {
     const c = this.#count(peer);
     const id = this.peerKey.get(peer);
     const k = id == null ? null : this.send.get(id);
+    if (!(data?.length ?? data?.byteLength)) return { data, e2ee: false }; // nothing in it
     if (!k || clear == null) { c.plain++; if (k) c.rawOut++; return { data, e2ee: false }; }
     const ctr = { hi: k.ctr.hi, lo: k.ctr.lo };
     if (++k.ctr.lo > 0xffffffff) { k.ctr.lo = 0; k.ctr.hi = (k.ctr.hi + 1) >>> 0; }
@@ -165,6 +168,8 @@ export class FrameCrypto {
       r.curSince = 0;
     }
     const d = data instanceof Uint8Array ? data : new Uint8Array(data);
+    // An empty frame (the browser makes some for audio) carries nothing to open or to hide.
+    if (!d.length) return { data, e2ee: false };
     // A codec whose packetiser reads the payload (H264): its sender can't seal it either.
     if (clear == null) { c.pass++; c.rawIn++; return { data, e2ee: false }; }
     const id = keyIdOf(d, clear);

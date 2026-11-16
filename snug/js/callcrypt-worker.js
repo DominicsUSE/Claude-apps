@@ -32,16 +32,19 @@ function pipe(readable, writable, opts, transformer = null) {
 // RTCRtpScriptTransform: the browser hands over each sender's or receiver's frames.
 self.onrtctransform = (e) => { const tr = e.transformer; pipe(tr.readable, tr.writable, tr.options, tr); };
 
-self.onmessage = async ({ data: m }) => {
+// One message at a time, in order: a key is in place before the message that uses it.
+let queue = Promise.resolve();
+self.onmessage = ({ data: m }) => { queue = queue.then(() => handle(m)); };
+async function handle(m) {
   if (!m || typeof m !== 'object') return;
   try {
     if (m.t === 'streams') pipe(m.readable, m.writable, m.opts);
     else if (m.t === 'send') await fc.setSendKey(m.id, new Uint8Array(m.raw));
     else if (m.t === 'use') fc.useFor(m.peer, m.id);
-    else if (m.t === 'recv') await fc.addRecvKey(m.peer, m.id, new Uint8Array(m.raw));
+    else if (m.t === 'recv') { await fc.addRecvKey(m.peer, m.id, new Uint8Array(m.raw)); self.postMessage({ t: 'done', req: m.req }); }
     else if (m.t === 'drop') fc.dropPeer(m.peer);
     else if (m.t === 'wipe') fc.wipe();
     else if (m.t === 'tamper') { if (m.on) fc.tamper.add(m.peer); else fc.tamper.delete(m.peer); }
     else if (m.t === 'stats') self.postMessage({ t: 'stats', req: m.req, stats: fc.stats() });
-  } catch { if (m.t === 'stats') self.postMessage({ t: 'stats', req: m.req, stats: {} }); }
-};
+  } catch { if (m.t === 'stats' || m.t === 'recv') self.postMessage({ t: m.t === 'stats' ? 'stats' : 'done', req: m.req, stats: {}, failed: true }); }
+}

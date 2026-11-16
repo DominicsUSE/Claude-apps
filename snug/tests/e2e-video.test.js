@@ -361,3 +361,38 @@ test('screen share: Text and slides or Motion and games, and a new resolution, c
   await robin.click('.stage [aria-label="Leave voice"]');
   await ines.click('.stage [aria-label="Leave voice"]');
 });
+
+// ---------- calls C1: camera, screen and screen sound end-to-end encrypted ----------
+async function turnOnEncryption(page) {
+  const dialog = page.locator('.modal[role=dialog]');
+  await page.click('.rail-btn:has(.sr:text-matches("^Messages"))');
+  await page.locator('.e2-invite button:has-text("Turn on")').click();
+  await dialog.locator('h2:has-text("Turn on end-to-end encryption")').waitFor();
+  await dialog.locator('button:has-text("Turn on")').click();
+  await dialog.locator('#e2-recovery-key').waitFor();
+  const key = (await dialog.locator('#e2-recovery-key code').allTextContents()).join('-');
+  await dialog.locator('#e2-last').fill(key.slice(-4).toLowerCase());
+  await dialog.locator('button:has-text("I’ve saved it")').click();
+  await dialog.waitFor({ state: 'detached' });
+  await page.waitForFunction(() => window.snug.e2ee.E2.status === 'ready');
+}
+
+test('end-to-end encrypted video: a camera and a screen share with its sound play on the other side from sealed frames, VP8 first', async () => {
+  const hyunwoo = await person('hyunwoo'), lea = await person('lea');
+  await turnOnEncryption(hyunwoo);
+  await turnOnEncryption(lea);
+  await joinVoiceRoom(lea);
+  await joinVoiceRoom(hyunwoo, 1);
+  await hyunwoo.click('.stage .vc.cam');
+  await hyunwoo.click('.stage .vc.scr');
+  await playing(lea, 'hyunwoo:camera');
+  await playing(lea, 'hyunwoo:screen');
+  for (const [page, other] of [[hyunwoo, 'lea'], [lea, 'hyunwoo']]) {
+    await waitAsync(page, async (u) => { const s = (await window.snug.voiceStats())[u]; return s?.e2ee && s.frames.dec > 100 && s.frames.enc > 100 && s.frames.drop === 0; }, other, { timeout: 30000 });
+  }
+  // The video codec in use is VP8 (its header is known, so the rest of each frame is sealed).
+  assert.deepEqual(await lea.evaluate(async () => (await window.snug.voiceStats()).hyunwoo.videoCodecs), ['video/VP8']);
+  await lea.locator('.stage .act-conn .act-e2ee.on:has-text("End-to-end encrypted")').waitFor();
+  await hyunwoo.click('.stage [aria-label="Leave voice"]');
+  await lea.click('.stage [aria-label="Leave voice"]');
+});
