@@ -100,8 +100,8 @@ export function PrivacyGuide({ level = 2 }) {
         <li>Settings > Your data: download everything that’s yours as one zip file (your profile, your messages, the direct conversations you’re in, files you uploaded and your settings).</li>
         <li>Deleting your account: choose to keep your messages under “Deleted user”, or to erase them with your files, reactions and sign-in history. Copies other people already have (on their PCs, or forwarded and screenshotted) can’t be erased.</li>
         <li>Deleting a message: it can be brought back for 10 minutes, then its text is gone from Snug.</li>
+        <li id="pv-disappear">Disappearing messages: in a conversation, open the More menu and choose Disappearing messages, and new messages there are removed after the time you pick (in a house, people who manage rooms set it). People can still copy or screenshot a message before it goes, and ${f.mode === 'p2p' ? 'each PC’s encrypted daily backup' : 'the server’s encrypted daily backups'} can keep a copy for up to a week.</li>
       </ul>
-      ${/* Per-conversation retention and disappearing messages: when they exist, add a line here linking to them. */ ''}
     </section>
     <section class="pv-sect" data-pv="law" aria-labelledby="pv-law">
       <${H} id="pv-law">Requests from the police or courts<//>

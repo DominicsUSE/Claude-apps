@@ -95,6 +95,12 @@ test('signed out: the sign-in screen links to the privacy page, which works at /
   assert.equal(new URL(page.url()).pathname, '/privacy');
   assert.match(await text(page, '.pv-panel h1'), /Privacy at Snug/);
   assert.match(await text(page, '#pv-guide'), /Whoever runs it can read houses and rooms/);
+  // Disappearing messages (0.12) are among your choices, with what they can't do.
+  const gone = await text(page, '#pv-disappear');
+  assert.match(gone, /Disappearing messages/);
+  assert.match(gone, /More menu/);
+  assert.match(gone, /copy or screenshot/);
+  assert.match(gone, /backups/);
   const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(wide <= 0, `no sideways scrolling on a phone (${wide}px)`);
   await page.click('#pv-back');
