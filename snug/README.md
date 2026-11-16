@@ -1101,7 +1101,7 @@ Real, and covered by tests with separate users:
     volume; and short-lived TURN credentials (below).
   - **On phones and laptops (0.13):** the screen stays on while you are in a
     call or voice (Screen Wake Lock, asked again when you come back to the
-    page), and the system's own call controls (a lock screen, a headset's
+    page; the desktop app allows it too), and the system's own call controls (a lock screen, a headset's
     button, the desktop's media controls, where the browser offers them)
     mute, turn the camera on and off and hang up. Without either API the
     call works as before.

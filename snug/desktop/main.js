@@ -328,7 +328,8 @@ async function askMediaAll(o, kinds) {
 }
 function permissions() {
   // display-capture: newer Electron asks it before getDisplayMedia reaches the picker below (Electron 45).
-  const allowed = new Set(["media", "display-capture", "notifications", "clipboard-sanitized-write", "fullscreen"]);
+  // screen-wake-lock: the page keeps the screen on while in a call (js/voice.js holdWake).
+  const allowed = new Set(["media", "display-capture", "notifications", "clipboard-sanitized-write", "fullscreen", "screen-wake-lock"]);
   // sec-desktop: only the main window's page, never another webContents (a picker, a future window).
   const ours = (wc) => !!wc && !!win && !win.isDestroyed() && wc === win.webContents;
   // Both sessions the window can have: the default one, and join mode's own partition (pinned).
