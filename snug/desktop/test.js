@@ -75,6 +75,9 @@ test("first run: choose to run Snug on this computer, create an account, send a 
   await page.click('.rail-add');
   await page.fill("#house-name", "Kiln & Co.");
   await page.click('.modal button[type=submit]');
+  // 0.12: a new house offers its invitation link first (js/views/modals.js Invite, fresh).
+  await page.locator('.modal h2:has-text("is ready")').waitFor();
+  await page.click('.modal button:text-is("Later")');
   await page.waitForSelector('.main .bar-title:has-text("Lounge")');
   await page.fill(".main .composer textarea", "First message from the desktop app");
   await page.press(".main .composer textarea", "Enter");
@@ -152,6 +155,9 @@ test("voice: the camera turns on, and the screen picker shares a screen", async 
   await page.click(".rail-add");
   await page.fill("#house-name", "Studio");
   await page.click(".modal button[type=submit]");
+  // 0.12: a new house offers its invitation link first (js/views/modals.js Invite, fresh).
+  await page.locator('.modal h2:has-text("is ready")').waitFor();
+  await page.click('.modal button:text-is("Later")');
   await page.waitForSelector('.main .bar-title:has-text("Lounge")');
   await page.click('.nav .row:has-text("Hangout")');
   step("join voice");
@@ -252,8 +258,8 @@ test("tray: closing hides the window, notifications still arrive and open the co
   await page.click(".self");
   await page.click(".me-pop >> text=Settings");
   await page.click(".layer-nav >> text=Notifications");
-  await page.click('.layer-body [aria-label="Desktop notifications"]');
-  await page.locator('.layer-body [aria-label="Desktop notifications"][aria-checked="true"]').waitFor();
+  await page.click('.layer-body [aria-label="Notifications while Snug is open"]');
+  await page.locator('.layer-body [aria-label="Notifications while Snug is open"][aria-checked="true"]').waitFor();
   await page.locator('#set-keep-running [role="switch"][aria-checked="true"]').waitFor();
   await page.keyboard.press("Escape");
 
@@ -261,6 +267,9 @@ test("tray: closing hides the window, notifications still arrive and open the co
   await page.click(".rail-add");
   await page.fill("#house-name", "Kiln & Co.");
   await page.click(".modal button[type=submit]");
+  // 0.12: a new house offers its invitation link first (js/views/modals.js Invite, fresh).
+  await page.locator('.modal h2:has-text("is ready")').waitFor();
+  await page.click('.modal button:text-is("Later")');
   await page.waitForSelector('.main .bar-title:has-text("Lounge")');
   await page.click('.rail-house:has-text("Kiln & Co.")', { button: "right" });
   await page.click('.menu-item:has-text("Invite people")');
@@ -382,6 +391,9 @@ test("incoming call: the hidden window comes back from the tray with a notificat
   await page.click(".rail-add");
   await page.fill("#house-name", "Kiln & Co.");
   await page.click(".modal button[type=submit]");
+  // 0.12: a new house offers its invitation link first (js/views/modals.js Invite, fresh).
+  await page.locator('.modal h2:has-text("is ready")').waitFor();
+  await page.click('.modal button:text-is("Later")');
   await page.waitForSelector('.main .bar-title:has-text("Lounge")');
   const reg = await fetch(`${origin}/api/register`, {
     method: "POST", headers: { "content-type": "application/json", origin }, body: JSON.stringify({ handle: "lou", name: "Lou Brandt", password: "a long password" }),
@@ -466,6 +478,9 @@ test("push to talk: a global key is held only while in voice in push-to-talk mod
   await page.click(".rail-add");
   await page.fill("#house-name", "Studio");
   await page.click(".modal button[type=submit]");
+  // 0.12: a new house offers its invitation link first (js/views/modals.js Invite, fresh).
+  await page.locator('.modal h2:has-text("is ready")').waitFor();
+  await page.click('.modal button:text-is("Later")');
   await page.waitForSelector('.main .bar-title:has-text("Lounge")');
   assert.equal(await page.evaluate(() => typeof window.snugApp.setPushToTalk), "function");
   await page.click('.nav .row:has-text("Hangout")');
@@ -604,6 +619,9 @@ test("desktop shell: badge and flash, theme colour, settings, global voice keys,
   await page.click(".rail-add");
   await page.fill("#house-name", "Shell House");
   await page.click(".modal button[type=submit]");
+  // 0.12: a new house offers its invitation link first (js/views/modals.js Invite, fresh).
+  await page.locator('.modal h2:has-text("is ready")').waitFor();
+  await page.click('.modal button:text-is("Later")');
   await page.waitForSelector('.main .bar-title:has-text("Lounge")');
   const lounge = await page.evaluate(() => window.snug.S.ui.view.id);
   await page.click('.rail-house:has-text("Shell House")', { button: "right" });
@@ -1225,6 +1243,9 @@ test("join mode, pinned: the app's own client runs at a plain-http LAN address, 
   await page.click(".rail-add");
   await page.fill("#house-name", "Pinned house");
   await page.click(".modal button[type=submit]");
+  // 0.12: a new house offers its invitation link first (js/views/modals.js Invite, fresh).
+  await page.locator('.modal h2:has-text("is ready")').waitFor();
+  await page.click('.modal button:text-is("Later")');
   await page.waitForSelector('.main .bar-title:has-text("Lounge")');
   const room = host.srv.db.get("SELECT id FROM rooms WHERE name = 'Lounge'").id;
   // An upload through the pass-through, then a Range request for it, then a redirect the page follows itself.
