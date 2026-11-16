@@ -13,8 +13,8 @@
 export const PRESENCE_TO = [['everyone', 'Everyone I share a place with'], ['friends', 'Friends only'], ['nobody', 'Nobody']];
 const presenceLine = {
   everyone: 'People who share a house, a conversation or a friendship with you see when you’re online, and when you last wrote.',
-  friends: 'Only your friends see when you’re online and when you last wrote. Everyone else sees you as offline.',
-  nobody: 'Nobody sees when you’re online or when you last wrote, and your typing isn’t shown.',
+  friends: 'Only your friends see when you’re online, your status and when you last wrote. Everyone else sees you as offline and, unless they are in it with you, not in a voice room. Everyone still sees when each message was sent.',
+  nobody: 'Nobody sees when you’re online, your status or when you last wrote, and your typing isn’t shown. Only people in a voice room with you see you there.',
 };
 
 // "this Snug at chat.example.org" (or the address with its port, for a PC on a home network).

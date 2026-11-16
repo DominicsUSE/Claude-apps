@@ -41,6 +41,8 @@ test('no mode ever claims anonymity or immunity, and every mode says there are n
 test('plain http is called out, and the presence line follows the setting', () => {
   assert.match(text(whoSeesWhat({ mode: 'host', https: false })), /plain connection \(http\)/);
   assert.match(text(whoSeesWhat({ presenceTo: 'friends' })), /Only your friends see when you’re online/);
+  // review-media 6: what the setting covers, and what stays visible, in plain words.
+  assert.match(text(whoSeesWhat({ presenceTo: 'friends' })), /your status.*voice room.*when each message was sent/);
   assert.match(text(whoSeesWhat({ presenceTo: 'nobody' })), /Nobody sees when you’re online/);
   assert.equal(snugAt(''), 'this Snug');
 });

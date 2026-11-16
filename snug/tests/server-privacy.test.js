@@ -89,6 +89,40 @@ test('presence "friends only": a house-mate sees me offline with no activity lin
   for (const c of [robin, ines, bex, bex2, ines2, me]) c.ws.close();
 });
 
+// review-media 6: "friends only" also covers the status line, who is in a house's voice room (to people not in
+// it) and the house's online and in-voice counts.
+test('presence "friends only": status, voice-room lists and house counts leave me out for non-friends', async () => {
+  const robin = await person('pv-robin6'), ines = await person('pv-ines6'), bex = await person('pv-bex6');
+  const { house } = await houseOf(robin, ines, bex);
+  await befriend(robin, ines);
+  await robin.ok('me.update', { status: 'At the beach' });
+  await robin.ok('prefs.set', { prefs: { presenceTo: 'friends' } });
+  const hangout = srv.db.get("SELECT id FROM rooms WHERE house = ? AND kind = 'voice'", house).id;
+  await robin.ok('voice.join', { room: hangout });
+  const bex2 = new Client(srv, bex.cookie, bex.id); await bex2.connect();
+  const ines2 = new Client(srv, ines.cookie, ines.id); await ines2.connect();
+  assert.equal(bex2.hello.users[robin.id].status, '', 'not a friend: no status line');
+  assert.equal(ines2.hello.users[robin.id].status, 'At the beach');
+  assert.deepEqual(bex2.hello.voice[hangout]?.users || [], [], 'not a friend: robin isn’t listed in the voice room');
+  assert.deepEqual(ines2.hello.voice[hangout].users, [robin.id]);
+  // Live: ines joining sends the room's list again; bex's copy still leaves robin out.
+  bex2.events.length = 0;
+  await ines.ok('voice.join', { room: hangout });
+  const live = await bex2.next('voice', (d) => d.room === hangout);
+  assert.deepEqual(live.users, [ines.id]);
+  assert.equal(live.state[robin.id], undefined);
+  // Counts: bex's preview doesn't count robin online or in voice; ines's does.
+  const pb = await bex2.ok('house.preview', { house });
+  const pi = await ines2.ok('house.preview', { house });
+  assert.equal(pi.online - pb.online, 1, 'robin is counted online only for his friend');
+  assert.equal(pi.inVoice - pb.inVoice, 1, 'and in voice only for his friend');
+  // Someone in the voice room sees everyone in it.
+  await bex.ok('voice.join', { room: hangout });
+  const inRoom = await bex2.next('voice', (d) => d.room === hangout && d.users.includes(bex.id));
+  assert.ok(inRoom.users.includes(robin.id), 'in the room: robin is listed');
+  for (const c of [robin, ines, bex, bex2, ines2]) { c.ok && c.op('voice.leave'); c.ws.close(); }
+});
+
 test('presence "nobody": friends see me offline too, and no typing note goes out', async () => {
   const kay = await person('pv-kay'), lee = await person('pv-lee');
   const { room } = await houseOf(kay, lee);

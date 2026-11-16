@@ -70,13 +70,36 @@ export function createPrivacy({ db, M, hub, ops, peer = null, facts = {}, filesD
     return to === 'friends' && M.areFriends(viewer, user);
   };
   M.presenceToAll = (user) => narrow.get(user) !== 'nobody';
-  // "How many are online" in Discover doesn't count people who show to nobody.
+  // "How many are online" in Discover doesn't count people who show to nobody; given a viewer (house cards,
+  // review-media 6), nor people who show to friends only and aren't the viewer's friend.
   const baseOnline = hub.isOnline;
-  if (baseOnline) hub.isOnline = (u) => baseOnline(u) && M.presenceToAll(u);
+  if (baseOnline) hub.isOnline = (u, viewer) => baseOnline(u) && M.presenceToAll(u) && (typeof viewer !== 'string' || M.presenceVisible(viewer, u));
   const quietTyping = (u) => prefs(u).typing === false || narrow.get(u) === 'nobody' || M.userRow(u)?.presence === 'offline';
 
   // ---------- Every frame out ----------
-  const masked = (v) => ({ ...v, presence: 'offline', idle: false, hideActive: true });
+  // review-media 6: the status line goes too, as in M.hiddenView (server/model.js).
+  const masked = (v) => ({ ...v, presence: 'offline', idle: false, hideActive: true, ...('status' in v ? { status: '' } : {}) });
+  // Who is in a house's voice room, as someone outside that room sees it: people who hide their presence from
+  // them aren't listed (review-media 6). Everyone in the room sees everyone in it; calls in direct conversations
+  // are left as they are.
+  function maskVoice(viewer, place, v) {
+    if (!v || typeof v !== 'object' || !Array.isArray(v.users) || v.users.includes(viewer) || !M.room?.(place)) return v;
+    const hide = v.users.filter((u) => !M.presenceVisible(viewer, u));
+    if (!hide.length) return v;
+    const state = { ...(v.state || {}) };
+    for (const u of hide) delete state[u];
+    return { ...v, users: v.users.filter((u) => !hide.includes(u)), state };
+  }
+  function maskVoiceMap(viewer, map) {
+    let out = map;
+    for (const [place, v] of Object.entries(map)) {
+      const m = maskVoice(viewer, place, v);
+      if (m === v) continue;
+      if (out === map) out = { ...map };
+      out[place] = m;
+    }
+    return out;
+  }
   const isView = (v) => v && typeof v === 'object' && typeof v.id === 'string' && 'presence' in v;
   // A copy of `users` with the people this viewer may not see as online shown offline (the same object when nobody is).
   function maskUsers(viewer, users) {
@@ -104,7 +127,12 @@ export function createPrivacy({ db, M, hub, ops, peer = null, facts = {}, filesD
     if (Array.isArray(d)) return maskList(viewer, d);
     if (ev === 'typing') return M.presenceVisible(viewer, d.user) ? d : null;
     if (ev === 'presence') return M.presenceVisible(viewer, d.user) ? d : { ...d, presence: 'offline', hideActive: true };
+    if (ev === 'voice') return maskVoice(viewer, d.room, d);
     let out = d;
+    if (d.voice && typeof d.voice === 'object' && !Array.isArray(d.voice)) {
+      const vm = maskVoiceMap(viewer, d.voice);
+      if (vm !== d.voice) out = { ...out, voice: vm };
+    }
     if (isView(d.user) && !M.presenceVisible(viewer, d.user.id)) out = { ...out, user: masked(d.user) };
     for (const [k, v] of Object.entries(d)) {
       if (k === 'users' && v && typeof v === 'object' && !Array.isArray(v)) {

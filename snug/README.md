@@ -1379,8 +1379,12 @@ mode you're in. The short version:
   your data-file key wrapped. Calls go straight between PCs or through a
   Cloudflare relay that can't hear them.
 - **Your choices**: who sees that you're online (everyone you share a place
-  with, friends only, nobody), which also hides your "Recently here" and
-  "last wrote" lines; typing on or off (off stops sending and showing it, and
+  with, friends only, nobody), which also hides your status, your "Recently
+  here" and "last wrote" lines, that you're in a voice room (from anyone not
+  in it with you) and you from houses' online counts. People still see when
+  each message was sent. On the desktop app, friends only also stops sharing
+  presence with members of your groups across PCs who aren't your friends
+  (both ways: you don't see them online either); typing on or off (off stops sending and showing it, and
   nothing is sent while invisible); who can message, befriend or invite you.
   Read receipts don't exist in Snug.
 - **Your data**: Settings > Your data downloads one zip (profile, settings,
