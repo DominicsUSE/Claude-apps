@@ -17,6 +17,7 @@ import { joinVoice } from '../voice.js';
 import { leavingCall } from '../calls.js';
 import { openHouse, onlineIn, OnlineCount } from './nav.js';
 import { RecoveryReminder } from './recover.js'; // v0.12: a password account with no recovery key yet
+import { t } from '../lib/i18n.js'; // words in the chosen language (js/locales)
 
 const first = (name) => (name || '').split(' ')[0];
 
@@ -230,11 +231,11 @@ function Picks() {
 function Welcome() {
   return html`<div class="home-start">
     <${Nook} size=${48} />
-    <h3>Snug is better with people in it</h3>
-    <p>Find a community that’s into what you’re into, or add a friend you already know. When they’re around, you’ll see it here first.</p>
+    <h3>${t('home.welcomeTitle')}</h3>
+    <p>${t('home.welcomeText')}</p>
     <div class="home-start-acts">
-      <button class="btn primary" onClick=${() => go({ type: 'discover' })}><${Icon} name="compass" size=${16} />Find a community</button>
-      <button class="btn" onClick=${() => go({ type: 'friends', tab: 'add' })}><${Icon} name="people" size=${16} />Add a friend</button>
+      <button class="btn primary" onClick=${() => go({ type: 'discover' })}><${Icon} name="compass" size=${16} />${t('home.findCommunity')}</button>
+      <button class="btn" onClick=${() => go({ type: 'friends', tab: 'add' })}><${Icon} name="people" size=${16} />${t('home.addFriend')}</button>
     </div>
   </div>`;
 }
@@ -265,12 +266,12 @@ export function Home() {
   if (voice.length || active.length) summary.push(`${plural(voice.length + active.length, 'conversation')} going`);
   if (happeningNow) summary.push('something on now');
 
-  return html`<section class="main view home" aria-label="Home">
+  return html`<section class="main view home" aria-label=${t('nav.home')}>
     <header class="bar">
       ${S.ui.phone && S.ui.depth > 0 && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`}
-      <h1 class="bar-title"><${Icon} name="house" />Home</h1>
+      <h1 class="bar-title"><${Icon} name="house" />${t('nav.home')}</h1>
       <div class="bar-end">
-        <button class="btn quiet" onClick=${() => go({ type: 'friends', tab: 'add' })}><${Icon} name="user-plus" size=${16} />Add a friend</button>
+        <button class="btn quiet" onClick=${() => go({ type: 'friends', tab: 'add' })}><${Icon} name="user-plus" size=${16} />${t('home.addFriend')}</button>
       </div>
     </header>
     <div class="view-body">
@@ -289,38 +290,38 @@ export function Home() {
           ? html`<${Welcome} />`
           : html`<div class="home-grid">
             <div class="home-main">
-              ${phone && voice.length > 0 && html`<${Sect} id="home-voice" title="Live in voice" count=${voice.length}>
+              ${phone && voice.length > 0 && html`<${Sect} id="home-voice" title=${t('home.liveVoice')} count=${voice.length}>
                 <div class="home-list">${voice.map((x) => html`<${VoiceRow} key=${x.conv} conv=${x.conv} people=${x.people} />`)}</div>
               <//>`}
 
-              ${active.length > 0 && html`<${Sect} id="home-active" title="Conversations going">
+              ${active.length > 0 && html`<${Sect} id="home-active" title=${t('home.going')}>
                 <div class="home-list">${active.map((x) => html`<${ConvRow} key=${x.conv} ...${x} />`)}</div>
               <//>`}
 
-              ${phone && events.length > 0 && html`<${Sect} id="home-events" title=${happeningNow ? 'Happening now' : 'Coming up'}
-                action=${{ label: 'All events', run: () => go({ type: 'discover', section: 'events' }) }}>
+              ${phone && events.length > 0 && html`<${Sect} id="home-events" title=${happeningNow ? t('nav.happeningNow') : t('home.comingUp')}
+                action=${{ label: t('nav.allEvents'), run: () => go({ type: 'discover', section: 'events' }) }}>
                 <div class="home-list home-events">${events.map((ev) => html`<${EventRow} key=${ev.id} ev=${ev} compact />`)}</div>
               <//>`}
 
-              ${quiet && html`<p class="home-empty home-quiet">It’s quiet right now. When people start talking or someone opens a voice room, it shows up here.</p>`}
-              ${!phone && !quiet && !active.length && html`<p class="home-empty home-quiet">No one’s talking right now. Voice rooms with people in them and events coming up are in the sidebar.</p>`}
+              ${quiet && html`<p class="home-empty home-quiet">${t('home.quiet')}</p>`}
+              ${!phone && !quiet && !active.length && html`<p class="home-empty home-quiet">${t('home.quietSide')}</p>`}
             </div>
 
             <aside class="home-side" aria-label=${phone || !S.houseOrder.length ? 'Who’s around, your communities and suggestions' : 'Who’s around and suggestions'}>
-              ${online.length > 0 && html`<${Sect} id="home-friends" title="Online now" count=${online.length} action=${{ label: 'All friends', run: () => go({ type: 'friends' }) }}>
+              ${online.length > 0 && html`<${Sect} id="home-friends" title=${t('home.onlineNow')} count=${online.length} action=${{ label: t('home.allFriends'), run: () => go({ type: 'friends' }) }}>
                 <${FriendsStrip} ids=${online} />
               <//>`}
 
               ${!online.length && (recent.length
-                ? html`<${Sect} id="home-recent" title="Recently here" action=${allFriends.length ? { label: 'All friends', run: () => go({ type: 'friends' }) } : null}>
+                ? html`<${Sect} id="home-recent" title=${t('home.recentlyHere')} action=${allFriends.length ? { label: t('home.allFriends'), run: () => go({ type: 'friends' }) } : null}>
                   <${RecentStrip} items=${recent} now=${now} />
                 <//>`
-                : !allFriends.length && html`<p class="home-empty">No friends on Snug yet. <button class="home-link" onClick=${() => go({ type: 'friends', tab: 'add' })}>Add someone by their handle</button> and you’ll see when they’re around.</p>`)}
+                : !allFriends.length && html`<p class="home-empty">${t('home.noFriendsBefore')} <button class="home-link" onClick=${() => go({ type: 'friends', tab: 'add' })}>${t('home.noFriendsLink')}</button> ${t('home.noFriendsAfter')}</p>`)}
 
-              ${(phone || !S.houseOrder.length) && html`<${Sect} id="home-houses" title="Your communities" count=${S.houseOrder.length || null}>
+              ${(phone || !S.houseOrder.length) && html`<${Sect} id="home-houses" title=${t('home.communities')} count=${S.houseOrder.length || null}>
                 ${S.houseOrder.length
                   ? html`<ul class="home-list" role="list">${S.houseOrder.map((id) => html`<${CommunityRow} key=${id} id=${id} />`)}</ul>`
-                  : html`<p class="home-empty">You’re not in a community yet. <button class="home-link" onClick=${() => go({ type: 'discover', section: 'communities' })}>Find one in Discover</button>.</p>`}
+                  : html`<p class="home-empty">${t('home.noHousesBefore')} <button class="home-link" onClick=${() => go({ type: 'discover', section: 'communities' })}>${t('home.noHousesLink')}</button>.</p>`}
               <//>`}
               <${Picks} />
             </aside>

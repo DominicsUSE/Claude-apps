@@ -35,6 +35,7 @@ import { muteItems, rolesOff, setRolesOff, orderDms } from '../inbox.js'; // tim
 import { newcomerSees } from '../lib/onboarding.js'; // newcomers see starter and voice rooms
 import { dmManageItems, groupFace } from './dm-manage.js'; // close, pin, rename, icon, add people, leave
 import { EncInvite } from './e2ee-setup.js'; // the offer to turn on end-to-end encryption, above the direct messages
+import { t, intlLocale } from '../lib/i18n.js'; // words and dates in the chosen language (js/locales)
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
@@ -197,16 +198,16 @@ export function roomMenu(id, pos, extra = []) {
     ...pos,
     items: [
       ...extra,
-      { label: 'Mark read', icon: 'check', disabled: !a.soft && !a.needs, onSelect: () => markConvRead(id) },
+      { label: t('nav.markRead'), icon: 'check', disabled: !a.soft && !a.needs, onSelect: () => markConvRead(id) },
       ...notifyItems('room', id, levelOf(S, id), pos),
       manage && { sep: true },
-      manage && { label: 'Edit room', icon: 'edit', onSelect: () => openModal(RoomForm, { room: id }) },
+      manage && { label: t('nav.editRoom'), icon: 'edit', onSelect: () => openModal(RoomForm, { room: id }) },
       ...roomMoveItems(id), // Move up, Move down, Move to another category (js/views/community.js)
       manage && {
-        label: 'Delete room', icon: 'trash', danger: true,
+        label: t('nav.deleteRoom'), icon: 'trash', danger: true,
         onSelect: () => openModal(Confirm, {
-          title: `Delete ${room.name}?`, danger: true, action: 'Delete room',
-          text: `Everything written in ${room.name} goes with it, for everyone. This can’t be undone.`,
+          title: t('nav.deleteRoomTitle', { room: room.name }), danger: true, action: t('nav.deleteRoom'),
+          text: t('nav.deleteRoomText', { room: room.name }),
           onConfirm: () => deleteRoom(id),
         }),
       },
@@ -220,7 +221,7 @@ export function dmMenu(id, pos, extra = []) {
     ...pos,
     items: [
       ...extra,
-      { label: 'Mark read', icon: 'check', disabled: !a.soft && !a.needs, onSelect: () => markConvRead(id) },
+      { label: t('nav.markRead'), icon: 'check', disabled: !a.soft && !a.needs, onSelect: () => markConvRead(id) },
       ...notifyItems('dm', id, levelOf(S, id), pos),
       ...dmManageItems(id), // js/views/dm-manage.js
     ],
@@ -234,14 +235,14 @@ export function houseMenu(id, pos) {
   openMenu({
     ...pos,
     items: [
-      { label: 'Mark house as read', icon: 'check', disabled: !a.soft && !a.needs, onSelect: () => markHouseRead(id) },
+      { label: t('nav.markHouseRead'), icon: 'check', disabled: !a.soft && !a.needs, onSelect: () => markHouseRead(id) },
       ...notifyItems('house', id, h.notify, pos),
       { sep: true },
-      can(S, id, 'invite') && { label: 'Invite people', icon: 'link', onSelect: () => openModal(Invite, { house: id }) },
-      { label: 'Browse rooms', icon: 'room', onSelect: () => openModal(RoomBrowser, { house: id }) },
-      can(S, id, 'rooms') && { label: 'New room', icon: 'plus', onSelect: () => openModal(RoomForm, { house: id, group: h.groups[0].id }) },
-      can(S, id, 'rooms') && { label: 'New category', icon: 'list', onSelect: () => openModal(GroupForm, { house: id }) },
-      settings && { label: 'House settings', icon: 'sliders', onSelect: () => openLayer({ C: HouseSettings, props: { house: id } }) },
+      can(S, id, 'invite') && { label: t('nav.invitePeople'), icon: 'link', onSelect: () => openModal(Invite, { house: id }) },
+      { label: t('nav.browseRooms'), icon: 'room', onSelect: () => openModal(RoomBrowser, { house: id }) },
+      can(S, id, 'rooms') && { label: t('nav.newRoom'), icon: 'plus', onSelect: () => openModal(RoomForm, { house: id, group: h.groups[0].id }) },
+      can(S, id, 'rooms') && { label: t('nav.newCategory'), icon: 'list', onSelect: () => openModal(GroupForm, { house: id }) },
+      settings && { label: t('nav.houseSettings'), icon: 'sliders', onSelect: () => openLayer({ C: HouseSettings, props: { house: id } }) },
       // Custom emoji: roles that may manage emoji but not the house reach the Emoji page from here.
       !settings && can(S, id, 'emoji') && { label: 'Custom emoji', icon: 'smile', onSelect: () => openLayer({ C: HouseSettings, props: { house: id, page: 'emoji' } }) },
       // Soundboard and voice rooms (js/views/voiceopts-settings.js): for roles that manage sounds but not the house.
@@ -250,11 +251,11 @@ export function houseMenu(id, pos) {
       modPages(id) && { label: h.reportsOpen ? `Moderation (${h.reportsOpen} open)` : 'Moderation', icon: 'shield', onSelect: () => openLayer({ C: HouseSettings, props: { house: id, page: can(S, id, 'moderate') ? 'reports' : can(S, id, 'ban') ? 'bans' : 'log' } }) },
       { sep: true },
       {
-        label: 'Leave house', icon: 'leave', danger: true,
+        label: t('nav.leaveHouse'), icon: 'leave', danger: true,
         onSelect: () => openModal(Confirm, {
-          title: `Leave ${h.name}?`, danger: true, action: 'Leave house',
-          text: 'Its rooms leave your sidebar. You’ll need a new invitation to come back.',
-          onConfirm: () => leaveHouse(id).catch((e) => toast(e.offline ? 'You’re offline. Try again when you’re back.' : e.message)),
+          title: t('nav.leaveTitle', { house: h.name }), danger: true, action: t('nav.leaveHouse'),
+          text: t('nav.leaveText'),
+          onConfirm: () => leaveHouse(id).catch((e) => toast(e.offline ? t('common.offline') : e.message)),
         }),
       },
     ],
@@ -274,15 +275,15 @@ export const homeNeeds = () => S.invites.length + friendRequests(S, 'incoming').
 export const onlineIn = (h) => Object.keys(h.members || {}).filter((u) => u !== S.me && S.users[u] && S.users[u].presence !== 'offline').length;
 // How that count reads: a mint dot and a number, or "Just you" with no dot.
 export const OnlineCount = ({ n, cls = '' }) => (n > 0
-  ? html`<span class=${cls}><i class="pres inline open" aria-hidden="true"></i><span class="num">${n}</span> online</span>`
-  : html`<span class=${cls}>Just you</span>`);
+  ? html`<span class=${cls}><i class="pres inline open" aria-hidden="true"></i><span class="num">${n}</span> ${t('nav.online', { count: n })}</span>`
+  : html`<span class=${cls}>${t('nav.justYou')}</span>`);
 
 // ---------- The rail ----------
 
 function RailItem({ label, sel, attn, onClick, onMenu, cls = '', children }) {
   const needs = attn?.needs || 0;
   const unread = !needs && attn?.soft;
-  const said = needs ? `, ${plural(needs, 'thing needs', 'things need')} you` : unread ? ', new activity' : '';
+  const said = needs ? t('nav.railNeeds', { count: needs }) : unread ? t('nav.railNew') : '';
   return html`<div class=${`rail-item${sel ? ' sel' : ''}${unread ? ' unread' : ''}`}>
     <button class=${`rail-btn ${cls}`} aria-current=${sel ? 'page' : undefined} data-tip=${label} data-tip-side="right"
       onClick=${onClick} onContextMenu=${onMenu && ((e) => { e.preventDefault(); onMenu({ x: e.clientX, y: e.clientY }); })}>
@@ -307,20 +308,20 @@ function onRailKey(e) {
 // `sp` and `pick`: the phone's drawer shows the rail for the place it is
 // browsing, which is not always where you are (js/app.js PhoneDrawer).
 export function Rail({ sp = S.ui.space, pick = openSpace } = {}) {
-  return html`<nav class="rail" aria-label="Places" onKeyDown=${onRailKey}>
+  return html`<nav class="rail" aria-label=${t('nav.places')} onKeyDown=${onRailKey}>
     <div class="rail-scroll">
-      <${RailItem} label="Home" cls="rail-home" sel=${sp === 'home'} attn=${{ needs: 0, soft: homeNeeds() > 0 }} onClick=${() => pick('home')}>
+      <${RailItem} label=${t('nav.home')} cls="rail-home" sel=${sp === 'home'} attn=${{ needs: 0, soft: homeNeeds() > 0 }} onClick=${() => pick('home')}>
         <${Nook} size=${28} />
       <//>
-      <${RailItem} label="Messages" sel=${sp === 'messages'} attn=${dmAttention()} onClick=${() => pick('messages')}>
+      <${RailItem} label=${t('nav.messages')} sel=${sp === 'messages'} attn=${dmAttention()} onClick=${() => pick('messages')}>
         <${Icon} name="dm" size=${20} />
       <//>
-      <${RailItem} label="Discover" sel=${sp === 'discover'} onClick=${() => pick('discover')}>
+      <${RailItem} label=${t('nav.discover')} sel=${sp === 'discover'} onClick=${() => pick('discover')}>
         <${Icon} name="compass" size=${20} />
       <//>
       <div class="rail-sep" role="separator"></div>
       <${RailHouses} sp=${sp} RailItem=${RailItem} houseMenu=${houseMenu} openSpace=${pick} houseAttention=${houseAttention} />
-      <${RailItem} label="Start or join a house" cls="rail-add" attn=${{ needs: 0 }} onClick=${() => openModal(AddHouse)}>
+      <${RailItem} label=${t('nav.addHouse')} cls="rail-add" attn=${{ needs: 0 }} onClick=${() => openModal(AddHouse)}>
         <${Icon} name="plus" size=${20} />
       <//>
     </div>
@@ -330,7 +331,7 @@ export function Rail({ sp = S.ui.space, pick = openSpace } = {}) {
 // ---------- Context column: one per place ----------
 
 function JumpButton({ label }) {
-  return html`<button class="jump-btn" onClick=${() => openQuick()} aria-label="Jump to a room or person, or search messages">
+  return html`<button class="jump-btn" onClick=${() => openQuick()} aria-label=${t('nav.jump')}>
     <${Icon} name="search" size=${16} /><span class="trunc">${label}</span><span class="kbd">${MOD} K</span>
   </button>`;
 }
@@ -361,8 +362,8 @@ function convIcon(id, size) {
 const liveRooms = () => S.houseOrder.flatMap((h) => roomIds(S, h))
   .filter((r) => roomVisible(r) && (S.rooms[r].kind === 'voice' || S.rooms[r].kind === 'stage') && (S.voice[r] || []).length > 0);
 const homeEvents = (now) => upcomingEvents(S, now).slice(0, 3);
-const eventWhen = (e, now) => (eventState(e, now) === 'now' ? 'Happening now'
-  : new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(e.starts));
+const eventWhen = (e, now) => (eventState(e, now) === 'now' ? t('nav.happeningNow')
+  : new Intl.DateTimeFormat(intlLocale(), { weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(e.starts));
 const openCatch = (tab) => { S.ui.catchTab = tab; go({ type: 'catchup' }); };
 
 // Home's column (brief 6): Snug's own places first, then what is live now
@@ -377,29 +378,29 @@ function HomeCtx() {
   const now = Date.now();
   const events = homeEvents(now);
   return html`
-    <${CtxHead}><${JumpButton} label="Find a conversation" /><//>
+    <${CtxHead}><${JumpButton} label=${t('nav.findConv')} /><//>
     <div class="nav-scroll">
       <div class="nav-group">
-        <${Row} icon=${html`<${Icon} name="house" />`} label="Home" sel=${v.type === 'home'} onClick=${() => go({ type: 'home' })} />
-        <${Row} icon=${html`<${Icon} name="tray" />`} place label="Catch up" sel=${v.type === 'catchup'} attn=${{ needs: catchNeeds }} onClick=${() => openCatch(v.type === 'catchup' ? S.ui.catchTab : 'you')} />
-        <${Row} icon=${html`<${Icon} name="people" />`} place label="Friends" sel=${v.type === 'friends'} attn=${{ needs: requests }} onClick=${() => go({ type: 'friends' })} />
-        <${Row} icon=${html`<${Icon} name="dm" />`} place label="Messages" attn=${quietAttn(dmAttention())} onClick=${() => openSpace('messages')} />
-        <${Row} icon=${html`<${Icon} name="save" />`} label="Saved" sel=${v.type === 'saved'} end=${S.saved.length ? html`<span class="num faint">${S.saved.length}</span>` : null} onClick=${() => go({ type: 'saved' })} />
+        <${Row} icon=${html`<${Icon} name="house" />`} label=${t('nav.home')} sel=${v.type === 'home'} onClick=${() => go({ type: 'home' })} />
+        <${Row} icon=${html`<${Icon} name="tray" />`} place label=${t('nav.catchUp')} sel=${v.type === 'catchup'} attn=${{ needs: catchNeeds }} onClick=${() => openCatch(v.type === 'catchup' ? S.ui.catchTab : 'you')} />
+        <${Row} icon=${html`<${Icon} name="people" />`} place label=${t('nav.friends')} sel=${v.type === 'friends'} attn=${{ needs: requests }} onClick=${() => go({ type: 'friends' })} />
+        <${Row} icon=${html`<${Icon} name="dm" />`} place label=${t('nav.messages')} attn=${quietAttn(dmAttention())} onClick=${() => openSpace('messages')} />
+        <${Row} icon=${html`<${Icon} name="save" />`} label=${t('nav.saved')} sel=${v.type === 'saved'} end=${S.saved.length ? html`<span class="num faint">${S.saved.length}</span>` : null} onClick=${() => go({ type: 'saved' })} />
       </div>
       ${voice.length > 0 && html`<div class="nav-group">
-        <div class="sect"><span>Voice</span></div>
+        <div class="sect"><span>${t('nav.voice')}</span></div>
         ${voice.map((r) => html`<${RoomRow} key=${r} id=${r} hint=${S.houses[S.rooms[r].house].name} />`)}
       </div>`}
       ${events.length > 0 && html`<div class="nav-group">
-        <div class="sect"><span>Events</span>
-          <button class="ib sm" aria-label="All events" data-tip="All events" onClick=${() => go({ type: 'discover', section: 'events' })}><${Icon} name="chev-r" size=${16} /></button>
+        <div class="sect"><span>${t('nav.events')}</span>
+          <button class="ib sm" aria-label=${t('nav.allEvents')} data-tip=${t('nav.allEvents')} onClick=${() => go({ type: 'discover', section: 'events' })}><${Icon} name="chev-r" size=${16} /></button>
         </div>
         ${events.map((e) => html`<${Row} key=${e.id} icon=${html`<${Icon} name="calendar" />`} label=${e.title}
           line=${`${eventWhen(e, now)} \u00b7 ${S.houses[e.house].name}`} lineLive=${eventState(e, now) === 'now'}
           onClick=${() => go({ type: 'house', id: e.house, about: true, events: true })} />`)}
       </div>`}
       ${recent.length > 0 && html`<div class="nav-group">
-        <div class="sect"><span>Recent</span></div>
+        <div class="sect"><span>${t('nav.recent')}</span></div>
         ${recent.map((id) => {
           const meta = convMeta(id);
           return html`<${Row} key=${id} icon=${convIcon(id)} label=${meta.title} hint=${meta.house ? S.houses[meta.house].name : null}
@@ -413,9 +414,9 @@ function HomeCtx() {
 // What a direct conversation's second line says: where the person is, their
 // status, or when they were last around; a group says how many are in it.
 function dmLine(id, meta) {
-  if (callLive(id)) return { text: 'In a call now', live: true };
+  if (callLive(id)) return { text: t('nav.inCall'), live: true };
   const u = meta.user;
-  if (!u) return { text: plural(meta.dm.members.length, 'member') };
+  if (!u) return { text: t('house.members', { count: meta.dm.members.length }) };
   const room = u.presence !== 'offline' && voiceRoomOf(u.id);
   if (room) return { text: `In ${S.rooms[room].name}`, live: true };
   if (u.presence === 'offline') {
@@ -429,8 +430,8 @@ export function NavDirect({ drawer } = {}) {
   const cur = current();
   return html`<div class="nav-group">
     <${EncInvite} />
-    <div class="sect"><span>Direct messages</span>
-      <button class="ib sm" aria-label="New message" data-tip="New message" onClick=${() => openModal(NewMessage)}><${Icon} name="plus" size=${16} /></button>
+    <div class="sect"><span>${t('nav.direct')}</span>
+      <button class="ib sm" aria-label=${t('nav.newMessage')} data-tip=${t('nav.newMessage')} onClick=${() => openModal(NewMessage)}><${Icon} name="plus" size=${16} /></button>
     </div>
     ${orderDms().filter((id) => !requestOf(id)).map((id) => {
       const meta = convMeta(id);
@@ -441,11 +442,11 @@ export function NavDirect({ drawer } = {}) {
         end=${callLive(id) ? html`<${CallMark} />` : null}
         onClick=${() => openConv(id)} onMenu=${(pos) => dmMenu(id, pos)} />`;
     })}
-    ${!S.dmOrder.length && html`<p class="ctx-note">No conversations yet. Start one with the plus, or from someone’s profile.</p>`}
+    ${!S.dmOrder.length && html`<p class="ctx-note">${t('nav.noConvs')}</p>`}
     ${(S.safety?.requests || []).some((r) => S.dms[r.dm]) && html`
-      <div class="sect"><span>Message requests</span></div>
+      <div class="sect"><span>${t('nav.requests')}</span></div>
       ${S.safety.requests.filter((r) => S.dms[r.dm]).map((r) => html`<${Row} key=${r.dm} icon=${convIcon(r.dm)} label=${convMeta(r.dm).title}
-        hint="Wants to talk" sel=${cur === r.dm} onClick=${() => openConv(r.dm)} />`)}`}
+        hint=${t('nav.wantsTalk')} sel=${cur === r.dm} onClick=${() => openConv(r.dm)} />`)}`}
   </div>`;
 }
 
@@ -465,18 +466,20 @@ function DmRow({ id }) {
     <span class="row-ic">${face}</span>
     <span class="grow row-two">
       <span class="row-two-top"><span class="trunc grow">${meta.title}</span>${last && html`<span class="row-two-time num">${fmtWhen(last.ts)}</span>`}</span>
-      <span class="row-two-sub">${callLive(id) ? html`<span class="trunc grow call-now">In a call now</span><${CallMark} />` : html`<span class="trunc grow">${text}</span>`}<${Marker} attn=${a} /></span>
+      <span class="row-two-sub">${callLive(id) ? html`<span class="trunc grow call-now">${t('nav.inCall')}</span><${CallMark} />` : html`<span class="trunc grow">${text}</span>`}<${Marker} attn=${a} /></span>
     </span>
   </button>`;
 }
 
 function MessagesCtx() {
   return html`
-    <${CtxHead}><${JumpButton} label="Find a conversation" /><//>
+    <${CtxHead}><${JumpButton} label=${t('nav.findConv')} /><//>
     <div class="nav-scroll"><${NavDirect} /></div>`;
 }
 
 // Discover's sections. The section names are the route's `section` values.
+// Their names in the chosen language (the labels stay English for other modules).
+const SECTION_NAME = { undefined: 'nav.forYou', communities: 'nav.communities', people: 'nav.people', events: 'nav.events' };
 export const DISCOVER_SECTIONS = [
   { id: undefined, label: 'For you', icon: 'compass' },
   { id: 'communities', label: 'Communities', icon: 'house' },
@@ -487,14 +490,14 @@ export const DISCOVER_SECTIONS = [
 function DiscoverCtx() {
   const v = S.ui.view.type === 'discover' ? S.ui.view : null;
   return html`
-    <${CtxHead} cls="ctx-title"><h2 class="ctx-name">Discover</h2><//>
+    <${CtxHead} cls="ctx-title"><h2 class="ctx-name">${t('nav.discover')}</h2><//>
     <div class="nav-scroll">
       <div class="nav-group">
-        ${DISCOVER_SECTIONS.map((s) => html`<${Row} key=${s.label} icon=${html`<${Icon} name=${s.icon} />`} label=${s.label}
+        ${DISCOVER_SECTIONS.map((s) => html`<${Row} key=${s.label} icon=${html`<${Icon} name=${s.icon} />`} label=${t(SECTION_NAME[s.id])}
           sel=${!!v && !v.topic && v.section === s.id} onClick=${() => go({ type: 'discover', section: s.id })} />`)}
       </div>
       <div class="nav-group">
-        <div class="sect"><span>Topics</span></div>
+        <div class="sect"><span>${t('nav.topics')}</span></div>
         ${TOPICS.map((t) => html`<${Row} key=${t} icon=${html`<span class="topic-mark" aria-hidden="true">#</span>`} label=${t}
           sel=${!!v && v.topic === t} onClick=${() => go({ type: 'discover', topic: t })} />`)}
       </div>
@@ -562,9 +565,9 @@ export function HouseRooms({ id }) {
   const front = S.ui.view.type === 'house' && S.ui.view.id === id;
   return html`
     <div class="nav-group">
-      <${Row} icon=${html`<${Icon} name="info" />`} label="About" sel=${front && !S.ui.view.events} onClick=${() => go({ type: 'house', id, about: true })} />
-      <${Row} icon=${html`<${Icon} name="calendar" />`} label="Events" sel=${front && !!S.ui.view.events}
-        end=${events.length ? html`${live && html`<span class="ev-live">Now</span>`}<span class="num faint">${events.length}</span>` : null}
+      <${Row} icon=${html`<${Icon} name="info" />`} label=${t('nav.about')} sel=${front && !S.ui.view.events} onClick=${() => go({ type: 'house', id, about: true })} />
+      <${Row} icon=${html`<${Icon} name="calendar" />`} label=${t('nav.events')} sel=${front && !!S.ui.view.events}
+        end=${events.length ? html`${live && html`<span class="ev-live">${t('nav.now')}</span>`}<span class="num faint">${events.length}</span>` : null}
         onClick=${() => go({ type: 'house', id, about: true, events: true })} />
     </div>
     ${h.groups.map((g) => {
@@ -601,7 +604,7 @@ function HouseHead({ id }) {
     onContextMenu=${(e) => { e.preventDefault(); houseMenu(id, { x: e.clientX, y: e.clientY }); }}>
     <span class="grow" style="min-width:0">
       <span class="ctx-name trunc">${h.name}</span>
-      <span class="ctx-meta"><span class="num">${plural(members, 'member')}</span><${OnlineCount} n=${online} cls="ctx-online" /></span>
+      <span class="ctx-meta"><span class="num">${t('house.members', { count: members })}</span><${OnlineCount} n=${online} cls="ctx-online" /></span>
     </span>
     <${Icon} name="chev-d" size=${16} />
   </button>`;
@@ -681,9 +684,9 @@ export function SelfPanel() {
           <span class="self-status trunc">${(u.status || u.statusEmoji) && u.presence !== 'offline' ? html`<${StatusEmoji} u=${u} />` : ''}${u.status || PRESENCE[u.presence].label}</span>
         </span>
       </button>
-      <button class=${`ib${muted ? ' alert' : ''}`} aria-pressed=${String(muted)} aria-label="Mute microphone" data-tip=${muted ? 'Unmute' : 'Mute'} onClick=${panelMic}><${Icon} name=${muted ? 'mic-off' : 'mic'} /></button>
-      <button class=${`ib${deaf ? ' alert' : ''}`} aria-pressed=${String(deaf)} aria-label="Deafen" data-tip=${deaf ? 'Undeafen' : 'Deafen'} onClick=${panelEar}><${Icon} name=${deaf ? 'headphones-off' : 'headphones'} /></button>
-      <button class="ib" aria-label="Settings" data-tip="Settings" onClick=${() => openLayer({ C: Settings, props: {} })}><${Icon} name="gear" /></button>
+      <button class=${`ib${muted ? ' alert' : ''}`} aria-pressed=${String(muted)} aria-label=${t('nav.muteMic')} data-tip=${muted ? t('nav.unmute') : t('nav.mute')} onClick=${panelMic}><${Icon} name=${muted ? 'mic-off' : 'mic'} /></button>
+      <button class=${`ib${deaf ? ' alert' : ''}`} aria-pressed=${String(deaf)} aria-label=${t('nav.deafen')} data-tip=${deaf ? t('nav.undeafen') : t('nav.deafen')} onClick=${panelEar}><${Icon} name=${deaf ? 'headphones-off' : 'headphones'} /></button>
+      <button class="ib" aria-label=${t('nav.settings')} data-tip=${t('nav.settings')} onClick=${() => openLayer({ C: Settings, props: {} })}><${Icon} name="gear" /></button>
     </div>
   </div>`;
 }
@@ -731,7 +734,7 @@ function ctxFor(sp) {
   if (isHouseSpace(sp) && S.houses[sp]) return html`<${HouseCtx} key=${sp} id=${sp} />`;
   return html`<${HomeCtx} />`;
 }
-const ctxLabel = (sp) => (sp === 'messages' ? 'Messages' : sp === 'discover' ? 'Discover' : isHouseSpace(sp) ? S.houses[sp]?.name : 'Home');
+const ctxLabel = (sp) => (sp === 'messages' ? t('nav.messages') : sp === 'discover' ? t('nav.discover') : isHouseSpace(sp) ? S.houses[sp]?.name : t('nav.home'));
 
 export function Nav() {
   const sp = S.ui.space;
@@ -739,7 +742,7 @@ export function Nav() {
     <${Rail} />
     <nav class="ctx" aria-label=${ctxLabel(sp)}>
       ${ctxFor(sp)}
-      ${!isOnline() && S.ui.view.type !== 'conv' && html`<div class="conn" role="status"><${Icon} name="offline" size=${16} />Can’t reach Snug. Trying again…</div>`}
+      ${!isOnline() && S.ui.view.type !== 'conv' && html`<div class="conn" role="status"><${Icon} name="offline" size=${16} />${t('nav.cantReach')}</div>`}
       <${SelfPanel} />
       <${SidebarGrip} />
     </nav>
@@ -765,7 +768,7 @@ export function PhoneDrawer() {
   if (S.ui.view !== d.at) { S.ui.drawer = null; return null; }
   const pick = (sp) => { S.ui.drawer = { ...d, sp }; emit(); };
   const ctx = d.sp === 'messages'
-    ? html`<div class="ctx-head ctx-title"><h2 class="ctx-name">Messages</h2></div><div class="nav-scroll"><${NavDirect} drawer /></div>`
+    ? html`<div class="ctx-head ctx-title"><h2 class="ctx-name">${t('nav.messages')}</h2></div><div class="nav-scroll"><${NavDirect} drawer /></div>`
     : ctxFor(d.sp);
   return html`<div class="drawer-scrim" onClick=${closeDrawer}></div>
     <div class="drawer" role="dialog" aria-modal="true" aria-label="Rooms and places">

@@ -1,6 +1,8 @@
 // Message text to a token tree. No HTML strings anywhere, so nothing a person
 // types can inject markup: the view turns tokens into elements.
 
+import { intlLocale } from './i18n.js';
+
 const RULES = [
   // A backslash keeps the next markup character as itself: \*not italic\*.
   ['esc', /\\([*_~|`\\<>#[\]()-])/],
@@ -141,7 +143,8 @@ const STAMP_OPTS = {
   t: { hour: 'numeric', minute: '2-digit' }, T: { hour: 'numeric', minute: '2-digit', second: '2-digit' },
   d: { dateStyle: 'short' }, D: { dateStyle: 'long' }, f: { dateStyle: 'long', timeStyle: 'short' }, F: { dateStyle: 'full', timeStyle: 'short' },
 };
-export function fmtStamp(unix, style = 'f', now = Date.now(), locale = undefined) {
+// Shown in the reader's language (js/lib/i18n.js) unless a locale is given.
+export function fmtStamp(unix, style = 'f', now = Date.now(), locale = intlLocale()) {
   const ms = Number(unix) * 1000;
   if (!Number.isFinite(ms) || Math.abs(ms) > 8.64e15) return String(unix);
   if (style === 'R') {

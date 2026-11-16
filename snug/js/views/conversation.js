@@ -36,6 +36,7 @@ import { DmHeaderButtons, dmHeaderItems } from './dm-manage.js'; // Add people a
 import { DirectLine, KeyBanner, remoteOf, GroupLine, isPeerGroup } from './p2p.js'; // a friend on another PC: how it travels, and a changed security code
 import { EncLabel, EncDetail, RoomEncNote } from './e2ee-conv.js'; // end-to-end encryption labels in conversations
 import { TtlButton, ttlMenuItem } from './disappear.js'; // 0.12: disappearing messages
+import { t } from '../lib/i18n.js'; // words in the chosen language (js/locales)
 
 const Back = () => S.ui.phone && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
 
@@ -445,19 +446,19 @@ export function Conversation({ conv }) {
     ${meta.dm && html`<${RequestBanner} conv=${conv} />`}
     ${meta.dm && html`<${KeyBanner} conv=${conv} />`}
     ${meta.kind === 'forum' ? html`<${ForumView} key=${conv} conv=${conv} />` : html`<${Stream} key=${conv} conv=${conv} intro=${html`<${Intro} conv=${conv} meta=${meta} />`}
-      placeholder=${meta.user ? `Message ${first}` : `Message ${meta.room && meta.kind === 'text' ? '#' : ''}${meta.title}`} />`}
+      placeholder=${t('composer.messageTo', { name: meta.user ? first : `${meta.room && meta.kind === 'text' ? '#' : ''}${meta.title}` })} />`}
   </section>`;
 }
 
 export function ThreadPane({ tid }) {
   const meta = convMeta(tid);
-  const t = S.threads[tid];
-  if (!meta || !t) return null;
+  const thread = S.threads[tid];
+  if (!meta || !thread) return null;
   const n = (S.msgs[tid] || []).length;
   const following = !!S.followed[tid];
   const intro = html`
     ${meta.root
-      ? html`<${Message} conv=${t.conv} m=${meta.root} inThread />`
+      ? html`<${Message} conv=${thread.conv} m=${meta.root} inThread />`
       : html`<div class="older-msg">The message this thread started from was deleted.</div>`}
     <div class="thread-count">${n ? plural(n, 'reply', 'replies') : 'No replies yet. Yours will be the first.'}</div>`;
   return html`<aside class="pane thread-pane" aria-label="Thread">
@@ -471,7 +472,7 @@ export function ThreadPane({ tid }) {
         ${!S.ui.phone && html`<button class="ib" aria-label="Close thread" data-tip="Close" data-key="Esc" onClick=${closePane}><${Icon} name="x" /></button>`}
       </div>
     </header>
-    <${Stream} key=${tid} conv=${tid} intro=${intro} placeholder="Reply in thread" />
+    <${Stream} key=${tid} conv=${tid} intro=${intro} placeholder=${t('composer.replyThread')} />
   </aside>`;
 }
 

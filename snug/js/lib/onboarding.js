@@ -4,6 +4,8 @@
 // (js/views/auth.js, modals.js, nav.js) and the server (server/community.js).
 import { canPost } from './perms.js';
 import { VOICE_KINDS } from './places.js';
+import { t } from './i18n.js';
+import en from '../locales/en.js';
 
 // The code inside whatever someone pasted: a full link (https://host/join/<code>),
 // an app link (snug://join/<code>), a path (/join/<code>) or the bare code.
@@ -28,13 +30,10 @@ export function inviteProblem(inv, now = Date.now()) {
 }
 
 // What to tell the person, for each reason. Every one ends with what to do.
-export const INVITE_WHY = {
-  unknown: 'This link doesn’t match any invitation on this Snug. Check it was copied in full, or ask for a new one.',
-  expired: 'This invitation has expired. Ask the person who sent it for a new link.',
-  used: 'This invitation has been used as many times as it allows. Ask for a new link.',
-  revoked: 'Whoever made this invitation has turned it off. Ask for a new link.',
-};
-export const inviteWhy = (reason) => INVITE_WHY[reason] || INVITE_WHY.unknown;
+// The server's copy is always English (js/locales/en.js); the client shows the
+// active language with inviteWhy.
+export const INVITE_WHY = Object.fromEntries(['unknown', 'expired', 'used', 'revoked'].map((k) => [k, en[`invite.why.${k}`]]));
+export const inviteWhy = (reason) => t(`invite.why.${Object.hasOwn(INVITE_WHY, reason) ? reason : 'unknown'}`);
 
 // The same rules as the server (server/index.js HANDLE, server/account.js
 // register, server/auth.js passwordProblem), so every problem shows at once,
@@ -44,18 +43,18 @@ const HANDLE = /^[a-z0-9](?:[a-z0-9_.-]{0,22}[a-z0-9])?$/;
 export function signupProblems({ handle = '', name = '', password = '' } = {}) {
   const out = {};
   const h = String(handle).trim().toLowerCase().replace(/^@/, '');
-  if (!h) out.handle = 'Pick a username.';
-  else if (/\s/.test(h)) out.handle = 'Usernames can’t have spaces. Try a dot or a dash instead.';
-  else if (h.length > 24) out.handle = 'Usernames can be up to 24 characters.';
-  else if (!HANDLE.test(h)) out.handle = 'Use only letters, numbers, dots, dashes or underscores, starting and ending with a letter or number.';
+  if (!h) out.handle = t('signup.pickUsername');
+  else if (/\s/.test(h)) out.handle = t('signup.noSpaces');
+  else if (h.length > 24) out.handle = t('signup.tooLong');
+  else if (!HANDLE.test(h)) out.handle = t('signup.badChars');
   const n = String(name).trim();
-  if (!n) out.name = 'Tell people what to call you.';
-  else if (n.length > 40) out.name = 'Your name can be up to 40 characters.';
-  if (password.length < 8) out.password = password ? `Passwords need at least 8 characters. That’s ${password.length}.` : 'Choose a password of at least 8 characters.';
+  if (!n) out.name = t('signup.needName');
+  else if (n.length > 40) out.name = t('signup.nameTooLong');
+  if (password.length < 8) out.password = password ? t('signup.passwordShort', { count: password.length }) : t('signup.choosePassword');
   else {
     const squash = password.toLowerCase().replace(/[^a-z0-9]/g, '');
     const inIt = [h, n].some((w) => { const x = w.toLowerCase().replace(/[^a-z0-9]/g, ''); return x.length >= 3 && squash.includes(x); });
-    if (inIt) out.password = 'Your password can’t contain your username or name.';
+    if (inIt) out.password = t('signup.passwordHasName');
   }
   return out;
 }
@@ -102,9 +101,9 @@ export function messageable(S) {
 // Why someone can't be messaged yet, in words that say what would change it.
 export function whyNotMessageable(S, id) {
   const f = S.friends?.[id]?.state;
-  if (f === 'outgoing') return 'You can message them once they accept your friend request.';
-  if (f === 'incoming') return 'They asked to be friends. Accept on the Friends page to message them.';
-  return 'You can message friends and people you share a house with. Send a friend request first.';
+  if (f === 'outgoing') return t('dm.whyOutgoing');
+  if (f === 'incoming') return t('dm.whyIncoming');
+  return t('dm.whyNot');
 }
 
 // Addresses only this computer or this network can open. An invitation made

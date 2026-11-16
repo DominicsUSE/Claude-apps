@@ -21,6 +21,7 @@ import { Tile } from '../ui/kit.js'; // the house's icon in its arch (server/com
 import { ForgotPassword } from './recover.js'; // v0.12: "Forgot your password?" with a recovery key
 import { usePasskeySignIn } from './passkeys.js'; // v0.12: passkey sign-in where the server allows it
 import { signupProblems, signupField, inviteWhy } from '../lib/onboarding.js'; // every sign-up problem at once; why an invitation fails
+import { t } from '../lib/i18n.js'; // words in the chosen language (js/locales)
 
 function entered(user) {
   S.me = user.id;
@@ -323,8 +324,8 @@ function PasswordAuth({ onGitHub }) {
     e.preventDefault();
     if (busy) return undefined;
     const found = isNew ? signupProblems({ handle, name, password }) : {
-      ...(handle.trim() ? {} : { handle: 'Type your username.' }),
-      ...(password ? {} : { password: 'Type your password.' }),
+      ...(handle.trim() ? {} : { handle: t('auth.typeUsername') }),
+      ...(password ? {} : { password: t('auth.typePassword') }),
     };
     if (Object.keys(found).length) return show(found);
     setBusy(true);
@@ -365,65 +366,65 @@ function PasswordAuth({ onGitHub }) {
         <div class="auth-brand"><${Lockup} size=${24} /></div>
         ${invite && html`<div class="auth-invite">
           <${Tile} house=${invite.house} lg invite=${S.ui.joinCode} />
-          <div><b>${invite.by ? `${invite.by} invited you to ${invite.house.name}` : `You’re invited to ${invite.house.name}`}</b>
-          <span>${isNew ? 'Create an account to join.' : 'Sign in to join.'}</span></div>
+          <div><b>${invite.by ? t('auth.invitedBy', { name: invite.by, house: invite.house.name }) : t('auth.invitedTo', { house: invite.house.name })}</b>
+          <span>${isNew ? t('auth.createToJoin') : t('auth.signInToJoin')}</span></div>
         </div>`}
         ${badInvite && html`<div class="auth-invite bad" role="alert">
           <${Icon} name="alert" size=${20} />
-          <div><b>That invitation doesn’t work</b><span>${badInvite} You can still create an account or sign in.</span></div>
+          <div><b>${t('invite.bad')}</b><span>${t('auth.badInviteMore', { why: badInvite })}</span></div>
         </div>`}
         <div class="auth-head">
-          <h1 id="auth-title">${isNew ? 'Make yourself at home' : 'Sign in to Snug'}</h1>
-          <p class="auth-sub">${onGitHub ? 'A password account lives on this PC only. It can’t reach friends on other PCs.' : isNew ? 'One account for every house you’re part of.' : 'A calm place for chat, voice and screen sharing with your people.'}</p>
+          <h1 id="auth-title">${isNew ? t('auth.newTitle') : t('auth.signInTitle')}</h1>
+          <p class="auth-sub">${onGitHub ? t('auth.pcOnly') : isNew ? t('auth.newSub') : t('auth.signInSub')}</p>
         </div>
         ${ticket && html`<${TotpStep} ticket=${ticket} onDone=${entered} onBack=${() => { setTicket(null); setPassword(''); }} />`}
         <form class="form auth-form" hidden=${!!ticket} onSubmit=${submit} novalidate aria-labelledby="auth-title" aria-busy=${busy ? 'true' : undefined}>
           <div class="auth-field">
-            <label class="label" for="auth-handle">Username</label>
+            <label class="label" for="auth-handle">${t('auth.username')}</label>
             <input id="auth-handle" ref=${refs.handle} class=${`field${bad('handle') ? ' bad' : ''}`} autocomplete=${isNew ? 'username' : 'username webauthn'} autocapitalize="none" spellcheck="false" maxlength="24" value=${handle}
               aria-invalid=${bad('handle') ? 'true' : undefined} aria-describedby=${described('handle', isNew)}
               onInput=${edit('handle', setHandle)} autofocus />
             ${bad('handle') && html`<${Err} id="auth-handle-err" text=${errors.handle} />`}
-            ${isNew && html`<div class="hint" id="auth-handle-hint">Letters, numbers, dots, dashes or underscores, no spaces. People use it to mention and invite you.</div>`}
+            ${isNew && html`<div class="hint" id="auth-handle-hint">${t('auth.handleHint')}</div>`}
           </div>
           ${isNew && html`<div class="auth-field">
-            <label class="label" for="auth-name">Name</label>
+            <label class="label" for="auth-name">${t('auth.name')}</label>
             <input id="auth-name" ref=${refs.name} class=${`field${bad('name') ? ' bad' : ''}`} autocomplete="name" maxlength="40" value=${name}
               aria-invalid=${bad('name') ? 'true' : undefined} aria-describedby=${described('name', true)}
               onInput=${edit('name', setName)} />
             ${bad('name') && html`<${Err} id="auth-name-err" text=${errors.name} />`}
-            <div class="hint" id="auth-name-hint">What people see next to your messages. You can change it later.</div>
+            <div class="hint" id="auth-name-hint">${t('auth.nameHint')}</div>
           </div>`}
           <div class="auth-field">
-            <label class="label" for="auth-pass">Password</label>
+            <label class="label" for="auth-pass">${t('auth.password')}</label>
             <div class="pass-wrap">
               <input id="auth-pass" ref=${refs.password} class=${`field${bad('password') ? ' bad' : ''}`} type=${shown ? 'text' : 'password'} autocomplete=${isNew ? 'new-password' : 'current-password'} maxlength="200" value=${password}
                 autocapitalize="none" spellcheck="false" aria-invalid=${bad('password') ? 'true' : undefined} aria-describedby=${described('password', isNew)}
                 onInput=${edit('password', setPassword)} />
-              <button type="button" class="ib sm pass-show" aria-pressed=${String(shown)} aria-controls="auth-pass" aria-label=${shown ? 'Hide password' : 'Show password'}
-                data-tip=${shown ? 'Hide password' : 'Show password'} onClick=${() => setShown(!shown)}><${Icon} name="eye" size=${16} /></button>
+              <button type="button" class="ib sm pass-show" aria-pressed=${String(shown)} aria-controls="auth-pass" aria-label=${shown ? t('auth.hidePassword') : t('auth.showPassword')}
+                data-tip=${shown ? t('auth.hidePassword') : t('auth.showPassword')} onClick=${() => setShown(!shown)}><${Icon} name="eye" size=${16} /></button>
             </div>
             ${bad('password') && html`<${Err} id="auth-password-err" text=${errors.password} />`}
-            ${isNew && html`<div class="hint" id="auth-password-hint">At least 8 characters, without your username or name. A few unrelated words work well.
-              <b class="auth-keep">Write your password down. Snug doesn’t ask for an email, so after you sign up it offers a recovery key instead: save it, and you can reset a forgotten password.</b></div>`}
-            ${!isNew && html`<button type="button" class="auth-link auth-forgot" id="auth-forgot" onClick=${() => setForgot(true)}>Forgot your password?</button>`}
+            ${isNew && html`<div class="hint" id="auth-password-hint">${t('auth.passwordHint')}
+              <b class="auth-keep">${t('auth.writeItDown')}</b></div>`}
+            ${!isNew && html`<button type="button" class="auth-link auth-forgot" id="auth-forgot" onClick=${() => setForgot(true)}>${t('auth.forgot')}</button>`}
           </div>
           ${errors.form && html`<${Err} id="auth-form-err" text=${errors.form} />`}
           <button class="btn primary auth-submit" type="submit" disabled=${busy} aria-busy=${busy ? 'true' : undefined}>
-            ${busy ? (isNew ? 'Creating your account…' : 'Signing in…') : (isNew ? 'Create account' : 'Sign in')}
+            ${busy ? (isNew ? t('auth.creating') : t('auth.signingIn')) : (isNew ? t('auth.create') : t('auth.signIn'))}
           </button>
         </form>
         ${!isNew && !ticket && pk.offered && html`<div class="auth-passkey">
           <button type="button" class="btn auth-submit" id="auth-passkey" disabled=${pk.busy} aria-busy=${pk.busy ? 'true' : undefined} onClick=${pk.start}>
-            <${Icon} name="shield" size=${16} />${pk.busy ? 'Waiting for your passkey…' : 'Sign in with a passkey'}
+            <${Icon} name="shield" size=${16} />${pk.busy ? t('auth.passkeyWait') : t('auth.passkey')}
           </button>
           ${pk.error && html`<${Err} id="auth-passkey-err" text=${pk.error} />`}
         </div>`}
         <p class="auth-swap" hidden=${!!ticket}>
-          ${isNew ? 'Already have an account?' : 'New to Snug?'}
-          <button type="button" class="auth-link" onClick=${() => swap(isNew ? 'in' : 'new')}>${isNew ? 'Sign in' : 'Create an account'}</button>
+          ${isNew ? t('auth.haveAccount') : t('auth.newToSnug')}
+          <button type="button" class="auth-link" onClick=${() => swap(isNew ? 'in' : 'new')}>${isNew ? t('auth.signIn') : t('auth.createAccount')}</button>
         </p>
-        ${onGitHub && html`<p class="auth-swap" hidden=${!!ticket}><button type="button" class="auth-link" id="auth-back-github" onClick=${onGitHub}>Back</button></p>`}
+        ${onGitHub && html`<p class="auth-swap" hidden=${!!ticket}><button type="button" class="auth-link" id="auth-back-github" onClick=${onGitHub}>${t('common.back')}</button></p>`}
       </div>
     </main>
   </div>`;
@@ -437,9 +438,9 @@ export function Splash({ unreachable, onRetry }) {
     ${unreachable
       ? html`<${Lockup} size=${32} />
         <div class="splash-down" role="alert">
-          <p>Can’t reach Snug. Check your connection and try again.</p>
-          <button class="btn" onClick=${onRetry}>Try again</button>
+          <p>${t('auth.unreachable')}</p>
+          <button class="btn" onClick=${onRetry}>${t('common.tryAgain')}</button>
         </div>`
-      : html`<${Loading} label="Opening Snug…" size=${48} />`}
+      : html`<${Loading} label=${t('auth.opening')} size=${48} />`}
   </div>`;
 }
