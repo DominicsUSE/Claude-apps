@@ -302,7 +302,10 @@ test('E2: a re-seal for someone added that quietly changes the name is refused b
   await until(() => srv.db.get('SELECT info_what FROM dms WHERE id = ?', 'g_sat')?.info_what === 'members', 'the re-seal was stored');
   const rev = JSON.parse(srv.db.get('SELECT info_enc FROM dms WHERE id = ?', 'g_sat').info_enc).h.rev;
   for (const p of [ines, malik]) {
-    await p.waitForFunction(async (r) => (await import('/js/e2ee/conv.js'))._test.infoState.get('g_sat')?.rev === r, rev);
+    // waitForFunction takes a returned promise as truthy, so the predicate must be synchronous:
+    // load the module first, then wait until this device has opened the newest revision.
+    await p.evaluate(async () => { window.__conv = await import('/js/e2ee/conv.js'); });
+    await p.waitForFunction((r) => window.__conv._test.infoState.get('g_sat')?.rev === r, rev);
     assert.equal(await p.evaluate(() => window.snug.S.dms.g_sat.name), before, 'the name before stays');
   }
   await jonas.context().close();
