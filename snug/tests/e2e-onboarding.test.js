@@ -293,6 +293,21 @@ test('the owner turns on Show every room to newcomers: a fresh joiner’s sideba
     await gwen.locator('.nav .row:has-text("Glaze lab")').waitFor();
     await gwen.locator('.nav .row:has-text("Wheel room")').waitFor();
     assert.equal(await gwen.locator('.nav .row:has-text("Browse")').count(), 0);
+    // The newcomer copy says so too: nothing is held back until a first message.
+    const welcome = gwen.locator('.welcome p');
+    assert.match(await welcome.textContent(), /Every room in Kiln & Co\. is in your list already/);
+    assert.doesNotMatch(await welcome.textContent(), /first message/);
+    await gwen.click('.welcome button:has-text("Look around first")');
+    const lead = gwen.locator('.modal .modal-lead');
+    assert.match(await lead.textContent(), /Every room is in your list already/);
+    assert.doesNotMatch(await lead.textContent(), /first message/);
+    await gwen.keyboard.press('Escape');
+    // The first message: no "open to you now" toast, since every room was already there.
+    await gwen.locator('.main .composer textarea').fill('hello all');
+    await gwen.keyboard.press('Enter');
+    await gwen.waitForFunction(() => window.snug.S.houses.kiln.newcomer === false);
+    await gwen.waitForTimeout(500);
+    assert.equal(await gwen.locator('.toast:has-text("open to you now")').count(), 0);
   } finally {
     srv.db.run("UPDATE houses SET show_all_rooms = 0 WHERE id = 'kiln'");
     await close(gwen); await close(robin);

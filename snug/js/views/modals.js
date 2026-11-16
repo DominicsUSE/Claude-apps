@@ -377,7 +377,7 @@ export function RoomBrowser({ house }) {
   const h = S.houses[house];
   return html`
     <h2>Rooms in ${h.name}</h2>
-    <p class="modal-lead">${h.newcomer ? 'You can open and read any of these now. They all join your sidebar after your first message.' : 'Every room in this house.'}</p>
+    <p class="modal-lead">${!h.newcomer ? 'Every room in this house.' : h.showAllRooms ? 'Every room is in your list already. You can open and read any of them now.' : 'You can open and read any of these now. They all join your sidebar after your first message.'}</p>
     <div class="pick-list">
       ${roomIds(S, house).map((id) => {
         const r = S.rooms[id];

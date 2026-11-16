@@ -432,7 +432,7 @@ const EVENTS = {
     Object.assign(S.rooms, rooms);
     S.houses[house.id] = house;
     if (house.joined && !S.houseOrder.includes(house.id)) S.houseOrder.push(house.id);
-    if (before?.joined && before.newcomer && !house.newcomer) {
+    if (before?.joined && before.newcomer && !house.newcomer && !before.showAllRooms) { // with every room shown, nothing new opens
       toast(`You’re in. All ${roomIds(S, house.id).length} rooms in ${house.name} are open to you now.`);
     }
     checkView();

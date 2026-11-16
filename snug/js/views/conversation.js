@@ -321,7 +321,7 @@ export function Welcome({ house, inPage }) {
     ${inPage
       ? html`<div class="welcome-head"><div><span class="welcome-kicker">You’re new here</span><h2>Welcome to ${h.name}. Start with hello.</h2></div></div>`
       : html`<div class="welcome-head"><${Tile} house=${h} lg /><div><span class="welcome-kicker">You’re new here</span><h2>Welcome to ${h.name}</h2><div class="faint">${h.about}</div></div></div>`}
-    <p>You can read every room in ${h.name} now. Your list starts with these and the voice rooms; the rest join it after your first message.</p>
+    <p>${h.showAllRooms ? `Every room in ${h.name} is in your list already, and you can read them all now. These are good places to start.` : `You can read every room in ${h.name} now. Your list starts with these and the voice rooms; the rest join it after your first message.`}</p>
     <div class="welcome-rooms">
       ${h.starter.map((id) => html`<button class="welcome-room" key=${id} onClick=${() => openConv(id)}>
         <${RoomIcon} kind=${S.rooms[id].kind} /><span><b>${S.rooms[id].name}</b> <span>${S.rooms[id].topic}</span></span>
