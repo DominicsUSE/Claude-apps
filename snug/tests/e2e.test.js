@@ -10,6 +10,7 @@ import { createRequire } from 'node:module';
 import { startServer } from '../server/index.js';
 import { openDb } from '../server/db.js';
 import { seedDatabase } from '../server/seed.js';
+import { waitAsync } from './helpers/wait.js';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -326,7 +327,7 @@ test('voice: two people in a room are really connected and audio flows', async (
   await robin.locator('.stage-person:has-text("You")').waitFor();
   await ines.locator('.stage-person:has-text("Robin")').waitFor();
   await ines.click('.stage .btn.primary');
-  const connected = (page) => page.waitForFunction(async () => {
+  const connected = (page) => waitAsync(page, async () => {
     const s = await window.snug.voiceStats();
     const peers = Object.values(s);
     return peers.length === 1 && peers[0].state === 'connected' && peers[0].bytes > 2000;
@@ -341,7 +342,7 @@ test('voice: two people in a room are really connected and audio flows', async (
   await robin.click('.stage [aria-label="Mute"]');
   await ines.locator('.stage-person:has-text("Robin") .muted-ic').waitFor();
   await ines.click('.stage [aria-label="Leave voice"]');
-  await robin.waitForFunction(async () => Object.keys(await window.snug.voiceStats()).length === 0);
+  await waitAsync(robin, async () => Object.keys(await window.snug.voiceStats()).length === 0);
   await robin.click('.stage [aria-label="Leave voice"]');
   assert.equal(await robin.locator('.dock').count(), 0);
 });

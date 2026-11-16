@@ -12,6 +12,7 @@ import { deflateSync, crc32 } from 'node:zlib';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { startRegistry, startPc, signUp, OWNER_GH, Client, mid } from './helpers/p2p.js';
+import { waitAsync } from './helpers/wait.js';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -422,7 +423,7 @@ test('a DM call connects with fake media', async () => {
   await card.waitFor({ timeout: 20000 });
   await card.locator('.inc-accept').click();
   for (const p of [alice, bob]) {
-    await p.waitForFunction(async () => {
+    await waitAsync(p, async () => {
       const peers = Object.values(await window.snug.voiceStats());
       return peers.length === 1 && peers.every((x) => x.state === 'connected' && x.bytes > 1000);
     }, null, { timeout: 30000, polling: 300 });
@@ -761,7 +762,7 @@ test('a group call between three PCs connects with fake media: each person hears
     await card.locator('.inc-accept').click();
   }
   for (const name of ['faye', 'gus', 'hana']) {
-    await pages[name].waitForFunction(async () => {
+    await waitAsync(pages[name], async () => {
       const peers = Object.values(await window.snug.voiceStats());
       return peers.length === 2 && peers.every((x) => x.state === 'connected' && x.bytes > 1000);
     }, null, { timeout: 45000, polling: 500 });
