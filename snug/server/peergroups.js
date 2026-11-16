@@ -415,6 +415,16 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
       if (later) applyItem(later);
     }
     if (from !== item.by && item.by !== me() && item.k === 'msg') rcptLater(item.by, g, item.id);
+    // Straight from its author: members online to me may not be reachable by the author (presence for friends
+    // only on a registry without quiet watches, review-media 4), so offer them my inventory a little later.
+    if (from === item.by && item.by !== me()) for (const u of st.members.keys()) if (u !== me() && u !== item.by && online.has(u)) nudge(u);
+  }
+  const nudgeT = new Map();
+  function nudge(uid) {
+    if (nudgeT.has(uid)) return;
+    const t = setTimeout(() => { nudgeT.delete(uid); if (!online.has(uid)) return; if (links.isUp(uid)) sendInv(uid); else links.want(uid); }, Math.floor(Math.random() * fwdMax));
+    t.unref?.();
+    nudgeT.set(uid, t);
   }
   // The local message id of an author's item id. Normally the same; when someone else already
   // holds that id here (a squat, or a clash), the author's message gets an id of its own.
