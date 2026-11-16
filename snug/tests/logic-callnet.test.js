@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {
   sendCaps, adaptStep, hasTurn, relayWanted, relayInsisted, sdpSession, pttGlobalWait, sdpFingerprint, callCode, screenPref,
   LOW_DATA, FLOOR, MAX_LEVEL, PTT_FIRST_WAIT,
-  relayMode, relayCandidate, relayOnlySdp, candidateType, sdpFingerprints, sdpUfrag, fpStatement, readFpAttr, withFpAttr, deviceCode,
+  relayMode, relayCandidate, relayOnlySdp, candidateType, sdpFingerprints, sdpUfrag, fpStatement, readFpAttr, withFpAttr, deviceCode, unsignedVerdict,
 } from '../js/lib/callnet.js';
 
 test('caps: full quality follows the room and the screen setting; more than 3 others lowers the camera', () => {
@@ -176,4 +176,13 @@ test('screen share choice: text keeps the resolution, motion keeps the frame rat
   assert.deepEqual(screenPref('detail'), { contentHint: 'detail', degradationPreference: 'maintain-resolution' });
   assert.deepEqual(screenPref('motion'), { contentHint: 'motion', degradationPreference: 'maintain-framerate' });
   assert.deepEqual(screenPref('junk'), screenPref('detail'), 'text and slides is the default');
+});
+
+test('a call that arrives unsigned from someone whose device signed before (calls C2): stopped while that device is still in their list, a notice once none is, silent the first time', () => {
+  assert.equal(unsignedVerdict({ signers: [], listed: ['dv_a'] }), 'ok', 'never signed to me: an older Snug, as before');
+  assert.equal(unsignedVerdict({ signers: ['dv_a'], listed: ['dv_a', 'dv_b'] }), 'alarm', 'the device that signed is still theirs');
+  assert.equal(unsignedVerdict({ signers: ['dv_a', 'dv_c'], listed: ['dv_c'] }), 'alarm');
+  assert.equal(unsignedVerdict({ signers: ['dv_a'], listed: null }), 'alarm', 'no list to check (withheld or rolled back): not taken as "no devices"');
+  assert.equal(unsignedVerdict({ signers: ['dv_a'], listed: ['dv_b'] }), 'notice', 'the device that signed was removed: a newer device may be an older Snug');
+  assert.equal(unsignedVerdict({ signers: ['dv_a'], listed: [] }), 'notice', 'no devices with encryption any more');
 });

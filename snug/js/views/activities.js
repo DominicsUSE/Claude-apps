@@ -222,7 +222,9 @@ export function ConnHeader({ room }) {
   const label = `Voice connected${worst ? `. ${QUALITY_LABEL[worst]}` : ''}${route ? `. ${route}` : ''}${sec ? `. ${sec.long || sec.short}` : ''}. Show connection details`;
   const alarm = S.callAlarm?.room === room ? S.callAlarm : null;
   return html`${alarm && html`<div class="act-alarm" role="alert">
-      <b>Snug stopped the connection to ${person(alarm.user).name}.</b> The security details that arrived for them don’t match what their device signed, so someone may be trying to listen in. Don’t continue this call; check with them another way.
+      <b>Snug stopped the connection to ${person(alarm.user).name}.</b> ${alarm.why === 'unsigned'
+        ? 'Their device has signed calls with you before, but this one arrived without its signature'
+        : 'The security details that arrived for them don’t match what their device signed'}, so someone may be trying to listen in. Don’t continue this call; check with them another way.
     </div>`}<button class=${`stage-conn ok act-conn${worst ? ` q-${worst}` : ''}`} aria-haspopup="dialog" aria-label=${label}
     onClick=${(e) => openPop({ anchor: rectOf(e), label: 'Connection', C: QualityPop, props: { room } })}>
     <i aria-hidden="true"></i>Voice connected${worst && html`<${Bars} q=${worst} />`}${route && html`<span class="act-routeword">${route}</span>`}

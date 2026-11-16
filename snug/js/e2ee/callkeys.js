@@ -14,7 +14,7 @@
 // that swapped certificates to sit in the middle of a call is caught.
 import { S } from '../store.js';
 import { E2, ring } from './manager.js';
-import { callDevices } from './conv.js';
+import { callDevices, listedDevices } from './conv.js';
 import { sealKey, openKey } from '../lib/e2ee/hpke.js';
 import * as sig from '../lib/e2ee/sig.js';
 import { b64u, b64uOf, utf8 } from '../lib/e2ee/bytes.js';
@@ -81,6 +81,53 @@ export async function verifyFingerprint(from, d, stmt, sigText) {
   const s = b64uOf(sigText, 64);
   return !!s && sig.verifyBytes(dsk, s, utf8(stmt));
 }
+// ---------- C2: who signed calls with me before ----------
+// Each device of someone whose signed offer, answer or call key checked here is
+// remembered on this device (sealed under its storage key, js/e2ee/store.js;
+// never sent anywhere). A later call from them that arrives unsigned is then
+// judged against their signed list (js/lib/callnet.js unsignedVerdict) instead
+// of being taken as an older Snug.
+// All of it is one sealed entry ("callsig"), read once before a call is joined
+// (loadCallSigners), so an unsigned offer from someone never remembered waits on nothing.
+let pins = { me: null, map: new Map(), loaded: false }; // user -> [device ids], most recent last
+const mine = () => { if (pins.me !== S.me) pins = { me: S.me, map: new Map(), loaded: false }; return pins; };
+export async function loadCallSigners() {
+  const x = mine();
+  if (x.loaded || !ring.store) return x.map;
+  let got = null;
+  try { got = await ring.store.getSecret('callsig'); } catch { got = null; }
+  if (mine() !== x || x.loaded) return x.map;
+  for (const [u, list] of Object.entries(got && typeof got === 'object' && !Array.isArray(got) ? got : {})) {
+    if (Array.isArray(list) && !x.map.has(u)) x.map.set(u, list.filter((d) => typeof d === 'string'));
+  }
+  x.loaded = true;
+  return x.map;
+}
+/** The devices of u that signed calls with this device before: [device ids]. */
+export async function callSigners(u) { return (await loadCallSigners()).get(u) || []; }
+/** The same, if already known (null while it is still to be read from this device's store). */
+export const signersNow = (u) => { const x = mine(); return x.loaded || !ring.store ? x.map.get(u) || [] : null; };
+async function keepSigners(u, list) {
+  const map = await loadCallSigners();
+  map.delete(u);
+  if (list.length) map.set(u, list);
+  const all = [...map.entries()];
+  try { await ring.store?.putSecret('callsig', Object.fromEntries(all.slice(-500))); } catch { /* this tab only */ }
+}
+/** Device d of u signed something of this call that checked. */
+export async function rememberSigner(u, d) {
+  if (!u || !d || u === S.me) return;
+  const was = await callSigners(u);
+  if (!was.includes(d)) await keepSigners(u, [...was, d].slice(-8));
+}
+/** Their signers still in their list (`listed`): the others are forgotten. */
+export async function pruneSigners(u, listed) {
+  const was = await callSigners(u);
+  const now = was.filter((d) => listed.includes(d));
+  if (now.length !== was.length) await keepSigners(u, now);
+}
+export { listedDevices };
+
 /** Both devices' identity keys, for the longer security code: mine and theirs (raw), or null. */
 export async function identityKeys(from, d) {
   const theirs = await deviceKey(from, d);

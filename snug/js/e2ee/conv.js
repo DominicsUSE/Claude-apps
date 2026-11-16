@@ -133,6 +133,13 @@ export async function callDevices(u, fresh = false) {
   return out;
 }
 
+/** calls C2: the device ids in one person's signed list as checked here, fetched afresh; null with no list to check. */
+export async function listedDevices(u) {
+  const [b] = await fetchBundles([u], true);
+  if (b?.problem || !b?.list) return null;
+  return b.list.devs.map((e) => e.d);
+}
+
 /** Members a verified contact's send waits on: a verified person whose account key changed. */
 export const sendGate = (members) => members.filter((u) => u !== S.me && changed.has(u) && ring.meta?.verified?.[u] && ring.meta.verified[u] !== changed.get(u));
 

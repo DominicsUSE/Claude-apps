@@ -240,15 +240,23 @@ open, anything from them that doesn't (plain, damaged, wrong key) is dropped, ne
 *End-to-end encrypted* only when every connection is; otherwise *Encrypted in transit only (DTLS-SRTP)* with
 the reason. Every offer and answer carries `a=x-snug-fp`, the device's signature over the call, both people,
 the certificate fingerprint and ICE username; one that doesn't verify against the sender's signed device list,
-or a missing one from a device that signs its keys, ends that connection with a warning. With both sides signed
-the security code is 12 digits from both device keys and fingerprints (*Verified device*).
+or a missing one from a device that signs its keys, ends that connection with a warning. Each device keeps, on
+itself only (sealed in its encryption store, never sent), which of a person's devices have signed a call with
+it; an unsigned offer or answer from that person later ends the connection with the same warning while one of
+those devices is still in their signed device list (or no list can be checked), so a server can't strip
+signatures and call keys to make a 0.14 device look like an older Snug. Once none is (removed, or encryption
+reset) the call goes on *in transit only* with a notice; calling from a browser without encryption keys while a
+signing device is still listed is stopped too. A first call with someone is not covered (nothing to remember
+yet). With both sides signed the security code is 12 digits from both device keys and fingerprints
+(*Verified device*).
 
 It does not hide who is in which call, when, for how long or how much was sent (the server and any relay see
 that), it trusts the device lists as for messages (a server could add a device to an account; Snug shows new
 devices), it doesn't cover calls with someone who hasn't turned encryption on, an older Snug, a browser without
 encoded transforms, or P2P calls with friends on other PCs (these say *in transit only*), and whoever serves the
-web client's JavaScript could change it. A server could also withhold call keys or signatures so a call falls
-back to *in transit only*; the label then says so. Not reviewed by anyone outside the implementation.
+web client's JavaScript could change it. A server could also withhold call keys so a call falls back to
+*in transit only* (the label then says so); withholding signatures as well works only on a first call between
+two devices, or with someone whose signing devices have all left their list. Not reviewed by anyone outside the implementation.
 
 ### What Snug cannot protect against
 
