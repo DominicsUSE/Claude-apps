@@ -52,9 +52,12 @@ export function createRecovery({ db, M, hub, account, sendJson, error, jsonBody,
   hub.extraLimits = [...(hub.extraLimits || []), finishLimit, userLimit];
   const key = (t) => createHash('sha256').update(String(t)).digest('hex');
   const tokenOf = (req) => readCookie(req.headers.cookie, COOKIE);
+  // old (v0.13): the usable key was saved by 0.12.0 (web-auth-v1, not tied to this host name); the app asks
+  // the person to replace it. It keeps working until then.
   const status = (user) => {
-    const r = db.get('SELECT created, used FROM recovery WHERE user = ?', user);
-    return { set: !!r && !r.used, created: r?.created || null };
+    const r = db.get('SELECT created, used, v FROM recovery WHERE user = ?', user);
+    const set = !!r && !r.used;
+    return { set, created: r?.created || null, old: set && r.v !== 2 };
   };
   const passwordAccount = (user) => !M.p2pOwner?.(user) && db.get('SELECT pass FROM users WHERE id = ?', user)?.pass !== '!';
 

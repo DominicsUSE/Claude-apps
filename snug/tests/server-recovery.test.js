@@ -251,3 +251,20 @@ test('recovery: a key saved before v2 still works once (the client sends the old
   const res = await post('/api/recover', { handle: 'rk-legacy', proof: b64u(await deriveAuthKeyV2(a.key.raw, '127.0.0.1')), proof1: await proofOf(a.key.raw) });
   assert.equal(res.status, 200, await res.clone().text());
 });
+
+test('recovery (v0.13): the status says a key was saved by an older version (v1) until a new one replaces it', async () => {
+  const { deriveAuthKeyV2 } = await import('../js/lib/recovery.js');
+  const a = await withKey('rk-oldver'); // the 0.12.0 way
+  const st = await (await get('/api/recovery', { cookie: a.cookie })).json();
+  assert.equal(st.set, true);
+  assert.equal(st.old, true);
+  // a new key, the v2 way (replacing needs the password)
+  const key = await newRecoveryKey();
+  const r = await post('/api/recovery/set', { verifier: b64u(await deriveAuthKeyV2(key.raw, '127.0.0.1')), v: 2, password: PW }, { cookie: a.cookie });
+  assert.equal(r.status, 200, await r.clone().text());
+  assert.equal((await r.json()).recovery.old, false);
+  assert.equal((await (await get('/api/recovery', { cookie: a.cookie })).json()).old, false);
+  // no key at all: nothing to replace
+  const b = await register('rk-nokey13');
+  assert.equal((await (await get('/api/recovery', { cookie: b.cookie })).json()).old, false);
+});

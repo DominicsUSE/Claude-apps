@@ -91,18 +91,23 @@ export function MakeRecoveryKey({ onDone = closeModal, onLater = null, replace =
 export const openMakeRecoveryKey = (props = {}) => openModal(MakeRecoveryKey, { wide: true, ...props });
 
 // Home's reminder for a password account with no key (it stays until one is made; "Later" hides it until the next visit).
+// v0.13: also for a key saved by 0.12.0 (old), which isn't tied to this server's address: it still works, but
+// a new one is safer.
 let later = false;
 export function RecoveryReminder() {
   const a = S.account;
   const [, redraw] = useState(0);
-  if (!a?.passwordAccount || !a.recovery || a.recovery.set || later) return null;
-  return html`<div class="rk-remind" role="region" aria-labelledby="rk-remind-title">
+  const old = !!a?.recovery?.set && !!a.recovery.old;
+  if (!a?.passwordAccount || !a.recovery || (a.recovery.set && !old) || later) return null;
+  return html`<div class="rk-remind" role="region" aria-labelledby="rk-remind-title" data-old=${old ? 'true' : undefined}>
     <span class="row-ic"><${Icon} name="shield" /></span>
     <div class="grow">
-      <b id="rk-remind-title">Save a recovery key</b>
-      <span class="faint">If you ever forget your password, it lets you set a new one. No email needed.</span>
+      <b id="rk-remind-title">${old ? 'Make a new recovery key' : 'Save a recovery key'}</b>
+      <span class="faint">${old
+        ? 'Yours was saved by an older version of Snug. It still works until you replace it, but a new one works only at this server’s address.'
+        : 'If you ever forget your password, it lets you set a new one. No email needed.'}</span>
     </div>
-    <button class="btn primary" id="rk-remind-go" onClick=${() => openMakeRecoveryKey()}>Make my key</button>
+    <button class="btn primary" id="rk-remind-go" onClick=${() => openMakeRecoveryKey({ replace: old })}>${old ? 'Make a new one' : 'Make my key'}</button>
     <button class="btn quiet" id="rk-remind-later" onClick=${() => { later = true; redraw((n) => n + 1); }}>Later</button>
   </div>`;
 }
@@ -113,9 +118,9 @@ export function RecoveryRows({ Row }) {
   if (!S.account?.passwordAccount || !r) return null;
   return html`<div class="set-head">Recovery key</div>
     <${Row} label=${r.set ? 'Saved' : 'Not made yet'} hint=${r.set
-      ? `Made ${new Date(r.created).toLocaleDateString()}. If you forget your password, it lets you set a new one; it works once. It also gets past two-factor sign-in, so keep it as safe as your password. Whoever runs this server can’t read it.`
+      ? `${r.old ? 'Make a new recovery key: yours was saved by an older version of Snug. It still works until you replace it. ' : ''}Made ${new Date(r.created).toLocaleDateString()}. If you forget your password, it lets you set a new one; it works once. It also gets past two-factor sign-in, so keep it as safe as your password. Whoever runs this server can’t read it.`
       : 'A key you keep on paper or in a password manager. If you forget your password, it lets you set a new one, with no email.'}>
-      <button class=${`btn${r.set ? '' : ' primary'}`} id="rk-settings" onClick=${() => openMakeRecoveryKey({ replace: r.set })}>${r.set ? 'Make a new one' : 'Make a recovery key'}</button>
+      <button class=${`btn${r.set && !r.old ? '' : ' primary'}`} id="rk-settings" data-old=${r.old ? 'true' : undefined} onClick=${() => openMakeRecoveryKey({ replace: r.set })}>${r.set ? 'Make a new one' : 'Make a recovery key'}</button>
     <//>`;
 }
 

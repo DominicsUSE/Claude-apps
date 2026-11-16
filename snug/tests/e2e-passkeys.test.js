@@ -220,3 +220,34 @@ test('phone: the reminder, the key and "Forgot your password?" fit a 390 px scre
   assert.ok(await noSideScroll(p), 'the forgot screen fits');
   await p.context().close();
 });
+
+test('recovery key (v0.13): a key saved by an older version shows "Make a new recovery key"; a new one makes the notice go', async () => {
+  // tomasz saved a key with 0.12.0: a row with no v (the server can't tell the key, only that it is old)
+  const { hashPasswordAsync } = await import('../server/auth.js');
+  const uid = srv.db.get("SELECT id FROM users WHERE handle = 'tomasz'").id;
+  srv.db.run('INSERT INTO recovery (user, hash, created, used, v, host) VALUES (?, ?, ?, NULL, NULL, NULL)', uid, await hashPasswordAsync('x'.repeat(43)), Date.now() - 86_400_000);
+  const p = await page(IP);
+  await signIn(p, 'tomasz');
+  await p.locator('.rk-remind[data-old="true"] #rk-remind-title:has-text("Make a new recovery key")').waitFor();
+  await p.locator('.rk-remind:has-text("saved by an older version")').waitFor();
+  // Settings says so too
+  await accountSettings(p);
+  await p.locator('.set-row:has-text("yours was saved by an older version")').waitFor();
+  await p.keyboard.press('Escape');
+  await p.click('#rk-remind-go');
+  await p.locator('#rk-key').waitFor();
+  const key = await keyText(p);
+  await p.fill('#rk-last', key.slice(-4));
+  await p.click('#rk-saved');
+  // replacing a key needs the password
+  await p.fill('#rk-pw', PASSWORD);
+  await p.click('#rk-pw-go');
+  await p.locator('.toast:has-text("new recovery key is saved")').waitFor();
+  await p.locator('.rk-remind').waitFor({ state: 'detached' });
+  assert.equal(srv.db.get('SELECT v FROM recovery WHERE user = ?', uid).v, 2);
+  await p.reload();
+  await p.waitForSelector('.nav');
+  await p.waitForTimeout(300);
+  assert.equal(await p.locator('.rk-remind').count(), 0, 'it stays gone');
+  await p.context().close();
+});
