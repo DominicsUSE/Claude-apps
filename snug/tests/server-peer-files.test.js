@@ -3,7 +3,7 @@
 // and the capability flag that keeps files over 10 MB away from 0.11 PCs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
@@ -72,6 +72,33 @@ test('a cut transfer whose bytes turn out wrong starts over instead of keeping t
   assert.equal(await p.R.fetch('s', { h, size: data.length, id: 'f_rdst000003', cap: P2P_MAX_FILE }), false, 'the hash check fails once');
   assert.equal(existsSync(join(p.dirR, 'f_rdst000003.part')), false, 'and the junk is gone');
   assert.equal(await p.R.fetch('s', { h, size: data.length, id: 'f_rdst000003', cap: P2P_MAX_FILE }), true);
+  p.done();
+});
+
+// review-media 5: .part files that will never be finished are removed.
+test('leftover .part files go: those for a file that no longer exists at once, the rest after a week; one in progress stays', async () => {
+  const p = pair({ cutAfter: 5 });
+  const data = randomBytes(400 * 1024);
+  const h = p.add('f_src0000005', data);
+  // A cut transfer for a file this PC still has a row for: kept while fresh, so it can resume.
+  const job = { h, size: data.length, id: 'f_src0000005', cap: P2P_MAX_FILE };
+  const first = p.R.fetch('s', job);
+  await new Promise((r) => setTimeout(r, 50));
+  p.R.peerDown('s');
+  assert.equal(await first, false);
+  const kept = join(p.dirR, 'f_src0000005.part');
+  assert.ok(existsSync(kept));
+  // One for a file whose row is gone (the message was deleted), and one in another name.
+  const orphan = join(p.dirR, 'f_gone0000001.part');
+  writeFileSync(orphan, randomBytes(1000));
+  assert.equal(p.R.sweepParts(), 1);
+  assert.equal(existsSync(orphan), false, 'no row: removed');
+  assert.ok(existsSync(kept), 'a fresh cut transfer stays');
+  // A week later it is given up on.
+  const old = (Date.now() - 8 * 86_400_000) / 1000;
+  utimesSync(kept, old, old);
+  assert.equal(p.R.sweepParts(), 1);
+  assert.equal(existsSync(kept), false);
   p.done();
 });
 

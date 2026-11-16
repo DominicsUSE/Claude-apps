@@ -951,7 +951,8 @@ Real, and covered by tests with separate users:
     file copies (`e2ee.file.copy`) are not yet held to the quota. Between PCs, files over 10 MB go only to friends on Snug 0.12 or
     later (a friend on 0.11 gets a clear "takes files up to 10 MB" instead),
     wait for a direct connection rather than the relay, show progress as they
-    arrive, and a cut transfer resumes.
+    arrive, and a cut transfer resumes (its partial file is kept for a week,
+    or removed at once if the message it belongs to is gone).
   - **Previews.** SVG shows as a picture made from its own bytes in an image
     element, which runs no script and loads nothing from elsewhere. PDFs show
     their first page, and Open goes through every page (pdf.js, loaded only

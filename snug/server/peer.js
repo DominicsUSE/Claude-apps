@@ -302,6 +302,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     if (lastPct.size > 100) lastPct.delete(lastPct.keys().next().value);
     toOwner('file.progress', { id, got, size });
   };
+  let lastPartSweep = 0;
   const blobs = createBlobs({
     db, filesDir, stats, log, onProgress: blobProgress,
     sendEph: (uid, t, d) => links.sendEph(uid, t, d),
@@ -1358,6 +1359,8 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     housekeep() {
       const t = Date.now();
       db.run('DELETE FROM peer_seen WHERE exp < ?', t);
+      // review-media 5: leftover .part files, every half hour (it lists the files folder).
+      if (t - lastPartSweep >= 30 * 60_000) { lastPartSweep = t; try { blobs.sweepParts(t); } catch (e) { log('peer', 'part sweep', e.code || e.message); } }
       if (!myUid()) return;
       const gone = outbox.expire(t);
       for (const r of gone) {
