@@ -2,13 +2,14 @@
 // Opening at login, starting minimised, minimising to the tray, hardware
 // acceleration (applies after a restart), global mute and deafen keys, the
 // unread number on the icon. The app keeps these in desktop.json and checks
-// every value again (desktop/main.js). Updates are mandatory and handled by the
-// app itself (desktop/update.html), so there is no setting for them here.
+// every value again (desktop/main.js). Updates (0.14): how often the app asks
+// GitHub for a new version, since GitHub sees this computer's address each time:
+// Automatically, Tell me, or Only when I ask, with Check now and Install now.
 import { html, useEffect, useLayoutEffect, useState } from '../../vendor/preact-htm.js';
 import { S, emit, toast } from '../store.js';
 import { call } from '../server.js';
 import { Icon } from '../ui/icons.js';
-import { Switch } from '../ui/kit.js';
+import { Seg, Switch } from '../ui/kit.js';
 import { acceleratorOf } from '../lib/inbox.js';
 import { HandleRow } from './handle.js';
 
@@ -43,6 +44,40 @@ function ShortcutPicker({ which, value, onPick, label }) {
     ${value && !listening && html`<button class="btn quiet" aria-label=${`Clear the ${label.toLowerCase()} shortcut`} onClick=${() => onPick(null)}>Clear</button>`}
     ${error && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${error}</div>`}
   </div>`;
+}
+
+// Updates: the choice, when the app last asked GitHub, and a version waiting to be installed (desktop/main.js).
+const UPDATE_CHOICES = [['auto', 'Automatically'], ['notify', 'Tell me'], ['manual', 'Only when I ask']];
+const UPDATE_HINT = {
+  auto: 'Snug asks GitHub for a new version when it starts and about once a day, and installs it when you’re not using Snug (never during a call).',
+  notify: 'Snug asks GitHub when it starts and about once a day, and tells you when there is a new version. It installs it only when you say.',
+  manual: 'Snug asks GitHub only when you press Check now. You may miss security fixes, and a server can turn away a version that’s too old.',
+};
+function UpdateRows({ Row }) {
+  const [u, setU] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { app()?.getUpdates?.().then(setU, () => setU(null)); }, []);
+  if (!u) return null;
+  const mode = u.mode || 'auto';
+  const pick = (m) => app().setUpdateMode(m).then((r) => { if (r?.error) { toast(r.error); return; } if (r?.update) setU(r.update); }, () => {});
+  const check = () => { setBusy(true); app().checkForUpdates().then((r) => { if (r) setU(r); }, () => {}).finally(() => setBusy(false)); };
+  const install = () => app().installUpdate().then((r) => { if (r) setU(r); }, () => {});
+  const when = u.lastCheck?.at ? new Date(u.lastCheck.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : null;
+  const status = !u.canCheck ? 'This copy of Snug doesn’t check for updates (it isn’t an installed release).'
+    : u.waiting ? `Snug ${u.version} is available.`
+      : ['downloading', 'verifying', 'waiting', 'installing'].includes(u.phase) ? `Snug ${u.version} is being installed. Snug restarts when you’re not using it.`
+        : when ? (u.lastCheck.ok ? `You have the newest version (${u.current}). Last checked ${when}.` : `Snug couldn’t reach GitHub at ${when}. Check your connection and try again.`)
+          : `You have Snug ${u.current}.`;
+  return html`
+    <div class="set-head">Updates</div>
+    <${Row} label="Check for new versions" hint=${UPDATE_HINT[mode]} top>
+      <${Seg} label="Check for new versions" value=${mode} options=${UPDATE_CHOICES} onChange=${pick} />
+    <//>
+    <${Row} label="Version" hint=${status}>
+      ${u.waiting
+        ? html`<button class="btn primary" id="ds-update-install" onClick=${install}>Install now</button>`
+        : html`<button class="btn" id="ds-update-check" disabled=${busy || !u.canCheck} onClick=${check}>${busy ? 'Checking…' : 'Check now'}</button>`}
+    <//>`;
 }
 
 export function DesktopPage({ Row }) {
@@ -96,6 +131,7 @@ export function DesktopPage({ Row }) {
       <${ShortcutPicker} which="deafen" label="Deafen" value=${cfg.voiceKeys?.deafen || null} onPick=${(a) => setKey('deafen', a)} />
       ${errors.deafen && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${errors.deafen}</div>`}
     <//>
+    <${UpdateRows} Row=${Row} />
     <div class="set-head">Advanced</div>
     <${Row} label="Hardware acceleration" hint="Uses the graphics card to draw Snug. Turn it off if the window flickers or video looks wrong. Applies after a restart.">
       <${Switch} on=${cfg.hardwareAcceleration !== false} label="Hardware acceleration" onChange=${(v) => set({ hardwareAcceleration: v })} />
@@ -119,7 +155,7 @@ function GetTheApp() {
 
 export function registerDesktopPage({ PAGES, VIEWS, Row }) {
   if (typeof window !== 'undefined' && window.snugApp?.desktop) {
-    PAGES.push({ id: 'desktop', label: 'Desktop app', icon: 'screen', words: 'desktop app startup login boot minimise tray hardware acceleration gpu global shortcut mute deafen badge' });
+    PAGES.push({ id: 'desktop', label: 'Desktop app', icon: 'screen', words: 'desktop app startup login boot minimise tray hardware acceleration gpu global shortcut mute deafen badge updates version github' });
     VIEWS.desktop = () => html`<${DesktopPage} Row=${Row} />`;
   } else if (typeof window !== 'undefined') {
     PAGES.push({ id: 'desktop', label: 'Desktop app', icon: 'screen', words: 'desktop app download install windows mac exe dmg' });

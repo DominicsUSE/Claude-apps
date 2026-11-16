@@ -553,3 +553,40 @@ test("D9: without --dev-update the updater sees no SNUG_UPDATE_* variables", asy
   await u.check().catch(() => {});
   assert.ok(!hits.slice(before).some((h) => h === "/latest"), "the planted address is never asked");
 });
+
+// ---------- 0.14 tracking track: how often the app asks GitHub, and the person's choice ----------
+test("0.14 update checks: the setting's three values, Automatically by default", () => {
+  assert.deepEqual(U.UPDATE_MODES, ["auto", "notify", "manual"]);
+  assert.equal(U.updateModeOf(undefined), "auto");
+  assert.equal(U.updateModeOf("notify"), "notify");
+  assert.equal(U.updateModeOf("manual"), "manual");
+  assert.equal(U.updateModeOf("hourly"), "auto", "anything else is the default");
+  assert.equal(U.updateModeOf(false), "auto", "the old updateCheck switch is ignored");
+});
+
+test("0.14 update checks: once at start, then about every 24 hours with jitter; never by themselves in Only when I ask", () => {
+  const H = 3_600_000;
+  for (const mode of ["auto", "notify"]) {
+    const first = U.nextCheckIn({ mode, first: true, random: () => 0.5 });
+    assert.ok(first >= 3_000 && first <= 60_000, `soon after starting: ${first}`);
+    const lo = U.nextCheckIn({ mode, random: () => 0 });
+    const hi = U.nextCheckIn({ mode, random: () => 0.999999 });
+    assert.ok(lo >= 22 * H && hi <= 26 * H, `22 to 26 hours: ${lo / H} to ${hi / H}`);
+    assert.ok(hi - lo > 3 * H, "the jitter really spreads checks out");
+    assert.notEqual(U.nextCheckIn({ mode, random: () => 0.1 }), U.nextCheckIn({ mode, random: () => 0.9 }));
+  }
+  assert.equal(U.nextCheckIn({ mode: "manual", first: true }), null);
+  assert.equal(U.nextCheckIn({ mode: "manual" }), null);
+  assert.ok(U.UPDATE_EVERY_MS >= 24 * H, "never hourly again");
+});
+
+test("0.14 update checks: what a found update does in each mode", () => {
+  // Automatically: download and install at a quiet moment. Tell me / Only when I ask: wait for the person,
+  // unless this version is below the registry's minimum (then it can't be used meanwhile).
+  assert.equal(U.autoInstall({ mode: "auto" }), true);
+  assert.equal(U.autoInstall({ mode: "notify" }), false);
+  assert.equal(U.autoInstall({ mode: "manual" }), false);
+  assert.equal(U.autoInstall({ mode: "notify", forced: true }), true);
+  assert.equal(U.autoInstall({ mode: "manual", forced: true }), true);
+  assert.equal(U.autoInstall({ mode: "notify", asked: true }), true, "Install now");
+});

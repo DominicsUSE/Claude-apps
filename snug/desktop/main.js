@@ -798,7 +798,7 @@ else {
 // Settings live in desktop.json next to keepRunning. Everything the Snug page
 // sends is checked here again; only the Snug page (fromSnug) may ask.
 const { screen, powerMonitor } = require("electron");
-const SHELL_DEFAULTS = { openAtLogin: false, startMinimized: false, minimizeToTray: false, hardwareAcceleration: true }; // an old updateCheck is ignored: updates install themselves
+const SHELL_DEFAULTS = { openAtLogin: false, startMinimized: false, minimizeToTray: false, hardwareAcceleration: true }; // an old updateCheck is ignored; how updates are checked is `updates` (0.14, updates:set below)
 const HEX = /^#[0-9a-fA-F]{6}$/;
 function rawConfig() { try { return JSON.parse(fs.readFileSync(configPath(), "utf8")) || {}; } catch { return {}; } }
 function shellPrefs() {
@@ -809,7 +809,9 @@ function shellPrefs() {
   out.themeColor = HEX.test(raw.themeColor || "") ? raw.themeColor : null;
   return out;
 }
-const publicPrefs = () => { const p = shellPrefs(); delete p.themeColor; return p; };
+const publicPrefs = () => { const p = shellPrefs(); delete p.themeColor; p.updates = updateMode(); return p; };
+// 0.14: how this app checks for updates (Settings > Desktop app): auto | notify | manual (desktop/updater.js).
+const updateMode = () => updateModeOf(rawConfig().updates);
 
 // Hardware acceleration can only change before the app is ready: it applies on the next start.
 if (rawConfig().hardwareAcceleration === false) app.disableHardwareAcceleration();
@@ -1073,8 +1075,12 @@ ipcMain.on("deeplink:ready", (e) => {
 app.on("open-url", (e, url) => { e.preventDefault(); deepLinkFrom([url]); if (win) showWindow(); });
 
 // ---------- Automatic updates (desktop/updater.js) ----------
-// Nobody downloads a new Snug by hand. A little after starting and every hour: one request for the newest
-// GitHub release, one for the registry's minimum version. A newer release with this computer's file and its
+// Nobody has to download a new Snug by hand. A little after starting and then about once a day (22 to 26
+// hours, so checks don't line up; 0.14, hourly before): one request for the newest GitHub release, one for the
+// registry's minimum version. GitHub sees this computer's address and that Snug is running, so the person
+// chooses in Settings > Desktop app (0.14): Automatically (as below), Tell me (a notification, and Install now
+// in Settings), or Only when I ask (no checks on their own: Check now in Settings). A version below the
+// registry's minimum still installs by itself once a check finds it. A newer release with this computer's file and its
 // checksum file is downloaded quietly while Snug stays in use, checked (size, sha256, and the signature once a
 // key is pinned), and then installs itself at a moment that interrupts nothing: never during a call or a
 // data-file transfer; when the window is hidden, minimised or not in front, when the computer has been idle
@@ -1085,7 +1091,7 @@ app.on("open-url", (e, url) => { e.preventDefault(); deepLinkFrom([url]); if (wi
 // write to its folder, the install failed). Only update.html may drive it (its exact file:// URL, checked on
 // every message). SNUG_UPDATE_CHECK=0 turns the check off (development, tests).
 const UPDATE_PAGE = pathToFileURL(path.join(__dirname, "update.html")).toString();
-const { createUpdater, updaterEnvFor, semverCmp, quietWindow } = require("./updater.js");
+const { createUpdater, updaterEnvFor, semverCmp, quietWindow, updateModeOf, nextCheckIn, autoInstall, UPDATE_MODES } = require("./updater.js");
 const BUSY = new Set(["downloading", "verifying", "installing"]);
 // state: none | quiet (downloading or waiting in the background) | required (the update page is up).
 // phase: ready | required | downloading | verifying | waiting (verified, waiting for a quiet moment) |
@@ -1126,14 +1132,16 @@ function showUpdatePage() {
   if (win && !win.isDestroyed() && win.webContents.getURL() !== UPDATE_PAGE) win.loadURL(UPDATE_PAGE).catch(() => {});
 }
 globalThis.snugUpdateShown = () => !!(win && !win.isDestroyed() && win.webContents.getURL() === UPDATE_PAGE); // for the desktop test
-async function checkUpdate() {
-  if (updaterEnv().SNUG_UPDATE_CHECK === "0") return null;
-  // Running from source is not a release: only the installed app asks (or a test's own address).
-  if (!app.isPackaged && !process.env.SNUG_UPDATE_URL) return null;
+// Whether this app asks at all: not when running from source (only the installed app, or a test's own address).
+const canCheck = () => updaterEnv().SNUG_UPDATE_CHECK !== "0" && (app.isPackaged || !!process.env.SNUG_UPDATE_URL);
+let lastCheck = null; // { at, ok }: Settings > Desktop app says when this app last asked
+// install: the person asked for this update (Install now, or the fallback page's update button).
+async function checkUpdate({ install = false } = {}) {
+  if (!canCheck()) return null;
   if (BUSY.has(upd.phase)) return publicUpdate();
   let r;
   if (!cleaned) { cleaned = true; try { getUpdater().cleanup(); } catch { /* best effort */ } }
-  try { r = await getUpdater().check(); } catch { return null; }
+  try { r = await getUpdater().check(); lastCheck = { at: Date.now(), ok: true }; } catch { lastCheck = { at: Date.now(), ok: false }; return null; }
   // Once found it stays found: offline or an odd reply never lifts it.
   if (r.state !== "required") return upd.state !== "none" ? publicUpdate() : null;
   if (BUSY.has(upd.phase)) return publicUpdate();
@@ -1141,10 +1149,12 @@ async function checkUpdate() {
   // The registry's minimum is above this version: it may not be used meanwhile.
   const forced = !!r.min && semverCmp(r.min, app.getVersion()) > 0;
   if (forced) upd.state = "required";
-  else if (upd.state === "none") upd.state = "quiet";
+  else if (upd.state === "none" && autoInstall({ mode: updateMode(), forced, asked: install })) upd.state = "quiet";
   // The last try couldn't put the new version in place: say so instead of trying again in a loop.
   if (getUpdater().takeFailure()) { upd.state = "required"; upd.dl = false; setUpdate({ phase: "error", message: UPDATE_ERRORS.install }); needsPerson(); }
   if (upd.state === "required") showUpdatePage();
+  // Tell me / Only when I ask: found, and waiting for Install now (0.14).
+  if (upd.state === "none") { tellAboutUpdate(r.version); return publicUpdate(); }
   // A download that failed is tried again at each check; an install that failed waits for "Try again".
   if (retryable()) startUpdate();
   else if (upd.phase === "waiting") installWhenQuiet();
@@ -1263,6 +1273,56 @@ async function installUpdate() {
   }
 }
 globalThis.snugCheckUpdate = checkUpdate; // for the desktop test
+// Tell me: one notification per new version (Only when I ask: the person is looking at Settings already).
+let toldVersion = null;
+function tellAboutUpdate(version) {
+  if (updateMode() !== "notify" || toldVersion === version) return;
+  toldVersion = version;
+  globalThis.snugUpdateNotes = [...(globalThis.snugUpdateNotes || []), version].slice(-5); // for the desktop test
+  try {
+    if (!NativeNotification.isSupported()) return;
+    const n = new NativeNotification({ title: `Snug ${version} is available`, body: "Open Settings > Desktop app to install it.", silent: true });
+    n.on("click", () => showWindow());
+    n.show();
+  } catch { /* not on every system */ }
+}
+// The next check on its own (none in Only when I ask, or with SNUG_UPDATE_CHECK=manual for the desktop test).
+let checkT = null;
+function scheduleCheck(first = false) {
+  clearTimeout(checkT); checkT = null;
+  if (updaterEnv().SNUG_UPDATE_CHECK === "manual") return;
+  const ms = nextCheckIn({ mode: updateMode(), first });
+  if (ms == null) return;
+  checkT = setTimeout(() => { checkT = null; checkUpdate().catch(() => null).finally(() => { if (!checkT) scheduleCheck(); }); }, ms);
+  checkT.unref?.();
+}
+globalThis.snugUpdateTimer = () => !!checkT; // for the desktop test
+// What Settings > Desktop app shows: the choice, when the app last asked, and a version waiting for Install now.
+const updateInfo = () => ({
+  ...publicUpdate(), mode: updateMode(), canCheck: canCheck(), lastCheck,
+  waiting: upd.state === "none" && !!upd.info && !BUSY.has(upd.phase),
+});
+const installNow = () => { if (upd.state === "none" && upd.info) { upd.state = "quiet"; startUpdate(); } };
+ipcMain.handle("updates:get", (e) => (fromSnug(e.senderFrame.url) ? updateInfo() : null));
+ipcMain.handle("updates:set", (e, mode) => {
+  if (!fromSnug(e.senderFrame.url)) return { error: "Not allowed." };
+  if (!UPDATE_MODES.includes(mode)) return { error: "That isn’t an update choice." };
+  saveTrayPrefs({ updates: mode });
+  if (mode === "manual") scheduleCheck();
+  else if (!checkT) scheduleCheck(true);
+  if (mode === "auto") installNow(); // a version that was waiting for the person goes ahead
+  return { settings: publicPrefs(), update: updateInfo() };
+});
+ipcMain.handle("updates:check", async (e) => {
+  if (!fromSnug(e.senderFrame.url)) return null;
+  await checkUpdate().catch(() => null);
+  return updateInfo();
+});
+ipcMain.handle("updates:install", (e) => {
+  if (!fromSnug(e.senderFrame.url)) return null;
+  installNow();
+  return updateInfo();
+});
 globalThis.snugUpdateState = publicUpdate;
 const fromUpdatePage = (e) => e.senderFrame?.url === UPDATE_PAGE;
 // The preload asks which page carries the bridge (file:// pages only).
@@ -1294,7 +1354,7 @@ ipcMain.handle("fallback:own", async (e) => {
 });
 ipcMain.handle("fallback:update", async (e) => {
   if (!fromFallback(e)) return null;
-  const r = await checkUpdate().catch(() => null);
+  const r = await checkUpdate({ install: true }).catch(() => null);
   return r ? { version: r.version, phase: r.phase } : { version: null };
 });
 ipcMain.on("fallback:change", (e) => {
@@ -1348,13 +1408,10 @@ function shellReady() {
   }
   deepLinkFrom(process.argv);
   watchIdle();
-  // Just after starting, then every hour. Nothing else polls.
-  // (SNUG_UPDATE_CHECK=manual, with --dev-update: the desktop test calls the check itself.)
+  // Just after starting, then about once a day, unless the person chose Only when I ask (0.14; every hour
+  // before). Nothing else polls. (SNUG_UPDATE_CHECK=manual, with --dev-update: the desktop test calls the check itself.)
   shellStartedAt = Date.now();
-  if (updaterEnv().SNUG_UPDATE_CHECK !== "manual") {
-    setTimeout(() => { checkUpdate(); }, 3_000).unref?.();
-    setInterval(() => { checkUpdate(); }, 3_600_000).unref?.();
-  }
+  scheduleCheck(true);
   const p = shellPrefs();
   if (p.openAtLogin) applyLoginItem(true);
 }

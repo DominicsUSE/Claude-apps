@@ -1,4 +1,4 @@
-// Snug's updater (desktop app). Updates install themselves; main.js decides when. No Electron import:
+// Snug's updater (desktop app). Updates install themselves unless the person chose otherwise (0.14); main.js decides when. No Electron import:
 // main.js passes in what it needs, so this file unit-tests under plain Node (updater.test.js).
 //
 //   check()     the newest snug-v<x.y.z> GitHub release (+ the registry's minimum version) → required or none
@@ -62,6 +62,23 @@ function quietWindow({ gone = false, hidden = false, audible = false, awayMs = 0
   if (audible) return false;
   return awayMs >= 60_000 || openMs < 20_000 || idleS >= 60;
 }
+// 0.14: how often Snug asks GitHub (which sees this computer's address and that Snug is running). The person
+// picks in Settings > Desktop app: "auto" (Automatically: check, download and install at a quiet moment),
+// "notify" (Tell me: check, then wait for "Install now") or "manual" (Only when I ask: no checks on their own).
+// Checks run once soon after starting and then every 22 to 26 hours, so they don't line up hour by hour.
+const UPDATE_MODES = ["auto", "notify", "manual"];
+const UPDATE_EVERY_MS = 24 * 3_600_000;
+const UPDATE_JITTER_MS = 2 * 3_600_000;
+const updateModeOf = (v) => (UPDATE_MODES.includes(v) ? v : "auto");
+// Milliseconds until the next check on its own, or null for none.
+function nextCheckIn({ mode = "auto", first = false, random = Math.random } = {}) {
+  if (updateModeOf(mode) === "manual") return null;
+  if (first) return 3_000 + Math.floor(random() * 12_000);
+  return UPDATE_EVERY_MS - UPDATE_JITTER_MS + Math.floor(random() * 2 * UPDATE_JITTER_MS);
+}
+// Whether a found update downloads and installs by itself. `forced`: this version is below the registry's
+// minimum. `asked`: the person pressed Install now.
+const autoInstall = ({ mode = "auto", forced = false, asked = false } = {}) => forced || asked || updateModeOf(mode) === "auto";
 const SUMS = { portable: "SHA256SUMS-windows.txt", installer: "SHA256SUMS-windows.txt", dmg: "SHA256SUMS-mac.txt" };
 const SIG = (sumsName) => `${sumsName}.sig`;
 const assetName = (kind, v) => ({ portable: `Snug-${v}-portable.exe`, installer: `Snug-Setup-${v}.exe`, dmg: `Snug-${v}-mac.dmg` }[kind] || null);
@@ -514,4 +531,4 @@ function createUpdater(o) {
   return { kind, testMode, check, download, recheck, install, cleanup, takeFailure };
 }
 
-module.exports = { createUpdater, quietWindow, semverCmp, needsUpdate, pickAssets, pickRelease, parseSums, swapScript, allowedUrl, kindOf, assetName, verifySums, updaterEnvFor, UPDATE_PUBKEYS, RELEASES_LIST };
+module.exports = { UPDATE_MODES, UPDATE_EVERY_MS, updateModeOf, nextCheckIn, autoInstall, createUpdater, quietWindow, semverCmp, needsUpdate, pickAssets, pickRelease, parseSums, swapScript, allowedUrl, kindOf, assetName, verifySums, updaterEnvFor, UPDATE_PUBKEYS, RELEASES_LIST };

@@ -90,6 +90,11 @@ if (location.protocol === "http:" || location.protocol === "https:") {
       return ipcRenderer.invoke("desktop:set", clean);
     },
     restart: () => ipcRenderer.send("app:restart"),
+    // Updates (0.14): how this app checks (auto | notify | manual), when it last did, Check now and Install now.
+    getUpdates: () => ipcRenderer.invoke("updates:get"),
+    setUpdateMode: (mode) => ipcRenderer.invoke("updates:set", ["auto", "notify", "manual"].includes(mode) ? mode : null),
+    checkForUpdates: () => ipcRenderer.invoke("updates:check"),
+    installUpdate: () => ipcRenderer.invoke("updates:install"),
     // Global mute and deafen keys: saved here, held only while in voice.
     setVoiceKeys: (keys) => ipcRenderer.invoke("voicekeys:set", {
       mute: typeof keys?.mute === "string" ? keys.mute.slice(0, 60) : null,
