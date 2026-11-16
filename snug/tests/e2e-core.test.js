@@ -268,8 +268,13 @@ test('heartbeat: a connection that stops answering is noticed within about 30 se
   const id = srv.db.get("SELECT id FROM users WHERE handle = 'tomasz'").id;
   await page.waitForFunction(() => window.snug.S.conn.rtt != null, null, { timeout: 15000 });
   // The server side of the socket goes silent: it reads nothing and sends nothing (a half-open connection).
+  // Nothing means nothing: the server's own liveness sweep (server/hub.js, every 25 seconds) would ping
+  // and then terminate this socket, and on a real half-open connection neither reaches the phone. Left
+  // in, that close arrives as "The connection dropped." before the page's own heartbeat notices,
+  // whenever the sweep happens to tick just after this point.
   const silent = srv.hub.socketsOf(id);
-  for (const ws of silent) { ws.send = () => {}; ws._socket.pause(); }
+  const kill = new Map();
+  for (const ws of silent) { kill.set(ws, ws.terminate.bind(ws)); ws.send = () => {}; ws.ping = () => {}; ws.terminate = () => {}; ws._socket.pause(); }
   const t0 = Date.now();
   await page.waitForFunction(() => window.snug.S.conn.lastError?.text.includes('stopped answering'), null, { timeout: 40000, polling: 500 });
   const noticed = Date.now() - t0;
@@ -280,7 +285,7 @@ test('heartbeat: a connection that stops answering is noticed within about 30 se
   await say(page, 'back after a dead connection');
   for (let i = 0; i < 50 && !srv.db.get("SELECT 1 FROM messages WHERE text = 'back after a dead connection'"); i++) await page.waitForTimeout(100);
   assert.ok(srv.db.get("SELECT 1 FROM messages WHERE text = 'back after a dead connection'"));
-  for (const ws of silent) ws.terminate(); // the server would drop it at its next check; not after the test
+  for (const ws of silent) kill.get(ws)(); // the server would drop it at its next check; not after the test
   await page.context().close();
   await new Promise((r) => setTimeout(r, 200));
 });
