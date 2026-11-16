@@ -18,7 +18,8 @@ import { canon, parseCanon } from '../js/lib/e2ee/canon.js';
 import { b64u, b64uOf } from '../js/lib/e2ee/bytes.js';
 import { listProblem, prekeyProblem, isDeviceId, MAX_DEVICES, PREKEY_MAX_AGE } from '../js/lib/e2ee/objects.js';
 import { PROTO } from '../js/lib/proto.js';
-import { limiter, tokenHash, recentAuth } from './auth.js';
+import { limiter, tokenHash, recentAuth, activeDay } from './auth.js';
+import { deviceLabel } from '../js/lib/account.js';
 import { secRecord } from './seclog.js';
 import { createE2eeConv } from './e2ee-conv.js';
 
@@ -105,7 +106,9 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
   const off = () => fail('End-to-end encryption isn’t turned on for this server.');
   const noAccount = () => fail('Turn on end-to-end encryption first.');
   const audit = (event, c, ok = true, why = null) => {
-    try { db.run('INSERT INTO auth_events (ts, user, event, ok, ip, agent, why) VALUES (?, ?, ?, ?, ?, ?, ?)', now(), c.user, event, ok ? 1 : 0, '', String(c.ws?.secReq?.headers?.['user-agent'] || '').slice(0, 80), why); } catch { /* closing */ }
+    const ua = c.ws?.secReq?.headers?.['user-agent'];
+    // 0.14: the kind of device, as sign-in history keeps it, not the browser's full string.
+    try { db.run('INSERT INTO auth_events (ts, user, event, ok, ip, agent, why) VALUES (?, ?, ?, ?, ?, ?, ?)', now(), c.user, event, ok ? 1 : 0, '', ua ? deviceLabel(ua) : '', why); } catch { /* closing */ }
   };
 
   // Rate limits for reads that hand out keys or the backup.
@@ -127,7 +130,8 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
   };
   function meView(u) {
     const a = account(u);
-    const devices = a ? devicesOf(u).map((d) => ({ d: d.id, label: d.label, kind: d.kind, state: d.state, created: d.created, seen: d.seen })) : [];
+    // seen: the day it was last used (0.14), sent as midday UTC so the date reads the same in every time zone.
+    const devices = a ? devicesOf(u).map((d) => ({ d: d.id, label: d.label, kind: d.kind, state: d.state, created: d.created, seen: d.seen ? activeDay(d.seen) + 43_200_000 : d.seen })) : [];
     return {
       state: a ? 'ready' : 'none', ver: a?.ver || 0, hist: a ? !!a.hist : true, epoch: a?.epoch || null, epochAt: a?.epoch_at || null,
       backup: !!db.get('SELECT 1 FROM e2ee_backup WHERE user = ?', u), resetAt: a?.reset_at || null, devices,
@@ -323,7 +327,8 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
       if (!c.ws?.e2eeNonce || !verifyEd(row.dsk, d.sig, `${PREFIX}bind\n${c.user}\n${row.id}\n${c.ws.e2eeNonce}`)) fail('That device proof didn’t check out.');
       c.ws.e2eeDevice = row.id;
       const session = sessionOf(c);
-      db.run('UPDATE e2ee_devices SET seen = ?, session = COALESCE(?, session) WHERE id = ?', now(), session, row.id);
+      // 0.14: the day it was last used, not every bind's time; written when the day or the session changes.
+      if (row.seen !== activeDay(now()) || (session && row.session !== session)) db.run('UPDATE e2ee_devices SET seen = ?, session = COALESCE(?, session) WHERE id = ?', activeDay(now()), session, row.id);
       if (session) db.run('UPDATE sessions SET e2ee_device = ? WHERE hash = ?', row.id, session);
       const cur = currentPrekey(row.id);
       return { state: row.state, kid: cur?.kid || 0, prekeyAt: cur?.created || 0 };

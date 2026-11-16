@@ -25,7 +25,8 @@ import {
   chainCheck, dmIdFor, remoteFileId, remoteMediaId, shadowId, randomEp, fingerprint, isUid, isKey, hsVerify,
 } from './peercrypto.js';
 import { UserError, rtcSignal } from './ops.js'; // sec-integrate: rtcSignal, the same check a local call member gets
-import { limiter } from './auth.js';
+import { limiter, activeDay } from './auth.js';
+import { withRelayIce } from './voiceopts.js'; // 0.14: relay STUN instead of Google's default
 import { uploadType, AUDIO_TYPES, VIDEO_TYPES } from './media.js';
 import { imageInfo, POLL_HOURS } from './messaging.js';
 import { HUES } from '../js/lib/util.js';
@@ -269,7 +270,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       // reach them for the rest of their session, so my messages go straight to them (review-media 4).
       if (!online.has(uid)) reach.add(uid);
       const p = peerOf(uid);
-      db.run('UPDATE peers SET last_seen = ? WHERE uid = ?', Date.now(), uid);
+      if (p && p.last_seen !== activeDay()) db.run('UPDATE peers SET last_seen = ? WHERE uid = ?', activeDay(), uid); // 0.14: the day, not each contact
       // The friend has a newer profile than the one kept here: ask for it.
       if (p && newer([hs.kver, hs.pv], [p.profile_kver, p.profile_ver]) && hs.pv > 0) links.sendEph(uid, 'profile.want', { have: [p.profile_kver, p.profile_ver] });
       syncMedia(uid);
@@ -1007,7 +1008,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
   hub.iceFor = (u) => {
     const list = baseIce(u);
     if (u !== owner() || !turn || turn.exp <= Date.now()) return list;
-    return [...(Array.isArray(list) ? list : []), ...turn.iceServers];
+    return withRelayIce(list, turn.iceServers); // 0.14: Cloudflare's STUN instead of Google's default (server/voiceopts.js)
   };
 
   // ---------- Wrapping the read paths (section 4, S13) ----------

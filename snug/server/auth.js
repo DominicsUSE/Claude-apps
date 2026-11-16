@@ -128,15 +128,21 @@ export const tokenHash = (token) => createHash('sha256').update(token).digest('h
 const POLICY = new WeakMap();
 export const configureSessions = (db, { idleDays = IDLE_DAYS } = {}) => POLICY.set(db, { idleMs: idleDays * 86_400_000 });
 export const idleMs = (db) => POLICY.get(db)?.idleMs ?? IDLE_DAYS * 86_400_000;
+// 0.14: when a session (or an encryption device, or a friend's PC) was last used is kept to the day: the
+// start of that day in UTC, written at most once a day. Idle expiry counts whole days from it, so a
+// session ends once `idleMs` has passed after the end of the last day it was used, never sooner.
+export const activeDay = (t = Date.now()) => t - (t % 86_400_000);
+const idleBefore = (db, now = Date.now()) => activeDay(now - idleMs(db));
+export { idleBefore };
 
 export function createSession(db, userId, agent = '', how = null) {
   const token = randomBytes(32).toString('base64url');
   const now = Date.now();
-  // agent and seen: the device list in Settings > Account (server/account.js).
+  // agent and seen: the device list in Settings > Account (server/account.js). seen is the day (0.14).
   // auth_at: when this person last proved who they are on this session (password, code or GitHub).
   // how: how the session began ('register', 'password', 'recovery', ...; v0.12 review M5, server/recovery.js).
   db.run('INSERT INTO sessions (hash, user, created, expires, agent, seen, auth_at, how) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    tokenHash(token), userId, now, now + SESSION_DAYS * 86_400_000, String(agent).slice(0, 80), now, now, how);
+    tokenHash(token), userId, now, now + SESSION_DAYS * 86_400_000, String(agent).slice(0, 80), activeDay(now), now, how);
   return token;
 }
 /** How this session began (createSession `how`), or null. */
@@ -150,14 +156,15 @@ function liveRow(db, token) {
   const row = db.get('SELECT user, expires, seen, created FROM sessions WHERE hash = ?', tokenHash(token));
   if (!row) return null;
   const now = Date.now();
-  if (row.expires < now || (row.seen || row.created) < now - idleMs(db)) { db.run('DELETE FROM sessions WHERE hash = ?', tokenHash(token)); return null; }
+  if (row.expires < now || (row.seen || row.created) < idleBefore(db, now)) { db.run('DELETE FROM sessions WHERE hash = ?', tokenHash(token)); return null; }
   return row;
 }
 export function sessionUser(db, token) {
   const row = liveRow(db, token);
   if (!row) return null;
-  // When this device was last used, to the minute (server/account.js).
-  if (!row.seen || row.seen < Date.now() - 60_000) db.run('UPDATE sessions SET seen = ? WHERE hash = ?', Date.now(), tokenHash(token));
+  // The day this device was last used (server/account.js), written once a day (0.14; to the minute before).
+  const day = activeDay();
+  if (row.seen !== day) db.run('UPDATE sessions SET seen = ? WHERE hash = ?', day, tokenHash(token));
   return row.user;
 }
 // The same check without counting as use: for the socket heartbeat (server/hub.js).

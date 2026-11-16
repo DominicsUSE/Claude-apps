@@ -78,16 +78,32 @@ export function turnCredential(secret, user, now = Date.now(), ttl = TURN_TTL_S)
   return { username, credential: createHmac('sha1', secret).update(username).digest('base64') };
 }
 // SNUG_STUN=none leaves STUN out (a STUN server sees each caller's IP
-// address); unset, Google's public one is used.
+// address). Unset: with this Snug's own TURN relay (SNUG_TURN_URL), the
+// relay's own address is asked (a TURN server answers STUN too, and already
+// sees callers' addresses), so no third party is (0.14); without one,
+// Google's public STUN server is used, and the privacy page names it.
+export const DEFAULT_STUN = 'stun:stun.l.google.com:19302';
+const relayStun = (turnUrls) => [...new Set(turnUrls.map((u) => /^turn:([^?]+)/.exec(u)?.[1]).filter(Boolean).map((h) => `stun:${h}`))];
 export function iceConfig(env = process.env) {
-  // privacy: SNUG_STUN=none asks no STUN server at all (Google's is the default when it isn't set; a STUN server sees each caller's IP address).
-  const raw = env.SNUG_STUN ? String(env.SNUG_STUN).trim() : 'stun:stun.l.google.com:19302';
-  const urls = /^none$/i.test(raw) ? [] : raw.split(',').map((u) => u.trim()).filter(Boolean);
-  const stun = urls.length ? [{ urls }] : [];
   const turnUrls = (env.SNUG_TURN_URL || '').split(',').map((u) => u.trim()).filter(Boolean);
+  const raw = env.SNUG_STUN ? String(env.SNUG_STUN).trim() : '';
+  const urls = /^none$/i.test(raw) ? [] : raw ? raw.split(',').map((u) => u.trim()).filter(Boolean)
+    : turnUrls.length ? relayStun(turnUrls) : [DEFAULT_STUN];
+  const stun = urls.length ? [{ urls }] : [];
   if (!turnUrls.length) return stun;
   if (env.SNUG_TURN_SECRET) return (user) => [...stun, { urls: turnUrls, ...turnCredential(env.SNUG_TURN_SECRET, user) }];
   return [...stun, { urls: turnUrls, username: env.SNUG_TURN_USER, credential: env.SNUG_TURN_PASS }];
+}
+
+// Desktop (server/peer.js): the directory's relay details (Cloudflare TURN) carry Cloudflare's STUN, so
+// Google's default STUN server is left out once they are here: one company fewer sees the address (0.14).
+// A STUN server chosen with SNUG_STUN stays.
+export function withRelayIce(list, relay) {
+  const base = Array.isArray(list) ? list : [];
+  const extra = Array.isArray(relay) ? relay : [];
+  const relayStuns = extra.some((s) => [].concat(s?.urls || []).some((u) => /^stuns?:/.test(u)));
+  const keep = relayStuns ? base.filter((s) => ![].concat(s?.urls || []).every((u) => u === DEFAULT_STUN)) : base;
+  return [...keep, ...extra];
 }
 
 export const soundView = (s) => s && {

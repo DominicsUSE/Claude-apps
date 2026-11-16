@@ -5,7 +5,7 @@
 //   spotting an attack (a refused cross-site request, a refused Host, a rate
 //   limit hit, an alert). Never a password, code, token or cookie: addresses
 //   are truncated (1.2.3.x, 2001:db8:1::/48), the browser string is cut to 80
-//   characters and details are redacted. Rows go after 30 days (SNUG_LOG_DAYS), and each
+//   characters and details are redacted. Rows go after 14 days (SNUG_LOG_DAYS), and each
 //   account keeps at most 500. Sign-ins and account changes are kept by the
 //   auth layer (auth_events, server/account.js); its events come here too, so
 //   the detectors see them and the owner sees one list.
@@ -20,6 +20,7 @@
 import { open } from 'node:fs/promises';
 import { pipeline } from 'node:stream';
 import { maskIp, limiter } from './auth.js';
+import { deviceLabel } from '../js/lib/account.js'; // 0.14: the kind of device, not the browser's full string
 
 // ---------- Redaction ----------
 const CTRL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
@@ -53,7 +54,7 @@ export const redactLog = (fn) => (...a) => fn(...a.map((x) => (typeof x === 'num
 
 // ---------- Events and detectors ----------
 const DAY = 86_400_000;
-const KEEP_DAYS = 30; // privacy: 90 before 0.12; the server owner sets it with SNUG_LOG_DAYS (server/privacy.js)
+const KEEP_DAYS = 14; // privacy: 90 before 0.12, 30 before 0.14; the server owner sets it with SNUG_LOG_DAYS (server/privacy.js)
 const PER_USER = 500;
 const ANON_ROWS = 20_000;
 // Kinds an attacker can make a lot of: stored at most 10 a minute per address and kind.
@@ -118,7 +119,10 @@ export function createSeclog({ db, log = () => {}, ipOf = (req) => req?.socket?.
   function record(kind, { req = null, user = null, ip = null, agent = null, detail = null } = {}) {
     const t = now();
     const masked = maskIp(ip ?? (req ? ipOf(req) : '')) || '';
-    const ua = String(agent ?? req?.headers?.['user-agent'] ?? '').replace(CTRL, '').slice(0, 80);
+    // 0.14: "Chrome on Windows", as sign-in history and the device list keep it; the full browser string is
+    // close to a fingerprint. An agent passed in is a label already (an alert, a test).
+    const raw = agent ?? req?.headers?.['user-agent'];
+    const ua = (agent != null ? String(agent) : raw ? deviceLabel(raw) : '').replace(CTRL, '').slice(0, 80);
     const keep = !NOISY.has(kind) || (store.take(`${kind}|${masked}`) && storeAll.take('all'));
     if (keep) {
       insert(kind, { user, ip: masked, agent: ua, detail });

@@ -157,17 +157,33 @@ test('GET /api/privacy (no sign-in) says what is kept and for how long, and that
   assert.equal(r.status, 200);
   const d = await r.json();
   assert.equal(d.mode, 'host');
-  assert.equal(d.logDays, 30);
+  assert.equal(d.logDays, 14);
   assert.equal(d.failureHours, 48);
   assert.equal(d.undoMinutes, 11);
   assert.equal(d.diagnostics, false);
   assert.equal(typeof d.linkPreviews, 'boolean');
   assert.equal(d.stun, 'google');
+  // 0.14: every window the server purges on its own (server/retention.js), and how fine activity times are.
+  assert.equal(d.memberLogDays, 90);
+  assert.equal(d.linkCacheHours, 24);
+  assert.equal(d.friendCooldownHours, 24);
+  assert.equal(d.activity, 'day');
+  assert.equal(d.pushTtlHours, 24);
 });
 
-test('sign-in history and security events are kept 30 days by default (90 before), and SNUG_LOG_DAYS changes it', async () => {
+test('0.14: with this Snug’s own TURN relay and no SNUG_STUN, /api/privacy says calls ask the relay, not a third party', async () => {
+  const d2 = mkdtempSync(join(tmpdir(), 'snug-privacy-turn-'));
+  const s2 = await startServer({ port: 0, dataDir: d2, quiet: true, iceEnv: { SNUG_TURN_URL: 'turn:turn.example.org:3478', SNUG_TURN_USER: 'u', SNUG_TURN_PASS: 'p' } });
+  try {
+    const d = await (await fetch(`http://127.0.0.1:${s2.port}/api/privacy`)).json();
+    assert.equal(d.stun, 'relay');
+    assert.equal(d.turn, true);
+  } finally { await s2.close(); rmSync(d2, { recursive: true, force: true }); }
+});
+
+test('sign-in history and security events are kept 14 days by default (30 before 0.14, 90 before 0.12), and SNUG_LOG_DAYS changes it', async () => {
   const u = await person('pv-logs');
-  const old = Date.now() - 31 * 86_400_000;
+  const old = Date.now() - 15 * 86_400_000;
   srv.db.run("INSERT INTO auth_events (ts, user, event, ok, ip, agent) VALUES (?, ?, 'login', 1, '1.2.3.x', 'x')", old, u.id);
   srv.db.run("INSERT INTO security_events (ts, user, kind, ip, agent, detail) VALUES (?, ?, 'origin.refused', '', '', '{}')", old, u.id);
   srv.seclog.prune();

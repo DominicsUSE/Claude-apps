@@ -19,6 +19,7 @@ import { mentions, plain } from '../js/lib/format.js';
 
 const MAX_SUBS = 10;            // devices per person; the oldest goes first
 const TTL = 24 * 3600;          // a note older than a day is not worth showing
+export const PUSH_TTL_HOURS = TTL / 3600; // the privacy page says how long a push service may hold a note (server/privacy.js)
 const PREVIEW = 180;            // characters of the message in the note
 const b64u = (buf) => Buffer.from(buf).toString('base64url');
 const unb64u = (s) => Buffer.from(String(s), 'base64url');
