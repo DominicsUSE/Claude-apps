@@ -204,6 +204,7 @@ export function migrateAccount(db) {
   add('sessions', 'seen', 'INTEGER');
   add('sessions', 'agent', "TEXT NOT NULL DEFAULT ''");
   add('sessions', 'auth_at', 'INTEGER'); // sec-auth: when this session last proved who it is (server/auth.js recentAuth)
+  add('sessions', 'how', 'TEXT'); // v0.12 review M5: how the session began (server/auth.js createSession)
   db.exec(`
     CREATE TABLE IF NOT EXISTS auth_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -713,7 +714,7 @@ export function createAccountHttp({
   // A new session for someone who just proved who they are: the audit trail, a
   // word to their other devices, and the cookies. `how`: password, totp, register.
   function signedIn(req, user, how) {
-    const token = createSession(db, user, agentOf(req));
+    const token = createSession(db, user, agentOf(req), how);
     const agent = agentOf(req);
     C.audit('login', { ...who(req, user), ok: true, why: how });
     if (how !== 'register') hub.toUser(user, 'account', { newSignIn: { agent: agent || 'Unknown device', at: Date.now() } });

@@ -94,8 +94,10 @@ test('REG-M2: a thief holding the current key can cancel moves, but the owner ca
     const u = await reg.signUp(6161, 'stolenlaptop'); // u.k now sits on a stolen laptop
     const k2 = await startMove(reg, u); // the real owner signs in with GitHub on a new PC
     assert.equal((await cancel(reg, u.uid, u.k)).status, 200, 'the thief presses Stop');
-    // The owner of the registry (after checking with the user, e.g. over GitHub) arms a forced move.
-    const f = await adminCall(reg, owner, { a: 'move.force', uid: u.uid });
+    // The owner of the registry (after checking with the user, e.g. over GitHub) arms a forced move. v0.12
+    // review H3: with no move waiting, the force is bound to the new PC's key (read from its security code).
+    assert.equal((await adminCall(reg, owner, { a: 'move.force', uid: u.uid })).status, 400, 'no key named: refused');
+    const f = await adminCall(reg, owner, { a: 'move.force', uid: u.uid, ik: k2.ik });
     assert.equal(f.status, 200, JSON.stringify(f.body));
     assert.equal(f.body.state, 'armed');
     // The user's next GitHub-proved move completes at once: no 24 h block, no 72 h wait, no Stop.
@@ -134,16 +136,18 @@ test('REG-M2: a pending move can be forced at once; only the owner may force, ne
     const u = await reg.signUp(6263, 'movingnow');
     const k2 = await startMove(reg, u);
     assert.equal((await adminCall(reg, admin, { a: 'move.force', uid: u.uid })).body.error, 'forbidden', 'an admin may not');
-    const f = await adminCall(reg, owner, { a: 'move.force', uid: u.uid });
+    assert.equal((await adminCall(reg, owner, { a: 'move.force', uid: u.uid })).status, 400, 'the waiting key must be named');
+    const f = await adminCall(reg, owner, { a: 'move.force', uid: u.uid, ik: k2.ik });
     assert.equal(f.status, 200, JSON.stringify(f.body));
     assert.equal(f.body.state, 'done');
     assert.equal((await reg.lookup(owner, { uid: u.uid })).body.ik, k2.ik);
-    assert.equal((await adminCall(reg, owner, { a: 'move.force', uid: owner.uid })).body.error, 'forbidden');
+    assert.equal((await adminCall(reg, owner, { a: 'move.force', uid: owner.uid, ik: makeKeys().ik })).body.error, 'forbidden');
     // Arming expires after 7 days.
     const v = await reg.signUp(6264, 'expires');
-    assert.equal((await adminCall(reg, owner, { a: 'move.force', uid: v.uid })).body.state, 'armed');
+    const vk = makeKeys();
+    assert.equal((await adminCall(reg, owner, { a: 'move.force', uid: v.uid, ik: vk.ik })).body.state, 'armed');
     await reg.clock.advance(8 * DAY);
-    await startMove(reg, v);
+    await startMove(reg, v, vk);
     assert.equal((await reg.lookup(owner, { uid: v.uid })).body.ik, v.k.ik, 'not forced: waits 72 h as usual');
   } finally {
     await reg.close();
@@ -267,7 +271,7 @@ test('REG-L1: a forced move rotates the key at the next fetch (the forced-out de
     const u = await reg.signUp(9193, 'forcedrot');
     const before = await vaultKey(reg, u);
     const k2 = await startMove(reg, u);
-    assert.equal((await adminCall(reg, owner, { a: 'move.force', uid: u.uid })).body.state, 'done');
+    assert.equal((await adminCall(reg, owner, { a: 'move.force', uid: u.uid, ik: k2.ik })).body.state, 'done');
     const after = await vaultKey(reg, { ...u, k: k2 });
     assert.equal(after.body.kid, before.body.kid + 1);
     assert.notEqual(after.body.key, before.body.key);

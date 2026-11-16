@@ -1,7 +1,9 @@
 // "Forgot your password?" without email, for password accounts on a Snug server (v0.12).
 //
 // The recovery key R (js/lib/recovery.js) never reaches the server. The browser
-// derives authKey = HKDF(R, "snug-recovery", "web-auth-v1") and sends only that;
+// derives authKey = HKDF(R, "snug-recovery", "web-auth-v2\n<host name>") and sends only that
+// (v0.12 review, second pass: bound to the host name, so this server's owner can't replay it on
+// another server; a key saved by 0.12.0 used "web-auth-v1" and works, once, until a new one is saved);
 // the server keeps a slow hash of it (scrypt, the same format and work as
 // passwords, so unknown accounts take the same time). The same R also opens the
 // end-to-end encryption backup (deriveBackupKey, a different HKDF label), which
@@ -13,11 +15,12 @@
 // works once; the person makes a new one straight after. Someone who has the key
 // can take the account, as with a password; the screens say so.
 //
-// Limits: per address (the sign-in bucket) and per account (POLICIES.recover:
-// 5 free tries, then waits from 15 minutes that double, kept in SQLite).
+// Limits: per address (the sign-in bucket) and per account and address
+// (POLICIES.recover: 5 free tries, then waits from 15 minutes that double, kept
+// in SQLite). Not per account alone: anyone could lock the owner out that way.
 import { randomBytes, createHash } from 'node:crypto';
 import {
-  verifyPassword, hashPasswordAsync, burnPasswordCheck, passwordProblem, endAllSessions, recentAuth, readCookie, COOKIE, POLICIES, limiter,
+  verifyPassword, hashPasswordAsync, burnPasswordCheck, passwordProblem, endAllSessions, recentAuth, sessionHow, readCookie, COOKIE, POLICIES, limiter,
 } from './auth.js';
 import { forgetPasskeys } from './passkeys.js';
 
@@ -27,7 +30,17 @@ const TICKET_MS = 5 * 60_000;
 const NO_MATCH = 'That username and recovery key don’t match. A recovery key works once: if you used it before, use the newer one you saved then.';
 
 export function migrateRecovery(db) {
-  (db.raw ?? db).exec('CREATE TABLE IF NOT EXISTS recovery (user TEXT PRIMARY KEY, hash TEXT NOT NULL, created INTEGER NOT NULL, used INTEGER)');
+  const raw = db.raw ?? db;
+  raw.exec('CREATE TABLE IF NOT EXISTS recovery (user TEXT PRIMARY KEY, hash TEXT NOT NULL, created INTEGER NOT NULL, used INTEGER)');
+  // v0.12 review, second pass (additive): v = 2 for a proof bound to `host`; NULL = a 0.12.0 key (web-auth-v1).
+  const cols = raw.prepare('PRAGMA table_info(recovery)').all().map((c) => c.name);
+  if (!cols.includes('v')) raw.exec('ALTER TABLE recovery ADD COLUMN v INTEGER');
+  if (!cols.includes('host')) raw.exec('ALTER TABLE recovery ADD COLUMN host TEXT');
+}
+/** The request's host name as the page sees it (location.hostname): lower case, no port. */
+export function hostOf(req) {
+  const h = String(req.headers.host || '').toLowerCase().slice(0, 300);
+  return h.startsWith('[') ? h.replace(/^(\[[^\]]*\]).*$/, '$1') : h.replace(/:\d+$/, '');
 }
 
 export function createRecovery({ db, M, hub, account, sendJson, error, jsonBody, ipOf, authLimit, log = () => {} }) {
@@ -72,18 +85,29 @@ export function createRecovery({ db, M, hub, account, sendJson, error, jsonBody,
       const d = await jsonBody(req);
       const handle = String(d.handle || '').trim().toLowerCase().replace(/^@/, '');
       const proof = typeof d.proof === 'string' ? d.proof : '';
+      const proof1 = typeof d.proof1 === 'string' && VERIFIER.test(d.proof1) ? d.proof1 : null; // a 0.12.0 key's proof
       const nope = () => error(res, 401, NO_MATCH);
       if (!LOGIN_HANDLE.test(handle) || !VERIFIER.test(proof)) { await burnPasswordCheck(proof); M.audit?.('recovery.use', req, null, { ok: false, why: 'unknown' }); nope(); return true; }
       const user = db.get('SELECT id, pass FROM users WHERE handle = ? AND deleted IS NULL', handle);
-      const rec = user && passwordAccount(user.id) ? db.get('SELECT hash FROM recovery WHERE user = ? AND used IS NULL', user.id) : null;
-      const acct = user ? `rec:${user.id}` : `rech:${handle}`;
+      const rec = user && passwordAccount(user.id) ? db.get('SELECT hash, v, host FROM recovery WHERE user = ? AND used IS NULL', user.id) : null;
+      // v0.12 review LM7: wrong tries count per account and address (hashed), so tries from elsewhere can't
+      // lock the owner out. The key is a 160-bit secret: guessing it is hopeless from any number of addresses.
+      const from = createHash('sha256').update(String(ip)).digest('hex').slice(0, 16);
+      const acct = user ? `rec:${user.id}:${from}` : `rech:${handle}:${from}`;
       const wait = G.waitMs(acct, POLICIES.recover);
       if (wait) { M.audit?.('recovery.use', req, user?.id || null, { ok: false, why: 'locked' }); error(res, 429, `Too many tries. Wait ${Math.ceil(wait / 60_000)} minutes and try again.`); return true; }
       // Unknown accounts, accounts with no key and used keys cost the same check as a real one.
-      const ok = rec ? (await verifyPassword(proof, rec.hash)).ok : await burnPasswordCheck(proof);
+      // A v2 key takes only the proof for its host name; a 0.12.0 key takes the old proof (proof1, or proof
+      // from a 0.12.0 page).
+      const ok = rec ? (await verifyPassword(rec.v === 2 ? proof : (proof1 ?? proof), rec.hash)).ok : await burnPasswordCheck(proof);
       if (!ok) {
         G.fail(acct, POLICIES.recover);
         M.audit?.('recovery.use', req, user?.id || null, { ok: false, why: user ? 'proof' : 'unknown' });
+        // Opened at another address of this server than the key was saved at: say where (its own name).
+        if (rec?.v === 2 && rec.host && rec.host !== hostOf(req)) {
+          sendJson(res, 401, { error: `That recovery key was saved at ${rec.host}. Open Snug at that address to use it.`, savedAt: rec.host });
+          return true;
+        }
         nope();
         return true;
       }
@@ -137,16 +161,21 @@ export function createRecovery({ db, M, hub, account, sendJson, error, jsonBody,
     const d = await jsonBody(req);
     if (!passwordAccount(user)) { error(res, 400, 'This account’s recovery key is in Settings > Account.'); return true; }
     if (typeof d.verifier !== 'string' || !VERIFIER.test(d.verifier)) { error(res, 400, 'That recovery key isn’t valid. Make a new one.'); return true; }
-    // Right after signing up, signing in or recovering (10 minutes), the session itself is enough;
-    // later, or whenever a password is typed, the password (and a code) is checked.
-    if (d.password !== undefined || !recentAuth(db, tokenOf(req))) {
-      const r = await M.stepUp(user, { password: d.password, code: typeof d.code === 'string' ? d.code.replace(/\s/g, '') : '', token: tokenOf(req) });
+    // v0.12 review M5: a recovery key resets the password and turns off two-factor sign-in, so the session
+    // alone saves only a first key (or the one after a recovery used the old), and only within 10 minutes
+    // of signing up or recovering. Replacing a key, or any later save, needs the password (and a code).
+    const token = tokenOf(req);
+    const sessionOk = !status(user).set && recentAuth(db, token) && ['register', 'recovery'].includes(sessionHow(db, token));
+    if (d.password !== undefined || !sessionOk) {
+      const r = await M.stepUp(user, { password: d.password, code: typeof d.code === 'string' ? d.code.replace(/\s/g, '') : '', token });
       if (r) { error(res, r.status === 429 ? 429 : 401, r.message); return true; }
     }
     try { M.onRecoverySet?.(user, d); } catch (e) { error(res, 400, e.message); return true; } // e2ee: the backup under the new key, when that ships
     const hash = await hashPasswordAsync(d.verifier);
     const now = Date.now();
-    db.run('INSERT INTO recovery (user, hash, created, used) VALUES (?, ?, ?, NULL) ON CONFLICT (user) DO UPDATE SET hash = excluded.hash, created = excluded.created, used = NULL', user, hash, now);
+    const v2 = d.v === 2; // a proof bound to this host name (js/lib/recovery.js deriveAuthKeyV2)
+    db.run('INSERT INTO recovery (user, hash, created, used, v, host) VALUES (?, ?, ?, NULL, ?, ?) ON CONFLICT (user) DO UPDATE SET hash = excluded.hash, created = excluded.created, used = NULL, v = excluded.v, host = excluded.host',
+      user, hash, now, v2 ? 2 : null, v2 ? hostOf(req) : null);
     M.audit?.('recovery.set', req, user);
     hub.toUser(user, 'account', { recovery: status(user) });
     sendJson(res, 200, { recovery: status(user) });

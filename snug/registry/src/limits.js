@@ -20,6 +20,10 @@ export const DEFAULT_LIMITS = {
   ipVault: [30, HOUR],
   ipPow: [20, HOUR], // v0.12 keypair accounts (keyacct.js): proof-of-work challenges
   ipRegister: [3, DAY], // v0.12: keypair sign-ups per /48 (persisted)
+  // v0.12 review M6: keypair sign-ups per IPv6 /32 (persisted; IPv4: the address). Second pass: not a cap; at
+  // this count in a day the proof of work of that /32 gets harder (keyacct.js wideBits).
+  ipRegisterWide: [20, DAY],
+  ipRegTry: [30, HOUR], // v0.12 review (second pass): sign-up attempts per /48 (memory), name refusals included
   ipMoveWait: [60, MIN], // v0.12: a new PC polling for its pairing code
   // global (SQLite)
   authGlobal: [300, HOUR], // tokens GitHub accepted (REG-M4)
@@ -114,8 +118,7 @@ export class Budgets {
     this.m = new Map(); // key -> {uid, win, kind, n, saved, cap}
     this.dirty = false;
   }
-  _get(uid, kind, ms) {
-    const win = Math.floor(this.now() / ms) * ms;
+  _get(uid, kind, ms, win = Math.floor(this.now() / ms) * ms) {
     const key = `${uid}|${kind}|${win}`;
     let c = this.m.get(key);
     if (!c) {
@@ -133,6 +136,15 @@ export class Budgets {
   value(uid, kind, ms) {
     return this._get(uid, kind, ms).n;
   }
+  /**
+   * A sliding-window estimate (v0.12 review M6): this window's count plus the previous window's, weighted by
+   * how much of it still lies within `ms` of now. It doesn't drop to zero when a window starts.
+   */
+  sliding(uid, kind, ms) {
+    const t = this.now();
+    const win = Math.floor(t / ms) * ms;
+    return this._get(uid, kind, ms, win).n + this._get(uid, kind, ms, win - ms).n * (1 - (t - win) / ms);
+  }
   /** Add `amount` if it fits under `limit`; returns true when allowed. */
   take(uid, kind, [limit, ms], amount = 1) {
     const c = this._get(uid, kind, ms);
@@ -144,6 +156,17 @@ export class Budgets {
       this._store(c, ahead);
     }
     return true;
+  }
+  /** Give one back (a refused call that should not count). The stored value stays ahead: a wake can't refund. */
+  refund(uid, kind, ms) {
+    const c = this._get(uid, kind, ms);
+    if (c.n > 0) c.n -= 1;
+  }
+  /** Count one and store it at once (rare events that must survive a wake, with no cap). */
+  count(uid, kind, ms) {
+    const c = this._get(uid, kind, ms);
+    c.n += 1;
+    this._store(c, c.n);
   }
   /** Add without a cap (usage counters). */
   bump(uid, kind, ms, amount = 1) {

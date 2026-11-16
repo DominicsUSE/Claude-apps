@@ -332,12 +332,16 @@ test('recover: an owner-armed move.force completes at once; an unapproved comple
   const t = await ghTicket(a.k, gid);
   assert.equal(t.status, 'new');
   assert.equal((await sp(u, '/v1/link/github', 'link-github', { ticket: t.ticket })).status, 200);
+  (await connectV(u, '0.12.0')).close(); // connected once, so the purge leaves it
+  await reg.clock.advance(7 * DAY + 1000); // v0.12 review H3: a link works after 7 days
+  assert.equal((await kind(u)).body.github.linked, true);
   // a vault key exists
   const vk = (k, uid) => { const ts = reg.ts(); return reg.call('/v1/vault/key', { uid, ts, p: '{}', sig: k.sign(`snug-reg-v1\nvault-key\n${uid}\n${ts}\n{}`) }); };
   const k1 = await vk(a.k, a.uid);
   assert.equal(k1.status, 200);
-  assert.equal((await adm(owner, { a: 'move.force', uid: a.uid })).body.state, 'armed');
-  const { res, k2 } = await recover(u);
+  const k2 = makeKeys();
+  assert.equal((await adm(owner, { a: 'move.force', uid: a.uid, ik: k2.ik })).body.state, 'armed'); // bound to the new key (H3)
+  const { res } = await recover(u, k2);
   near(res.body.at, reg.clock.now(), 'at');
   const s = await connectV({ uid: a.uid, k: k2 }, '0.12.0');
   assert.equal(s.ready.mode, 'normal');
@@ -397,16 +401,19 @@ test('recovery/set: with the old key at once; without it 7 days later unless the
   assert.equal((await kind(u)).body.move, null);
 });
 
-test('recovery/set: a GitHub account adds a first key at once; a later unapproved GitHub move removes it', async () => {
+test('recovery/set: a GitHub account adds a first key 7 days later; a later unapproved GitHub move removes it', async () => {
   const gh = await reg.signUp(nextGh++, uniq('gale'));
   const nr = makeKeys();
   const ts = reg.ts();
   const msg = `snug-reg-v1\nrecovery-set\n${gh.uid}\n${nr.ik}\n${ts}`;
   const p = JSON.stringify({ rk: nr.ik, rsigNew: nr.sign(msg) });
   const r = await reg.call('/v1/recovery/set', { uid: gh.uid, ts, p, sig: gh.k.sign(`snug-reg-v1\nrecovery-set\n${gh.uid}\n${ts}\n${p}`) });
-  assert.deepEqual(r.body, { state: 'set' });
+  // v0.12 review H3: the device alone adds a second proof only after 7 days (its GitHub sign-in can cancel)
+  assert.equal(r.body.state, 'pending');
+  near(r.body.at, reg.clock.now() + 7 * DAY, 'at');
+  await reg.clock.advance(7 * DAY + 1000);
   const kd = await kind(gh);
-  assert.deepEqual(kd.body, { kind: 'github', recovery: { set: true, pendingAt: null }, github: { linked: true }, move: null });
+  assert.deepEqual(kd.body, { kind: 'github', recovery: { set: true, pendingAt: null, rk: nr.ik }, github: { linked: true, pending: null }, move: null });
   // the recovery key can move a GitHub account too
   const { res } = await recover({ uid: gh.uid, r: nr });
   assert.equal(res.status, 200);
@@ -441,7 +448,13 @@ test('link/github: a new GitHub account becomes a second proof; it can move the 
   const tOwner = await ghTicket(a.k, OWNER_ID);
   if (tOwner.status === 'new') assert.equal((await sp(u, '/v1/link/github', 'link-github', { ticket: tOwner.ticket })).body.error, 'forbidden');
   const t = await ghTicket(a.k, gid);
-  assert.equal((await sp(u, '/v1/link/github', 'link-github', { ticket: t.ticket })).status, 200);
+  const l = await sp(u, '/v1/link/github', 'link-github', { ticket: t.ticket });
+  assert.equal(l.status, 200);
+  // v0.12 review H3: the link works 7 days later (the recovery key can cancel it meanwhile)
+  assert.equal(l.body.state, 'pending');
+  assert.equal((await kind(u)).body.github.linked, false);
+  (await connectV(u, '0.12.0')).close(); // connected once, so the purge leaves it
+  await reg.clock.advance(7 * DAY + 1000);
   assert.equal((await kind(u)).body.github.linked, true);
   // signing in with it finds this account: ok here, rebind elsewhere; claiming with it is refused
   assert.equal((await reg.authId(a.k, gid)).body.status, 'ok');
@@ -454,8 +467,11 @@ test('link/github: a new GitHub account becomes a second proof; it can move the 
   const ghAcc = await reg.signUp(nextGh++, uniq('gab'));
   const tg = await ghTicket(ghAcc.k, nextGh++);
   assert.equal((await sp(ghAcc, '/v1/link/github', 'link-github', { ticket: tg.ticket })).status, 400);
-  // unlink
-  assert.equal((await sp(u, '/v1/link/github/remove', 'unlink-github', {})).status, 200);
+  // unlink: 7 days later too
+  const un = await sp(u, '/v1/link/github/remove', 'unlink-github', {});
+  assert.equal(un.status, 200);
+  assert.equal(un.body.state, 'pending');
+  await reg.clock.advance(7 * DAY + 1000);
   assert.equal((await reg.authId(makeKeys(), gid)).body.status, 'new');
 });
 

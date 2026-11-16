@@ -478,6 +478,7 @@ export async function startServer({
     // v0.10 A/C: srv.notices, srv.vault
     notices, // v0.10 A: announcements, bans, admin rights (server/notices.js)
     vault, // v0.10 C: the data file (server/vault.js)
+    refreshKind: () => keyAuth.refreshKind(), // v0.12: tests read the registry's account kind now (a 0.11.x socket gets no recovery frames)
     dbSnapshots, // sec-registry REG-L6: dbSnapshots?.now() writes a snapshot (tests)
     // For tests: forget every rate limit, the socket ones and the sign-in ones.
     resetLimits: () => { hub.resetLimits(); authLimit.reset(); uploadLimit.reset(); mediaHttp.reset(); accountHttp.reset(); passkeys.reset(); recovery.reset(); openLimit.reset(); inviteLimit.reset(); cspLimit.reset(); sec.reset(); }, // sec-web: openLimit, inviteLimit, cspLimit, sec

@@ -7,8 +7,9 @@
 // an admin can't change their own rights or ban themselves.
 import { check, normalize, skeleton, SHORT_NAMES } from '../../js/lib/usernames.js';
 import { randomId } from './crypto.js';
-import { fail, need, isUid, rawName, isUnique, isSemver, semverCmp } from './common.js';
+import { fail, need, isUid, isKey, rawName, isUnique, isSemver, semverCmp } from './common.js';
 import { DAY } from './limits.js';
+import { normFp } from './keyacct.js';
 
 export const ADMIN_SCHEMA = [
   'CREATE TABLE IF NOT EXISTS admins (uid TEXT PRIMARY KEY, perms TEXT NOT NULL, by TEXT NOT NULL, at INTEGER NOT NULL)',
@@ -144,6 +145,7 @@ export const AdminMixin = {
   adminSweep(t) {
     this.sql.exec('DELETE FROM bans WHERE until IS NOT NULL AND until<=?', t);
     this.sql.exec('DELETE FROM move_force WHERE until<=?', t);
+    this.sql.exec('DELETE FROM move_force_key WHERE ghh NOT IN (SELECT ghh FROM move_force)');
     this.sql.exec('DELETE FROM forced_old WHERE until<=?', t);
     const gone = this.sql.exec('DELETE FROM announcements WHERE until IS NOT NULL AND until<=?', t).rowsWritten;
     if (gone) this._notices = null;
@@ -153,6 +155,7 @@ export const AdminMixin = {
   async admin(b, ip) {
     this.ipLimit('ipAdmin', ip);
     await this.owners();
+    const pendFp = await this.pendingFpFor(b); // move.force {fp}: the waiting move's security code (keyacct.js)
     return this.signedP(b, 'admin', { mutating: true }, (acc, d) => {
       need(typeof d.a === 'string' && Object.hasOwn(ACTIONS, d.a));
       const spec = ACTIONS[d.a];
@@ -162,7 +165,7 @@ export const AdminMixin = {
       const wanted = [].concat(spec.perm);
       if (!wanted.some((p) => perms.includes(p))) fail('forbidden');
       this.refuseBanned(acc.uid);
-      const ctx = { acc, owner: this.isOwnerAcc(acc), target: null, detail: null };
+      const ctx = { acc, owner: this.isOwnerAcc(acc), target: null, detail: null, pendFp };
       const out = this.tx(() => {
         const r = this[`adm_${d.a.replace('.', '_')}`](d, ctx);
         if (!spec.read) this.audit(acc.uid, d.a, ctx.target, ctx.detail ?? argsOf(d));
@@ -447,34 +450,56 @@ export const AdminMixin = {
   },
 
   /**
-   * sec-registry REG-M2. {uid}: a pending move completes now (unapproved: prev = null, so friends see a loud
-   * key change). With no pending move, the account's next move (it needs a fresh GitHub sign-in) within 7
-   * days completes at once, past the 24 h block and the old key's Stop. Owner only; never on the owner.
+   * sec-registry REG-M2. {uid, fp | ik}: a pending move completes now (unapproved: prev = null, so friends
+   * see a loud key change). v0.12 review H3: the force is bound to one key, fp (the security code the new
+   * PC shows) or ik (its device key): the account's next move of exactly that key within 7 days completes at
+   * once, past the 24 h block and the old key's Stop; a move of that key already waiting completes now.
+   * Moves of any other key get the normal wait. Second pass: {uid} alone is refused (bad_request), since
+   * someone with the recovery key or the GitHub login can swap their own key into the waiting move between
+   * the owner checking the account and running the force.
+   * Owner only; never on the owner.
    */
   adm_move_force(d, ctx) {
     if (!ctx.owner) fail('forbidden');
+    if (d.ik !== undefined) need(isKey(d.ik));
+    const fp = d.fp === undefined ? null : normFp(d.fp);
+    if (d.fp !== undefined) need(fp && d.ik === undefined);
+    const bind = d.ik !== undefined ? `ik:${d.ik}` : fp ? `fp:${fp}` : null;
+    if (!bind) fail('bad_request', { message: 'Name the new PC: fp (its security code) or ik.' });
     const t = this.targetAcc(d.uid, ctx);
     const now = this.now();
-    if (this.pending(t.uid)) {
+    const p = this.pending(t.uid);
+    const same = bind === `ik:${p?.ik}` || (ctx.pendFp?.ik === p?.ik && bind === `fp:${ctx.pendFp?.fp}`);
+    if (p && same) {
       ctx.detail = { state: 'done' };
       this.markForcedOld(t);
       this.markVaultRotate(t.ghh); // REG-L1: the forced-out device holds the old vault key
       ctx.after = () => this.completeRebind(t.uid, null);
       return { state: 'done' };
     }
-    this.sql.exec('INSERT OR REPLACE INTO move_force(ghh, until, by, at) VALUES(?,?,?,?)', t.ghh, now + FORCE_FOR, ctx.acc.uid, now);
-    this.metaUpsert(t.ghh, 'rebind_block_until', null);
-    ctx.detail = { state: 'armed', until: now + FORCE_FOR };
+    this.tx(() => {
+      this.sql.exec('INSERT OR REPLACE INTO move_force(ghh, until, by, at) VALUES(?,?,?,?)', t.ghh, now + FORCE_FOR, ctx.acc.uid, now);
+      this.sql.exec('INSERT OR REPLACE INTO move_force_key(ghh, k) VALUES(?,?)', t.ghh, bind);
+      this.metaUpsert(t.ghh, 'rebind_block_until', null);
+    });
+    ctx.detail = { state: 'armed', until: now + FORCE_FOR, key: bind };
     return { state: 'armed', until: now + FORCE_FOR };
   },
   markForcedOld(acc) {
     this.sql.exec('INSERT OR REPLACE INTO forced_old(uid, ik, until) VALUES(?,?,?)', acc.uid, acc.ik, this.now() + 31 * DAY);
   },
-  /** A forced move armed for this GitHub account (used once), or null. */
-  takeMoveForce(ghh) {
+  /**
+   * A forced move armed for this account and the moving key (ik, and fp: its security code), used once, or
+   * null. A force bound to another key stays armed for it; one armed before forces were bound to a key (no
+   * move_force_key row) applies to no move (v0.12 review H3).
+   */
+  takeMoveForce(ghh, ik, fp) {
     const r = this.row('SELECT * FROM move_force WHERE ghh=?', ghh);
     if (!r) return null;
+    const k = this.row('SELECT k FROM move_force_key WHERE ghh=?', ghh)?.k;
+    if (!k || (k !== `ik:${ik}` && !(fp && k === `fp:${fp}`))) return null;
     this.sql.exec('DELETE FROM move_force WHERE ghh=?', ghh);
+    this.sql.exec('DELETE FROM move_force_key WHERE ghh=?', ghh);
     return r.until > this.now() ? r : null;
   },
 

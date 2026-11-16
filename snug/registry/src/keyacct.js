@@ -13,11 +13,15 @@
 //
 // Concurrency rule (hub.js): every read-check-write happens in one synchronous block after the last await.
 import { check, normalize, skeleton } from '../../js/lib/usernames.js';
-import { b64u, sha256, hmacHex, verifyEd25519, randomBytes, randomId } from './crypto.js';
+import { b64u, fromB64u, sha256, hmacHex, verifyEd25519, randomBytes, randomId } from './crypto.js';
 import {
   fail, need, ID_RE, isUid, isKey, isSig, isTs, rawName, isUnique, semverCmp, isSemver, REBIND_DELAY, REBIND_BLOCK, KNOCK_TTL, MAX_KNOCK_BOX,
 } from './common.js';
 import { MIN, DAY } from './limits.js';
+import { ApiError } from './common.js';
+
+// Errors about the name itself (usernames.js check() codes, and the registry's own name rules).
+const NAME_ERRORS = new Set(['invalid_name', 'taken', 'reserved', 'too_new', 'owner_only']);
 
 export const KEY_SCHEMA = [
   // the recovery key of an account (keypair accounts always have one; GitHub accounts may add one)
@@ -36,11 +40,19 @@ export const KEY_SCHEMA = [
   // proof-of-work challenges already used (until they expire)
   'CREATE TABLE IF NOT EXISTS pow_spent (h TEXT PRIMARY KEY, exp INTEGER NOT NULL)',
   'CREATE INDEX IF NOT EXISTS key_meta_new ON key_meta(first_auth, created)',
+  // v0.12 review H3: a GitHub link change made by the device alone (ghh = link that GitHub account, NULL =
+  // unlink). It takes effect at `at` unless the recovery key cancels it (/v1/recovery/cancel).
+  'CREATE TABLE IF NOT EXISTS link_pending (uid TEXT PRIMARY KEY, ghh TEXT, at INTEGER NOT NULL, created INTEGER NOT NULL)',
+  // v0.12 review H3: the one device key an armed move.force completes a move for (admin.js takeMoveForce):
+  // k = "ik:<device key>" or "fp:<its security code, 32 characters>"
+  'CREATE TABLE IF NOT EXISTS move_force_key (ghh TEXT PRIMARY KEY, k TEXT NOT NULL)',
 ];
 
 // Additive error codes: 0.11 clients never call the routes that return them.
-export const KEY_STATUS = { pow_invalid: 400, too_new: 409, key_in_use: 409, recovery_pending: 409, move_pending: 409 };
+export const KEY_STATUS = { pow_invalid: 400, too_new: 409, key_in_use: 409, recovery_pending: 409, move_pending: 409, link_too_new: 409, already_linked: 409 };
 export const KEY_MESSAGES = {
+  already_linked: 'A GitHub account is already linked. Unlink it first.',
+  link_too_new: 'That GitHub account was linked recently. Try again later, or use the recovery key.',
   pow_invalid: 'The setup check failed. Try again.',
   too_new: 'New accounts can do that later.',
   key_in_use: 'That key already belongs to an account.',
@@ -59,6 +71,7 @@ export const KEY_ROUTES = {
   '/v1/move/accept': 'moveAccept',
   '/v1/recovery/set': 'recoverySet',
   '/v1/recovery/cancel': 'recoveryCancel',
+  '/v1/recovery/whose': 'recoveryWhose',
   '/v1/link/github': 'linkGithub',
   '/v1/link/github/remove': 'unlinkGithub',
   '/v1/release/key': 'releaseKey',
@@ -73,6 +86,9 @@ const POW_MAX = 28;
 const MOVE_CODE_TTL = 10 * MIN;
 const MOVE_TRIES = 5;
 const RECOVERY_DELAY = 7 * DAY;     // a recovery key set without the old one
+const PROOF_DELAY = RECOVERY_DELAY; // v0.12 review H3: any second proof the device adds or removes alone
+const POW_SLACK = 1;                // v0.12 review M6: bits a challenge may lag the difficulty at sign-up
+const WIDE_SLACK = 2;               // and bits it may lag the extra work of a busy IPv6 /32 (second pass)
 const NEW_FOR = 72 * 3_600_000;     // smaller budgets for this long after registration
 const FIRST_RENAME_AFTER = 7 * DAY;
 const SHORT_NAME_AFTER = 30 * DAY;  // names of 2 or 3 characters
@@ -100,6 +116,30 @@ function earlyP(b) {
   } catch {
     return null;
   }
+}
+
+/** A security code as people type it -> its 32 characters (upper case, no spaces), or null. */
+export function normFp(s) {
+  if (typeof s !== 'string' || s.length > 64) return null;
+  const c = s.toUpperCase().replace(/[\s-]+/g, '');
+  return /^[A-Z2-7]{32}$/.test(c) ? c : null;
+}
+/** The security code the app shows for a device key (server/peercrypto.js fingerprint), without spaces. */
+export async function keyFp(ik, xk) {
+  const a = fromB64u(ik);
+  const x = fromB64u(xk);
+  const buf = new Uint8Array(a.length + x.length);
+  buf.set(a);
+  buf.set(x, a.length);
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', buf));
+  const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = 0, v = 0, out = '';
+  for (const b of d) {
+    v = (v << 8) | b;
+    bits += 8;
+    while (bits >= 5) { out += B32[(v >>> (bits - 5)) & 31]; bits -= 5; }
+  }
+  return out.slice(0, 32);
 }
 
 /** Leading zero bits of a digest. */
@@ -135,11 +175,36 @@ export const KeyAcctMixin = {
     else this.sql.exec('DELETE FROM pending_via WHERE uid=?', uid);
   },
   linkedGhh(uid) {
+    this.applyLinks();
     return this.row('SELECT ghh FROM gh_links WHERE uid=?', uid)?.ghh ?? null;
   },
   /** The keypair account a GitHub account is linked to, as a raw row (accountByGhh settles it). */
   linkedAccount(ghh) {
+    this.applyLinks();
     return this.row('SELECT a.* FROM gh_links g JOIN accounts a ON a.uid=g.uid WHERE g.ghh=?', ghh);
+  },
+  /** Link changes whose wait is over take effect (lazily, as settle() does for moves, and from the alarm). */
+  applyLinks(t = this.now()) {
+    for (const r of this.rows('SELECT * FROM link_pending WHERE at<=? LIMIT 50', t)) {
+      this.tx(() => {
+        this.sql.exec('DELETE FROM link_pending WHERE uid=?', r.uid);
+        if (r.ghh === null) {
+          this.sql.exec('DELETE FROM gh_links WHERE uid=?', r.uid);
+          return;
+        }
+        // That GitHub account became someone's account or link meanwhile: the change lapses.
+        if (this.row('SELECT 1 AS x FROM accounts WHERE ghh=? UNION SELECT 1 FROM gh_links WHERE ghh=? AND uid<>?', r.ghh, r.ghh, r.uid)) return;
+        // v0.12 review H3 (second pass): at = when it took effect, not when it was asked for, so a link the
+        // device added alone can't delete the account (/v1/release) until another wait has passed.
+        this.sql.exec('INSERT OR REPLACE INTO gh_links(uid,ghh,at) VALUES(?,?,?)', r.uid, r.ghh, r.at);
+      });
+      this.sendNew(r.uid, { t: 'recovery', state: 'github' }); // a 0.12 app reads /v1/account/kind again
+    }
+  },
+  /** v0.12 review H3: deleting through a linked GitHub needs a link at least as old as the wait. */
+  refuseYoungLink(uid) {
+    const at = this.row('SELECT at FROM gh_links WHERE uid=?', uid)?.at ?? 0;
+    if (at > this.now() - PROOF_DELAY) fail('link_too_new', { retryAt: at + PROOF_DELAY });
   },
   /** True when k is already some account's device key (current or pending) or recovery key. */
   keyInUse(k, exceptUid = null) {
@@ -149,6 +214,35 @@ export const KeyAcctMixin = {
   },
   liveCode(h) {
     return this.row('SELECT * FROM move_codes WHERE h=? AND exp>? AND done IS NULL', h, this.now());
+  },
+  /**
+   * v0.12 review H3 (second pass): an optional `rsig` on a signedP call, by the account's current recovery key
+   * over the same string the device key signs. Returns that recovery key (to re-check synchronously), or null
+   * when the call has no rsig. A wrong one fails.
+   */
+  async coSigned(b, op) {
+    if (b.rsig === undefined) return null;
+    need(isUid(b.uid) && isTs(b.ts) && typeof b.p === 'string' && isSig(b.rsig));
+    const cur0 = this.rkOf(b.uid);
+    if (!cur0 || !(await verifyEd25519(cur0, b.rsig, `snug-reg-v1\n${op}\n${b.uid}\n${b.ts}\n${b.p}`))) fail('bad_signature');
+    return cur0;
+  },
+  /** {key, link}: which waiting changes a cancel names (what = 'key' | 'link'; none = both, as 0.12.0 sent). */
+  cancelWhat(what) {
+    if (what === undefined) return { key: true, link: true, sfx: '' };
+    need(what === 'key' || what === 'link');
+    return { key: what === 'key', link: what === 'link', sfx: `\n${what}` };
+  },
+  dropPendingChanges(uid, w) {
+    if (w.key) this.sql.exec('DELETE FROM recovery_pending WHERE uid=?', uid);
+    if (w.link) this.sql.exec('DELETE FROM link_pending WHERE uid=?', uid);
+  },
+  /** For admin move.force {uid, fp}: {ik, fp} of the move waiting now, computed before the synchronous part. */
+  async pendingFpFor(b) {
+    const d = earlyP(b);
+    if (!d || d.a !== 'move.force' || d.fp === undefined || !isUid(d.uid)) return null;
+    const p = this.pending(d.uid);
+    return p ? { ik: p.ik, fp: await keyFp(p.ik, p.xk) } : null;
   },
   /** A keypair account in its first 72 hours gets the smaller budgets (L.new*). */
   limitFor(acc, kind) {
@@ -162,7 +256,7 @@ export const KeyAcctMixin = {
   },
   /** Every row of the new tables for uid (release, delete, purge). */
   dropKeyRows(uid) {
-    for (const t of ['recovery_keys', 'recovery_pending', 'gh_links', 'key_meta', 'pending_via']) this.sql.exec(`DELETE FROM ${t} WHERE uid=?`, uid);
+    for (const t of ['recovery_keys', 'recovery_pending', 'gh_links', 'key_meta', 'pending_via', 'link_pending', 'signer_ts']) this.sql.exec(`DELETE FROM ${t} WHERE uid=?`, uid);
   },
   /** Delete an account outright (release with the recovery key, never-connected purge). */
   dropAccount(acc) {
@@ -179,8 +273,18 @@ export const KeyAcctMixin = {
   // ---------- proof of work ----------
   powBits() {
     const base = Math.min(POW_MAX, Math.max(1, Math.floor(Number(this.env.POW_BITS) || 20)));
-    const n = this.budgets.value('*', 'reg', this.L.regGlobal[1]);
+    const n = this.budgets.sliding('*', 'reg', this.L.regGlobal[1]); // v0.12 review M6: no drop on the hour
     return Math.min(POW_MAX, base + (n > 30 ? Math.ceil(Math.log2(n / 30)) : 0));
+  },
+  /**
+   * v0.12 review M6, second pass: extra bits for an IPv6 /32 (IPv4: the address) that made L.ipRegisterWide[0]
+   * or more sign-ups in the last day. Not a refusal: a whole tunnel broker or mobile carrier can share one
+   * /32, so its sign-ups get slower (2 more bits at the count, 2 more each time it doubles), never blocked.
+   */
+  wideBits(ip) {
+    const [w, ms] = this.L.ipRegisterWide;
+    const n = this.budgets.sliding(`ip:${this.ipKeyOf('ipRegisterWide', ip)}`, 'ipRegisterWide', ms);
+    return n < w ? 0 : 2 + 2 * Math.floor(Math.log2(n / w));
   },
   async powMac(exp, bits, rand) {
     return (await hmacHex(this.secret(), `pow\nregister\n${exp}\n${bits}\n${rand}`)).slice(0, 32);
@@ -188,12 +292,12 @@ export const KeyAcctMixin = {
   async pow(b, ip) {
     this.ipLimit('ipPow', ip);
     need(b.purpose === 'register');
-    const bits = this.powBits();
+    const bits = Math.min(POW_MAX, this.powBits() + this.wideBits(ip));
     const exp = this.now() + POW_TTL;
     const rand = b64u(randomBytes(16));
     return { c: `1.${exp}.${bits}.${rand}.${await this.powMac(exp, bits, rand)}`, bits, exp };
   },
-  /** Checks a solved challenge (MAC, expiry, the work itself); returns its exp. Spent-ness is checked later, synchronously. */
+  /** Checks a solved challenge (MAC, expiry, the work itself); returns {exp, bits}. Spent-ness and the current difficulty are checked later, synchronously. */
   async powCheck(c, ik, nonce) {
     const parts = typeof c === 'string' ? c.split('.') : [];
     if (parts.length !== 5 || parts[0] !== '1') fail('pow_invalid');
@@ -205,19 +309,31 @@ export const KeyAcctMixin = {
     if (mac !== await this.powMac(exp, bits, rand)) fail('pow_invalid');
     const d = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(powInput(c, ik, nonce))));
     if (zeroBits(d) < bits) fail('pow_invalid');
-    return exp;
+    return { exp, bits };
   },
 
   // ---------- POST /v1/register ----------
   async register(b, ip) {
+    this.ipLimit('ipRegTry', ip); // in memory: bounds the tries the refund below gives back
     this.ipLimit('ipAccount', ip);
-    this.ipLimit('ipRegister', ip);
+    // v0.12 review: the daily sign-ups of an address are spent only by a sign-up that worked.
+    this.ipFull('ipRegister', ip);
+    try {
+      return await this.registerIn(b, ip);
+    } catch (e) {
+      // Second pass: a mistyped or taken name gives back the ipAccount allowance it shares with claim, rebind
+      // and recover, so picking a name can't use those up.
+      if (e instanceof ApiError && NAME_ERRORS.has(e.code)) this.ipRefund('ipAccount', ip);
+      throw e;
+    }
+  },
+  async registerIn(b, ip) {
     const { ik, xk, rk, username, c, nonce, ts, sig, rsig } = b;
     need(isKey(ik) && isKey(xk) && isKey(rk) && rk !== ik && rk !== xk && ik !== xk && isTs(ts) && isSig(sig) && isSig(rsig));
     need(typeof c === 'string' && c.length <= 200 && typeof nonce === 'string' && /^\d{1,20}$/.test(nonce));
     need(typeof username === 'string');
     if (!rawName(username)) fail('invalid_name');
-    this.fresh(ts);
+    this.freshMut(ts); // ts becomes the device key's replay counter
     const name = normalize(username);
     const ce = check(name, { owner: false });
     if (ce) fail(ce);
@@ -225,14 +341,19 @@ export const KeyAcctMixin = {
     if (name.length <= 3) fail('too_new', { what: 'short_name' });
     const skel = skeleton(name);
     if (this.reservedHit(name, skel)) fail('reserved');
-    const exp = await this.powCheck(c, ik, nonce);
+    const { exp, bits } = await this.powCheck(c, ik, nonce);
     const msg = registerStr({ ik, xk, rk, username, c, nonce, ts });
     if (!(await verifyEd25519(ik, sig, msg)) || !(await verifyEd25519(rk, rsig, msg))) fail('bad_signature');
     const ch = await sha256(c);
     // --- synchronous from here ---
     if (this.row('SELECT 1 AS x FROM pow_spent WHERE h=?', ch)) fail('pow_invalid');
+    // v0.12 review M6: the difficulty when the challenge was issued may have risen since (a sign-up wave), and
+    // (second pass) a challenge from another address or before its /32 got busy is short of that /32's extra bits.
+    if (bits < this.powBits() - POW_SLACK + Math.max(0, this.wideBits(ip) - WIDE_SLACK)) fail('pow_invalid');
     if (this.keyInUse(ik) || this.keyInUse(rk) || this.keyInUse(xk)) fail('key_in_use');
-    if (!this.budgets.take('*', 'reg', this.L.regGlobal)) fail('rate_limited', { retryAfter: this.retryAfter(this.L.regGlobal[1]) });
+    // Budgets are checked here and spent only once the account row exists (a taken name spends nothing).
+    this.ipFull('ipRegister', ip);
+    if (this.budgets.sliding('*', 'reg', this.L.regGlobal[1]) >= this.L.regGlobal[0]) fail('rate_limited', { retryAfter: this.retryAfter(this.L.regGlobal[1]) });
     const now = this.now();
     for (let i = 0; ; i++) {
       const uid = randomId(16);
@@ -247,6 +368,10 @@ export const KeyAcctMixin = {
           this.sql.exec('INSERT INTO key_meta(uid,created,first_auth,seen) VALUES(?,?,NULL,NULL)', uid, now);
           this.sql.exec('INSERT INTO pow_spent(h,exp) VALUES(?,?)', ch, exp);
         });
+        // checked above in this same synchronous block, so these can't fail
+        this.budgets.take('*', 'reg', this.L.regGlobal);
+        this.ipSpend('ipRegister', ip);
+        this.budgets.count(`ip:${this.ipKeyOf('ipRegisterWide', ip)}`, 'ipRegisterWide', this.L.ipRegisterWide[1]); // no cap: wideBits()
         this.ensureAlarm(Math.min(exp, now + NEVER_CONNECTED));
         return { account: this.view(this.row('SELECT * FROM accounts WHERE uid=?', uid)) };
       } catch (e) {
@@ -259,6 +384,24 @@ export const KeyAcctMixin = {
     }
   },
 
+  /**
+   * v0.12 review, second pass: {rk, ts, rsig} -> {uid} of the account whose current recovery key rk is, so a
+   * PC that still holds an account can tell its own account's key (one replaced elsewhere) from another
+   * account's before /v1/recover starts a move. Only the key's holder can ask (rsig by rk over
+   * "snug-reg-v1\nrecovery-whose\n<rk>\n<ts>"); nothing changes.
+   */
+  async recoveryWhose(b, ip) {
+    this.ipLimit('ipLookup', ip);
+    const { rk, ts, rsig } = b;
+    need(isKey(rk) && isTs(ts) && isSig(rsig));
+    this.fresh(ts);
+    if (!this.row('SELECT 1 AS x FROM recovery_keys WHERE rk=?', rk)) fail('not_found');
+    if (!(await verifyEd25519(rk, rsig, `snug-reg-v1\nrecovery-whose\n${rk}\n${ts}`))) fail('bad_signature');
+    const r = this.row('SELECT uid FROM recovery_keys WHERE rk=?', rk);
+    if (!r || !this.accountByUid(r.uid)) fail('not_found');
+    return { uid: r.uid };
+  },
+
   // ---------- POST /v1/recover: the old PC is lost; the recovery key starts a 72 h move ----------
   async recover(b, ip) {
     this.ipLimit('ipAccount', ip);
@@ -269,6 +412,7 @@ export const KeyAcctMixin = {
     if (!r0) fail('not_found');
     const msg = recoverStr({ rk, ik, xk, ts });
     if (!(await verifyEd25519(rk, rsig, msg)) || !(await verifyEd25519(ik, sig, msg))) fail('bad_signature');
+    const fp = await keyFp(ik, xk); // for a move.force bound to a security code
     // --- synchronous from here ---
     const r = this.row('SELECT uid FROM recovery_keys WHERE rk=?', rk);
     const acc = r && r.uid === r0.uid ? this.accountByUid(r.uid) : null;
@@ -277,8 +421,9 @@ export const KeyAcctMixin = {
     if (acc.ik === ik) fail('bad_request');
     if (this.keyInUse(ik, acc.uid) || this.keyInUse(xk)) fail('key_in_use');
     const now = this.now();
-    // An owner-armed recovery (admin move.force) completes this move at once, as for a GitHub-proved one.
-    const forced = this.row('SELECT 1 AS x FROM move_force WHERE ghh=? AND until>?', acc.ghh, now) && this.takeMoveForce(acc.ghh);
+    // An owner-armed recovery (admin move.force) completes this move at once, as for a GitHub-proved one,
+    // and only for the key it was armed for (v0.12 review H3).
+    const forced = this.row('SELECT 1 AS x FROM move_force WHERE ghh=? AND until>?', acc.ghh, now) && this.takeMoveForce(acc.ghh, ik, fp);
     if (forced) {
       this.tx(() => {
         this.sql.exec('INSERT OR REPLACE INTO pending_rebind(uid,ik,xk,at,created) VALUES(?,?,?,?,?)', acc.uid, ik, xk, now, now);
@@ -438,7 +583,9 @@ export const KeyAcctMixin = {
       if (cur && !withOld && recMove) fail('move_pending');
       if (!this.budgets.take(acc.uid, 'recSet', this.L.recSet)) fail('rate_limited', { retryAfter: this.retryAfter(this.L.recSet[1]) });
       const now = this.now();
-      if (!cur || withOld) {
+      // With the current key too: at once. Without it, and (v0.12 review H3) also for a GitHub account's first
+      // key, it waits 7 days: the current recovery key, or a GitHub account's own GitHub sign-in, cancels it.
+      if (withOld) {
         this.tx(() => {
           this.sql.exec('INSERT OR REPLACE INTO recovery_keys(uid,rk,at) VALUES(?,?,?)', acc.uid, pre.rk, now);
           this.sql.exec('DELETE FROM recovery_pending WHERE uid=?', acc.uid);
@@ -462,58 +609,122 @@ export const KeyAcctMixin = {
     });
   },
 
-  /** The current recovery key stops a new one set by the device alone. */
+  /**
+   * The current recovery key stops what the device did alone: a new recovery key, and (v0.12 review H3) a
+   * GitHub link or unlink that is waiting. Or {ticket, ts, sig}: a GitHub account's own fresh GitHub sign-in
+   * (sig by the ticket's key over "snug-reg-v1\nrecovery-cancel-gh\n<ticket>\n<ts>") stops a recovery key its
+   * device set alone, its first one included.
+   */
   async recoveryCancel(b, ip) {
     this.ipLimit('ipAccount', ip);
+    const w = this.cancelWhat(b.what);
+    if (b.ticket !== undefined) return this.recoveryCancelGh(b, w);
     const { uid, ts, rsig } = b;
     need(isUid(uid) && isTs(ts) && isSig(rsig));
-    this.fresh(ts);
+    this.freshMut(ts);
     const cur0 = this.rkOf(uid);
     if (!cur0) fail('not_found');
-    if (!(await verifyEd25519(cur0, rsig, `snug-reg-v1\nrecovery-cancel\n${uid}\n${ts}`))) fail('bad_signature');
+    if (!(await verifyEd25519(cur0, rsig, `snug-reg-v1\nrecovery-cancel\n${uid}\n${ts}${w.sfx}`))) fail('bad_signature');
     // --- synchronous from here ---
     const acc = this.accountByUid(uid);
     if (!acc || this.rkOf(uid) !== cur0) fail('bad_signature');
-    if (ts <= acc.last_ts) fail('stale');
-    this.tx(() => {
-      this.sql.exec('UPDATE accounts SET last_ts=? WHERE uid=?', ts, uid);
-      this.sql.exec('DELETE FROM recovery_pending WHERE uid=?', uid);
-    });
-    this.sendNew(uid, { t: 'recovery', state: 'cancelled' });
+    // v0.12 review C1: the recovery key's own replay counter. The device key's (accounts.last_ts) is
+    // untouched, so a copy of the recovery key can't date its calls ahead to make the old PC's Stop stale.
+    this.replayGuard(acc, cur0, ts, () => this.tx(() => this.dropPendingChanges(uid, w)));
+    this.sendNew(uid, { t: 'recovery', state: 'cancelled', ...(b.what ? { what: b.what } : {}) });
     return { ok: true };
+  },
+  /**
+   * A fresh GitHub sign-in (any key may hold the ticket, so a new PC can send it): the GitHub account itself
+   * stops a recovery key its device set alone; (v0.12 review H3, second pass) a keypair account's working
+   * GitHub link stops a recovery key or a GitHub unlink its device asked for alone. With what: only that one.
+   */
+  async recoveryCancelGh(b, w) {
+    const { ticket, ts, sig } = b;
+    return this.withTicket(ticket, ts, sig, () => `snug-reg-v1\nrecovery-cancel-gh\n${ticket}\n${ts}${w.sfx}`, (t, h) => {
+      const own = this.row('SELECT uid FROM accounts WHERE ghh=?', t.ghh);
+      const uid = own?.uid ?? this.linkedAccount(t.ghh)?.uid;
+      if (!uid) fail('not_found');
+      this.tx(() => {
+        this.dropPendingChanges(uid, own ? { key: w.key, link: false } : w);
+        this.sql.exec('DELETE FROM tickets WHERE h=?', h);
+      });
+      this.sendNew(uid, { t: 'recovery', state: 'cancelled', ...(b.what ? { what: b.what } : {}) });
+      return { ok: true };
+    });
   },
 
   // ---------- an optional GitHub link ----------
-  /** p = {ticket}: a fresh /v1/auth/github ticket (status new) issued to this account's current key. */
+  /**
+   * p = {ticket}: a fresh /v1/auth/github ticket (status new) issued to this account's current key.
+   * v0.12 review H3: the link takes effect 7 days later (`{ok, state: "pending", at}`) unless the recovery key
+   * cancels it, so someone with only this PC can't add a GitHub account of their own as a second proof.
+   * Second pass: refused while a GitHub account is linked (already_linked: unlink first, which waits too, and
+   * the linked GitHub can cancel that). With `rsig` (the current recovery key over the same string) it takes
+   * effect at once: `{ok, state: "done"}`.
+   */
   async linkGithub(b, ip) {
     this.ipLimit('ipAccount', ip);
     const pre = earlyP(b);
     need(pre && isKey(pre.ticket));
     const h = await sha256(pre.ticket);
+    const rk0 = await this.coSigned(b, 'link-github');
     return this.signedP(b, 'link-github', { mutating: true }, (acc) => {
       this.refuseBanned(acc.uid);
       if (!isKeyAcc(acc)) fail('bad_request');
+      if (rk0 && this.rkOf(acc.uid) !== rk0) fail('bad_signature');
       const t = this.ticket(h);
       if (!t || t.ik !== acc.ik) fail('bad_ticket');
       if (t.owner) fail('forbidden'); // the owner's GitHub account stays a GitHub account
       if (this.accountByGhh(t.ghh)) fail('already_claimed');
-      try {
+      if (this.linkedGhh(acc.uid)) fail('already_linked');
+      const now = this.now();
+      if (rk0) {
         this.tx(() => {
-          this.sql.exec('INSERT OR REPLACE INTO gh_links(uid,ghh,at) VALUES(?,?,?)', acc.uid, t.ghh, this.now());
+          this.sql.exec('DELETE FROM link_pending WHERE uid=?', acc.uid);
+          this.sql.exec('INSERT INTO gh_links(uid,ghh,at) VALUES(?,?,?)', acc.uid, t.ghh, now);
           this.sql.exec('DELETE FROM tickets WHERE h=?', h);
         });
-      } catch (e) {
-        if (isUnique(e)) fail('already_claimed');
-        throw e;
+        this.sendNew(acc.uid, { t: 'recovery', state: 'github' });
+        return { ok: true, state: 'done' };
       }
-      return { ok: true };
+      const at = now + PROOF_DELAY;
+      this.tx(() => {
+        this.sql.exec('INSERT OR REPLACE INTO link_pending(uid,ghh,at,created) VALUES(?,?,?,?)', acc.uid, t.ghh, at, now);
+        this.sql.exec('DELETE FROM tickets WHERE h=?', h);
+      });
+      this.sendNew(acc.uid, { t: 'recovery', state: 'link', at });
+      this.ensureAlarm(at);
+      return { ok: true, state: 'pending', at };
     });
   },
+  /**
+   * Unlink: a link still waiting is dropped at once; a working one goes 7 days later unless the recovery key
+   * or the linked GitHub cancels (H3). With `rsig` (the current recovery key, second pass) it goes at once.
+   */
   async unlinkGithub(b, ip) {
     this.ipLimit('ipAccount', ip);
+    const rk0 = await this.coSigned(b, 'unlink-github');
     return this.signedP(b, 'unlink-github', { mutating: true }, (acc) => {
-      this.sql.exec('DELETE FROM gh_links WHERE uid=?', acc.uid);
-      return { ok: true };
+      if (rk0 && this.rkOf(acc.uid) !== rk0) fail('bad_signature');
+      this.sql.exec('DELETE FROM link_pending WHERE uid=? AND ghh IS NOT NULL', acc.uid);
+      if (!this.linkedGhh(acc.uid)) return { ok: true, state: 'done' };
+      if (rk0) {
+        this.tx(() => {
+          this.sql.exec('DELETE FROM link_pending WHERE uid=?', acc.uid);
+          this.sql.exec('DELETE FROM gh_links WHERE uid=?', acc.uid);
+        });
+        this.sendNew(acc.uid, { t: 'recovery', state: 'github' });
+        return { ok: true, state: 'done' };
+      }
+      const old = this.row('SELECT at FROM link_pending WHERE uid=?', acc.uid);
+      if (old) return { ok: true, state: 'pending', at: old.at };
+      const now = this.now();
+      const at = now + PROOF_DELAY;
+      this.sql.exec('INSERT INTO link_pending(uid,ghh,at,created) VALUES(?,NULL,?,?)', acc.uid, at, now);
+      this.sendNew(acc.uid, { t: 'recovery', state: 'link', at });
+      this.ensureAlarm(at);
+      return { ok: true, state: 'pending', at };
     });
   },
 
@@ -532,15 +743,25 @@ export const KeyAcctMixin = {
     });
   },
 
+  /**
+   * v0.12 review H3 (second pass): the pending move's key may read this too, so a new PC that is still moving
+   * in sees changes waiting on the account (and can cancel them with the recovery key or GitHub). It is not
+   * told the recovery key's public key.
+   */
   async accountKind(b, ip) {
     this.ipLimit('ipLookup', ip);
-    return this.signedP(b, 'account-kind', { mutating: false }, (acc) => {
+    return this.signedP(b, 'account-kind', { mutating: false, pending: true }, (acc, _p, signer) => {
       const rp = this.row('SELECT at FROM recovery_pending WHERE uid=?', acc.uid);
       const p = this.pending(acc.uid);
+      const key = isKeyAcc(acc);
+      const linked = key && !!this.linkedGhh(acc.uid);
+      const lp = key ? this.row('SELECT ghh, at FROM link_pending WHERE uid=?', acc.uid) : null;
+      const rk = this.rkOf(acc.uid);
       return {
-        kind: isKeyAcc(acc) ? 'key' : 'github',
-        recovery: { set: !!this.rkOf(acc.uid), pendingAt: rp?.at ?? null },
-        github: { linked: isKeyAcc(acc) ? !!this.linkedGhh(acc.uid) : true },
+        kind: key ? 'key' : 'github',
+        // rk: the current recovery key's public key, so the app can tell a key it holds is still the current one
+        recovery: { set: !!rk, pendingAt: rp?.at ?? null, ...(signer === acc.ik ? { rk } : {}) },
+        github: { linked: key ? linked : true, pending: lp ? { change: lp.ghh === null ? 'unlink' : 'link', at: lp.at } : null },
         move: p ? { via: this.viaOf(acc.uid), at: p.at } : null,
       };
     });
@@ -557,11 +778,17 @@ export const KeyAcctMixin = {
     const via = this.viaOf(acc.uid);
     if (!prev) {
       if (isKeyAcc(acc) && via === 'recovery') this.sql.exec('DELETE FROM gh_links WHERE uid=?', acc.uid);
-      if (!isKeyAcc(acc) && via === 'github') {
-        this.sql.exec('DELETE FROM recovery_keys WHERE uid=?', acc.uid);
-        this.sql.exec('DELETE FROM recovery_pending WHERE uid=?', acc.uid);
-      }
+      if (!isKeyAcc(acc) && via === 'github') this.sql.exec('DELETE FROM recovery_keys WHERE uid=?', acc.uid);
+      // v0.12 review H3: changes to the second proof that the device left behind asked for alone go with it.
+      this.sql.exec('DELETE FROM recovery_pending WHERE uid=?', acc.uid);
+      this.sql.exec('DELETE FROM link_pending WHERE uid=?', acc.uid);
       this.markVaultRotate(acc.ghh);
+    }
+    // v0.12 review (purge): the new PC gets its own 7 days to connect, counted from the move.
+    if (isKeyAcc(acc)) {
+      const t = this.now();
+      this.sql.exec('UPDATE key_meta SET created=? WHERE uid=? AND first_auth IS NULL', t, acc.uid);
+      this.sql.exec('UPDATE key_meta SET seen=? WHERE uid=? AND seen IS NOT NULL', t, acc.uid);
     }
     this.setVia(acc.uid, null);
   },
@@ -599,22 +826,27 @@ export const KeyAcctMixin = {
         this.sql.exec('DELETE FROM recovery_pending WHERE uid=?', r.uid); // that key went to someone else meanwhile
       }
     }
+    this.applyLinks(t);
     this.sql.exec('DELETE FROM move_codes WHERE exp<=?', t);
     this.sql.exec('DELETE FROM pow_spent WHERE exp<=?', t);
-    // Accounts whose device never connected within 7 days free their names. Banned ones are kept.
+    // Accounts whose device never connected within 7 days free their names. Banned ones are kept, and so
+    // (v0.12 review) are accounts with a move waiting: the person may be recovering a lost PC.
     const gone = this.rows(`SELECT a.* FROM key_meta m JOIN accounts a ON a.uid=m.uid
-      WHERE m.first_auth IS NULL AND m.created<=? AND m.uid NOT IN (SELECT uid FROM bans) LIMIT 200`, t - NEVER_CONNECTED);
+      WHERE m.first_auth IS NULL AND m.created<=? AND m.uid NOT IN (SELECT uid FROM bans)
+      AND m.uid NOT IN (SELECT uid FROM pending_rebind) LIMIT 200`, t - NEVER_CONNECTED);
     const idleDays = Number(this.env.KEY_ACCOUNT_IDLE_DAYS) || 0;
     if (idleDays > 0) {
       gone.push(...this.rows(`SELECT a.* FROM key_meta m JOIN accounts a ON a.uid=m.uid
-        WHERE m.seen IS NOT NULL AND m.seen<=? AND m.uid NOT IN (SELECT uid FROM bans) LIMIT 200`, t - idleDays * DAY)
+        WHERE m.seen IS NOT NULL AND m.seen<=? AND m.uid NOT IN (SELECT uid FROM bans)
+        AND m.uid NOT IN (SELECT uid FROM pending_rebind) LIMIT 200`, t - idleDays * DAY)
         .filter((a) => !this.normalSocket(a.uid)));
     }
     for (const a of gone) this.dropAccount(a);
     const r = this.row(`SELECT (SELECT MIN(at) FROM recovery_pending) AS rp, (SELECT MIN(exp) FROM move_codes) AS mc,
-      (SELECT MIN(exp) FROM pow_spent) AS ps, (SELECT MIN(created) FROM key_meta WHERE first_auth IS NULL) AS kc`);
+      (SELECT MIN(exp) FROM pow_spent) AS ps, (SELECT MIN(created) FROM key_meta WHERE first_auth IS NULL) AS kc,
+      (SELECT MIN(at) FROM link_pending) AS lp`);
     let next = Infinity;
-    for (const v of [r.rp, r.mc, r.ps, r.kc == null ? null : r.kc + NEVER_CONNECTED]) if (v != null) next = Math.min(next, v);
+    for (const v of [r.rp, r.mc, r.ps, r.lp, r.kc == null ? null : r.kc + NEVER_CONNECTED]) if (v != null) next = Math.min(next, v);
     return next;
   },
 };

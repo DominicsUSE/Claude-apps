@@ -61,3 +61,13 @@ test('recovery file text names the account and says the key can’t be reset', a
   assert.match(t, /2026-11-15/);
   assert.match(t, /can’t reset this key/);
 });
+
+test('recovery: the v2 host proof differs per host name and from the 0.12.0 proof (v0.12 review, second pass)', async () => {
+  const { deriveAuthKeyV2 } = await import('../js/lib/recovery.js');
+  const { raw } = await newRecoveryKey();
+  const hex = (u8) => Buffer.from(u8).toString('hex');
+  const [a, b, c, v1] = await Promise.all([deriveAuthKeyV2(raw, 'snug.example'), deriveAuthKeyV2(raw, 'SNUG.example'), deriveAuthKeyV2(raw, 'other.example'), deriveAuthKey(raw)]);
+  assert.equal(hex(a), hex(b), 'host names are compared in lower case');
+  assert.notEqual(hex(a), hex(c));
+  assert.notEqual(hex(a), hex(v1));
+});

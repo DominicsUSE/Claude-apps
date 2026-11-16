@@ -210,23 +210,47 @@ test('a new recovery key: with the old one at once (the old one stops working); 
   c.close();
 });
 
-test('GitHub as an optional second proof: link, then unlink', async () => {
+test('GitHub as an optional second proof: a link and an unlink each wait 7 days; the recovery key cancels them', async () => {
   const a = await pc();
   const r = await create(a, 'linker');
+  const code = r.data.recovery.code;
+  await post(a, '/api/id/recovery/confirm', { last: code.slice(-4) }, { cookie: r.cookie });
   const c = await client(a, r.cookie);
   await until(() => a.peer.statusFor(c.id)?.registry === 'connected', 8000, 'connected');
-  const s = await post(a, '/api/gh/start', { purpose: 'link-account' }, { cookie: r.cookie });
-  assert.equal(s.status, 200, JSON.stringify(s.data));
-  registry.github.authorize(s.data.userCode, { id: 82001 });
-  let w;
-  do w = await post(a, '/api/gh/wait', { flow: s.data.flow }); while (w.data.state === 'pending');
-  assert.equal(w.data.state, 'confirmed');
-  await c.ok('id.linkGithub', { flow: s.data.flow });
-  assert.equal((await kindOf(a)).github.linked, true);
-  assert.equal(a.peer.statusFor(c.id).ghLinked, true);
+  const linkFlow = async (ghId) => {
+    const s = await post(a, '/api/gh/start', { purpose: 'link-account' }, { cookie: r.cookie });
+    assert.equal(s.status, 200, JSON.stringify(s.data));
+    registry.github.authorize(s.data.userCode, { id: ghId });
+    let w;
+    do w = await post(a, '/api/gh/wait', { flow: s.data.flow }); while (w.data.state === 'pending');
+    assert.equal(w.data.state, 'confirmed');
+    return s.data.flow;
+  };
+  const flow = await linkFlow(82001);
+  const l = await c.ok('id.linkGithub', { flow });
+  // v0.12 review H3: someone with only this PC can't add a GitHub account of their own at once
+  assert.equal(l.state, 'pending');
+  assert.ok(l.at > registry.clock.now() + 6 * 86_400_000);
+  assert.equal((await kindOf(a)).github.linked, false);
+  assert.deepEqual(a.peer.statusFor(c.id).ghChange, { change: 'link', at: l.at });
+  assert.equal(a.peer.statusFor(c.id).ghLinked, false);
   // the same flow can't be used twice
-  assert.match(await c.refused('id.linkGithub', { flow: s.data.flow }), /took too long/);
-  await c.ok('id.unlinkGithub', {});
+  assert.match(await c.refused('id.linkGithub', { flow }), /took too long/);
+  // the recovery key cancels it
+  await c.ok('id.recoveryCancel', { code });
+  assert.equal(a.peer.statusFor(c.id).ghChange, null);
+  assert.equal((await kindOf(a)).github.pending, null);
+  // again, and nobody cancels: linked 7 days later, and this PC hears of it
+  await c.ok('id.linkGithub', { flow: await linkFlow(82001) });
+  await registry.clock.advance(7 * 86_400_000 + 1000);
+  await until(async () => { await a.refreshKind(); return a.peer.statusFor(c.id).ghLinked === true; }, 10000, 'linked');
+  assert.equal(a.peer.statusFor(c.id).ghChange, null);
+  // unlinking waits too
+  const u = await c.ok('id.unlinkGithub', {});
+  assert.equal(u.state, 'pending');
+  assert.equal((await kindOf(a)).github.linked, true);
+  await registry.clock.advance(7 * 86_400_000 + 1000);
+  await until(async () => { await a.refreshKind(); return a.peer.statusFor(c.id).ghLinked === false; }, 10000, 'unlinked');
   assert.equal((await kindOf(a)).github.linked, false);
   c.close();
 });
@@ -274,4 +298,161 @@ test('a registry with keypair accounts off: create says to use GitHub, and confi
   } finally {
     await off.close();
   }
+});
+
+// ---------- v0.12 identity review ----------
+
+test('a recovery key replaced on the registry no longer signs anyone back in on this PC', async () => {
+  const a = await pc();
+  const r = await create(a, 'staler');
+  const first = r.data.recovery.code;
+  await post(a, '/api/id/recovery/confirm', { last: first.slice(-4) }, { cookie: r.cookie });
+  const c = await client(a, r.cookie);
+  await until(() => a.peer.statusFor(c.id)?.registry === 'connected', 8000, 'connected');
+  // a new key without the old one: it takes effect after 7 days
+  const p = await c.ok('id.recoveryNew', {});
+  assert.equal(p.state, 'pending');
+  await c.ok('id.recoveryConfirm', { last: p.code.slice(-4) });
+  await registry.clock.advance(7 * 86_400_000 + 1000);
+  await until(async () => { await a.refreshKind(); return a.peer.statusFor(c.id).recovery.pendingAt === null; }, 10000, 'the new key took effect');
+  const old = await post(a, '/api/id/recover', { code: first });
+  assert.notEqual(old.data.state, 'signed-in', 'the replaced key signs nobody in');
+  assert.equal(old.status, 409, JSON.stringify(old.data)); // this PC holds the account; that key isn't its key now
+  const now = await post(a, '/api/id/recover', { code: p.code });
+  assert.equal(now.status, 200, JSON.stringify(now.data));
+  assert.equal(now.data.state, 'signed-in');
+  c.close();
+});
+
+test('recovering another account on a PC that still holds one is refused before any move starts', async () => {
+  const b = await pc();
+  const rb = await create(b, 'bystander');
+  const a = await pc();
+  const ra = await create(a, 'leftbehind');
+  const oa = await client(a, ra.cookie);
+  await until(() => a.peer.statusFor(oa.id)?.registry === 'connected', 8000, 'connected');
+  // the account moves on to another PC; this one is left holding it, revoked
+  const neu = await pc();
+  const s = await post(neu, '/api/id/move/start');
+  const waiting = post(neu, '/api/id/move/wait', { flow: s.data.flow });
+  await oa.ok('id.moveAccept', { code: s.data.code });
+  assert.equal((await waiting).data.state, 'signed-in');
+  await until(() => a.peer.identity.self()?.state === 'revoked', 10000, 'revoked');
+  const mv = await post(a, '/api/id/recover', { code: rb.data.recovery.code });
+  assert.equal(mv.status, 409, JSON.stringify(mv.data));
+  assert.equal((await kindOf(b)).move, null, 'no move was started for the other account');
+  oa.close();
+});
+
+test('a GitHub account: a first recovery key waits 7 days, and a GitHub sign-in on this PC cancels it', async () => {
+  const a = await pc();
+  const c = await signUp(a, registry, 82101, 'ghkeyed');
+  await until(() => a.peer.statusFor(c.id)?.registry === 'connected', 8000, 'connected');
+  const p = await c.ok('id.recoveryNew', {});
+  assert.equal(p.state, 'pending');
+  assert.equal((await kindOf(a)).recovery.set, false);
+  const s = await post(a, '/api/gh/start', { purpose: 'recovery-cancel' }, { cookie: c.cookie });
+  assert.equal(s.status, 200, JSON.stringify(s.data));
+  registry.github.authorize(s.data.userCode, { id: 82101 });
+  let w;
+  do w = await post(a, '/api/gh/wait', { flow: s.data.flow }); while (w.data.state === 'pending');
+  assert.equal(w.data.state, 'confirmed', JSON.stringify(w.data));
+  await c.ok('id.recoveryCancelGh', { flow: s.data.flow });
+  assert.equal((await kindOf(a)).recovery.pendingAt, null);
+  assert.equal(a.peer.statusFor(c.id).recovery.pendingAt, null);
+  c.close();
+});
+
+// ---------- v0.12 identity review, second pass ----------
+
+test('a revoked PC whose stored recovery key is stale still takes its own account\'s current key (the registry is asked whose it is)', async () => {
+  const a = await pc();
+  const ra = await create(a, 'staleback');
+  const oa = await client(a, ra.cookie);
+  await until(() => a.peer.statusFor(oa.id)?.registry === 'connected', 8000, 'connected');
+  const b = await pc();
+  const s = await post(b, '/api/id/move/start');
+  const waiting = post(b, '/api/id/move/wait', { flow: s.data.flow });
+  await oa.ok('id.moveAccept', { code: s.data.code });
+  const w = await waiting;
+  assert.equal(w.data.state, 'signed-in');
+  await until(() => a.peer.identity.self()?.state === 'revoked', 10000, 'revoked');
+  // on the new PC the key is replaced (with the old one, so at once); the old PC never hears of it
+  const ob = await client(b, w.cookie);
+  await until(() => b.peer.identity.self()?.state === 'ok', 20000, 'b active');
+  const n = await ob.ok('id.recoveryNew', { old: ra.data.recovery.code });
+  assert.equal(n.state, 'set');
+  assert.notEqual(a.peer.identity.get('rk'), (await kindOf(b)).recovery.rk, 'the old PC holds a stale key');
+  const mv = await post(a, '/api/id/recover', { code: n.code });
+  assert.equal(mv.status, 200, JSON.stringify(mv.data));
+  assert.equal(mv.data.state, 'moving');
+  oa.close(); ob.close();
+});
+
+async function ghFlow(srv, cookie, purpose, ghId) {
+  const s = await post(srv, '/api/gh/start', { purpose }, { cookie });
+  assert.equal(s.status, 200, JSON.stringify(s.data));
+  registry.github.authorize(s.data.userCode, { id: ghId });
+  let w;
+  do w = await post(srv, '/api/gh/wait', { flow: s.data.flow }); while (w.data.state === 'pending');
+  assert.equal(w.data.state, 'confirmed', JSON.stringify(w.data));
+  return s.data.flow;
+}
+
+test('a moving PC (the owner lost the old one) sees what waits on the account and cancels each change on its own', async () => {
+  const a = await pc();
+  const ra = await create(a, 'lostagain');
+  const code = ra.data.recovery.code;
+  await post(a, '/api/id/recovery/confirm', { last: code.slice(-4) }, { cookie: ra.cookie });
+  const oa = await client(a, ra.cookie);
+  await until(() => a.peer.statusFor(oa.id)?.registry === 'connected', 8000, 'connected');
+  // whoever has the old PC links their own GitHub and asks for their own recovery key
+  assert.equal((await oa.ok('id.linkGithub', { flow: await ghFlow(a, ra.cookie, 'link-account', 82201) })).state, 'pending');
+  assert.equal((await oa.ok('id.recoveryNew', {})).state, 'pending');
+  // the owner, on a new PC, with the recovery key
+  const b = await pc();
+  const mv = await post(b, '/api/id/recover', { code });
+  assert.equal(mv.status, 200, JSON.stringify(mv.data));
+  const ob = await client(b, mv.cookie);
+  await until(async () => { await b.refreshKind(); const st = b.peer.statusFor(ob.id); return st?.ghChange?.change === 'link' && st.recovery.pendingAt; }, 10000, 'the moving PC sees both changes');
+  // the GitHub link only: the recovery key change still waits, and this PC's saved state says so
+  await ob.ok('id.recoveryCancel', { code, what: 'link' });
+  let kd = await kindOf(a);
+  assert.equal(kd.github.pending, null);
+  assert.ok(kd.recovery.pendingAt);
+  assert.equal(b.peer.statusFor(ob.id).ghChange, null);
+  assert.ok(b.peer.statusFor(ob.id).recovery.pendingAt);
+  await ob.ok('id.recoveryCancel', { code, what: 'key' });
+  kd = await kindOf(a);
+  assert.equal(kd.recovery.pendingAt, null);
+  assert.equal(b.peer.statusFor(ob.id).recovery.pendingAt, null);
+  oa.close(); ob.close();
+});
+
+test('the linked GitHub cancels a waiting unlink from a moving PC; with the recovery key, link and unlink are immediate', async () => {
+  const a = await pc();
+  const ra = await create(a, 'ghguard');
+  const code = ra.data.recovery.code;
+  await post(a, '/api/id/recovery/confirm', { last: code.slice(-4) }, { cookie: ra.cookie });
+  const oa = await client(a, ra.cookie);
+  await until(() => a.peer.statusFor(oa.id)?.registry === 'connected', 8000, 'connected');
+  // with the recovery key typed, the link works at once
+  const l = await oa.ok('id.linkGithub', { flow: await ghFlow(a, ra.cookie, 'link-account', 82301), code });
+  assert.equal(l.state, 'done');
+  assert.equal((await kindOf(a)).github.linked, true);
+  assert.equal(a.peer.statusFor(oa.id).ghLinked, true);
+  // someone with the old PC unlinks (it waits); the owner moves with GitHub's help... from a new PC
+  assert.equal((await oa.ok('id.unlinkGithub', {})).state, 'pending');
+  const b = await pc();
+  const mv = await post(b, '/api/id/recover', { code });
+  assert.equal(mv.status, 200, JSON.stringify(mv.data));
+  const ob = await client(b, mv.cookie);
+  await ob.ok('id.recoveryCancelGh', { flow: await ghFlow(b, mv.cookie, 'recovery-cancel', 82301), what: 'link' });
+  assert.equal((await kindOf(a)).github.pending, null);
+  assert.equal((await kindOf(a)).github.linked, true);
+  // and on the old PC, with the recovery key: unlinked at once
+  const u = await oa.ok('id.unlinkGithub', { code });
+  assert.equal(u.state, 'done');
+  assert.equal((await kindOf(a)).github.linked, false);
+  oa.close(); ob.close();
 });

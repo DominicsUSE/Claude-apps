@@ -11,13 +11,16 @@ import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { S, me, emit, toast, openModal, closeModal } from '../store.js';
 import { api } from '../server.js';
 import { Icon } from '../ui/icons.js';
-import { newRecoveryKey, parseRecoveryKey, deriveAuthKey } from '../lib/recovery.js';
+import { newRecoveryKey, parseRecoveryKey, deriveAuthKey, deriveAuthKeyV2 } from '../lib/recovery.js';
 import { RecoverySave } from './keyauth.js';
 
 export const recoveryHooks = [];
 const Err = ({ id, text }) => html`<div class="err" id=${id} role="alert"><${Icon} name="alert" size=${16} /><span>${text}</span></div>`;
 const b64u = (u8) => btoa(String.fromCharCode(...u8)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-const proofOf = async (raw) => b64u(await deriveAuthKey(raw));
+// v0.12 review (second pass): the proof is bound to this page's host name; proof1 (no host) opens a key
+// saved by 0.12.0 only.
+const proofOf = async (raw) => b64u(await deriveAuthKeyV2(raw, location.hostname));
+const proof1Of = async (raw) => b64u(await deriveAuthKey(raw));
 const lastGroup = (text) => text.split('-').pop();
 const sameGroup = (typed, text) => typed.toUpperCase().replace(/[\s-]/g, '').replace(/0/g, 'O').replace(/1/g, 'I').replace(/8/g, 'B') === lastGroup(text);
 const WEB = {
@@ -38,14 +41,15 @@ function adopt(recovery) {
 }
 // Save a new key: its proof, plus a password (and code) when the server asks for one.
 async function saveKey(key, extra = {}) {
-  const r = await api('/api/recovery/set', { verifier: await proofOf(key.raw), ...await hookFields('made', key.raw), ...extra });
+  const r = await api('/api/recovery/set', { verifier: await proofOf(key.raw), v: 2, ...await hookFields('made', key.raw), ...extra });
   adopt(r.recovery);
   return r;
 }
 
 /**
- * Make a recovery key: shown once, typed back, then saved. Right after signing up or in
- * the server keeps it without asking; later it asks for the password (and a code) first.
+ * Make a recovery key: shown once, typed back, then saved. Right after signing up or
+ * recovering, a first key is kept without asking; otherwise (a new sign-in, or replacing a
+ * key) the server asks for the password (and a code) first.
  */
 export function MakeRecoveryKey({ onDone = closeModal, onLater = null, replace = false }) {
   const [key, setKey] = useState(null);
@@ -136,7 +140,7 @@ export function ForgotPassword({ onDone, onBack }) {
     if (parsed.error) return setErr({ field: 'key', text: text.trim() ? parsed.message : 'Type your recovery key.' });
     setBusy(true); setErr(null);
     try {
-      const r = await api('/api/recover', { handle: handle.trim(), proof: await proofOf(parsed.raw) });
+      const r = await api('/api/recover', { handle: handle.trim(), proof: await proofOf(parsed.raw), proof1: await proof1Of(parsed.raw) });
       setStep({ kind: 'password', ticket: r.ticket, totp: r.totp, raw: parsed.raw });
     } catch (x) { setErr({ field: null, text: x.message }); }
     setBusy(false);

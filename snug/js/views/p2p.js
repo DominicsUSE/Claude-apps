@@ -207,6 +207,12 @@ export function P2pNotice() {
     cls = ' info'; icon = 'clock';
     title = 'Your account is moving to this PC';
     text = `It finishes ${p.rebindAt ? `on ${when(p.rebindAt)}` : 'in 72 hours'}, or sooner if you confirm on your other PC. Houses and everything on this PC work meanwhile.`;
+    // v0.12 review, second pass: changes waiting on the account that the owner may not have asked for.
+    if (p.recovery?.pendingAt || p.ghChange) {
+      cls = ''; icon = 'alert';
+      text += ' Changes are waiting on your account. If you didn’t ask for them, cancel them in Settings, Account and security.';
+      act = html`<div class="p2p-notice-acts"><button class="btn sm" id="p2p-moving-waiting" onClick=${() => openModal(WaitingModal)}>Review changes</button></div>`;
+    }
   } else if (p.state === 'revoked') {
     title = 'Your Snug account moved to another PC';
     text = kindKey
@@ -279,6 +285,10 @@ export function AccountRows({ Row, signOut }) {
   const kindKey = keyAccount();
   const rec = p.recovery || {};
   const active = p.state === 'ok';
+  // Cancelling a waiting change also works while the account moves in here (second pass): the owner who lost
+  // the old PC may be on this one.
+  const canCancel = active || p.state === 'moving';
+  const ghCancel = (what) => openModal(LinkGitHubKey, { purpose: 'recovery-cancel', what });
   return html`
     <div class="set-head">Snug account</div>
     <${UsernameRow} Row=${Row} />
@@ -296,11 +306,16 @@ export function AccountRows({ Row, signOut }) {
           ? `Your new recovery key starts working on ${when(rec.pendingAt)}. Until then your old one works, and it can cancel the new one.`
           : 'Lost it, or think someone else has seen it? Make a new one. Your old key stops working.'}>
           <div class="p2p-row-acts">
-            ${rec.pendingAt && html`<button class="btn" id="p2p-recovery-cancel" disabled=${!active} onClick=${() => openModal(CancelRecoveryModal)}>Cancel the new key</button>`}
+            ${rec.pendingAt && html`<button class="btn" id="p2p-recovery-cancel" disabled=${!canCancel} onClick=${() => openModal(CancelRecoveryModal)}>Cancel the new key</button>`}
+            ${rec.pendingAt && (!kindKey || p.ghLinked) && html`<button class="btn" id="p2p-recovery-cancel-gh2" disabled=${!canCancel} onClick=${() => ghCancel('key')}>Cancel with GitHub</button>`}
             <button class="btn" id="p2p-recovery-new" disabled=${!active} onClick=${() => openModal(NewRecoveryModal)}>Make a new one</button>
           </div>
         <//>`
-      : html`<${Row} label="Recovery key (optional)" hint="Then you don’t need GitHub to move to a new PC. Snug can’t reset it for you, so keep it safe.">
+      : rec.pendingAt
+        ? html`<${Row} label="Recovery key (optional)" hint=${`Your recovery key starts working on ${when(rec.pendingAt)}. If you didn’t add it, cancel it: signing in with GitHub confirms it’s you.`}>
+            <button class="btn" id="p2p-recovery-cancel-gh" disabled=${!canCancel} onClick=${() => ghCancel('key')}>Cancel it</button>
+          <//>`
+        : html`<${Row} label="Recovery key (optional)" hint="Then you don’t need GitHub to move to a new PC. It starts working 7 days after you add it. Snug can’t reset it for you, so keep it safe.">
           <button class="btn" id="p2p-recovery-add" disabled=${!active} onClick=${() => openModal(NewRecoveryModal, { first: true })}>Add a recovery key</button>
         <//>`}
     <${Row} label="Status" hint=${p.state === 'moving' ? `Moving here. It finishes ${p.rebindAt ? `on ${when(p.rebindAt)}` : 'in 72 hours'}, or sooner if you confirm on your other PC.` : p.registry === 'connected' ? 'Connected to Snug’s directory. Friends on other PCs can reach you.' : 'Not connected to Snug’s directory. Messages to friends wait and send when it’s back.'}>
@@ -320,12 +335,18 @@ export function AccountRows({ Row, signOut }) {
       : 'Open Snug on the new PC: it shows a code to type here, or sign in with GitHub there (it moves after 72 hours unless you confirm here). One PC at a time.'}>
       <button class="btn" id="p2p-move-new" disabled=${!active} onClick=${() => openModal(MoveModal)}>Move to a new PC</button>
     <//>
-    ${kindKey && html`<${Row} label="GitHub (optional)" hint=${p.ghLinked
-        ? 'Your GitHub account can also move your Snug account to a new PC. Nobody on Snug sees it.'
-        : 'Lets you move your account with GitHub too, if you have an account there. Nobody on Snug sees your GitHub account.'}>
-      ${p.ghLinked
+    ${kindKey && html`<${Row} label="GitHub (optional)" hint=${p.ghChange
+        ? `${p.ghChange.change === 'link' ? 'Your GitHub account starts working' : 'GitHub is unlinked'} on ${when(p.ghChange.at)}. If you didn’t ask for this, cancel it with your recovery key${p.ghChange.change === 'unlink' ? ' or by signing in with the linked GitHub account' : ''}.`
+        : p.ghLinked
+          ? 'Your GitHub account can also move your Snug account to a new PC. Nobody on Snug sees it.'
+          : 'Lets you move your account with GitHub too, if you have an account there. It starts working 7 days after you link it. Nobody on Snug sees your GitHub account.'}>
+      ${p.ghChange
+        ? html`<div class="p2p-row-acts"><span class="p2p-tag warn" id="p2p-gh-waiting"><${Icon} name="clock" size=${14} />Waiting</span>
+            <button class="btn" id="p2p-gh-cancel" disabled=${!canCancel} onClick=${() => openModal(CancelRecoveryModal, { what: 'github' })}>Cancel</button>
+            ${p.ghChange.change === 'unlink' && p.ghLinked && html`<button class="btn" id="p2p-gh-cancel-gh" disabled=${!canCancel} onClick=${() => ghCancel('link')}>Cancel with GitHub</button>`}</div>`
+        : p.ghLinked
         ? html`<div class="p2p-row-acts"><span class="p2p-tag ok"><${Icon} name="check" size=${14} />Linked</span>
-            <button class="btn" id="p2p-gh-unlink" disabled=${!active} onClick=${unlinkGithub}>Unlink</button></div>`
+            <button class="btn" id="p2p-gh-unlink" disabled=${!active} onClick=${() => openModal(UnlinkModal)}>Unlink</button></div>`
         : html`<button class="btn" id="p2p-gh-link" disabled=${!active} onClick=${() => openModal(LinkGitHubKey)}>Link GitHub</button>`}
     <//>`}
     <${Row} label="Sign out on this PC" hint=${kindKey ? 'Your messages stay on this PC. Open Snug to come back, or use your recovery key.' : 'Your messages stay on this PC. Sign in with GitHub to come back.'}>
@@ -334,8 +355,57 @@ export function AccountRows({ Row, signOut }) {
 }
 
 const offlineText = (e) => (e.offline ? 'You’re offline. Try again once you’re back.' : e.message);
-function unlinkGithub() {
-  call('id.unlinkGithub', {}).then(() => { S.p2p = { ...S.p2p, ghLinked: false }; emit(); toast('GitHub unlinked. Your recovery key still moves your account.'); }, (e) => toast(offlineText(e)));
+// v0.12 review, second pass: what waits on the account, from the "moving here" note, with a way to cancel
+// each change (the recovery key, or GitHub where it can).
+function WaitingModal() {
+  const p = S.p2p;
+  const rec = p.recovery || {};
+  const kindKey = keyAccount();
+  const byKey = kindKey || rec.set;
+  const byGh = !kindKey || p.ghLinked;
+  return html`<div>
+    <h2 id="p2p-waiting-t">Changes waiting on your account</h2>
+    <p class="modal-lead">Someone with your old PC may have asked for these. If you didn’t, cancel them before they start working.</p>
+    ${rec.pendingAt && html`<div class="p2p-waiting-row" id="p2p-waiting-key"><p>A new recovery key starts working on ${when(rec.pendingAt)}.</p>
+      <div class="p2p-row-acts">
+        ${byKey && html`<button class="btn" onClick=${() => openModal(CancelRecoveryModal)}>Cancel with my recovery key</button>`}
+        ${byGh && html`<button class="btn" onClick=${() => openModal(LinkGitHubKey, { purpose: 'recovery-cancel', what: 'key' })}>Cancel with GitHub</button>`}
+      </div></div>`}
+    ${p.ghChange && html`<div class="p2p-waiting-row" id="p2p-waiting-gh"><p>${p.ghChange.change === 'link' ? 'A GitHub account starts working with your account' : 'GitHub is unlinked'} on ${when(p.ghChange.at)}.</p>
+      <div class="p2p-row-acts">
+        <button class="btn" onClick=${() => openModal(CancelRecoveryModal, { what: 'github' })}>Cancel with my recovery key</button>
+        ${p.ghChange.change === 'unlink' && p.ghLinked && html`<button class="btn" onClick=${() => openModal(LinkGitHubKey, { purpose: 'recovery-cancel', what: 'link' })}>Cancel with GitHub</button>`}
+      </div></div>`}
+    <div class="modal-foot"><button class="btn" onClick=${closeModal}>Close</button></div>
+  </div>`;
+}
+
+// Unlink GitHub: with the recovery key typed, at once; without it, in 7 days (the recovery key or the linked
+// GitHub can cancel that), so someone with only this PC can't remove it quietly (v0.12 review, second pass).
+function UnlinkModal() {
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const go = (e) => {
+    e.preventDefault();
+    setBusy(true);
+    call('id.unlinkGithub', code.trim() ? { code } : {}).then((r) => {
+      closeModal();
+      if (r?.state === 'pending') { S.p2p = { ...S.p2p, ghChange: { change: 'unlink', at: r.at } }; emit(); toast(`GitHub is unlinked on ${when(r.at)}. Your recovery key can cancel that.`); return; }
+      S.p2p = { ...S.p2p, ghLinked: false, ghChange: null }; emit(); toast('GitHub unlinked. Your recovery key still moves your account.');
+    }, (x) => { setErr(offlineText(x)); setBusy(false); });
+  };
+  return html`<form onSubmit=${go} novalidate>
+    <h2>Unlink GitHub?</h2>
+    <p class="modal-lead">Type your recovery key and GitHub is unlinked at once. Without it, GitHub is unlinked in 7 days, and until then your recovery key or the linked GitHub account can cancel it.</p>
+    <div class="form"><label class="label" for="rk-unlink">Recovery key (optional)</label>
+      <textarea id="rk-unlink" class="field rk-input" rows="2" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="120" value=${code} data-autofocus onInput=${(e) => { setCode(e.target.value); setErr(''); }}></textarea></div>
+    ${err && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} /><span>${err}</span></div>`}
+    <div class="modal-foot">
+      <button type="button" class="btn" onClick=${closeModal}>Back</button>
+      <button type="submit" class="btn primary" id="gh-unlink-go" disabled=${busy}>${busy ? 'Unlinking…' : code.trim() ? 'Unlink now' : 'Unlink in 7 days'}</button>
+    </div>
+  </form>`;
 }
 
 // ---------- v0.12: the recovery key from Settings ----------
@@ -360,6 +430,7 @@ function NewRecoveryModal({ first = false }) {
   const [made, setMade] = useState(null);
   if (made) {
     return html`<${RecoverySave} code=${made.code} username=${made.username} titleId="rk-modal-t" pendingAt=${made.state === 'pending' ? made.at : null}
+      pendingNote=${first ? 'Until then, signing in with GitHub can cancel it.' : null}
       confirm=${(last) => call('id.recoveryConfirm', { last })} onDone=${() => { closeModal(); toast(made.state === 'pending' ? 'Saved. Your new key starts working in 7 days.' : 'New recovery key saved. The old one no longer works.'); }} />`;
   }
   const go = (e) => {
@@ -370,7 +441,7 @@ function NewRecoveryModal({ first = false }) {
   return html`<form onSubmit=${go} novalidate>
     <h2 id="rk-modal-t">${first ? 'Add a recovery key' : 'Make a new recovery key'}</h2>
     <p class="modal-lead">${first
-      ? 'A recovery key moves your account to a new PC without GitHub. You’ll see it once, so have paper or a password manager ready.'
+      ? 'A recovery key moves your account to a new PC without GitHub. It starts working 7 days after you add it, and until then signing in with GitHub can cancel it. You’ll see it once, so have paper or a password manager ready.'
       : 'Type your old recovery key and the new one replaces it at once. If you lost the old one, leave it empty: the new key then starts working in 7 days, and your old key can cancel it. That stops someone who only has this PC from locking you out.'}</p>
     ${!first && html`<div class="form">
       <label class="label" for="rk-old">Old recovery key (optional)</label>
@@ -386,24 +457,34 @@ function NewRecoveryModal({ first = false }) {
 }
 
 // The current key stops a new one that is waiting.
-function CancelRecoveryModal() {
+// The current recovery key stops what this PC asked for alone: a new recovery key, and a GitHub link or unlink.
+function CancelRecoveryModal({ what = 'key' }) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const gh = what === 'github';
   const go = (e) => {
     e.preventDefault();
     setBusy(true);
-    call('id.recoveryCancel', { code }).then(() => { closeModal(); toast('Cancelled. Your current recovery key stays.'); }, (x) => { setErr(offlineText(x)); setBusy(false); });
+    call('id.recoveryCancel', { code, what: gh ? 'link' : 'key' }).then(() => {
+      if (gh) S.p2p = { ...S.p2p, ghChange: null };
+      else S.p2p = { ...S.p2p, recovery: { ...S.p2p.recovery, pendingAt: null } };
+      emit();
+      closeModal();
+      toast(gh ? 'Cancelled. Your GitHub link stays as it was.' : 'Cancelled. Your current recovery key stays.');
+    }, (x) => { setErr(offlineText(x)); setBusy(false); });
   };
   return html`<form onSubmit=${go} novalidate>
-    <h2>Cancel the new recovery key?</h2>
-    <p class="modal-lead">Type your current recovery key. If you didn’t ask for a new one, someone with this PC may have: cancel it, and keep your key safe.</p>
+    <h2>${gh ? 'Cancel the GitHub change?' : 'Cancel the new recovery key?'}</h2>
+    <p class="modal-lead">${gh
+      ? 'Type your recovery key. If you didn’t ask for this, someone with this PC may have: cancel it, and keep your key safe.'
+      : 'Type your current recovery key. If you didn’t ask for a new one, someone with this PC may have: cancel it, and keep your key safe.'}</p>
     <div class="form"><label class="label" for="rk-cur">Current recovery key</label>
       <textarea id="rk-cur" class="field rk-input" rows="2" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="120" value=${code} data-autofocus onInput=${(e) => { setCode(e.target.value); setErr(''); }}></textarea></div>
     ${err && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} /><span>${err}</span></div>`}
     <div class="modal-foot">
       <button type="button" class="btn" onClick=${closeModal}>Back</button>
-      <button type="submit" class="btn primary" disabled=${busy || !code.trim()}>${busy ? 'Cancelling…' : 'Cancel the new key'}</button>
+      <button type="submit" class="btn primary" disabled=${busy || !code.trim()}>${busy ? 'Cancelling…' : gh ? 'Cancel it' : 'Cancel the new key'}</button>
     </div>
   </form>`;
 }
@@ -453,7 +534,8 @@ function MoveModal() {
 }
 
 // Link GitHub to an account with no GitHub: the usual code screen, then the link.
-function LinkGitHubKey() {
+// purpose 'recovery-cancel': a GitHub account's GitHub sign-in stops a recovery key waiting to take effect.
+function LinkGitHubKey({ purpose = 'link-account', what }) {
   const [step, setStep] = useState(null);
   const [err, setErr] = useState('');
   const flow = useRef(null);
@@ -461,7 +543,7 @@ function LinkGitHubKey() {
     let live = true;
     (async () => {
       try {
-        const s = await api('/api/gh/start', { purpose: 'link-account' });
+        const s = await api('/api/gh/start', { purpose });
         if (!live) { api('/api/gh/cancel', { flow: s.flow }).catch(() => {}); return; }
         flow.current = s.flow;
         setStep({ kind: 'code', flow: s.flow, userCode: s.userCode, uri: s.verificationUri });
@@ -470,11 +552,18 @@ function LinkGitHubKey() {
           if (!live) return;
           if (w.state === 'pending') continue;
           flow.current = null;
-          if (w.state === 'confirmed') {
-            await call('id.linkGithub', { flow: s.flow });
-            S.p2p = { ...S.p2p, ghLinked: true };
+          if (w.state === 'confirmed' && purpose === 'recovery-cancel') {
+            await call('id.recoveryCancelGh', { flow: s.flow, ...(what ? { what } : {}) });
+            S.p2p = what === 'link' ? { ...S.p2p, ghChange: null } : { ...S.p2p, recovery: { ...S.p2p.recovery, pendingAt: null } };
+            emit();
             closeModal();
-            toast('GitHub linked. It can also move your account now.');
+            toast(what === 'link' ? 'Cancelled. GitHub stays linked.' : 'Cancelled. That recovery key won’t start working.');
+          } else if (w.state === 'confirmed') {
+            const r = await call('id.linkGithub', { flow: s.flow });
+            if (r?.state === 'pending') S.p2p = { ...S.p2p, ghChange: { change: 'link', at: r.at } };
+            else S.p2p = { ...S.p2p, ghLinked: true };
+            closeModal();
+            toast(r?.state === 'pending' ? `GitHub is linked. It can move your account from ${when(r.at)}.` : 'GitHub linked. It can also move your account now.');
           } else { setErr(w.message || 'GitHub sign-in stopped. Try again.'); setStep(null); }
           return;
         }
@@ -485,7 +574,7 @@ function LinkGitHubKey() {
   return html`<div class="p2p-link">
     ${!step && !err && html`<p class="modal-lead">Asking GitHub…</p>`}
     ${step?.kind === 'code' && html`<${CodeStep} step=${step} onCancel=${closeModal} />`}
-    ${err && html`<h2>Link GitHub</h2><div class="err" role="alert"><${Icon} name="alert" size=${14} /><span>${err}</span></div>
+    ${err && html`<h2>${purpose === 'recovery-cancel' ? (what === 'link' ? 'Cancel the GitHub change' : 'Cancel the recovery key') : 'Link GitHub'}</h2><div class="err" role="alert"><${Icon} name="alert" size=${14} /><span>${err}</span></div>
       <div class="modal-foot"><button class="btn" onClick=${closeModal}>Close</button></div>`}
   </div>`;
 }

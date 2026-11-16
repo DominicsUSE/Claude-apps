@@ -207,8 +207,11 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
   // What the registry said about this GitHub account, turned into the flow's next step.
   function outcome(f, a) {
     const uid = a.account?.uid;
-    if (f.purpose === 'release') {
-      if (a.status === 'ok' && uid && uid === self()?.uid) settle(f, 'confirmed', { ticket: a.ticket });
+    if (f.purpose === 'release' || f.purpose === 'recovery-cancel') {
+      // v0.12 review, second pass: a cancel also works from a PC that is moving in (the registry answers
+      // pending or rebind for its key), as long as it is this PC's account.
+      const okStatus = a.status === 'ok' || (f.purpose === 'recovery-cancel' && (a.status === 'pending' || a.status === 'rebind'));
+      if (okStatus && uid && uid === self()?.uid) settle(f, 'confirmed', { ticket: a.ticket });
       else settle(f, 'error', { message: 'That’s not the GitHub account this Snug account uses.' });
       return;
     }
@@ -274,10 +277,11 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
     if (post && path === '/api/gh/start') {
       const d = await json(req);
       const f = { status: 'pending', waiters: new Set(), trouble: 0 };
-      if (d.purpose === 'release' || d.purpose === 'link-account' || d.link === true) {
+      // v0.12: 'recovery-cancel': GitHub sign-in stops a recovery key (or, through a linked GitHub, an unlink) waiting.
+      if (d.purpose === 'release' || d.purpose === 'link-account' || d.purpose === 'recovery-cancel' || d.link === true) {
         const user = userOf(req);
         if (!user) { err(res, 401, 'Sign in first.'); return true; }
-        if (d.purpose === 'release' || d.purpose === 'link-account') {
+        if (d.purpose === 'release' || d.purpose === 'link-account' || d.purpose === 'recovery-cancel') {
           if (!peer.isOwner(user)) { err(res, 403, 'Only this PC’s Snug account can do that.'); return true; }
           if (d.purpose === 'link-account' && !keyAccount()) { err(res, 409, 'Your account already signs in with GitHub.'); return true; }
           f.purpose = d.purpose;
@@ -539,7 +543,7 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
     };
   }
 
-  // v0.12: a confirmed link-account flow's ticket, once (keyauth.js id.linkGithub).
+  // v0.12: a confirmed link-account or recovery-cancel flow's ticket, once (keyauth.js).
   function takeTicket(flow, purpose) {
     const f = typeof flow === 'string' ? flows.get(flow) : null;
     if (!f || f.status !== 'confirmed' || f.purpose !== purpose) return null;

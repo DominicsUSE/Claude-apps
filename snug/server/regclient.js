@@ -138,9 +138,27 @@ export function createRegClient({ url, identity, fetch: fetchFn = globalThis.fet
     async moveWait(hid) {
       return signed('POST', '/v1/move/wait', () => { const t = ts(); return { hid, ts: t, sig: sign('move-wait', hid, t) }; });
     },
-    async recoveryCancel(rk) {
+    // what: 'key' | 'link' cancels only that waiting change (v0.12 review, second pass); none: both.
+    async recoveryCancel(rk, what) {
       const u = uid();
-      return signed('POST', '/v1/recovery/cancel', () => { const t = ts(); return { uid: u, ts: t, rsig: rk.sign(['snug-reg-v1', 'recovery-cancel', u, t].join('\n')) }; });
+      return signed('POST', '/v1/recovery/cancel', () => {
+        const t = ts();
+        return { uid: u, ts: t, rsig: rk.sign(['snug-reg-v1', 'recovery-cancel', u, t, ...(what ? [what] : [])].join('\n')), ...(what ? { what } : {}) };
+      });
+    },
+    // A fresh GitHub sign-in (its ticket) stops a recovery key that is waiting to take effect, and for a keypair
+    // account with that GitHub linked, a waiting unlink too (registry keyacct.js recoveryCancelGh).
+    async recoveryCancelGh(ticket, what) {
+      return signed('POST', '/v1/recovery/cancel', () => {
+        const t = ts();
+        return { ticket, ts: t, sig: sign('recovery-cancel-gh', ticket, t, ...(what ? [what] : [])), ...(what ? { what } : {}) };
+      });
+    },
+    // {uid} of the account whose current recovery key rk is (nothing changes); null when it is nobody's.
+    async recoveryWhose(rk) {
+      try {
+        return await signed('POST', '/v1/recovery/whose', () => { const t = ts(); return { rk: rk.pub, ts: t, rsig: rk.sign(['snug-reg-v1', 'recovery-whose', rk.pub, t].join('\n')) }; });
+      } catch (e) { if (e.code === 'not_found') return null; throw e; }
     },
     // 0.12: a short-lived token for GIF search through the registry (registry/src/gif.js); null when it has none.
     async gifToken() {

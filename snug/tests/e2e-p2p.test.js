@@ -495,6 +495,12 @@ test('no GitHub: Kay loses her PC and moves to a second one with her recovery ke
   const { alice } = pages;
   const kay = pages.kay;
   pcs.K.vault.close(); // a lost PC sends no data file
+  // v0.12 review, second pass: whoever has the lost PC asks for a recovery key of their own (it waits 7 days)
+  const { recoverySigner } = await import('../server/keyauth.js');
+  const { newRecoveryKey } = await import('../js/lib/recovery.js');
+  const thiefRk = await recoverySigner((await newRecoveryKey()).raw);
+  const set = await pcs.K.peer.reg.signedCall('/v1/recovery/set', 'recovery-set', (t, u) => ({ rk: thiefRk.pub, rsigNew: thiefRk.sign(`snug-reg-v1\nrecovery-set\n${u}\n${thiefRk.pub}\n${t}`) }));
+  assert.equal(set.state, 'pending');
   await pc('K2');
   const kay2 = await open('kay2', pcs.K2);
   await kay2.click('#auth-have');
@@ -513,6 +519,13 @@ test('no GitHub: Kay loses her PC and moves to a second one with her recovery ke
   await kay2.click('#auth-moving-continue');
   await kay2.waitForFunction(() => window.snug.S.auth === 'in' && window.snug.S.conn.socket === 'open');
   await kay2.locator('#p2p-state-notice[data-state="moving"]').waitFor();
+  // The new PC, still moving in, sees the waiting change and cancels it with the recovery key.
+  await kay2.locator('#p2p-moving-waiting').click({ timeout: 20000 });
+  await kay2.locator('#p2p-waiting-key button:has-text("Cancel with my recovery key")').click();
+  await kay2.fill('#rk-cur', kayCode);
+  await kay2.click('button[type=submit]:has-text("Cancel the new key")');
+  await kay2.waitForFunction(() => !window.snug.S.p2p?.recovery?.pendingAt, null, { timeout: 20000 });
+  assert.equal((await pcs.K2.peer.reg.signedCall('/v1/account/kind', 'account-kind', {})).recovery.pendingAt, null);
   // The old PC, still on, is told how the move started and could stop it.
   await kay.locator('#p2p-move-notice[data-via="recovery"]:has-text("Someone used your recovery key")').waitFor({ timeout: 20000 });
   await shot(kay, '26-key-old-pc-notice');
