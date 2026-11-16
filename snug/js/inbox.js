@@ -85,9 +85,23 @@ export function openMuteMenu(kind, id, pos) {
     ...(pos || {}),
     items: [
       { heading: 'Mute' },
-      ...MUTE_FOR.map((m) => ({ label: MUTE_LABEL[m], onSelect: () => setNotifyFor(kind, id, 'muted', m === 'never' ? null : m) })),
+      ...MUTE_FOR.map((m) => ({ label: MUTE_LABEL[m], onSelect: () => muteFor(kind, id, m) })),
     ],
   });
+}
+// The level a place has now, unset meaning its default (a room follows its house).
+function levelNow(kind, p) {
+  if (p.notify && !(p.notifyUntil && p.notifyUntil <= Date.now())) return p.notify;
+  return kind === 'room' ? S.houses[p.house]?.notify || 'all' : 'all';
+}
+// Mute, then say until when ("Muted until 22:40", or "Muted" with no end), with Undo back to the level before.
+function muteFor(kind, id, choice) {
+  const p = placeOf(kind, id);
+  if (!p) return;
+  const was = levelNow(kind, p);
+  setNotifyFor(kind, id, 'muted', choice === 'never' ? null : choice);
+  const u = untilOf(kind, id);
+  toast(u ? `Muted until ${untilText(u, Date.now(), h12())}` : 'Muted', { undo: () => setNotifyFor(kind, id, was) });
 }
 
 // ---------- Suppress @role mentions (a set of house ids, like everyoneOff) ----------

@@ -196,6 +196,33 @@ test('timed mute: Mute for 1 hour shows "Muted until" in the menu, and Unmute cl
   await page.context().close();
 });
 
+test('a mute says until when, and Undo puts the room back as it was; one with no end just says Muted', async () => {
+  const page = await person('robin');
+  await page.click('.rail-house:has-text("Kiln & Co.")');
+  const was = await page.evaluate(() => window.snug.S.rooms.k_market.notify ?? null);
+  await page.click('.nav .row:has-text("Marketplace")', { button: 'right' });
+  await page.click('.menu-item:has-text("Mute for…")');
+  await page.click('.menu-item:has-text("For 1 hour")');
+  const note = page.locator('.toast:has-text("Muted until")');
+  await note.waitFor();
+  const hm = await page.evaluate(() => {
+    const d = new Date(window.snug.S.rooms.k_market.notifyUntil);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  });
+  assert.match(await note.textContent(), new RegExp(`^Muted until (\\w{3} )?${hm}`));
+  await note.locator('button:has-text("Undo")').click();
+  await page.waitForFunction((w) => !window.snug.S.rooms.k_market.notifyUntil && (window.snug.S.rooms.k_market.notify ?? null) === w, was);
+  // Until I turn it back on.
+  await page.click('.nav .row:has-text("Marketplace")', { button: 'right' });
+  await page.click('.menu-item:has-text("Mute for…")');
+  await page.click('.menu-item:has-text("Until I turn it back on")');
+  const plain = page.locator('.toast', { hasText: 'Muted' }).filter({ hasNotText: 'until' });
+  await plain.waitFor();
+  await plain.locator('button:has-text("Undo")').click();
+  await page.waitForFunction((w) => (window.snug.S.rooms.k_market.notify ?? null) === w, was);
+  await page.context().close();
+});
+
 test('friends: the Blocked tab unblocks, and the filter box narrows the list (Escape clears)', async () => {
   const page = await person('robin');
   await page.click('.self');
