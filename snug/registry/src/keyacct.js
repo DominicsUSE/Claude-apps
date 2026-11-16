@@ -645,15 +645,17 @@ export const KeyAcctMixin = {
     return this.withTicket(ticket, ts, sig, () => `snug-reg-v1\nrecovery-cancel-gh\n${ticket}\n${ts}${w.sfx}`, (t, h) => {
       const own = this.row('SELECT uid FROM accounts WHERE ghh=?', t.ghh);
       const linked = own ? null : this.linkedAccount(t.ghh);
-      // v0.13: the GitHub account a waiting link would add can call that link off (and nothing else).
-      const waiting = own || linked || !w.link ? null : this.row('SELECT uid FROM link_pending WHERE ghh=?', t.ghh);
-      const uid = own?.uid ?? linked?.uid ?? waiting?.uid;
-      if (!uid) fail('not_found');
+      // v0.13: the GitHub account a waiting link would add can call that link off (and nothing else). Every
+      // link waiting for it (review: one GitHub account may wait on several accounts, so not just the first).
+      const waiting = w.link ? this.rows('SELECT uid FROM link_pending WHERE ghh=?', t.ghh).map((r) => r.uid) : [];
+      const uid = own?.uid ?? linked?.uid ?? null;
+      if (!uid && !waiting.length) fail('not_found');
       this.tx(() => {
-        this.dropPendingChanges(uid, own ? { key: w.key, link: false } : waiting ? { key: false, link: true } : w);
+        if (uid) this.dropPendingChanges(uid, own ? { key: w.key, link: false } : w);
+        if (w.link) this.sql.exec('DELETE FROM link_pending WHERE ghh=?', t.ghh);
         this.sql.exec('DELETE FROM tickets WHERE h=?', h);
       });
-      this.sendNew(uid, { t: 'recovery', state: 'cancelled', ...(b.what ? { what: b.what } : {}) });
+      for (const u of new Set([uid, ...waiting].filter(Boolean))) this.sendNew(u, { t: 'recovery', state: 'cancelled', ...(b.what ? { what: b.what } : {}) });
       return { ok: true };
     });
   },

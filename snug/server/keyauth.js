@@ -111,6 +111,7 @@ export function createKeyAuth({ db, M, hub, peer, gh, opts = {}, secure = false,
     // A recovery key this PC never showed (made on another PC, or it moved here) counts as saved.
     if (k.recovery?.set && identity.get('rk_saved') == null) identity.set('rk_saved', '1');
     pushStatus();
+    return true;
   }
   if (enabled && peer._signal) {
     peer._signal.on('ready', () => { refreshKind().catch(() => {}); }); // a pending socket too (moving in)
@@ -501,7 +502,20 @@ export function createKeyAuth({ db, M, hub, peer, gh, opts = {}, secure = false,
       active();
       const ticket = gh?.takeTicket?.(d.flow, 'link-account');
       if (!ticket) fail('That GitHub sign-in took too long. Start again.');
-      await reg2(() => reg.recoveryCancelGh(ticket, 'link'), { not_found: 'That isn’t the GitHub account waiting to be linked.' });
+      let r = null;
+      try { r = await reg.recoveryCancelGh(ticket, 'link'); } catch (e) {
+        log('id', 'registry', e.code || 'error');
+        if (e.code !== 'not_found') fail(regMessage(e));
+      }
+      // Review: ok can mean the registry stopped another account's wait for that GitHub (or, before 0.13, a
+      // change on the account it is linked to), and not_found is also what a registry from before 0.13 says
+      // for any waiting link. So only this PC's account as the registry has it now says whether it's gone (if
+      // the registry can't be asked, an ok is taken at its word and a not_found isn't).
+      const fresh = await refreshKind();
+      if (fresh ? ghChange()?.change === 'link' : !r) {
+        if (r) fail('That isn’t the GitHub account waiting to be linked.');
+        fail('Snug’s directory didn’t cancel it: that may not be the GitHub account waiting to be linked, or the directory can’t cancel with GitHub yet. Cancel it from this PC instead.');
+      }
       afterCancel('link');
       return {};
     };

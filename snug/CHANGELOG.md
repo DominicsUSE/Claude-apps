@@ -15,7 +15,9 @@ goes back to an older version on its own (README, "Install, update, go back").
   replace a recovery key. Changing your name or username tells your passkey provider, where supported.
 - Desktop: a GitHub link still waiting, or a GitHub account's first recovery key, can be cancelled from the
   same PC or with GitHub (registry: `/v1/recovery/drop`, and `/v1/recovery/cancel` takes the waiting link's
-  GitHub account). Nothing changes for 0.11 and 0.12 apps.
+  GitHub account, and stops every link waiting for it). Cancelling a waiting link with GitHub needs that
+  updated registry; until then Snug says so and you cancel from the same PC. Nothing changes for 0.11 and
+  0.12 apps.
 - Registry: the optional `KEY_ACCOUNT_IDLE_DAYS` purge (still off by default) keeps accounts with a GitHub
   account linked, and now runs on its own.
 

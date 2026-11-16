@@ -506,6 +506,25 @@ test('v0.13: a waiting link can be cancelled by the GitHub account being linked 
   assert.ok((await kind(u)).body.recovery.pendingAt);
 });
 
+test('v0.13 review: the same GitHub waiting on two accounts: its cancel calls off every link waiting for it', async () => {
+  const cancelGh = (tk, k) => { const ts = reg.ts(); return reg.call('/v1/recovery/cancel', { ticket: tk, ts, sig: k.sign(`snug-reg-v1\nrecovery-cancel-gh\n${tk}\n${ts}\nlink`), what: 'link' }); };
+  const link = async (u, id) => (await sp(u, '/v1/link/github', 'link-github', { ticket: (await ghTicket(u.k, id)).ticket })).body;
+  const x = await account(uniq('lwx'));
+  const y = await account(uniq('lwy'));
+  const gid = nextGh++;
+  assert.equal((await link(x, gid)).state, 'pending');
+  assert.equal((await link(y, gid)).state, 'pending');
+  // Y's PC cancels with that GitHub: Y's own link stops waiting (X's too: that GitHub said no to both)
+  const sy = await connectV(y, '0.13.0');
+  assert.equal((await cancelGh((await ghTicket(y.k, gid)).ticket, y.k)).status, 200);
+  await sy.next((m) => m.t === 'recovery' && m.state === 'cancelled');
+  sy.close();
+  assert.equal((await kind(y)).body.github.pending, null);
+  assert.equal((await kind(x)).body.github.pending, null);
+  await reg.clock.advance(7 * DAY + 1000);
+  assert.equal((await kind(y)).body.github.linked, false); // and it didn't come through later
+});
+
 test('v0.13: recovery/drop: the device cancels a first recovery key it asked for; not a key that replaces one', async () => {
   const gh = await reg.signUp(nextGh++, uniq('drp'));
   const setKey = (who, k) => {
