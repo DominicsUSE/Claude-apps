@@ -129,14 +129,20 @@ const POLICY = new WeakMap();
 export const configureSessions = (db, { idleDays = IDLE_DAYS } = {}) => POLICY.set(db, { idleMs: idleDays * 86_400_000 });
 export const idleMs = (db) => POLICY.get(db)?.idleMs ?? IDLE_DAYS * 86_400_000;
 
-export function createSession(db, userId, agent = '') {
+export function createSession(db, userId, agent = '', how = null) {
   const token = randomBytes(32).toString('base64url');
   const now = Date.now();
   // agent and seen: the device list in Settings > Account (server/account.js).
   // auth_at: when this person last proved who they are on this session (password, code or GitHub).
-  db.run('INSERT INTO sessions (hash, user, created, expires, agent, seen, auth_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    tokenHash(token), userId, now, now + SESSION_DAYS * 86_400_000, String(agent).slice(0, 80), now, now);
+  // how: how the session began ('register', 'password', 'recovery', ...; v0.12 review M5, server/recovery.js).
+  db.run('INSERT INTO sessions (hash, user, created, expires, agent, seen, auth_at, how) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    tokenHash(token), userId, now, now + SESSION_DAYS * 86_400_000, String(agent).slice(0, 80), now, now, how);
   return token;
+}
+/** How this session began (createSession `how`), or null. */
+export function sessionHow(db, token) {
+  if (!token || typeof token !== 'string' || token.length > 100) return null;
+  return db.get('SELECT how FROM sessions WHERE hash = ?', tokenHash(token))?.how ?? null;
 }
 
 function liveRow(db, token) {

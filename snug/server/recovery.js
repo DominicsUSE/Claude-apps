@@ -13,11 +13,12 @@
 // works once; the person makes a new one straight after. Someone who has the key
 // can take the account, as with a password; the screens say so.
 //
-// Limits: per address (the sign-in bucket) and per account (POLICIES.recover:
-// 5 free tries, then waits from 15 minutes that double, kept in SQLite).
+// Limits: per address (the sign-in bucket) and per account and address
+// (POLICIES.recover: 5 free tries, then waits from 15 minutes that double, kept
+// in SQLite). Not per account alone: anyone could lock the owner out that way.
 import { randomBytes, createHash } from 'node:crypto';
 import {
-  verifyPassword, hashPasswordAsync, burnPasswordCheck, passwordProblem, endAllSessions, recentAuth, readCookie, COOKIE, POLICIES, limiter,
+  verifyPassword, hashPasswordAsync, burnPasswordCheck, passwordProblem, endAllSessions, recentAuth, sessionHow, readCookie, COOKIE, POLICIES, limiter,
 } from './auth.js';
 import { forgetPasskeys } from './passkeys.js';
 
@@ -76,7 +77,10 @@ export function createRecovery({ db, M, hub, account, sendJson, error, jsonBody,
       if (!LOGIN_HANDLE.test(handle) || !VERIFIER.test(proof)) { await burnPasswordCheck(proof); M.audit?.('recovery.use', req, null, { ok: false, why: 'unknown' }); nope(); return true; }
       const user = db.get('SELECT id, pass FROM users WHERE handle = ? AND deleted IS NULL', handle);
       const rec = user && passwordAccount(user.id) ? db.get('SELECT hash FROM recovery WHERE user = ? AND used IS NULL', user.id) : null;
-      const acct = user ? `rec:${user.id}` : `rech:${handle}`;
+      // v0.12 review LM7: wrong tries count per account and address (hashed), so tries from elsewhere can't
+      // lock the owner out. The key is a 160-bit secret: guessing it is hopeless from any number of addresses.
+      const from = createHash('sha256').update(String(ip)).digest('hex').slice(0, 16);
+      const acct = user ? `rec:${user.id}:${from}` : `rech:${handle}:${from}`;
       const wait = G.waitMs(acct, POLICIES.recover);
       if (wait) { M.audit?.('recovery.use', req, user?.id || null, { ok: false, why: 'locked' }); error(res, 429, `Too many tries. Wait ${Math.ceil(wait / 60_000)} minutes and try again.`); return true; }
       // Unknown accounts, accounts with no key and used keys cost the same check as a real one.
@@ -137,10 +141,13 @@ export function createRecovery({ db, M, hub, account, sendJson, error, jsonBody,
     const d = await jsonBody(req);
     if (!passwordAccount(user)) { error(res, 400, 'This account’s recovery key is in Settings > Account.'); return true; }
     if (typeof d.verifier !== 'string' || !VERIFIER.test(d.verifier)) { error(res, 400, 'That recovery key isn’t valid. Make a new one.'); return true; }
-    // Right after signing up, signing in or recovering (10 minutes), the session itself is enough;
-    // later, or whenever a password is typed, the password (and a code) is checked.
-    if (d.password !== undefined || !recentAuth(db, tokenOf(req))) {
-      const r = await M.stepUp(user, { password: d.password, code: typeof d.code === 'string' ? d.code.replace(/\s/g, '') : '', token: tokenOf(req) });
+    // v0.12 review M5: a recovery key resets the password and turns off two-factor sign-in, so the session
+    // alone saves only a first key (or the one after a recovery used the old), and only within 10 minutes
+    // of signing up or recovering. Replacing a key, or any later save, needs the password (and a code).
+    const token = tokenOf(req);
+    const sessionOk = !status(user).set && recentAuth(db, token) && ['register', 'recovery'].includes(sessionHow(db, token));
+    if (d.password !== undefined || !sessionOk) {
+      const r = await M.stepUp(user, { password: d.password, code: typeof d.code === 'string' ? d.code.replace(/\s/g, '') : '', token });
       if (r) { error(res, r.status === 429 ? 429 : 401, r.message); return true; }
     }
     try { M.onRecoverySet?.(user, d); } catch (e) { error(res, 400, e.message); return true; } // e2ee: the backup under the new key, when that ships

@@ -44,8 +44,9 @@ async function saveKey(key, extra = {}) {
 }
 
 /**
- * Make a recovery key: shown once, typed back, then saved. Right after signing up or in
- * the server keeps it without asking; later it asks for the password (and a code) first.
+ * Make a recovery key: shown once, typed back, then saved. Right after signing up or
+ * recovering, a first key is kept without asking; otherwise (a new sign-in, or replacing a
+ * key) the server asks for the password (and a code) first.
  */
 export function MakeRecoveryKey({ onDone = closeModal, onLater = null, replace = false }) {
   const [key, setKey] = useState(null);

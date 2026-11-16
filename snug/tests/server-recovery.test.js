@@ -67,6 +67,21 @@ test('recovery: a key saved at sign-up is stored only as a slow hash of its proo
   assert.equal(await proofOf(parsed.raw), proof);
 });
 
+test('recovery: replacing a key always needs the password; a session alone saves only a first key, right after sign-up or recovery', async () => {
+  const m = await withKey('rk-mo'); // the sign-up session saved the first key
+  const next = await newRecoveryKey();
+  const verifier = await proofOf(next.raw);
+  // v0.12 review M5: a fresh sign-in (or a stolen session) can't swap the key, which resets the password
+  const ck = cookieOf(await login('rk-mo', PW));
+  assert.equal((await post('/api/recovery/set', { verifier }, { cookie: ck })).status, 401);
+  assert.equal((await post('/api/recovery/set', { verifier }, { cookie: m.cookie })).status, 401, 'not even the sign-up session, once a key exists');
+  assert.equal((await post('/api/recovery/set', { verifier, password: PW }, { cookie: ck })).status, 200);
+  // no key yet: a password sign-in's session alone isn't enough either
+  await register('rk-nokey');
+  const ck2 = cookieOf(await login('rk-nokey', PW));
+  assert.equal((await post('/api/recovery/set', { verifier: await proofOf((await newRecoveryKey()).raw) }, { cookie: ck2 })).status, 401);
+});
+
 test('recovery: later, making a new key needs the password; a malformed proof is refused', async () => {
   const b = await register('rk-bo');
   srv.db.run('UPDATE sessions SET auth_at = ? WHERE user = ?', Date.now() - 3_600_000, b.id); // signed in an hour ago
@@ -116,7 +131,7 @@ test('recovery: a ticket finishes once; two finishes at the same time spend the 
   assert.equal((await post('/api/recover/finish', { ticket: 'made-up-ticket', password: NEW })).status, 401);
 });
 
-test('recovery: wrong keys count per account across addresses; unknown accounts get the same answer', async () => {
+test('recovery: wrong keys count per account and address, so nobody can lock the owner out; unknown accounts get the same answer', async () => {
   const e = await withKey('rk-ed');
   const other = await newRecoveryKey();
   const unknown = await recover('rk-nobody-here', other.raw);
@@ -124,10 +139,14 @@ test('recovery: wrong keys count per account across addresses; unknown accounts 
   assert.equal(unknown.status, 401);
   assert.equal(wrong.status, 401);
   assert.equal(unknown.body.error, wrong.body.error, 'no hint which accounts exist');
+  const bad = freshIp();
   let locked = false;
-  for (let i = 0; i < 8 && !locked; i++) locked = (await recover('rk-ed', other.raw)).status === 429; // each from a new address
-  assert.ok(locked, 'the account waits after 5 free tries');
-  assert.equal((await recover('rk-ed', e.key.raw)).status, 429, 'even the right key waits now');
+  for (let i = 0; i < 8 && !locked; i++) locked = (await recover('rk-ed', other.raw, { ip: bad })).status === 429;
+  assert.ok(locked, 'that address waits after 5 free tries on this account');
+  assert.equal((await recover('rk-ed', e.key.raw, { ip: bad })).status, 429, 'from there even the right key waits');
+  // v0.12 review LM7: wrong tries from many other addresses don't lock the account itself
+  for (let i = 0; i < 8; i++) await recover('rk-ed', other.raw); // each from a new address
+  assert.equal((await recover('rk-ed', e.key.raw)).status, 200, 'the owner, from their own address, still gets in');
   // Per address too (the sign-in bucket: 10 per 15 minutes).
   srv.resetLimits();
   const ip = freshIp();
@@ -190,4 +209,12 @@ test('owner reset: a temporary password shown once, every device signed out, pas
   assert.throws(() => resetPassword(srv.db, 'nobody-at-all'), /No account/);
   srv.db.run("UPDATE users SET pass = '!' WHERE id = ?", k.id);
   assert.throws(() => resetPassword(srv.db, 'rk-owner'), /has no password here/);
+});
+
+test('owner reset: the recovery key is deleted too, in case someone else made it', async () => {
+  const k = await withKey('rk-owner2');
+  const r = resetPassword(srv.db, 'rk-owner2');
+  assert.equal(r.recovery, true);
+  assert.equal(srv.db.get('SELECT COUNT(*) n FROM recovery WHERE user = ?', k.id).n, 0);
+  assert.equal((await recover('rk-owner2', k.key.raw)).status, 401, 'that key no longer resets the password');
 });

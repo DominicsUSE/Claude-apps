@@ -19,6 +19,9 @@ import { deviceLabel } from '../js/lib/account.js';
 export const MAX_PASSKEYS = 10;
 const CHALLENGE_MS = 5 * 60_000;
 const MAX_CHALLENGES = 1000;
+const PER_SOURCE = 30; // v0.12 review: outstanding challenges per IPv6 /48 (or IPv4 address), or per account
+// ipOf gives an IPv6 address as its /64 ("a:b:c:d::/64"); the sign-in limits here count its /48.
+const wideOf = (k) => (/::\/64$/.test(k) ? `${k.split(':').slice(0, 3).join(':')}::/48` : k);
 
 export function migratePasskeys(db) {
   (db.raw ?? db).exec(`
@@ -66,19 +69,29 @@ export function createPasskeys({
   migratePasskeys(db);
   const challenges = new Map(); // sha256(ticket) -> { kind, user, challenge, until, rpId, origins }
   const optionLimit = limiter({ capacity: 10, perSecond: 10 / 60 }); // per address, sign-in options
+  const wideLimit = limiter({ capacity: 30, perSecond: 30 / 60 });  // per /48, sign-in options (v0.12 review)
   const userLimit = limiter({ capacity: 6, perSecond: 0.1 });       // per account: begin, finish, rename, remove
-  hub.extraLimits = [...(hub.extraLimits || []), optionLimit, userLimit];
+  hub.extraLimits = [...(hub.extraLimits || []), optionLimit, wideLimit, userLimit];
   const key = (t) => createHash('sha256').update(String(t)).digest('hex');
   const place = (req) => passkeyPlace({ host: req.headers.host, https: httpsReq(req), rpId, hosts, loopback, desktop, extraOrigins });
   const tokenOf = (req) => readCookie(req.headers.cookie, COOKIE);
 
-  function newChallenge(entry) {
+  // src: who asked (a /48 or IPv4 address, or u:<account>). A source keeps at most PER_SOURCE challenges,
+  // and when the map is full the busiest source loses its oldest one, so a flood pushes out its own first.
+  function newChallenge(entry, src) {
     const now = Date.now();
     for (const [k, c] of challenges) if (c.until < now) challenges.delete(k);
-    while (challenges.size >= MAX_CHALLENGES) challenges.delete(challenges.keys().next().value); // the oldest first
+    const mine = [...challenges].filter(([, c]) => c.src === src);
+    if (mine.length >= PER_SOURCE) challenges.delete(mine[0][0]);
+    while (challenges.size >= MAX_CHALLENGES) {
+      const count = new Map();
+      for (const c of challenges.values()) count.set(c.src, (count.get(c.src) || 0) + 1);
+      const top = [...count].sort((x, y) => y[1] - x[1])[0][0];
+      for (const [k, c] of challenges) if (c.src === top) { challenges.delete(k); break; }
+    }
     const ticket = randomBytes(24).toString('base64url');
     const challenge = b64u(randomBytes(32));
-    challenges.set(key(ticket), { ...entry, challenge, until: now + CHALLENGE_MS });
+    challenges.set(key(ticket), { ...entry, src, challenge, until: now + CHALLENGE_MS });
     return { ticket, challenge };
   }
   // Single use: a ticket is gone the moment it is read, whatever happens next.
@@ -114,10 +127,11 @@ export function createPasskeys({
     }
     if (req.method !== 'POST') return false;
     if (path === '/api/passkey/options') {
-      if (!optionLimit.take(ipOf(req))) { error(res, 429, 'Too many attempts. Wait a minute and try again.'); return true; }
+      const ip = ipOf(req);
+      if (!optionLimit.take(ip) || !wideLimit.take(wideOf(ip))) { error(res, 429, 'Too many attempts. Wait a minute and try again.'); return true; }
       const p = place(req);
       if (!p.ok) { error(res, 400, p.message); return true; }
-      const { ticket, challenge } = newChallenge({ kind: 'login', rpId: p.rpId, origins: p.origins });
+      const { ticket, challenge } = newChallenge({ kind: 'login', rpId: p.rpId, origins: p.origins }, wideOf(ip));
       // No allowCredentials: the browser offers the passkeys it has for this site, so no
       // username is needed and the answer says nothing about which accounts exist.
       sendJson(res, 200, { ticket, options: { challenge, rpId: p.rpId, timeout: CHALLENGE_MS, userVerification: 'required', allowCredentials: [] } });
@@ -184,7 +198,7 @@ export function createPasskeys({
       if (have.length >= MAX_PASSKEYS) { error(res, 400, `You have ${MAX_PASSKEYS} passkeys, the most an account can have. Remove one first.`); return true; }
       if (!await step()) return true;
       const row = M.userRow(user);
-      const { ticket, challenge } = newChallenge({ kind: 'add', user, rpId: p.rpId, origins: p.origins });
+      const { ticket, challenge } = newChallenge({ kind: 'add', user, rpId: p.rpId, origins: p.origins }, `u:${user}`);
       sendJson(res, 200, {
         ticket,
         options: {
@@ -242,6 +256,6 @@ export function createPasskeys({
 
   return {
     open, authed, listOf,
-    reset: () => { challenges.clear(); optionLimit.reset(); userLimit.reset(); },
+    reset: () => { challenges.clear(); optionLimit.reset(); wideLimit.reset(); userLimit.reset(); },
   };
 }
