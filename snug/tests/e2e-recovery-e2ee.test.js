@@ -17,6 +17,8 @@ const PASSWORD = 'snug-demo-1';
 const dir = mkdtempSync(join(tmpdir(), 'snug-e2e-rk-e2ee-'));
 let srv, browser, url;
 const errors = [];
+// 0.14 S5: every body a page sends (HTTP and socket frames), to check no recovery or backup key travels.
+const wire = [];
 
 test.before(async () => {
   const db = openDb(join(dir, 'snug.db'));
@@ -35,6 +37,8 @@ async function newPage(name) {
   const page = await ctx.newPage();
   page.setDefaultTimeout(15000);
   page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
+  page.on('request', (r) => { const b = r.postData(); if (b) wire.push(b); });
+  page.on('websocket', (ws) => ws.on('framesent', (f) => wire.push(typeof f.payload === 'string' ? f.payload : Buffer.from(f.payload).toString('latin1'))));
   page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource|WebSocket connection|ERR_CONNECTION_REFUSED/.test(m.text())) errors.push(`${name} console: ${m.text()}`); });
   await page.goto(url);
   await page.waitForSelector('.auth-form');
@@ -132,6 +136,30 @@ test('one key: a password recovery key made after "Forgot your password?" also o
   const fresh = await addWithKey('robin', pw, k2);
   assert.equal(fresh.ok, true, 'the new password recovery key opens the encryption backup');
   await fresh.page.context().close();
+  // 0.14 S5: through saving, using and adopting, no request carried a key, its text or its backup key.
+  const { parseRecoveryKey, deriveBackupKey } = await import('../js/lib/recovery.js');
+  const { openBackup } = await import('../js/lib/e2ee/backup.js');
+  const all = wire.join('\n');
+  assert.ok(all.includes('"verifier"') && all.includes('"proof"') && all.includes('e2ee.publish'), 'save, use and adopt were all captured');
+  const forms = (raw, text = null) => {
+    const b = Buffer.from(raw);
+    const out = [b.toString('hex'), b.toString('base64'), b.toString('base64url'), b.toString('base64').replace(/=+$/, '')];
+    if (text) { const bare = text.replace(/-/g, ''); out.push(text, text.toLowerCase(), bare, bare.toLowerCase(), bare.slice(0, 32), bare.slice(0, 32).toLowerCase()); }
+    return out;
+  };
+  for (const text of [e2Key, k1, k2]) {
+    const { raw } = await parseRecoveryKey(text);
+    for (const f of [...forms(raw, text), ...forms(await deriveBackupKey(raw))]) assert.equal(all.includes(f), false, `a key travelled (${f.slice(0, 6)}…)`);
+  }
+  // The server's recovery row opens nothing; the key itself does.
+  const user = srv.db.get("SELECT id FROM users WHERE handle = 'robin'").id;
+  const blob = JSON.parse(backupBlob('robin'));
+  const row = srv.db.get('SELECT hash FROM recovery WHERE user = ?', user);
+  for (const part of row.hash.split('$')) {
+    const b = Buffer.concat([Buffer.from(part, 'base64'), Buffer.alloc(32)]).subarray(0, 32);
+    await assert.rejects(openBackup(blob, new Uint8Array(b), user));
+  }
+  assert.equal((await openBackup(blob, await deriveBackupKey((await parseRecoveryKey(k2)).raw), user)).u, user);
 });
 
 test('one key: a device removed in Settings > Encryption; its new recovery key, used for the password too, works for "Forgot your password?"', async () => {
