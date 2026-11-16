@@ -186,7 +186,9 @@ stronger than "end-to-end encrypted" is used.
 signing key (`caps`, separate from the device list, which 0.12/0.13 clients check field by field); the
 server can't add a feature, and a client keeps the features it has seen for a device, so once a device has
 seen them the server can't take one away to make it fall back. A feature is used in a conversation only when every trusted device of
-every member signed for it; until then the older form keeps working. Then: reactions are one sealed
+every member signed for it; until then the older form keeps working. Only a device positively lacking a
+feature means the older form: when a client can't tell (its keys aren't ready, or fetching device keys fails)
+it refuses to send rather than fall back (an attachment is padded and checked again at send), so a server can't fail the check to get a plain reaction, reply link or unpadded file. Then: reactions are one sealed
 envelope per person and message (kind `react`, the person's set of emoji, at most 20); poll votes and a
 poll's end are sealed envelopes (kind `vote`; only the poll's author can end it, and both the server and
 each client check that), counted on each device, with the end judged by the sender's clock; the poll itself

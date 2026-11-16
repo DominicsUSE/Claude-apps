@@ -102,7 +102,7 @@ export function GroupIcon({ dm: id }) {
   const save = () => {
     setBusy(true);
     sealedInfo(id).then((sealed) => (sealed ? setGroupInfo(id, { icon: emoji, hue: emoji ? hue : null }, 'icon') : iconDm(id, emoji, emoji ? hue : null)))
-      .then(closeModal, (err) => { setBusy(false); setError(err.message); });
+      .then(closeModal, (err) => { setBusy(false); setError(err.offline ? 'You’re offline. Try again when you’re back.' : err.message); });
   };
   return html`
     <h2>Group icon</h2>
