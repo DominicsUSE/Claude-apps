@@ -87,21 +87,39 @@ async function bundled(req, { origin, appDir, rules }) {
 // Like Electron's ses.fetch, plus two things it can't do: a redirect comes back to the page as a
 // redirect (so the page follows it itself, and the window's will-redirect guard sees where it goes),
 // and requests that change something carry Origin: <host>, which the host checks.
+//
+// The host's answers are data for the bundled page, never code at the host's origin: a request the
+// browser makes to load a document, a frame, a script or a worker from /api is refused here without
+// asking the host, and every answer that comes back is marked nosniff with a sandboxing policy (so
+// even one that ends up shown as a page runs nothing), and can't widen a service worker's scope.
+// Pictures, sound and video still load (Sec-Fetch-Dest image, audio, video), as do fetches (empty).
 const NO_BODY = new Set([101, 204, 205, 304]);
+const NEVER_CODE = new Set(["document", "iframe", "frame", "script", "worker", "sharedworker", "serviceworker"]);
+const API_CSP = "sandbox; default-src 'none'";
+function harden(headers) {
+  headers.delete("service-worker-allowed");
+  headers.set("x-content-type-options", "nosniff");
+  headers.set("content-security-policy", API_CSP);
+  return headers;
+}
 function passThrough(net, ses, req, origin) {
+  const dest = String(req.headers.get("sec-fetch-dest") || "").toLowerCase();
+  if (NEVER_CODE.has(dest)) {
+    return Promise.resolve(new Response("Not here", { status: 403, headers: harden(new Headers({ "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" })) }));
+  }
   return new Promise((resolve, reject) => {
     const cr = net.request({ session: ses, method: req.method, url: req.url, origin, credentials: "include", redirect: "manual", bypassCustomProtocolHandlers: true });
     for (const [k, v] of req.headers) { try { cr.setHeader(k, v); } catch { /* a header the network layer sets itself */ } }
     if (req.method !== "GET" && req.method !== "HEAD") cr.setHeader("Origin", origin);
     cr.on("redirect", (status, _method, url) => {
       cr.abort();
-      resolve(new Response(null, { status, headers: { location: url, "cache-control": "no-store" } }));
+      resolve(new Response(null, { status, headers: harden(new Headers({ location: url, "cache-control": "no-store" })) }));
     });
     cr.on("response", (r) => {
       const headers = new Headers();
       for (const [name, value] of Object.entries(r.headers)) for (const v of [].concat(value)) headers.append(name, String(v));
       const body = NO_BODY.has(r.statusCode) || req.method === "HEAD" ? null : Readable.toWeb(r);
-      resolve(new Response(body, { status: r.statusCode, statusText: r.statusMessage, headers }));
+      resolve(new Response(body, { status: r.statusCode, statusText: r.statusMessage, headers: harden(headers) }));
     });
     cr.on("error", reject);
     if (req.body) req.body.pipeTo(Writable.toWeb(cr)).catch((e) => { cr.abort(); reject(e); });

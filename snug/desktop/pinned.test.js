@@ -124,6 +124,37 @@ test("passThrough: the page's requests reach the host on the window's session, w
   await assert.rejects(P.passThrough(net, ses, new Request(`${origin}/api/fail`), origin), /REFUSED/, "a network failure is a failure in the page too");
 });
 
+test("passThrough (pinned): the host's /api answers can't become a page, a script or a worker at the host's origin", async () => {
+  const origin = "http://snug.lan:47821";
+  const net = fakeNet((r) => r.emit("response", respond(200, {
+    "content-type": "text/html", "content-security-policy": "default-src *", "x-content-type-options": "bogus",
+    "service-worker-allowed": "/", "x-other": "kept",
+  }, "<script>steal()</script>")));
+  const ses = { id: "join session" };
+  // A fetch from the bundled page (Sec-Fetch-Dest: empty) gets the body, with the host's say over sniffing and policy taken away.
+  const ok = await P.passThrough(net, ses, new Request(`${origin}/api/files/f_1`, { headers: { "sec-fetch-dest": "empty" } }), origin);
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(ok.headers.get("content-security-policy"), "sandbox; default-src 'none'");
+  assert.equal(ok.headers.get("service-worker-allowed"), null);
+  assert.equal(ok.headers.get("x-other"), "kept");
+  assert.equal(await ok.text(), "<script>steal()</script>", "the body itself is the page's business");
+  const sent = net.made.length;
+  // Loaded as a document, a frame, a script or a worker: refused here, never asked of the host.
+  for (const dest of ["document", "iframe", "frame", "script", "worker", "sharedworker", "serviceworker"]) {
+    const r = await P.passThrough(net, ses, new Request(`${origin}/api/files/f_1`, { headers: { "sec-fetch-dest": dest } }), origin);
+    assert.equal(r.status, 403, dest);
+    assert.equal(r.headers.get("content-security-policy"), "sandbox; default-src 'none'", dest);
+    assert.equal(r.headers.get("x-content-type-options"), "nosniff", dest);
+  }
+  assert.equal(net.made.length, sent, "none of them reached the host");
+  // Images and media still load (the page shows pictures from /api/files).
+  for (const dest of ["image", "video", "audio"]) assert.equal((await P.passThrough(net, ses, new Request(`${origin}/api/files/f_1`, { headers: { "sec-fetch-dest": dest } }), origin)).status, 200, dest);
+  // A redirect answer carries the same headers.
+  const red = await P.passThrough(fakeNet((r) => r.emit("redirect", 302, "GET", `${origin}/x`, {})), ses, new Request(`${origin}/api/go`), origin);
+  assert.equal(red.headers.get("content-security-policy"), "sandbox; default-src 'none'");
+});
+
 test("pin: one handler for the join address's scheme, replaced when the address changes", async () => {
   const handled = new Map();
   const ses = { protocol: { handle: (s, fn) => handled.set(s, fn), unhandle: (s) => handled.delete(s), isProtocolHandled: (s) => handled.has(s) }, fetch: async () => new Response("other site") };
