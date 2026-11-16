@@ -165,7 +165,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
   transition: background var(--m-hover) var(--ease-in-out), color var(--m-hover) var(--ease-in-out);
 }
 .seg button:hover { background: var(--surface-hover); color: var(--text-1); }
-.seg button[aria-pressed="true"] { background: var(--surface-sel); color: var(--text-1); font-weight: var(--w-semibold); box-shadow: 0 1px 0 rgb(0 0 0 / 0.12); }
+.seg button[aria-pressed="true"], .seg button[role="radio"][aria-checked="true"] { background: var(--surface-sel); color: var(--text-1); font-weight: var(--w-semibold); box-shadow: 0 1px 0 rgb(0 0 0 / 0.12); }
 .seg button:focus-visible { outline-offset: 0; }
 .seg button[disabled] { color: var(--text-disabled); pointer-events: none; }
 

@@ -248,7 +248,7 @@ const FONTS = [['inter', 'Inter', '"Inter", sans-serif'], ['system', 'System', '
 function FontPicker() {
   const p = S.prefs;
   return html`<div class="seg ap-fonts" role="radiogroup" aria-label="Font">
-    ${FONTS.map(([id, label, face]) => html`<button key=${id} type="button" role="radio" aria-checked=${String(p.font === id)} aria-pressed=${String(p.font === id)} data-font=${id} style=${`font-family:${face}`} onClick=${() => setPref('font', id)}>${label}</button>`)}
+    ${FONTS.map(([id, label, face]) => html`<button key=${id} type="button" role="radio" aria-checked=${String(p.font === id)} data-font=${id} style=${`font-family:${face}`} onClick=${() => setPref('font', id)}>${label}</button>`)}
   </div>`;
 }
 
