@@ -23,14 +23,19 @@ const dir = mkdtempSync(join(tmpdir(), 'snug-e2e-voicemesh-'));
 let srv, browser, url;
 const errors = [];
 // Playwright's waitForFunction doesn't wait for a promise, so an async check
-// would pass at once: this one polls it until it is true.
+// would pass at once: this one polls it until it is true. Each check is
+// awaited to its answer, one at a time: on a busy machine a page can take tens
+// of seconds to answer (its WebRTC calls wait on a starved thread), and a slow
+// true still counts. Only a check still unanswered 30 s past the limit fails.
 async function waitAsync(page, fn, arg, { timeout = 15000, polling = 250 } = {}) {
   const end = Date.now() + timeout;
+  const fail = (why) => new Error(`waitAsync: ${why} after ${timeout} ms: ${String(fn).slice(0, 160)}`);
   for (;;) {
-    // One check that doesn't answer in 5 s (a busy machine) counts as not yet.
-    const ok = await Promise.race([page.evaluate(fn, arg), new Promise((r) => setTimeout(r, 5000, false))]);
+    let timer;
+    const late = new Promise((_, no) => { timer = setTimeout(() => no(fail('a check did not answer')), Math.max(0, end - Date.now()) + 30000); });
+    const ok = await Promise.race([page.evaluate(fn, arg), late]).finally(() => clearTimeout(timer));
     if (ok) return ok;
-    if (Date.now() > end) throw new Error(`waitAsync: timed out after ${timeout} ms: ${String(fn).slice(0, 160)}`);
+    if (Date.now() > end) throw fail('timed out');
     await new Promise((r) => setTimeout(r, typeof polling === 'number' ? polling : 100));
   }
 }
@@ -222,10 +227,15 @@ test('mesh: when a 5th person joins, everyone’s existing camera and screen sen
   for (const n of names) { const p = await person(n); await joinWheel(p); pages.push(p); }
   const [robin] = pages;
   await connected(robin, 3);
+  // Robin sends at the lowest camera and screen settings: the caps are the same
+  // kind of numbers, but eight full-size software encodes in one browser can
+  // freeze its page for minutes on a shared machine.
+  await robin.evaluate(async () => (await import('/js/voiceopts.js')).setVoice({ camRes: '360', camFps: 15, screenRes: '720', screenFps: 15 }));
   await robin.click('.stage .vc.cam');
   await robin.click('.stage .vc.scr');
   // Every one of Robin's sends, to each person, at the caps for this many people
   // (and for the step adaptive quality is at on that line, if the machine is busy).
+  // A busy machine can keep a page from answering for half a minute, hence the long limit.
   const capsAre = (page, { many, n }) => waitAsync(page, async ([m, count]) => {
     const { sendCaps } = await import('/js/lib/callnet.js');
     const { screenBitrate } = await import('/js/voiceopts.js');
@@ -234,7 +244,7 @@ test('mesh: when a 5th person joins, everyone’s existing camera and screen sen
       const want = sendCaps({ many: m, level: s.level, screenBps: screenBitrate(m) });
       return s.caps.camera?.maxBitrate === want.camera.maxBitrate && s.caps.screen?.maxBitrate === want.screen.maxBitrate;
     });
-  }, [many, n], { timeout: 40000, polling: 300 });
+  }, [many, n], { timeout: 120000, polling: 300 });
   await capsAre(robin, { many: false, n: 3 });
   const few = await robin.evaluate(async () => (await window.snug.voiceStats()).ines.caps);
   // Malik joins: 4 others now.

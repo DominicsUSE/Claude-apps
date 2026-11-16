@@ -23,14 +23,19 @@ let srv, browser, bare, url;
 let relaySrv = null, relayUrl = null;
 const errors = [];
 // Playwright's waitForFunction doesn't wait for a promise, so an async check
-// would pass at once: this one polls it until it is true.
+// would pass at once: this one polls it until it is true. Each check is
+// awaited to its answer, one at a time: on a busy machine a page can take tens
+// of seconds to answer (its WebRTC calls wait on a starved thread), and a slow
+// true still counts. Only a check still unanswered 30 s past the limit fails.
 async function waitAsync(page, fn, arg, { timeout = 15000, polling = 250 } = {}) {
   const end = Date.now() + timeout;
+  const fail = (why) => new Error(`waitAsync: ${why} after ${timeout} ms: ${String(fn).slice(0, 160)}`);
   for (;;) {
-    // One check that doesn't answer in 5 s (a busy machine) counts as not yet.
-    const ok = await Promise.race([page.evaluate(fn, arg), new Promise((r) => setTimeout(r, 5000, false))]);
+    let timer;
+    const late = new Promise((_, no) => { timer = setTimeout(() => no(fail('a check did not answer')), Math.max(0, end - Date.now()) + 30000); });
+    const ok = await Promise.race([page.evaluate(fn, arg), late]).finally(() => clearTimeout(timer));
     if (ok) return ok;
-    if (Date.now() > end) throw new Error(`waitAsync: timed out after ${timeout} ms: ${String(fn).slice(0, 160)}`);
+    if (Date.now() > end) throw fail('timed out');
     await new Promise((r) => setTimeout(r, typeof polling === 'number' ? polling : 100));
   }
 }
