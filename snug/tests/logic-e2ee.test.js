@@ -528,6 +528,7 @@ test('copy (0.14): “sealed with the system key store” is said only of an app
   const all = [
     [{ kind: 'app', keyStore: 'os', sealed: true }, true],
     [{ kind: 'app', keyStore: 'os', sealed: false }, false], // made before 0.14
+    [{ kind: 'app', keyStore: 'os', sealed: null }, true], // no keys on this computer yet: any made here are sealed
     [{ kind: 'app', keyStore: 'none', sealed: false }, false], // no key store on this computer
     [{ kind: 'app', keyStore: 'locked', sealed: true }, false],
     [{ kind: 'web', keyStore: 'none', sealed: false }, false], // a browser, or the app on a server's own page
@@ -543,6 +544,7 @@ test('copy (0.14): “sealed with the system key store” is said only of an app
   assert.match(storageNoteFor({ kind: 'web', keyStore: 'none', sealed: false }), /aren’t sealed/);
   assert.match(storageNoteFor({ kind: 'app', keyStore: 'os', sealed: false }), /made before.*Reset encryption/s);
   assert.match(storageNoteFor({ kind: 'app', keyStore: 'none', sealed: false }), /aren’t sealed/);
+  assert.doesNotMatch(storageNoteFor({ kind: 'app', keyStore: 'os', sealed: null }), /made before/);
 });
 
 // ---------- review fixes (L1, L3, M2, M3, H1) ----------

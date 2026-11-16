@@ -203,7 +203,7 @@ function EncryptionPage({ Row }) {
         <li>${COPY.roomsNot}</li>
         ${deviceKind() === 'web' && html`<li>${COPY.browserNote}</li>`}
         ${plainHttp() && html`<li>${COPY.plainHttp}</li>`}
-        <li>${storageNoteFor({ kind: deviceKind(), keyStore: E2.keyStore, sealed: deviceKeySealed() })}</li>
+        <li>${storageNoteFor({ kind: deviceKind(), keyStore: E2.keyStore, sealed: E2.device ? deviceKeySealed() : null })}</li>
         <li>Compare safety numbers with the people you talk to (in a conversation’s details) to know nobody put different keys between you.</li>
       </ul>
     </div>

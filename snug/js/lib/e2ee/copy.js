@@ -143,9 +143,10 @@ export const BANNED = ['unhackable', 'anonymous', 'military-grade', 'zero-knowle
 /**
  * 0.14: the storage line of “What it does and doesn’t do” for this device. Keys are sealed only in the
  * Snug app with a working system key store and a device key made there (manager.js deviceKeySealed()).
+ * `sealed` is null while this device has no keys yet: any it makes under the key store are sealed.
  */
 export function storageNoteFor({ kind, keyStore, sealed }) {
   const app = kind === 'app';
-  const rest = app && keyStore === 'os' ? (sealed ? COPY.storageSealed : COPY.storageOld) : COPY.storagePlain;
+  const rest = app && keyStore === 'os' ? (sealed === false ? COPY.storageOld : COPY.storageSealed) : COPY.storagePlain;
   return `${COPY.storageNote} ${rest}`;
 }
