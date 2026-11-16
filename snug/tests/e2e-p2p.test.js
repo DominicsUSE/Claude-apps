@@ -661,3 +661,105 @@ test('relay fallback: with direct links off on one PC, messages still go both wa
   await d.close();
   await e.close();
 });
+
+// ---------- v0.13: waiting changes, from Settings > Account and security ----------
+const kindOn = (srv) => srv.peer.reg.signedCall('/v1/account/kind', 'account-kind', {});
+async function openAccount(page) {
+  await page.click('.nav button[aria-label="Settings"]');
+  await page.click('.layer-nav button.row:has-text("Account and security")');
+}
+// The GitHub code screen in a modal; (mock) GitHub approves it for ghId.
+async function approveOnGithub(page, ghId) {
+  const code = (await page.locator('.modal #auth-device-code').textContent()).trim();
+  registry.github.authorize(code, { id: ghId });
+}
+
+test('v0.13: a GitHub account adds a first recovery key, cancels the wait from this PC, then with GitHub', async () => {
+  const bob2 = pages.bob2;
+  await openAccount(bob2);
+  const add = async () => {
+    await bob2.click('#p2p-recovery-add');
+    await bob2.click('#rk-make');
+    await bob2.locator('#rk-key').waitFor();
+    const code = (await bob2.locator('#rk-key > span').allTextContents()).join('-');
+    await bob2.fill('#rk-last', code.slice(-4));
+    await bob2.click('#rk-saved');
+    await bob2.locator('#p2p-recovery-cancel').waitFor();
+    const k = await kindOn(pcs.B2);
+    assert.ok(k.recovery.pendingAt, 'a first key waits');
+    assert.equal(k.recovery.set, false);
+  };
+  await add();
+  await bob2.locator('.set-label span:has-text("Your recovery key starts working on")').waitFor();
+  await shot(bob2, '40-first-key-waiting');
+  // from this PC: only the key change goes
+  await bob2.click('#p2p-recovery-cancel');
+  await bob2.click('#p2p-cancel-go');
+  await bob2.locator('#p2p-recovery-add').waitFor();
+  assert.deepEqual((await kindOn(pcs.B2)).recovery, { set: false, pendingAt: null, rk: null });
+  // again, and this time GitHub cancels it
+  await add();
+  await bob2.click('#p2p-recovery-cancel-gh');
+  await approveOnGithub(bob2, 1001);
+  await bob2.locator('#p2p-recovery-add').waitFor({ timeout: 20000 });
+  assert.deepEqual((await kindOn(pcs.B2)).recovery, { set: false, pendingAt: null, rk: null });
+  await bob2.keyboard.press('Escape');
+});
+
+test('v0.13: a keypair account links GitHub and cancels the wait from this PC and with GitHub; unlinks with and without its recovery key', async () => {
+  const kay3 = pages.kay3;
+  const GH = 1101;
+  await openAccount(kay3);
+  const link = async () => {
+    await kay3.click('#p2p-gh-link');
+    await approveOnGithub(kay3, GH);
+    await kay3.locator('#p2p-gh-waiting').waitFor({ timeout: 20000 });
+    assert.equal((await kindOn(pcs.K3)).github.pending?.change, 'link');
+  };
+  await link();
+  await kay3.locator('.set-label span:has-text("Your GitHub account starts working on")').waitFor();
+  await shot(kay3, '41-link-waiting');
+  // from this PC, with no recovery key
+  await kay3.click('#p2p-gh-cancel');
+  await kay3.click('#p2p-cancel-go');
+  await kay3.locator('#p2p-gh-link').waitFor();
+  assert.deepEqual((await kindOn(pcs.K3)).github, { linked: false, pending: null });
+  // again; the GitHub account being linked cancels it
+  await link();
+  await kay3.click('#p2p-gh-cancel-gh');
+  await approveOnGithub(kay3, GH);
+  await kay3.locator('#p2p-gh-link').waitFor({ timeout: 20000 });
+  assert.deepEqual((await kindOn(pcs.K3)).github, { linked: false, pending: null });
+  // a third time, and the 7 days pass: linked
+  await link();
+  await registry.clock.advance(7 * 24 * 3600_000 + 1000);
+  await kay3.locator('#p2p-gh-unlink').waitFor({ timeout: 20000 });
+  assert.deepEqual((await kindOn(pcs.K3)).github, { linked: true, pending: null });
+  // unlink without the recovery key: it waits; the linked GitHub cancels it
+  const unlinkLater = async () => {
+    await kay3.click('#p2p-gh-unlink');
+    await kay3.locator('#gh-unlink-go:has-text("Unlink in 7 days")').click();
+    await kay3.locator('#p2p-gh-waiting').waitFor();
+    assert.equal((await kindOn(pcs.K3)).github.pending?.change, 'unlink');
+  };
+  await unlinkLater();
+  await kay3.locator('.set-label span:has-text("GitHub is unlinked on")').waitFor();
+  await kay3.click('#p2p-gh-cancel-gh');
+  await approveOnGithub(kay3, GH);
+  await kay3.locator('#p2p-gh-unlink').waitFor({ timeout: 20000 });
+  assert.deepEqual((await kindOn(pcs.K3)).github, { linked: true, pending: null });
+  // again; the recovery key cancels it
+  await unlinkLater();
+  await kay3.click('#p2p-gh-cancel');
+  await kay3.fill('#rk-cur', kayCode);
+  await kay3.click('button[type=submit]:has-text("Cancel it")');
+  await kay3.locator('#p2p-gh-unlink').waitFor({ timeout: 20000 });
+  assert.deepEqual((await kindOn(pcs.K3)).github, { linked: true, pending: null });
+  // with the recovery key typed, the unlink happens at once
+  await kay3.click('#p2p-gh-unlink');
+  await kay3.fill('#rk-unlink', kayCode);
+  await kay3.locator('#gh-unlink-go:has-text("Unlink now")').click();
+  await kay3.locator('#p2p-gh-link').waitFor();
+  assert.deepEqual((await kindOn(pcs.K3)).github, { linked: false, pending: null });
+  await kay3.keyboard.press('Escape');
+});
