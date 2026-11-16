@@ -491,5 +491,6 @@ import('./voice.js').then((v) => import('./calls.js').then((c) => import('./serv
     dropSocket: srv.dropSocket, endMic: v.simulateMicEnded, mutedWatch: v.mutedWatch, resetMutedWarn: v.resetMutedWarn,
     line: v.simulateLine, quality: v.simulateQuality, iceGrace: v.setIceGrace, sinks: v.audioSinks, // reconnection and adaptive quality (v12)
     lastRing: () => c.lastRing, previewRingtone: c.previewRingtone,
+    tamper: v.tamperFrames, crypt: v.cryptInfo, // calls C1: end-to-end media encryption probes
   };
 })));

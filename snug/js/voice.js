@@ -25,7 +25,12 @@ import {
 // Connection quality from WebRTC's statistics (js/lib/netquality.js).
 import { summarize, uplinkPoor } from './lib/netquality.js';
 // Send caps, adaptive steps, the relay choice, new connection or renegotiation (js/lib/callnet.js).
-import { sendCaps, adaptStep, hasTurn, relayWanted, relayInsisted, sdpSession, callCode, screenPref } from './lib/callnet.js';
+import {
+  sendCaps, adaptStep, hasTurn, relayWanted, relayInsisted, sdpSession, callCode, screenPref,
+  relayMode, relayCandidate, relayOnlySdp, sdpFingerprints, sdpUfrag, fpStatement, readFpAttr, withFpAttr, deviceCode,
+} from './lib/callnet.js';
+// Call keys sealed to each person's devices, and offers and answers signed by this device (calls C1, C2).
+import { callKeysReady, e2eeOffered, myDevice, sealCallKey, openCallKey, signFingerprint, parseFpAttr, verifyFingerprint, identityKeys } from './e2ee/callkeys.js';
 
 // user -> { pc, audio, screenAudio, queue, stopLevel, polite, makingOffer,
 //           ignoreOffer, settingAnswer, chain, kinds, video, tx, id, relay,
@@ -96,6 +101,185 @@ function watchLevel(user, stream) {
 }
 
 function signal(to, data) { call('rtc', { to, data }).catch(() => {}); }
+
+// ---------- End-to-end encryption of the media (calls C1) ----------
+// On top of WebRTC's own DTLS-SRTP, every encoded frame of every sender and
+// receiver goes through the call's worker (js/callcrypt-worker.js), which
+// seals what I send with my key and opens what others send with theirs
+// (js/lib/callcrypt.js). Each person's device makes its own key, and a new
+// one whenever someone joins or leaves; it goes to each other person sealed
+// to their devices (js/e2ee/callkeys.js), and is used for them once they
+// acknowledge it. Someone who can't (an older Snug, no encryption keys, a
+// browser without encoded transforms) gets the media as before, and the call
+// says so. Everything is forgotten when the call ends.
+const crypt = { worker: null, mode: null, why: null, key: null, req: 0, waits: new Map(), refused: new Set() };
+const ckOf = new Map(); // user -> { acked, keyed, ckSeen, unsigned, why }
+const ckState = (u) => { let x = ckOf.get(u); if (!x) ckOf.set(u, (x = { acked: null, keyed: false, ckSeen: false, unsigned: false, why: null })); return x; };
+const transformMode = () => (typeof RTCRtpScriptTransform === 'function' ? 'script'
+  : typeof RTCRtpSender !== 'undefined' && typeof RTCRtpSender.prototype.createEncodedStreams === 'function' ? 'streams' : null);
+// Called before the first connection of a call: whether its media can be end-to-end encrypted, and how.
+function startCrypt() {
+  stopCrypt();
+  const mode = transformMode();
+  crypt.why = !mode ? 'browser' : !e2eeOffered() ? 'off' : !callKeysReady() ? 'keys' : !S.callE2ee ? 'server' : null;
+  if (crypt.why) return;
+  try {
+    crypt.worker = new Worker(new URL('./callcrypt-worker.js', import.meta.url), { type: 'module' });
+  } catch { crypt.why = 'browser'; return; }
+  crypt.mode = mode;
+  crypt.worker.onmessage = ({ data: m }) => { if (m?.t === 'stats') { crypt.waits.get(m.req)?.(m.stats); crypt.waits.delete(m.req); } };
+  crypt.worker.onerror = () => { crypt.why = 'browser'; };
+  newCallKey();
+}
+function stopCrypt() {
+  if (crypt.worker) { try { crypt.worker.postMessage({ t: 'wipe' }); } catch { /* gone */ } crypt.worker.terminate(); }
+  crypt.key?.raw.fill(0);
+  for (const done of crypt.waits.values()) done({});
+  Object.assign(crypt, { worker: null, mode: null, key: null, waits: new Map() });
+  ckOf.clear();
+}
+// A new key of mine: made here, never sent anywhere but sealed to the others' devices.
+function newCallKey() {
+  if (!crypt.worker) return;
+  const id = crypt.key ? (crypt.key.id + 1) & 255 : crypto.getRandomValues(new Uint8Array(1))[0];
+  crypt.key?.raw.fill(0);
+  crypt.key = { id, raw: crypto.getRandomValues(new Uint8Array(32)) };
+  const copy = crypt.key.raw.slice();
+  crypt.worker.postMessage({ t: 'send', id, raw: copy.buffer }, [copy.buffer]);
+  for (const u of peers.keys()) sendKeyTo(u);
+}
+function sendKeyTo(user) {
+  if (!S.callE2ee) return;
+  if (!crypt.worker || !crypt.key) { signal(user, { ck: { v: 1, t: 'no', why: crypt.why === 'keys' || crypt.why === 'off' ? 'keys' : 'browser' } }); return; }
+  const { id, raw } = crypt.key;
+  sealCallKey({ place: S.call.room, to: user, id, raw }).then((m) => {
+    if (!m) { const st = ckState(user); st.why ||= 'their-keys'; emit(); return; }
+    if (crypt.key?.id === id && peers.has(user)) signal(user, { ck: m });
+  }).catch(() => { const st = ckState(user); st.why ||= 'their-keys'; emit(); });
+}
+function onCallKey(from, m) {
+  const st = ckState(from);
+  if (m.t === 'no') { st.why = m.why === 'keys' ? 'their-keys' : 'their-browser'; emit(); return; }
+  if (m.t === 'ack') { if (crypt.worker && crypt.key) { crypt.worker.postMessage({ t: 'use', peer: from, id: m.id }); st.acked = m.id; } return; }
+  if (m.t !== 'key' || !crypt.worker) return;
+  const place = S.call.room;
+  openCallKey(from, m, place).then(({ id, raw }) => {
+    if (!crypt.worker || S.call?.room !== place) { raw.fill(0); return; }
+    crypt.worker.postMessage({ t: 'recv', peer: from, id, raw: raw.buffer }, [raw.buffer]);
+    st.keyed = true;
+    st.ckSeen = true;
+    st.why = null;
+    signal(from, { ck: { v: 1, t: 'ack', id } });
+    // A device that signs its keys signs its offers too (calls C2): an offer from them without it was changed on the way.
+    if (st.unsigned) refusePeer(from);
+  }).catch(() => { st.why = 'their-keys'; emit(); });
+}
+// Every sender and receiver of a connection goes through the worker, the
+// ones a renegotiation adds included: with createEncodedStreams a sender left
+// out would send nothing at all.
+const piped = new WeakSet();
+function attachCrypt(p, user = p.user) {
+  if (!crypt.worker || !user) return;
+  for (const t of p.pc.getTransceivers()) {
+    if (t.stopped || t.currentDirection === 'stopped') continue;
+    const kind = t.receiver.track?.kind;
+    if (!kind) continue;
+    // VP8 first: its header is known, so the rest of each frame can be sealed (js/lib/callcrypt.js clearBytes).
+    if (kind === 'video' && !piped.has(t) && t.setCodecPreferences && typeof RTCRtpReceiver?.getCapabilities === 'function') {
+      piped.add(t);
+      try {
+        const codecs = RTCRtpReceiver.getCapabilities('video')?.codecs || [];
+        const vp8 = codecs.filter((c) => /vp8$/i.test(c.mimeType));
+        if (vp8.length) t.setCodecPreferences([...vp8, ...codecs.filter((c) => !/vp8$/i.test(c.mimeType))]);
+      } catch { /* the browser picks */ }
+    }
+    for (const [x, dir] of [[t.sender, 'send'], [t.receiver, 'recv']]) {
+      if (piped.has(x)) continue;
+      piped.add(x);
+      const opts = { dir, peer: user, kind };
+      try {
+        if (crypt.mode === 'script') x.transform = new RTCRtpScriptTransform(crypt.worker, opts);
+        else {
+          const { readable, writable } = x.createEncodedStreams();
+          crypt.worker.postMessage({ t: 'streams', readable, writable, opts }, [readable, writable]);
+        }
+      } catch { /* already piped */ }
+    }
+  }
+}
+function cryptStats() {
+  if (!crypt.worker) return Promise.resolve({});
+  const req = ++crypt.req;
+  return new Promise((r) => {
+    crypt.waits.set(req, r);
+    crypt.worker.postMessage({ t: 'stats', req });
+    setTimeout(() => { if (crypt.waits.delete(req)) r({}); }, 3000);
+  });
+}
+// Whether the media with one person is end-to-end encrypted, and if not, why.
+function e2eeOf(user, p, stats) {
+  const st = ckOf.get(user);
+  if (crypt.why) return { on: false, why: crypt.why };
+  if (st?.why) return { on: false, why: st.why };
+  return { on: !!(stats?.e2ee && st?.keyed && st.acked != null), why: stats?.e2ee ? null : 'waiting' };
+}
+// The whole call, for the label in it (js/views/activities.js): on only when every connection is.
+export function callSecurity() {
+  const list = [...peers.entries()].filter(([u]) => !crypt.refused.has(u));
+  if (!S.call) return null;
+  if (crypt.why) return { on: false, why: crypt.why, who: null };
+  if (!list.length) return { on: true, why: null, who: null, alone: true };
+  const off = list.find(([, p]) => !p.e2ee?.on);
+  return off ? { on: false, why: off[1].e2ee?.why || 'waiting', who: off[0] } : { on: true, why: null, who: null };
+}
+
+// ---------- The connection's certificate, signed (calls C2) ----------
+// Every offer and answer I send carries a=x-snug-fp: my device's signature
+// over who it's from and for, the call, and its certificate fingerprint and
+// ICE username. Each one I receive is checked against the sender's signed
+// device list before it is used; one that doesn't match ends that
+// connection with a warning, never a quiet fallback.
+async function sdpOut(user, desc) {
+  let sdp = desc.sdp;
+  const p = peers.get(user);
+  if (p?.relay) sdp = relayOnlySdp(sdp);
+  const fingerprint = sdpFingerprints(sdp), ufrag = sdpUfrag(sdp);
+  if (fingerprint && S.call && callKeysReady()) {
+    const stmt = fpStatement({ place: S.call.room, fromUser: S.me, fromDevice: myDevice(), toUser: user, fingerprint, ufrag });
+    const attr = await signFingerprint(stmt).catch(() => null);
+    if (attr) { sdp = withFpAttr(sdp, attr); if (p) p.signed = true; }
+  }
+  return { type: desc.type, sdp };
+}
+async function sendSdp(user, desc) { signal(user, { sdp: await sdpOut(user, desc) }); }
+// 'ok' to go on, or 'refuse'.
+async function checkSdp(from, p, desc) {
+  const st = ckState(from);
+  const attr = readFpAttr(desc.sdp);
+  if (!attr) {
+    if (st.ckSeen) return 'refuse';
+    st.unsigned = true;
+    p.fp = null;
+    return 'ok';
+  }
+  const a = parseFpAttr(attr);
+  const fingerprint = sdpFingerprints(desc.sdp), ufrag = sdpUfrag(desc.sdp);
+  if (!a || !fingerprint) return 'refuse';
+  const stmt = fpStatement({ place: S.call.room, fromUser: from, fromDevice: a.d, toUser: S.me, fingerprint, ufrag });
+  const ok = await verifyFingerprint(from, a.d, stmt, a.sig).catch(() => null);
+  if (ok === false) return 'refuse';
+  p.fp = ok ? { d: a.d, fingerprint, ufrag } : null;
+  return 'ok';
+}
+export const callAlarm = () => S.callAlarm || null;
+function refusePeer(user) {
+  if (!S.call || crypt.refused.has(user)) return;
+  crypt.refused.add(user);
+  dropPeer(user);
+  S.callAlarm = { user, room: S.call.room, at: Date.now() };
+  toast(`Snug stopped the connection to ${S.users[user]?.name || 'someone'}: the security details that arrived don’t match what their device signed. Someone may be trying to listen in. Don’t continue this call; check with them another way.`);
+  emit();
+}
 
 // Which of my streams is which. Sent before any track is added, so it reaches
 // the other person before the offer that carries the track.
@@ -174,6 +358,7 @@ function sendOn(p, slot, track, stream) {
   }
   const sender = p.pc.addTrack(track, stream);
   p.tx[slot] = p.pc.getTransceivers().find((x) => x.sender === sender) || null;
+  attachCrypt(p);
 }
 function stopOn(p, slot) {
   const t = p.tx[slot];
@@ -196,7 +381,7 @@ function addRemoteVideo(p, stream) {
 // IP address from them)? Voice rooms and people who aren't friends do by
 // default, when the server has a relay (js/lib/callnet.js relayWanted).
 function relayFor(user) {
-  const opts = { mode: vp().relay, p2pHide: !!S.p2p?.hideIp, room: !S.call?.dm, friend: S.friends?.[user]?.state === 'friends' };
+  const opts = { mode: relayMode(vp()), p2pHide: !!S.p2p?.hideIp, room: !S.call?.dm, friend: S.friends?.[user]?.state === 'friends' };
   return { want: relayWanted(opts), insist: relayInsisted(opts) };
 }
 let refreshingIce = null;
@@ -207,6 +392,15 @@ function refreshIce() {
   return refreshingIce;
 }
 let noRelayToast = 0;
+// calls C3: with no relay on this server (and not the desktop app's PC-to-PC
+// calls, which say so on a friend's profile), a call connects straight to the
+// other people's devices, so they can see my IP address. Said before joining:
+// a note on the voice room and the incoming call, and once per device before
+// starting a call (js/calls.js).
+export const connectsDirectly = () => !hasTurn(S.ice) && !(S.p2p?.enabled && S.p2p.owner) && relayMode(vp()) !== 'all';
+const DIRECT_OK = 'snug.directOk';
+export function directAcknowledged() { try { return localStorage.getItem(DIRECT_OK) === '1'; } catch { return false; } }
+export function acknowledgeDirect() { try { localStorage.setItem(DIRECT_OK, '1'); } catch { /* private window: asked again next time */ } }
 
 let pcSeq = 0;
 function peer(user, offering) {
@@ -219,12 +413,12 @@ function peer(user, offering) {
   // Asked outright to hide my IP and no relay is known: relay-only all the
   // same, which can't connect, rather than quietly going direct (S14).
   const relayOnly = relay.want && (turn || relay.insist);
-  const pc = new RTCPeerConnection({ iceServers: S.ice, ...(relayOnly ? { iceTransportPolicy: 'relay' } : {}) });
+  const pc = new RTCPeerConnection({ iceServers: S.ice, ...(relayOnly ? { iceTransportPolicy: 'relay' } : {}), ...(crypt.mode === 'streams' ? { encodedInsertableStreams: true } : {}) });
   p = {
     pc, audio: null, screenAudio: null, queue: [], stopLevel: null,
     polite: String(S.me) > String(user), makingOffer: false, ignoreOffer: false, settingAnswer: false,
     chain: Promise.resolve(), kinds: pendingKinds.get(user) || {}, video: {}, tx: {},
-    id: ++pcSeq, relay: relayOnly, noRelay: relayOnly && !turn, adapt: { level: 0, bad: 0, good: 0 }, wantCamera: pendingWant.get(user) ?? true, restarts: [], graceTimer: null,
+    user, id: ++pcSeq, relay: relayOnly, noRelay: relayOnly && !turn, adapt: { level: 0, bad: 0, good: 0 }, wantCamera: pendingWant.get(user) ?? true, restarts: [], graceTimer: null,
   };
   pendingKinds.delete(user);
   pendingWant.delete(user);
@@ -232,8 +426,9 @@ function peer(user, offering) {
   pc.onnegotiationneeded = async () => {
     try {
       p.makingOffer = true;
+      attachCrypt(p, user);
       await pc.setLocalDescription();
-      signal(user, { sdp: pc.localDescription });
+      await sendSdp(user, pc.localDescription);
     } catch { /* a newer negotiation replaced this one */ } finally { p.makingOffer = false; }
   };
   tellKinds(user);
@@ -249,8 +444,11 @@ function peer(user, offering) {
     sendOn(p, 'screen', screen.getVideoTracks()[0], out.screen);
     if (screen.getAudioTracks()[0]) sendOn(p, 'screenAudio', screen.getAudioTracks()[0], out.screenAudio);
   }
-  pc.onicecandidate = (e) => { if (e.candidate) signal(user, { candidate: e.candidate.toJSON() }); };
+  attachCrypt(p, user);
+  // Relay-only: nothing but relay candidates leaves this device (calls C3).
+  pc.onicecandidate = (e) => { if (e.candidate && (!p.relay || relayCandidate(e.candidate.candidate))) signal(user, { candidate: e.candidate.toJSON() }); };
   pc.ontrack = (e) => {
+    attachCrypt(p, user);
     const stream = e.streams[0] || new MediaStream([e.track]);
     if (e.track.kind === 'video') {
       addRemoteVideo(p, stream);
@@ -282,6 +480,7 @@ function peer(user, offering) {
     // A relay may be on its way (PC to PC, fetched at the start of a call): try again with it.
     refreshIce().then(() => { if (peers.get(user) === p && hasTurn(S.ice)) { dropPeer(user); peer(user, true); } });
   } else setPeerState(user, 'connecting');
+  sendKeyTo(user);
   recapIfMeshChanged();
   return p;
 }
@@ -319,14 +518,31 @@ function onLineState(user, p, state = p.pc.connectionState) {
 // The security code for this connection (js/lib/callnet.js callCode), from
 // both certificates' fingerprints as this side sees them; the same for one
 // connection's life, ICE restarts included.
+// When both devices signed their certificates (calls C2), the code is longer
+// and comes from both devices' identity keys as well: "Verified device".
+async function codeFor(user, p) {
+  const local = p.pc.currentLocalDescription, remote = p.pc.currentRemoteDescription;
+  if (p.fp && p.signed) {
+    const keys = await identityKeys(user, p.fp.d).catch(() => null);
+    const mine = sdpFingerprints(local);
+    if (keys && mine) {
+      const code = await deviceCode({ key: keys.mine, fp: mine }, { key: keys.theirs, fp: p.fp.fingerprint });
+      if (code) return { code, verified: true };
+    }
+  }
+  const code = await callCode(local, remote);
+  return code ? { code, verified: false } : null;
+}
 function readCode(user, p) {
   if (p.code) return;
-  callCode(p.pc.currentLocalDescription, p.pc.currentRemoteDescription).then((code) => {
-    if (code && peers.get(user) === p && !p.code) { p.code = code; emit(); }
+  codeFor(user, p).then((r) => {
+    if (r && peers.get(user) === p && !p.code) { p.code = r.code; p.verified = r.verified; emit(); }
   }).catch(() => {});
 }
 // The code to compare with one person, or null while there is none yet.
 export const codeOf = (user) => peers.get(user)?.code || null;
+// Whether that code is the longer one: both devices signed their certificates and the signatures checked.
+export const verifiedDevice = (user) => !!peers.get(user)?.verified;
 
 function restartLine(user, p) {
   if (p.noRelay) return;
@@ -356,6 +572,9 @@ function dropPeer(user) {
   if (p.audio) { forgetAudio(p.audio); p.audio.srcObject = null; }
   if (p.screenAudio) { forgetAudio(p.screenAudio); p.screenAudio.srcObject = null; }
   p.pc.close();
+  // Their keys go, and what they sent is judged afresh on a new connection.
+  crypt.worker?.postMessage({ t: 'drop', peer: user });
+  ckOf.delete(user);
   const next = { ...S.peers };
   delete next[user];
   S.peers = next;
@@ -376,15 +595,21 @@ async function handleSignal(from, p, data) {
       if (collision) p.glare = (p.glare || 0) + 1;
       p.ignoreOffer = !p.polite && collision;
       if (p.ignoreOffer) return;
+      if ((await checkSdp(from, p, desc)) === 'refuse') { refusePeer(from); return; }
+      if (peers.get(from) !== p) return;
       p.settingAnswer = desc.type === 'answer';
-      await pc.setRemoteDescription(desc); // a polite peer rolls its own offer back here
+      await pc.setRemoteDescription({ type: desc.type, sdp: withFpAttr(desc.sdp, null) }); // a polite peer rolls its own offer back here
       p.settingAnswer = false;
+      // What the browser took is what was signed.
+      if (p.fp && sdpFingerprints(pc.remoteDescription?.sdp) !== p.fp.fingerprint) { refusePeer(from); return; }
+      attachCrypt(p, from);
       for (const c of p.queue.splice(0)) await pc.addIceCandidate(c).catch(() => {});
       // Listening: their voice's line is the one a microphone joins later.
       if (!send && !p.tx.voice) p.tx.voice = pc.getTransceivers().find((t) => t.mid != null && t.receiver.track?.kind === 'audio') || null;
       if (desc.type === 'offer') {
+        attachCrypt(p, from);
         await pc.setLocalDescription();
-        signal(from, { sdp: pc.localDescription });
+        await sendSdp(from, pc.localDescription);
       }
       capBitrate(p);
     } else if (data.candidate) {
@@ -398,7 +623,8 @@ async function handleSignal(from, p, data) {
 }
 
 on('rtc', ({ from, data }) => {
-  if (!S.call || !data || typeof data !== 'object') return;
+  if (!S.call || !data || typeof data !== 'object' || crypt.refused.has(from)) return;
+  if (data.ck && typeof data.ck === 'object') { onCallKey(from, data.ck); return; }
   if (data.kinds) {
     const k = { mic: data.kinds.mic || null, camera: data.kinds.camera || null, screen: data.kinds.screen || null, screenAudio: data.kinds.screenAudio || null };
     const p = peers.get(from);
@@ -430,9 +656,14 @@ on('rtc', ({ from, data }) => {
 // (an offer of mine they never got) goes again, and a line that isn't
 // connected restarts.
 const awayNow = new Set();
+let lastUsers = '';
 on('voice', ({ room, users, state }) => {
   if (S.call?.room !== room) return;
   for (const u of [...peers.keys()]) if (!users.includes(u)) dropPeer(u);
+  for (const u of [...crypt.refused]) if (!users.includes(u)) crypt.refused.delete(u);
+  // Someone joined or left: a new key of mine, so newcomers can't open what came before and leavers what comes after.
+  const now = [...users].sort().join();
+  if (now !== lastUsers) { const had = lastUsers; lastUsers = now; if (had && S.call.status === 'live') newCallKey(); }
   for (const u of [...pendingKinds.keys()]) if (!users.includes(u)) pendingKinds.delete(u);
   for (const u of [...pendingWant.keys()]) if (!users.includes(u)) pendingWant.delete(u);
   for (const u of users) {
@@ -448,7 +679,7 @@ on('voice', ({ room, users, state }) => {
 function resumeLine(user, p) {
   tellKinds(user);
   if (vp().lowData) signal(user, { want: { camera: !!S.call?.showCam?.[user] } });
-  if (p.pc.signalingState === 'have-local-offer' && p.pc.localDescription) signal(user, { sdp: p.pc.localDescription });
+  if (p.pc.signalingState === 'have-local-offer' && p.pc.localDescription) sendSdp(user, p.pc.localDescription);
   else if (p.pc.connectionState !== 'connected') restartLine(user, p);
 }
 on('voice.kicked', ({ room, reason } = {}) => {
@@ -533,6 +764,9 @@ function stop() {
   awayNow.clear();
   wasMany = false;
   out = null;
+  stopCrypt();
+  crypt.refused.clear();
+  lastUsers = '';
   S.call = null;
   S.peers = {};
   S.speaking = {};
@@ -556,6 +790,7 @@ export async function joinVoice(room, { start = false, video = false, listen = f
   const what = dm ? 'call' : 'join voice';
   if (S.conn.socket !== 'open') { toast(`You’re offline, so you can’t ${what} right now.`); return 'offline'; }
   if (S.callEnd?.dm === room) S.callEnd = null;
+  if (iceSoon()) await refreshIce();
   const c = { room, dm, muted: false, deaf: false, camera: false, screen: false, status: 'mic', video: !!video, listen: false };
   S.call = c;
   // The screen's sound goes in its own stream, so adding it never restarts the picture.
@@ -596,6 +831,8 @@ export async function joinVoice(room, { start = false, video = false, listen = f
     emit();
     cue('join');
     if (c.listen) pushState();
+    lastUsers = [S.me, ...r.peers].sort().join();
+    startCrypt();
     for (const u of r.peers) peer(u, true);
     // Data saver keeps the camera off until you turn it on.
     if (video && vp().lowData) toast('Data saver is on, so your camera stays off. Turn it on with the camera button if you want it.');
@@ -641,6 +878,7 @@ async function addMic() {
       try { t.sender.setStreams?.(send); } catch { /* older browsers: the kinds signal still names it */ }
       t.direction = 'sendrecv';
     } else p.pc.addTrack(track, send);
+    attachCrypt(p, u);
   }
   stopMyLevel = watchLevel(S.me, mic);
   watchMic(mic);
@@ -1017,6 +1255,7 @@ export function mediaOf(user) {
 // For the end-to-end checks: the live connection states and audio bytes received.
 export async function voiceStats() {
   const out = {};
+  const cs = await cryptStats();
   for (const [u, p] of peers) {
     let bytes = 0, energy = 0;
     (await p.pc.getStats()).forEach((r) => { if (r.type === 'inbound-rtp' && r.kind === 'audio') { bytes += r.bytesReceived; energy += r.totalAudioEnergy || 0; } });
@@ -1037,6 +1276,8 @@ export async function voiceStats() {
       screenPref: (() => { try { return p.tx.screen?.sender?.track ? p.tx.screen.sender.getParameters().degradationPreference || null : null; } catch { return null; } })(),
       caps: Object.fromEntries(['camera', 'screen'].map((k) => { try { return [k, p.tx[k]?.sender?.track ? p.tx[k].sender.getParameters().encodings?.[0] || null : null]; } catch { return [k, null]; } })),
       sending: p.pc.getSenders().some((x) => x.track && x.track.kind === 'audio' && x.track.readyState === 'live'),
+      // calls C1/C2: end-to-end encryption of the media with this person, and why not; the code and whether the device signed.
+      e2ee: !!p.e2ee?.on, e2eeWhy: p.e2ee?.why ?? null, frames: cs[u] || null, code: p.code || null, verified: !!p.verified, fpSigned: !!p.fp,
     };
   }
   return out;
@@ -1148,6 +1389,15 @@ export function resetMutedWarn() { lastWarn = 0; S.mutedWarn = 0; }
 // Every 2 seconds in a call: each connection's round trip, loss, jitter, what
 // I send and whether it is relayed, into S.netq (js/lib/netquality.js).
 async function pollQuality() {
+  if (S.call?.status === 'live' && peers.size) {
+    const cs = await cryptStats();
+    let changed = false;
+    for (const [u, p] of peers) {
+      const e = e2eeOf(u, p, cs[u]);
+      if (p.e2ee?.on !== e.on || p.e2ee?.why !== e.why) { p.e2ee = e; changed = true; }
+    }
+    if (changed) emit();
+  }
   if (!S.call || S.call.status !== 'live' || !peers.size) { if (S.netq && Object.keys(S.netq).length) S.netq = {}; return; }
   const next = {};
   for (const [u, p] of peers) {
@@ -1187,9 +1437,15 @@ function cameraKbps(p, report) {
 setInterval(pollQuality, 2000);
 
 // Short-lived TURN credentials (server/voiceopts.js iceConfig) run out after
-// 12 hours; a long call asks for fresh ones every 6, for the connections it
-// makes from then on. Every new socket's hello brings fresh ones too.
-setInterval(() => {
-  if (!S.call || !(S.ice || []).some((s) => typeof s.username === 'string' && /^\d+:/.test(s.username))) return;
-  call('ice.refresh').then((r) => { if (Array.isArray(r?.ice)) S.ice = r.ice; }).catch(() => {});
-}, 6 * 3600_000);
+// an hour (calls C4). Every socket's hello brings fresh ones with when they
+// run out (iceExp); a call fetches new ones before they do, for the
+// connections it makes from then on, and before joining.
+on('hello', (d) => {
+  if (Array.isArray(d?.ice)) { S.ice = d.ice; S.iceExp = d.iceExp || null; }
+  S.callE2ee = d?.callE2ee === 1; // the server passes on call keys (calls C1)
+});
+const iceSoon = () => !!S.iceExp && S.iceExp - Date.now() < 600_000;
+setInterval(() => { if (S.call && iceSoon()) refreshIce(); }, 60_000);
+// For the end-to-end checks: damage what I send to one person (their side must drop it), and the key ids in use.
+export function tamperFrames(user, on = true) { crypt.worker?.postMessage({ t: 'tamper', peer: user, on }); }
+export const cryptInfo = () => ({ mode: crypt.mode, why: crypt.why, key: crypt.key?.id ?? null, refused: [...crypt.refused] });

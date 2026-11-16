@@ -9,7 +9,7 @@ import { Icon } from '../ui/icons.js';
 import { Seg, Switch } from '../ui/kit.js';
 import { Confirm } from './modals.js';
 import { restartMic, restartCamera, applyScreen, applyDataSaver } from '../voice.js';
-import { hasTurn } from '../lib/callnet.js'; // whether this server has a relay to hide your IP
+import { hasTurn, relayMode } from '../lib/callnet.js'; // whether this server has a relay to hide your IP, and the setting (calls C3)
 import {
   vp, setVoice, micConstraints, cameraConstraints, audioCtx, meter, canPickSpeaker, preview, setPersonVolume, setPersonMuted,
   RESOLUTIONS, FRAME_RATES, CAM_RES, CAM_FPS,
@@ -302,9 +302,9 @@ export function VoiceSettings() {
       <${Switch} on=${!!v.lowData} label="Data saver" onChange=${(on) => { setVoice({ lowData: on }); applyDataSaver(); }} />
     <//>
     ${hasTurn(S.ice)
-      ? html`<${Row} label="Hide my IP address from people in calls (uses a relay)" hint="Your audio and video go through a relay server instead of straight to each person, so they don’t see your IP address. It can add a little delay. The relay’s operator (whoever runs this Snug server, or Cloudflare for PC-to-PC calls) sees that you connected, from where and when, but not what you say: calls are encrypted between the people in them. A change applies to the next call you join." top>
-          <${Seg} label="Hide my IP address" value=${v.relay} onChange=${(r) => setVoice({ relay: r })}
-            options=${[['others', 'Rooms and non-friends'], ['all', 'Always'], ['off', 'Off']]} />
+      ? html`<${Row} label="Hide my IP address from people in calls (uses a relay)" hint="On by default: your audio and video go through a relay server instead of straight to each person, so they don’t see your IP address. It can add a little delay. The relay’s operator (whoever runs this Snug server, or Cloudflare for PC-to-PC calls) sees that you connected, from where and when, and how much you sent, but not what you say. Off: calls go straight to each person, so they can see your IP address. A change applies to the next call you join." top>
+          <${Seg} label="Hide my IP address" value=${relayMode(v) === 'all' ? 'auto' : relayMode(v)} onChange=${(r) => setVoice({ relay: r, relayV: 2 })}
+            options=${[['auto', 'On'], ['others', 'Rooms and non-friends'], ['off', 'Off']]} />
         <//>`
       : html`<${Row} label="Hide my IP address from people in calls" hint="This Snug server has no relay, so calls connect straight to each person and they can see your IP address. The server’s owner can add one (a TURN server).">
           <span class="faint">No relay here</span>

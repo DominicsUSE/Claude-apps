@@ -51,6 +51,8 @@ test.afterEach(() => { const seen = errors.splice(0); assert.deepEqual(seen, [],
 
 async function person(handle, { viewport = { width: 1280, height: 860 } } = {}) {
   const ctx = await browser.newContext({ viewport, permissions: ['microphone', 'camera'] });
+  // calls C3: this machine's server has no relay; the one-time "connects directly" sheet is tested on its own.
+  await ctx.addInitScript(() => { try { localStorage.setItem('snug.directOk', '1'); } catch { /* none */ } });
   const page = await ctx.newPage();
   page.setDefaultTimeout(15000);
   page.on('pageerror', (e) => errors.push(`${handle}: ${e.message}`));

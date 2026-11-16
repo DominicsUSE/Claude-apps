@@ -8,6 +8,7 @@ import { S, person, convMeta, isOnline } from '../store.js';
 import { fmtTime, fmtFull, nameList } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Stack } from '../ui/kit.js';
+import { connectsDirectly } from '../voice.js'; // calls C3
 import { ServerNoteMark } from './e2ee-conv.js'; // call records in an encrypted conversation aren't encrypted
 import { startCall, acceptCall, joinCall, declineCall, incoming, dismissCallEnd, callTitle, callBody } from '../calls.js';
 
@@ -99,6 +100,7 @@ function IncomingCard({ r }) {
   const meta = convMeta(r.dm);
   const caller = person(r.from);
   const busy = busyNote(S.call && S.call.room !== r.dm ? S.call : null);
+  const direct = connectsDirectly(); // calls C3: no relay here, so they'd see my IP address
   useEffect(() => {
     const before = document.activeElement;
     // A loud ring takes the focus, so Enter picks up; a quiet one waits to be
@@ -140,9 +142,10 @@ function IncomingCard({ r }) {
         </p>
       </div>
     </div>
-    ${(r.quiet || busy) && html`<div class="inc-notes">
+    ${(r.quiet || busy || direct) && html`<div class="inc-notes">
       ${r.quiet && html`<p class="inc-note">No ringtone: ${meta?.kind === 'group' ? 'this group' : 'this conversation'} is muted${S.users[S.me]?.presence === 'focus' ? ', or you’re Focused' : ''}.</p>`}
       ${busy && html`<p class="inc-note">${busy}</p>`}
+      ${direct && html`<p class="inc-note inc-direct">This connects directly: ${r.group ? 'people in the call' : caller.name.split(' ')[0]} can see your IP address.</p>`}
     </div>`}
     <div class="inc-acts">
       <button class="btn danger solid inc-decline" onClick=${() => declineCall(r.dm)} aria-keyshortcuts="Escape"><${Icon} name="phone-off" size=${18} />Decline</button>

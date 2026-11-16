@@ -22,6 +22,8 @@ import { b64u, b64uOf, utf8 } from '../lib/e2ee/bytes.js';
 /** Whether this device can take part: its encryption keys are set up and unlocked. */
 export const callKeysReady = () => E2.on === true && E2.status === 'ready' && !!ring.dev?.dsk?.privateKey;
 export const myDevice = () => ring.dev?.d || null;
+/** Whether this server offers end-to-end encryption at all. */
+export const e2eeOffered = () => E2.on === true;
 const MAX_AGE = 10 * 60_000;
 const info = (m, d) => `snug-call-v1/key\n${m.place}\n${m.from}\n${m.d}\n${m.to}\n${d}\n${m.id}`;
 

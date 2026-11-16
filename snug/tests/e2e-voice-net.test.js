@@ -77,9 +77,11 @@ test.beforeEach(() => { srv.resetLimits(); relaySrv?.resetLimits(); });
 test.afterEach(() => { const seen = errors.splice(0); assert.deepEqual(seen, [], 'page errors'); });
 
 const contexts = [];
-async function person(handle, { viewport = { width: 1280, height: 860 }, on = browser, at = url, phone = false, permissions = ['microphone', 'camera'], init = null } = {}) {
+async function person(handle, { viewport = { width: 1280, height: 860 }, on = browser, at = url, phone = false, permissions = ['microphone', 'camera'], init = null, askDirect = false } = {}) {
   const ctx = await on.newContext({ viewport, permissions, ...(phone ? { isMobile: true, hasTouch: true } : {}) });
   contexts.push(ctx);
+  // calls C3: this machine's server has no relay; the one-time "connects directly" sheet is tested on its own.
+  if (!askDirect) await ctx.addInitScript(() => { try { localStorage.setItem('snug.directOk', '1'); } catch { /* none */ } });
   if (init) await ctx.addInitScript(init);
   const page = await ctx.newPage();
   page.setDefaultTimeout(15000);
@@ -340,59 +342,119 @@ async function relayServer() {
   // A relay that answers nobody (a documentation-only address): relay-only connections can't connect, which proves they never went direct.
   relaySrv = await startServer({
     port: 0, dataDir: relayDir, quiet: true, ringMs: 8000,
-    iceEnv: { SNUG_STUN: 'none', SNUG_TURN_URL: 'turn:192.0.2.1:3478', SNUG_TURN_USER: 'snug', SNUG_TURN_PASS: 'relay-pass' },
+    // calls C4: short-lived credentials from a shared secret; no outside STUN (the default with TURN).
+    iceEnv: { SNUG_TURN_URL: 'turn:192.0.2.1:3478', SNUG_TURN_SECRET: 'e2e-relay-secret' },
   });
   relayUrl = `http://127.0.0.1:${relaySrv.port}`;
   return relayUrl;
 }
 
-test('relay: with a relay, voice rooms go relay-only by default (never direct), calls with a friend go direct; Always and Off; the setting explains who sees what', async () => {
+test('relay: with a relay, every call hides my IP by default (friends too), and only relay candidates leave the device; Rooms and non-friends, and Off', async () => {
   const at = await relayServer();
-  const robin = await person('robin', { at });
-  const ines = await person('ines', { at });
-  await openVoiceSettings(robin);
-  const row = robin.locator('.set-row:has-text("Hide my IP address from people in calls (uses a relay)")');
-  await row.waitFor();
-  assert.match(await row.textContent(), /relay’s operator/);
-  assert.match(await row.textContent(), /little delay/);
-  assert.equal(await row.locator('.seg button[aria-pressed="true"], .seg button[aria-checked="true"]').first().textContent(), 'Rooms and non-friends');
-  await robin.keyboard.press('Escape');
-  // A voice room: relay-only, so with a dead relay it stays unconnected and says how it's trying.
-  await joinWheel(robin);
-  await joinWheel(ines);
-  await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.policy === 'relay');
-  await robin.locator('.stage-person:has-text("Ines") .stage-note:has-text("through the relay")').waitFor();
-  await robin.waitForTimeout(1500);
-  assert.notEqual((await statsOf(robin, 'ines')).state, 'connected', 'never direct');
-  await robin.click('.stage [aria-label="Leave voice"]');
-  await ines.click('.stage [aria-label="Leave voice"]');
-  // Off: direct, and it connects (both on this machine).
-  await robin.evaluate(() => { window.snug.S.prefs.voice = { ...window.snug.S.prefs.voice, relay: 'off' }; });
-  await ines.evaluate(() => { window.snug.S.prefs.voice = { ...window.snug.S.prefs.voice, relay: 'off' }; });
-  await joinWheel(robin);
-  await joinWheel(ines);
-  await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.policy === 'all');
-  await connected(robin, 1);
-  await robin.locator('.stage .act-conn .act-routeword:has-text("Direct")').waitFor({ timeout: 10000 });
-  await robin.click('.stage .act-conn');
-  await robin.locator('.act-qpop .act-route:has-text("they can see your IP address")').waitFor();
-  await robin.locator('.act-qpop .act-route:has-text("not the end-to-end encryption of private messages")').waitFor();
-  await robin.keyboard.press('Escape');
-  await robin.click('.stage [aria-label="Leave voice"]');
-  await ines.click('.stage [aria-label="Leave voice"]');
-  // The default with a friend in a call: direct.
-  await robin.evaluate(() => { window.snug.S.prefs.voice = { ...window.snug.S.prefs.voice, relay: 'others' }; });
-  await ines.evaluate(() => { window.snug.S.prefs.voice = { ...window.snug.S.prefs.voice, relay: 'others' }; });
+  // Everything Robin's browser signals, as the server passes it on.
+  const sent = [];
+  const robinId = relaySrv.db.get("SELECT id FROM users WHERE handle = 'robin'").id;
+  const real = relaySrv.hub.rtcRelay;
+  relaySrv.hub.rtcRelay = (from, to, data) => { if (from === robinId) sent.push(JSON.stringify(data)); return real(from, to, data); };
+  try {
+    const robin = await person('robin', { at });
+    const ines = await person('ines', { at });
+    // calls C4: the hello says when the TURN credentials run out, about an hour from now.
+    const exp = await robin.evaluate(() => window.snug.S.iceExp);
+    assert.ok(exp > Date.now() + 50 * 60_000 && exp < Date.now() + 61 * 60_000, `iceExp ${exp}`);
+    await openVoiceSettings(robin);
+    const row = robin.locator('.set-row:has-text("Hide my IP address from people in calls (uses a relay)")');
+    await row.waitFor();
+    assert.match(await row.textContent(), /On by default/);
+    assert.match(await row.textContent(), /relay’s operator/);
+    assert.equal(await row.locator('.seg button[aria-pressed="true"], .seg button[aria-checked="true"]').first().textContent(), 'On');
+    await robin.keyboard.press('Escape');
+    // A call with a friend: relay-only by default (with a dead relay it never connects, so never directly).
+    await openDm(robin, 'Ines Carvalho');
+    await robin.click('.main .bar .call-btn[aria-label="Start a voice call"]');
+    await ines.locator('.incoming .inc-accept').click();
+    await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.policy === 'relay');
+    await waitAsync(ines, async () => (await window.snug.voiceStats()).robin?.policy === 'relay');
+    await robin.waitForTimeout(1500);
+    assert.notEqual((await statsOf(robin, 'ines')).state, 'connected', 'never direct');
+    assert.ok(sent.some((x) => x.includes('"sdp"')), 'offers went through the server');
+    for (const x of sent) assert.doesNotMatch(x, /typ (host|srflx|prflx)|\.local\b/, 'only relay candidates leave the device');
+    // calls C4: credentials near their end are fetched again before the next call.
+    await robin.click('.stage [aria-label="Leave call"]');
+    await robin.evaluate(() => { window.snug.S.iceExp = Date.now() + 60_000; });
+    await joinWheel(robin);
+    await waitAsync(robin, async () => window.snug.S.iceExp > Date.now() + 50 * 60_000);
+    await robin.click('.stage [aria-label="Leave voice"]');
+    // Rooms and non-friends (chosen since 0.14): a call with a friend goes direct.
+    for (const p of [robin, ines]) await p.evaluate(() => { window.snug.S.prefs.voice = { ...window.snug.S.prefs.voice, relay: 'others', relayV: 2 }; });
+    await openDm(robin, 'Ines Carvalho');
+    await robin.click('.main .bar .call-btn[aria-label="Start a voice call"]');
+    await ines.locator('.incoming .inc-accept').click();
+    await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.policy === 'all');
+    await robin.click('.stage [aria-label="Leave call"]');
+    // ... and a voice room stays relay-only.
+    await joinWheel(robin);
+    await joinWheel(ines);
+    await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.policy === 'relay');
+    await robin.locator('.stage-person:has-text("Ines") .stage-note:has-text("through the relay")').waitFor();
+    await robin.click('.stage [aria-label="Leave voice"]');
+    await ines.click('.stage [aria-label="Leave voice"]');
+    // Off: direct, and it connects (both on this machine); the details say who sees what.
+    for (const p of [robin, ines]) await p.evaluate(() => { window.snug.S.prefs.voice = { ...window.snug.S.prefs.voice, relay: 'off', relayV: 2 }; });
+    await joinWheel(robin);
+    await joinWheel(ines);
+    await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.policy === 'all');
+    await connected(robin, 1);
+    await robin.locator('.stage .act-conn .act-routeword:has-text("Direct")').waitFor({ timeout: 10000 });
+    await robin.click('.stage .act-conn');
+    await robin.locator('.act-qpop .act-route:has-text("they can see your IP address")').waitFor();
+    await robin.locator('.act-qpop .act-e2ee-note:has-text("Encrypted in transit only (DTLS-SRTP)")').waitFor();
+    await robin.keyboard.press('Escape');
+  } finally { relaySrv.hub.rtcRelay = real; }
+});
+
+test('no relay on the server: starting a call asks once on this device, the voice room and the incoming call say so before joining', async () => {
+  const robin = await person('robin', { askDirect: true });
+  const ines = await person('ines', { askDirect: true });
   await openDm(robin, 'Ines Carvalho');
   await robin.click('.main .bar .call-btn[aria-label="Start a voice call"]');
-  await ines.locator('.incoming .inc-accept').click();
-  await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.policy === 'all');
-  // Always: relay-only with a friend too.
+  const sheet = robin.locator('.modal:has-text("This connects directly: Ines can see your IP address")');
+  await sheet.waitFor();
+  await sheet.locator('button:has-text("Cancel")').click();
+  await sheet.waitFor({ state: 'detached' });
+  assert.equal(await robin.evaluate(() => window.snug.S.call), null, 'cancelling starts nothing');
+  await robin.click('.main .bar .call-btn[aria-label="Start a voice call"]');
+  await sheet.locator('button:has-text("Join")').click();
+  await ines.locator('.incoming .inc-direct:has-text("This connects directly: Robin can see your IP address")').waitFor();
+  await ines.locator('.incoming .inc-decline').click();
+  await robin.locator('.stage.call').waitFor({ state: 'detached' });
+  // Asked once: the next call starts straight away.
+  await robin.click('.main .bar .call-btn[aria-label="Start a voice call"]');
+  await ines.locator('.incoming').waitFor();
+  assert.equal(await sheet.count(), 0);
   await robin.click('.stage [aria-label="Leave call"]');
-  await robin.evaluate(() => { window.snug.S.prefs.voice = { ...window.snug.S.prefs.voice, relay: 'all' }; });
+  // A voice room says it above Join voice.
+  await openWheelRoom(ines);
+  await ines.locator('.stage .stage-direct:has-text("This connects directly: people in Wheel room can see your IP address")').waitFor();
+});
+
+test('connection details and stats never show an IP address', async () => {
+  const robin = await person('robin');
+  const ines = await person('ines');
   await joinWheel(robin);
   await joinWheel(ines);
-  await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.policy === 'relay');
+  await connected(robin, 1);
+  await robin.waitForFunction(() => Object.keys(window.snug.S.netq || {}).length > 1, null, { timeout: 15000 });
+  await robin.click('.stage .act-conn');
+  await robin.locator('.act-qpop .act-qtable').waitFor();
+  const shown = await robin.locator('.act-qpop').textContent();
+  const stats = JSON.stringify(await robin.evaluate(async () => ({ s: await window.snug.voiceStats(), q: window.snug.S.netq, p: window.snug.S.peers })));
+  const IPV4 = /\b(?:\d{1,3}\.){3}\d{1,3}\b/;
+  const IPV6 = /\b(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}\b|::ffff:/i;
+  for (const text of [shown, stats]) {
+    assert.doesNotMatch(text, IPV4);
+    assert.doesNotMatch(text, IPV6);
+  }
 });
 
 test('relay: asked to hide my IP with no relay on the server, Snug doesn’t connect directly and says why', async () => {

@@ -47,6 +47,8 @@ test.afterEach(async () => {
 async function person(handle, { viewport = { width: 1280, height: 860 } } = {}) {
   const ctx = await browser.newContext({ viewport, permissions: ['microphone', 'camera'] });
   contexts.push(ctx);
+  // calls C3: this machine's server has no relay; the one-time "connects directly" sheet is tested on its own.
+  await ctx.addInitScript(() => { try { localStorage.setItem('snug.directOk', '1'); } catch { /* none */ } });
   const page = await ctx.newPage();
   page.setDefaultTimeout(15000);
   page.on('pageerror', (e) => errors.push(`${handle}: ${e.message}`));
@@ -369,10 +371,11 @@ test('a group call I declined is a quiet line, not a violet missed call', async 
   await connected(robin, 1);
   await robin.click('.stage.call [aria-label="Leave call"]');
   await malik.click('.stage.call [aria-label="Leave call"]');
+  // calls C5: the record keeps only who missed the call, so Ines (who declined) sees the call, not a missed call.
   const line = ines.locator('.callline').last();
-  await ines.locator('.callline:has-text("Declined call")').waitFor();
+  await ines.locator('.callline:has-text("Robin started it")').waitFor().catch(async (e) => { console.log("DEBUG", await ines.locator(".callline").allTextContents(), JSON.stringify(await ines.evaluate(() => Object.values(window.snug.S.msgs).flat().filter((m) => m.call).map((m) => m.call)))); throw e; });
   assert.equal(await line.evaluate((el) => el.classList.contains('missed')), false);
-  assert.match(await line.textContent(), /Declined call.*from Robin/);
+  assert.match(await line.textContent(), /Call · .*Robin started it/);
   assert.equal(await line.locator('button:has-text("Call back")').count(), 0);
 });
 
@@ -395,4 +398,49 @@ test('in a call, calling someone else asks first; cancelling keeps the call', as
   await ines.locator('.stage.call').waitFor({ state: 'detached' });
   await robin.locator('.stage.call .stage-conn.ring').waitFor();
   await robin.click('.stage.call [aria-label="Leave call"]');
+});
+
+// ---------- calls C2: a server in the middle is caught ----------
+async function turnOnEncryption(page) {
+  const dialog = page.locator('.modal[role=dialog]');
+  await page.click('.rail-btn:has(.sr:text-matches("^Messages"))');
+  await page.locator('.e2-invite button:has-text("Turn on")').click();
+  await dialog.locator('h2:has-text("Turn on end-to-end encryption")').waitFor();
+  await dialog.locator('button:has-text("Turn on")').click();
+  await dialog.locator('#e2-recovery-key').waitFor();
+  const key = (await dialog.locator('#e2-recovery-key code').allTextContents()).join('-');
+  await dialog.locator('#e2-last').fill(key.slice(-4).toLowerCase());
+  await dialog.locator('button:has-text("I’ve saved it")').click();
+  await dialog.waitFor({ state: 'detached' });
+  await page.waitForFunction(() => window.snug.e2ee.E2.status === 'ready');
+}
+
+test('a server that swaps the certificate fingerprint on the way: the call refuses that connection and says so loudly, never a quiet fallback', async () => {
+  const robin = await person('robin');
+  const ines = await person('ines');
+  await turnOnEncryption(robin);
+  await turnOnEncryption(ines);
+  const robinId = srv.db.get("SELECT id FROM users WHERE handle = 'robin'").id;
+  // The server in the middle: Robin's offers reach Ines with another certificate's fingerprint.
+  const real = srv.hub.rtcRelay;
+  let swapped = 0;
+  srv.hub.rtcRelay = (from, to, data) => {
+    if (from === robinId && typeof data?.sdp?.sdp === 'string' && /a=fingerprint:/.test(data.sdp.sdp)) {
+      swapped++;
+      data = { sdp: { ...data.sdp, sdp: data.sdp.sdp.replace(/^a=fingerprint:(\S+) ([0-9A-F:]+)/gm, (m, h, v) => `a=fingerprint:${h} ${v.split(':').reverse().join(':')}`) } };
+    }
+    return real(from, to, data);
+  };
+  try {
+    await openDm(robin, 'Ines Carvalho');
+    await robin.click('.main .bar .call-btn[aria-label="Start a voice call"]');
+    await ines.locator('.incoming .inc-accept').click();
+    await ines.locator('.stage .act-alarm[role=alert]:has-text("Snug stopped the connection to Robin")').waitFor({ timeout: 20000 });
+    await ines.locator('.toast:has-text("don’t match what their device signed")').waitFor();
+    assert.ok(swapped > 0);
+    assert.deepEqual(await ines.evaluate(() => window.snug.voiceTest.crypt().refused), [robinId]);
+    assert.equal((await ines.evaluate(() => window.snug.voiceStats())).robin, undefined, 'no connection to Robin');
+    await ines.waitForTimeout(1500);
+    assert.notEqual((await robin.evaluate(() => window.snug.voiceStats())).ines?.state, 'connected', 'Robin never connects through the swapped certificate');
+  } finally { srv.hub.rtcRelay = real; }
 });

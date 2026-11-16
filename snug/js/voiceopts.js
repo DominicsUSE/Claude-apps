@@ -46,7 +46,7 @@ export const VOICE_DEFAULTS = {
   ringOutput: '',                      // the device the ringtone plays on; '' is the system default
   // --- v12 voice track ---
   lowData: false,                      // data saver: voice at 24 kbit/s, cameras paused, screens at 10 fps (js/lib/callnet.js)
-  relay: 'others',                     // hide my IP through the relay: 'others' (rooms, non-friends) | 'all' | 'off'
+  relay: 'auto',                       // hide my IP through the relay (calls C3): 'auto' (everyone, when there is one) | 'others' (rooms, non-friends) | 'all' | 'off'; js/lib/callnet.js relayMode
 };
 export const CAM_RES = { 360: { width: 640, height: 360 }, 720: { width: 1280, height: 720 }, 1080: { width: 1920, height: 1080 } };
 export const CAM_FPS = [15, 24, 30];
