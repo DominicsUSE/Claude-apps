@@ -105,11 +105,16 @@ from **Settings > Desktop app**). Every release's notes carry the same steps.
   release itself; for that, `gh attestation verify <file> -R DominicsUSE/Claude-apps`
   checks GitHub's build provenance (the file was built by this repository's
   workflow).
-- **Updates** install themselves: the app downloads the new release, checks its
+- **Updates** install themselves by default: the app downloads the new release, checks its
   size and SHA-256 against the release's checksum file (and that file's Ed25519
   signature once a key is pinned in `desktop/updater.js`), and installs it at a
-  quiet moment, never during a call or a data-file transfer. Updates are
-  required: an installed app ignores `SNUG_UPDATE_CHECK`.
+  quiet moment, never during a call or a data-file transfer. It asks GitHub
+  when it starts and then about once a day (22 to 26 hours apart; every hour
+  before 0.14), and GitHub sees the computer's address each time. **Settings >
+  Desktop app > Updates** (0.14): *Automatically*, *Tell me* (a notification
+  and **Install now**) or *Only when I ask* (no checks on their own; **Check
+  now**). A version below the registry's minimum still installs once a check
+  finds it. An installed app ignores `SNUG_UPDATE_CHECK`.
 - **Going back.** The updater never installs an older version. Every version
   stays on the releases page (<https://github.com/DominicsUSE/Claude-apps/releases?q=snug-v>):
   download the older file, check it, and install it over the current one (or
@@ -118,9 +123,10 @@ from **Settings > Desktop app**). Every release's notes carry the same steps.
   desktop app's encryption keys under the system key store, 0.12 can't open
   them, so encrypted messages can't be read in that app until it is updated
   again, or until that computer is removed from another device (Settings >
-  Encryption) and added again. Because updates are required, the app
+  Encryption) and added again. With *Automatically* (the default), the app
   takes the newest release again at its next check, so a person can go back
-  only for a while. **To stop a broken release for everyone**, the owner edits
+  only for a while; *Tell me* or *Only when I ask* keeps the older one until
+  they install. **To stop a broken release for everyone**, the owner edits
   it on GitHub and ticks **Set as a pre-release** (or saves it as a draft): the
   updater skips pre-releases and drafts (`desktop/updater.test.js`, D11), so
   clients that haven't updated stay where they are and people who have can
@@ -1256,7 +1262,7 @@ behind a reverse proxy that terminates TLS and passes WebSocket upgrades on
 | `SNUG_ORIGINS` | Extra allowed page origins, comma separated | none |
 | `SNUG_RP_ID` | The domain passkeys belong to (for example `example.org` to share them across `snug.example.org` and `chat.example.org`). Without it: the one `SNUG_HOSTS` name, or `localhost` on a server that only listens on this machine. Changing it later stops existing passkeys from working (passwords keep working) | the `SNUG_HOSTS` name |
 | `SNUG_HOSTS` | Host names this server answers to, comma separated (for example `snug.example.org`). Any other `Host` gets 421, which stops DNS-rebinding pages. A server bound to loopback always checks (localhost, IP addresses and `SNUG_ORIGINS` hosts pass). A server bound to a public address checks once this is set, and logs a warning until then | none |
-| `SNUG_STUN` | STUN servers for voice, comma separated; `none` asks no STUN server at all (a STUN server sees each caller's IP address) | Google's public server |
+| `SNUG_STUN` | STUN servers for voice, comma separated; `none` asks no STUN server at all (a STUN server sees each caller's IP address) | with `SNUG_TURN_URL`, the TURN server's own address (0.14); otherwise Google's public server |
 | `SNUG_LOG_DAYS` | Days sign-in history and security events are kept (1 to 365) | `30` |
 | `SNUG_TURN_URL`, `SNUG_TURN_USER`, `SNUG_TURN_PASS` | TURN relay for voice | none |
 | `SNUG_TURN_SECRET` | Shared secret of the TURN server's REST API (coturn `use-auth-secret`): each person gets their own credential, `<expiry>:<user id>` with a base64 HMAC-SHA1, valid 12 hours and refreshed by the `ice.refresh` op. When set, `SNUG_TURN_USER`/`SNUG_TURN_PASS` are never sent | none |
@@ -1308,7 +1314,7 @@ before seeding anything that faces the internet, or better, do not seed there.
   network (/48) or account; when 1000 are waiting, the busiest /32 (IPv4: /24)
   loses its oldest first. The RP ID never comes from the `Host` header alone.
 - **Audit**: sign-ins, failures and security changes go to the `auth_events`
-  table (30 days by default, `SNUG_LOG_DAYS`; addresses truncated) and the log
+  table (14 days by default since 0.14, `SNUG_LOG_DAYS`; addresses truncated) and the log
   as JSON lines, never with a password, code, token or full address; bursts
   log a `suspicious` line, and other devices get a "new sign-in" notice.
   Failure counters name an address only by an HMAC under the data key.
@@ -1528,11 +1534,35 @@ mode you're in. The short version:
   their copies of your most recent messages (up to 5,000 with each friend and
   2,000 in each group), but a PC that is offline then, or runs a changed copy
   of Snug, keeps them, and so do older messages, forwards and screenshots.
-- **What is kept**: sign-in history and security events 30 days
-  (`SNUG_LOG_DAYS`), addresses shortened; failed sign-in counters 2 days,
-  addresses only as a keyed hash; sessions store the kind of device, never an
-  address; deleted message text goes after about 11 minutes; encrypted
-  database backups keep 7 days. `GET /api/privacy` reports these for the page.
+- **What Snug stores and for how long** (0.14; `GET /api/privacy` reports the
+  numbers, and the privacy page lists them):
+  - Sign-in history and security events: 14 days (`SNUG_LOG_DAYS`), addresses
+    shortened, the kind of device ("Firefox on Windows"), not the browser's
+    full string. Failed sign-in counters: 2 days, addresses only as a keyed hash.
+  - Signed-in devices and encryption keys: until signed out (30 days at most,
+    14 unused); when each was last used is kept to the day, not the time.
+  - Messages, files, profile, reactions, read positions, pins and saved
+    messages: until deleted (deleted text goes after about 11 minutes).
+    Call records (who called, answered or missed, how long) are a line in the
+    conversation and are kept like its messages.
+  - House join and leave log: 90 days (owners' insights). Link-preview cache:
+    24 hours (a preview shown under a message stays with it). Declined friend
+    requests: a day. All purged hourly (`server/retention.js`).
+  - Push notification addresses: until that sign-in ends; each note is
+    encrypted to the device and waits at the push service (the browser
+    maker's) a day at most. GIF searches go to the GIF service through the
+    server (or the registry), cached in memory for an hour, not stored.
+  - End-to-end encrypted conversations: the server still stores who sends to
+    whom and when, message sizes, and who is mentioned (to notify them).
+  - Encrypted database backups: 7 days.
+  - Outside parties: Google's STUN server when calls need it and this Snug has
+    no TURN relay of its own (`SNUG_STUN=none` turns it off); the TURN relay if
+    there is one; the browser's push service; in the desktop app, GitHub
+    (update checks, see above) and the Snug directory on Cloudflare, which
+    keeps accounts, friend lists and roughly when a PC last connected (updated
+    once a day), and stores addresses only as keyed hashes for abuse limits
+    that go after 2 days. Moderation records (reports, bans, timeouts, the
+    house log) are kept as before.
 - **What Snug never does**: no analytics, diagnostics or crash reports, no
   ads, no email or phone number, no fonts, scripts or pictures from other
   websites. Snug doesn't hide who you are, and whoever runs a server or the directory

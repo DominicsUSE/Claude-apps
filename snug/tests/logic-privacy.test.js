@@ -2,7 +2,7 @@
 // mode the app is in, and never a promise it can't keep.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { whoSeesWhat, keptFor, snugAt } from '../js/lib/privacy.js';
+import { whoSeesWhat, keptFor, snugAt, lastActive } from '../js/lib/privacy.js';
 
 const text = (s) => s.flatMap((x) => [x.title, ...x.items]).join('\n');
 
@@ -53,4 +53,44 @@ test('retention lines come from the server’s numbers', () => {
   assert.match(t, /30 days at most, or 14 days unused/);
   assert.match(t, /Encrypted backups of the database are kept for 7 days/);
   assert.doesNotMatch(keptFor({ logDays: 30 }).join('\n'), /backups/);
+});
+
+// 0.14 tracking track: the whole list of what the server keeps, with the windows it really purges at.
+const ABOUT = { mode: 'host', logDays: 14, failureHours: 48, undoMinutes: 11, sessionDays: 30, idleDays: 14, memberLogDays: 90, linkCacheHours: 24, friendCooldownHours: 24, activity: 'day', pushTtlHours: 24 };
+test('0.14 what Snug stores lists call records, the house join log, link previews, push addresses, reactions and reads, and day-only activity', () => {
+  const t = keptFor(ABOUT).join('\n');
+  assert.match(t, /Sign-in history and security events: 14 days/);
+  assert.match(t, /Call records .*who called.*answered.*how long/);
+  assert.match(t, /joins or leaves a house: 90 days/);
+  assert.match(t, /Link previews: .*24 hours/);
+  assert.match(t, /push address.*until that sign-in ends.*24 hours/);
+  assert.match(t, /Reactions, where you’ve read up to, pins and saved messages/);
+  assert.match(t, /last used: the day only/);
+  assert.match(t, /Friend requests that were declined or taken back: 24 hours/);
+  assert.match(t, /GIF searches/);
+  // End-to-end encryption: what the server can still see, said plainly.
+  assert.match(keptFor(ABOUT, { e2ee: true }).join('\n'), /who is mentioned/);
+  // The desktop app: update checks and the directory.
+  const d = keptFor(ABOUT, { desktopApp: true, updates: 'notify' }).join('\n');
+  assert.match(d, /GitHub sees your internet address/);
+  assert.match(d, /once a day/);
+  assert.match(keptFor(ABOUT, { desktopApp: true, updates: 'manual' }).join('\n'), /only when you ask/);
+  assert.match(keptFor({ ...ABOUT, mode: 'desktop' }, { p2p: true }).join('\n'), /directory.*keyed hash.*2 days/);
+});
+
+test('0.14 STUN: Google is named as a third party with the way to turn it off; this Snug’s own relay is not a third party', () => {
+  const g = text(whoSeesWhat({ mode: 'host', stun: 'google' }));
+  assert.match(g, /Google/);
+  assert.match(g, /SNUG_STUN=none/);
+  const r = text(whoSeesWhat({ mode: 'host', stun: 'relay', turn: true }));
+  assert.doesNotMatch(r, /Google/);
+  assert.match(r, /relay server/);
+  assert.match(text(whoSeesWhat({ mode: 'p2p', turn: true })), /STUN/);
+});
+
+test('0.14 last active: today, or the date only', () => {
+  const now = Date.UTC(2026, 10, 16, 15, 30);
+  assert.equal(lastActive(Date.UTC(2026, 10, 16), now), 'Active today');
+  assert.match(lastActive(Date.UTC(2026, 10, 2), now), /^Last active .*2/);
+  assert.doesNotMatch(lastActive(Date.UTC(2026, 10, 2), now), /:/, 'no time of day');
 });

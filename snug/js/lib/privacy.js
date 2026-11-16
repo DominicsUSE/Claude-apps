@@ -51,6 +51,9 @@ export function whoSeesWhat({
         turn
           ? 'Calls go straight between PCs when they can, encrypted. When they can’t, a relay on Cloudflare passes them on: it sees both addresses, not the sound or picture. With “Hide my IP from friends” on, Snug uses the relay whenever one is available.'
           : 'Calls go straight between PCs, encrypted, so the other side of a call sees your internet address.',
+        turn
+          ? 'To set up a call, your PC asks a STUN server for your public address: Cloudflare’s once it has relay details from the directory (it asks for them when a call starts), otherwise Google’s. That server sees your address, not the call.'
+          : 'To set up a call, your PC asks Google’s STUN server for your public address. Google sees that address, not the call.',
         friendPreviews
           ? 'Previews for links friends send are on: your PC fetches those sites, so they see your internet address.'
           : 'Links friends send don’t get a preview unless you turn that on, because fetching a preview would show the site your internet address. Links you send get previews fetched by your PC.',
@@ -76,8 +79,10 @@ export function whoSeesWhat({
         `The company hosting ${here}, if there is one, can see what the server stores, like the person who runs it.`,
         'Voice and video go straight between devices when they can, encrypted, so people in a call can see each other’s internet address. A relay server, if this Snug has one, passes calls on without hearing them.',
         stun === 'google'
-          ? 'To set up calls, your browser asks a Google server (STUN) for your public address. Google sees that address, not the call.'
-          : stun === 'none' ? 'Calls don’t ask any outside server for your address.' : 'To set up calls, your browser asks this Snug’s chosen STUN server for your public address.',
+          ? `To set up calls, your browser asks a Google server (STUN) for your public address. Google sees that address, not the call. Whoever runs ${here} can turn this off (SNUG_STUN=none) or use their own relay instead.`
+          : stun === 'none' ? 'Calls don’t ask any outside server for your address.'
+            : stun === 'relay' ? `To set up calls, your browser asks ${here}’s own relay server for your public address, so no outside company is asked.`
+              : 'To set up calls, your browser asks this Snug’s chosen STUN server for your public address. Whoever runs that server sees your address, not the call.',
         linkPreviews
           ? `Link previews are fetched by ${here}, not your device, so linked sites see the server’s address, not yours.`
           : 'Link previews are turned off on this Snug.',
@@ -95,16 +100,43 @@ export function whoSeesWhat({
   return sections;
 }
 
-// How long this Snug keeps things, from GET /api/privacy (server/privacy.js).
-export function keptFor(a = {}) {
+// What this Snug stores and for how long, from GET /api/privacy (server/privacy.js; the windows the server
+// really purges at, server/retention.js). `e2ee`: this server offers end-to-end encryption. `desktopApp`:
+// running in the desktop app, whose update checks go to GitHub (`updates`: auto | notify | manual).
+// `p2p`: the desktop app's own account, which also uses the Snug directory.
+export function keptFor(a = {}, { e2ee = false, desktopApp = false, updates = 'auto', p2p = false } = {}) {
   const days = (n) => `${n} day${n === 1 ? '' : 's'}`;
+  const hours = (n) => `${n} hour${n === 1 ? '' : 's'}`;
   const out = [
-    `Sign-in history and security events: ${days(a.logDays ?? 30)}, with internet addresses shortened (like 203.0.113.x).`,
+    `Sign-in history and security events: ${days(a.logDays ?? 14)}, with internet addresses shortened (like 203.0.113.x) and the kind of device (like “Firefox on Windows”), not your browser’s full details.`,
     `Failed sign-in counters: ${a.failureHours ?? 48} hours, with addresses stored only as a keyed hash.`,
     `Deleted messages can be brought back for 10 minutes; after about ${a.undoMinutes ?? 11} minutes their text is gone from the database.`,
     `Signed-in devices: until you sign out, ${days(a.sessionDays ?? 30)} at most${a.idleDays && a.idleDays < (a.sessionDays ?? 30) ? `, or ${days(a.idleDays)} unused` : ''}. Snug stores the kind of device, not your address.`,
+    ...(a.activity === 'day' ? ['When each device or encryption key was last used: the day only, not the time.'] : []),
     'Messages, files and your profile: until you delete them or your account.',
+    'Call records (who called, whether it was answered or missed, and how long it lasted): a line in that conversation, kept like its messages.',
+    'Reactions, where you’ve read up to, pins and saved messages: until you remove them, or the message goes.',
+    ...(a.memberLogDays ? [`When someone joins or leaves a house: ${days(a.memberLogDays)}, so its owners can see how many joined and left each day.`] : []),
+    ...(a.linkCacheHours ? [`Link previews: the linked address and the preview fetched for it, ${hours(a.linkCacheHours)}. A preview shown under a message stays with that message.`] : []),
+    ...(a.friendCooldownHours ? [`Friend requests that were declined or taken back: ${hours(a.friendCooldownHours)}, so the same request can’t be sent again at once.`] : []),
+    `Notifications while Snug is closed: the push address your browser gave (run by its maker, like Google, Mozilla or Apple) is kept until that sign-in ends. Each note is encrypted to your device; the push service sees when one arrives and holds it ${hours(a.pushTtlHours ?? 24)} at most.`,
+    'GIF searches: the words go to the GIF service through this Snug (or the Snug directory), so the service never sees your address. Results are kept in memory for an hour, not stored.',
   ];
+  if (e2ee) out.push('In end-to-end encrypted conversations the server can’t read messages, but it stores who sends to whom and when, how big each message is, and who is mentioned (so they can be notified).');
   if (a.backupDays) out.push(`Encrypted backups of the database are kept for ${days(a.backupDays)}, so something you delete can stay in a backup that long.`);
+  if (p2p) out.push('The Snug directory keeps your account, your friends list (to tell you when they come online) and roughly when your PC last connected (updated at most once a day). It stores internet addresses only as a keyed hash, for abuse limits that go after 2 days.');
+  if (desktopApp) {
+    out.push(updates === 'manual'
+      ? 'Updates: the app asks GitHub for a new version only when you ask (Settings > Desktop app). GitHub then sees your internet address.'
+      : `Updates: the app asks GitHub for a new version when it starts and about once a day after, so GitHub sees your internet address and that Snug is running. ${updates === 'notify' ? 'It tells you about a new version and installs it when you say.' : 'It installs a new version by itself.'} You can change this in Settings > Desktop app.`);
+  }
   return out;
+}
+
+// "Active today", or "Last active 2 Nov 2026": a day is all the server keeps (server/auth.js activeDay),
+// read in UTC so the date is the one the server stored.
+export function lastActive(ts, now = Date.now()) {
+  const day = (t) => Math.floor(t / 86_400_000);
+  if (day(ts) >= day(now)) return 'Active today';
+  return `Last active ${new Date(ts).toLocaleDateString(undefined, { dateStyle: 'medium', timeZone: 'UTC' })}`;
 }

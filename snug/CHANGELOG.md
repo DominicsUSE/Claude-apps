@@ -4,6 +4,26 @@ Snug's releases, newest first. Every version's files stay on the releases page
 (<https://github.com/DominicsUSE/Claude-apps/releases?q=snug-v>); the desktop app updates itself and never
 goes back to an older version on its own (README, "Install, update, go back").
 
+## 0.14.0
+
+### Privacy: less tracking, shorter retention
+
+- **What Snug stores and for how long**: the privacy page and README list everything the server keeps, with
+  the real windows from `GET /api/privacy`: call records, the house join log, link previews, push addresses,
+  reactions and read positions, what end-to-end encrypted conversations still reveal, GIF searches, the STUN
+  and TURN operators, the directory, and desktop update checks.
+- The server forgets on its own, hourly: house join and leave rows after 90 days (insights count the same),
+  the link-preview cache after 24 hours, declined friend requests after a day.
+- Sign-in history and security events: 14 days by default (was 30). Security events keep the kind of device
+  ("Chrome on Windows"), not the browser's full string.
+- When a device, encryption key or friend's PC was last used is stored to the day, written at most daily.
+  Settings > Account says *Active today* or *Last active 2 Nov 2026*.
+- Calls: with the server's own TURN relay and no `SNUG_STUN`, the relay answers STUN instead of Google. The
+  desktop app drops Google's STUN once it has Cloudflare relay details. Without a relay, Google is named on the
+  privacy page, with `SNUG_STUN=none`.
+- Desktop app: update checks at start and then about once a day with jitter (were hourly). **Settings >
+  Desktop app > Updates**: *Automatically*, *Tell me* or *Only when I ask*.
+
 ## 0.13.0
 
 ### Changed

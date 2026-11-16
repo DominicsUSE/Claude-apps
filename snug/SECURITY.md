@@ -233,9 +233,19 @@ stronger than "end-to-end encrypted" is used.
 The plain-language version for people using Snug is the privacy page (Settings > Privacy guide, or `/privacy`),
 built from `js/lib/privacy.js` and `GET /api/privacy` (`server/privacy.js`).
 
-- Sign-in history (`auth_events`) and security events are kept 30 days by default (`SNUG_LOG_DAYS`, 1 to 365),
-  with addresses truncated (1.2.3.x, /48). Failed sign-in counters last 2 days and hold an address only as an
-  HMAC under the data key. Sessions store a device label, never an address. Logs never print a full address.
+- Sign-in history (`auth_events`) and security events are kept 14 days by default (`SNUG_LOG_DAYS`, 1 to 365;
+  30 before 0.14), with addresses truncated (1.2.3.x, /48) and a coarse device label ("Chrome on Windows"),
+  not the raw User-Agent (0.14: security events and encryption audit rows too). Failed sign-in counters last
+  2 days and hold an address only as an HMAC under the data key. Sessions store a device label, never an
+  address. Logs never print a full address.
+- 0.14 retention (`server/retention.js`, hourly): house join/leave rows (`member_log`, owners' insights) go
+  after 90 days, with when each house's log began kept in `member_log_began` so insights count the same;
+  link-preview cache rows and their cached pictures after 24 hours; friend-request cooldowns after their day.
+  Last use of sessions, encryption devices and friends' PCs (`sessions.seen`, `e2ee_devices.seen`,
+  `peers.last_seen`) is stored as the UTC day and written at most daily; idle expiry counts whole days.
+  Still kept as before: moderation records (reports, bans, timeouts, audit log), call records as messages,
+  reactions, read positions, pins, push subscriptions (until the session ends), and in end-to-end encrypted
+  conversations who sends to whom, when, sizes and declared mentions.
 - Who sees that someone is online (everyone sharing a place, friends only, nobody) and typing are applied to
   every frame the server sends (`hub.outFilter`), not only in the browser: presence, status (words, picture and
   end time, and no frame at all when it changes), the "last wrote" lines, house voice-room lists and a stage's
@@ -276,9 +286,11 @@ built from `js/lib/privacy.js` and `GET /api/privacy` (`server/privacy.js`).
   name it was given and says Snug can't check who wrote it.
 - Snug sends no telemetry, analytics or crash reports, and the web client loads nothing from other origins
   (CSP `default-src 'self'`; tested in `tests/e2e-privacy.test.js`). Outside parties it does reach: the STUN
-  server (Google by default, `SNUG_STUN=none` turns it off), a TURN relay if configured, the browser's push
-  service, the registry and Cloudflare (P2P), GitHub (desktop updates), and Tenor (only server-side, only if
-  the server owner enables GIF search).
+  server (Google by default when no TURN relay is configured; with `SNUG_TURN_URL` and no `SNUG_STUN`, the
+  relay's own address since 0.14; `SNUG_STUN=none` turns it off; the desktop app uses Cloudflare's STUN once it
+  has relay details from the registry), a TURN relay if configured, the browser's push service, the registry
+  and Cloudflare (P2P), GitHub (desktop update checks: at start and every 22 to 26 hours, or only when asked,
+  Settings > Desktop app), and GIF providers (only server-side or through the registry).
 - Desktop first-run page (0.13): its **Privacy** link starts a short-lived copy of the app's server on
   127.0.0.1 only, with an empty temporary data folder, and shows `/privacy` in a separate window on an in-memory
   session (no permissions, other links open in the browser). Closing the window stops that server and deletes
