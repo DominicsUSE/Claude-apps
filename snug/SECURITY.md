@@ -136,7 +136,7 @@ prekey) is left out of the weekly history key and named in Settings; a change yo
 offers to remove it.
 
 It does not protect against whoever serves the browser's JavaScript (an operator who changes the code
-can read messages in a browser; the desktop app runs its own built-in code, also when it joins another server, except on a server's own page, which its window title names; when it joins another server, the server's `/api` answers reach the page only as data: the page's policy allows scripts and workers only from the app's own folders (never from `/api`), and every answer is marked nosniff with a sandboxing Content-Security-Policy and can't widen a service worker's scope. The desktop app keeps its encryption keys in the page's IndexedDB like a browser does; they aren't yet wrapped by the operating system's key store), membership decided by the
+can read messages in a browser; the desktop app runs its own built-in code, also when it joins another server, except on a server's own page, which its window title names; when it joins another server, the server's `/api` answers reach the page only as data: the page's policy allows scripts and workers only from the app's own folders (never from `/api`), and every answer is marked nosniff with a sandboxing Content-Security-Policy and can't widen a service worker's scope; the window itself never navigates to the server's `/api/` (only to an attachment download, whose redirects are watched). Electron's protocol handler never sees `Sec-Fetch-Dest`, so nothing relies on it. In the desktop app's own page, the storage key that seals the device's secrets (account and history keys, the recovery key, message keys, settings, unsent drafts) is derived from a secret the operating system's key store (Electron `safeStorage`) protects, so a copy of the data folder alone doesn't open them; on a computer without one (Linux with no keyring) it is a plain browser key in IndexedDB, as in a browser, and Settings says so. The device's own signing and prekey private keys are non-extractable browser keys in IndexedDB on every platform, so a copy of the data folder still opens messages sealed to that device while its prekey is kept, up to three weeks), membership decided by the
 server (ghost members), withheld or delayed messages, metadata (who, when, how much, group names,
 reactions, devices, IP addresses), compromised devices and people in the conversation, history readable
 with the history key (on by default) or the recovery key and password, messages sent before a
@@ -162,7 +162,8 @@ trusted device of every member and to each member's current history key. The acc
 devices carry a serial and the device list version they were sealed at, and a device takes only newer
 ones that keep every history key it holds (so a 0.12.0 device's weekly key, which doesn't bump the serial,
 is still taken). Nothing decrypted is written to
-the browser's localStorage copy (encrypted messages are kept there as envelopes). The server refuses a recipient set that isn't exactly the current
+the browser's localStorage copy (encrypted messages are kept there as envelopes); drafts, what they reply to and
+messages waiting to send in an encrypted conversation are kept sealed under the device's storage key, not there. The server refuses a recipient set that isn't exactly the current
 one (`e2ee_stale`), so a client fetches newer keys and seals again. Attachments are sealed whole with
 AES-256-GCM under a key carried in the message. Safety numbers follow libsignal's numeric fingerprint
 (version 0) over the account keys. A new device is added with a 12-character one-time code shown on a
@@ -176,7 +177,7 @@ stronger than "end-to-end encrypted" is used.
 - **A compromised device.** Malware running as you, or someone with your unlocked PC, can read what you can
   read. Keys wrapped by the OS key store protect against other users and offline copying of the disk, not
   against code running in your session. If the OS key store is unavailable, Snug says the key file is "not
-  protected by the OS".
+  protected by the OS", and Settings > Encryption says the encryption keys aren't protected by it either.
 - **The machine that hosts a server.** Houses and their conversations live in that server's SQLite database,
   which is not encrypted as a whole. Whoever runs a Snug server, or gets its disk, can read its houses. Use
   full-disk encryption and keep `data/secret.key` (or `SNUG_DATA_KEY`) stored apart from backups.
@@ -280,7 +281,7 @@ built from `js/lib/privacy.js` and `GET /api/privacy` (`server/privacy.js`).
 | Input and output | Type and length checks on every field, prepared SQL, token-tree rendering, strict CSP | `server/`, `js/`, `server/index.js` |
 | CSRF, rebinding, SSRF | Origin checks, `Host` allow-list, outbound fetches checked per hop (allow-lists, no private addresses) | `server/index.js`, `server/media.js`, `server/linkpreview.js` |
 | Transport | HTTPS with HSTS behind a TLS proxy (`SNUG_SECURE=1`); E2E links between PCs; TLS to the registry | `README.md` (Putting it online) |
-| Encryption at rest | AES-256-GCM for TOTP secrets, snapshots and data files; OS key store for device keys; HMACs for GitHub ids | `server/vault.js`, `server/vaultfile.js`, `server/dbbackup.js`, `server/identity.js` |
+| Encryption at rest | AES-256-GCM for TOTP secrets, snapshots and data files; OS key store for device keys and the desktop app's encryption storage key; HMACs for GitHub ids | `server/vault.js`, `server/vaultfile.js`, `server/dbbackup.js`, `server/identity.js` |
 | Audit and detection | `auth_events` and `security_events` tables, JSON log lines without secrets, burst detection with `suspicious` alerts, "new sign-in" notices, alerts in Settings > Account > Recent activity; refused cross-site requests and sockets, foreign `Host` names, rate-limit hits (HTTP, sockets and socket ops), evicted sockets, refused role-hierarchy changes, filtered webhook posts and CSP reports all reach one log; signed and audited registry admin actions | `server/seclog.js`, `registry/src/admin.js` |
 | Error handling | Users see plain messages; stack traces and internals stay in the server log | `server/` |
 | Backup and recovery | Daily encrypted, integrity-checked database snapshots with automatic restore of the newest good one; the portable data file; registry point-in-time recovery | `server/dbbackup.js`, `server/vault.js`, `registry/SECURITY.md` |

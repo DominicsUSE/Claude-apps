@@ -200,6 +200,12 @@ test("voice: the camera turns on, and the screen picker shares a screen", async 
   await picker.waitForSelector("button[data-i]", { timeout: 30000 });
   assert.equal(await picker.title(), "Share your screen");
   assert.equal(await picker.evaluate(() => typeof window.snugDesktop), "undefined", "the picker gets no desktop bridge");
+  // A bundled page (not a data: page) whose policy runs only its own script file: no inline script.
+  const pickerCsp = await picker.evaluate(() => document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.content || "");
+  const scriptSrc = (pickerCsp.split(";").map((x) => x.trim()).find((x) => x.startsWith("script-src")) || "");
+  assert.equal(scriptSrc, "script-src 'self'", pickerCsp);
+  assert.ok(picker.url().startsWith("file:") && picker.url().endsWith("/picker.html"), picker.url());
+  assert.equal(await picker.evaluate(() => Object.keys(window.snugPicker || {}).join()), "list", "only the list of what can be shared");
   await choose(picker, ".cancel");
   await page.waitForFunction(() => !window.snug.S.call.screenBusy);
   assert.equal(await page.locator(".stage .vc.scr").getAttribute("aria-pressed"), "false");
@@ -1094,8 +1100,8 @@ test("join mode: a server redirect to another site never takes over the window (
   const join = stubSite((req, res) => {
     if (req.url === "/api/version") { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ version: "0.12.0", proto: 12, minClient: 12, e2ee: 1 })); }
     // Pinned, only /api/ reaches the host (other paths load the app's own page, as on a real Snug server).
-    if (req.url === "/api/go") { res.writeHead(302, { location: `${otherBase}/landed` }); return res.end(); }
-    if (req.url === "/api/file") { res.writeHead(302, { location: "file:///etc/hostname" }); return res.end(); }
+    if (req.url === "/api/go" || req.url === "/api/files/go") { res.writeHead(302, { location: `${otherBase}/landed` }); return res.end(); }
+    if (req.url === "/api/files/file") { res.writeHead(302, { location: "file:///etc/hostname" }); return res.end(); }
     res.writeHead(200, { "content-type": "text/html" });
     return res.end("<!doctype html><title>stand-in Snug</title><p>a Snug someone else runs</p>");
   });
@@ -1116,10 +1122,19 @@ test("join mode: a server redirect to another site never takes over the window (
     dialog.showMessageBox = async (_w, o) => { globalThis.testAsked.push(o.message); return { response: globalThis.testAnswer }; };
   });
 
-  // D1: /api/go answers 302 to another origin. will-navigate only sees /api/go (same origin); will-redirect stops the rest.
+  // Pinned, the window never navigates to the host's /api/ (it only ever shows the app's own page there):
+  // /api/go is refused before it is asked for, so its redirect never comes into play.
   await page.evaluate(() => { location.href = "/api/go"; });
+  await new Promise((r) => setTimeout(r, 1000));
+  assert.equal(page.url(), `${joinBase}/`, "still the app's page");
+  assert.ok(!join.hits.includes("/api/go"), "never asked for");
+  assert.deepEqual(await app.evaluate(() => globalThis.testOpened), [], "and not handed to the browser either");
+  // D1: a download (/api/files/<id>, the one /api/ address the window may go to) that the host answers with a
+  // 302 to another origin. will-navigate only sees the same origin; will-redirect stops the rest.
+  await page.evaluate(() => { location.href = "/api/files/go"; });
   await new Promise((r) => setTimeout(r, 1500));
   assert.equal(new URL(page.url()).origin, joinBase, "still the Snug address");
+  assert.ok(join.hits.includes("/api/files/go"));
   assert.ok(!other.hits.includes("/landed"), "the other site was never loaded in the window");
   assert.deepEqual(await app.evaluate(() => globalThis.testOpened), [`${otherBase}/landed`], "it opens in the browser instead");
 
@@ -1137,7 +1152,7 @@ test("join mode: a server redirect to another site never takes over the window (
   assert.equal(cam, "ok");
   assert.equal((await app.evaluate(() => globalThis.testAsked)).at(-1), "Let this Snug use your camera?");
   // A redirect into the file loader: never followed (an error page at most), never handed to the browser.
-  await page.evaluate(() => { location.href = "/api/file"; });
+  await page.evaluate(() => { location.href = "/api/files/file"; });
   await new Promise((r) => setTimeout(r, 1000));
   assert.ok(!page.url().startsWith("file:"), page.url());
   assert.equal((await app.evaluate(() => globalThis.testOpened)).length, 1);
@@ -1159,6 +1174,8 @@ test("join mode, pinned: a script or worker the host serves under /api/ never ru
   const { app, page } = await launchWith(userData, { config: { mode: "join", url: joinBase } });
   await page.waitForURL(`${joinBase}/`);
   await page.waitForSelector('link[href="/css/tokens.css"]', { state: "attached" });
+  // What the protocol handler itself sees as Sec-Fetch-Dest, per request it passes on (desktop/pinned.js).
+  await app.evaluate(() => { globalThis.snugPinnedDests = []; });
   const got = await page.evaluate(async () => {
     const script = await new Promise((r) => { const s = document.createElement("script"); s.src = "/api/evil.js"; s.onload = () => r("loaded"); s.onerror = () => r("blocked"); document.head.append(s); });
     const mod = await import("/api/evil-module.js").then(() => "loaded", () => "blocked");
@@ -1168,8 +1185,27 @@ test("join mode, pinned: a script or worker the host serves under /api/ never ru
   });
   assert.deepEqual(got, { script: "blocked", mod: "blocked", worker: "blocked", pwned: false });
   for (const u of ["/api/evil.js", "/api/evil-module.js", "/api/evil-worker.js"]) assert.equal(join.hits.includes(u), false, `${u} was requested from the host`);
-  // What the protocol handler passes on as Sec-Fetch-Dest for a page fetch (reported, for the record).
-  t.diagnostic(`Sec-Fetch-Dest the host saw for fetch("/api/data"): ${dests["/api/data"]}`);
+  // A top-level navigation to the host's /api/ is refused in the window (will-navigate), and the window stays on
+  // the app's own page: the host is never asked for it.
+  await page.evaluate(() => { window.location = "/api/x"; });
+  await new Promise((r) => setTimeout(r, 1000));
+  assert.equal(page.url(), `${joinBase}/`);
+  assert.equal(join.hits.includes("/api/x"), false, "/api/x was never requested");
+  assert.equal(await page.locator('link[href="/css/tokens.css"]').count(), 1, "still the app's page");
+  // A document load of /api/ in this session anyway (another window, not the guarded one), to see what the
+  // handler gets for a document. Recorded, not relied on: what refuses /api/ as a page is will-navigate.
+  await app.evaluate(async ({ BrowserWindow, session }, url) => {
+    const w = new BrowserWindow({ show: false, webPreferences: { session: session.fromPartition("persist:snug-join"), sandbox: true, contextIsolation: true } });
+    await w.loadURL(url).catch(() => {});
+    w.destroy();
+  }, `${joinBase}/api/doc`);
+  const seen = await app.evaluate(() => globalThis.snugPinnedDests);
+  const at = (u) => seen.find((x) => x.path === u)?.dest ?? "(not passed on)";
+  t.diagnostic(`Sec-Fetch-Dest at the protocol handler: fetch /api/data -> ${at("/api/data")}; document /api/doc -> ${at("/api/doc")}; the host saw ${dests["/api/data"]} for /api/data`);
+  // Scripts and workers from /api/ never reach the handler at all (the page's policy stops them first), so
+  // whatever Electron would pass for them, nothing under /api/ can run.
+  for (const u of ["/api/evil.js", "/api/evil-module.js", "/api/evil-worker.js"]) assert.equal(at(u), "(not passed on)", u);
+  assert.ok(seen.some((x) => x.path === "/api/data"), "the handler recorded the page's fetch");
   await app.close();
 });
 
@@ -1359,12 +1395,172 @@ test("join mode, fallback: an older server gets a local page, never its code sil
   assert.deepEqual(await own.evaluate(async () => (await indexedDB.databases()).map((d) => d.name)), []);
   assert.equal(await own.evaluate(() => typeof window.snugApp?.builtIn), "boolean");
   assert.equal(await own.evaluate(() => window.snugApp.builtIn), false, "the server's own code is not the app's");
+  assert.equal(await own.evaluate(() => typeof window.snugApp.e2eeStoreKey), "undefined", "and gets no key store secret");
+  assert.equal(await own.evaluate(() => typeof window.snugApp.e2eeStoreReset), "undefined", "and can't put it aside");
   await app.close();
 
   // The choice is remembered for this server and version: next time it opens straight away, with no new note.
   ({ app } = await launchWith(userData, { config: undefined }));
   await (await windowAt(app, base)).waitForSelector("#old");
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()).getTitle()), "Old Snug — server’s own page");
+  await app.close();
+});
+
+// ---------- The encryption storage key and the OS key store (js/e2ee/store.js, main.js e2ee:storekey) ----------
+// A Snug 0.12.0 profile (its storage key a plain browser key in IndexedDB) is upgraded: the sealed keys are
+// sealed again under a key derived from a secret the OS key store protects, and nothing is lost: the device
+// keys, the account keys and an encrypted message from before still open. SNUG_KEYSTORE (only honoured when
+// running from source) stands in for the key store this Linux test machine doesn't have: "off" is a computer
+// without one (as 0.12.0 behaved everywhere), "test" a stand-in key store that isn't the OS's.
+async function e2eeTurnOn(page) {
+  const dialog = page.locator(".modal[role=dialog]");
+  await page.click('.rail-btn:has(.sr:text-matches("^Messages"))');
+  await page.locator('.e2-invite button:has-text("Turn on")').click();
+  await dialog.locator('h2:has-text("Turn on end-to-end encryption")').waitFor();
+  await dialog.locator('button:has-text("Turn on")').click();
+  await dialog.locator("#e2-recovery-key").waitFor();
+  const key = (await dialog.locator("#e2-recovery-key code").allTextContents()).join("-");
+  await dialog.locator("#e2-last").fill(key.slice(-4));
+  await dialog.locator('button:has-text("I’ve saved it")').click();
+  await dialog.waitFor({ state: "detached" });
+  await page.waitForFunction(() => window.snug.e2ee.E2.status === "ready");
+}
+async function encryptionPage(page) {
+  await page.click('.me-row [aria-label="Settings"], .me-panel [aria-label="Settings"]');
+  await page.click('.layer-nav .row:has-text("Encryption")');
+  await page.locator(".e2-page h1").waitFor();
+}
+// What this account's encryption database holds in its "dev" store: the names, and which are AES keys.
+const devStore = (page) => page.evaluate(() => new Promise((resolve, reject) => {
+  const r = indexedDB.open(`snug-e2ee:${window.snug.S.me}`);
+  r.onerror = () => reject(r.error);
+  r.onsuccess = () => {
+    const tx = r.result.transaction("dev", "readonly");
+    const st = tx.objectStore("dev");
+    const keys = st.getAllKeys();
+    const vals = st.getAll();
+    tx.oncomplete = () => {
+      const out = {};
+      keys.result.forEach((k, i) => { const v = vals.result[i]; out[k] = v instanceof CryptoKey ? `CryptoKey ${v.algorithm.name}` : v && typeof v === "object" ? Object.keys(v).sort().join(",") : typeof v; });
+      r.result.close();
+      resolve(out);
+    };
+  };
+}));
+const NOT_PROTECTED = /Your encryption keys aren’t protected by the system key store on this computer/;
+
+test("encryption keys and the OS key store: a 0.12.0 profile is upgraded without losing keys or messages; without a key store Settings says so", { skip: !!process.env.SNUG_BIN && "SNUG_KEYSTORE is only honoured when running from source" }, async (t) => {
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-e2ee-store-"));
+  t.after(() => removeDir(userData));
+  const H = await import(require("url").pathToFileURL(path.join(__dirname, "..", "tests", "helpers", "e2ee.js")).href);
+  const storeFile = path.join(userData, "e2ee-store.json");
+
+  // 1. As 0.12.0 (or a computer with no key store): the storage key is a browser key in IndexedDB.
+  let { app, page } = await launchWith(userData, { config: { mode: "host" }, env: { SNUG_KEYSTORE: "off" } });
+  await signUpIn(page, "eve");
+  assert.equal(await page.evaluate(() => typeof window.snugApp.e2eeStoreKey), "function", "the app's own page has the bridge");
+  await e2eeTurnOn(page);
+  assert.equal((await devStore(page)).sk, "CryptoKey AES-GCM", "the old kind of storage key");
+  assert.equal(fs.existsSync(storeFile), false);
+  await encryptionPage(page);
+  await page.locator(".e2-page").getByText(NOT_PROTECTED).waitFor();
+  await page.keyboard.press("Escape");
+
+  // Fay (another device, outside the app) writes to Eve in an encrypted DM.
+  const srv = { port: await app.evaluate(() => globalThis.snugHostForTest().port) };
+  const eveCookie = (await app.evaluate(({ session }, url) => session.defaultSession.cookies.get({ url }), `http://127.0.0.1:${srv.port}`)).map((c) => `${c.name}=${c.value}`).join("; ");
+  const fay = await H.register(srv, "fay");
+  fay.sock = await new H.Sock(srv, fay.cookie).connect();
+  fay.dev = await H.newDevice(fay.id);
+  const { acct, payload } = await H.setupPayload(fay.id, fay.dev);
+  fay.acct = acct;
+  await fay.sock.ok("e2ee.setup", payload);
+  await H.bind(fay.sock, fay.dev);
+  const eve = { id: await page.evaluate(() => window.snug.S.me) };
+  await fay.sock.ok("friend.request", { handle: "eve" });
+  const eveSock = await new H.Sock(srv, eveCookie).connect();
+  await eveSock.ok("friend.accept", { user: fay.id });
+  await eveSock.close();
+  const { id: dm } = await fay.sock.ok("dm.open", { users: [eve.id] });
+  const users = [eve.id, fay.id].sort();
+  const id = `m_${[...H.random(16)].map((b) => "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36]).join("")}`;
+  const { e2ee } = await H.sealFrom(fay, { conv: dm, id, users, body: { text: "sealed before the upgrade" } });
+  await fay.sock.ok("msg.send", { conv: dm, id, text: "", e2ee });
+  await page.waitForFunction((mid) => Object.values(window.snug.S.msgs).flat().some((m) => m.id === mid && m.enc === true && m.text === "sealed before the upgrade"), id);
+  await fay.sock.close();
+  await app.close();
+
+  // 2. The same profile with a key store: everything sealed again under the protected key, and still there.
+  ({ app, page } = await launchWith(userData, { env: { SNUG_KEYSTORE: "test" } }));
+  await page.waitForSelector(".nav");
+  await page.waitForFunction(() => window.snug.e2ee.E2.status === "ready", null, { timeout: 30000 });
+  const file = JSON.parse(fs.readFileSync(storeFile, "utf8"));
+  assert.equal(file.enc, "test", "the secret is kept by the (stand-in) key store");
+  assert.doesNotMatch(JSON.stringify(file), /"key":"[A-Za-z0-9_-]{43}"/, "never in the clear");
+  const dev = await devStore(page);
+  assert.equal(dev.sk, undefined, "no storage key left in IndexedDB that opens anything by itself");
+  assert.equal(dev.skw, "check,salt,v", "only a salt and a check: usable only with the key store's secret");
+  assert.equal(await page.evaluate(() => window.snug.e2ee.E2.device?.label.startsWith("Snug app")), true, "the same device keys");
+  assert.equal(await page.evaluate(() => window.snug.e2ee.E2.keyStore), "os");
+  await page.waitForFunction((mid) => Object.values(window.snug.S.msgs).flat().some((m) => m.id === mid && m.enc === true && m.text === "sealed before the upgrade"), id, { timeout: 30000 });
+  await encryptionPage(page);
+  assert.equal(await page.locator(".e2-page").getByText(NOT_PROTECTED).count(), 0, "protected: no warning");
+  await app.close();
+
+  // 3. The key store gone (or the data copied to another computer): locked, said so, and no new keys made over it.
+  ({ app, page } = await launchWith(userData, { env: { SNUG_KEYSTORE: "off" } }));
+  await page.waitForSelector(".nav");
+  await page.waitForFunction(() => window.snug.e2ee.E2.support?.reason === "locked", null, { timeout: 30000 });
+  assert.equal((await devStore(page)).skw, "check,salt,v", "the protected key is left as it was");
+  await encryptionPage(page);
+  await page.locator('.e2-page :text("locked")').first().waitFor();
+  await app.close();
+
+  // 4. A key store again: it opens as before.
+  ({ app, page } = await launchWith(userData, { env: { SNUG_KEYSTORE: "test" } }));
+  await page.waitForFunction(() => window.snug?.e2ee.E2.status === "ready", null, { timeout: 30000 });
+  await app.close();
+
+  // 5. The key store works but can't open the kept secret (it was reset): locked. Removing this computer's
+  // keys puts that secret aside, so the keys made next are protected by the key store again, not left plain.
+  const kept = JSON.parse(fs.readFileSync(storeFile, "utf8"));
+  fs.writeFileSync(storeFile, JSON.stringify({ ...kept, key: Buffer.from("not a secret this key store kept").toString("base64") }));
+  ({ app, page } = await launchWith(userData, { env: { SNUG_KEYSTORE: "test" } }));
+  await page.waitForSelector(".nav");
+  await page.waitForFunction(() => window.snug.e2ee.E2.support?.reason === "locked", null, { timeout: 30000 });
+  await encryptionPage(page);
+  await page.locator('.e2-locked button:has-text("Remove")').click();
+  await page.locator('.modal[role=dialog] button:has-text("Remove")').click();
+  await page.waitForFunction(() => window.snug?.e2ee.E2.status === "new-device", null, { timeout: 30000 });
+  assert.equal(await page.evaluate(() => window.snug.e2ee.E2.keyStore), "os", "protected by the key store again");
+  const dev5 = await devStore(page);
+  assert.equal(dev5.sk, undefined, "no plain storage key");
+  assert.equal(dev5.skw, "check,salt,v");
+  assert.notEqual(JSON.parse(fs.readFileSync(storeFile, "utf8")).key, JSON.parse(fs.readFileSync(`${storeFile}.locked`, "utf8")).key, "a new secret");
+  assert.equal(fs.existsSync(`${storeFile}.locked`), true, "the secret that couldn't be opened is put aside, not deleted");
+  await app.close();
+});
+
+test("encryption keys and the OS key store: a new profile uses the real key store when this computer has one", async (t) => {
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-e2ee-os-"));
+  t.after(() => removeDir(userData));
+  const { app, page } = await launchWith(userData, { config: { mode: "host" } });
+  await signUpIn(page, "gus");
+  await e2eeTurnOn(page);
+  const available = await app.evaluate(({ safeStorage }) => safeStorage.isEncryptionAvailable() && (process.platform !== "linux" || safeStorage.getSelectedStorageBackend() !== "basic_text"));
+  const storeFile = path.join(userData, "e2ee-store.json");
+  await encryptionPage(page);
+  if (available) {
+    assert.equal(JSON.parse(fs.readFileSync(storeFile, "utf8")).enc, "safeStorage");
+    assert.equal((await devStore(page)).sk, undefined);
+    assert.equal(await page.locator(".e2-page").getByText(NOT_PROTECTED).count(), 0);
+  } else {
+    t.diagnostic("no OS key store here (Linux basic_text): the storage key stays a browser key, and Settings says so");
+    assert.equal(fs.existsSync(storeFile), false);
+    assert.equal((await devStore(page)).sk, "CryptoKey AES-GCM");
+    await page.locator(".e2-page").getByText(NOT_PROTECTED).waitFor();
+  }
+  if (process.platform === "win32") assert.equal(available, true, "Windows always has DPAPI");
   await app.close();
 });
 

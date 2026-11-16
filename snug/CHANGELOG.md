@@ -54,6 +54,31 @@ goes back to an older version on its own (README, "Install, update, go back").
   or a link). Group calls with friends on other PCs have only been tested on one machine, not through a
   real TURN relay.
 
+### Private conversations
+
+- The desktop app protects the key that seals your encryption keys with the operating system's key store
+  (safeStorage). A 0.12 profile is moved over the first time, without losing keys or messages. Without a
+  key store (some Linux setups), Settings > Encryption says so.
+- If the key store can't open the keys any more (it was reset, or the data folder was copied to another
+  computer), Settings > Encryption offers to remove this computer's keys; the computer is then added again
+  with another device or the recovery key, and its new keys are protected by the key store.
+- Drafts and messages waiting to send in encrypted conversations are no longer kept as text in the
+  browser's storage; they are sealed on the device and come back after a reload.
+- Messages from someone who has left a group can still be checked and opened after a reload or on a new
+  device.
+- Join mode never shows one of the server's `/api` answers as the window's page. The screen-share picker
+  runs no inline script.
+
+### Known limits
+
+- The desktop app's own signing and prekey private keys are still browser keys in its storage, not sealed
+  by the key store, and they open messages sent to that device while its prekey is kept (up to three
+  weeks), so a copy of the data folder still opens recent messages. Attachments added to a draft in an
+  encrypted conversation aren't kept across a reload.
+- Once 0.13 has moved a desktop app's encryption keys under the key store, 0.12 can't open them: a desktop
+  app taken back to 0.12 can't read encrypted messages until it is updated again, or until that computer is
+  removed from another device and added again.
+
 ## 0.12.0
 
 ### Private conversations

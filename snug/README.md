@@ -114,7 +114,11 @@ from **Settings > Desktop app**). Every release's notes carry the same steps.
   stays on the releases page (<https://github.com/DominicsUSE/Claude-apps/releases?q=snug-v>):
   download the older file, check it, and install it over the current one (or
   replace the Mac app); the data folder is kept, and additions of the newer
-  version don't work in the older one. Because updates are required, the app
+  version don't work in the older one. One takes more: once 0.13 has put a
+  desktop app's encryption keys under the system key store, 0.12 can't open
+  them, so encrypted messages can't be read in that app until it is updated
+  again, or until that computer is removed from another device (Settings >
+  Encryption) and added again. Because updates are required, the app
   takes the newest release again at its next check, so a person can go back
   only for a while. **To stop a broken release for everyone**, the owner edits
   it on GitHub and ticks **Set as a pre-release** (or saves it as a draft): the
@@ -1294,8 +1298,8 @@ before seeding anything that faces the internet, or better, do not seed there.
   HTML. A strict Content-Security-Policy allows scripts only from Snug itself.
 - **Uploads**: `SNUG_MAX_FILE_MB` limit (100 MB by default), streamed to disk,
   with quotas and a free-disk floor that also cover uploads still arriving
-  and the server's own copies (forwards, stickers, GIFs, link previews; not yet
-  end-to-end encrypted file copies); fetched only by people who can read the
+  and the server's own copies (forwards, stickers, GIFs, link previews, and
+  copies of end-to-end encrypted files); fetched only by people who can read the
   conversation, served with `nosniff` and a sandboxing policy. Anything that
   is not a known image type downloads instead of opening; SVG and PDF previews
   are drawn in the page from the bytes (SVG as an image, which runs no script).
@@ -1402,6 +1406,17 @@ and call signalling. Push notifications say only "New message".
   device's keys can keep reading what is sealed to them until then.
 - *Endpoints and people.* A compromised device, or anyone in the conversation, can
   read, copy or screenshot what they receive.
+- *Keys on this device.* In the desktop app, the key that seals your account keys,
+  recovery key, message keys and unsent drafts is protected by the operating
+  system's key store (Windows DPAPI, the macOS Keychain, a Linux keyring), so a copy
+  of Snug's data folder alone doesn't open those. The device's own signing and
+  prekey private keys aren't sealed this way: they are browser keys in that folder,
+  and they open messages sent to this device while its prekey is kept (a new one
+  each week, the old one kept 14 days more), so a copy still opens recent
+  messages. Without a key store (some Linux
+  setups) Settings > Encryption says your keys aren't protected by it. In a browser
+  they are kept like any site's data. Either way, code running as you on that
+  computer can use them.
 - *Messages from before.* Messages sent before a conversation turned encrypted stay
   stored readable on the server (each says so in its menu), and database snapshots
   taken before keep them until they age out.

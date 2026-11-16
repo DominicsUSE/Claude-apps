@@ -58,6 +58,9 @@
       "pinned.js",
       "fallback.html",
       "fallback.js",
+      "picker.html",
+      "picker.js",
+      "picker.css",
       "snug/**/*",
       "package.json"
     ],

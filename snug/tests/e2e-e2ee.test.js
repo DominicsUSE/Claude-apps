@@ -937,3 +937,92 @@ test('review H3, M1, M3: removing a lost device makes a new recovery key the old
   await robinA.waitForFunction(() => window.snug?.S.conn.socket === 'open');
   await waitStatus(robinA, 'ready');
 });
+
+// Review L2 (the rest): what this device keeps for an encrypted conversation while it is unsent (the draft,
+// what it replies to, a message waiting for the connection) is sealed under this device's storage key, never
+// written to localStorage as text, and comes back once the keys are open after a reload.
+test('review L2: a draft and a message waiting to send in an encrypted DM never reach localStorage as text; after a reload both come back, and it sends', async () => {
+  await openDm(robinA, 'Ines Carvalho');
+  const MARK = `UNSENT-${Date.now().toString(36)}`;
+  const ctx = robinA.context();
+  await ctx.setOffline(true);
+  await robinA.evaluate(() => window.snug.voiceTest.dropSocket());
+  await robinA.waitForFunction(() => window.snug.S.conn.socket !== 'open');
+  await say(robinA, `${MARK} queued`);
+  await robinA.waitForFunction((t) => Object.values(window.snug.S.msgs).flat().some((m) => m.text === t && m.state === 'queued'), `${MARK} queued`);
+  const replyTo = await robinA.evaluate(() => Object.values(window.snug.S.msgs).flat().find((m) => m.e2ee && !m.state)?.id);
+  await robinA.evaluate(async (id) => { const { setReply } = await import('/js/store.js'); setReply(window.snug.S.ui.view.id, id); }, replyTo);
+  await robinA.locator('.main [data-composer] textarea').fill(`${MARK} draft`);
+  // Drafts are saved shortly after a change, the device copy at most every 2 seconds (and when the page goes).
+  await robinA.waitForTimeout(2600);
+  await robinA.evaluate(() => dispatchEvent(new Event('pagehide')));
+  const stored = await robinA.evaluate(() => Object.keys(localStorage).map((k) => `${k}=${localStorage.getItem(k)}`).join('\n'));
+  assert.ok(stored.includes('snug.cache='));
+  assert.equal(stored.includes(MARK), false, 'the draft or the waiting message is in localStorage as text');
+  assert.equal(stored.split('\n').find((l) => l.startsWith('snug.reply='))?.includes(replyTo) ?? false, false, 'what the draft replies to isn’t kept in the clear either');
+  // A reload: this page goes while offline; the next one opens with the connection back.
+  await robinA.close();
+  await ctx.setOffline(false);
+  robinA = await ctx.newPage();
+  robinA.setDefaultTimeout(15000);
+  robinA.on('pageerror', (e) => errors.push(`robin: ${e.message}`));
+  await robinA.goto(url);
+  await robinA.waitForFunction(() => window.snug?.S.conn.socket === 'open');
+  await waitStatus(robinA, 'ready');
+  // It was sent, sealed: the server has the envelope and no text.
+  const sentId = await msgIdOf(robinA, `${MARK} queued`);
+  await expectRow(() => srv.db.get('SELECT enc FROM messages WHERE id = ?', sentId)?.enc, 'the waiting message reached the server');
+  assert.equal(srv.db.get('SELECT text FROM messages WHERE id = ?', sentId).text, '');
+  await openDm(robinA, 'Ines Carvalho');
+  await robinA.waitForFunction((t) => document.querySelector('.main [data-composer] textarea')?.value === t, `${MARK} draft`);
+  assert.equal(await robinA.evaluate(() => window.snug.S.ui.reply[window.snug.S.ui.view.id]), replyTo, 'still a reply');
+  await robinA.locator('.main .composer:has-text("Replying to")').waitFor();
+  await robinA.waitForTimeout(2600);
+  assert.equal((await robinA.evaluate(() => Object.keys(localStorage).map((k) => localStorage.getItem(k)).join('\n'))).includes(MARK), false);
+  scanServer(`${MARK} draft`);
+  // Sent, it is a message like any other (and nothing is left unsent).
+  await say(robinA, `${MARK} draft`);
+  const draftId = await msgIdOf(robinA, `${MARK} draft`);
+  assert.ok(srv.db.get('SELECT enc FROM messages WHERE id = ?', draftId)?.enc);
+  scanServer(MARK);
+});
+
+// A scheduled message with history off: its envelope opens on the author's own device after a reload (it is
+// sealed to that device, and the key is kept sealed here), so "Waiting here" shows its text.
+test('scheduled, history off: after a reload the Waiting here list still shows the text', async () => {
+  const R = idOf('robin');
+  await openEncryptionSettings(robinA);
+  const sw = robinA.locator('.layer-col [role=switch]').first();
+  if ((await sw.getAttribute('aria-checked')) !== 'false') await sw.click();
+  await expectRow(() => srv.db.get('SELECT hist FROM e2ee_accounts WHERE user = ?', R).hist === 0, 'history off');
+  await openDm(robinA, 'Ines Carvalho');
+  const MARK = `SCHED-OFF-${Date.now().toString(36)}`;
+  const schedule = async () => {
+    await robinA.locator('.main .plus-btn').click();
+    await robinA.locator('[role=menu] :text("Schedule a message")').click();
+    await dialog(robinA).locator('.modal-lead:has-text("Up to 14 days ahead")').waitFor();
+  };
+  await schedule();
+  await dialog(robinA).locator('textarea').fill(`${MARK} later`);
+  await dialog(robinA).locator('.chips .chip').first().click();
+  await dialog(robinA).locator('button:has-text("Schedule")').last().click();
+  await dialog(robinA).waitFor({ state: 'detached' });
+  const row = srv.db.get('SELECT id, enc FROM scheduled WHERE user = ? ORDER BY created DESC LIMIT 1', R);
+  assert.ok(row.enc && !row.enc.includes(MARK));
+  assert.equal(row.enc.includes(`"a:${R}:`), false, 'no history wrap with history off');
+  await robinA.reload();
+  await robinA.waitForFunction(() => window.snug?.S.conn.socket === 'open');
+  await waitStatus(robinA, 'ready');
+  await openDm(robinA, 'Ines Carvalho');
+  await schedule();
+  await dialog(robinA).locator(`.sched-list .sched-text:has-text("${MARK} later")`).waitFor();
+  assert.equal(await dialog(robinA).locator('.sched-list .sched-text:text-is("Encrypted message")').count(), 0);
+  // Tidy up: cancel it, and history back on for the tests after this one.
+  await dialog(robinA).locator('.sched-item:has-text("SCHED-OFF") button:has-text("Cancel")').click();
+  await expectRow(() => !srv.db.get('SELECT 1 FROM scheduled WHERE id = ?', row.id), 'cancelled');
+  await robinA.keyboard.press('Escape');
+  await openEncryptionSettings(robinA);
+  await robinA.locator('.layer-col [role=switch]').first().click();
+  await expectRow(() => srv.db.get('SELECT hist FROM e2ee_accounts WHERE user = ?', R).hist === 1, 'history on again');
+  await robinA.keyboard.press('Escape');
+});

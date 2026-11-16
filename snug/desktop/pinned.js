@@ -93,6 +93,20 @@ function pinnedCsp(csp, origin) {
     .replace("worker-src 'self'", `worker-src ${origin}/vendor/ ${origin}/sw.js`);
 }
 
+// Where the pinned window itself may go at the host's address (main.js will-navigate): the app's own
+// page (any path the bundle answers), and a download of an attachment (/api/files/<id>, answered by the
+// host as a file; will-redirect watches where it goes). Never any other /api/ address as a page: the
+// host's answers are data for the bundled page, not documents at its origin. Another origin: false
+// (main.js hands it to the browser).
+const DOWNLOAD = /^\/api\/files\/[A-Za-z0-9_-]{1,80}$/;
+function navAllowed(url, origin) {
+  let u, p;
+  try { u = new URL(url); p = decodeURIComponent(u.pathname); } catch { return false; }
+  if (u.origin !== origin) return false;
+  if (DOWNLOAD.test(p)) return true;
+  return !/^\/api(?:\/|$)/i.test(p);
+}
+
 // Everything else, to the host through the window's session (its cookies are sent and kept there).
 // Like Electron's ses.fetch, plus two things it can't do: a redirect comes back to the page as a
 // redirect (so the page follows it itself, and the window's will-redirect guard sees where it goes),
@@ -100,12 +114,13 @@ function pinnedCsp(csp, origin) {
 //
 // The host's answers are data for the bundled page, never code at the host's origin. What stops a
 // script or worker from /api is the page's own policy (pinnedCsp: scripts and workers only from the
-// app's folders). Every answer that comes back is also marked nosniff with a sandboxing policy (so
-// even one that ends up shown as a page runs nothing), and can't widen a service worker's scope.
-// The Sec-Fetch-Dest refusal below is kept for engines that pass that header to the handler; the
-// desktop test shows Electron's protocol handler doesn't see it for scripts or workers.
+// app's folders); what stops one becoming the window's page is main.js will-navigate (navAllowed).
+// Every answer that comes back is also marked nosniff with a sandboxing policy (so even one that ends
+// up shown as a page runs nothing), and can't widen a service worker's scope.
+// There used to be a 403 here for a Sec-Fetch-Dest of document, frame, script or worker. Electron's
+// protocol handler never gets that header (desktop/test.js records it: not for a fetch, not for a
+// document load), so the rule never fired and is gone; the checks above are the ones that work.
 const NO_BODY = new Set([101, 204, 205, 304]);
-const NEVER_CODE = new Set(["document", "iframe", "frame", "script", "worker", "sharedworker", "serviceworker"]);
 const API_CSP = "sandbox; default-src 'none'";
 function harden(headers) {
   headers.delete("service-worker-allowed");
@@ -115,8 +130,9 @@ function harden(headers) {
 }
 function passThrough(net, ses, req, origin) {
   const dest = String(req.headers.get("sec-fetch-dest") || "").toLowerCase();
-  if (NEVER_CODE.has(dest)) {
-    return Promise.resolve(new Response("Not here", { status: 403, headers: harden(new Headers({ "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" })) }));
+  // desktop/test.js records what the handler sees (globalThis.snugPinnedDests, set only by the test).
+  if (Array.isArray(globalThis.snugPinnedDests) && globalThis.snugPinnedDests.length < 200) {
+    try { globalThis.snugPinnedDests.push({ path: new URL(req.url).pathname, dest: dest || "(none)" }); } catch { /* a bad address */ }
   }
   return new Promise((resolve, reject) => {
     const cr = net.request({ session: ses, method: req.method, url: req.url, origin, credentials: "include", redirect: "manual", bypassCustomProtocolHandlers: true });
@@ -170,4 +186,4 @@ function fallbackText({ state, host, server, app }) {
 const OWN_PAGE_NOTE = (host) => `The server’s own page runs code from ${host}. Encrypted conversations there depend on trusting whoever runs it.`;
 const OWN_PAGE_SUFFIX = " — server’s own page";
 
-module.exports = { PARTITION, insecureOrigin, loadRules, verdict, readVersion, checkVersion, bundled, pinnedCsp, passThrough, pin, unpin, fallbackText, OWN_PAGE_NOTE, OWN_PAGE_SUFFIX };
+module.exports = { PARTITION, insecureOrigin, loadRules, verdict, readVersion, checkVersion, bundled, pinnedCsp, navAllowed, passThrough, pin, unpin, fallbackText, OWN_PAGE_NOTE, OWN_PAGE_SUFFIX };

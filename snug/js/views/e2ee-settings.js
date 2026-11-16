@@ -7,7 +7,7 @@ import { S, openModal, closeModal, toast, subscribe } from '../store.js';
 import { Icon } from '../ui/icons.js';
 import { Switch } from '../ui/kit.js';
 import { Confirm } from './modals.js';
-import { E2, removeDevice, setHistory, newRecoveryKeyFlow, deviceKind, resetEncryption, keysExposed, repairMeta } from '../e2ee/manager.js';
+import { E2, removeDevice, setHistory, newRecoveryKeyFlow, deviceKind, resetEncryption, keysExposed, repairMeta, forgetLockedKeys } from '../e2ee/manager.js';
 import { COPY } from '../lib/e2ee/copy.js';
 import { SetupSheet, RecoveryKeyScreen } from './e2ee-setup.js';
 import { LinkScreen, RecoverScreen } from './e2ee-link.js';
@@ -18,6 +18,14 @@ const failText = (e) => (e?.offline ? 'You’re offline. Try again once you’re
 
 function Status({ Row }) {
   const st = E2.status;
+  if (st === 'unsupported' && E2.support?.reason === 'locked') {
+    const forget = () => openModal(Confirm, {
+      title: `${COPY.keyStoreLockedAction}?`, text: 'Encrypted messages can’t be read on this computer until you add it again, with another device or your recovery key.',
+      action: 'Remove', danger: true, onConfirm: () => forgetLockedKeys().catch((e) => toast(failText(e))),
+    });
+    return html`<div class="e2-warn e2-locked" role="alert"><${Icon} name="alert" size=${16} /><span class="grow">${COPY.unsupported.locked}</span>
+      <button class="btn sm" onClick=${forget}>${COPY.keyStoreLockedAction}</button></div>`;
+  }
   if (st === 'unsupported') return html`<p class="e2-warn" role="status"><${Icon} name="alert" size=${16} /><span>${COPY.unsupported[E2.support?.reason] || COPY.unsupported.old}</span></p>`;
   if (st === 'none') {
     return html`<${Row} label="End-to-end encryption" hint=${E2.on ? COPY.setupBody : 'This server hasn’t turned on end-to-end encryption.'}>
@@ -156,6 +164,7 @@ function EncryptionPage({ Row }) {
     <h1>Encryption</h1>
     <p class="lead">Direct messages and groups can be end-to-end encrypted: encrypted on your device and readable only on the devices of the people in them. This server stores them encrypted.</p>
     <${Status} Row=${Row} />
+    ${deviceKind() === 'app' && E2.keyStore === 'none' && html`<p class="e2-warn e2-keystore" role="status"><${Icon} name="alert" size=${16} /><span>${COPY.keyStoreNone}</span></p>`}
     ${ready && html`<${MetaProblem} />`}
     ${ready && E2.rotateProblem && html`<p class="e2-warn" role="status"><${Icon} name="alert" size=${16} /><span>Your weekly new history key wasn’t made: ${E2.rotateProblem}</span></p>`}
     ${ready && html`

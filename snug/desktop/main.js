@@ -108,6 +108,52 @@ const keyStore = {
   encrypt: (str) => require("electron").safeStorage.encryptString(str).toString("base64"),
   decrypt: (b64) => require("electron").safeStorage.decryptString(Buffer.from(b64, "base64")),
 };
+// The encryption storage key (js/e2ee/store.js) is derived from a secret kept here, wrapped by the OS key
+// store, and handed only to the app's own page (preload.js snugApp.e2eeStoreKey, checked again below). With no
+// key store (Linux basic_text) there is no secret, and the page keeps the 0.12.0 behaviour and says so in
+// Settings. SNUG_KEYSTORE=off|test is for the desktop test and only honoured when running from source: "off"
+// is a computer without a key store, "test" a stand-in for one (not protection) on machines that have none.
+const devKeyStore = app.isPackaged ? null : process.env.SNUG_KEYSTORE;
+const e2eeKeyStore = devKeyStore === "off" ? { name: "safeStorage", available: () => false }
+  : devKeyStore === "test" ? {
+    name: "test", available: () => true,
+    encrypt: (str) => Buffer.from(str).map((b) => b ^ 0x5a).toString("base64"),
+    decrypt: (b64) => Buffer.from(b64, "base64").map((b) => b ^ 0x5a).toString(),
+  } : { name: "safeStorage", ...keyStore };
+const e2eeStoreFile = () => path.join(app.getPath("userData"), "e2ee-store.json");
+// { protected: true, key } or { protected: false, why: "unavailable" | "locked" }. "locked": a secret was
+// kept but the key store can't give it back now (it changed, or this folder was copied from another computer).
+function e2eeStoreSecret() {
+  let file = null;
+  try { file = JSON.parse(fs.readFileSync(e2eeStoreFile(), "utf8")); } catch { /* none yet */ }
+  if (file) {
+    if (file.v !== 1 || file.enc !== e2eeKeyStore.name || !e2eeKeyStore.available()) return { protected: false, why: "locked" };
+    try {
+      const key = e2eeKeyStore.decrypt(String(file.key || ""));
+      if (/^[A-Za-z0-9_-]{43}$/.test(key)) return { protected: true, key };
+    } catch { /* the key store refused */ }
+    return { protected: false, why: "locked" };
+  }
+  if (!e2eeKeyStore.available()) return { protected: false, why: "unavailable" };
+  const key = require("crypto").randomBytes(32).toString("base64url");
+  try {
+    fs.mkdirSync(path.dirname(e2eeStoreFile()), { recursive: true });
+    const tmp = `${e2eeStoreFile()}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ v: 1, enc: e2eeKeyStore.name, key: e2eeKeyStore.encrypt(key) }), { mode: 0o600 });
+    fs.renameSync(tmp, e2eeStoreFile());
+  } catch { return { protected: false, why: "unavailable" }; }
+  return { protected: true, key };
+}
+// "Remove this computer's keys" while locked (js/e2ee/manager.js forgetLockedKeys): a kept secret that this
+// working key store can't open is put aside as e2ee-store.json.locked, so the keys made next get a new,
+// protected secret instead of none. A key store that is only unavailable now (or a file from a newer version)
+// changes nothing. Another account on this computer sealed under the old secret was locked already and stays so.
+function e2eeStoreReset() {
+  let file = null;
+  try { file = JSON.parse(fs.readFileSync(e2eeStoreFile(), "utf8")); } catch { return false; }
+  if (file?.v !== 1 || !e2eeKeyStore.available() || e2eeStoreSecret().protected) return false;
+  try { fs.renameSync(e2eeStoreFile(), `${e2eeStoreFile()}.locked`); return true; } catch { return false; }
+}
 // A per-launch secret in an httpOnly cookie lets this window sign back in after signing out (F5).
 const resumeSecret = require("crypto").randomBytes(32).toString("base64url");
 
@@ -282,6 +328,9 @@ function createWindow({ ses = session.defaultSession, bounds, maximized, hidden 
   // Links in messages open in the default browser, never inside the app.
   w.webContents.setWindowOpenHandler(({ url }) => { external(url); return { action: "deny" }; });
   w.webContents.on("will-navigate", (ev, url) => {
+    // Pinned join mode: at the host's address the window shows only the app's own page (or a download),
+    // never another /api/ answer as a page (desktop/pinned.js navAllowed). Refused, not sent to the browser.
+    if (pinnedOn && fromSnug(url) && w.webContents.session === joinSes && !pinned.navAllowed(url, origin)) { ev.preventDefault(); return; }
     if (fromSnug(url) || url.startsWith(SETUP) || url.startsWith(FALLBACK)) return;
     ev.preventDefault();
     external(url);
@@ -397,51 +446,41 @@ function screenSharing(ses) {
   }, { useSystemPicker: isMac });
 }
 
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-
-// A plain window listing what can be shared, with thumbnails. Choosing one
-// shares it; closing the window or Cancel shares nothing. The page has no
-// bridge and no network: it reports the choice through its title.
+// A plain window listing what can be shared, with thumbnails (picker.html, picker.js). Choosing one
+// shares it; closing the window or Cancel shares nothing. The page's only bridge is the list itself
+// (preload.js snugPicker, answered here for this picker only); it has no network and reports the
+// choice through its title. Its policy runs only its own script file (no inline script).
+const PICKER = pathToFileURL(path.join(__dirname, "picker.html")).toString();
+let picking = null; // { wc, items } while a picker is open
+ipcMain.on("picker:page", (e) => { e.returnValue = String(e.senderFrame?.url || "").startsWith("file:") ? PICKER : null; });
+ipcMain.handle("picker:list", (e) => (picking && e.sender === picking.wc && e.senderFrame?.url === PICKER ? picking.items : null));
 function pickSource(sources) {
   if (!sources.length || !win) return Promise.resolve(null);
   const screens = sources.filter((s) => s.id.startsWith("screen:"));
   const windows = sources.filter((s) => !s.id.startsWith("screen:") && !s.thumbnail.isEmpty()).slice(0, 30);
   const list = [...screens, ...windows];
-  const item = (s, i) => `<button data-i="${i}"><img alt="" src="data:image/jpeg;base64,${s.thumbnail.toJPEG(70).toString("base64")}"><span>${esc(screens.length === 1 && s.id.startsWith("screen:") ? "Entire screen" : s.name)}</span></button>`;
-  const page = `<!doctype html><html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
-<title>Share your screen</title><style>
-:root { color-scheme: dark; --bg: #141516; --bg2: #212324; --line: #393B3D; --text: #F4F1ED; --text2: #B8B4AE; }
-@media (prefers-color-scheme: light) { :root { color-scheme: light; --bg: #FBFAF8; --bg2: #ECE9E4; --line: #CFCAC3; --text: #1A1817; --text2: #57534E; } }
-* { box-sizing: border-box; } body { margin: 0; padding: 20px 24px; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, sans-serif; }
-h1 { font-size: 20px; margin: 0 0 4px; } h2 { font-size: 13px; color: var(--text2); font-weight: 600; margin: 20px 0 8px; } p { margin: 0; color: var(--text2); }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
-button[data-i] { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--text); text-align: left; font: inherit; cursor: pointer; }
-button[data-i]:hover { background: var(--bg2); }
-button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
-img { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: var(--bg2); border-radius: 6px; }
-span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.foot { display: flex; justify-content: flex-end; margin-top: 20px; }
-.cancel { height: 40px; padding: 0 16px; border-radius: 6px; border: 0; background: var(--bg2); color: var(--text); font: inherit; cursor: pointer; }
-</style></head><body>
-<h1>Share your screen</h1><p>Everyone in the voice room will see what you choose.</p>
-${screens.length ? `<h2>Screens</h2><div class="grid">${screens.map((s) => item(s, list.indexOf(s))).join("")}</div>` : ""}
-${windows.length ? `<h2>Windows</h2><div class="grid">${windows.map((s) => item(s, list.indexOf(s))).join("")}</div>` : ""}
-<div class="foot"><button class="cancel">Cancel</button></div>
-<script>
-document.addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; document.title = b.dataset.i != null ? "pick:" + b.dataset.i : "cancel"; });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.title = "cancel"; });
-document.querySelector("button[data-i]")?.focus();
-</script></body></html>`;
+  const item = (s) => ({
+    i: list.indexOf(s), thumb: `data:image/jpeg;base64,${s.thumbnail.toJPEG(70).toString("base64")}`,
+    name: String(screens.length === 1 && s.id.startsWith("screen:") ? "Entire screen" : s.name).slice(0, 200),
+  });
+  const items = { screens: screens.map(item), windows: windows.map(item) };
   return new Promise((resolve) => {
     const picker = new BrowserWindow({
       parent: win, modal: true, width: 760, height: 560, minWidth: 420, minHeight: 360,
       title: "Share your screen", autoHideMenuBar: true, show: false,
       backgroundColor: nativeTheme.shouldUseDarkColors ? "#141516" : "#FBFAF8",
-      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+      webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false, sandbox: true },
     });
+    const mine = { wc: picker.webContents, items };
+    picking = mine;
     let done = false;
-    const finish = (source) => { if (done) return; done = true; resolve(source); if (!picker.isDestroyed()) picker.close(); };
+    const finish = (source) => {
+      if (done) return;
+      done = true;
+      if (picking === mine) picking = null;
+      resolve(source);
+      if (!picker.isDestroyed()) picker.close();
+    };
     picker.webContents.on("will-navigate", (e) => e.preventDefault());
     picker.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     picker.webContents.on("page-title-updated", (e, title) => {
@@ -450,7 +489,7 @@ document.querySelector("button[data-i]")?.focus();
     });
     picker.on("closed", () => finish(null));
     picker.once("ready-to-show", () => picker.show());
-    picker.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(page)}`).catch(() => finish(null));
+    picker.loadURL(PICKER).catch(() => finish(null));
   });
 }
 
@@ -1231,12 +1270,16 @@ ipcMain.on("update:page", (e) => { e.returnValue = String(e.senderFrame?.url || 
 ipcMain.on("fallback:page", (e) => { e.returnValue = String(e.senderFrame?.url || "").startsWith("file:") ? FALLBACK : null; });
 // Whether the Snug page runs the app's own code: the in-app server's page (host mode) or the pinned client
 // (join mode), in the main window only. The server's own page never is. (js/e2ee/manager.js deviceKind)
-ipcMain.on("page:builtin", (e) => {
+function builtInPage(e) {
   const main = !!win && !win.isDestroyed() && e.sender === win.webContents;
   const ses = e.sender.session;
-  e.returnValue = main && fromSnug(e.senderFrame?.url || "") && !ownPage
+  return main && fromSnug(e.senderFrame?.url || "") && !ownPage
     && ((config?.mode === "host" && ses === session.defaultSession) || (pinnedOn && ses === joinSes));
-});
+}
+ipcMain.on("page:builtin", (e) => { e.returnValue = builtInPage(e); });
+// The encryption storage key's secret (above): the app's own page only, never a server's own page.
+ipcMain.handle("e2ee:storekey", (e) => (builtInPage(e) ? e2eeStoreSecret() : null));
+ipcMain.handle("e2ee:storekey:reset", (e) => (builtInPage(e) ? e2eeStoreReset() : false));
 // The fallback page (fallback.html): what to say, the server's own page, an app update, or another server.
 const fromFallback = (e) => String(e.senderFrame?.url || "").split(/[?#]/)[0] === FALLBACK;
 ipcMain.handle("fallback:info", (e) => (fromFallback(e) && fallbackInfo ? { ...pinned.fallbackText(fallbackInfo), host: new URL(fallbackInfo.host).host, note: pinned.OWN_PAGE_NOTE(new URL(fallbackInfo.host).host) } : null));

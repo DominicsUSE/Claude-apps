@@ -598,3 +598,34 @@ test('a scheduled message sent after a history epoch changed carries no wrap for
   assert.ok(targets.includes(`d:${a.dev.d}`) && targets.includes(`d:${b.dev.d}`));
   await close(a, b);
 });
+
+test('a former member’s earlier messages can still be checked: bundles hand out the device list of authors in conversations you read', async () => {
+  // Alice and Ines share nothing but Bob's group: no friendship, no house.
+  const alice = await enrolled('ec-former-a');
+  const bob = await enrolled('ec-former-b');
+  const ines = await enrolled('ec-former-i');
+  await friends(bob, alice);
+  await friends(bob, ines);
+  const { id: g } = await bob.sock.ok('dm.open', { users: [alice.id, ines.id] });
+  const users = [alice.id, bob.id, ines.id].sort();
+  const { id, ack } = await sendEnc(ines, { dm: g, users, text: 'from ines, before she left' });
+  assert.equal(ack.ok, true, ack.error);
+  await ines.sock.ok('dm.leave', { dm: g });
+  // Alice reloads (or opens Snug on a new device): she has no list of Ines's pinned yet.
+  const r = await alice.sock.ok('e2ee.bundles', { users: [ines.id] });
+  const got = r.users[ines.id];
+  assert.ok(got?.list, 'Ines’s signed device list is handed out');
+  assert.equal(got.ready, false, 'but nothing to seal new messages to: she isn’t someone Alice can message');
+  assert.deepEqual(got.prekeys, {}, 'no prekeys');
+  const entry = got.list.devs.find((x) => x.d === ines.dev.d);
+  assert.ok(entry);
+  const w = await alice.sock.ok('e2ee.wraps', { ids: [id] });
+  const hist = await alice.sock.ok('history', { conv: g });
+  const m = hist.msgs.find((x) => x.id === id);
+  const opened = await openAs(alice, { ...m, k: w.wraps[id].k }, { conv: g, senderDsk: b64uOf(entry.dsk, 32) });
+  assert.equal(opened.body.text, 'from ines, before she left');
+  // Someone with no message in a conversation Alice reads gets nothing.
+  const stranger = await enrolled('ec-former-x');
+  assert.equal((await alice.sock.ok('e2ee.bundles', { users: [stranger.id] })).users[stranger.id], undefined);
+  await close(alice, bob, ines, stranger);
+});
