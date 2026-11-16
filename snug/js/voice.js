@@ -117,18 +117,31 @@ const ckOf = new Map(); // user -> { acked, keyed, ckSeen, unsigned, why }
 const ckState = (u) => { let x = ckOf.get(u); if (!x) ckOf.set(u, (x = { acked: null, keyed: false, ckSeen: false, unsigned: false, why: null })); return x; };
 const transformMode = () => (typeof RTCRtpScriptTransform === 'function' ? 'script'
   : typeof RTCRtpSender !== 'undefined' && typeof RTCRtpSender.prototype.createEncodedStreams === 'function' ? 'streams' : null);
-// Called before the first connection of a call: whether its media can be end-to-end encrypted, and how.
-function startCrypt() {
+// Called before joining (so before any connection of the call): whether its
+// media can be end-to-end encrypted, and how. The worker must answer first: a
+// page whose policy doesn't allow it (or a broken one) would otherwise stop
+// every frame, so the call goes on as before and says why.
+async function startCrypt() {
   stopCrypt();
   const mode = transformMode();
   crypt.why = !mode ? 'browser' : !e2eeOffered() ? 'off' : !callKeysReady() ? 'keys' : !S.callE2ee ? 'server' : null;
   if (crypt.why) return;
+  let worker;
   try {
-    crypt.worker = new Worker(new URL('./callcrypt-worker.js', import.meta.url), { type: 'module' });
+    worker = new Worker(new URL('./callcrypt-worker.js', import.meta.url), { type: 'module' });
   } catch { crypt.why = 'browser'; return; }
+  worker.onmessage = ({ data: m }) => { if (m?.t === 'stats' || m?.t === 'done') { crypt.waits.get(m.req)?.(m.t === 'stats' ? m.stats : !m.failed); crypt.waits.delete(m.req); } };
+  const req = ++crypt.req;
+  const alive = await new Promise((r) => {
+    crypt.waits.set(req, r);
+    worker.onerror = () => { crypt.waits.delete(req); r(false); };
+    worker.postMessage({ t: 'ping', req });
+    setTimeout(() => { if (crypt.waits.delete(req)) r(false); }, 3000);
+  });
+  if (alive !== true) { worker.terminate(); crypt.why = 'browser'; return; }
+  worker.onerror = null;
+  crypt.worker = worker;
   crypt.mode = mode;
-  crypt.worker.onmessage = ({ data: m }) => { if (m?.t === 'stats' || m?.t === 'done') { crypt.waits.get(m.req)?.(m.t === 'stats' ? m.stats : !m.failed); crypt.waits.delete(m.req); } };
-  crypt.worker.onerror = () => { crypt.why = 'browser'; };
   newCallKey();
 }
 function stopCrypt() {
@@ -825,6 +838,9 @@ export async function joinVoice(room, { start = false, video = false, listen = f
     stopMyLevel = watchLevel(S.me, mic);
     watchMic(mic);
   }
+  // calls C1: the media encryption worker, ready before any connection exists.
+  await startCrypt();
+  if (S.call !== c) { stopCrypt(); mic?.getTracks().forEach((t) => t.stop()); return 'ok'; }
   try {
     c.status = 'joining';
     emit();
@@ -839,7 +855,6 @@ export async function joinVoice(room, { start = false, video = false, listen = f
     cue('join');
     if (c.listen) pushState();
     lastUsers = [S.me, ...r.peers].sort().join();
-    startCrypt();
     for (const u of r.peers) peer(u, true);
     // Data saver keeps the camera off until you turn it on.
     if (video && vp().lowData) toast('Data saver is on, so your camera stays off. Turn it on with the camera button if you want it.');

@@ -46,5 +46,6 @@ async function handle(m) {
     else if (m.t === 'wipe') fc.wipe();
     else if (m.t === 'tamper') { if (m.on) fc.tamper.add(m.peer); else fc.tamper.delete(m.peer); }
     else if (m.t === 'stats') self.postMessage({ t: 'stats', req: m.req, stats: fc.stats() });
+    else if (m.t === 'ping') self.postMessage({ t: 'done', req: m.req });
   } catch { if (m.t === 'stats' || m.t === 'recv') self.postMessage({ t: m.t === 'stats' ? 'stats' : 'done', req: m.req, stats: {}, failed: true }); }
 }
