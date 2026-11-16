@@ -10,7 +10,8 @@ goes back to an older version on its own (README, "Install, update, go back").
 
 - **Polls** work in direct conversations and groups with friends on other PCs: the poll, everyone's votes
   (only each person's latest counts) and its end reach every PC, so all show the same counts. If someone's
-  Snug is older, the poll is refused and the message says who needs to update.
+  Snug is older, or a group member's PC hasn't been in touch yet so Snug can't tell, the poll is refused and
+  the message names them.
 - **Group calls** in groups with friends on other PCs, up to the 12 people a call holds. Audio and video go
   between the people's browsers as in any call; the PCs only pass the connection messages.
 - **Forwarding** a message to friends on other PCs brings the whole message: the forwarded card with who

@@ -758,9 +758,18 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
   };
   // Polls (0.13): a poll item, then each member's votes (their whole choice; the latest counts) and its end.
   // Only once every other member's PC says it knows polls; otherwise the message names who needs to update.
-  // Members whose PCs are known to be older (a co-member never linked with is unknown: an older PC drops the items).
-  const noPolls = (g) => [...state(g).members.keys()].filter((u) => u !== me() && X.capsKnown(u) && !X.capsOf(u).includes('poll'));
-  const OLD_POLLS = (uids) => `${uids.map((u) => M.userRow(localId(u))?.name || 'Someone').join(', ')} ${uids.length === 1 ? 'needs' : 'need'} to update Snug before you can share a poll here. Until then, they’d only see the question.`;
+  // Members whose PCs are known to be older, and those this PC hasn't heard from since the update (unknown): an older
+  // PC drops the poll's items without anyone being told, so both are refused, by name.
+  const noPolls = (g) => [...state(g).members.keys()].filter((u) => u !== me() && !X.capsOf(u).includes('poll'));
+  const names = (uids) => uids.map((u) => M.userRow(localId(u))?.name || 'Someone').join(', ');
+  const OLD_POLLS = (uids) => {
+    const old = uids.filter((u) => X.capsKnown(u));
+    const unknown = uids.filter((u) => !X.capsKnown(u));
+    if (old.length) return `${names(old)} ${old.length === 1 ? 'needs' : 'need'} to update Snug before you can share a poll here. Until then, they’d only see the question.`;
+    return unknown.length === 1
+      ? `Snug hasn’t heard from ${names(unknown)}’s PC yet, so it can’t tell whether it shows polls. Try again once it has been online.`
+      : `Snug hasn’t heard from the PCs of ${names(unknown)} yet, so it can’t tell whether they show polls. Try again once they have been online.`;
+  };
   wrap('poll.create', (c, d, base) => {
     if (!inGroup(c, d.conv)) return base(c, d);
     const g = groupOf(d.conv);

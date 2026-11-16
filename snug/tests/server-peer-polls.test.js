@@ -127,4 +127,12 @@ test('a poll in a group across PCs: every member votes, every PC shows the same 
   const err = await a.refused('poll.create', { conv: g, id: mid(), question: 'Again?', answers: ANSWERS, hours: 1 });
   assert.match(err, /pgcal/);
   A.peer._setCaps(uidOf(c), null);
+  // A member whose PC this PC hasn't heard from since the update (caps unknown): refused too, naming them,
+  // since an older PC would drop the poll without anyone being told.
+  const was = B.db.get('SELECT caps FROM peers WHERE uid = ?', uidOf(c)).caps;
+  B.db.run('UPDATE peers SET caps = NULL WHERE uid = ?', uidOf(c));
+  const unk = await b.refused('poll.create', { conv: g, id: mid(), question: 'Unknown?', answers: ANSWERS, hours: 1 });
+  assert.match(unk, /pgcal/);
+  assert.match(unk, /hasn’t heard from/);
+  B.db.run('UPDATE peers SET caps = ? WHERE uid = ?', was, uidOf(c));
 });
