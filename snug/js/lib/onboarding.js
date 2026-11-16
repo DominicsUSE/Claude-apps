@@ -20,13 +20,14 @@ export function parseInvite(text) {
 }
 
 // The quick switcher (js/views/search.js) offers "Join with this invitation"
-// for a link with /join/<code> in it, or a bare code shaped like the ones
-// Snug makes (8 or more letters and numbers, with both in it), so a room or a
-// person's name typed there never looks like an invitation.
+// for a link with /join/<code> in it ({ link: true }: that row goes first), or
+// a bare code with the shape Snug makes, 12 of a-z and 0-9 (server/safety.js
+// invite.create; { link: false }: that row goes after the rooms and people
+// it matches, so a room called "glazebatch24" still opens on Enter).
 export function quickInvite(text) {
   const s = String(text || '').trim();
-  if (/(?:^|\/)join\//i.test(s)) return parseInvite(s);
-  return /^[a-z0-9]{8,40}$/i.test(s) && /\d/.test(s) && /[a-z]/i.test(s) ? s : null;
+  if (/(?:^|\/)join\//i.test(s)) { const code = parseInvite(s); return code ? { code, link: true } : null; }
+  return /^[a-z0-9]{12}$/.test(s) ? { code: s, link: false } : null;
 }
 
 // Why an invitation row can't be used, or null when it can. Mirrors the checks

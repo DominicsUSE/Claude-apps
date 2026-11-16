@@ -287,8 +287,8 @@ export function QuickJump() {
   useLayoutEffect(() => field.current.focus(), []);
   const term = q.trim();
   const rows = candidates(term);
-  const code = quickInvite(term);
-  if (code) rows.unshift({ group: 'Invitation', key: 'invite', label: 'Join with this invitation', hint: code, icon: html`<${Icon} name="link" />`, run: () => joinFromQuick(code) });
+  const inv = quickInvite(term);
+  if (inv) rows[inv.link ? 'unshift' : 'push']({ group: 'Invitation', key: 'invite', label: 'Join with this invitation', hint: inv.code, icon: html`<${Icon} name="link" />`, run: () => joinFromQuick(inv.code) });
   if (term) rows.push({ group: 'Messages', key: 'search', label: `Search messages for “${term}”`, hint: 'Messages and files', icon: html`<${Icon} name="search" />`, run: () => go({ type: 'search', q: term }) });
   else rows.push({ key: 'search', label: 'Search messages', hint: '', icon: html`<${Icon} name="search" />`, run: () => go({ type: 'search', q: '' }) });
   const at = Math.min(i, rows.length - 1);

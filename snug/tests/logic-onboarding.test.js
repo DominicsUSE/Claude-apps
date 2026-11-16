@@ -140,10 +140,13 @@ test('summaryLine: Home’s summary is one sentence with a capital, whichever pa
 });
 
 test('quickInvite: the quick switcher offers to join only for text that looks like an invitation', () => {
-  assert.equal(quickInvite('https://snug.example.org/join/k3x9q2m7a1bz'), 'k3x9q2m7a1bz');
-  assert.equal(quickInvite('snug://join/k3x9q2m7a1bz'), 'k3x9q2m7a1bz');
-  assert.equal(quickInvite('/join/kiln'), 'kiln', 'a link names a house’s own word too');
-  assert.equal(quickInvite('  k3x9q2m7a1bz  '), 'k3x9q2m7a1bz', 'a bare code: letters and numbers, 6 or more');
+  assert.deepEqual(quickInvite('https://snug.example.org/join/k3x9q2m7a1bz'), { code: 'k3x9q2m7a1bz', link: true });
+  assert.deepEqual(quickInvite('snug://join/k3x9q2m7a1bz'), { code: 'k3x9q2m7a1bz', link: true });
+  assert.deepEqual(quickInvite('/join/kiln'), { code: 'kiln', link: true }, 'a link names a house’s own word too');
+  // A bare code has the server's shape: 12 of a-z and 0-9 (server/safety.js invite.create).
+  assert.deepEqual(quickInvite('  k3x9q2m7a1bz  '), { code: 'k3x9q2m7a1bz', link: false });
+  assert.deepEqual(quickInvite('kxqmabzwrtyp'), { code: 'kxqmabzwrtyp', link: false }, 'about 1 in 50 codes has no digit');
+  assert.deepEqual(quickInvite('384950129384'), { code: '384950129384', link: false });
   // Words people type to find a room or a person are not invitations.
-  for (const s of ['general', 'glaze lab', 'robin', 'ab12', 'room-2', '', '   ', 'https://example.org/about']) assert.equal(quickInvite(s), null, s);
+  for (const s of ['general', 'general2', 'alex2000', 'glaze lab', 'robin', 'ab12', 'room-2', 'k3x9q2m7a1bzz', 'K3X9Q2M7A1BZ', '', '   ', 'https://example.org/about']) assert.equal(quickInvite(s), null, s);
 });

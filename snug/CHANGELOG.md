@@ -15,7 +15,8 @@ goes back to an older version on its own (README, "Install, update, go back").
 ### New
 
 - Paste an invitation link (or a code) into the quick switcher (`Ctrl`/`⌘ K`): *Join with this invitation*
-  joins and opens the house, or says why the link doesn't work.
+  joins and opens the house, or says why the link doesn't work. A link's row comes first; a bare code's comes after
+  any room or person the text matches, so Enter still opens a room called "glazebatch24".
 - House settings > Overview: **Show every room to newcomers**. On for new Friends and Gaming houses.
 - *Mute for…* confirms with "Muted until 22:40" (or "Muted") and **Undo**.
 - Phones: **double-tap a message to react** (❤️, or your pick in Settings > Text and messages, or off).

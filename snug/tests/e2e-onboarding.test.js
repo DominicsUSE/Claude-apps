@@ -254,6 +254,18 @@ test('the quick switcher: paste an invitation link, press Enter, land in the hou
     await bex.locator('.quick .menu-item.act:has-text("Join with this invitation")').waitFor();
     await bex.keyboard.press('Enter');
     await bex.waitForFunction(() => window.snug.S.ui.view.id === 'k_floor');
+    // A room whose name has a code's shape (12 letters and numbers): Enter opens the room.
+    // The bare code's Join row comes after the matches, never in their place.
+    const { id: batch } = await robin.evaluate(() => import('/js/server.js').then((s) => s.call('room.create', { house: 'kiln', name: 'glazebatch24', kind: 'text' })));
+    await robin.waitForFunction((id) => !!window.snug.S.rooms[id], batch);
+    await robin.keyboard.press('Control+k');
+    await robin.locator('.quick input').fill('glazebatch24');
+    await robin.locator('.quick .menu-item:has-text("Join with this invitation")').waitFor();
+    assert.match(await robin.locator('.quick .menu-item.act').textContent(), /glazebatch24/);
+    assert.doesNotMatch(await robin.locator('.quick .menu-item.act').textContent(), /invitation/);
+    await robin.keyboard.press('Enter');
+    await robin.waitForFunction((id) => window.snug.S.ui.view.id === id, batch);
+    await robin.evaluate((id) => import('/js/server.js').then((s) => s.call('room.delete', { room: id })), batch);
   } finally { await close(robin); await close(bex); }
 });
 
