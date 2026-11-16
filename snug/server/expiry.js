@@ -43,6 +43,11 @@ export function migrateExpiry(db) {
       WHERE seq = new.seq;
     END;
   `);
+  // calls C5, for records a 0.12/0.13 sweep already blanked (it left sys whole): they keep only how it went.
+  // Those messages are hidden already, so nothing that shows changes.
+  db.prepare(`UPDATE messages SET sys = json_object('outcome', json_extract(sys, '$.outcome'))
+    WHERE expires IS NOT NULL AND expires <= ? AND deleted IS NOT NULL AND sys IS NOT NULL AND json_valid(sys)
+      AND json_extract(sys, '$.outcome') IS NOT NULL AND sys != json_object('outcome', json_extract(sys, '$.outcome'))`).run(Date.now());
 }
 
 export function createExpiry({ db, M, hub, ops, clock = Date.now }) {

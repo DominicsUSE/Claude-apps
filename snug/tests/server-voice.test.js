@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { createHmac } from 'node:crypto';
 import WebSocket from 'ws';
 import { startServer } from '../server/index.js';
+import { openDb } from '../server/db.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'snug-voice-'));
 const GRACE = 600;
@@ -521,6 +522,25 @@ test('call records: only who started it, how it went, when, how long and who mis
   srv.M.eraseAuthored(b.id);
   assert.deepEqual(JSON.parse(srv.db.get('SELECT sys FROM messages WHERE id = ?', again.id).sys).missed, []);
   closeAll(a, b, c, d);
+});
+
+test('call records a 0.12/0.13 sweep already blanked keep only how it went once the database is opened; records still showing are left alone', () => {
+  const path = join(dir, 'old-records.db');
+  const t = Date.now() - 100_000;
+  const full = (id) => JSON.stringify({ id, by: 'u_old', video: false, outcome: 'answered', joined: ['u_old', 'u_two'], declined: ['u_three'], started: t, dur: 5000 });
+  let db = openDb(path);
+  db.run("INSERT INTO users (id, handle, name, pass, created) VALUES ('u_old', 'oldrec', 'Old Rec', 'x', ?)", t);
+  const put = (id, expires, deleted) => db.run("INSERT INTO messages (id, conv, author, ts, text, fold, sys, expires, deleted) VALUES (?, 'd_old', 'u_old', ?, '', '', ?, ?, ?)", id, t, full(id), expires, deleted);
+  put('m_swept', t + 1000, t + 1000); // what the 0.12/0.13 sweep left: deleted, words gone, sys untouched
+  put('m_later', Date.now() + 86_400_000, null); // not expired yet
+  put('m_kept', null, null); // no timer
+  db.close();
+  db = openDb(path);
+  const sys = (id) => JSON.parse(db.get('SELECT sys FROM messages WHERE id = ?', id).sys);
+  assert.deepEqual(sys('m_swept'), { outcome: 'answered' });
+  assert.deepEqual(sys('m_later').joined, ['u_old', 'u_two'], 'a record still showing is untouched');
+  assert.deepEqual(sys('m_kept').declined, ['u_three']);
+  db.close();
 });
 
 // ---------- TURN ----------
