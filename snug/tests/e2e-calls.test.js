@@ -365,6 +365,7 @@ test('a group call I declined is a quiet line, not a violet missed call', async 
   const malik = await person('malik');
   await openDm(robin, 'Saturday load');
   await openDm(ines, 'Saturday load');
+  const before = await ines.locator('.callline').count();
   await robin.click('.main .bar .call-btn[aria-label="Start a voice call"]');
   await ines.locator('.incoming .inc-decline').click();
   await malik.locator('.incoming .inc-accept').click();
@@ -373,7 +374,7 @@ test('a group call I declined is a quiet line, not a violet missed call', async 
   await malik.click('.stage.call [aria-label="Leave call"]');
   // calls C5: the record keeps only who missed the call, so Ines (who declined) sees the call, not a missed call.
   const line = ines.locator('.callline').last();
-  await ines.locator('.callline:has-text("Robin started it")').waitFor();
+  await ines.waitForFunction((n) => document.querySelectorAll('.callline').length > n, before);
   assert.equal(await line.evaluate((el) => el.classList.contains('missed')), false);
   assert.match(await line.textContent(), /Call · .*Robin started it/);
   assert.equal(await line.locator('button:has-text("Call back")').count(), 0);

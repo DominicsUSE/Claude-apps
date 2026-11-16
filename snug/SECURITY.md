@@ -150,7 +150,7 @@ can read messages in a browser; the desktop app runs its own built-in code, also
 server (ghost members), withheld or delayed messages, metadata (who, when, how much, group names,
 reactions, devices, IP addresses), compromised devices and people in the conversation, history readable
 with the history key (on by default) or the recovery key and password, messages sent before a
-conversation turned encrypted, and calls. There is no per-message forward secrecy, no deniability and no
+conversation turned encrypted, and calls that aren't labelled end-to-end encrypted (below). There is no per-message forward secrecy, no deniability and no
 automatic recovery after a compromise: a prekey stays usable to senders for up to 30 days, a history key
 for a week, and nothing heals on its own until you remove the device, make new keys or reset. In a
 browser (not the desktop app), the server's code can also roll back what the page keeps, since it is the
@@ -182,6 +182,32 @@ trusted device and typed on the new one (HMAC over the exact keys, name and kind
 the protocol description should be reviewed by someone outside the implementation before any wording
 stronger than "end-to-end encrypted" is used.
 
+### End-to-end encrypted calls (0.14)
+
+On top of WebRTC's DTLS-SRTP, every encoded frame of the microphone, camera, screen and screen sound is sealed
+on the sending device with AES-256-GCM (WebCrypto, `js/lib/callcrypt.js`, run in `js/callcrypt-worker.js`
+through `RTCRtpScriptTransform` or `createEncodedStreams`). The frame is `header | ciphertext+tag | counter(8) |
+key id(1)`: the codec header (VP8 10 or 3 bytes, Opus 1) stays readable for the packetiser and is
+authenticated; video asks for VP8; a codec whose packetiser reads the payload (H264) isn't sealed and the call
+then isn't labelled end-to-end encrypted. Each device makes its own 32-byte key (HKDF-SHA256 to the frame key),
+sends it to each other person sealed with HPKE to each device in their signed device list and signed with its
+device Ed25519 key (`js/e2ee/callkeys.js`, rtc signal `ck`, size-capped by the server), and encrypts to that
+person only after they acknowledge it. A new key on every join and leave; a receiver keeps the previous one
+about 2 seconds after the new one is in use; everything is wiped when the call ends. Once a sender's frames
+open, anything from them that doesn't (plain, damaged, wrong key) is dropped, never played. The label says
+*End-to-end encrypted* only when every connection is; otherwise *Encrypted in transit only (DTLS-SRTP)* with
+the reason. Every offer and answer carries `a=x-snug-fp`, the device's signature over the call, both people,
+the certificate fingerprint and ICE username; one that doesn't verify against the sender's signed device list,
+or a missing one from a device that signs its keys, ends that connection with a warning. With both sides signed
+the security code is 12 digits from both device keys and fingerprints (*Verified device*).
+
+It does not hide who is in which call, when, for how long or how much was sent (the server and any relay see
+that), it trusts the device lists as for messages (a server could add a device to an account; Snug shows new
+devices), it doesn't cover calls with someone who hasn't turned encryption on, an older Snug, a browser without
+encoded transforms, or P2P calls with friends on other PCs (these say *in transit only*), and whoever serves the
+web client's JavaScript could change it. A server could also withhold call keys or signatures so a call falls
+back to *in transit only*; the label then says so. Not reviewed by anyone outside the implementation.
+
 ### What Snug cannot protect against
 
 - **A compromised device.** Malware running as you, or someone with your unlocked PC, can read what you can
@@ -196,16 +222,22 @@ stronger than "end-to-end encrypted" is used.
   they also obtain. The registry never sees messages between PCs.
 - **Metadata.** The registry sees who is online, which accounts signal each other and when, each account's
   list of friends and group co-members (to tell them who is online), and IP addresses (stored only as keyed
-  hashes or truncated). Cloudflare, which runs the registry and the TURN relays, sees connecting addresses. Voice and video go peer to peer, so the other side of a call
-  sees your IP address unless "Hide my IP from friends" is on and a relay server is set up.
-- **Calls and the server in the middle.** Calls are encrypted between the people in them (DTLS-SRTP), but the
-  offers that carry each side's certificate fingerprint pass through the Snug server, so a server that
-  swapped them could sit in the middle. Since 0.13 the connection details show a 6-digit security code per
-  person (a hash of both fingerprints): if both people read out the same code, swapping the keys is much
-  harder, not impossible. The code is about 20 bits and neither side commits to its fingerprint before seeing
-  the other's, so a server in the middle can keep making certificates until both codes match (about a million
-  tries on average: seconds to minutes of computing). It only helps if people compare it, and it checks the
-  connection, not who the other person is.
+  hashes or truncated). Cloudflare, which runs the registry and the TURN relays, sees connecting addresses. Calls go through the relay
+  by default when the registry offers one (0.14); without one they go peer to peer, so the other side of a call
+  sees your IP address.
+- **Calls and the server in the middle.** Calls are encrypted between the people in them (DTLS-SRTP), and the
+  offers that carry each side's certificate fingerprint pass through the Snug server. Since 0.14 a device with
+  encryption keys signs its fingerprint, and the other side refuses a connection whose fingerprint doesn't match
+  (above); media is also end-to-end encrypted when the call says so. Without keys on both sides (or with an
+  older Snug) only the 0.13 6-digit code remains: about 20 bits, so a server in the middle can keep making
+  certificates until both codes match (about a million tries). It only helps if people compare it.
+- **Your IP address in calls.** With a TURN relay, calls and voice rooms are relay-only by default (0.14), and
+  only relay candidates leave the device, so the people in a call see the relay's address, not yours. The
+  relay's operator sees your address, when and how much. TURN credentials last an hour and their username is a
+  keyed hash of the person and the day, not the account id; a static TURN login (no `SNUG_TURN_SECRET`) is the
+  same for everyone and never expires, and the server warns about it at startup. Without a relay a call
+  connects directly and the other people see your address; Snug says so before you join. Anyone can turn
+  *Hide my IP address* off.
 - **People you talk to.** Anyone in a conversation can copy, screenshot or forward it. Deleting a message
   removes it from Snug, not from someone else's copy.
 - **Disappearing messages are not unrecoverable.** The timer (0.12) removes a message from Snug's database,
@@ -236,6 +268,11 @@ built from `js/lib/privacy.js` and `GET /api/privacy` (`server/privacy.js`).
 - Sign-in history (`auth_events`) and security events are kept 30 days by default (`SNUG_LOG_DAYS`, 1 to 365),
   with addresses truncated (1.2.3.x, /48). Failed sign-in counters last 2 days and hold an address only as an
   HMAC under the data key. Sessions store a device label, never an address. Logs never print a full address.
+- Calls (0.14): nothing is recorded. A call's record in the conversation stores who started it, voice or video,
+  how it went, when, how long and who missed it (not who took part or declined; 0.12/0.13 clients get the
+  members who didn't miss it, worked out when read). The disappearing-messages sweep and erasing the author's
+  account cut it down to how it went; erasing someone also takes them off others' records. Who is in a call
+  right now is kept in memory only.
 - Who sees that someone is online (everyone sharing a place, friends only, nobody) and typing are applied to
   every frame the server sends (`hub.outFilter`), not only in the browser: presence, status (words, picture and
   end time, and no frame at all when it changes), the "last wrote" lines, house voice-room lists and a stage's
@@ -276,7 +313,7 @@ built from `js/lib/privacy.js` and `GET /api/privacy` (`server/privacy.js`).
   name it was given and says Snug can't check who wrote it.
 - Snug sends no telemetry, analytics or crash reports, and the web client loads nothing from other origins
   (CSP `default-src 'self'`; tested in `tests/e2e-privacy.test.js`). Outside parties it does reach: the STUN
-  server (Google by default, `SNUG_STUN=none` turns it off), a TURN relay if configured, the browser's push
+  server (Google by default when no TURN relay is set, none when one is; `SNUG_STUN=none` turns it off), a TURN relay if configured, the browser's push
   service, the registry and Cloudflare (P2P), GitHub (desktop updates), and Tenor (only server-side, only if
   the server owner enables GIF search).
 - Desktop first-run page (0.13): its **Privacy** link starts a short-lived copy of the app's server on

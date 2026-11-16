@@ -4,7 +4,24 @@ Snug's releases, newest first. Every version's files stay on the releases page
 (<https://github.com/DominicsUSE/Claude-apps/releases?q=snug-v>); the desktop app updates itself and never
 goes back to an older version on its own (README, "Install, update, go back").
 
-## 0.13.0
+## 0.14.0
+
+### Calls: private by default
+
+- **End-to-end encrypted calls.** When everyone in a call has turned on end-to-end encryption and their browser
+  can encrypt frames, voice, camera, screen and screen sound are sealed on each device with keys only the
+  devices of the people in the call get (sealed to their devices, new on every join and leave, wiped when the
+  call ends). The call says *End-to-end encrypted*, or *Encrypted in transit only* and why. DM calls, group
+  calls and house voice rooms; P2P calls with friends on other PCs stay *in transit only*.
+- **Connections signed by the device.** Each side signs its certificate fingerprint; a connection whose
+  fingerprint doesn't match is stopped with a warning. Both signed: a 12-digit code and *Verified device*.
+- **Hide my IP address is on by default** whenever the server has a relay (the old default moves to it); only
+  relay candidates leave the device. With no relay, Snug says before you join who will see your IP address.
+- **TURN credentials last an hour** and no longer name your account; fetched again before they run out. With
+  TURN set, no outside STUN server by default. A static TURN login gets a startup warning.
+- **Smaller call records:** who started it, how it went, when, how long, and who missed it, no longer who took
+  part. The disappearing-messages sweep and account erasure cut it down further. Older records still read.
+
 
 ### Changed
 

@@ -36,7 +36,7 @@ const factsNow = (about) => ({
   // End-to-end encrypted direct messages and groups: offered by this server (js/e2ee/manager.js).
   e2ee: E2.on === true,
   presenceTo: S.prefs?.presenceTo || 'everyone', friendPreviews: S.prefs?.friendPreviews === true,
-  stun: about?.stun ?? 'google', turn: about?.turn ?? modeNow() === 'p2p', linkPreviews: about?.linkPreviews ?? true,
+  stun: about?.stun ?? 'google', turn: about?.turn ?? modeNow() === 'p2p', turnStatic: about?.turnStatic === true, linkPreviews: about?.linkPreviews ?? true,
 });
 
 function Sections({ sections, level = 3 }) {

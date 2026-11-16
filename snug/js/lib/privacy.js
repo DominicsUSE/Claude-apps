@@ -23,7 +23,7 @@ export const snugAt = (host) => (host ? `this Snug at ${host}` : 'this Snug');
 // Sections of { id, title, items } for the mode the app is in.
 export function whoSeesWhat({
   mode = 'host', host = '', https = true, e2ee = false, presenceTo = 'everyone', stun = 'google', turn = false,
-  linkPreviews = true, friendPreviews = false,
+  linkPreviews = true, friendPreviews = false, turnStatic = false,
 } = {}) {
   const here = snugAt(host);
   const sections = [];
@@ -74,7 +74,11 @@ export function whoSeesWhat({
           ? `Your internet provider and anyone on your network can see that you use ${here}, when, and how much. The connection is encrypted, so not what you say.`
           : `This Snug uses a plain connection (http), so anyone on your network could read what you send to ${here}. Use it only on a network you trust.`,
         `The company hosting ${here}, if there is one, can see what the server stores, like the person who runs it.`,
-        'Voice and video go straight between devices when they can, encrypted, so people in a call can see each other’s internet address. A relay server, if this Snug has one, passes calls on without hearing them.',
+        // calls C1, C3, C4 (0.14)
+        turn
+          ? 'Calls go through this Snug’s relay server by default, so people in a call don’t see your internet address (you can turn that off). The relay sees your address, when and how much, not what is said. Calls labelled “End-to-end encrypted” can’t be heard or seen by the server or the relay; others are encrypted in transit only.'
+          : 'Voice and video go straight between devices, encrypted, so people in a call can see each other’s internet address; Snug says so before you join. Calls labelled “End-to-end encrypted” can’t be heard or seen by the server; others are encrypted in transit only.',
+        ...(turnStatic ? ['This Snug’s relay uses one login for everyone that never expires, so the relay can’t tell people apart, but anyone with a copy of the login can use the relay.'] : []),
         stun === 'google'
           ? 'To set up calls, your browser asks a Google server (STUN) for your public address. Google sees that address, not the call.'
           : stun === 'none' ? 'Calls don’t ask any outside server for your address.' : 'To set up calls, your browser asks this Snug’s chosen STUN server for your public address.',

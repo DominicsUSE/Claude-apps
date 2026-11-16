@@ -43,6 +43,8 @@ export function iceFacts(ice) {
   return {
     stun: !stun.length ? 'none' : stun.every((u) => /\.l\.google\.com/.test(u)) ? 'google' : 'custom',
     turn: urls.some((u) => /^turns?:/.test(u)),
+    // calls C4: a TURN login that is the same for everyone and never expires (no SNUG_TURN_SECRET).
+    turnStatic: list.some((s) => [].concat(s.urls || []).some((u) => /^turns?:/.test(u)) && !/^\d{9,12}:/.test(String(s.username || ''))),
   };
 }
 
