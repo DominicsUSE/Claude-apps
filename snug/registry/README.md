@@ -338,7 +338,7 @@ Abuse limits (`src/limits.js`; raise `POW_BITS` or lower `regGlobal` without a c
 | New accounts (72 h) | knocks 10/day (2 per person), lookups 60/day, TURN 3/day |
 | Names | 2 or 3 characters only after 30 days; the first rename after 7 days |
 | Never connected | deleted after 7 days (the name is freed); banned accounts and accounts with a move waiting are kept, and a completed move gives the new PC its own 7 days |
-| Idle | optional `KEY_ACCOUNT_IDLE_DAYS` frees names of accounts with no connection for that long |
+| Idle | optional `KEY_ACCOUNT_IDLE_DAYS` (off unless set) frees names of accounts with no connection for that long; banned accounts, ones with a move waiting, ones still connected and (0.13) ones with a GitHub account linked are kept |
 
 None of this makes one person equal one account: someone with many addresses and spare CPU can still make
 accounts slowly. The registry can still read nothing of what friends send each other, and, as for GitHub

@@ -167,11 +167,13 @@ has it can start moving your account (your old PC is told and can stop it).
   account made without GitHub can link one in Settings as a second way to move.
   A link (and an unlink) takes effect 7 days later; until then your recovery
   key can cancel it (and the linked GitHub can cancel an unlink), so someone
-  with only your PC can't add their own GitHub. Typing your recovery key makes
+  with only your PC can't add their own GitHub. A link still waiting can also
+  be cancelled from the same PC, or by signing in with that GitHub account
+  (0.13). Typing your recovery key makes
   a link or unlink happen at once. A linked GitHub must be unlinked before
   another can be linked. A new recovery key made without the old one waits 7
   days the same way, and so does a GitHub account's first recovery key (a
-  GitHub sign-in cancels it). If you lost your PC, the new one shows these
+  GitHub sign-in cancels it, and since 0.13 so does the same PC). If you lost your PC, the new one shows these
   waiting changes while your account moves there, and can cancel each one.
 
 New accounts cost a few seconds of computer work (a "proof of work") and are
@@ -893,13 +895,23 @@ Real, and covered by tests with separate users:
     two-factor sign-in turns off. A key works once; you make a new one straight
     after. Wrong keys count per account and address (5 free, then waits from 15
     minutes; tries from other addresses never lock you out) and per address. Anyone with your key and username can get in, as with a password, and
-    the screens say so. The same key will open the end-to-end encryption backup
-    (a different derived key, `e2ee-backup-v1`, which the server can't compute).
+    the screens say so. The same key opens the end-to-end encryption backup
+    (a different derived key, `e2ee-backup-v1`, which the server can't compute):
+    since 0.13, a key you save here also becomes your encryption recovery key on a
+    device where encryption is on (the backup is sealed again under it, also right
+    after "Forgot your password?"), and a new encryption recovery key (after
+    removing a device, for example) is offered on Home and in Settings as your
+    password recovery key too. A key saved by 0.12.0 still works; Home and Settings
+    ask you to make a new one, which is tied to this server's address.
   - **Passkeys** (v0.12, password accounts on a server): **Sign in with a passkey**
     on the sign-in screen, and the username field offers your passkeys too. Add,
     rename and remove them in Settings > Account and security (adding or removing
     needs the password, and a code when two-factor is on; up to 10). A passkey
     sign-in needs no code: the device already checked your PIN, fingerprint or face.
+    Since 0.13 a passkey also stands in for the password (and code) when you change
+    the password, remove a passkey or replace a recovery key ("Use a passkey
+    instead"), and after you change your name or username the page tells your
+    passkey provider, where the browser supports it.
     Your password keeps working. Checked with `node:crypto` only (`server/webauthn.js`:
     challenge, origin, RP ID, user verification, signature, and a counter that goes
     backwards is refused as a copied authenticator). Passkeys need HTTPS with a

@@ -4,6 +4,21 @@ Snug's releases, newest first. Every version's files stay on the releases page
 (<https://github.com/DominicsUSE/Claude-apps/releases?q=snug-v>); the desktop app updates itself and never
 goes back to an older version on its own (README, "Install, update, go back").
 
+## 0.13.0
+
+### Accounts
+
+- One recovery key for both: a password recovery key you save also becomes your end-to-end encryption
+  recovery key on a device with encryption on, and a new encryption recovery key is offered as your
+  password recovery key too. A key saved by 0.12.0 keeps working; Home and Settings ask you to replace it.
+- A passkey can stand in for your password (and code) when you change the password, remove a passkey or
+  replace a recovery key. Changing your name or username tells your passkey provider, where supported.
+- Desktop: a GitHub link still waiting, or a GitHub account's first recovery key, can be cancelled from the
+  same PC or with GitHub (registry: `/v1/recovery/drop`, and `/v1/recovery/cancel` takes the waiting link's
+  GitHub account). Nothing changes for 0.11 and 0.12 apps.
+- Registry: the optional `KEY_ACCOUNT_IDLE_DAYS` purge (still off by default) keeps accounts with a GitHub
+  account linked, and now runs on its own.
+
 ## 0.12.0
 
 ### Private conversations
