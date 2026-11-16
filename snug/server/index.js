@@ -246,7 +246,7 @@ export async function startServer({
   // GIF routes (/api/gifs...): picker lists, the optional search provider, and copies.
   // On a PC linked to a registry, GIF search goes through the registry, so a provider never sees this PC's address.
   const gifReg = peer.enabled ? { base: String(registryUrl).replace(/\/+$/, ''), token: () => peer.reg.gifToken() } : null;
-  const mediaHttp = createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, headers, fetch: fetchFn, gifReg });
+  const mediaHttp = createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, headers, fetch: fetchFn, gifReg, room: (...a) => uploads.room(...a) }); // review-media 1: copies count against the quotas
   // Custom emoji: uploads at POST /api/files?emoji=<house>, and who may fetch an emoji image.
   const emojiHttp = createEmojiHttp({ db, M, filesDir, sendJson, error, body, uploadLimit });
   const emojiR = emojiReads(db, M);
@@ -255,7 +255,7 @@ export async function startServer({
   const messagingHttp = createMessagingHttp({ db, M, filesDir, sendJson, error, body, headers, uploadLimit });
   // Soundboard (server/voiceopts.js): uploads at POST /api/files?sound=<house>, files at GET /api/sounds/<file>.
   const voiceOptsHttp = createVoiceOptsHttp({ db, M, filesDir, sendJson, error, body, headers, uploadLimit });
-  hub.messaging?.configure({ filesDir, previews: linkPreviews, allowLoopback: linkAllowLocal });
+  hub.messaging?.configure({ filesDir, previews: linkPreviews, allowLoopback: linkAllowLocal, room: (...a) => uploads.room(...a) });
   hub.e2ee?.conv?.configure({ filesDir }); // e2ee.file.copy (server/e2ee-conv.js)
   const placesHttp = createPlacesHttp({ db, M, hub, sendJson, error, jsonBody, ipOf }); // webhooks (server/places.js)
   const accountHttp = createAccountHttp({ db, M, hub, filesDir, sendJson, error, jsonBody, body, headers, ipOf, secure, authLimit, uploadLimit, log, dataDir, keyStore, dataKey, desktop: !!resumeSecret, logDays }); // server/account.js; sec-auth: the data key, sign-up, sign-in, sign-out, new password

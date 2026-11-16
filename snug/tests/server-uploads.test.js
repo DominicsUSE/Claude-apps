@@ -262,3 +262,47 @@ test('cancel removes the part file; uploads left alone for a day are swept, row 
   assert.equal((await p.json('GET', `/api/uploads/${b.id}`)).status, 404);
   p.close();
 });
+
+// review-media 1: server-side copies (forwarding, GIF reuse) count against the same quota and disk floor.
+test('copies made on the server (forward, GIF reuse) are held to the quota like uploads', async () => {
+  const p = await person(B);
+  const gif = Buffer.concat([Buffer.from('GIF89a'), Buffer.alloc(560 * 1024, 1)]);
+  const up = await fetch(`${p.base}/api/files?conv=${p.room}`, { method: 'POST', headers: { cookie: p.cookie, origin: p.base, 'content-type': 'image/gif', 'x-file-name': 'big.gif' }, body: gif });
+  assert.equal(up.status, 201, await up.clone().text());
+  const f = await up.json();
+  const sent = await p.op('msg.send', { conv: p.room, id: 'm_quotafwd0000001', text: '', files: [{ id: f.id }] });
+  assert.equal(sent.ok, true, sent.error);
+  // 560 KB stored of 1000 KB: a second copy would pass the quota.
+  const use = await p.json('POST', '/api/gifs/use', { conv: p.room, file: f.id });
+  assert.equal(use.status, 413, 'GIF reuse checks the quota');
+  assert.match((await use.json()).error, /room for your files/);
+  const fwd = await p.op('msg.forward', { conv: p.room, id: 'm_quotafwd0000001', to: p.room, newId: 'm_quotafwd0000002' });
+  assert.equal(fwd.ok, false, 'forwarding a file checks the quota');
+  assert.match(fwd.error, /room for your files/);
+  p.close();
+});
+
+test('the free-disk floor counts bytes still owed to unfinished uploads', async () => {
+  const p = await person(A);
+  disk.free = 1024 * MB + 30 * MB;
+  const a = await p.json('POST', '/api/uploads', { conv: p.room, name: 'a.bin', size: 20 * MB, type: 'application/octet-stream' });
+  assert.equal(a.status, 201);
+  const b = await p.json('POST', '/api/uploads', { conv: p.room, name: 'b.bin', size: 20 * MB, type: 'application/octet-stream' });
+  assert.equal(b.status, 507, 'the first upload’s 20 MB is already promised');
+  await p.json('POST', `/api/uploads/${(await a.json()).id}/cancel`);
+  p.close();
+});
+
+test('a one-request upload still streaming counts against the quota', async () => {
+  const p = await person(B);
+  const size = 550 * 1024;
+  const req = request(`${p.base}/api/files?conv=${p.room}`, { method: 'POST', headers: { cookie: p.cookie, origin: p.base, 'content-type': 'application/octet-stream', 'x-file-name': 'slow.bin', 'content-length': String(size) } });
+  const done = new Promise((r) => { req.on('response', (res) => { res.resume(); res.on('end', () => r(res.statusCode)); }); req.on('error', () => r(0)); });
+  req.write(Buffer.alloc(64 * 1024));
+  await new Promise((r) => setTimeout(r, 150));
+  const over = await p.json('POST', '/api/uploads', { conv: p.room, name: 'more.bin', size: 500 * 1024, type: 'application/octet-stream' });
+  assert.equal(over.status, 413, 'the 550 KB still arriving is counted');
+  req.end(Buffer.alloc(size - 64 * 1024));
+  assert.equal(await done, 201);
+  p.close();
+});

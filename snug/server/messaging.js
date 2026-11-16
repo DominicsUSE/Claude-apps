@@ -147,7 +147,7 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
   const readableConv = (user, conv) => (M.canRead(user, conv) ? M.where(conv) : fail('You don’t have access to this conversation.'));
   const canModerate = (user, conv, row) => row.author === user || (!!M.where(conv)?.house && M.can(user, M.where(conv).house, 'moderate'));
   const live = (conv, id) => { const r = M.liveMsg(idOf(id, 'message')); if (!r || r.conv !== conv) fail('That message was deleted.'); return r; };
-  const cfg = { filesDir: null, previews: true, allowLoopback: false, tickMs: 1000 };
+  const cfg = { filesDir: null, previews: true, allowLoopback: false, tickMs: 1000, room: () => null };
   // Rate limits for everything here that writes or reaches other people,
   // registered with the hub so tests can reset them with the others.
   const L = {
@@ -250,8 +250,12 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
   const newMsgId = (v) => (typeof v === 'string' && MSG_ID.test(v) ? v : fail('That message id isn’t valid.'));
 
   // A copy of a file into another conversation (forwarding, stickers, previews).
+  // review-media 1: held to the same quotas and disk floor as an upload (server/uploads.js room); refused with
+  // the same message.
   function copyFileTo(src, conv, owner, meta) {
     if (!cfg.filesDir || !existsSync(join(cfg.filesDir, src.id))) return null;
+    const full = cfg.room(owner, conv, src.size);
+    if (full) fail(full.message);
     const id = newId('f');
     copyFileSync(join(cfg.filesDir, src.id), join(cfg.filesDir, id));
     db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -337,7 +341,8 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
         if (data.kind === 'link') Object.assign(e, { title: data.title || undefined, description: data.description || undefined, site: data.site || undefined, color: data.color });
         if (data.media) {
           const src = join(cfg.filesDir, `lc_${data.media.hash}`);
-          if (existsSync(src)) {
+          // review-media 1: a preview's copy is skipped when the author or the house is out of room.
+          if (existsSync(src) && !cfg.room(row.author, conv, data.media.size)) {
             const fid = newId('f');
             copyFileSync(src, join(cfg.filesDir, fid));
             const ext = data.media.type.split('/')[1];
@@ -470,8 +475,8 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
 
   const api = {
     // Called by server/index.js once the files folder and options are known.
-    configure({ filesDir, previews = true, allowLoopback = false, tickMs = 1000 } = {}) {
-      Object.assign(cfg, { filesDir, previews, allowLoopback, tickMs });
+    configure({ filesDir, previews = true, allowLoopback = false, tickMs = 1000, room = () => null } = {}) {
+      Object.assign(cfg, { filesDir, previews, allowLoopback, tickMs, room });
       const timer = setInterval(() => { try { tick(); } catch (e) { console.error('messaging tick', e); } }, tickMs);
       timer.unref?.();
       const baseClose = hub.close;
@@ -607,11 +612,13 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
       const srcFiles = json(src.files, []);
       const gate = M.postGate(c.user, to);
       if (!gate.ok) fail(gate.why);
-      for (const f of srcFiles.slice(0, 6)) {
-        const row = f.id && db.get('SELECT * FROM files WHERE id = ?', f.id);
-        const nid = row && copyFileTo(row, to, c.user);
-        if (nid) files.push({ ...f, id: nid });
-      }
+      try {
+        for (const f of srcFiles.slice(0, 6)) {
+          const row = f.id && db.get('SELECT * FROM files WHERE id = ?', f.id);
+          const nid = row && copyFileTo(row, to, c.user);
+          if (nid) files.push({ ...f, id: nid });
+        }
+      } catch (e) { dropFiles(files); throw e; } // out of room part-way: no copies left behind
       const fwd = {
         conv, id: src.id, author: orig ? orig.author : src.author, ts: orig ? orig.ts : src.ts,
         text: orig ? orig.text : src.text,

@@ -79,15 +79,25 @@ export function createUploads({ db, M, filesDir, sendJson, error, jsonBody, uplo
   // A not-yet-started thread ("t:<message>") belongs to its root's conversation.
   const realConv = (conv) => (conv.startsWith('t:') && !M.thread(conv) ? (M.liveMsg(conv.slice(2))?.conv || '') : conv);
 
+  // One-request uploads still streaming (they have no row): { user, house, size } by temp id. review-media 1.
+  const inflight = new Map();
+  const inflightSum = (pick) => { let n = 0; for (const f of inflight.values()) if (pick(f)) n += f.size; return n; };
+
   // Bytes a person has stored (files they own) plus uploads they have under way.
   const usedBy = (user, except = '') => db.get('SELECT COALESCE(SUM(size), 0) n FROM files WHERE owner = ?', user).n
-    + db.get('SELECT COALESCE(SUM(size), 0) n FROM uploads WHERE owner = ? AND id != ?', user, except).n;
+    + db.get('SELECT COALESCE(SUM(size), 0) n FROM uploads WHERE owner = ? AND id != ?', user, except).n
+    + inflightSum((f) => f.user === user);
   // Bytes stored in a house's rooms and threads, plus uploads under way into it.
   const usedInHouse = (house, except = '') => db.get(`SELECT COALESCE(SUM(size), 0) n FROM files WHERE conv IN (SELECT id FROM rooms WHERE house = ?)
       OR conv IN (SELECT t.id FROM threads t JOIN rooms r ON r.id = t.conv WHERE r.house = ?)`, house, house).n
-    + db.get('SELECT COALESCE(SUM(size), 0) n FROM uploads WHERE house = ? AND id != ?', house, except).n;
-  function freeDisk() {
-    try { const s = statfs(filesDir); return Number(s.bavail) * Number(s.bsize); } catch { return Infinity; }
+    + db.get('SELECT COALESCE(SUM(size), 0) n FROM uploads WHERE house = ? AND id != ?', house, except).n
+    + inflightSum((f) => f.house === house);
+  // Free space, less what unfinished uploads have been promised but not yet written.
+  function freeDisk(except = '') {
+    let free;
+    try { const s = statfs(filesDir); free = Number(s.bavail) * Number(s.bsize); } catch { return Infinity; }
+    const owed = db.get('SELECT COALESCE(SUM(MAX(size - received, 0)), 0) n FROM uploads WHERE id != ?', except).n + inflightSum(() => true);
+    return free - owed;
   }
 
   // Everything checked before a byte is stored. Throws an error with a status and a message for people.
@@ -96,6 +106,11 @@ export function createUploads({ db, M, filesDir, sendJson, error, jsonBody, uplo
     if (!gate.ok) throw httpError(403, gate.why);
     encMatches(conv, enc);
     if (size > L.maxFile + (enc ? GCM_TAG : 0)) throw httpError(413, `Files can be up to ${sizeText(L.maxFile)} on this server.`);
+    return roomFor(user, conv, size, except);
+  }
+  // The quotas and the disk floor: for uploads and for every copy the server makes (forwards, stickers, GIFs,
+  // link previews; review-media 1). Throws an error with a status and a message for people.
+  function roomFor(user, conv, size, except = '') {
     if (L.quota && usedBy(user, except) + size > L.quota) {
       throw httpError(413, `There’s no more room for your files on this server (${sizeText(L.quota)} each). Delete messages with big files, or ask whoever runs the server for more room.`);
     }
@@ -103,7 +118,7 @@ export function createUploads({ db, M, filesDir, sendJson, error, jsonBody, uplo
     if (house && L.houseQuota && usedInHouse(house, except) + size > L.houseQuota) {
       throw httpError(413, `This house is out of room for files (${sizeText(L.houseQuota)} on this server). Ask whoever runs the server for more room.`);
     }
-    if (freeDisk() - size < L.diskFloor) throw httpError(507, 'The server is nearly out of disk space, so it can’t take this file right now. Try a smaller one, or tell whoever runs the server.');
+    if (freeDisk(except) - size < L.diskFloor) throw httpError(507, 'The server is nearly out of disk space, so it can’t take this file right now. Try a smaller one, or tell whoever runs the server.');
     return { house };
   }
 
@@ -138,17 +153,23 @@ export function createUploads({ db, M, filesDir, sendJson, error, jsonBody, uplo
     const size = Number(req.headers['content-length']);
     if (!Number.isSafeInteger(size) || size <= 0) return error(res, 411, 'Snug needs the file’s size. Try attaching it again.');
     const enc = url.searchParams.get('enc') === '1';
-    try { admit(user, conv, size, '', enc); } catch (e) { if (e.expose) return fail(res, e); throw e; }
+    let house;
+    try { ({ house } = admit(user, conv, size, '', enc)); } catch (e) { if (e.expose) return fail(res, e); throw e; }
     const name = enc ? 'file' : cleanFileName(safeDecode(String(req.headers['x-file-name'] || 'file'))); // sec-authz: no bidi or zero-width characters (js/lib/util.js)
-    const tmp = join(partDir, newId('s'));
-    let got;
-    try { got = await streamTo(req, tmp, { max: size, flags: 'w' }); } catch (e) {
-      rm(tmp);
-      if (e.status === 413) return error(res, 413, 'That file is bigger than it said it was.');
-      throw e;
-    }
-    if (got !== size) { rm(tmp); return error(res, 400, 'The file didn’t arrive whole. Try again.'); }
-    return sendJson(res, 201, storeFile({ user, conv, name, header: req.headers['content-type'], path: tmp, size, enc }));
+    const sid = newId('s');
+    const tmp = join(partDir, sid);
+    // Counted while it streams, so a second upload at the same time can't slip past the quota or the floor.
+    inflight.set(sid, { user, house, size });
+    try {
+      let got;
+      try { got = await streamTo(req, tmp, { max: size, flags: 'w' }); } catch (e) {
+        rm(tmp);
+        if (e.status === 413) return error(res, 413, 'That file is bigger than it said it was.');
+        throw e;
+      }
+      if (got !== size) { rm(tmp); return error(res, 400, 'The file didn’t arrive whole. Try again.'); }
+      return sendJson(res, 201, storeFile({ user, conv, name, header: req.headers['content-type'], path: tmp, size, enc }));
+    } finally { inflight.delete(sid); }
   }
 
   const UP = /^\/api\/uploads\/(u_[a-z0-9]{8,40})(\/done|\/cancel)?$/;
@@ -250,5 +271,10 @@ export function createUploads({ db, M, filesDir, sendJson, error, jsonBody, uplo
     return removed;
   }
 
-  return { http, single, sweep, limits: L };
+  // For server-side copies: null when there's room, or the refusal ({ status, message }).
+  function room(user, conv, size) {
+    try { roomFor(user, conv, Number(size) || 0); return null; } catch (e) { if (e.expose) return { status: e.status, message: e.message }; throw e; }
+  }
+
+  return { http, single, sweep, room, limits: L };
 }

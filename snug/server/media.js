@@ -343,7 +343,7 @@ export function createMediaOps({ db, M, hub, fail, ops = {} }) {
 
 // GIF search (server/gifs.js has the providers). Results, previews and picks
 // all go through here; only addresses a search of ours returned are fetched.
-export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, headers, env = process.env, fetch: fetchFn = globalThis.fetch, gifReg = null }) {
+export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, headers, env = process.env, fetch: fetchFn = globalThis.fetch, gifReg = null, room = () => null }) {
   const providers = gifProviders(env, { fetch: fetchFn, reg: gifReg });
   const byId = new Map(providers.map((p) => [p.id, p]));
   const searchLimit = limiter({ capacity: 20, perSecond: 1 });
@@ -431,6 +431,8 @@ export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, he
       if (!saveLimit.take(user)) { error(res, 429, 'Too many GIFs at once. Wait a moment.'); return true; }
       const got = await byId.get(k.p).fetch(String(d.url));
       if (got.err) { error(res, 422, got.err); return true; }
+      const full = room(user, conv, got.data.length); // review-media 1: the quota and the disk floor, as for uploads
+      if (full) { error(res, full.status, full.message); return true; }
       const id = newId('f');
       const name = `${stripInvisible(String(d.title || 'GIF')).replace(/[\u0000-\u001f\u007f/\\]/g, '').trim().slice(0, 80) || 'GIF'}.${got.type === 'video/mp4' ? 'mp4' : got.type.split('/')[1]}`;
       // Openly licensed GIFs keep their credit (author, licence, where from) wherever they go.
@@ -453,6 +455,8 @@ export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, he
       if (!src || !readableFile(M, user, src)) { error(res, 404, 'That GIF is no longer here.'); return true; }
       if (!isGif(src)) { error(res, 400, 'That isn’t a GIF.'); return true; }
       if (!saveLimit.take(user)) { error(res, 429, 'Too many GIFs at once. Wait a moment.'); return true; }
+      const full = room(user, conv, src.size); // review-media 1: a copy counts like an upload
+      if (full) { error(res, full.status, full.message); return true; }
       const id = newId('f');
       const meta = { ...json(src.meta, {}), gif: true };
       if (Number.isInteger(d.w) && Number.isInteger(d.h) && d.w > 0 && d.h > 0) { meta.w = Math.min(8000, d.w); meta.h = Math.min(8000, d.h); }

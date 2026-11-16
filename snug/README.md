@@ -945,7 +945,10 @@ Real, and covered by tests with separate users:
     over 8 MB goes up in 4 MB parts with a progress bar and Cancel; a dropped
     connection costs one part and the upload carries on by itself. Per-person
     and per-house quotas and a free-disk floor refuse with a message that says
-    which. Between PCs, files over 10 MB go only to friends on Snug 0.12 or
+    which. Uploads still arriving count, and so do the copies the server makes
+    when you forward a file, send a sticker or reuse or pick a GIF (a link
+    preview's picture is left out when there's no room). End-to-end encrypted
+    file copies (`e2ee.file.copy`) are not yet held to the quota. Between PCs, files over 10 MB go only to friends on Snug 0.12 or
     later (a friend on 0.11 gets a clear "takes files up to 10 MB" instead),
     wait for a direct connection rather than the relay, show progress as they
     arrive, and a cut transfer resumes.
@@ -1251,7 +1254,9 @@ before seeding anything that faces the internet, or better, do not seed there.
 - **Rendering**: message text becomes a token tree and then elements, never
   HTML. A strict Content-Security-Policy allows scripts only from Snug itself.
 - **Uploads**: `SNUG_MAX_FILE_MB` limit (100 MB by default), streamed to disk,
-  with quotas and a free-disk floor; fetched only by people who can read the
+  with quotas and a free-disk floor that also cover uploads still arriving
+  and the server's own copies (forwards, stickers, GIFs, link previews; not yet
+  end-to-end encrypted file copies); fetched only by people who can read the
   conversation, served with `nosniff` and a sandboxing policy. Anything that
   is not a known image type downloads instead of opening; SVG and PDF previews
   are drawn in the page from the bytes (SVG as an image, which runs no script).
