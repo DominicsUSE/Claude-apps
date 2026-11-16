@@ -465,3 +465,47 @@ test('a server that swaps the certificate fingerprint on the way: the call refus
 
 test('a swapped fingerprint whose signature line names a device Robin doesn\'t have is refused the same way, not taken as unsigned', () =>
   swappedCertificateCall((s) => s.replace(/^a=x-snug-fp:v1 dv_[A-Za-z0-9]+ /m, 'a=x-snug-fp:v1 dv_FAKEFAKEFAKE ')));
+
+test('an offer signed by a device Ines can\'t look up yet (Robin just turned encryption on) is checked again when his key arrives: the call connects, signed and verified, with no alarm', async () => {
+  const robin = await person('robin');
+  const ines = await person('ines');
+  await turnOnEncryption(robin, 'robin');
+  await turnOnEncryption(ines, 'ines');
+  const robinId = srv.db.get("SELECT id FROM users WHERE handle = 'robin'").id;
+  const inesId = srv.db.get("SELECT id FROM users WHERE handle = 'ines'").id;
+  // Until Robin's first offer has reached Ines and a moment has passed, his device list doesn't reach
+  // her yet, and his call keys wait.
+  const realOp = srv.hub.ops['e2ee.bundles'], realRelay = srv.hub.rtcRelay;
+  let blocked = true;
+  const held = [];
+  srv.hub.ops['e2ee.bundles'] = (c, d) => {
+    const r = realOp(c, d);
+    if (blocked && c.user === inesId && r?.users?.[robinId]) r.users[robinId] = { ...r.users[robinId], list: null, prekeys: {} };
+    return r;
+  };
+  srv.hub.rtcRelay = (from, to, data) => {
+    if (blocked && from === robinId && data?.ck) { held.push([from, to, data]); return true; }
+    if (blocked && from === robinId && data?.sdp && !held.timer) {
+      held.timer = setTimeout(() => { blocked = false; for (const h of held.splice(0)) realRelay(...h); }, 2500);
+    }
+    return realRelay(from, to, data);
+  };
+  try {
+    await openDm(robin, 'Ines Carvalho');
+    await robin.click('.main .bar .call-btn[aria-label="Start a voice call"]');
+    await ines.locator('.incoming .inc-accept').click();
+    // (waitForFunction doesn't wait for a promise: polled here.)
+    const until = Date.now() + 30000;
+    let st = null;
+    while (Date.now() < until && !(st?.state === 'connected' && st.fpSigned && st.frames?.dec > 50)) {
+      await ines.waitForTimeout(300);
+      st = (await ines.evaluate(() => window.snug.voiceStats())).robin;
+    }
+    assert.ok(held.timer, 'the offer came before his list');
+    // Signed and checked (the longer code), and what Robin sends opens with his key.
+    assert.deepEqual({ state: st?.state, fpSigned: st?.fpSigned, verified: st?.verified, strict: st?.frames?.strict }, { state: 'connected', fpSigned: true, verified: true, strict: true });
+    assert.deepEqual(await ines.evaluate(() => window.snug.voiceTest.crypt().refused), []);
+    assert.equal(await ines.locator('.act-alarm').count(), 0);
+    await robin.click('.stage.call [aria-label="Leave call"]');
+  } finally { srv.hub.ops['e2ee.bundles'] = realOp; srv.hub.rtcRelay = realRelay; clearTimeout(held.timer); }
+});

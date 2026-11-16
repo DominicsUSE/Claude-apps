@@ -113,8 +113,8 @@ function signal(to, data) { call('rtc', { to, data }).catch(() => {}); }
 // browser without encoded transforms) gets the media as before, and the call
 // says so. Everything is forgotten when the call ends.
 const crypt = { worker: null, mode: null, why: null, key: null, req: 0, waits: new Map(), refused: new Set() };
-const ckOf = new Map(); // user -> { acked, keyed, ckSeen, ckDev, unsigned, heard, why }
-const ckState = (u) => { let x = ckOf.get(u); if (!x) ckOf.set(u, (x = { acked: null, keyed: false, ckSeen: false, ckDev: null, unsigned: false, heard: false, why: null })); return x; };
+const ckOf = new Map(); // user -> { acked, keyed, ckSeen, ckDev, unsigned, stripped, recheck, heard, why }
+const ckState = (u) => { let x = ckOf.get(u); if (!x) ckOf.set(u, (x = { acked: null, keyed: false, ckSeen: false, ckDev: null, unsigned: false, stripped: false, recheck: null, heard: false, why: null })); return x; };
 // Connected this long without a word about call keys from them (no key, no "can't"): an older Snug (0.13 and before).
 const CK_WAIT_MS = 10_000;
 const transformMode = () => (typeof RTCRtpScriptTransform === 'function' ? 'script'
@@ -181,7 +181,7 @@ function onCallKey(from, m) {
   if (m.t === 'ack') { if (crypt.worker && crypt.key) { crypt.worker.postMessage({ t: 'use', peer: from, id: m.id }); st.acked = m.id; } return; }
   if (m.t !== 'key' || !crypt.worker) return;
   const place = S.call.room;
-  openCallKey(from, m, place).then(({ id, raw }) => {
+  openCallKey(from, m, place).then(async ({ id, raw }) => {
     if (!crypt.worker || S.call?.room !== place) { raw.fill(0); return; }
     const req = ++crypt.req;
     const installed = new Promise((r) => crypt.waits.set(req, r));
@@ -189,8 +189,21 @@ function onCallKey(from, m) {
     st.ckSeen = true;
     st.ckDev = m.d;
     // A device that signs its keys signs its offers too (calls C2): an offer from them without it, or signed by another device, was changed on the way.
-    const fp = peers.get(from)?.fp;
-    if (st.unsigned || (fp && fp.d !== m.d)) { refusePeer(from); return undefined; }
+    const p = peers.get(from);
+    if (p?.fp && p.fp.d !== m.d) { refusePeer(from); return undefined; }
+    if (st.unsigned) {
+      // An offer signed by a device not in their list when it came (they may have just turned encryption
+      // on) is checked again now that their list opened this key: it must be this device's signature.
+      const list = st.stripped ? [] : st.recheck || [];
+      let ok = list.length > 0;
+      for (const r of list) ok = ok && r.p === p && r.d === m.d && (await verifyFingerprint(from, r.d, r.stmt, r.sig).catch(() => null)) === true;
+      if (!ok || peers.get(from) !== p) { refusePeer(from); return undefined; }
+      const r = list.at(-1);
+      st.unsigned = false;
+      st.recheck = null;
+      p.fp = { d: r.d, fingerprint: r.fingerprint, ufrag: r.ufrag };
+      if (p.pc.connectionState === 'connected') { p.code = null; readCode(from, p); }
+    }
     return installed.then((ok) => {
       if (!ok || !crypt.worker || !peers.has(from)) return;
       st.keyed = true;
@@ -282,9 +295,11 @@ async function sendSdp(user, desc) { signal(user, { sdp: await sdpOut(user, desc
 // 'ok' to go on, or 'refuse'.
 async function checkSdp(from, p, desc) {
   const st = ckState(from);
-  const unsigned = () => {
+  const unsigned = (recheck = null) => {
     if (st.ckSeen) return 'refuse';
     st.unsigned = true;
+    if (recheck) (st.recheck ||= []).push(recheck);
+    else st.stripped = true; // no signature at all: nothing can make up for it
     p.fp = null;
     return 'ok';
   };
@@ -298,8 +313,9 @@ async function checkSdp(from, p, desc) {
   const stmt = fpStatement({ place: S.call.room, fromUser: from, fromDevice: a.d, toUser: S.me, fingerprint, ufrag });
   const ok = await verifyFingerprint(from, a.d, stmt, a.sig).catch(() => null);
   if (ok === false) return 'refuse';
-  // A signature from a device they don't have (or no longer have) can't be checked: the same as none.
-  if (ok !== true) return unsigned();
+  // A signature from a device they don't have (or no longer have) can't be checked: the same as none,
+  // unless their key, when it opens, comes from that device and the signature then checks (onCallKey).
+  if (ok !== true) return unsigned({ p, d: a.d, stmt, sig: a.sig, fingerprint, ufrag });
   p.fp = { d: a.d, fingerprint, ufrag };
   return 'ok';
 }
