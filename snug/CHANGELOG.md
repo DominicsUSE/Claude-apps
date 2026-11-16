@@ -4,6 +4,20 @@ Snug's releases, newest first. Every version's files stay on the releases page
 (<https://github.com/DominicsUSE/Claude-apps/releases?q=snug-v>); the desktop app updates itself and never
 goes back to an older version on its own (README, "Install, update, go back").
 
+## 0.13.0
+
+### Calls
+
+- The screen stays on while you are in a call or voice (where the browser allows it), and the system's call
+  controls (lock screen, headset button, desktop media controls, where offered) mute, turn the camera on and
+  off, and hang up.
+- A security code per person in the connection details: matching codes, read out loud, show nobody is in the
+  middle of the connection.
+- Screen share: choose **Text and slides** or **Motion and games**; resolution, frame rate and data saver
+  now change a share that is already running.
+- New test: send limits drop when a voice room grows past 3 other people and come back when it shrinks
+  (five browsers).
+
 ## 0.12.0
 
 ### Private conversations
