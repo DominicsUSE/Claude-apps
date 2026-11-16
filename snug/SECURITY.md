@@ -200,8 +200,9 @@ stronger than "end-to-end encrypted" is used.
   `files` or `backups` folder, or a disk backup, taken **without** `secret.key` (or, on the desktop, without
   the OS key store that wraps it). It does **not** protect against someone who controls the running server
   or can read `secret.key`: the server decrypts files to send them. The live `snug.db` (and its WAL) is still
-  not encrypted. Files from before 0.14 are read as they are and sealed in the background
-  (`SNUG_FILES_REENCRYPT=off` stops that); uploads still arriving (`files/partial`) and friends' files still
+  not encrypted. Files from before 0.14 are read as they are and sealed in the background, a few hundred
+  every 15 minutes, including files no database row names any more (left by a crash, a failed delete or an
+  older version: sealed, not deleted) (`SNUG_FILES_REENCRYPT=off` stops that); uploads still arriving (`files/partial`) and friends' files still
   being fetched (`*.part`) are plaintext until complete. If `secret.key` can't be read at start, new files
   are stored unencrypted for that run (a throwaway key would lose them) and the log says so.
 - **This device's copy of messages (0.14).** In the desktop app, the cached messages, drafts, reply targets,

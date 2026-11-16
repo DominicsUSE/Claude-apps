@@ -12,7 +12,7 @@
 // several servers' keys (tests) and lets a file under a key this server doesn't have be told apart.
 //
 // Files without the magic are 0.13 and older files in plaintext: read as they are. reencryptDir() seals
-// them in the background (SNUG_FILES_REENCRYPT=off turns that off). Sizes in the database stay plaintext
+// them in the background, each run going on where the last stopped (SNUG_FILES_REENCRYPT=off turns that off). Sizes in the database stay plaintext
 // sizes, so quotas are unchanged.
 //
 // What this protects, honestly: a copy of the files folder, or a disk backup, taken without secret.key (or
@@ -287,11 +287,16 @@ const STORED = /^(f_|lc_)[A-Za-z0-9_-]{4,80}$/;
  * away (no row), which is left alone. Returns { sealed, checked }. Never touches files being written (*.part,
  * files/partial) or files it can't read.
  */
+const cursors = new Map(); // resolved directory -> the last name a run checked there
 export async function reencryptDir(dir, { limit = 200, keep = () => true, log = () => {} } = {}) {
   const out = { sealed: 0, checked: 0 };
   if (!sealsIn(dir)) return out;
   let names = [];
-  try { names = readdirSync(dir); } catch { return out; }
+  try { names = readdirSync(dir).sort(); } catch { return out; }
+  // Each run goes on after the last name the one before checked, then round from the start, so files passed
+  // over (or that fail to seal) never hold up the rest.
+  const at = resolve(dir), from = cursors.get(at) ?? '';
+  names = [...names.filter((n) => n > from), ...names.filter((n) => n <= from)];
   for (const name of names) {
     // A temp file a crash left mid-write: gone after an hour.
     if (name.startsWith('.') && name.endsWith('.sealing')) { try { if (statSync(join(dir, name)).mtimeMs < Date.now() - 3600_000) unlinkSync(join(dir, name)); } catch { /* gone */ } continue; }
@@ -301,6 +306,7 @@ export async function reencryptDir(dir, { limit = 200, keep = () => true, log = 
     let st;
     try { st = statSync(path); if (!st.isFile() || isSealed(path)) continue; } catch { continue; }
     out.checked++;
+    cursors.set(at, name);
     if (!keep(name)) continue;
     try {
       await sealFile(path, path);

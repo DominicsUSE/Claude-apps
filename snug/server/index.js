@@ -213,8 +213,10 @@ export async function startServer({
   // Deleted messages can be restored for ten minutes; after that their content is gone for good.
   const sweepFiles = createFileSweep({ db, filesDir, log }); // sec-authz: deleted attachments and never-sent uploads (server/media.js)
   // 0.14: plaintext files from before are sealed in the background, a few at a time (SNUG_FILES_REENCRYPT=off: not).
+  // Files no row names (left by a crash, a failed delete or an older version) are sealed too, not deleted:
+  // Snug can't be sure nothing still uses them.
   let closing = false;
-  const reencryptFiles = () => reencryptDir(filesDir, { keep: (n) => !closing && (n.startsWith('lc_') || !!db.get('SELECT 1 FROM files WHERE id = ?', n)), log });
+  const reencryptFiles = () => reencryptDir(filesDir, { keep: () => !closing, log });
   const reencryptOn = filesKeyFrom && dataDir !== ':memory:' && !['0', 'off', 'false', 'no'].includes(String(process.env.SNUG_FILES_REENCRYPT ?? 'on').trim().toLowerCase());
   const reencryptTimer = reencryptOn ? setInterval(() => { reencryptFiles().catch((e) => log('error', 'file re-encrypt', e)); }, 15 * 60_000) : null;
   reencryptTimer?.unref?.();

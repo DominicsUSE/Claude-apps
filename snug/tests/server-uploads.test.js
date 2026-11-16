@@ -374,6 +374,14 @@ test('S1: a 0.13 file in plaintext is still served (and Range works); a tampered
   assert.ok(out.sealed >= 1);
   assert.equal(readFileSync(path).subarray(0, 6).toString(), 'SNUGF1');
   assert.ok(Buffer.from(await (await getRange(p, up.id)).arrayBuffer()).equals(data));
+  // Plaintext files no database row names (a crash, a failed delete, an older version) are sealed too, however
+  // many there are: a run goes on where the last one stopped.
+  for (let i = 0; i < 250; i++) writeFileSync(join(dirB, 'files', `f_00orphan${String(i).padStart(4, '0')}`), `orphan ${i} in plaintext`);
+  await B.reencryptFiles();
+  await B.reencryptFiles();
+  const orphans = readdirSync(join(dirB, 'files')).filter((n) => n.startsWith('f_00orphan'));
+  assert.equal(orphans.length, 250, 'nothing is deleted');
+  for (const n of orphans) assert.equal(readFileSync(join(dirB, 'files', n)).subarray(0, 6).toString(), 'SNUGF1', `${n} sealed`);
   // A byte changed in segment 1: a read starting there is refused before any byte goes out.
   const bad = Buffer.from(sealed);
   bad[30 + 65536 + 16 + 100] ^= 0xff;

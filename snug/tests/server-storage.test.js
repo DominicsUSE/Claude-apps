@@ -187,3 +187,21 @@ test('S1: legacy plaintext files stay readable; copies are sealed for their new 
     assert.deepEqual(readdirSync(dir).filter((n) => n.endsWith('.sealing')), [], 'no temp files left');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('S1: re-encrypt never stalls on files it passes over: each run goes on where the last one stopped', async () => {
+  const dir = tmp();
+  try {
+    // 300 files the run is told to leave (named to come first), then 20 legacy files after them.
+    for (let i = 0; i < 300; i++) writeFileSync(join(dir, `f_0skip${String(i).padStart(4, '0')}`), 'left alone');
+    for (let i = 0; i < 20; i++) writeFileSync(join(dir, `f_zlegacy${String(i).padStart(3, '0')}`), `legacy ${i}`);
+    useFilesKey(dir, randomBytes(32));
+    const keep = (n) => !n.startsWith('f_0skip');
+    let sealed = 0;
+    for (let run = 0; run < 2; run++) sealed += (await reencryptDir(dir, { keep })).sealed;
+    assert.equal(sealed, 20, 'two runs of 200 reach the files after the ones passed over');
+    for (let i = 0; i < 20; i++) assert.ok(isSealed(join(dir, `f_zlegacy${String(i).padStart(3, '0')}`)));
+    assert.equal(readStoredSync(join(dir, 'f_zlegacy007')).toString(), 'legacy 7');
+    // Then it goes round again from the start.
+    assert.equal((await reencryptDir(dir, { keep })).checked, 200);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
