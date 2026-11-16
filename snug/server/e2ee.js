@@ -245,12 +245,16 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
   // current epoch number (a device would take the newer box for the old key), and after a device
   // leaves the list a new epoch, so the key it holds seals nothing new (review H3).
   function checkArc(a, list, { leaving = false } = {}) {
-    if (!list.arc || !a.epoch) return;
+    if (!list.arc) return;
+    // Turning history back on (review M2): always a new epoch, since a device removed while it was off
+    // holds the old key. An account set up with history off already has epoch 1 in its keys.
+    if (!a.hist && list.arc.e <= (a.epoch || 1)) fail('Turning history on needs a new history key. Update Snug on this device, then try again.');
+    if (!a.epoch) return;
     const old = json(a.list);
     const curPub = a.epoch_pub || (old?.arc?.e === a.epoch ? old.arc.pub : null);
     if (list.arc.e < a.epoch) fail('That history key is older than the current one.');
     if (list.arc.e === a.epoch && curPub && list.arc.pub !== curPub) fail('A new history key needs a new epoch. Reload Snug and try again.');
-    if (leaving && list.arc.e === a.epoch) fail('Removing a device needs a new history key. Reload Snug and try again.');
+    if (leaving && list.arc.e === a.epoch) fail('Removing a device needs a new history key. Update Snug on this device (or remove it from another device), then try again.');
   }
   // Synced settings rewritten in the same step as the account keys (a new SYNC key): compare-and-swap.
   function checkMeta(u, m) {
@@ -538,7 +542,10 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
     'e2ee.meta.put': (c, d) => {
       boundTrusted(c);
       const cur = db.get('SELECT ver FROM e2ee_meta WHERE user = ?', c.user)?.ver || 0;
-      if (d.ver !== cur + 1) fail('Your encryption settings changed on another device. Try again.', { code: 'e2ee_conflict', data: { ver: cur } });
+      // repair: a device putting back its own copy after the server's went back (review H1) writes above
+      // the highest version it has seen, which may be past cur + 1, so it never lowers its own mark.
+      const ok = d.repair === true ? Number.isSafeInteger(d.ver) && d.ver > cur && d.ver <= cur + 1_000_000 : d.ver === cur + 1;
+      if (!ok) fail('Your encryption settings changed on another device. Try again.', { code: 'e2ee_conflict', data: { ver: cur } });
       const blob = metaOk(d.blob);
       db.run('INSERT OR REPLACE INTO e2ee_meta (user, ver, blob, updated) VALUES (?, ?, ?, ?)', c.user, d.ver, blob, now());
       for (const ws of hub.socketsOf(c.user)) if (ws !== c.ws) sendTo([ws], 'e2ee.meta', { ver: d.ver });

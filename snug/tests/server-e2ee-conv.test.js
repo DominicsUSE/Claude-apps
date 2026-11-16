@@ -420,6 +420,8 @@ test('scheduled messages: the envelope waits and is sent as sealed; 14 days at m
   await a.sock.refused('sched.create', { conv: g, id, at: at + 60_000, text: '', e2ee: s.e2ee }, /doesn’t match/);
   const r = await a.sock.ok('sched.create', { conv: g, id, at, text: '', e2ee: s.e2ee });
   const row = srv.db.get('SELECT text, enc, members FROM scheduled WHERE id = ?', r.id);
+  // The snapshot's view carries no `k` at all: an empty one made 0.12.0 clients skip e2ee.wraps.
+  assert.equal('k' in srv.M.schedView(srv.db.get('SELECT * FROM scheduled WHERE id = ?', r.id)).m, false);
   assert.equal(row.text, '');
   assert.ok(row.enc && !row.enc.includes('later, sealed'));
   // Time comes: sent as the stored envelope, under the message id it was sealed with.

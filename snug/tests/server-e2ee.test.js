@@ -352,11 +352,33 @@ test('history key: a list may keep the current epoch only with the same key; a n
   // The same key at the same epoch (a label change, history switched on again): fine; a higher epoch: fine.
   assert.equal((await p.sock.ok('e2ee.publish', { devlist: await nextList(p.acct, () => ({})) })).ver, 2);
   assert.equal((await p.sock.ok('e2ee.publish', { devlist: await nextList(p.acct, async (cur) => ({ arc: await nextArc(cur) })) })).ver, 3);
-  // Off, then on again with the key it had: fine; with another key at that epoch: refused.
+  // Off, then on again (review M2, second pass): never with the key it had (a device removed while
+  // history was off holds it), nor another key at that epoch; only with a new epoch.
   const keep = p.acct.list.arc;
   await p.sock.ok('e2ee.publish', { devlist: await nextList(p.acct, () => ({ arc: null })) });
   await p.sock.refused('e2ee.publish', { devlist: await obj.makeList(p.acct.keys.aik, { ...p.acct.list, ver: p.acct.list.ver + 1, arc: { e: keep.e, pub: await freshPub(), at: Date.now() } }) }, /history key/);
-  await p.sock.ok('e2ee.publish', { devlist: await nextList(p.acct, () => ({ arc: keep })) });
+  await p.sock.refused('e2ee.publish', { devlist: await obj.makeList(p.acct.keys.aik, { ...p.acct.list, ver: p.acct.list.ver + 1, arc: keep }) }, /Turning history on needs a new history key/);
+  await p.sock.ok('e2ee.publish', { devlist: await nextList(p.acct, async () => ({ arc: await nextArc({ arc: keep }) })) });
+  await p.sock.close();
+});
+
+test('history off from the start, then on: epoch 1 (in every device’s keys since setup) is refused; epoch 2 is fine', async () => {
+  const p = await enrolled('e2-arc-off');
+  await p.sock.ok('e2ee.publish', { devlist: await nextList(p.acct, () => ({ arc: null })) });
+  srv.db.run('UPDATE e2ee_accounts SET epoch = NULL, epoch_pub = NULL WHERE user = ?', p.id); // as an account set up with history off
+  await p.sock.refused('e2ee.publish', { devlist: await obj.makeList(p.acct.keys.aik, { ...p.acct.list, ver: p.acct.list.ver + 1, arc: { e: 1, pub: await freshPub(), at: Date.now() } }) }, /Turning history on/);
+  await p.sock.ok('e2ee.publish', { devlist: await nextList(p.acct, async () => ({ arc: { e: 2, pub: await freshPub(), at: Date.now() } })) });
+  await p.sock.close();
+});
+
+test('synced settings: a repair may write above the server’s version (never lowering a device’s mark); an ordinary write may not skip', async () => {
+  const p = await enrolled('e2-meta-jump');
+  const cur = (await p.sock.ok('e2ee.meta.get')).ver;
+  const skip = await p.sock.refused('e2ee.meta.put', { ver: cur + 3, blob: b64u(random(60)) });
+  assert.equal(skip.code, 'e2ee_conflict');
+  await p.sock.refused('e2ee.meta.put', { ver: cur, blob: b64u(random(60)), repair: true });
+  assert.equal((await p.sock.ok('e2ee.meta.put', { ver: cur + 3, blob: b64u(random(60)), repair: true })).ver, cur + 3);
+  assert.equal(srv.db.get('SELECT ver FROM e2ee_meta WHERE user = ?', p.id).ver, cur + 3);
   await p.sock.close();
 });
 
@@ -386,7 +408,7 @@ test('removing a device with history on needs a new history epoch; the backup, t
   assert.ok(srv.db.get('SELECT 1 FROM e2ee_asb_boxes WHERE device = ? AND ver = ?', third.dev.d, next.ver));
   // A device removing itself needs a new epoch too (refused without one; the same step from another device goes through).
   const self = await obj.makeList(p.acct.keys.aik, { ...p.acct.list, ver: p.acct.list.ver + 1, devs: p.acct.list.devs.filter((x) => x.d !== third.dev.d) });
-  await third.s.refused('e2ee.device.remove', { d: third.dev.d, devlist: self }, /new history key/);
+  await third.s.refused('e2ee.device.remove', { d: third.dev.d, devlist: self }, /new history key\. Update Snug/);
   await p.sock.ok('e2ee.device.remove', { d: third.dev.d, devlist: await nextList(p.acct, async (cur) => ({ devs: cur.devs.filter((x) => x.d !== third.dev.d), arc: await nextArc(cur) })) });
   await s.close().catch(() => {}); await third.s.close().catch(() => {}); await p.sock.close();
 });

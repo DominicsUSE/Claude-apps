@@ -391,11 +391,12 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
   }
   // What the author's own list shows of one: the envelope; each socket then gets only its own
   // device's wrap and, on a trusted device, its history wraps (socketView, e2ee.wraps). A snapshot
-  // goes out before the socket proves its device, so it carries none.
+  // goes out before the socket proves its device, so it carries no `k` at all (an empty one made
+  // 0.12.0 clients think the wraps were there and never ask e2ee.wraps).
   function schedRow(r) {
     const v = { id: r.id, conv: r.conv, text: r.text, replyTo: r.reply_to || undefined, at: r.at, created: r.created };
     const s = r.enc ? parseCanon(r.enc, 256 * 1024) : null;
-    if (s?.env) v.m = { id: s.env.h.id, author: r.user, ts: r.at, e2ee: s.env, k: {}, ...(r.reply_to ? { replyTo: r.reply_to } : {}) };
+    if (s?.env) v.m = { id: s.env.h.id, author: r.user, ts: r.at, e2ee: s.env, ...(r.reply_to ? { replyTo: r.reply_to } : {}) };
     return v;
   }
   function schedWraps(user, device, schedId) {
