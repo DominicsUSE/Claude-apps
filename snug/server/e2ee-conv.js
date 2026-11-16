@@ -33,7 +33,29 @@ export const NOT_READY = (name) => `${name} needs to open an up-to-date Snug and
 const sha256 = (s) => createHash('sha256').update(s).digest();
 const json = (s, f) => { try { return s == null ? f : JSON.parse(s); } catch { return f; } };
 
-export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, account, deviceRow }) {
+// What the server still sees of end-to-end encrypted DMs and groups (0.14): the one list, served
+// by GET /api/privacy (server/privacy.js facts) and repeated in the README (tests check both).
+export const SERVER_SEES = [
+  { id: 'who', text: 'Who wrote each message, and in which conversation' },
+  { id: 'when', text: 'When each message was sent, edited or deleted' },
+  { id: 'sizes', text: 'Roughly how long each message is and how big each file is (both padded to size steps)' },
+  { id: 'members', text: 'Who is in each DM and group, who added or removed whom, and who owns a group' },
+  { id: 'info', text: 'That someone renamed a group or changed its icon (not the new name or icon)' },
+  { id: 'mentions', text: 'Who a message mentions or notifies about a reply, so they get a notification' },
+  { id: 'threads', text: 'Which message a thread hangs off' },
+  { id: 'side', text: 'That someone reacted to a message, voted in a poll or ended one, and when (not the emoji, the vote or the poll)' },
+  { id: 'reads', text: 'How far each person has read' },
+  { id: 'typing', text: 'Who is typing (unless typing notes are off)' },
+  { id: 'presence', text: 'Who is online, and their status' },
+  { id: 'pins', text: 'Which messages are pinned or saved' },
+  { id: 'devices', text: 'Each account’s devices, their names and when they were last used' },
+  { id: 'ips', text: 'Your IP address while you’re connected, and your sign-in history' },
+  { id: 'gifs', text: 'GIF searches, which go through the server' },
+  { id: 'calls', text: 'Calls: who called, when, who joined, and the connection set-up between devices' },
+  { id: 'rooms', text: 'Everything in house rooms: rooms aren’t end-to-end encrypted' },
+];
+
+export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, account, deviceRow, capable = () => false, lacking = () => [] }) {
   const ops = {};
   const hasRemote = db.all('PRAGMA table_info(users)').some((c) => c.name === 'remote');
   const members = (dm) => db.all('SELECT user FROM dm_members WHERE dm = ? ORDER BY user', dm).map((r) => r.user);
@@ -113,6 +135,8 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
       const e = encEnv(row.enc);
       if (e) m.e2ee = e;
       m.text = '';
+      const side = sideOf(row.id);
+      if (side.length) m.side = side; // 0.14: sealed reactions and poll votes (opaque here)
       return m;
     }
     if (!row.sys) { const s = sinceOf(row.conv); if (s != null && row.seq < s) m.legacy = true; }
@@ -142,6 +166,11 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
   hub.socketView = (ws, ev, d) => {
     const v = prevView ? prevView(ws, ev, d) : d;
     if (ev === 'sched' && Array.isArray(v?.list) && ws.user) return { ...v, list: v.list.map((x) => (x?.m?.e2ee ? { ...x, m: { ...x.m, k: schedWraps(ws.user, ws.e2eeDevice, x.id) } } : x)) };
+    if (ev === 'e2ee.side' && v?.e2ee && ws.user) return { ...v, k: wrapsFor(ws.user, ws.e2eeDevice, v.e2ee.h.id, v.e2ee.h.rev) };
+    if (ev === 'dm' && v?.dm?.info?.e2ee && ws.user) {
+      const h = v.dm.info.e2ee.h;
+      return { ...v, dm: { ...v.dm, info: { ...v.dm.info, k: wrapsFor(ws.user, ws.e2eeDevice, h.id, h.rev) } } };
+    }
     if (ev !== 'msg' || !v?.m?.e2ee || !ws.user) return v;
     const k = wrapsFor(ws.user, ws.e2eeDevice, v.m.id, v.m.e2ee.h.rev);
     return Object.keys(k).length ? { ...v, m: { ...v.m, k } } : v;
@@ -236,6 +265,13 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
     if (typeof d.id === 'string' && M.msg(d.id)) return baseSend(c, d); // a retry: the first copy landed
     if (d.e2ee == null || (typeof d.text === 'string' && d.text !== '')) fail(RELOAD);
     const replyTo = d.replyTo ?? null;
+    // 0.14: where every device can read it, the message replied to is inside the sealed body.
+    if (replyTo != null && capable(members(dm), 're')) fail(UPDATE('Replies in this conversation are encrypted'));
+    // An encrypted poll: everyone's devices must count votes themselves (server/e2ee-conv.js side blobs).
+    if (d.poll !== undefined) {
+      if (d.poll !== true) fail('That poll isn’t valid.');
+      if (!capable(members(dm), 'poll')) fail(oldDevices('Encrypted polls need everyone here on Snug 0.14 or later', lacking(members(dm), 'poll')), { code: 'e2ee_old_devices' });
+    }
     const v = checkEnvelope(c, d.e2ee, { dm, place: conv, id: d.id, kind: 'msg', rev: 0, users: members(dm), replyTo });
     v.files = encFiles(c, conv, d.files);
     const inner = { conv, id: d.id, text: '', files: v.files.map((f) => ({ id: f.id })), ...(replyTo ? { replyTo } : {}) };
@@ -298,6 +334,11 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
     for (const x of d.ids) {
       const id = typeof x === 'string' ? x : x?.id;
       if (typeof id !== 'string') continue;
+      if (/^(react|vote|end|info):/.test(id)) {
+        const k = sideKey(c.user, id);
+        if (k) { const rev = Number.isSafeInteger(x?.rev) ? x.rev : k.rev; revs[`${id}:${rev}`] = out[id] = { rev, k: wrapsFor(c.user, c.ws?.e2eeDevice || null, id, rev) }; }
+        continue;
+      }
       const row = M.msg(id);
       if (!row) {
         mine ||= new Map(db.all('SELECT id, enc FROM scheduled WHERE user = ? AND enc IS NOT NULL', c.user).map((r) => [parseCanon(r.enc, 256 * 1024)?.env?.h?.id, r.id]));
@@ -317,7 +358,7 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
     if (!base) return;
     ops[name] = (c, d) => { if (encrypted(convOf(d))) fail(why); return base(c, d); };
   };
-  refuseIn('poll.create', 'Polls aren’t available in encrypted conversations yet.');
+  refuseIn('poll.create', 'Polls aren’t available in encrypted conversations on this version. Update Snug to start an encrypted poll.'); // 0.14 seals them (msg.send poll)
   refuseIn('cmd.roll', '/roll isn’t available in encrypted conversations: a fair roll needs the server to see the result.');
   refuseIn('sticker.send', 'Stickers here are encrypted on your device first. Reload Snug and send it again.');
   const baseForward = all['msg.forward'];
@@ -326,6 +367,130 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
       const src = typeof d?.id === 'string' ? M.msg(d.id) : null;
       if (src?.enc || encrypted(d?.to)) fail('Encrypted messages are forwarded from your device. Reload Snug and try again.');
       return baseForward(c, d);
+    };
+  }
+
+
+  // ---------- 0.14: sealed reactions, poll votes, private room information ----------
+  // Each is an envelope like a message's (js/lib/e2ee/envelope.js kinds react, vote, info), sealed
+  // to the members' devices and history keys and signed by the sending device. The server keeps one
+  // per message, person and slot (react, vote, end), or one per group (info), with its wraps, and
+  // relays it; it can't read any of them. A newer revision replaces the older one (rev only goes up).
+  // A feature is used in a conversation once every device of every member signed for it (capable).
+  const UPDATE = (what) => `${what}. Update Snug to do this here.`;
+  const oldDevices = (what, list) => {
+    const named = list.slice(0, 5).map((x) => `${nameOf(x.user)}’s ${x.label}`);
+    return `${what}. Still on an older Snug: ${named.join(', ')}${list.length > 5 ? ` and ${list.length - 5} more` : ''}.`;
+  };
+  const SLOTS = { react: 'react', vote: 'vote', end: 'vote' }; // slot -> envelope kind
+  function sideOf(msg) {
+    return db.all('SELECT user, slot, env FROM e2ee_side WHERE msg = ? ORDER BY user, slot', msg)
+      .map((r) => ({ user: r.user, slot: r.slot, e2ee: encEnv(r.env) })).filter((x) => x.e2ee);
+  }
+  // A wrap request for a side blob or a group's information: only for someone who can read it.
+  function sideKey(user, id) {
+    const [slot, a, ...rest] = id.split(':');
+    if (slot === 'info') {
+      const r = a && rest.length === 0 && db.get('SELECT info_rev FROM dms WHERE id = ? AND info_enc IS NOT NULL', a);
+      return r && M.inDm(a, user) ? { rev: r.info_rev } : null;
+    }
+    const r = db.get('SELECT rev, msg FROM e2ee_side WHERE msg = ? AND user = ? AND slot = ?', a, rest.join(':'), slot);
+    const row = r && M.liveMsg(r.msg);
+    return row && M.canRead(user, row.conv) ? { rev: r.rev } : null;
+  }
+  function replaceWraps(key, h, k) {
+    db.run('DELETE FROM e2ee_wraps WHERE msg = ?', key);
+    insertWraps(key, h, k);
+  }
+  ops['e2ee.side'] = (c, d) => {
+    const conv = typeof d?.conv === 'string' ? d.conv : '';
+    const dm = rootOf(conv);
+    if (!dm || !encrypted(conv)) fail('This conversation isn’t end-to-end encrypted. Reload Snug.');
+    if (!M.canRead(c.user, conv)) fail('You don’t have access to this conversation.');
+    const row = typeof d.msg === 'string' && M.liveMsg(d.msg);
+    if (!row || row.conv !== conv) fail('That message was deleted.');
+    if (!row.enc) fail('Messages from before encryption was turned on can’t take encrypted reactions or votes.');
+    const slot = Object.hasOwn(SLOTS, d.slot) ? d.slot : fail('That isn’t valid.');
+    const gate = M.postGate(c.user, dm);
+    if (!gate.ok) fail(gate.why);
+    if (slot === 'end' && row.author !== c.user) fail('Only the person who started the poll can end it.');
+    const key = `${slot}:${row.id}:${c.user}`;
+    const prev = db.get('SELECT rev FROM e2ee_side WHERE msg = ? AND user = ? AND slot = ?', row.id, c.user, slot);
+    const rev = d.e2ee?.h?.rev;
+    if (!Number.isSafeInteger(rev) || rev <= (prev?.rev ?? -1)) fail('That was changed on another device. Snug is trying again.', { code: 'e2ee_side_rev', data: { rev: prev?.rev ?? -1 } });
+    const v = checkEnvelope(c, d.e2ee, { dm, place: conv, id: key, kind: SLOTS[slot], rev, users: members(dm) });
+    if (v.h.ping.length) fail('That encrypted reaction isn’t valid.');
+    db.tx(() => {
+      db.run('INSERT OR REPLACE INTO e2ee_side (msg, user, slot, rev, env) VALUES (?, ?, ?, ?, ?)', row.id, c.user, slot, rev, canon(v.env));
+      replaceWraps(key, v.h, v.k);
+    });
+    hub.toConv(conv, 'e2ee.side', { conv, msg: row.id, user: c.user, slot, e2ee: v.env });
+    return { rev };
+  };
+  // A plain reaction where every device can seal one is refused (a stale tab, an older Snug): taking
+  // one back is still fine, it says nothing new.
+  const baseReact = all.react;
+  if (baseReact) {
+    ops.react = (c, d) => {
+      const conv = typeof d?.conv === 'string' ? d.conv : '';
+      const dm = rootOf(conv);
+      // Rows from before the conversation turned encrypted keep plain reactions (they have no envelope).
+      if (dm && encrypted(conv) && d.on !== false && (typeof d.id === 'string' && M.liveMsg(d.id)?.enc) && capable(members(dm), 'react')) fail('Reactions in this conversation are encrypted. Update Snug to react here.');
+      return baseReact(c, d);
+    };
+  }
+
+  // A group's name, icon and hue, sealed (kind info). The server keeps no name for it; older Snug
+  // shows "Encrypted group". Lines in the conversation say who changed what, never the new name.
+  const INFO_LABEL = 'Encrypted group';
+  const infoOf = (dm) => { const r = db.get('SELECT info_enc, info_rev FROM dms WHERE id = ?', dm); const e = r?.info_enc ? encEnv(r.info_enc) : null; return e ? { e2ee: e, rev: r.info_rev } : null; };
+  const dmView2 = M.dmView;
+  M.dmView = (id, viewer) => {
+    const v = dmView2(id, viewer);
+    if (!v) return v;
+    const info = infoOf(id);
+    if (info) { v.info = { e2ee: info.e2ee }; v.name = INFO_LABEL; delete v.icon; }
+    return v;
+  };
+  const infoLine = (dm, by, what) => {
+    const mid = newId('m');
+    const text = what === 'icon' ? `${nameOf(by)} changed the group’s icon` : `${nameOf(by)} renamed the group`;
+    db.run('INSERT INTO messages (id, conv, author, ts, text, fold, sys) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      mid, dm, by, now(), text, '', JSON.stringify({ kind: 'dm', act: what === 'icon' ? 'icon' : 'info', by, enc: true }));
+    const [m] = M.withReactions([M.msg(mid)]);
+    hub.toConv(dm, 'msg', { conv: dm, m, user: hub.userView(by) });
+  };
+  ops['e2ee.info'] = (c, d) => {
+    const dm = typeof d?.dm === 'string' ? d.dm : '';
+    if (!db.get('SELECT 1 FROM dms WHERE id = ?', dm) || !M.inDm(dm, c.user)) fail('You’re not in that conversation.');
+    if (!encrypted(dm)) fail('This conversation isn’t end-to-end encrypted. Reload Snug.');
+    if (!M.isGroupDm?.(dm)) fail('That’s a conversation between two people. Add someone to start a group.');
+    const users = members(dm);
+    if (!capable(users, 'info')) fail(oldDevices('A private group name needs everyone here on Snug 0.14 or later', lacking(users, 'info')), { code: 'e2ee_old_devices' });
+    const what = ['name', 'icon', 'members'].includes(d.what) ? d.what : fail('That isn’t valid.');
+    const prev = db.get('SELECT info_rev FROM dms WHERE id = ?', dm)?.info_rev ?? -1;
+    const rev = d.e2ee?.h?.rev;
+    if (!Number.isSafeInteger(rev) || rev <= prev) fail('The group was changed on another device. Snug is trying again.', { code: 'e2ee_side_rev', data: { rev: prev } });
+    const key = `info:${dm}`;
+    const v = checkEnvelope(c, d.e2ee, { dm, place: dm, id: key, kind: 'info', rev, users });
+    if (v.h.ping.length) fail('That isn’t valid.');
+    db.tx(() => {
+      // The readable name and icon go: from now on only members' devices know them.
+      db.run('UPDATE dms SET info_enc = ?, info_rev = ?, name = NULL, icon = NULL, icon_hue = NULL WHERE id = ?', canon(v.env), rev, dm);
+      replaceWraps(key, v.h, v.k);
+    });
+    if (what !== 'members') infoLine(dm, c.user, what);
+    for (const u of users) hub.sendDm(u, dm);
+    return { rev };
+  };
+  // Once a group's information is sealed, a plain rename or icon change (an older Snug) is refused.
+  for (const name of ['dm.rename', 'dm.icon']) {
+    const base = all[name];
+    if (!base) continue;
+    ops[name] = (c, d) => {
+      const dm = typeof d?.dm === 'string' ? d.dm : '';
+      if (encrypted(dm) && (infoOf(dm) || capable(members(dm), 'info'))) fail('This group’s name and icon are encrypted. Update Snug to change them.');
+      return base(c, d);
     };
   }
 
@@ -342,6 +507,9 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
       const dm = typeof d?.dm === 'string' ? d.dm : '';
       if (encrypted(dm) && Array.isArray(d.users)) {
         for (const u of d.users) if (typeof u === 'string' && !M.inDm(dm, u) && !ready(u)) fail(NOT_READY(nameOf(u)));
+        // A group whose name is sealed: someone whose devices can't open it would see none of it.
+        const fresh = d.users.filter((u) => typeof u === 'string' && !M.inDm(dm, u));
+        if (infoOf(dm) && fresh.length && !capable(fresh, 'info')) fail(oldDevices('This group’s name is encrypted, so new people need Snug 0.14 or later', lacking(fresh, 'info')), { code: 'e2ee_old_devices' });
       }
       const r = baseAdd(c, d);
       if (r?.created) upgrade(r.id);
@@ -380,6 +548,7 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
       if (at > Date.now() + SCHED_MAX) fail('In encrypted conversations, messages can be scheduled up to 14 days ahead.');
       if (typeof d.id !== 'string' || !/^m_[a-z0-9]{8,40}$/.test(d.id) || M.msg(d.id)) fail('That message id isn’t valid.');
       const users = members(dm);
+      if (d.replyTo != null && capable(users, 're')) fail(UPDATE('Replies in this conversation are encrypted'));
       const v = checkEnvelope(c, d.e2ee, { dm, place: conv, id: d.id, kind: 'sched', rev: 0, users, replyTo: d.replyTo ?? null });
       if (v.h.at !== at) fail('That encrypted message doesn’t match when it should be sent.');
       // The ordinary checks (posting allowed, time, how many waiting) with a placeholder text, then the envelope instead.
@@ -467,6 +636,8 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
     }
     const pre = historyTarget(u);
     db.run('DELETE FROM e2ee_wraps WHERE substr(target, 1, ?) = ?', pre.length, pre);
+    for (const r of db.all('SELECT msg, slot FROM e2ee_side WHERE user = ?', u)) db.run('DELETE FROM e2ee_wraps WHERE msg = ?', `${r.slot}:${r.msg}:${u}`);
+    db.run('DELETE FROM e2ee_side WHERE user = ?', u);
     for (const t of ['e2ee_links', 'e2ee_backup', 'e2ee_meta', 'e2ee_accounts', 'e2ee_devices']) db.run(`DELETE FROM ${t} WHERE user = ?`, u);
   };
 
@@ -481,6 +652,8 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
         db.run('UPDATE messages SET enc = NULL, ping = NULL WHERE id = ?', id);
         db.run('DELETE FROM e2ee_wraps WHERE msg = ?', id);
         db.run('DELETE FROM msg_edits WHERE msg = ?', id);
+        for (const r of db.all('SELECT user, slot FROM e2ee_side WHERE msg = ?', id)) db.run('DELETE FROM e2ee_wraps WHERE msg = ?', `${r.slot}:${id}:${r.user}`);
+        db.run('DELETE FROM e2ee_side WHERE msg = ?', id);
       }
     });
   }

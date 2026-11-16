@@ -36,6 +36,7 @@ export const PREF_RULES = {
   toasts: ['bool', null, true],
   embeds: ['bool', null, true],
   preview: ['bool', null, true],
+  notifyNames: ['bool', null, true], // 0.14: off, pushed notifications say only "New message" (server/push.js)
   sound: ['enum', ['off', 'soft', 'bell', 'pop', 'drop'], 'soft'],
   mutedSounds: ['set', 300, {}],
   everyoneOff: ['set', 300, {}],

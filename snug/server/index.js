@@ -40,6 +40,7 @@ import {
 import { createSeclog, redactLog, redact, sendFile } from './seclog.js'; // sec-web: security events, log redaction, safe file sends
 import { PROTO, MIN_CLIENT } from '../js/lib/proto.js'; // GET /api/version
 import { staticRel, staticHeaders, BASE_HEADERS, PUBLIC } from './static.js'; // the app's own files and their headers, shared with the desktop app's join mode
+import { SERVER_SEES } from './e2ee-conv.js'; // what the server still sees of encrypted conversations (0.14)
 import { createPrivacy, logDaysFrom, iceFacts } from './privacy.js'; // privacy: who sees you online, typing, friends' link previews, erasing, what is kept
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -197,7 +198,7 @@ export async function startServer({
   // privacy: last, so its typing rule covers friends on other PCs too (server/privacy.js).
   const privacy = createPrivacy({
     db, M, hub, ops: hub.ops, peer, filesDir, log,
-    facts: { mode: peer.enabled ? 'desktop' : 'host', logDays, linkPreviews, ...iceFacts(ice), backupDays: dbKey ? KEEP_SNAPSHOTS : 0 },
+    facts: { mode: peer.enabled ? 'desktop' : 'host', logDays, linkPreviews, ...iceFacts(ice), backupDays: dbKey ? KEEP_SNAPSHOTS : 0, e2eeServerSees: SERVER_SEES },
   });
   M.eraseAuthored = privacy.eraseAuthored; // account deletion, when asked to erase (server/account.js)
 
