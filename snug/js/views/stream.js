@@ -152,7 +152,7 @@ function FileItem({ f, i, conv, m }) {
     return html`<div class="file-wrap">
       <button class="img" style=${`aspect-ratio:${f.w}/${f.h};width:${Math.min(420, f.w)}px`}
         aria-label=${`Open image ${f.alt || f.name}`} onClick=${() => (m && f.id ? openViewer(conv, m, f) : openLightbox(src, f.alt || f.name))}>
-        <img src=${src} alt=${f.alt || f.name} />
+        <img src=${src} alt=${f.alt || f.name} loading="lazy" decoding="async" />
       </button>${alt}${altText}
     </div>`;
   }

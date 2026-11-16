@@ -137,6 +137,9 @@ test('an attached picture uploads and shows for the other person', async () => {
   await theirs.waitFor();
   await ines.waitForFunction(() => [...document.querySelectorAll('.main .msg .img img')].pop()?.naturalWidth === 200);
   assert.match(await theirs.getAttribute('src'), /^\/api\/files\/f_/);
+  // A long conversation doesn't fetch every picture at once: they load as they come into view.
+  assert.equal(await theirs.getAttribute('loading'), 'lazy');
+  assert.equal(await theirs.getAttribute('decoding'), 'async');
   // Someone who is not signed in cannot fetch it.
   const src = await theirs.getAttribute('src');
   assert.equal((await fetch(url + src)).status, 401);
