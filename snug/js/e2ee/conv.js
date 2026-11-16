@@ -119,6 +119,19 @@ async function fetchBundles(users, fresh = false) {
   return users.map((u) => bundles.get(u));
 }
 
+// calls C1/C2 (js/e2ee/callkeys.js): one person's devices that have a valid prekey, from their
+// signed device list as checked here (never on the server's word): [{ d, dsk, kid, pub }].
+export async function callDevices(u, fresh = false) {
+  const [b] = await fetchBundles([u], fresh);
+  if (b?.problem) throw new Error(b.problem);
+  const out = [];
+  for (const e of b?.list?.devs || []) {
+    const p = b.prekeys[e.d];
+    if (p && (await obj.verifyPrekey(p, { u, d: e.d, dsk: e.dsk }))) out.push({ d: e.d, dsk: e.dsk, kid: p.kid, pub: b64uOf(p.pub, 32) });
+  }
+  return out;
+}
+
 /** Members a verified contact's send waits on: a verified person whose account key changed. */
 export const sendGate = (members) => members.filter((u) => u !== S.me && changed.has(u) && ring.meta?.verified?.[u] && ring.meta.verified[u] !== changed.get(u));
 
