@@ -166,9 +166,13 @@ has it can start moving your account (your old PC is told and can stop it).
 - **GitHub** is optional: **I used GitHub before** signs in as in 0.11, and an
   account made without GitHub can link one in Settings as a second way to move.
   A link (and an unlink) takes effect 7 days later; until then your recovery
-  key can cancel it, so someone with only your PC can't add their own GitHub.
-  A new recovery key made without the old one waits 7 days the same way, and so
-  does a GitHub account's first recovery key (a GitHub sign-in cancels it).
+  key can cancel it (and the linked GitHub can cancel an unlink), so someone
+  with only your PC can't add their own GitHub. Typing your recovery key makes
+  a link or unlink happen at once. A linked GitHub must be unlinked before
+  another can be linked. A new recovery key made without the old one waits 7
+  days the same way, and so does a GitHub account's first recovery key (a
+  GitHub sign-in cancels it). If you lost your PC, the new one shows these
+  waiting changes while your account moves there, and can cancel each one.
 
 New accounts cost a few seconds of computer work (a "proof of work") and are
 limited per network address, which slows down mass sign-ups but doesn't stop
@@ -866,8 +870,9 @@ Real, and covered by tests with separate users:
     password, and a code when two-factor is on; only a first key, within ten minutes
     of signing up or of using the old key, is saved without it). It is 36 letters and numbers in 9 groups of 4 (`js/lib/recovery.js`),
     shown once: save it as a file, print it or copy it, then type the last group back.
-    The browser sends only a key derived from it (HKDF, label `web-auth-v1`); the
-    server keeps a scrypt hash of that, so whoever runs the server can't read or use
+    The browser sends only a key derived from it (HKDF, label `web-auth-v2` plus the
+    server's host name, so it is useless on any other server; a key saved by 0.12.0
+    used `web-auth-v1` and still works once); the server keeps a scrypt hash of that, so whoever runs the server can't read or use
     it. **Forgot your password?** on the sign-in screen takes your username and the
     key (a typo is caught by its check characters before anything is sent), then a
     new password: every other device signs out, your passkeys are removed (in case
@@ -1234,7 +1239,8 @@ before seeding anything that faces the internet, or better, do not seed there.
   tries are limited per address and per account and address; a used key is
   spent once, even when two attempts race; replacing a key needs the password.
   Passkey challenges are single use and last 5 minutes, at most 30 waiting per
-  network (/48) or account; the RP ID never comes from the `Host` header alone.
+  network (/48) or account; when 1000 are waiting, the busiest /32 (IPv4: /24)
+  loses its oldest first. The RP ID never comes from the `Host` header alone.
 - **Audit**: sign-ins, failures and security changes go to the `auth_events`
   table (30 days by default, `SNUG_LOG_DAYS`; addresses truncated) and the log
   as JSON lines, never with a password, code, token or full address; bursts

@@ -256,9 +256,9 @@ Admin actions (`a`) and the right each needs: `me` (anyone → `{perms}`), `stat
 `name.unreserve {name}`, `name.reserved` (names), `ban {uid, reason, until|null}`, `unban {uid}`, `bans`
 (ban), `ann.add {text, level, until?}`, `ann.remove {id}` (ann), `min.set {v|null, app}` (update; never
 above `app`, the caller's own version), `admin.grant {uid, perms}`, `admin.revoke {uid}`, `admins`
-(owner only), `audit {before?}` (stats), `move.force {uid, fp? | ik?}` (owner only, for a stolen current
-device: bound to one device key. Without `fp`/`ik`, the move waiting right now completes now, and with no move
-waiting it answers `not_found`. With `fp` (the security code the new PC shows, spaces and case ignored) or
+(owner only), `audit {before?}` (stats), `move.force {uid, fp | ik}` (owner only, for a stolen current
+device: bound to one device key. Without `fp`/`ik` it is refused (`bad_request`): someone with the recovery key
+or the GitHub login could swap their own key into the waiting move between the check and the force. With `fp` (the security code the new PC shows, spaces and case ignored) or
 `ik` (its device key), the account's next move of exactly that key within 7 days (GitHub-proved or by recovery
 key) completes at once; a waiting move of that `ik` completes now. Moves of any other key wait as usual. The forced-out key gets no `old` xfer
 role and the vault key rotates; a force armed before v0.12's binding applies to no move), `vault.export {after?}` (owner only: the vault key rows,
@@ -301,21 +301,26 @@ derives from the recovery secret (`js/lib/recovery.js`); the registry stores onl
 | `POST /v1/move/peek` | `{uid, ts, p:{code}, sig}` | current key, `move-peek` → `{ik, xk, kver}` (5 tries a code, 10 codes a day) |
 | `POST /v1/move/accept` | `{uid, ts, p:{code, prev, knock?}, sig}` | current key, `move-accept`, mutating; `prev` as `/v1/rebind/approve` → `{ok}`: the move completes now; `knock {id, box}` is the restore list for the new key |
 | `POST /v1/recovery/set` | `{uid, ts, p:{rk, rsigNew, rsigOld?}, sig}` | current key; both rsigs over `recovery-set\n{uid}\n{rk}\n{ts}` → `{state:"set"}` with the old key, else `{state:"pending", at}` (7 days), a GitHub account's first key included |
-| `POST /v1/recovery/cancel` | `{uid, ts, rsig}` or `{ticket, ts, sig}` | current `rk`, `recovery-cancel\n{uid}\n{ts}` (its own replay counter): stops a waiting recovery key **and** a waiting GitHub link or unlink. Or a GitHub account's fresh `/v1/auth/github` ticket, signed by the ticket's key over `recovery-cancel-gh\n{ticket}\n{ts}`: stops its waiting recovery key → `{ok}` |
-| `POST /v1/link/github` | `{uid, ts, p:{ticket}, sig}` | current key, `link-github`; a fresh `new` ticket issued to the same key → `{ok, state:"pending", at}`: the link works 7 days later unless the recovery key cancels it. A working link signs in to (and can move) the account |
-| `POST /v1/link/github/remove` | `{uid, ts, p:{}, sig}` | current key, `unlink-github` → `{ok, state:"done"}` (nothing linked; a waiting link is dropped) or `{ok, state:"pending", at}` (a working link goes 7 days later unless the recovery key cancels) |
+| `POST /v1/recovery/cancel` | `{uid, ts, rsig, what?}` or `{ticket, ts, sig, what?}` | current `rk`, `recovery-cancel\n{uid}\n{ts}` (with `what`: `\n{what}` appended; its own replay counter): stops a waiting recovery key and a waiting GitHub link or unlink, or with `what: "key"` / `"link"` only that one. Or a fresh `/v1/auth/github` ticket (any key may hold it, so a new PC can send it), signed by the ticket's key over `recovery-cancel-gh\n{ticket}\n{ts}` (`\n{what}` likewise): a GitHub account's own GitHub stops its waiting recovery key; a keypair account's working linked GitHub stops its waiting recovery key and its waiting unlink → `{ok}` |
+| `POST /v1/recovery/whose` | `{rk, ts, rsig}` | `rk` over `recovery-whose\n{rk}\n{ts}` → `{uid}` of the account whose current recovery key it is (`not_found` otherwise); changes nothing. A PC that still holds an account asks this before `/v1/recover`, to refuse another account's key without starting a move |
+| `POST /v1/link/github` | `{uid, ts, p:{ticket}, sig, rsig?}` | current key, `link-github`; a fresh `new` ticket issued to the same key → `{ok, state:"pending", at}`: the link works 7 days later unless the recovery key cancels it. Refused while a GitHub account is linked (`already_linked`: unlink first). With `rsig` (the current `rk` over the same string) → `{ok, state:"done"}` at once. A working link signs in to (and can move) the account |
+| `POST /v1/link/github/remove` | `{uid, ts, p:{}, sig, rsig?}` | current key, `unlink-github` → `{ok, state:"done"}` (nothing linked; a waiting link is dropped) or `{ok, state:"pending", at}` (a working link goes 7 days later unless the recovery key or the linked GitHub cancels). With `rsig` (the current `rk` over the same string): `{ok, state:"done"}`, unlinked at once |
 | `POST /v1/release/key` | `{uid, ts, p:{}, sig, rsig}` | current key **and** `rk` over `release-key\n{uid}\n{ts}\n{p}` → `{ok}` (the name is free at once) |
-| `POST /v1/account/kind` | `{uid, ts, p:{}, sig}` | current key → `{kind, recovery:{set, pendingAt, rk}, github:{linked, pending:{change:"link"\|"unlink", at}\|null}, move:{via, at}\|null}` (`rk`: the current recovery public key or null) |
+| `POST /v1/account/kind` | `{uid, ts, p:{}, sig}` | current key, or the waiting move's key (a PC moving in sees what waits on the account) → `{kind, recovery:{set, pendingAt, rk}, github:{linked, pending:{change:"link"\|"unlink", at}\|null}, move:{via, at}\|null}` (`rk`: the current recovery public key or null; left out for the waiting move's key) |
 
 Errors added: `pow_invalid` 400, `too_new` 409 (`{retryAt?, what?}`), `key_in_use` 409, `recovery_pending`
-409, `move_pending` 409, `link_too_new` 409 (`{retryAt}`). New frame, only to sockets whose auth `v` is 0.12.0
+409, `move_pending` 409, `link_too_new` 409 (`{retryAt}`), `already_linked` 409. New frame, only to sockets whose auth `v` is 0.12.0
 or newer: `{t:'recovery', state}`.
 
-Second proofs the device adds or removes alone wait 7 days and the account's primary proof can stop them: a
-GitHub link or unlink on a keypair account (the recovery key stops it), a GitHub account's first recovery key
-(its GitHub sign-in stops it), and any new recovery key set without the old one. `/v1/release` through a
-linked GitHub (instead of the account's own) needs a link at least 7 days old (`link_too_new`); a link made
-through the wait is that old the moment it works.
+Second proofs the device adds or removes alone wait 7 days and another proof can stop them: a GitHub link or
+unlink on a keypair account (the recovery key stops either; the linked GitHub stops an unlink), a GitHub
+account's first recovery key (its GitHub sign-in stops it), and any new recovery key set without the old one
+(the old key, or the GitHub account or linked GitHub, stops it). A link can't replace another: the device must
+unlink first, which itself waits. The device and the recovery key together link or unlink at once.
+`/v1/release` through a linked GitHub (instead of the account's own) needs a link at least 7 days old
+(`link_too_new`), counted from when the link took effect, so a link that came through the wait can delete the
+account only 7 days after it started working. Where only the device and the linked GitHub are left (no recovery
+key at hand), neither can remove the other: the result is a stand-off the registry owner settles.
 
 After a move that completed without the old PC's approval, the proof that started it wins: a recovery move
 drops a linked GitHub; a GitHub move drops a GitHub account's recovery key. Such a move also drops any waiting
@@ -327,7 +332,7 @@ Abuse limits (`src/limits.js`; raise `POW_BITS` or lower `regGlobal` without a c
 | Control | Value |
 |---|---|
 | Proof of work | `POW_BITS` (20) + 1 per doubling of sign-ups past 30 in the last hour (a sliding hour: the previous hour counts by how much of it is still within 60 min), at most 28. `/v1/register` checks the challenge against the difficulty **now**, one bit of slack |
-| Per address | `ipPow` 20/h, `ipAccount` 5/h, `ipRegister` 3/day (IPv6 by /48); `ipRegisterWide` 20/day per IPv6 /32. The sign-up budgets are kept in SQLite and spent only by a sign-up that worked |
+| Per address | `ipPow` 20/h, `ipAccount` 5/h, `ipRegister` 3/day (IPv6 by /48), spent only by a sign-up that worked; a sign-up refused for its name (invalid, reserved, taken, too short) gives back its `ipAccount`, and `ipRegTry` 30/h (memory, /48) bounds the tries. `ipRegisterWide` is not a cap: from 20 sign-ups in a day per IPv6 /32 (IPv4: the address), that /32's proof of work needs 2 more bits, and 2 more each time the count doubles (a /32 can hold a whole tunnel broker or mobile carrier). `/v1/register` checks that too, with 2 bits of slack. The per-address sign-up counts are kept in SQLite |
 | Global | `regGlobal` 300 sign-ups in a sliding hour (GitHub sign-up is not counted) |
 | New accounts (72 h) | knocks 10/day (2 per person), lookups 60/day, TURN 3/day |
 | Names | 2 or 3 characters only after 30 days; the first rename after 7 days |
