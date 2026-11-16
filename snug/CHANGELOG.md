@@ -18,9 +18,28 @@ goes back to an older version on its own (README, "Install, update, go back").
 - **Hide my IP address is on by default** whenever the server has a relay (the old default moves to it); only
   relay candidates leave the device. With no relay, Snug says before you join who will see your IP address.
 - **TURN credentials last an hour** and no longer name your account; fetched again before they run out. With
-  TURN set, no outside STUN server by default. A static TURN login gets a startup warning.
+  TURN set, the relay answers STUN, not an outside server. A static TURN login gets a startup warning.
 - **Smaller call records:** who started it, how it went, when, how long, and who missed it, no longer who took
   part. The disappearing-messages sweep and account erasure cut it down further. Older records still read.
+
+### Privacy: less tracking, shorter retention
+
+- **What Snug stores and for how long**: the privacy page and README list everything the server keeps, with
+  the real windows from `GET /api/privacy`: call records, the house join log, link previews, push addresses,
+  reactions and read positions, what end-to-end encrypted conversations still reveal, GIF searches, the STUN
+  and TURN operators, the directory, and desktop update checks.
+- The server forgets on its own, hourly: house join and leave rows after 90 days (insights count the same),
+  the link-preview cache after 24 hours, declined friend requests after a day.
+- Sign-in history and security events: 14 days by default (was 30). Security events keep the kind of device
+  ("Chrome on Windows"), not the browser's full string.
+- When a device, encryption key or friend's PC was last used is stored to the day, written at most daily.
+  Settings > Account says *Active today* or *Last active 2 Nov 2026*.
+- Calls: with a TURN relay set (`SNUG_TURN_URL`) and no `SNUG_STUN`, the relay answers STUN instead of Google
+  (whoever runs the relay sees addresses; the privacy page doesn't claim who that is). The
+  desktop app drops Google's STUN once it has Cloudflare relay details. Without a relay, Google is named on the
+  privacy page, with `SNUG_STUN=none`.
+- Desktop app: update checks at start and then about once a day with jitter (were hourly). **Settings >
+  Desktop app > Updates**: *Automatically*, *Tell me* or *Only when I ask*.
 
 ## 0.13.0
 

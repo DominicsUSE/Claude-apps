@@ -616,8 +616,8 @@ test('STUN: SNUG_STUN=none leaves the STUN server out (it sees callers’ IP add
   assert.deepEqual(iceConfig({ SNUG_STUN: 'none' }), []);
   assert.deepEqual(iceConfig({ SNUG_STUN: ' NONE ', SNUG_TURN_URL: 'turn:t.example', SNUG_TURN_USER: 'u', SNUG_TURN_PASS: 'p' }), [{ urls: ['turn:t.example'], username: 'u', credential: 'p' }]);
   assert.match(iceConfig({})[0].urls[0], /^stun:/);
-  // calls C3: with TURN configured and SNUG_STUN unset, no outside STUN server (the TURN server answers STUN).
-  assert.deepEqual(iceConfig({ SNUG_TURN_URL: 'turn:t.example', SNUG_TURN_SECRET: 's' })('u_x').map((s) => s.urls), [['turn:t.example']]);
+  // calls C3 / 0.14: with TURN configured and SNUG_STUN unset, no outside STUN server: the relay's own address answers STUN.
+  assert.deepEqual(iceConfig({ SNUG_TURN_URL: 'turn:t.example', SNUG_TURN_SECRET: 's' })('u_x').map((s) => s.urls), [['stun:t.example'], ['turn:t.example']]);
 });
 
 test('grace: SNUG_VOICE_GRACE_MS only shortens the grace under the test runner', async () => {

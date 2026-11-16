@@ -22,10 +22,12 @@
 import { unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { idleMs, SESSION_DAYS } from './auth.js';
+import { MEMBER_LOG_DAYS, LINK_CACHE_HOURS, FRIEND_COOLDOWN_MS } from './retention.js'; // 0.14: what the server purges on its own
+import { PUSH_TTL_HOURS } from './push.js';
 
 // How long sign-in history and security events are kept, in days. The server
-// owner can change it with SNUG_LOG_DAYS (1 to 365).
-export const LOG_DAYS = 30;
+// owner can change it with SNUG_LOG_DAYS (1 to 365). 0.14: 14 (30 before).
+export const LOG_DAYS = 14;
 export function logDaysFrom(v) {
   const n = Number(v);
   return Number.isInteger(n) && n >= 1 && n <= 365 ? n : LOG_DAYS;
@@ -41,7 +43,10 @@ export function iceFacts(ice) {
   const urls = list.flatMap((s) => [].concat(s.urls || []));
   const stun = urls.filter((u) => /^stuns?:/.test(u));
   return {
-    stun: !stun.length ? 'none' : stun.every((u) => /\.l\.google\.com/.test(u)) ? 'google' : 'custom',
+    // relay (0.14): only the configured TURN relay is asked for STUN (no separate STUN service). Whoever runs
+    // that relay (this Snug's owner or a hosted service; the server can't tell) still sees addresses.
+    stun: !stun.length ? 'none' : stun.every((u) => /\.l\.google\.com/.test(u)) ? 'google'
+      : stun.every((u) => urls.some((t) => /^turns?:/.test(t) && t.replace(/^turns?:/, '').split('?')[0] === u.replace(/^stuns?:/, ''))) ? 'relay' : 'custom',
     turn: urls.some((u) => /^turns?:/.test(u)),
     // calls C4: a TURN login that is the same for everyone and never expires (no SNUG_TURN_SECRET).
     turnStatic: list.some((s) => [].concat(s.urls || []).some((u) => /^turns?:/.test(u)) && !/^\d{9,12}:/.test(String(s.username || ''))),
@@ -278,6 +283,10 @@ export function createPrivacy({ db, M, hub, ops, peer = null, facts = {}, filesD
   const about = () => ({
     ...facts, logDays: facts.logDays ?? LOG_DAYS, failureHours: FAILURE_HOURS, undoMinutes: UNDO_MINUTES,
     sessionDays: SESSION_DAYS, idleDays: Math.round(idleMs(db) / 86_400_000), diagnostics: false,
+    // 0.14 (server/retention.js): purged once an hour past these windows.
+    memberLogDays: MEMBER_LOG_DAYS, linkCacheHours: LINK_CACHE_HOURS, friendCooldownHours: FRIEND_COOLDOWN_MS / 3_600_000,
+    activity: 'day', // when each device was last used: kept to the day (server/auth.js activeDay)
+    pushTtlHours: PUSH_TTL_HOURS, // a notification waits at a push service at most this long (server/push.js TTL)
   });
 
   return { eraseAuthored, about, quietTyping };

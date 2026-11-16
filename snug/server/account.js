@@ -51,7 +51,7 @@ import { zipWriter } from './zip.js'; // privacy: Download my data as one zip
 import {
   limiter, verifyPassword, hashPasswordAsync, burnPasswordCheck, passwordProblem, tokenHash, createSession, sessionCookie, endAllSessions, endSession,
   readCookie, COOKIE, sessionValid, recentAuth, markAuth, createAuthGuard, POLICIES, loadDataKey, subKey, seal, unseal, isSealed, maskIp,
-  configureSessions, MAX_PASSWORD, SESSION_DAYS, idleMs,
+  configureSessions, MAX_PASSWORD, SESSION_DAYS, idleMs, activeDay, idleBefore,
 } from './auth.js';
 import { HUES, stripInvisible } from '../js/lib/util.js'; // sec-authz: stripInvisible
 import { imageInfo } from './messaging.js';
@@ -141,7 +141,7 @@ const tooMany = (ms) => `Too many tries. Wait ${ms > 90_000 ? `${Math.ceil(ms / 
 function core(db) {
   let c = CORES.get(db);
   if (c) return c;
-  c = { key: null, derived: null, log: () => {}, guard: createAuthGuard(db), windows: new Map(), pruned: 0, keepDays: 30 };
+  c = { key: null, derived: null, log: () => {}, guard: createAuthGuard(db), windows: new Map(), pruned: 0, keepDays: 14 };
   // privacy: an address as a failure-counter key: an HMAC, so the table never holds the address.
   c.addrKey = (ip) => createHmac('sha256', c.keys().addr).update(String(ip || '')).digest('base64url').slice(0, 22);
   // The hourly sweep: sign-in history past keepDays (SNUG_LOG_DAYS), failure counters past two days.
@@ -556,8 +556,9 @@ export function createAccountOps({ db, M, hub, fail, ops = {} }) {
       const mine = currentHash(c);
       // e2eeDevice: the end-to-end encryption device bound on that session (server/e2ee.js), so signing it out can remove its keys too.
       return {
-        sessions: db.all('SELECT * FROM sessions WHERE user = ? AND expires > ? AND COALESCE(seen, created) > ? ORDER BY COALESCE(seen, created) DESC', c.user, Date.now(), Date.now() - idleMs(db))
-          .map((s) => ({ id: s.hash.slice(0, 16), agent: s.agent || 'Unknown device', created: s.created, seen: s.seen || s.created, current: s.hash === mine, ...(s.e2ee_device ? { e2eeDevice: s.e2ee_device } : {}) })),
+        // seen: the day it was last used (0.14), the start of that day in UTC.
+        sessions: db.all('SELECT * FROM sessions WHERE user = ? AND expires > ? AND COALESCE(seen, created) >= ? ORDER BY COALESCE(seen, created) DESC, created DESC', c.user, Date.now(), idleBefore(db))
+          .map((s) => ({ id: s.hash.slice(0, 16), agent: s.agent || 'Unknown device', created: s.created, seen: activeDay(s.seen || s.created), current: s.hash === mine, ...(s.e2ee_device ? { e2eeDevice: s.e2ee_device } : {}) })),
       };
     },
     'sessions.revoke'(c, d) {
@@ -691,7 +692,7 @@ export function createAccountHttp({
   db, M, hub, filesDir, sendJson, error, jsonBody, body, headers, ipOf, secure, authLimit, uploadLimit, log = () => {},
   dataDir = null, keyStore = null, desktop = false,
   dataKey = null, // sec-integrate: the key server/index.js already loaded (one load, one log line)
-  logDays = 30, // privacy: how long sign-in history is kept (SNUG_LOG_DAYS)
+  logDays = 14, // privacy: how long sign-in history is kept (SNUG_LOG_DAYS; 30 before 0.14)
 }) {
   const R = reads(db);
   const C = core(db);
@@ -993,7 +994,7 @@ export function createAccountHttp({
       friends: db.all('SELECT other, state, favorite, since FROM friends WHERE user = ?', user).map((f) => ({ person: handleOf(f.other), state: f.state, favorite: !!f.favorite, since: f.since ? new Date(f.since).toISOString() : null })),
       houses,
       conversations: dms,
-      sessions: db.all('SELECT agent, created, seen FROM sessions WHERE user = ?', user).map((s) => ({ device: s.agent, created: new Date(s.created).toISOString(), lastSeen: new Date(s.seen || s.created).toISOString() })),
+      sessions: db.all('SELECT agent, created, seen FROM sessions WHERE user = ?', user).map((s) => ({ device: s.agent, created: new Date(s.created).toISOString(), lastSeen: new Date(activeDay(s.seen || s.created)).toISOString() })),
       messages,
       ...(messages.some((m) => m.encrypted) ? { encryptedNote: 'Messages in end-to-end encrypted conversations are exported as this server stores them: encrypted envelopes. The server can’t read them, so it can’t export their text; your devices can.' } : {}),
       ...extra,

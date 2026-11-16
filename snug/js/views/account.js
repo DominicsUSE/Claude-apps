@@ -26,6 +26,7 @@ import { setLook } from '../account.js';
 import { Confirm } from './modals.js';
 import { RevokeSheet, hasKeys } from './e2ee-revoke.js'; // signing out a device can remove its encryption keys too
 import { EraseChoice } from './privacy.js'; // deleting: keep or erase what I wrote
+import { lastActive } from '../lib/privacy.js'; // 0.14: a device's last use is kept to the day
 import { p2pOwner, AccountRows, ConnectRow, DeleteP2p } from './p2p.js'; // GitHub-secured accounts: no password; the Snug username
 import { PasskeyRows, PasskeyStepButton } from './passkeys.js'; // v0.12: passkey sign-in (server/passkeys.js); v0.13: passkey as step-up
 import { RecoveryRows } from './recover.js'; // v0.12: the recovery key for a forgotten password (server/recovery.js)
@@ -463,7 +464,7 @@ function Sessions() {
   return html`<ul class="acc-sessions" aria-label="Signed-in devices">
     ${list.map((s) => html`<li key=${s.id} class="acc-session">
       <span class="row-ic"><${Icon} name=${/Android|iPhone/.test(s.agent) ? 'phone' : 'screen'} /></span>
-      <span class="grow"><b>${s.agent}</b><span class="faint">${s.current ? 'This device' : `Last used ${fmtWhen(s.seen)}`} · signed in ${fmtWhen(s.created)}</span></span>
+      <span class="grow"><b>${s.agent}</b><span class="faint">${s.current ? 'This device' : lastActive(s.seen)} · signed in ${fmtWhen(s.created)}</span></span>
       ${s.current ? html`<span class="acc-tag">This device</span>` : html`<button class="btn" aria-label=${`Sign out ${s.agent}`} onClick=${() => revoke(s.id)}>Sign out</button>`}
     </li>`)}
   </ul>

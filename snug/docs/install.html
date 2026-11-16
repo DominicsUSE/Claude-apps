@@ -126,7 +126,10 @@ membership. Snug isn't notarized, so macOS shows this the first time.</p>
 <h2 id="updates">5. Updates, and going back to an older version</h2>
 <p>Snug updates itself. It downloads the new version from the same release page and installs it only after
 its checksum matches the release's checksum file (and, once the project switches on update signing, only if
-that file carries the project's signature). It waits for a quiet moment and never restarts during a call.</p>
+that file carries the project's signature). It waits for a quiet moment and never restarts during a call.
+It asks GitHub for a new version when it starts and about once a day, so GitHub sees your internet address
+then. In <b>Settings &gt; Desktop app &gt; Updates</b> you can choose <i>Automatically</i>, <i>Tell me</i>
+(Snug says when there is a new version and installs it when you press Install now) or <i>Only when I ask</i>.</p>
 <p>Snug never goes back to an older version by itself. Every version stays on the release page:
 <a href="https://github.com/DominicsUSE/Claude-apps/releases?q=snug-v&amp;expanded=true">all Snug releases</a>.
 If a new version breaks something for you:</p>
@@ -138,8 +141,9 @@ If a new version breaks something for you:</p>
   over the current one (Windows) or replace Snug in Applications (Mac). Your conversations and settings stay in
   your data folder. Things the newer version added won't work in the older one.</li>
 </ol>
-<p class="note">Updates are required, so an older version updates itself again soon after it starts, unless
-the project has withdrawn the broken release (marked it as a pre-release). Going back is a way to keep working
+<p class="note">With <i>Automatically</i> (the default), an older version updates itself again soon after it
+starts, unless the project has withdrawn the broken release (marked it as a pre-release); choose <i>Tell me</i>
+or <i>Only when I ask</i> to stay on it. Going back is a way to keep working
 until a fixed version is out.</p>
 
 <footer>

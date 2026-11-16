@@ -758,11 +758,24 @@ test("desktop shell: badge and flash, theme colour, settings, global voice keys,
   assert.equal(await app.evaluate(() => globalThis.snugParseLink("snug://open/a/b/c")), null);
   await page.keyboard.press("Escape");
 
-  // Updates are mandatory (the test below): the Snug page has no strip, no update bridge, no setting.
+  // Updates install themselves by default (the tests below): the Snug page has no strip and no update bridge.
+  // 0.14: Settings > Desktop app has the choice of how the app checks, saved in desktop.json.
   assert.equal(await page.evaluate(() => typeof window.snugUpdate), "undefined");
   assert.equal(await page.evaluate(() => typeof window.snugApp.openUpdate), "undefined");
   assert.equal(await page.locator(".update-strip").count(), 0);
   assert.match((await page.evaluate(() => window.snugApp.setDesktopSettings({ updateCheck: false }))).error, /isn’t a desktop setting/);
+  await page.evaluate(() => import("/js/store.js").then((s) => import("/js/views/settings.js").then((v) => s.openLayer({ C: v.Settings, props: {} }))));
+  await page.click('.layer-nav .row:has-text("Desktop app")');
+  const choice = page.locator('.seg[aria-label="Check for new versions"]');
+  await choice.waitFor();
+  assert.equal(await choice.locator('button[aria-pressed="true"]').textContent(), "Automatically");
+  await choice.locator('button:has-text("Only when I ask")').click();
+  await page.locator("#ds-update-check").waitFor();
+  await page.waitForFunction(() => document.querySelector(".layer-body")?.textContent.includes("only when you press Check now"));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(shellDir, "desktop.json"), "utf8")).updates, "manual");
+  await choice.locator('button:has-text("Automatically")').click();
+  await page.waitForFunction(() => document.querySelector('.seg[aria-label="Check for new versions"] button[aria-pressed="true"]')?.textContent === "Automatically");
+  await page.keyboard.press("Escape");
 
   // Leave a known size and place for the next test.
   await mainWin(app, (w) => { w.unmaximize(); w.setBounds({ x: 60, y: 40, width: 900, height: 700 }); });
@@ -899,9 +912,9 @@ test("p2p: Create my account works in the app: the proof of work runs in a worke
 // puts the update page in the way before the install.
 // The app's own check (3 s after start) stays out of the way unless a test asks for it (auto): the tests call
 // the check themselves, so nothing depends on how long a start takes.
-async function launchUpdate(userData, { auto = false } = {}) {
+async function launchUpdate(userData, { auto = false, config = {} } = {}) {
   await stubReady;
-  fs.writeFileSync(path.join(userData, "desktop.json"), JSON.stringify({ mode: "host" }));
+  fs.writeFileSync(path.join(userData, "desktop.json"), JSON.stringify({ mode: "host", ...config }));
   const bin = process.env.SNUG_BIN && path.resolve(process.env.SNUG_BIN);
   const env = { ...process.env, SNUG_UPDATE_URL: `http://127.0.0.1:${updateStub.address().port}/latest`, SNUG_NOTICES_URL: `http://127.0.0.1:${updateStub.address().port}/notices`, SNUG_UPDATE_KIND: "portable", SNUG_UPDATE_DRY_INSTALL: "1", SNUG_UPDATE_QUIET: auto ? "1" : "0", SNUG_UPDATE_CHECK: "manual" };
   if (auto) delete env.SNUG_UPDATE_CHECK;
@@ -1073,6 +1086,61 @@ test("automatic update: the app's own check, a few seconds after starting, does 
   const rec = await app.evaluate(() => globalThis.snugUpdateInstalled);
   assert.equal(rec.kind, "portable");
   fs.rmSync(path.dirname(rec.file), { recursive: true, force: true });
+});
+
+test("0.14 update choice: Tell me finds the version, says so and waits for Install now; Only when I ask never checks by itself", async (t) => {
+  upd.badSums = false;
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-update-notify-"));
+  t.after(() => removeDir(userData));
+  const { app, page } = await launchUpdate(userData, { auto: true, config: { updates: "notify" } });
+  t.after(() => app.close().catch(() => {}));
+  // Its own check soon after starting finds 9.9.9: a notification, nothing downloaded, Snug stays in use.
+  for (let end = Date.now() + 40000; !(await app.evaluate(() => (globalThis.snugUpdateNotes || []).includes("9.9.9"))); ) {
+    if (Date.now() > end) throw new Error("no notification about 9.9.9");
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  assert.equal(await updatePhase(app), "required", "found, not downloading");
+  assert.equal(await app.evaluate(() => globalThis.snugUpdateShown()), false);
+  let u = await page.evaluate(() => window.snugApp.getUpdates());
+  assert.deepEqual({ mode: u.mode, waiting: u.waiting, version: u.version }, { mode: "notify", waiting: true, version: "9.9.9" });
+  assert.equal(u.lastCheck.ok, true);
+  for (let end = Date.now() + 5000; !(await app.evaluate(() => globalThis.snugUpdateTimer())); ) {
+    if (Date.now() > end) throw new Error("the next check (about a day away) was never set");
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.equal(await app.evaluate(() => globalThis.snugUpdateInstalled ?? null), null);
+  // Install now: it downloads, checks and installs (a quiet moment, here).
+  await page.evaluate(() => window.snugApp.installUpdate());
+  for (let end = Date.now() + 40000; !(await app.evaluate(() => globalThis.snugUpdateInstalled ?? null)); ) {
+    if (Date.now() > end) throw new Error(`not installed (phase ${await updatePhase(app)})`);
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  const rec = await app.evaluate(() => globalThis.snugUpdateInstalled);
+  fs.rmSync(path.dirname(rec.file), { recursive: true, force: true });
+  await app.close();
+
+  // Only when I ask: no check on its own; Check now finds it and it still waits for Install now.
+  const userData2 = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-update-manual-"));
+  t.after(() => removeDir(userData2));
+  const two = await launchUpdate(userData2, { auto: true, config: { updates: "manual" } });
+  t.after(() => two.app.close().catch(() => {}));
+  assert.equal(await two.app.evaluate(() => globalThis.snugUpdateTimer()), false, "nothing scheduled");
+  u = await two.page.evaluate(() => window.snugApp.getUpdates());
+  assert.equal(u.lastCheck, null, "never asked GitHub");
+  u = await two.page.evaluate(() => window.snugApp.checkForUpdates());
+  assert.deepEqual({ waiting: u.waiting, version: u.version, phase: u.phase }, { waiting: true, version: "9.9.9", phase: "required" });
+  assert.equal(await two.app.evaluate(() => (globalThis.snugUpdateNotes || []).length), 0, "no notification: the person is looking");
+  assert.match((await two.page.evaluate(() => window.snugApp.setUpdateMode("hourly"))).error, /isn’t an update choice/);
+  // Switching to Automatically lets the waiting version go ahead, and schedules the checks again.
+  const r = await two.page.evaluate(() => window.snugApp.setUpdateMode("auto"));
+  assert.equal(r.settings.updates, "auto");
+  assert.equal(JSON.parse(fs.readFileSync(path.join(userData2, "desktop.json"), "utf8")).updates, "auto");
+  assert.equal(await two.app.evaluate(() => globalThis.snugUpdateTimer()), true);
+  for (let end = Date.now() + 40000; !(await two.app.evaluate(() => globalThis.snugUpdateInstalled ?? null)); ) {
+    if (Date.now() > end) throw new Error(`not installed (phase ${await updatePhase(two.app)})`);
+    await new Promise((r2) => setTimeout(r2, 200));
+  }
+  fs.rmSync(path.dirname((await two.app.evaluate(() => globalThis.snugUpdateInstalled)).file), { recursive: true, force: true });
 });
 
 // ---------- sec-desktop: join mode against a stand-in server, the in-app server's switches, fuses ----------

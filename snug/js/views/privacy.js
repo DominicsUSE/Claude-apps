@@ -28,6 +28,20 @@ function useAbout() {
   return about;
 }
 
+// In the desktop app: its settings, for how it checks for updates (desktop/main.js); null in a browser.
+function useDesktop() {
+  const [cfg, setCfg] = useState(null);
+  useEffect(() => {
+    const app = typeof window !== 'undefined' ? window.snugApp : null;
+    if (!app?.desktop) return undefined;
+    let live = true;
+    setCfg({});
+    app.getDesktopSettings?.().then((c) => { if (live && c) setCfg(c); }, () => {});
+    return () => { live = false; };
+  }, []);
+  return cfg;
+}
+
 // The desktop app's own account talks to friends on other PCs; everyone else
 // (a website, or a guest on someone's PC) is on a server.
 const modeNow = () => (S.p2p?.enabled && S.p2p.owner ? 'p2p' : 'host');
@@ -83,6 +97,7 @@ export function PrivacyControls({ Row }) {
 // The full privacy page, for ordinary people: in Settings (Privacy guide) and on its own at /privacy (PrivacyDoc).
 export function PrivacyGuide({ level = 2 }) {
   const about = useAbout();
+  const desk = useDesktop();
   const f = factsNow(about);
   const H = `h${level}`;
   const other = whoSeesWhat({ ...f, mode: f.mode === 'p2p' ? 'host' : 'p2p' }).filter((s) => s.id === 'messages' || s.id === 'directory');
@@ -90,8 +105,8 @@ export function PrivacyGuide({ level = 2 }) {
     <p class="lead">What Snug stores, who can see it, and what you can do about it, in plain words. This page describes ${f.mode === 'p2p' ? 'the desktop app with friends on other PCs' : `this Snug at ${f.host}`}.</p>
     <${Sections} sections=${whoSeesWhat(f)} level=${level} />
     <section class="pv-sect" data-pv="kept" aria-labelledby="pv-kept">
-      <${H} id="pv-kept">What this Snug keeps, and for how long<//>
-      <ul>${keptFor(about || {}).map((t, i) => html`<li key=${i}>${t}</li>`)}</ul>
+      <${H} id="pv-kept">What Snug stores and for how long<//>
+      <ul>${keptFor(about || {}, { e2ee: f.e2ee, p2p: f.mode === 'p2p', desktopApp: !!desk, updates: desk?.updates }).map((t, i) => html`<li key=${i}>${t}</li>`)}</ul>
     </section>
     <section class="pv-sect" data-pv="choices" aria-labelledby="pv-choices">
       <${H} id="pv-choices">Your choices<//>

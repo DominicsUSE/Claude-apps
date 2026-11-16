@@ -41,7 +41,8 @@ import {
 import { createSeclog, redactLog, redact, sendFile } from './seclog.js'; // sec-web: security events, log redaction, safe file sends
 import { PROTO, MIN_CLIENT } from '../js/lib/proto.js'; // GET /api/version
 import { staticRel, staticHeaders, BASE_HEADERS, PUBLIC } from './static.js'; // the app's own files and their headers, shared with the desktop app's join mode
-import { createPrivacy, logDaysFrom, iceFacts } from './privacy.js'; // privacy: who sees you online, typing, friends' link previews, erasing, what is kept
+import { createRetention } from './retention.js'; // 0.14: house join log, link-preview cache and friend-request cooldowns purged hourly
+import { createPrivacy, logDaysFrom, iceFacts, LOG_DAYS } from './privacy.js'; // privacy: who sees you online, typing, friends' link previews, erasing, what is kept
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // Uploaded images shown inline. Anything else downloads.
@@ -89,8 +90,8 @@ export async function startServer({
   linkPreviews = process.env.SNUG_LINK_PREVIEWS !== '0',
   // Tests only: let previews fetch a local stand-in site on 127.0.0.1 (every other private address stays refused).
   linkAllowLocal = false,
-  // privacy: days sign-in history and security events are kept (SNUG_LOG_DAYS, 1 to 365; 30 by default).
-  logDays = logDaysFrom(process.env.SNUG_LOG_DAYS ?? 30),
+  // privacy: days sign-in history and security events are kept (SNUG_LOG_DAYS, 1 to 365; 14 by default, 30 before 0.14).
+  logDays = logDaysFrom(process.env.SNUG_LOG_DAYS ?? LOG_DAYS),
   // p2p (server/peer.js): the registry, GitHub sign-in, the device key wrapper and link tuning.
   registryUrl = process.env.SNUG_REGISTRY_URL || null,
   githubClientId = process.env.SNUG_GITHUB_CLIENT_ID || null,
@@ -205,6 +206,7 @@ export async function startServer({
 
   // Deleted messages can be restored for ten minutes; after that their content is gone for good.
   const sweepFiles = createFileSweep({ db, filesDir, log }); // sec-authz: deleted attachments and never-sent uploads (server/media.js)
+  const retention = createRetention({ db, filesDir, log }); // 0.14: operational metadata past its window, once an hour
   const sweep = setInterval(() => {
     try { expiry.sweep(); } catch (e) { log('error', 'expiry sweep', e); } // 0.12: disappearing messages, before their files go
     try { sweepFiles(); } catch (e) { log('error', 'file sweep', e); } // sec-authz: before the files column is cleared below
@@ -215,6 +217,7 @@ export async function startServer({
     push.prune(); // devices whose sign-in expired stop getting notifications
     peer.housekeep(); // p2p: outbox rows past 30 days, old knock ids
     hub.e2ee?.sweep(); // end-to-end encryption: expired device requests (server/e2ee.js)
+    retention.tick(); // 0.14: once an hour (server/retention.js)
   }, 60_000);
 
   function headers(res, extra = {}) {
@@ -470,6 +473,7 @@ export async function startServer({
     port: address.port, db, M, hub, server,
     seclog: sec, // sec-web W4: tests run the security-event sweep and read events
     sweepFiles, // sec-authz: tests run the attachment sweep with their own clock
+    retention, // 0.14: tests run the hourly purge with their own clock
     sweepUploads: (now) => uploads.sweep(now), // tests: abandoned chunked uploads
     expiry, // 0.12: tests run the disappearing-messages sweep with their own clock
     accountPrune: () => accountHttp.prune(), // privacy: tests run the sign-in history sweep now

@@ -98,7 +98,12 @@ export function migratePlaces(db) {
       ts INTEGER NOT NULL,
       kind TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS member_log_house ON member_log(house, ts);`);
+    CREATE INDEX IF NOT EXISTS member_log_house ON member_log(house, ts);
+    -- 0.14: when a house's join log began, kept before rows past 90 days are purged (server/retention.js).
+    CREATE TABLE IF NOT EXISTS member_log_began (
+      house TEXT PRIMARY KEY REFERENCES houses(id) ON DELETE CASCADE,
+      ts INTEGER NOT NULL
+    );`);
   const have = (t, c) => db.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c);
   const firstTime = !have('roles', 'hoist');
   // Names and types are fixed here, never from input.
@@ -1143,8 +1148,10 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
     const fill = (rows) => { const s = series(); for (const r of rows) { const i = Math.round((r.day - since) / DAY); if (s[i]) s[i].n += r.n; } return s; };
     const convs = `(SELECT id FROM rooms WHERE house = ?1) OR conv IN (SELECT t.id FROM threads t JOIN rooms r ON r.id = t.conv WHERE r.house = ?1)`;
     const messages = fill(db.all(`SELECT (ts / ${DAY}) * ${DAY} AS day, COUNT(*) n FROM messages WHERE (conv IN ${convs}) AND ts >= ?2 AND sys IS NULL GROUP BY day`, house.id, since));
-    // Joins before the log began come from when people joined.
-    const logged = db.get("SELECT MIN(ts) t FROM member_log WHERE house = ? AND kind = 'join'", house.id)?.t ?? t;
+    // Joins before the log began come from when people joined. 0.14: rows past 90 days are purged
+    // (server/retention.js), which first keeps when the log began in member_log_began.
+    const logged = db.get('SELECT ts FROM member_log_began WHERE house = ?', house.id)?.ts
+      ?? db.get("SELECT MIN(ts) t FROM member_log WHERE house = ? AND kind = 'join'", house.id)?.t ?? t;
     const joined = fill([
       ...db.all(`SELECT (ts / ${DAY}) * ${DAY} AS day, COUNT(*) n FROM member_log WHERE house = ? AND kind = 'join' AND ts >= ? GROUP BY day`, house.id, since),
       ...db.all(`SELECT (joined / ${DAY}) * ${DAY} AS day, COUNT(*) n FROM members WHERE house = ? AND joined >= ? AND joined < ? GROUP BY day`, house.id, since, logged),

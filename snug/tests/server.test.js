@@ -3678,7 +3678,8 @@ test('account: sessions list the device and last use; sign one out, or every oth
   assert.equal(sessions.filter((s) => s.current).length, 1);
   assert.ok(sessions.some((s) => s.agent === 'Chrome on Android'));
   assert.ok(sessions.some((s) => s.agent === 'Snug desktop on Windows'));
-  assert.ok(sessions.every((s) => /^[0-9a-f]{16}$/.test(s.id) && s.seen >= s.created));
+  // 0.14: last use is the day it happened (the start of that day, UTC), nothing finer.
+  assert.ok(sessions.every((s) => /^[0-9a-f]{16}$/.test(s.id) && s.seen % 86_400_000 === 0 && s.seen <= s.created && s.seen > s.created - 86_400_000));
   const mine = sessions.find((s) => s.current);
   assert.match(await me1.refused('sessions.revoke', { id: mine.id }), /this device/);
   assert.match(await me1.refused('sessions.revoke', { id: 'zz' }), /isn’t valid/);

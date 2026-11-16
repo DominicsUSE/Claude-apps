@@ -90,19 +90,34 @@ export function iceExpOf(ice) {
   return exps.length ? Math.min(...exps) * 1000 - 5 * 60_000 : null;
 }
 // SNUG_STUN=none leaves STUN out (a STUN server sees each caller's IP
-// address). Unset: with TURN configured, none (calls C3: a TURN server answers
-// STUN too, so nobody else needs to see addresses); without TURN, Google's
-// public one.
+// address). Unset: with this Snug's own TURN relay (SNUG_TURN_URL), the
+// relay's own address is asked (calls C3: a TURN server answers STUN too, and
+// already sees callers' addresses), so no third party is (0.14); without one,
+// Google's public STUN server is used, and the privacy page names it.
 // tagKey: the server's own key for TURN username tags (a random one per run when none is given).
+export const DEFAULT_STUN = 'stun:stun.l.google.com:19302';
+const relayStun = (turnUrls) => [...new Set(turnUrls.map((u) => /^turn:([^?]+)/.exec(u)?.[1]).filter(Boolean).map((h) => `stun:${h}`))];
 export function iceConfig(env = process.env, { warn = () => {}, tagKey = randomBytes(32) } = {}) {
   const turnUrls = (env.SNUG_TURN_URL || '').split(',').map((u) => u.trim()).filter(Boolean);
-  const raw = env.SNUG_STUN ? String(env.SNUG_STUN).trim() : turnUrls.length ? 'none' : 'stun:stun.l.google.com:19302';
-  const urls = /^none$/i.test(raw) ? [] : raw.split(',').map((u) => u.trim()).filter(Boolean);
+  const raw = env.SNUG_STUN ? String(env.SNUG_STUN).trim() : '';
+  const urls = /^none$/i.test(raw) ? [] : raw ? raw.split(',').map((u) => u.trim()).filter(Boolean)
+    : turnUrls.length ? relayStun(turnUrls) : [DEFAULT_STUN];
   const stun = urls.length ? [{ urls }] : [];
   if (!turnUrls.length) return stun;
   if (env.SNUG_TURN_SECRET) return (user) => [...stun, { urls: turnUrls, ...turnCredential(env.SNUG_TURN_SECRET, tagKey, user) }];
   warn('Warning: a static TURN login (SNUG_TURN_USER/SNUG_TURN_PASS) goes to every client and never expires. Set SNUG_TURN_SECRET for short-lived credentials.');
   return [...stun, { urls: turnUrls, username: env.SNUG_TURN_USER, credential: env.SNUG_TURN_PASS }];
+}
+
+// Desktop (server/peer.js): the directory's relay details (Cloudflare TURN) carry Cloudflare's STUN, so
+// Google's default STUN server is left out once they are here: one company fewer sees the address (0.14).
+// A STUN server chosen with SNUG_STUN stays.
+export function withRelayIce(list, relay) {
+  const base = Array.isArray(list) ? list : [];
+  const extra = Array.isArray(relay) ? relay : [];
+  const relayStuns = extra.some((s) => [].concat(s?.urls || []).some((u) => /^stuns?:/.test(u)));
+  const keep = relayStuns ? base.filter((s) => ![].concat(s?.urls || []).every((u) => u === DEFAULT_STUN)) : base;
+  return [...keep, ...extra];
 }
 
 export const soundView = (s) => s && {

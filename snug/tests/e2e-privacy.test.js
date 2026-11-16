@@ -77,7 +77,21 @@ test('server mode: Settings > Privacy and safety says this Snug at its address s
   await robin.click('#pv-open-guide');
   await robin.locator('#pv-guide').waitFor();
   const g = await text(robin, '#pv-guide');
-  assert.match(g, /Sign-in history and security events: 30 days/);
+  assert.match(g, /Sign-in history and security events: 14 days/);
+  // 0.14: the whole list of what this Snug stores, with the windows it purges at.
+  assert.match(await text(robin, '#pv-kept'), /What Snug stores and for how long/);
+  const kept = await text(robin, '[data-pv="kept"]');
+  for (const re of [/Call records/, /joins or leaves a house: 90 days/, /Link previews: .*24 hours/, /push address/, /Reactions, where you’ve read up to/,
+    /last used: the day only/, /declined or taken back: 24 hours/, /GIF searches/, /who is mentioned/]) assert.match(kept, re);
+  assert.doesNotMatch(kept, /GitHub/, 'no update checks in a browser');
+  assert.match(g, /Google .*SNUG_STUN=none/, 'the STUN server is named as a third party');
+  // Settings > Account: when each other device was last used, to the day, with no time.
+  const other = await fetch(`${url}/api/login`, { method: 'POST', headers: { origin: url, 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'robin', password: PASSWORD }) });
+  assert.equal(other.status, 200);
+  await settings(robin, 'Account');
+  const row = robin.locator('.acc-session', { hasNotText: 'This device' }).first();
+  await row.waitFor();
+  assert.match(await row.innerText(), /Active today · signed in/);
   assert.match(g, /no analytics, diagnostics or crash reports/);
   assert.match(g, /Snug is not anonymous/);
   assert.match(g, /can be required by law to hand over what they store/);
