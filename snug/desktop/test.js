@@ -1433,3 +1433,62 @@ test("an installed app ignores planted updater variables without --dev-update (S
   assert.deepEqual(planted.hits, []);
   await app.close();
 });
+
+// ---------- First-run setup page (desktop/setup.html) ----------
+// An invitation made on a Snug server over its socket, as the Invite dialog does.
+async function inviteOn(port) {
+  const base = `http://127.0.0.1:${port}`;
+  const res = await fetch(`${base}/api/register`, { method: "POST", headers: { "content-type": "application/json", origin: base }, body: JSON.stringify({ handle: "host_owner", name: "Hana", password: "a long password" }) });
+  const cookie = res.headers.get("set-cookie").split(";")[0];
+  const WebSocket = require("ws");
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, { headers: { cookie, origin: base } });
+  let seq = 0;
+  const acks = new Map();
+  await new Promise((resolve, reject) => {
+    ws.on("error", reject);
+    ws.on("message", (buf) => { const m = JSON.parse(buf); if (m.t === "hello") resolve(); else if (m.t === "ack") acks.get(m.id)?.(m); });
+  });
+  const op = (name, d) => { const id = ++seq; ws.send(JSON.stringify({ t: "op", id, op: name, d })); return new Promise((r) => acks.set(id, r)).then((a) => { assert.equal(a.ok, true, `${name}: ${a.error}`); return a.d; }); };
+  const { house } = await op("house.create", { name: "Hana’s place", hue: 25 });
+  const { code } = await op("invite.create", { house });
+  ws.close();
+  return code;
+}
+
+test("setup: a Privacy link opens the privacy page, the layout keeps to the page's CSP, and a pasted invitation link lands on the invitation", async (t) => {
+  const host = await realHost();
+  const origin = `http://127.0.0.1:${host.port}`;
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-setup-"));
+  t.after(async () => { await removeDir(userData); await host.close(); });
+  const { app, page } = await launchWith(userData, { env: NO_PROXY_ENV });
+  const csp = [];
+  page.on("console", (m) => { if (/Content Security Policy|Refused to/i.test(m.text())) csp.push(m.text()); });
+  await page.waitForSelector("#setup");
+  await page.reload(); // the listener came after the first load: load again so nothing is missed
+  await page.waitForSelector("#setup");
+  // The form is a card (.auth-panel), and the network switch's row has no line under it, from the stylesheet.
+  assert.equal(await page.locator(".auth-panel #setup").count(), 1);
+  assert.equal(await page.locator("[style]").count(), 0, "no inline styles (style-src 'self' blocks them)");
+  assert.equal(await page.locator("#host .set-row").evaluate((el) => getComputedStyle(el).borderBottomWidth), "0px");
+
+  // Privacy: the app's own privacy page, in a window of its own.
+  const link = page.locator("a#privacy");
+  assert.equal((await link.textContent()).trim(), "Privacy");
+  const [pv] = await Promise.all([app.waitForEvent("window"), link.click()]);
+  await pv.waitForSelector("#pv-guide");
+  assert.equal(new URL(pv.url()).pathname, "/privacy");
+  assert.equal(await pv.locator("h1").textContent(), "Privacy at Snug");
+  await pv.close();
+
+  // Join a Snug with a whole invitation link: the window opens the invitation once it is set up.
+  const code = await inviteOn(host.srv.port);
+  await page.click("#pick-join");
+  await page.fill("#url", `${origin}/join/${code}`);
+  await page.click("#go");
+  const joined = await windowAt(app, origin);
+  await joined.locator('.auth-invite:has-text("invited you to Hana’s place")').waitFor();
+  assert.equal((await app.evaluate(() => globalThis.snugLinks)).at(-1), `snug://join/${code}`);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(userData, "desktop.json"), "utf8")).url, origin, "the saved address is the server, not the invitation");
+  assert.deepEqual(csp, [], "no CSP violations on the setup page");
+  await app.close();
+});

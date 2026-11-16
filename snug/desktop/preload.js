@@ -32,6 +32,7 @@ if (updatePage && location.href === updatePage) {
   contextBridge.exposeInMainWorld("snugDesktop", {
     config: () => ipcRenderer.invoke("config:get"),
     save: (cfg) => ipcRenderer.invoke("config:save", cfg),
+    privacy: () => ipcRenderer.invoke("setup:privacy"), // the privacy page, in a window of its own
   });
 }
 

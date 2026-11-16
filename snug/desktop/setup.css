@@ -1,0 +1,7 @@
+/* The first-run setup page (desktop/setup.html). It uses the app's sign-in
+   layout (snug/css/brand.css .auth, .auth-panel); these are its own few rules.
+   No inline styles: the page's CSP (style-src 'self') blocks them. */
+.setup-brand { align-items: center; gap: var(--s-2); font-weight: var(--w-semibold); }
+.setup-lan { border: 0; padding-bottom: 0; }
+.setup-foot { margin: 0; font-size: var(--t-13); color: var(--text-2); }
+.setup-foot .auth-link { margin-left: 0; margin-right: var(--s-1); }

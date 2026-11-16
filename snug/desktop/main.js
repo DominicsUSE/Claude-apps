@@ -44,6 +44,16 @@ function validUrl(input) {
     return u.protocol === "http:" || u.protocol === "https:" ? u.origin : null;
   } catch { return null; }
 }
+// The invitation in a pasted "Join a Snug" link (https://host/join/<code>), or null. The address saved is
+// still the origin (validUrl); the invitation is opened once, after setup (snug:// links, below).
+function joinCodeIn(input) {
+  try {
+    const raw = String(input || "").trim();
+    const u = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    const m = /^\/join\/([\w-]{6,40})\/?$/.exec(u.pathname);
+    return m ? m[1] : null;
+  } catch { return null; }
+}
 
 let win = null;
 let server = null;      // the running in-app server, in host mode
@@ -665,13 +675,58 @@ ipcMain.handle("config:save", async (e, cfg) => {
     const url = validUrl(cfg.url);
     if (!url) return { error: "That doesn’t look like an address. Try something like snug.example.com." };
     writeConfig({ mode: "join", url });
+    // A whole invitation link: the page opens it once it is up (it says "deeplink:ready").
+    const code = joinCodeIn(cfg.url);
+    const link = code ? `snug://join/${code}` : null;
+    if (link) pendingLink = link;
     // A plain-http address on the network needs the secure-origin switch for it (above), set only at startup.
     const needs = pinned.insecureOrigin(url);
-    if (needs && needs !== insecureOrigin) { setImmediate(() => { quitting = true; app.relaunch(); app.quit(); }); return {}; }
+    if (needs && needs !== insecureOrigin) {
+      setImmediate(() => { quitting = true; app.relaunch(link ? { args: [...process.argv.slice(1), link] } : undefined); app.quit(); });
+      return {};
+    }
   } else return { error: "Choose one of the two." };
   setImmediate(() => open());
   return {};
 });
+
+// The setup page's Privacy link: the privacy page (snug/js/views/privacy.js) as this app's own server serves it,
+// from a short-lived copy with nothing in it (a temporary folder, this computer only), in a window of its own
+// on a session that keeps nothing. Closing the window stops that server and removes the folder.
+let privacyWin = null;
+async function openPrivacy() {
+  if (privacyWin && !privacyWin.isDestroyed()) { privacyWin.show(); privacyWin.focus(); return; }
+  const { startServer } = await import(pathToFileURL(path.join(__dirname, "snug", "server", "index.js")).toString());
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "snug-privacy-"));
+  let srv;
+  try {
+    srv = await startServer({
+      host: "127.0.0.1", port: 0, dataDir, quiet: true,
+      secure: false, trustProxy: false, extraOrigins: [], hosts: [], pushAllowLocal: false, linkAllowLocal: false, ghWindowOnly: true, e2ee: true,
+      ...p2pConfig(), fetch: require("electron").net.fetch.bind(require("electron").net), // the same mode as Snug on this computer, so the page describes it
+    });
+  } catch (e) { fs.rmSync(dataDir, { recursive: true, force: true }); throw e; }
+  const at = `http://127.0.0.1:${srv.port}`;
+  const ses = session.fromPartition("snug-privacy"); // no "persist:": nothing is kept
+  ses.setPermissionRequestHandler((_wc, _p, cb) => cb(false));
+  ses.setPermissionCheckHandler(() => false);
+  const w = privacyWin = new BrowserWindow({
+    width: 760, height: 860, minWidth: 380, minHeight: 480, title: "Privacy at Snug", autoHideMenuBar: true,
+    icon: path.join(__dirname, "snug", "icon.png"), backgroundColor: nativeTheme.shouldUseDarkColors ? "#0E0F10" : "#E9E6E1",
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, session: ses },
+  });
+  const isPage = (url) => { try { const u = new URL(url); return u.origin === at && /^\/privacy\/?$/.test(u.pathname); } catch { return false; } };
+  // Only the privacy page: links elsewhere open in the browser; "Back to Snug" closes the window.
+  w.webContents.setWindowOpenHandler(({ url }) => { external(url); return { action: "deny" }; });
+  w.webContents.on("will-navigate", (ev, url) => { if (isPage(url)) return; ev.preventDefault(); if (new URL(url).origin === at) w.close(); else external(url); });
+  w.webContents.on("did-navigate-in-page", (_ev, url) => { if (!isPage(url)) w.close(); });
+  w.on("closed", () => {
+    if (privacyWin === w) privacyWin = null;
+    srv.close().catch(() => {}).finally(() => fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }));
+  });
+  await w.loadURL(`${at}/privacy`);
+}
+ipcMain.handle("setup:privacy", (e) => (e.senderFrame.url.startsWith(SETUP) ? openPrivacy().then(() => true, () => false) : null));
 
 // One window and one database: opening Snug again brings the running one to the front.
 if (exporting) { /* --export-vault: desktop/vaultexport.js does the work and exits */ } else if (!app.requestSingleInstanceLock()) app.quit();

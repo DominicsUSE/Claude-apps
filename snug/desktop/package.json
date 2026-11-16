@@ -50,6 +50,7 @@
       "preload.js",
       "setup.html",
       "setup.js",
+      "setup.css",
       "vaultexport.js",
       "updater.js",
       "update.html",

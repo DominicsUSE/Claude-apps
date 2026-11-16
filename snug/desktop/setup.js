@@ -17,6 +17,11 @@ function fail(text) {
   $("go").disabled = false;
 }
 
+// Privacy: the app's own privacy page (snug/js/views/privacy.js), opened by the app in a window of its own.
+$("privacy").addEventListener("click", (e) => {
+  e.preventDefault();
+  window.snugDesktop.privacy().then((ok) => { if (ok === false) fail("The privacy page couldn’t open. Try again."); });
+});
 $("pick-host").addEventListener("click", () => show("host"));
 $("pick-join").addEventListener("click", () => show("join"));
 $("lan").addEventListener("click", () => {
