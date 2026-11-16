@@ -71,6 +71,7 @@ export const KEY_ROUTES = {
   '/v1/move/accept': 'moveAccept',
   '/v1/recovery/set': 'recoverySet',
   '/v1/recovery/cancel': 'recoveryCancel',
+  '/v1/recovery/drop': 'recoveryDrop',
   '/v1/recovery/whose': 'recoveryWhose',
   '/v1/link/github': 'linkGithub',
   '/v1/link/github/remove': 'unlinkGithub',
@@ -643,13 +644,33 @@ export const KeyAcctMixin = {
     const { ticket, ts, sig } = b;
     return this.withTicket(ticket, ts, sig, () => `snug-reg-v1\nrecovery-cancel-gh\n${ticket}\n${ts}${w.sfx}`, (t, h) => {
       const own = this.row('SELECT uid FROM accounts WHERE ghh=?', t.ghh);
-      const uid = own?.uid ?? this.linkedAccount(t.ghh)?.uid;
+      const linked = own ? null : this.linkedAccount(t.ghh);
+      // v0.13: the GitHub account a waiting link would add can call that link off (and nothing else).
+      const waiting = own || linked || !w.link ? null : this.row('SELECT uid FROM link_pending WHERE ghh=?', t.ghh);
+      const uid = own?.uid ?? linked?.uid ?? waiting?.uid;
       if (!uid) fail('not_found');
       this.tx(() => {
-        this.dropPendingChanges(uid, own ? { key: w.key, link: false } : w);
+        this.dropPendingChanges(uid, own ? { key: w.key, link: false } : waiting ? { key: false, link: true } : w);
         this.sql.exec('DELETE FROM tickets WHERE h=?', h);
       });
       this.sendNew(uid, { t: 'recovery', state: 'cancelled', ...(b.what ? { what: b.what } : {}) });
+      return { ok: true };
+    });
+  },
+
+  /**
+   * v0.13: p = {what: 'key'}, signed by the device: it calls off a first recovery key it asked for (a GitHub
+   * account with no recovery key yet). That only puts back what was there; a key that would replace a current
+   * one is cancelled with that current key (/v1/recovery/cancel) or the account's GitHub sign-in.
+   */
+  async recoveryDrop(b, ip) {
+    this.ipLimit('ipAccount', ip);
+    return this.signedP(b, 'recovery-drop', { mutating: true }, (acc, p) => {
+      need(p.what === 'key');
+      if (!this.row('SELECT 1 AS x FROM recovery_pending WHERE uid=?', acc.uid)) fail('not_found');
+      if (this.rkOf(acc.uid)) fail('forbidden');
+      this.sql.exec('DELETE FROM recovery_pending WHERE uid=?', acc.uid);
+      this.sendNew(acc.uid, { t: 'recovery', state: 'cancelled', what: 'key' });
       return { ok: true };
     });
   },

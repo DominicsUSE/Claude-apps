@@ -86,7 +86,7 @@ test('KEY_ACCOUNTS off: every new route answers exactly like an unknown path', a
   try {
     const unknown = await off.call('/v1/nope', {});
     for (const path of ['/v1/pow', '/v1/register', '/v1/recover', '/v1/move/hello', '/v1/move/wait', '/v1/move/peek', '/v1/move/accept',
-      '/v1/recovery/set', '/v1/recovery/cancel', '/v1/link/github', '/v1/link/github/remove', '/v1/release/key', '/v1/account/kind']) {
+      '/v1/recovery/set', '/v1/recovery/cancel', '/v1/recovery/drop', '/v1/link/github', '/v1/link/github/remove', '/v1/release/key', '/v1/account/kind']) {
       const r = await off.call(path, { purpose: 'register' });
       assert.equal(r.status, 404, path);
       assert.deepEqual({ ...r.body, now: 0 }, { ...unknown.body, now: 0 }, path);
@@ -473,6 +473,64 @@ test('link/github: a new GitHub account becomes a second proof; it can move the 
   assert.equal(un.body.state, 'pending');
   await reg.clock.advance(7 * DAY + 1000);
   assert.equal((await reg.authId(makeKeys(), gid)).body.status, 'new');
+});
+
+test('v0.13: a waiting link can be cancelled by the GitHub account being linked (only the link)', async () => {
+  const a = await account(uniq('lgc'));
+  const u = { uid: a.uid, k: a.k };
+  const gid = nextGh++;
+  const t = await ghTicket(a.k, gid);
+  assert.equal((await sp(u, '/v1/link/github', 'link-github', { ticket: t.ticket })).body.state, 'pending');
+  // a recovery key waiting too: cancelling the link with GitHub leaves it
+  const nr = makeKeys();
+  const ts0 = reg.ts();
+  const msg0 = `snug-reg-v1\nrecovery-set\n${u.uid}\n${nr.ik}\n${ts0}`;
+  const p0 = JSON.stringify({ rk: nr.ik, rsigNew: nr.sign(msg0) });
+  assert.equal((await reg.call('/v1/recovery/set', { uid: u.uid, ts: ts0, p: p0, sig: a.k.sign(`snug-reg-v1\nrecovery-set\n${u.uid}\n${ts0}\n${p0}`) })).body.state, 'pending');
+  // another GitHub account can't
+  const k3 = makeKeys();
+  const tx = await ghTicket(k3, nextGh++);
+  const cancelGh = (tk, k, what) => { const ts = reg.ts(); return reg.call('/v1/recovery/cancel', { ticket: tk, ts, sig: k.sign(`snug-reg-v1\nrecovery-cancel-gh\n${tk}\n${ts}${what ? `\n${what}` : ''}`), ...(what ? { what } : {}) }); };
+  assert.equal((await cancelGh(tx.ticket, k3, 'link')).body.error, 'not_found');
+  // the GitHub account being linked, signed in on any PC
+  const k2 = makeKeys();
+  const t2 = await ghTicket(k2, gid);
+  assert.equal((await cancelGh(t2.ticket, k2, 'link')).status, 200);
+  const kd = (await kind(u)).body;
+  assert.equal(kd.github.pending, null);
+  assert.equal(kd.github.linked, false);
+  assert.ok(kd.recovery.pendingAt, 'the waiting recovery key stays');
+  // it can't cancel the recovery key: it isn't linked
+  const t3 = await ghTicket(k2, gid);
+  assert.equal((await cancelGh(t3.ticket, k2, 'key')).body.error, 'not_found');
+  assert.ok((await kind(u)).body.recovery.pendingAt);
+});
+
+test('v0.13: recovery/drop: the device cancels a first recovery key it asked for; not a key that replaces one', async () => {
+  const gh = await reg.signUp(nextGh++, uniq('drp'));
+  const setKey = (who, k) => {
+    const nr = makeKeys();
+    const ts = reg.ts();
+    const msg = `snug-reg-v1\nrecovery-set\n${who.uid}\n${nr.ik}\n${ts}`;
+    const p = JSON.stringify({ rk: nr.ik, rsigNew: nr.sign(msg) });
+    return reg.call('/v1/recovery/set', { uid: who.uid, ts, p, sig: k.sign(`snug-reg-v1\nrecovery-set\n${who.uid}\n${ts}\n${p}`) });
+  };
+  const drop = (who, payload = { what: 'key' }, k = who.k) => sp({ uid: who.uid, k }, '/v1/recovery/drop', 'recovery-drop', payload);
+  assert.equal((await drop(gh)).body.error, 'not_found'); // nothing waiting
+  assert.equal((await setKey(gh, gh.k)).body.state, 'pending');
+  assert.equal((await drop(gh, { what: 'link' })).status, 400);
+  assert.equal((await drop(gh, {}, makeKeys())).body.error, 'bad_signature');
+  const s = await connectV(gh, '0.12.0');
+  assert.equal((await drop(gh)).status, 200);
+  await s.next((m) => m.t === 'recovery' && m.state === 'cancelled' && m.what === 'key');
+  s.close();
+  assert.deepEqual((await kind(gh)).body.recovery, { set: false, pendingAt: null, rk: null });
+  // a keypair account has a current key: that key cancels a new one, the device alone can't
+  const a = await account(uniq('drk'));
+  const u = { uid: a.uid, k: a.k };
+  assert.equal((await setKey(u, a.k)).body.state, 'pending');
+  assert.equal((await drop(u)).body.error, 'forbidden');
+  assert.ok((await kind(u)).body.recovery.pendingAt);
 });
 
 // ---------- delete with the recovery key ----------
