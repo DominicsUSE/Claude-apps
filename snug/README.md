@@ -1306,18 +1306,29 @@ in your conversations with them and stays there. Each device remembers (encrypte
 the device) what it has seen: your synced settings, your device list, each contact's
 keys and devices, and which conversations are encrypted. If the server later shows
 something older, or says an encrypted conversation isn't encrypted any more, Snug
-says so and won't send there in plain text. A message the server puts into an
-encrypted conversation without encryption shows "Not encrypted – delivered by the
-server". People who leave get nothing sent after that.
+says so and won't send there in plain text. A new device added with a code learns
+these from the device that approves it, and one added with the recovery key learns
+the settings version and encrypted conversations from the backup. (A device's first
+start after updating from 0.12.0 has nothing to compare with yet.) A message the
+server puts into an encrypted conversation without encryption shows "Not encrypted –
+delivered by the server", in the conversation, in notifications and in the phone's
+conversation list. People who leave get nothing sent after that.
 
 **Removing a device.** A removed device gets no new messages, and history and synced
-settings sent from then on use new keys it doesn't have. It keeps what it already
-had, including your account keys. If it was lost or stolen, tick "It was lost or
-stolen": Snug also makes a new recovery key, because until then whoever has the
-device and your password could open your recovery backup. Someone who had a stolen
-device can still use your account key; only "Reset encryption" replaces that.
-"My keys may be exposed" (Settings > Encryption) makes new history, settings and
-recovery keys for what is sent from then on.
+settings sent from then on use new keys it doesn't have. Removing one also makes a
+new recovery key to save, because the removed device could open your old backup with
+your password. It keeps what it already had, including your account key: whoever has
+it, with your password or the server's help, could add a device of their own to your
+account. Your other devices show an alert whenever a device they didn't add appears.
+If it was lost or stolen, tick "It was lost or stolen": Snug says to reset
+encryption, since only "Reset encryption" replaces the account key. A message from a
+removed device that reached the server after the removal isn't shown; older ones say
+on the message that the device was removed. "My keys may be exposed" (Settings >
+Encryption) makes new history, settings and recovery keys for what is sent from then
+on. Switching "Let my new devices read my encrypted history" back on makes a new
+history key too. A device that hasn't been online for over a month is left out of the
+weekly history key (Settings names it), and is offered for removal when you make new
+keys.
 
 **What the server still sees.** Who talks to whom and when, how many messages and
 roughly how long (sizes are padded), who is in each group, group names and icons,
