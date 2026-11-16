@@ -1385,9 +1385,11 @@ mode you're in. The short version:
   your data-file key wrapped. Calls go straight between PCs or through a
   Cloudflare relay that can't hear them.
 - **Your choices**: who sees that you're online (everyone you share a place
-  with, friends only, nobody), which also hides your status, your "Recently
-  here" and "last wrote" lines, that you're in a voice room (from anyone not
-  in it with you) and you from houses' online counts. People still see when
+  with, friends only, nobody), which also hides your status (and that you
+  changed it), your "Recently here" and "last wrote" lines, that you're in a
+  voice room or on a stage (from anyone not in it with you) and you from
+  houses' online counts. A full voice room with a user limit still turns
+  people away, which can show that someone they can't see is in it. People still see when
   each message was sent. On the desktop app, friends only also hides you from
   members of your groups across PCs who aren't your friends: the registry
   doesn't tell their PCs you're online. Group messages, files and calls
