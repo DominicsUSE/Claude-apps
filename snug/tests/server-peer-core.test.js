@@ -85,9 +85,12 @@ test('disappearing across PCs: the timer reaches the friend, and their copy of e
   await until(() => !A.db.get('SELECT ttl FROM conv_ttl WHERE conv = ?', dm), 8000, 'timer off on A');
 });
 
-test('B3: polls with friends on other PCs are refused plainly instead of staying on one PC', async () => {
-  const { a, dm } = pair;
-  assert.match(await a.refused('poll.create', { conv: dm, id: mid(), question: 'Lunch?', answers: ['Yes', 'No'], hours: 24 }), /other PCs/);
+// 0.13: polls travel between PCs (tests/server-peer-polls.test.js); a friend's older PC still gets a plain refusal.
+test('B3: a poll for a friend whose PC doesn’t know polls (0.12.0) is refused plainly instead of staying on one PC', async () => {
+  const { A, a, dm } = pair;
+  A.peer._setCaps(uidOf(pair.b), ['thread', 'pin', 'ttl']);
+  assert.match(await a.refused('poll.create', { conv: dm, id: mid(), question: 'Lunch?', answers: [{ text: 'Yes' }, { text: 'No' }], hours: 24 }), /needs an update/);
+  A.peer._setCaps(uidOf(pair.b), null);
 });
 
 test('capabilities: a friend whose PC doesn’t say it knows timers (0.11) can’t be given one; threads reach it as replies', async () => {

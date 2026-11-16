@@ -1446,7 +1446,12 @@ mode you're in. The short version:
   (registry, on Cloudflare) sees when you're online, which accounts are your
   friends or share a group with you, when your PC contacts theirs, and keeps
   your data-file key wrapped. Calls go straight between PCs or through a
-  Cloudflare relay that can't hear them.
+  Cloudflare relay that can't hear them. Since 0.13, polls, group calls (up to
+  12 people, each browser connected to each other one) and forwarding whole
+  messages work with friends on other PCs too, when their Snug is 0.13 or
+  newer (an older one is named when something is refused); houses still live
+  on one PC, and friends on other PCs can't join them yet. The data file keeps
+  each conversation's disappearing timer and when each message disappears.
 - **Your choices**: who sees that you're online (everyone you share a place
   with, friends only, nobody), which also hides your status (and that you
   changed it), your "Recently here" and "last wrote" lines, that you're in a
@@ -1459,8 +1464,8 @@ mode you're in. The short version:
   between you still connect directly, because your PC contacts theirs when
   they come online, so their PC (not their Snug) can tell you're online while
   that happens. With a registry that predates this, your PC doesn't connect
-  to them at all and group messages between you wait for a friend of both to
-  pass them on; typing on or off (off stops sending and showing it, and
+  to them at all and group messages between you go through a friend of both,
+  whose PC passes them on while it is online; typing on or off (off stops sending and showing it, and
   nothing is sent while invisible); who can message, befriend or invite you.
   Read receipts don't exist in Snug.
 - **Your data**: Settings > Your data downloads one zip (profile, settings,
@@ -1468,7 +1473,11 @@ mode you're in. The short version:
   uploaded, reactions, sign-in history, devices) as JSON and readable text.
   Deleting your account asks whether to keep your messages as "Deleted user"
   or erase them with your files, reactions, poll votes, sign-in history and
-  security events. Copies other people already have can't be erased.
+  security events. Copies other people already have can't always be erased: in
+  the desktop app (0.13), friends' PCs that are online are asked to delete
+  their copies of your most recent messages (up to 5,000 with each friend and
+  2,000 in each group), but a PC that is offline then, or runs a changed copy
+  of Snug, keeps them, and so do older messages, forwards and screenshots.
 - **What is kept**: sign-in history and security events 30 days
   (`SNUG_LOG_DAYS`), addresses shortened; failed sign-in counters 2 days,
   addresses only as a keyed hash; sessions store the kind of device, never an

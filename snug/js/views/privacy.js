@@ -98,7 +98,7 @@ export function PrivacyGuide({ level = 2 }) {
       <ul>
         <li>Settings > Privacy and safety: who can message you, befriend you or invite you; who sees when you’re online; typing; blocking.</li>
         <li>Settings > Your data: download everything that’s yours as one zip file (your profile, your messages, the direct conversations you’re in, files you uploaded and your settings).</li>
-        <li>Deleting your account: choose to keep your messages under “Deleted user”, or to erase them with your files, reactions and sign-in history. Copies other people already have (on their PCs, or forwarded and screenshotted) can’t be erased.</li>
+        <li>Deleting your account: choose to keep your messages under “Deleted user”, or to erase them with your files, reactions and sign-in history. Copies other people already have (on their PCs, or forwarded and screenshotted) can’t always be erased: with friends on other PCs, those PCs that are online are asked to delete their copies, and the others keep them.</li>
         <li>Deleting a message: it can be brought back for 10 minutes, then its text is gone from Snug.</li>
         <li id="pv-disappear">Disappearing messages: in a conversation, open the More menu and choose Disappearing messages, and new messages there are removed after the time you pick (in a house, people who manage rooms set it). People can still copy or screenshot a message before it goes, and ${f.mode === 'p2p' ? 'each PC’s encrypted daily backup' : 'the server’s encrypted daily backups'} can keep a copy for up to a week.</li>
       </ul>
@@ -147,7 +147,9 @@ export const PrivacyLink = () => html`<a class="pv-signedout-link" id="pv-link" 
 
 // Deleting an account: keep what I wrote under "Deleted user", or erase it.
 // `p2p`: the desktop app, where friends' PCs hold their own copies.
-export function EraseChoice({ value, onChange, p2p = false }) {
+// p2p (0.13): friends' PCs that are online are asked to delete their copies; `offline` names those that aren't.
+const listOf = (names) => (names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
+export function EraseChoice({ value, onChange, p2p = false, offline = [] }) {
   const opt = (v, title, text) => html`<label>
     <input type="radio" name="erase" value=${v} checked=${value === v} onChange=${() => onChange(v)} />
     <span><b>${title}</b><small>${text}</small></span>
@@ -155,9 +157,10 @@ export function EraseChoice({ value, onChange, p2p = false }) {
   return html`<fieldset class="erase-choice">
     <legend>What you wrote</legend>
     ${opt('keep', 'Keep my messages', 'They stay where you wrote them, by “Deleted user”, so conversations still make sense.')}
-    ${opt('erase', 'Erase what I wrote', `Your messages${p2p ? ' on this PC' : ''} (direct ones too), files you uploaded, reactions, poll votes, sign-in history and security log go. They show as “Message deleted”.`)}
+    ${opt('erase', 'Erase what I wrote', `Your messages${p2p ? ' on this PC' : ''} (direct ones too), files you uploaded, reactions, poll votes, sign-in history and security log go. They show as “Message deleted”.${p2p ? ' Friends’ PCs that are online now are asked to delete their copies of your most recent messages too (up to 5,000 with each friend and 2,000 in each group).' : ''}`)}
+    ${p2p && value === 'erase' && offline.length > 0 && html`<p class="hint erase-offline">${listOf(offline)}${offline.length === 1 ? '’s PC is' : '’s PCs are'} offline now, so ${offline.length === 1 ? 'it keeps its' : 'they keep their'} copy of your messages.</p>`}
     <p class="hint">${p2p
-      ? 'Copies other people already have can’t be erased: friends’ PCs keep their own copy of your messages, and anyone may have saved or forwarded something.'
+      ? 'Copies can’t always be erased: a PC that’s offline when you delete, or one running a changed copy of Snug, keeps them, and anyone may have saved or forwarded something.'
       : 'Copies other people already have can’t be erased: anything forwarded, saved or screenshotted, and reports moderators already received. The server’s encrypted backups drop it within a week.'}${' '}Emoji, stickers and sounds you added to a house stay with the house.</p>
   </fieldset>`;
 }

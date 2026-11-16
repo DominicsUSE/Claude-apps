@@ -28,6 +28,32 @@ goes back to an older version on its own (README, "Install, update, go back").
 - An automated accessibility check (axe-core, tests only) on the main screens; it fixed the font choices'
   ARIA.
 
+### Friends on other PCs
+
+- **Polls** work in direct conversations and groups with friends on other PCs: the poll, everyone's votes
+  (only each person's latest counts) and its end reach every PC, so all show the same counts. If someone's
+  Snug is older, or a group member's PC hasn't been in touch yet so Snug can't tell, the poll is refused and
+  the message names them.
+- **Group calls** in groups with friends on other PCs, up to the 12 people a call holds. Audio and video go
+  between the people's browsers as in any call; the PCs only pass the connection messages.
+- **Forwarding** a message to friends on other PCs brings the whole message: the forwarded card with who
+  wrote it, its pictures and files, and a sticker. Older PCs show it as quoted text with the files.
+- The **data file** keeps the disappearing-messages timer and when each message disappears, so a move to a
+  new PC keeps them; messages whose time has passed aren't brought back. 0.11 and 0.12 still read the file.
+- **Erasing your account** now asks friends' PCs that are online to delete their copies of your most recent
+  messages (up to 5,000 with each friend and 2,000 in each group). PCs that are offline at that moment, or
+  that run a changed copy of Snug, keep theirs, and so do older messages; the dialog says which friends' PCs
+  are offline.
+- Fixes: a forward with no note didn't reach a friend's PC; a copy of a friend's file couldn't be passed
+  on and could be dropped from the cache; with presence for friends only and an older directory, group
+  messages between people who aren't friends waited for a link to reopen.
+
+### Known limits
+
+- Friends on other PCs still can't join houses (a house lives on one PC and its people join over the LAN
+  or a link). Group calls with friends on other PCs have only been tested on one machine, not through a
+  real TURN relay.
+
 ## 0.12.0
 
 ### Private conversations

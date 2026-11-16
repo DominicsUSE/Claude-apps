@@ -364,3 +364,64 @@ test('REG-L2: my own group ops in a data file must verify with my key chain from
   assert.equal(A.db.get('SELECT 1 FROM grp_ops WHERE g = ?', op.g), undefined, 'a forged op “by me” is not taken');
   assert.equal(A.db.get('SELECT 1 FROM dms WHERE id = ?', op.g), undefined);
 });
+
+// 0.13: the disappearing timer and each message's expiry travel in the data file (direct conversations and
+// groups), so a move to a new PC keeps them; messages already past their time aren't brought back.
+test('the disappearing timer and message expiry come back after a move; expired messages stay gone; 0.12.0 still reads the file', async () => {
+  const { A, B, a, b, dm, gb } = await friends('vlt_ttl_a', 'vlt_ttl_b');
+  // A group across PCs too: Bea, Ana and Cy (a friend of Bea's).
+  const C = await pc();
+  const c = await signUp(C, registry, ++gh, 'vlt_ttl_c');
+  await b.ok('friend.request', { handle: 'vlt_ttl_c' });
+  await c.ok('friend.accept', { user: (await c.next('friend', (d) => d.friend?.state === 'incoming')).id });
+  await b.next('friend', (d) => d.id === c.id && d.friend?.state === 'friends');
+  await until(() => B.peer.capsOf(uidOf(a)).includes('ttl') && B.peer.capsOf(uidOf(c)).includes('ttl'), 10_000, 'caps');
+  const g = (await b.ok('dm.open', { users: [a.id, c.id] })).id;
+  const DAY = 86_400_000;
+  await b.ok('dm.open', { users: [a.id] });
+  await b.ok('conv.ttl', { conv: dm, ttl: DAY });
+  await b.ok('conv.ttl', { conv: g, ttl: DAY });
+  const live = mid(), soon = mid(), gLive = mid(), gSoon = mid();
+  await b.ok('msg.send', { conv: dm, id: live, text: 'stays a day' });
+  await b.ok('msg.send', { conv: dm, id: soon, text: 'nearly gone' });
+  await b.ok('msg.send', { conv: g, id: gLive, text: 'group, stays a day' });
+  await b.ok('msg.send', { conv: g, id: gSoon, text: 'group, nearly gone' });
+  const t = Date.now();
+  B.db.run('UPDATE messages SET expires = ? WHERE id IN (?, ?)', t + 2500, soon, gSoon);
+  const exp = B.db.get('SELECT expires FROM messages WHERE id = ?', live).expires;
+  const gExp = B.db.get('SELECT expires FROM messages WHERE id = ?', gLive).expires;
+  assert.ok(exp > t + DAY - 60_000);
+  const file = (await download(B, b.cookie)).buf;
+  // What 0.11 and 0.12.0 read: the same file opens and its groups section parses with their code.
+  const key = await B.peer.reg.signedCall('/v1/vault/key', 'vault-key');
+  const old = await import('./fixtures/v0.12.0/vaultfile.js');
+  const oldGroups = await import('./fixtures/v0.12.0/grouplog.js');
+  const { payload: p } = old.open(file, { owner: uidOf(b), key: Buffer.from(key.key, 'base64url') });
+  const conv = p.dms.find((x) => x.peer === uidOf(a));
+  assert.equal(conv.ttl, DAY);
+  assert.equal(conv.msgs.find((m) => m.id === live).exp, exp);
+  const og = oldGroups.parseGroupsSection(p.sections.groups).find((x) => x.g === g);
+  assert.ok(og.msgs.some((m) => m.id === gLive), '0.12.0 reads the group and its messages');
+  assert.equal(p.sections.groups.groups.find((x) => x.g === g).ttl, DAY);
+  // The move: the old PC is gone, the file goes to a new one after the messages' time has passed.
+  await off(B, b);
+  const { B2, b2 } = await newPcFor(gb);
+  await completeMove(B2);
+  await until(() => Date.now() > t + 3000, 5000, 'past the near messages’ time');
+  const r = await importFile(B2, b2.cookie, file);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(B2.db.get('SELECT ttl FROM conv_ttl WHERE conv = ?', dm)?.ttl, DAY, 'the timer is on again');
+  assert.equal(B2.db.get('SELECT expires FROM messages WHERE id = ?', live)?.expires, exp, 'the live message keeps its time');
+  assert.equal(B2.db.get('SELECT 1 FROM messages WHERE id = ?', soon), undefined, 'the expired one isn’t brought back');
+  assert.equal(B2.db.get('SELECT ttl FROM conv_ttl WHERE conv = ?', g)?.ttl, DAY, 'the group’s timer too');
+  assert.equal(B2.db.get('SELECT expires FROM messages WHERE id = ?', gLive)?.expires, gExp);
+  assert.equal(B2.db.get('SELECT 1 FROM messages WHERE id = ?', gSoon), undefined);
+  // A file from before (0.12.0: no timer, no expiry) still imports.
+  const { ttl, ...plain } = conv;
+  void ttl;
+  const before = { ...p, dms: [{ ...plain, msgs: plain.msgs.map(({ exp: e, ...m }) => { void e; return m; }) }], sections: {} };
+  const k2 = await B2.peer.reg.signedCall('/v1/vault/key', 'vault-key');
+  const oldFile = seal({ key: Buffer.from(k2.key, 'base64url'), uid: uidOf(b), kid: k2.kid, seq: 99, app: '0.12.0', payload: { ...before, at: Date.now() } });
+  const r2 = await importFile(B2, b2.cookie, oldFile);
+  assert.equal(r2.status, 200, JSON.stringify(r2.body));
+});

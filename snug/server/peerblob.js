@@ -48,12 +48,24 @@ export function createBlobs({ db, filesDir, sendEph, canServe, log = () => {}, s
   }
 
   // ---------- Serving my files ----------
+  const copies = new Map(); // `${uid} ${hash}` -> file id, for the parts that follow the first
+  function otherCopy(uid, h) {
+    const k = `${uid} ${h}`;
+    const known = copies.has(k) && db.get('SELECT * FROM files WHERE id = ?', copies.get(k));
+    if (known && canServe(uid, known)) return known;
+    if (typeof db.all !== 'function') return null;
+    const row = db.all("SELECT * FROM files WHERE json_extract(meta, '$.hash') = ? ORDER BY created DESC LIMIT 20", h).find((r) => canServe(uid, r)) || null;
+    if (row) { copies.set(k, row.id); if (copies.size > 500) copies.delete(copies.keys().next().value); }
+    return row;
+  }
   let serving = 0;
   async function serve(uid, d) {
     const h = d?.h, o = d?.o, n = Math.min(8, Math.max(1, Number(d?.n) || 1));
     if (typeof h !== 'string' || !HASH.test(h) || !Number.isSafeInteger(o) || o < 0) return;
     const ref = db.get('SELECT file FROM peer_hash WHERE hash = ?', h);
-    const row = ref && db.get('SELECT * FROM files WHERE id = ?', ref.file);
+    let row = ref && db.get('SELECT * FROM files WHERE id = ?', ref.file);
+    // 0.13: the same bytes can be in more than one file (a forwarded copy): the one this friend may have.
+    if (!row || !canServe(uid, row)) row = otherCopy(uid, h) || row;
     if (!row || !canServe(uid, row) || o > row.size) { sendEph(uid, 'blob.miss', { h }); return; }
     if (serving >= 8) { sendEph(uid, 'blob.miss', { h, busy: true }); return; }
     serving++;

@@ -208,6 +208,8 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
     }
     return out;
   }
+  // 0.13: a conversation's disappearing timer, carried in the file and set again on import.
+  const ttlOf = (conv) => db.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'conv_ttl'") ? (db.get('SELECT ttl FROM conv_ttl WHERE conv = ?', conv)?.ttl || 0) : 0;
   // Everything but `at`; its hash says whether anything changed since the last write.
   function buildBody() {
     const o = owner();
@@ -238,10 +240,13 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
       const rows = left > 0 ? db.all('SELECT * FROM messages WHERE conv = ? AND sys IS NULL ORDER BY seq DESC LIMIT ?', c.id, Math.min(CAPS.perConversation, left)).reverse() : [];
       const rx = M.reactions(rows.map((m) => m.id));
       const msgs = [];
+      const now = Date.now();
       for (const m of rows) {
         const a = m.author === o ? uid : m.author === c.other ? peerUid : null;
         if (!a || !/^m_[a-z0-9]{8,40}$/.test(m.id)) continue;
+        if (m.expires && m.expires <= now) continue; // gone already (0.13)
         const x = { id: m.id, a, ts: m.ts, text: String(m.text || '').slice(0, CAPS.text) };
+        if (m.expires) x.exp = m.expires; // 0.13: when it disappears (a 0.11 or 0.12 PC ignores it)
         if (m.reply_to && /^m_[a-z0-9]{8,40}$/.test(m.reply_to)) x.r = m.reply_to;
         if (m.edited) x.e = m.edited;
         if (m.deleted) x.d = m.deleted;
@@ -251,7 +256,8 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
         msgs.push(x);
       }
       left -= msgs.length;
-      dms.push({ peer: peerUid, msgs });
+      // 0.13: the disappearing timer (0 when off); its presence also says each message's `exp` is complete.
+      dms.push({ peer: peerUid, ttl: ttlOf(c.id), msgs });
     }
     const sections = {};
     const ctx = { db, M, owner: o, myUid: uid, peer };
@@ -375,6 +381,12 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
       id, o, `${kind}:${o}`, kind, img.type, data.length, Date.now(), JSON.stringify({ w: img.w, h: img.h }));
     return { id, anim: img.type === 'image/gif' };
   }
+  // 0.13: the timer as the file had it, unless this PC already has one for that conversation (a merge).
+  const TTLS = [3_600_000, 86_400_000, 7 * 86_400_000, 30 * 86_400_000];
+  function restoreTtl(conv, ttl, by, t) {
+    if (!TTLS.includes(ttl) || !db.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'conv_ttl'")) return;
+    db.run('INSERT INTO conv_ttl (conv, ttl, by, ts) VALUES (?, ?, ?, ?) ON CONFLICT (conv) DO NOTHING', conv, ttl, by, t);
+  }
   function applyPayload(p, selfKeys = null) {
     const o = owner();
     const uid = myUid();
@@ -451,8 +463,10 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
             counts.conversations++;
           }
           for (const u of [o, s]) db.run('INSERT OR IGNORE INTO dm_members (dm, user) VALUES (?, ?)', dm, u);
+          const withTtl = Number.isSafeInteger(c.ttl); // 0.13 file: each message's exp is complete
           for (const m of c.msgs) {
             if (db.get('SELECT 1 FROM messages WHERE id = ?', m.id)) continue;
+            if (Number.isSafeInteger(m.exp) && m.exp <= t) continue; // its time has passed: it stays gone
             const author = m.a === uid ? o : s;
             const files = [];
             for (const f of m.f || []) {
@@ -470,14 +484,18 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
               files.push({ kind: f.type.startsWith('image/') ? 'image' : 'file', id: fid, name: f.name, size: f.size });
             }
             const reply = m.r && db.get('SELECT 1 FROM messages WHERE id = ?', m.r) ? m.r : (m.r && c.msgs.some((x) => x.id === m.r) ? m.r : null);
-            db.run('INSERT OR IGNORE INTO messages (id, conv, author, ts, text, fold, reply_to, files, edited, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-              m.id, dm, author, m.ts, m.text, M.foldText(m.text, files), reply, files.length ? JSON.stringify(files) : null, m.e ?? null, m.d ?? null);
+            db.run('INSERT OR IGNORE INTO messages (id, conv, author, ts, text, fold, reply_to, files, edited, deleted, expires) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+              m.id, dm, author, m.ts, m.text, M.foldText(m.text, files), reply, files.length ? JSON.stringify(files) : null, m.e ?? null, m.d ?? null,
+              Number.isSafeInteger(m.exp) ? m.exp : null);
+            // A message the file says doesn't disappear doesn't get this PC's timer either.
+            if (withTtl && !Number.isSafeInteger(m.exp)) db.run('UPDATE messages SET expires = NULL WHERE id = ?', m.id);
             counts.messages++;
             for (const x of m.x || []) db.run('INSERT OR IGNORE INTO reactions (msg, user, emoji, ts) VALUES (?, ?, ?, ?)', m.id, x.u === uid ? o : s, x.e, m.ts);
           }
+          restoreTtl(dm, c.ttl, o, t);
         }
         // Other tracks' data (groups across PCs); a throw aborts everything.
-        const ctx = { db, M, owner: o, myUid: uid, peer, selfKeys };
+        const ctx = { db, M, owner: o, myUid: uid, peer, selfKeys, restoreTtl };
         for (const s of hub.vaultSections || []) {
           if (p.sections && Object.hasOwn(p.sections, s.name)) s.import(p.sections[s.name], ctx);
         }
@@ -925,6 +943,9 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
   if (baseDelete) {
     M.p2pDelete = async (u, d, run) => {
       const uid = myUid();
+      // 0.13: erasing asks friends' PCs that are online to delete their copies first, while they still
+      // take frames from this account (server/peer.js eraseShared). Offline PCs keep theirs.
+      if (d?.erase === true) await peer.eraseShared?.().catch((e) => log('peer', 'erase', e.message));
       const r = await baseDelete(u, d, run);
       forget(uid);
       return r;

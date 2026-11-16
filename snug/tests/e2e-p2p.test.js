@@ -275,6 +275,68 @@ test('edits, deletes and reactions reach the other PC, both ways', async () => {
   await b.close();
 });
 
+// 0.13: polls between PCs.
+test('a poll made from the + menu reaches Bob’s PC; both votes show the same counts on both screens; ending it ends it there', async () => {
+  const { alice, bob } = pages;
+  const dm = await alice.evaluate(() => window.snug.S.ui.view.id);
+  await goto(bob, { type: 'conv', id: dm });
+  await alice.click('.main .composer .plus-btn');
+  await alice.click('.menu-item:has-text("Create a poll")');
+  await alice.fill('#poll-q', 'Which kiln shelf?');
+  await alice.fill('.modal input[aria-label="Answer 1"]', 'Top shelf');
+  await alice.fill('.modal input[aria-label="Answer 2"]', 'Bottom shelf');
+  await alice.click('.modal button:has-text("Post poll")');
+  await alice.locator('.modal').waitFor({ state: 'detached' });
+  const bpoll = bob.locator('.main .poll:has-text("Which kiln shelf?")');
+  await bpoll.waitFor({ timeout: 20000 });
+  assert.equal(await bpoll.locator('.poll-a').count(), 2);
+  await bpoll.locator('.poll-a:has-text("Bottom shelf")').click();
+  await bpoll.locator('.poll-a.done.mine:has-text("Bottom shelf") .poll-n:has-text("100%")').waitFor();
+  const apoll = alice.locator('.main .poll:has-text("Which kiln shelf?")');
+  await apoll.locator('.poll-a:has-text("Top shelf")').click();
+  // Both votes on both screens: 50% each.
+  for (const p of [apoll, bpoll]) {
+    await p.locator('.poll-a:has-text("Top shelf") .poll-n:has-text("50%")').waitFor({ timeout: 20000 });
+    await p.locator('.poll-a:has-text("Bottom shelf") .poll-n:has-text("50%")').waitFor({ timeout: 20000 });
+  }
+  await apoll.locator('button:has-text("End now")').click();
+  await bpoll.locator('.poll-how:has-text("Final results")').waitFor({ timeout: 20000 });
+});
+
+// 0.13: forwarding a whole message (its picture too) into a conversation with a friend on another PC.
+test('forwarding a message with a picture to Bob: he sees the forwarded card with the picture', async () => {
+  const { alice, bob } = pages;
+  const dm = await alice.evaluate(() => window.snug.S.ui.view.id);
+  await goto(bob, { type: 'conv', id: dm });
+  const a = await clientOf(alice, pcs.A);
+  const up = await (await fetch(`${pcs.A.base}/api/files?conv=${dm}`, { method: 'POST', headers: { cookie: a.cookie, origin: pcs.A.base, 'content-type': 'image/png', 'x-file-name': 'glaze.png' }, body: png(48, 32, [20, 160, 90]) })).json();
+  await a.ok('msg.send', { conv: dm, id: mid(), text: 'test tile from the kiln', files: [{ id: up.id, w: 48, h: 32 }] });
+  await a.close();
+  const m = alice.locator('.main .msg:has-text("test tile from the kiln")').last();
+  await m.waitFor();
+  await m.hover();
+  await m.locator('.msg-actions button[aria-label="More actions"]').click();
+  await alice.click('.menu-item:has-text("Forward")');
+  await alice.click('.modal .fwd-dest:has-text("bob")');
+  await alice.fill('.modal textarea', 'look at the colour');
+  await alice.click('.modal button:has-text("Forward")');
+  await alice.locator('.modal').waitFor({ state: 'detached' });
+  const card = bob.locator('.main .msg:has-text("look at the colour") .fwd-card');
+  await card.waitFor({ timeout: 20000 });
+  assert.match(await card.textContent(), /test tile from the kiln/);
+  // The picture comes over from Alice's PC and shows inside the card.
+  await bob.waitForFunction(() => [...document.querySelectorAll('.main .fwd-card img')].some((i) => i.complete && i.naturalWidth === 48), null, { timeout: 20000 });
+  // Bob's PC holds Alice's message with those words, so the card is hers and carries no warning.
+  assert.equal(await bob.locator('.main .msg:has-text("look at the colour") .fwd-unchecked').count(), 0);
+  // A card whose words Bob's PC can't find (a modified PC could send one) shows only the name it was given, and says so.
+  const bobUid = pcs.B.peer.identity.self().uid;
+  const id = mid();
+  pcs.A.peer._outbox.push(`u_${bobUid}`, 'dm.msg', id, JSON.stringify({ id, text: '> I never said this\n— bob, forwarded', note: '', fwd: { a: bobUid, name: 'bob', ts: Date.now(), text: 'I never said this' } }), Date.now());
+  pcs.A.peer._links.want(bobUid);
+  const forged = bob.locator('.main .msg:has-text("I never said this")');
+  await forged.locator('.fwd-unchecked:has-text("can’t check who wrote it")').waitFor({ timeout: 20000 });
+});
+
 test('profile: a new name and picture reach Bob once, and the picture is served from his PC', async () => {
   const { alice, bob } = pages;
   const before = pcs.B.peer.stats().profileApplied;
@@ -660,4 +722,78 @@ test('relay fallback: with direct links off on one PC, messages still go both wa
   assert.equal(rowsOf(E, id3).length, 1);
   await d.close();
   await e.close();
+});
+
+// 0.13: group calls in a group across PCs: a mesh between the members' browsers, signalled over the PC links.
+test('a group call between three PCs connects with fake media: each person hears the two others', async () => {
+  const people = [['F', 'faye', 1011], ['G', 'gus', 1012], ['H', 'hana', 1013]];
+  const cs = {};
+  for (const [P, name, ghId] of people) {
+    const srv = await pc(P);
+    cs[name] = await signUp(srv, registry, ghId, name);
+    const ctx = await browser.newContext({ permissions: ['microphone', 'camera'] });
+    contexts.push(ctx);
+    await ctx.addCookies([{ name: 'snug_session', value: cs[name].cookie.split('=')[1], url: srv.base }]);
+    const page = await ctx.newPage();
+    page.setDefaultTimeout(15000);
+    page.on('pageerror', (err) => errors.push(`${name}: ${err.message}`));
+    await page.goto(srv.base);
+    await inApp(page);
+    pages[name] = page;
+  }
+  const { faye, gus, hana } = cs;
+  // Faye is friends with both; Gus and Hana only share the group.
+  for (const [x, y] of [[faye, gus], [faye, hana]]) {
+    await x.ok('friend.request', { handle: y.srv === pcs.G ? 'gus' : 'hana' });
+    const req = await y.next('friend', (d) => d.friend?.state === 'incoming', 15000);
+    await y.ok('friend.accept', { user: req.id });
+    await x.next('friend', (d) => d.id === y.id && d.friend?.state === 'friends', 15000);
+  }
+  const g = (await faye.ok('dm.open', { users: [gus.id, hana.id] })).id;
+  await until(() => pcs.G.db.get('SELECT 1 FROM dms WHERE id = ?', g) && pcs.H.db.get('SELECT 1 FROM dms WHERE id = ?', g), 20000, 'the group on every PC');
+  await until(() => pcs.F.peer.capsOf(gus.id.slice(2)).includes('gcall') && pcs.F.peer.capsOf(hana.id.slice(2)).includes('gcall'), 20000, 'caps');
+  await until(() => pcs.G.peer.isOnline(hana.id.slice(2)) && pcs.H.peer.isOnline(gus.id.slice(2)), 20000, 'co-members online to each other');
+  for (const name of ['faye', 'gus', 'hana']) await goto(pages[name], { type: 'conv', id: g });
+  await pages.faye.locator('.main .bar .call-btn[aria-label="Start a voice call"]').click();
+  for (const name of ['gus', 'hana']) {
+    const card = pages[name].locator('.incoming[role="alertdialog"]');
+    await card.waitFor({ timeout: 20000 });
+    await card.locator('.inc-accept').click();
+  }
+  for (const name of ['faye', 'gus', 'hana']) {
+    await pages[name].waitForFunction(async () => {
+      const peers = Object.values(await window.snug.voiceStats());
+      return peers.length === 2 && peers.every((x) => x.state === 'connected' && x.bytes > 1000);
+    }, null, { timeout: 45000, polling: 500 });
+  }
+  await shot(pages.faye, '32-group-call');
+  for (const name of ['faye', 'gus', 'hana']) await pages[name].click('.stage.call [aria-label="Leave call"]');
+  await until(() => !pcs.F.hub.callOf(g) && !pcs.G.hub.callOf(g) && !pcs.H.hub.callOf(g), 20000, 'the call is over on every PC');
+  for (const c of Object.values(cs)) await c.close();
+});
+
+// 0.13: deleting with "Erase what I wrote" asks friends' PCs that are online to delete their copies.
+test('erase on delete: with Erin’s PC off the dialog says it keeps its copy; with it on, Dana’s messages go from Erin’s PC', async () => {
+  const { dana } = pages;
+  const D = pcs.D;
+  const eDir = pcs.E.dataDir;
+  const erinUid = D.db.get("SELECT uid FROM peers WHERE username = 'erin'").uid;
+  await pcs.E.close();
+  await dana.waitForFunction(() => Object.values(window.snug.S.users).some((u) => u.remote && u.username === 'erin' && u.presence === 'offline'), null, { timeout: 30000 });
+  await dana.evaluate(async () => { const s = await import('/js/store.js'); const p = await import('/js/views/p2p.js'); s.openModal(p.DeleteP2p, { onGone: async () => {} }); });
+  await dana.locator('.erase-choice input[value="erase"]').check();
+  const note = dana.locator('.erase-choice .erase-offline');
+  await note.waitFor();
+  assert.match(await note.textContent(), /erin’s PC is offline now, so it keeps its copy/);
+  await shot(dana, '31-erase-offline');
+  // Erin's PC starts again: the note goes, and erasing reaches it.
+  await pc('E', { dataDir: eDir, peerDirect: false });
+  await until(() => D.peer.isOnline(erinUid), 30000, 'Erin back online');
+  await note.waitFor({ state: 'detached', timeout: 20000 });
+  const mine = D.db.all("SELECT id FROM messages WHERE author = (SELECT id FROM users WHERE handle = 'dana') AND sys IS NULL").map((r) => r.id);
+  assert.ok(mine.length >= 2);
+  await until(() => mine.every((id) => rowsOf(pcs.E, id)[0] && !rowsOf(pcs.E, id)[0].deleted), 10000, 'Erin has Dana’s messages');
+  await dana.fill('#cf-handle', 'dana');
+  await dana.click('.modal button:has-text("Delete my account")');
+  await until(() => mine.every((id) => rowsOf(pcs.E, id)[0]?.deleted), 30000, 'Dana’s messages deleted on Erin’s PC');
 });

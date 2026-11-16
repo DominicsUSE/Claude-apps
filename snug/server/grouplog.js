@@ -17,7 +17,8 @@ export const OP_ID = /^o_[a-z0-9]{16}$/;
 export const ITEM_ID = /^m_[a-z0-9]{8,40}$/;
 const OP_TYPES = new Set(['create', 'add', 'remove', 'leave', 'rename', 'icon']);
 // pin and ttl: 0.12 (a 0.11 PC drops items of a kind it doesn't know, and is never sent a ttl).
-const ITEM_KINDS = new Set(['msg', 'edit', 'delete', 'restore', 'react', 'pin', 'ttl']);
+// poll, vote and pollend: 0.13 (a poll is only made once every member's PC says it knows polls).
+const ITEM_KINDS = new Set(['msg', 'edit', 'delete', 'restore', 'react', 'pin', 'ttl', 'poll', 'vote', 'pollend']);
 const TTLS = [0, 3_600_000, 86_400_000, 7 * 86_400_000, 30 * 86_400_000];
 const isUid = (s) => typeof s === 'string' && UID.test(s);
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -71,6 +72,11 @@ export function itemShape(item) {
     case 'react': return mid(d.id) && typeof d.emoji === 'string' && d.emoji.length <= 32 && typeof d.on === 'boolean';
     case 'pin': return mid(d.id) && typeof d.on === 'boolean';
     case 'ttl': return TTLS.includes(d.ttl);
+    case 'poll': return typeof d.question === 'string' && d.question.length <= 300 && Array.isArray(d.answers) && d.answers.length >= 2 && d.answers.length <= 10
+      && d.answers.every((a) => isObj(a) && typeof a.text === 'string' && a.text.length <= 55 && (a.emoji === undefined || (typeof a.emoji === 'string' && a.emoji.length <= 16)))
+      && typeof d.multi === 'boolean' && typeof d.hidden === 'boolean' && Number.isSafeInteger(d.ends) && (d.t === undefined || mid(d.t));
+    case 'vote': return mid(d.id) && Array.isArray(d.answers) && d.answers.length <= 10 && d.answers.every((a) => Number.isInteger(a) && a >= 0 && a < 10);
+    case 'pollend': return mid(d.id);
     default: return false;
   }
 }
@@ -173,7 +179,8 @@ export const opsDigest = (ids) => base32(sha256([...ids].sort().join('\n'))).sli
 // The vault section (design 2.4) as pure functions over plain data.
 // exportGroups(rows) -> JSON-able; importGroups(data) -> normalized list, or throws.
 export function exportGroups(groups) {
-  return { groups: groups.map((x) => ({ g: x.g, name: x.name ?? null, icon: x.icon ?? null, ops: x.ops.map((o) => ({ body: o.body, sig: o.sig })), msgs: (x.msgs || []).slice(-5000) })) };
+  // ttl (0.13): the group's disappearing timer, 0 when off; a 0.11 or 0.12 reader skips it.
+  return { groups: groups.map((x) => ({ g: x.g, name: x.name ?? null, icon: x.icon ?? null, ops: x.ops.map((o) => ({ body: o.body, sig: o.sig })), msgs: (x.msgs || []).slice(-5000), ...(Number.isSafeInteger(x.ttl) ? { ttl: x.ttl } : {}) })) };
 }
 export function parseGroupsSection(data) {
   if (!isObj(data) || !Array.isArray(data.groups) || data.groups.length > 200) throw new Error('bad groups section');
@@ -185,6 +192,6 @@ export function parseGroupsSection(data) {
       if (!opShape(op) || op.g !== x.g) throw new Error('bad op');
       return { op, body: o.body, sig: o.sig };
     });
-    return { g: x.g, ops, msgs: x.msgs };
+    return { g: x.g, ops, msgs: x.msgs, ...(Number.isSafeInteger(x.ttl) ? { ttl: x.ttl } : {}) };
   });
 }
