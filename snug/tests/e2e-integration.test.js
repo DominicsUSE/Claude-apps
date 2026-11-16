@@ -67,6 +67,7 @@ test('settings: one structure in sections with a search; each room’s pace and 
   assert.deepEqual(await navText(robin), [
     '# You', 'Profile', 'Account and security', 'Privacy and safety', 'Encryption', 'Your data', // Encryption: offered by default since 0.12
     '# App', 'Notifications', 'Voice and video', 'Appearance', 'Text and messages', 'Accessibility', 'Streamer mode', 'Keyboard',
+    'Desktop app', 'Connection', 'Privacy guide', // 0.12: install help, connection status, the full privacy page
   ]);
   // Contrast and motion have one home, on Accessibility.
   await robin.click('.layer-nav .row:has-text("Appearance")');

@@ -7,7 +7,8 @@
 // Encryption, and the same sheets on a phone.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+const storedFiles = (d) => readdirSync(d).filter((f) => statSync(join(d, f)).isFile()); // files/partial holds uploads under way
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -260,7 +261,7 @@ function scanServer(needle) {
     const p = join(dir, f);
     if (existsSync(p)) assert.equal(readFileSync(p).includes(Buffer.from(needle)), false, `${f} holds the marker`);
   }
-  for (const f of readdirSync(join(dir, 'files'))) assert.equal(readFileSync(join(dir, 'files', f)).includes(Buffer.from(needle)), false, `files/${f} holds the marker`);
+  for (const f of storedFiles(join(dir, 'files'))) assert.equal(readFileSync(join(dir, 'files', f)).includes(Buffer.from(needle)), false, `files/${f} holds the marker`);
 }
 const textOf = (page, needle) => page.locator(`.main .msg .msg-text:has-text("${needle}")`);
 
@@ -400,7 +401,7 @@ test('attachments: a picture sent in an encrypted DM shows from a blob on the ot
   await recoverWith(ines, inesKey);
   await openDm(robinA, 'Ines Carvalho');
   await openDm(ines, 'Robin Hale');
-  const before = new Set(readdirSync(join(dir, 'files')));
+  const before = new Set(storedFiles(join(dir, 'files')));
   await robinA.locator('.main [data-composer] input[type=file]').setInputFiles({ name: 'glaze-test.png', mimeType: 'image/png', buffer: PNG });
   await robinA.locator('.main [data-composer] .pending-file .pending-state:not(:has-text("Uploading"))').waitFor();
   assert.equal(await robinA.locator('.main [data-composer] .pending-state.bad').count(), 0, 'the encrypted upload worked');
@@ -408,7 +409,7 @@ test('attachments: a picture sent in an encrypted DM shows from a blob on the ot
   const img = ines.locator('.main .msg .files img[src^="blob:"]').last();
   await img.waitFor();
   assert.ok(await img.evaluate((el) => el.complete && el.naturalWidth === 2), 'the decrypted picture loads');
-  const added = readdirSync(join(dir, 'files')).filter((f) => !before.has(f));
+  const added = storedFiles(join(dir, 'files')).filter((f) => !before.has(f));
   assert.ok(added.length >= 1);
   for (const f of added) {
     const bytes = readFileSync(join(dir, 'files', f));

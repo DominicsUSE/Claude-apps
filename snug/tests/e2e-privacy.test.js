@@ -70,7 +70,7 @@ test('server mode: Settings > Privacy and safety says this Snug at its address s
   const t = await box.innerText();
   assert.match(t, new RegExp(`stored on the server this Snug at 127\\.0\\.0\\.1:${srv.port} runs on`));
   assert.match(t, /Whoever runs it can read houses and rooms/);
-  assert.match(t, /Direct messages are stored on the same server and are not end-to-end encrypted/);
+  assert.match(t, /Direct messages and groups marked “End-to-end encrypted” can be read only on the devices of the people in them/); // offered by default since 0.12
   assert.match(t, /plain connection \(http\)/, 'a plain-http Snug says so');
   assert.doesNotMatch(t, /travel encrypted between your PC/);
   // The full page, with what this Snug keeps and for how long.

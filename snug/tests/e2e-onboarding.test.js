@@ -415,6 +415,19 @@ test('phone: a long press opens the sheet without choosing what lands under the 
     await phone.locator('.screen.push .composer textarea').waitFor();
     const msg = phone.locator('.screen.push .msg').last();
     await msg.waitFor();
+    // The room opens at the first unread, so the last message can sit under the composer: bring it into view,
+    // then let the screen finish sliding in and the composer area settle (the rooms note can appear above it).
+    await phone.evaluate(() => { const s = document.querySelector('.screen.push .scroller'); s.scrollTop = s.scrollHeight; });
+    await phone.waitForFunction(() => {
+      const el = [...document.querySelectorAll('.screen.push .msg')].pop();
+      const c = document.querySelector('.screen.push .composer');
+      if (!el || !c) return false;
+      const a = el.getBoundingClientRect(), b = c.getBoundingClientRect();
+      const key = `${a.x},${a.y},${b.y}`;
+      const same = window.__lpLast === key;
+      window.__lpLast = key;
+      return same && Math.abs(a.x) < 1 && a.bottom <= b.top + 1;
+    }, null, { polling: 100 });
     const r = await msg.boundingBox();
     const x = Math.round(r.x + r.width / 2), y = Math.round(r.y + Math.min(r.height / 2, 30));
     const cdp = await phone.context().newCDPSession(phone);
