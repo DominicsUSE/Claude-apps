@@ -71,6 +71,7 @@ export const KEY_ROUTES = {
   '/v1/move/accept': 'moveAccept',
   '/v1/recovery/set': 'recoverySet',
   '/v1/recovery/cancel': 'recoveryCancel',
+  '/v1/recovery/drop': 'recoveryDrop',
   '/v1/recovery/whose': 'recoveryWhose',
   '/v1/link/github': 'linkGithub',
   '/v1/link/github/remove': 'unlinkGithub',
@@ -643,13 +644,35 @@ export const KeyAcctMixin = {
     const { ticket, ts, sig } = b;
     return this.withTicket(ticket, ts, sig, () => `snug-reg-v1\nrecovery-cancel-gh\n${ticket}\n${ts}${w.sfx}`, (t, h) => {
       const own = this.row('SELECT uid FROM accounts WHERE ghh=?', t.ghh);
-      const uid = own?.uid ?? this.linkedAccount(t.ghh)?.uid;
-      if (!uid) fail('not_found');
+      const linked = own ? null : this.linkedAccount(t.ghh);
+      // v0.13: the GitHub account a waiting link would add can call that link off (and nothing else). Every
+      // link waiting for it (review: one GitHub account may wait on several accounts, so not just the first).
+      const waiting = w.link ? this.rows('SELECT uid FROM link_pending WHERE ghh=?', t.ghh).map((r) => r.uid) : [];
+      const uid = own?.uid ?? linked?.uid ?? null;
+      if (!uid && !waiting.length) fail('not_found');
       this.tx(() => {
-        this.dropPendingChanges(uid, own ? { key: w.key, link: false } : w);
+        if (uid) this.dropPendingChanges(uid, own ? { key: w.key, link: false } : w);
+        if (w.link) this.sql.exec('DELETE FROM link_pending WHERE ghh=?', t.ghh);
         this.sql.exec('DELETE FROM tickets WHERE h=?', h);
       });
-      this.sendNew(uid, { t: 'recovery', state: 'cancelled', ...(b.what ? { what: b.what } : {}) });
+      for (const u of new Set([uid, ...waiting].filter(Boolean))) this.sendNew(u, { t: 'recovery', state: 'cancelled', ...(b.what ? { what: b.what } : {}) });
+      return { ok: true };
+    });
+  },
+
+  /**
+   * v0.13: p = {what: 'key'}, signed by the device: it calls off a first recovery key it asked for (a GitHub
+   * account with no recovery key yet). That only puts back what was there; a key that would replace a current
+   * one is cancelled with that current key (/v1/recovery/cancel) or the account's GitHub sign-in.
+   */
+  async recoveryDrop(b, ip) {
+    this.ipLimit('ipAccount', ip);
+    return this.signedP(b, 'recovery-drop', { mutating: true }, (acc, p) => {
+      need(p.what === 'key');
+      if (!this.row('SELECT 1 AS x FROM recovery_pending WHERE uid=?', acc.uid)) fail('not_found');
+      if (this.rkOf(acc.uid)) fail('forbidden');
+      this.sql.exec('DELETE FROM recovery_pending WHERE uid=?', acc.uid);
+      this.sendNew(acc.uid, { t: 'recovery', state: 'cancelled', what: 'key' });
       return { ok: true };
     });
   },
@@ -834,11 +857,14 @@ export const KeyAcctMixin = {
     const gone = this.rows(`SELECT a.* FROM key_meta m JOIN accounts a ON a.uid=m.uid
       WHERE m.first_auth IS NULL AND m.created<=? AND m.uid NOT IN (SELECT uid FROM bans)
       AND m.uid NOT IN (SELECT uid FROM pending_rebind) LIMIT 200`, t - NEVER_CONNECTED);
+    // KEY_ACCOUNT_IDLE_DAYS (off unless set): accounts not seen for that long go too, except banned ones, ones
+    // with a move waiting, ones still connected, and (v0.13) ones with a GitHub account linked: that GitHub
+    // account can still bring them back.
     const idleDays = Number(this.env.KEY_ACCOUNT_IDLE_DAYS) || 0;
     if (idleDays > 0) {
       gone.push(...this.rows(`SELECT a.* FROM key_meta m JOIN accounts a ON a.uid=m.uid
         WHERE m.seen IS NOT NULL AND m.seen<=? AND m.uid NOT IN (SELECT uid FROM bans)
-        AND m.uid NOT IN (SELECT uid FROM pending_rebind) LIMIT 200`, t - idleDays * DAY)
+        AND m.uid NOT IN (SELECT uid FROM pending_rebind) AND m.uid NOT IN (SELECT uid FROM gh_links) LIMIT 200`, t - idleDays * DAY)
         .filter((a) => !this.normalSocket(a.uid)));
     }
     for (const a of gone) this.dropAccount(a);
@@ -847,6 +873,12 @@ export const KeyAcctMixin = {
       (SELECT MIN(at) FROM link_pending) AS lp`);
     let next = Infinity;
     for (const v of [r.rp, r.mc, r.ps, r.lp, r.kc == null ? null : r.kc + NEVER_CONNECTED]) if (v != null) next = Math.min(next, v);
+    // The idle purge looks again when the longest-idle account would be due, and at most once a day for the
+    // ones it keeps.
+    if (idleDays > 0) {
+      const s = this.row('SELECT MIN(seen) AS s FROM key_meta WHERE seen IS NOT NULL')?.s;
+      if (s != null) next = Math.min(next, Math.max(s + idleDays * DAY, t + DAY));
+    }
     return next;
   },
 };

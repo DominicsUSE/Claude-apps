@@ -312,8 +312,11 @@ export function AccountRows({ Row, signOut }) {
           </div>
         <//>`
       : rec.pendingAt
-        ? html`<${Row} label="Recovery key (optional)" hint=${`Your recovery key starts working on ${when(rec.pendingAt)}. If you didn’t add it, cancel it: signing in with GitHub confirms it’s you.`}>
-            <button class="btn" id="p2p-recovery-cancel-gh" disabled=${!canCancel} onClick=${() => ghCancel('key')}>Cancel it</button>
+        ? html`<${Row} label="Recovery key (optional)" hint=${`Your recovery key starts working on ${when(rec.pendingAt)}. If you didn’t add it, or changed your mind, cancel it here or by signing in with GitHub.`}>
+            <div class="p2p-row-acts">
+              <button class="btn" id="p2p-recovery-cancel" disabled=${!active} onClick=${() => openModal(PcCancelModal, { what: 'key' })}>Cancel it</button>
+              <button class="btn" id="p2p-recovery-cancel-gh" disabled=${!canCancel} onClick=${() => ghCancel('key')}>Cancel with GitHub</button>
+            </div>
           <//>`
         : html`<${Row} label="Recovery key (optional)" hint="Then you don’t need GitHub to move to a new PC. It starts working 7 days after you add it. Snug can’t reset it for you, so keep it safe.">
           <button class="btn" id="p2p-recovery-add" disabled=${!active} onClick=${() => openModal(NewRecoveryModal, { first: true })}>Add a recovery key</button>
@@ -336,14 +339,19 @@ export function AccountRows({ Row, signOut }) {
       <button class="btn" id="p2p-move-new" disabled=${!active} onClick=${() => openModal(MoveModal)}>Move to a new PC</button>
     <//>
     ${kindKey && html`<${Row} label="GitHub (optional)" hint=${p.ghChange
-        ? `${p.ghChange.change === 'link' ? 'Your GitHub account starts working' : 'GitHub is unlinked'} on ${when(p.ghChange.at)}. If you didn’t ask for this, cancel it with your recovery key${p.ghChange.change === 'unlink' ? ' or by signing in with the linked GitHub account' : ''}.`
+        ? (p.ghChange.change === 'link'
+          ? `Your GitHub account starts working on ${when(p.ghChange.at)}. If you didn’t ask for this, or changed your mind, cancel it here or by signing in with that GitHub account.`
+          : `GitHub is unlinked on ${when(p.ghChange.at)}. If you didn’t ask for this, cancel it with your recovery key or by signing in with the linked GitHub account.`)
         : p.ghLinked
           ? 'Your GitHub account can also move your Snug account to a new PC. Nobody on Snug sees it.'
           : 'Lets you move your account with GitHub too, if you have an account there. It starts working 7 days after you link it. Nobody on Snug sees your GitHub account.'}>
       ${p.ghChange
         ? html`<div class="p2p-row-acts"><span class="p2p-tag warn" id="p2p-gh-waiting"><${Icon} name="clock" size=${14} />Waiting</span>
-            <button class="btn" id="p2p-gh-cancel" disabled=${!canCancel} onClick=${() => openModal(CancelRecoveryModal, { what: 'github' })}>Cancel</button>
-            ${p.ghChange.change === 'unlink' && p.ghLinked && html`<button class="btn" id="p2p-gh-cancel-gh" disabled=${!canCancel} onClick=${() => ghCancel('link')}>Cancel with GitHub</button>`}</div>`
+            ${p.ghChange.change === 'link'
+              ? html`<button class="btn" id="p2p-gh-cancel" disabled=${!active} onClick=${() => openModal(PcCancelModal, { what: 'link' })}>Cancel</button>
+                <button class="btn" id="p2p-gh-cancel-gh" disabled=${!active} onClick=${() => openModal(LinkGitHubKey, { cancelLink: true })}>Cancel with GitHub</button>`
+              : html`<button class="btn" id="p2p-gh-cancel" disabled=${!canCancel} onClick=${() => openModal(CancelRecoveryModal, { what: 'github' })}>Cancel</button>
+                ${p.ghLinked && html`<button class="btn" id="p2p-gh-cancel-gh" disabled=${!canCancel} onClick=${() => ghCancel('link')}>Cancel with GitHub</button>`}`}</div>`
         : p.ghLinked
         ? html`<div class="p2p-row-acts"><span class="p2p-tag ok"><${Icon} name="check" size=${14} />Linked</span>
             <button class="btn" id="p2p-gh-unlink" disabled=${!active} onClick=${() => openModal(UnlinkModal)}>Unlink</button></div>`
@@ -489,6 +497,32 @@ function CancelRecoveryModal({ what = 'key' }) {
   </form>`;
 }
 
+// v0.13: this PC calls off a change it asked for that would only add a way in (a GitHub link still waiting,
+// or a GitHub account's first recovery key). Nothing else changes, so no recovery key is needed.
+function PcCancelModal({ what }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const link = what === 'link';
+  const go = () => {
+    setBusy(true);
+    call(link ? 'id.linkCancel' : 'id.recoveryDrop', {}).then(() => {
+      S.p2p = link ? { ...S.p2p, ghChange: null } : { ...S.p2p, recovery: { ...S.p2p.recovery, pendingAt: null } };
+      emit();
+      closeModal();
+      toast(link ? 'Cancelled. GitHub isn’t linked.' : 'Cancelled. That recovery key won’t start working.');
+    }, (x) => { setErr(offlineText(x)); setBusy(false); });
+  };
+  return html`<div>
+    <h2>${link ? 'Cancel the GitHub link?' : 'Cancel the recovery key?'}</h2>
+    <p class="modal-lead">${link ? 'It hasn’t started working yet, so this PC can cancel it. You can link GitHub again later.' : 'It hasn’t started working yet, so this PC can cancel it. You can add a recovery key again later.'}</p>
+    ${err && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} /><span>${err}</span></div>`}
+    <div class="modal-foot">
+      <button type="button" class="btn" onClick=${closeModal}>Back</button>
+      <button type="button" class="btn primary" id="p2p-cancel-go" disabled=${busy} aria-busy=${String(busy)} onClick=${go}>${busy ? 'Cancelling…' : link ? 'Cancel the link' : 'Cancel the key'}</button>
+    </div>
+  </div>`;
+}
+
 // "Move to a new PC": the code shown on the new PC, then a check of where it goes, then the move.
 function MoveModal() {
   const p = S.p2p;
@@ -535,7 +569,8 @@ function MoveModal() {
 
 // Link GitHub to an account with no GitHub: the usual code screen, then the link.
 // purpose 'recovery-cancel': a GitHub account's GitHub sign-in stops a recovery key waiting to take effect.
-function LinkGitHubKey({ purpose = 'link-account', what }) {
+// cancelLink (v0.13): the GitHub account a waiting link would add signs in, and the link is called off.
+function LinkGitHubKey({ purpose = 'link-account', what, cancelLink = false }) {
   const [step, setStep] = useState(null);
   const [err, setErr] = useState('');
   const flow = useRef(null);
@@ -558,6 +593,12 @@ function LinkGitHubKey({ purpose = 'link-account', what }) {
             emit();
             closeModal();
             toast(what === 'link' ? 'Cancelled. GitHub stays linked.' : 'Cancelled. That recovery key won’t start working.');
+          } else if (w.state === 'confirmed' && cancelLink) {
+            await call('id.linkCancelGh', { flow: s.flow });
+            S.p2p = { ...S.p2p, ghChange: null };
+            emit();
+            closeModal();
+            toast('Cancelled. GitHub isn’t linked.');
           } else if (w.state === 'confirmed') {
             const r = await call('id.linkGithub', { flow: s.flow });
             if (r?.state === 'pending') S.p2p = { ...S.p2p, ghChange: { change: 'link', at: r.at } };
@@ -574,7 +615,7 @@ function LinkGitHubKey({ purpose = 'link-account', what }) {
   return html`<div class="p2p-link">
     ${!step && !err && html`<p class="modal-lead">Asking GitHub…</p>`}
     ${step?.kind === 'code' && html`<${CodeStep} step=${step} onCancel=${closeModal} />`}
-    ${err && html`<h2>${purpose === 'recovery-cancel' ? (what === 'link' ? 'Cancel the GitHub change' : 'Cancel the recovery key') : 'Link GitHub'}</h2><div class="err" role="alert"><${Icon} name="alert" size=${14} /><span>${err}</span></div>
+    ${err && html`<h2>${cancelLink ? 'Cancel the GitHub link' : purpose === 'recovery-cancel' ? (what === 'link' ? 'Cancel the GitHub change' : 'Cancel the recovery key') : 'Link GitHub'}</h2><div class="err" role="alert"><${Icon} name="alert" size=${14} /><span>${err}</span></div>
       <div class="modal-foot"><button class="btn" onClick=${closeModal}>Close</button></div>`}
   </div>`;
 }

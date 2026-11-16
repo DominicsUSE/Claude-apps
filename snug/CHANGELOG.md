@@ -92,6 +92,25 @@ goes back to an older version on its own (README, "Install, update, go back").
 - New test: send limits drop when a voice room grows past 3 other people and come back when it shrinks
   (five browsers).
 
+### Accounts
+
+- One recovery key for both: a password recovery key you save also becomes your end-to-end encryption
+  recovery key on a device with encryption on, and a new encryption recovery key is offered as your
+  password recovery key too. A key saved by 0.12.0 keeps working; Home and Settings ask you to replace it.
+  After "Forgot your password?" on a browser where encryption isn't unlocked within two minutes, Home and
+  Settings say your encrypted history still opens with the previous key, and offer a new key that does
+  both once encryption is unlocked.
+- A passkey can stand in for your password (and code) when you change the password, remove a passkey,
+  replace a recovery key, turn two-factor sign-in on or off, make new backup codes, or deactivate or delete
+  your account. Changing your name or username tells your passkey provider, where supported.
+- Desktop: a GitHub link still waiting, or a GitHub account's first recovery key, can be cancelled from the
+  same PC or with GitHub (registry: `/v1/recovery/drop`, and `/v1/recovery/cancel` takes the waiting link's
+  GitHub account, and stops every link waiting for it). Cancelling a waiting link with GitHub needs that
+  updated registry; until then Snug says so and you cancel from the same PC. Nothing changes for 0.11 and
+  0.12 apps.
+- Registry: the optional `KEY_ACCOUNT_IDLE_DAYS` purge (still off by default) keeps accounts with a GitHub
+  account linked, and now runs on its own.
+
 ## 0.12.0
 
 ### Private conversations

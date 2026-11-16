@@ -48,6 +48,14 @@ Security fixes go into the newest release only; there are no backports.
   using the old key. Wrong keys are counted per account and address, so tries from elsewhere can't lock the
   owner out. The owner's `npm run reset-password` deletes the key too. Optional **passkeys** add a sign-in
   that phishing pages can't replay (bound to the server's domain); only their public halves are stored.
+  Since 0.13 a passkey checked just now (single-use challenge for that account, user verification
+  required) can replace the password and code when you change the password, remove a passkey, replace a
+  recovery key, turn two-factor sign-in on or off, make new backup codes, or deactivate or delete the
+  account (the username is still typed to delete). Changing your username, and deleting or handing over a
+  house, still ask for the password or code. A failed check counts like a wrong password.
+  The same recovery key now also seals the encryption backup when saved on a device with encryption
+  unlocked, so whoever holds it can both reset the password and read the encrypted history
+  backup, as the README always said it would.
 - **Account takeover with a recovery key.** Someone who copies the recovery key only starts a **move**,
   which waits 72 hours unless the current PC approves. The current PC is told it was the recovery key, can
   stop it, and can then replace the key with the old one in hand (the copy stops working at once). The copy
@@ -58,7 +66,9 @@ Security fixes go into the newest release only; there are no backports.
   without GitHub all wait 7 days. The recovery key cancels them; so does a GitHub sign-in (a GitHub
   account's own, or the linked GitHub of an account without GitHub, which can cancel an unlink or a new
   recovery key). The person can do this from a new PC while the account moves there: it shows the waiting
-  changes. The PC's key can't replace a linked GitHub (unlink first, which waits), and deleting the account
+  changes. Since 0.13 the PC's key alone may also cancel a waiting GitHub link or a first recovery key: that
+  only puts back what was there (the PC could already replace a waiting change with its own), while a
+  waiting unlink, or a key that replaces one, still needs the recovery key or GitHub. The PC's key can't replace a linked GitHub (unlink first, which waits), and deleting the account
   through a linked GitHub needs a link that has worked for at least 7 days. With the device and the recovery
   key together, a link or unlink happens at once. If the thief has the PC and the person has only the linked
   GitHub (no recovery key), neither side can remove the other's proof; the registry owner settles it. The
@@ -215,7 +225,7 @@ stronger than "end-to-end encrypted" is used.
   is bound to the server's host name (`web-auth-v2`), so the owner of one server can't use it on another.
   A key saved by 0.12.0 used the unbound proof (`web-auth-v1`); it still works, once, and the browser sends
   that old proof alongside when using a key, so until such a key is replaced the old exposure remains for
-  it. A key saved at one address of a server (say `localhost`) works only at that address; the server says
+  it. Since 0.13, Home and Settings ask the person to make a new key while their key is such an old one. A key saved at one address of a server (say `localhost`) works only at that address; the server says
   which. Snug makes a new key for each account; don't type one account's key into another server.
 
 ### Privacy and data kept

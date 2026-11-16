@@ -456,3 +456,81 @@ test('the linked GitHub cancels a waiting unlink from a moving PC; with the reco
   assert.equal((await kindOf(a)).github.linked, false);
   oa.close(); ob.close();
 });
+
+// ---------- v0.13 ----------
+
+test('v0.13: this PC calls off a waiting GitHub link alone, or with that GitHub account', async () => {
+  const a = await pc();
+  const r = await create(a, 'linkoff');
+  const code = r.data.recovery.code;
+  await post(a, '/api/id/recovery/confirm', { last: code.slice(-4) }, { cookie: r.cookie });
+  const c = await client(a, r.cookie);
+  await until(() => a.peer.statusFor(c.id)?.registry === 'connected', 8000, 'connected');
+  assert.match(await c.refused('id.linkCancel', {}), /No GitHub link is waiting/);
+  // link (waits), then this PC calls it off with no recovery key
+  assert.equal((await c.ok('id.linkGithub', { flow: await ghFlow(a, r.cookie, 'link-account', 82401) })).state, 'pending');
+  await c.ok('id.linkCancel', {});
+  let kd = await kindOf(a);
+  assert.equal(kd.github.pending, null);
+  assert.equal(kd.github.linked, false);
+  assert.equal(a.peer.statusFor(c.id).ghChange, null);
+  // link again; the GitHub account being linked calls it off
+  assert.equal((await c.ok('id.linkGithub', { flow: await ghFlow(a, r.cookie, 'link-account', 82401) })).state, 'pending');
+  await c.ok('id.linkCancelGh', { flow: await ghFlow(a, r.cookie, 'link-account', 82401) });
+  kd = await kindOf(a);
+  assert.equal(kd.github.pending, null);
+  assert.equal(a.peer.statusFor(c.id).ghChange, null);
+  c.close();
+});
+
+test('v0.13 review: Cancel with GitHub says done only when this PC\'s waiting link is really gone', async () => {
+  const a = await pc();
+  const r = await create(a, 'linkcheck');
+  await post(a, '/api/id/recovery/confirm', { last: r.data.recovery.code.slice(-4) }, { cookie: r.cookie });
+  const c = await client(a, r.cookie);
+  await until(() => a.peer.statusFor(c.id)?.registry === 'connected', 8000, 'connected');
+  assert.equal((await c.ok('id.linkGithub', { flow: await ghFlow(a, r.cookie, 'link-account', 82411) })).state, 'pending');
+  const waiting = async () => {
+    assert.ok((await kindOf(a)).github.pending, 'still waiting at the registry');
+    assert.equal(a.peer.statusFor(c.id).ghChange?.change, 'link');
+  };
+  // another account waits on GitHub 82412: cancelling with 82412 here stops that one (the registry says ok),
+  // not this PC's link to 82411
+  const b = await pc();
+  const rb = await create(b, 'linkother');
+  const cb = await client(b, rb.cookie);
+  await until(() => b.peer.statusFor(cb.id)?.registry === 'connected', 8000, 'connected');
+  assert.equal((await cb.ok('id.linkGithub', { flow: await ghFlow(b, rb.cookie, 'link-account', 82412) })).state, 'pending');
+  assert.match(await c.refused('id.linkCancelGh', { flow: await ghFlow(a, r.cookie, 'link-account', 82412) }), /isn’t the GitHub account waiting to be linked/);
+  await waiting();
+  // a GitHub account nothing waits for: not_found, as a registry from before 0.13 answers for any waiting link
+  const notYet = /didn’t cancel it.*Cancel it from this PC instead/;
+  assert.match(await c.refused('id.linkCancelGh', { flow: await ghFlow(a, r.cookie, 'link-account', 82413) }), notYet);
+  await waiting();
+  const real = a.peer.reg.recoveryCancelGh;
+  a.peer.reg.recoveryCancelGh = async () => { throw Object.assign(new Error('Not found.'), { code: 'not_found', status: 404 }); };
+  try {
+    assert.match(await c.refused('id.linkCancelGh', { flow: await ghFlow(a, r.cookie, 'link-account', 82411) }), notYet);
+  } finally { a.peer.reg.recoveryCancelGh = real; }
+  await waiting();
+  // the right one
+  await c.ok('id.linkCancelGh', { flow: await ghFlow(a, r.cookie, 'link-account', 82411) });
+  assert.equal((await kindOf(a)).github.pending, null);
+  assert.equal(a.peer.statusFor(c.id).ghChange, null);
+  c.close(); cb.close();
+});
+
+test('v0.13: a GitHub account calls off its first recovery key from this PC alone (only the key change)', async () => {
+  const a = await pc();
+  const c = await signUp(a, registry, 82402, 'ghdropper');
+  await until(() => a.peer.statusFor(c.id)?.registry === 'connected', 8000, 'connected');
+  assert.match(await c.refused('id.recoveryDrop', {}), /No recovery key is waiting/);
+  assert.equal((await c.ok('id.recoveryNew', {})).state, 'pending');
+  assert.ok(a.peer.statusFor(c.id).recovery.pendingAt);
+  await c.ok('id.recoveryDrop', {});
+  const kd = await kindOf(a);
+  assert.equal(kd.recovery.pendingAt, null);
+  assert.equal(kd.recovery.set, false);
+  assert.equal(a.peer.statusFor(c.id).recovery.pendingAt, null);
+  c.close();
+});

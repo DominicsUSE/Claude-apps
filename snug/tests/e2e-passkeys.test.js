@@ -11,6 +11,7 @@ import { createRequire } from 'node:module';
 import { startServer } from '../server/index.js';
 import { openDb } from '../server/db.js';
 import { seedDatabase } from '../server/seed.js';
+import { totpAt, unbase32 } from '../server/account.js';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -218,5 +219,124 @@ test('phone: the reminder, the key and "Forgot your password?" fit a 390 px scre
   await p.click('#auth-forgot');
   await p.locator('#rk-key-in').waitFor();
   assert.ok(await noSideScroll(p), 'the forgot screen fits');
+  await p.context().close();
+});
+
+test('recovery key (v0.13): a key saved by an older version shows "Make a new recovery key"; a new one makes the notice go', async () => {
+  // tomasz saved a key with 0.12.0: a row with no v (the server can't tell the key, only that it is old)
+  const { hashPasswordAsync } = await import('../server/auth.js');
+  const uid = srv.db.get("SELECT id FROM users WHERE handle = 'tomasz'").id;
+  srv.db.run('INSERT INTO recovery (user, hash, created, used, v, host) VALUES (?, ?, ?, NULL, NULL, NULL)', uid, await hashPasswordAsync('x'.repeat(43)), Date.now() - 86_400_000);
+  const p = await page(IP);
+  await signIn(p, 'tomasz');
+  await p.locator('.rk-remind[data-old="true"] #rk-remind-title:has-text("Make a new recovery key")').waitFor();
+  await p.locator('.rk-remind:has-text("saved by an older version")').waitFor();
+  // Settings says so too
+  await accountSettings(p);
+  await p.locator('.set-row:has-text("yours was saved by an older version")').waitFor();
+  await p.keyboard.press('Escape');
+  await p.click('#rk-remind-go');
+  await p.locator('#rk-key').waitFor();
+  const key = await keyText(p);
+  await p.fill('#rk-last', key.slice(-4));
+  await p.click('#rk-saved');
+  // replacing a key needs the password
+  await p.fill('#rk-pw', PASSWORD);
+  await p.click('#rk-pw-go');
+  await p.locator('.toast:has-text("new recovery key is saved")').waitFor();
+  await p.locator('.rk-remind').waitFor({ state: 'detached' });
+  assert.equal(srv.db.get('SELECT v FROM recovery WHERE user = ?', uid).v, 2);
+  await p.reload();
+  await p.waitForSelector('.nav');
+  await p.waitForTimeout(300);
+  assert.equal(await p.locator('.rk-remind').count(), 0, 'it stays gone');
+  await p.context().close();
+});
+
+// v0.13: priya adds a passkey, then changes her password with it instead of the old one.
+test('passkeys (v0.13): change the password with the passkey instead of the old password', async () => {
+  const p = await page(LOCAL);
+  await authenticator(p);
+  await signIn(p, 'priya');
+  await accountSettings(p);
+  await p.click('#pk-add');
+  await p.fill('#pk-pw', PASSWORD);
+  await p.click('#pk-go');
+  await p.locator('#pk-list .pk-name').waitFor();
+  await p.locator('.toast:has-text("Passkey added")').waitFor();
+  // the passkey button shows once a new password is typed
+  assert.equal(await p.locator('#pw-passkey').count(), 0);
+  await p.fill('#pw-next', 'a passkey changed this');
+  await p.click('#pw-passkey');
+  // The change signs out every other session and renews this one, so the page reconnects (and Settings may
+  // close); the server is the judge.
+  const login = (password) => fetch(`${LOCAL}/api/login`, { method: 'POST', headers: { origin: LOCAL, 'content-type': 'application/json', 'x-forwarded-for': '10.9.9.9' }, body: JSON.stringify({ handle: 'priya', password }) }).then((r) => r.status);
+  const end = Date.now() + 10000;
+  while (await login('a passkey changed this') !== 200) { if (Date.now() > end) assert.fail('the new password never worked'); await p.waitForTimeout(250); }
+  assert.equal(await login(PASSWORD), 401, 'the old one doesn’t');
+  assert.equal(srv.db.get("SELECT COUNT(*) n FROM auth_events e JOIN users u ON u.id = e.user WHERE u.handle = 'priya' AND e.event = 'password.change'").n, 1);
+  await p.waitForSelector('.nav'); // still signed in on this device
+  await p.context().close();
+});
+
+// v0.13 review: the passkey also stands in when two-factor sign-in is turned on and off.
+test('passkeys (v0.13): turn two-factor sign-in on and off with the passkey instead of the password', async () => {
+  const p = await page(LOCAL);
+  await authenticator(p);
+  await signIn(p, 'malik');
+  await accountSettings(p);
+  await p.click('#pk-add');
+  await p.fill('#pk-pw', PASSWORD);
+  await p.click('#pk-go');
+  await p.locator('#pk-list .pk-name').waitFor();
+  await p.click('.layer-body button:has-text("Set up")');
+  const secret = unbase32((await p.locator('.acc-secret code').textContent()).replace(/\s/g, ''));
+  assert.equal(await p.locator('#tf-passkey').count(), 0, 'offered once the code is typed');
+  await p.fill('#tf-code', totpAt(secret, Date.now()));
+  await p.click('#tf-passkey');
+  await p.locator('h2:has-text("Two-factor sign-in is on")').waitFor();
+  await p.click('button:has-text("I’ve saved them")');
+  await p.click('.layer-body button:has-text("Turn off")');
+  await p.click('#cf-passkey');
+  await p.locator('.toast:has-text("Two-factor sign-in is off.")').waitFor();
+  const events = srv.db.all("SELECT e.event FROM auth_events e JOIN users u ON u.id = e.user WHERE u.handle = 'malik' AND e.event LIKE 'totp.%' ORDER BY e.rowid").map((r) => r.event);
+  assert.deepEqual(events, ['totp.enable', 'totp.disable']);
+  await p.context().close();
+});
+
+// v0.13: renaming tells the passkey provider (signalCurrentUserDetails, stubbed: Chromium's virtual
+// authenticator doesn't show names).
+test('passkeys (v0.13): a new name and username are passed to the passkey provider', async () => {
+  const p = await page(LOCAL);
+  await p.addInitScript(() => {
+    window.__signals = [];
+    if (window.PublicKeyCredential) window.PublicKeyCredential.signalCurrentUserDetails = async (o) => { window.__signals.push(o); };
+  });
+  await p.reload();
+  await p.waitForSelector('.auth-form');
+  await authenticator(p);
+  await signIn(p, 'jonas');
+  await accountSettings(p);
+  await p.click('#pk-add');
+  await p.fill('#pk-pw', PASSWORD);
+  await p.click('#pk-go');
+  await p.locator('#pk-list .pk-name').waitFor();
+  const userId = (await (await p.evaluate(() => fetch('/api/passkeys').then((r) => r.json())))).userId;
+  assert.ok(userId);
+  // the display name, from Settings > Profile
+  await p.click('.layer-nav .row:has-text("Profile")');
+  await p.fill('.set-field[aria-label="Name"]', 'Jonas Renamed');
+  await p.locator('.set-field[aria-label="Name"]').press('Tab');
+  await p.waitForFunction(() => window.__signals.some((s) => s.displayName === 'Jonas Renamed'));
+  let sig = await p.evaluate(() => window.__signals.find((s) => s.displayName === 'Jonas Renamed'));
+  assert.deepEqual(sig, { rpId: 'localhost', userId, name: 'jonas', displayName: 'Jonas Renamed' });
+  // the username
+  await p.click('#handle-change');
+  await p.fill('#handle-new', 'jonas2');
+  await p.fill('#handle-pass', PASSWORD);
+  await p.click('.handle-form button[type=submit]');
+  await p.waitForFunction(() => window.__signals.some((s) => s.name === 'jonas2'));
+  sig = await p.evaluate(() => window.__signals.find((s) => s.name === 'jonas2'));
+  assert.deepEqual(sig, { rpId: 'localhost', userId, name: 'jonas2', displayName: 'Jonas Renamed' });
   await p.context().close();
 });

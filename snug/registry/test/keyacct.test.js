@@ -86,7 +86,7 @@ test('KEY_ACCOUNTS off: every new route answers exactly like an unknown path', a
   try {
     const unknown = await off.call('/v1/nope', {});
     for (const path of ['/v1/pow', '/v1/register', '/v1/recover', '/v1/move/hello', '/v1/move/wait', '/v1/move/peek', '/v1/move/accept',
-      '/v1/recovery/set', '/v1/recovery/cancel', '/v1/link/github', '/v1/link/github/remove', '/v1/release/key', '/v1/account/kind']) {
+      '/v1/recovery/set', '/v1/recovery/cancel', '/v1/recovery/drop', '/v1/link/github', '/v1/link/github/remove', '/v1/release/key', '/v1/account/kind']) {
       const r = await off.call(path, { purpose: 'register' });
       assert.equal(r.status, 404, path);
       assert.deepEqual({ ...r.body, now: 0 }, { ...unknown.body, now: 0 }, path);
@@ -475,6 +475,83 @@ test('link/github: a new GitHub account becomes a second proof; it can move the 
   assert.equal((await reg.authId(makeKeys(), gid)).body.status, 'new');
 });
 
+test('v0.13: a waiting link can be cancelled by the GitHub account being linked (only the link)', async () => {
+  const a = await account(uniq('lgc'));
+  const u = { uid: a.uid, k: a.k };
+  const gid = nextGh++;
+  const t = await ghTicket(a.k, gid);
+  assert.equal((await sp(u, '/v1/link/github', 'link-github', { ticket: t.ticket })).body.state, 'pending');
+  // a recovery key waiting too: cancelling the link with GitHub leaves it
+  const nr = makeKeys();
+  const ts0 = reg.ts();
+  const msg0 = `snug-reg-v1\nrecovery-set\n${u.uid}\n${nr.ik}\n${ts0}`;
+  const p0 = JSON.stringify({ rk: nr.ik, rsigNew: nr.sign(msg0) });
+  assert.equal((await reg.call('/v1/recovery/set', { uid: u.uid, ts: ts0, p: p0, sig: a.k.sign(`snug-reg-v1\nrecovery-set\n${u.uid}\n${ts0}\n${p0}`) })).body.state, 'pending');
+  // another GitHub account can't
+  const k3 = makeKeys();
+  const tx = await ghTicket(k3, nextGh++);
+  const cancelGh = (tk, k, what) => { const ts = reg.ts(); return reg.call('/v1/recovery/cancel', { ticket: tk, ts, sig: k.sign(`snug-reg-v1\nrecovery-cancel-gh\n${tk}\n${ts}${what ? `\n${what}` : ''}`), ...(what ? { what } : {}) }); };
+  assert.equal((await cancelGh(tx.ticket, k3, 'link')).body.error, 'not_found');
+  // the GitHub account being linked, signed in on any PC
+  const k2 = makeKeys();
+  const t2 = await ghTicket(k2, gid);
+  assert.equal((await cancelGh(t2.ticket, k2, 'link')).status, 200);
+  const kd = (await kind(u)).body;
+  assert.equal(kd.github.pending, null);
+  assert.equal(kd.github.linked, false);
+  assert.ok(kd.recovery.pendingAt, 'the waiting recovery key stays');
+  // it can't cancel the recovery key: it isn't linked
+  const t3 = await ghTicket(k2, gid);
+  assert.equal((await cancelGh(t3.ticket, k2, 'key')).body.error, 'not_found');
+  assert.ok((await kind(u)).body.recovery.pendingAt);
+});
+
+test('v0.13 review: the same GitHub waiting on two accounts: its cancel calls off every link waiting for it', async () => {
+  const cancelGh = (tk, k) => { const ts = reg.ts(); return reg.call('/v1/recovery/cancel', { ticket: tk, ts, sig: k.sign(`snug-reg-v1\nrecovery-cancel-gh\n${tk}\n${ts}\nlink`), what: 'link' }); };
+  const link = async (u, id) => (await sp(u, '/v1/link/github', 'link-github', { ticket: (await ghTicket(u.k, id)).ticket })).body;
+  const x = await account(uniq('lwx'));
+  const y = await account(uniq('lwy'));
+  const gid = nextGh++;
+  assert.equal((await link(x, gid)).state, 'pending');
+  assert.equal((await link(y, gid)).state, 'pending');
+  // Y's PC cancels with that GitHub: Y's own link stops waiting (X's too: that GitHub said no to both)
+  const sy = await connectV(y, '0.13.0');
+  assert.equal((await cancelGh((await ghTicket(y.k, gid)).ticket, y.k)).status, 200);
+  await sy.next((m) => m.t === 'recovery' && m.state === 'cancelled');
+  sy.close();
+  assert.equal((await kind(y)).body.github.pending, null);
+  assert.equal((await kind(x)).body.github.pending, null);
+  await reg.clock.advance(7 * DAY + 1000);
+  assert.equal((await kind(y)).body.github.linked, false); // and it didn't come through later
+});
+
+test('v0.13: recovery/drop: the device cancels a first recovery key it asked for; not a key that replaces one', async () => {
+  const gh = await reg.signUp(nextGh++, uniq('drp'));
+  const setKey = (who, k) => {
+    const nr = makeKeys();
+    const ts = reg.ts();
+    const msg = `snug-reg-v1\nrecovery-set\n${who.uid}\n${nr.ik}\n${ts}`;
+    const p = JSON.stringify({ rk: nr.ik, rsigNew: nr.sign(msg) });
+    return reg.call('/v1/recovery/set', { uid: who.uid, ts, p, sig: k.sign(`snug-reg-v1\nrecovery-set\n${who.uid}\n${ts}\n${p}`) });
+  };
+  const drop = (who, payload = { what: 'key' }, k = who.k) => sp({ uid: who.uid, k }, '/v1/recovery/drop', 'recovery-drop', payload);
+  assert.equal((await drop(gh)).body.error, 'not_found'); // nothing waiting
+  assert.equal((await setKey(gh, gh.k)).body.state, 'pending');
+  assert.equal((await drop(gh, { what: 'link' })).status, 400);
+  assert.equal((await drop(gh, {}, makeKeys())).body.error, 'bad_signature');
+  const s = await connectV(gh, '0.12.0');
+  assert.equal((await drop(gh)).status, 200);
+  await s.next((m) => m.t === 'recovery' && m.state === 'cancelled' && m.what === 'key');
+  s.close();
+  assert.deepEqual((await kind(gh)).body.recovery, { set: false, pendingAt: null, rk: null });
+  // a keypair account has a current key: that key cancels a new one, the device alone can't
+  const a = await account(uniq('drk'));
+  const u = { uid: a.uid, k: a.k };
+  assert.equal((await setKey(u, a.k)).body.state, 'pending');
+  assert.equal((await drop(u)).body.error, 'forbidden');
+  assert.ok((await kind(u)).body.recovery.pendingAt);
+});
+
 // ---------- delete with the recovery key ----------
 
 test('release/key: needs the device and the recovery key; frees the name; refused while banned', async () => {
@@ -512,6 +589,41 @@ test('purge: an account whose device never connected within 7 days frees its nam
     assert.equal(exists(seen), true);
     assert.equal(exists(banned), true);
     assert.equal((await r2.call(`/v1/check?name=${never.account.username}`)).body.ok, true);
+  } finally {
+    await r2.close();
+  }
+});
+
+test('idle purge (KEY_ACCOUNT_IDLE_DAYS): an idle account goes; an active one, one with a recovery move waiting and a GitHub-linked one stay', async () => {
+  // Off by default: nothing in wrangler.toml sets it.
+  const toml = (await import('node:fs')).readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8');
+  assert.doesNotMatch(toml, /^\s*KEY_ACCOUNT_IDLE_DAYS\s*=/m);
+  const r2 = await start({ env: { POW_BITS: '2', KEY_ACCOUNT_IDLE_DAYS: '30' } });
+  try {
+    const mk = async (p) => { const a = await account(uniq(p), { R: r2 }); const u = { uid: a.uid, k: a.k, r: a.r, name: a.account.username }; (await connectV(u, '0.12.0', u.k, r2)).close(); return u; };
+    const idle = await mk('idl');
+    const active = await mk('act');
+    const moving = await mk('mov');
+    const linked = await mk('lnk');
+    // linked: GitHub linked at once with the recovery key
+    const t = await ghTicket(linked.k, nextGh++, r2);
+    const l = await sp(linked, '/v1/link/github', 'link-github', { ticket: t.ticket }, { R: r2, extra: (msg) => ({ rsig: linked.r.sign(msg) }) });
+    assert.equal(l.body.state, 'done', JSON.stringify(l.body));
+    // active: its app stays connected
+    const live = await connectV(active, '0.12.0', active.k, r2);
+    await r2.clock.advance(30 * 86_400_000 - 3_600_000);
+    // moving: someone with the recovery key starts a move an hour before the purge would come
+    const { res } = await recover(moving, makeKeys(), { R: r2 });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    await r2.clock.advance(2 * 3_600_000);
+    await r2.clock.advance(1000);
+    const exists = (u) => r2.runtime.sql('SELECT 1 AS x FROM accounts WHERE uid=?', u.uid).length === 1;
+    assert.equal(exists(idle), false, 'the idle account is purged');
+    assert.equal((await r2.call(`/v1/check?name=${idle.name}`)).body.ok, true);
+    assert.equal(exists(active), true, 'a connected account stays');
+    assert.equal(exists(moving), true, 'an account with a recovery move waiting stays');
+    assert.equal(exists(linked), true, 'a GitHub-linked account stays');
+    live.close();
   } finally {
     await r2.close();
   }

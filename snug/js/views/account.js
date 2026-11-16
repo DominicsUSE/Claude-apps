@@ -27,7 +27,7 @@ import { Confirm } from './modals.js';
 import { RevokeSheet, hasKeys } from './e2ee-revoke.js'; // signing out a device can remove its encryption keys too
 import { EraseChoice } from './privacy.js'; // deleting: keep or erase what I wrote
 import { p2pOwner, AccountRows, ConnectRow, DeleteP2p } from './p2p.js'; // GitHub-secured accounts: no password; the Snug username
-import { PasskeyRows } from './passkeys.js'; // v0.12: passkey sign-in (server/passkeys.js)
+import { PasskeyRows, PasskeyStepButton } from './passkeys.js'; // v0.12: passkey sign-in (server/passkeys.js); v0.13: passkey as step-up
 import { RecoveryRows } from './recover.js'; // v0.12: the recovery key for a forgotten password (server/recovery.js)
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
@@ -313,11 +313,12 @@ function PasswordForm() {
   const [code, setCode] = useState('');
   const [msg, setMsg] = useState(null);
   const need = acc().totp;
-  const submit = async (e) => {
-    e.preventDefault();
+  // v0.13: or a passkey checked now, instead of the current password (and the code)
+  const submit = async (e, passkey) => {
+    e?.preventDefault();
     if (next.length < 8) return setMsg({ bad: true, text: 'Passwords need at least 8 characters.' });
     try {
-      await api('/api/password', { current: cur, next, code });
+      await api('/api/password', passkey ? { passkey, next } : { current: cur, next, code });
       setCur(''); setNext(''); setCode('');
       setMsg({ text: 'Password changed. Every other device has been signed out.' });
     } catch (err) { setMsg({ bad: true, text: err.message }); }
@@ -329,6 +330,7 @@ function PasswordForm() {
     ${need && html`<div><label class="label" for="pw-code">Code from your app</label><input id="pw-code" class="field" inputmode="numeric" autocomplete="one-time-code" value=${code} onInput=${(e) => setCode(e.target.value)} /></div>`}
     ${msg && html`<div class=${msg.bad ? 'err' : 'hint'} role=${msg.bad ? 'alert' : 'status'}>${msg.text}</div>`}
     <div><button class="btn" type="submit" disabled=${!cur || !next || (need && !code)}>Change password</button></div>
+    ${next.length >= 8 && html`<${PasskeyStepButton} id="pw-passkey" label="Change it with a passkey instead" onProof=${(proof) => submit(null, proof)} />`}
   </form>`;
 }
 
@@ -368,10 +370,10 @@ function TotpSetup() {
   useEffect(() => {
     call('totp.begin').then((r) => { setSecret(r); setStep('scan'); }, (e) => { setErr(e.message); setStep('error'); });
   }, []);
-  const enable = async (e) => {
-    e.preventDefault();
+  const enable = async (e, passkey) => {
+    e?.preventDefault();
     try {
-      const r = await call('totp.enable', { code: code.replace(/\s/g, ''), password });
+      const r = await call('totp.enable', passkey ? { code: code.replace(/\s/g, ''), passkey } : { code: code.replace(/\s/g, ''), password });
       S.account.totp = true; S.account.backupLeft = r.codes.length;
       setCodes(r.codes); setStep('codes'); emit();
     } catch (x) { setErr(x.message); }
@@ -402,6 +404,7 @@ function TotpSetup() {
       <input id="tf-pw" class="field" type="password" autocomplete="current-password" value=${password}
         aria-invalid=${err ? 'true' : undefined} aria-describedby="tf-err" onInput=${(e) => { setPassword(e.target.value); setErr(''); }} /></div>
       ${err && html`<${Err} id="tf-err" text=${err} />`}
+      ${code.replace(/\s/g, '').length === 6 && html`<${PasskeyStepButton} id="tf-passkey" label="Turn on with a passkey instead" onProof=${(proof) => enable(null, proof)} />`}
     </div>
     <div class="modal-foot">
       <button type="button" class="btn" onClick=${closeModal}>Cancel</button>
@@ -410,7 +413,7 @@ function TotpSetup() {
   </form>`;
 }
 
-// Password (and a code) before something that matters.
+// Password (and a code) before something that matters; or (v0.13) a passkey checked just now.
 function Confirmed({ title, lead, action, danger, needCode, needHandle, run, noPassword, erase: offerErase = false }) {
   const [erase, setErase] = useState('keep'); // privacy: keep or erase what I wrote (deleting only)
   const [password, setPassword] = useState('');
@@ -419,10 +422,11 @@ function Confirmed({ title, lead, action, danger, needCode, needHandle, run, noP
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
-  const submit = async (e) => {
-    e.preventDefault();
+  const submit = async (e, passkey) => {
+    e?.preventDefault();
     setBusy(true);
-    try { const r = await run({ password, code, confirm: handle, ...(offerErase ? { erase: erase === 'erase' } : {}) }); if (r) setResult(r); else closeModal(); } catch (x) { setErr(x.message); setBusy(false); }
+    const how = passkey ? { passkey } : { password, code };
+    try { const r = await run({ ...how, confirm: handle, ...(offerErase ? { erase: erase === 'erase' } : {}) }); if (r) setResult(r); else closeModal(); } catch (x) { setErr(x.message); setBusy(false); }
   };
   if (result) return result;
   return html`<form onSubmit=${submit}>
@@ -434,6 +438,7 @@ function Confirmed({ title, lead, action, danger, needCode, needHandle, run, noP
       ${needHandle && html`<div><label class="label" for="cf-handle">Type your username, <b class="secret">${me().handle}</b>, to confirm</label><input id="cf-handle" class="field" autocapitalize="none" spellcheck="false" data-autofocus=${noPassword || undefined} value=${handle} onInput=${(e) => { setHandle(e.target.value); setErr(''); }} /></div>`}
       ${needCode && html`<div><label class="label" for="cf-code">Code from your app, or a backup code</label><input id="cf-code" class="field" autocomplete="one-time-code" value=${code} onInput=${(e) => { setCode(e.target.value); setErr(''); }} /></div>`}
       ${err && html`<${Err} id="cf-err" text=${err} />`}
+      ${!noPassword && (!needHandle || handle) && html`<${PasskeyStepButton} id="cf-passkey" onProof=${(proof) => submit(null, proof)} />`}
     </div>
     <div class="modal-foot">
       <button type="button" class="btn" onClick=${closeModal}>Cancel</button>
@@ -526,11 +531,11 @@ function PasswordSecurity({ a }) {
           <div class="acc-inline">
             <button class="btn" onClick=${() => openModal(Confirmed, {
               title: 'New backup codes', lead: 'Your old backup codes stop working.', action: 'Make new codes', needCode: true,
-              run: async ({ password, code }) => { const r = await call('totp.codes', { password, code }); return html`<h2>New backup codes</h2><p class="modal-lead">Each works once. They won’t be shown again.</p><${BackupCodes} codes=${r.codes} /><div class="modal-foot"><button class="btn primary" onClick=${closeModal}>Done</button></div>`; },
+              run: async ({ password, code, passkey }) => { const r = await call('totp.codes', { password, code, passkey }); return html`<h2>New backup codes</h2><p class="modal-lead">Each works once. They won’t be shown again.</p><${BackupCodes} codes=${r.codes} /><div class="modal-foot"><button class="btn primary" onClick=${closeModal}>Done</button></div>`; },
             })}>New backup codes</button>
             <button class="btn danger" onClick=${() => openModal(Confirmed, {
               title: 'Turn off two-factor sign-in?', lead: 'Your password alone will sign you in again.', action: 'Turn off', danger: true, needCode: true,
-              run: ({ password, code }) => call('totp.disable', { password, code }).then(() => { S.account.totp = false; emit(); toast('Two-factor sign-in is off.'); }),
+              run: ({ password, code, passkey }) => call('totp.disable', { password, code, passkey }).then(() => { S.account.totp = false; emit(); toast('Two-factor sign-in is off.'); }),
             })}>Turn off</button>
           </div>
         <//>`

@@ -52,9 +52,12 @@ export function createRecovery({ db, M, hub, account, sendJson, error, jsonBody,
   hub.extraLimits = [...(hub.extraLimits || []), finishLimit, userLimit];
   const key = (t) => createHash('sha256').update(String(t)).digest('hex');
   const tokenOf = (req) => readCookie(req.headers.cookie, COOKIE);
+  // old (v0.13): the usable key was saved by 0.12.0 (web-auth-v1, not tied to this host name); the app asks
+  // the person to replace it. It keeps working until then.
   const status = (user) => {
-    const r = db.get('SELECT created, used FROM recovery WHERE user = ?', user);
-    return { set: !!r && !r.used, created: r?.created || null };
+    const r = db.get('SELECT created, used, v FROM recovery WHERE user = ?', user);
+    const set = !!r && !r.used;
+    return { set, created: r?.created || null, old: set && r.v !== 2 };
   };
   const passwordAccount = (user) => !M.p2pOwner?.(user) && db.get('SELECT pass FROM users WHERE id = ?', user)?.pass !== '!';
 
@@ -166,8 +169,8 @@ export function createRecovery({ db, M, hub, account, sendJson, error, jsonBody,
     // of signing up or recovering. Replacing a key, or any later save, needs the password (and a code).
     const token = tokenOf(req);
     const sessionOk = !status(user).set && recentAuth(db, token) && ['register', 'recovery'].includes(sessionHow(db, token));
-    if (d.password !== undefined || !sessionOk) {
-      const r = await M.stepUp(user, { password: d.password, code: typeof d.code === 'string' ? d.code.replace(/\s/g, '') : '', token });
+    if (d.password !== undefined || d.passkey != null || !sessionOk) {
+      const r = await M.stepUp(user, { password: d.password, code: typeof d.code === 'string' ? d.code.replace(/\s/g, '') : '', passkey: d.passkey ?? undefined, token });
       if (r) { error(res, r.status === 429 ? 429 : 401, r.message); return true; }
     }
     try { M.onRecoverySet?.(user, d); } catch (e) { error(res, 400, e.message); return true; } // e2ee: the backup under the new key, when that ships

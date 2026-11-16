@@ -319,7 +319,7 @@ async function freshAsb(list) {
  *   bk:    a new recovery key, so the backup a removed device could open (with your password) is replaced.
  * Returns what to send and keep; the caller sends it with its own op.
  */
-async function nextKeys(list, devs, prekeys, { epoch = true, sync = false, bk = false, arcOn = false, skipStale = false } = {}) {
+async function nextKeys(list, devs, prekeys, { epoch = true, sync = false, bk = false, rkRaw = null, arcOn = false, skipStale = false } = {}) {
   // Settings sealed again at the server's lower version would lower this device's mark (review H1,
   // second pass): while the server's copy is behind, the person puts this device's copy back first.
   if ((sync || bk) && E2.metaProblem) throw new Error(COPY_META_FIRST);
@@ -332,14 +332,16 @@ async function nextKeys(list, devs, prekeys, { epoch = true, sync = false, bk = 
   }
   if (sync) asb = { ...asb, sync: b64u(random(32)) };
   let rk = null;
-  if (bk) { rk = await newRecoveryKey(); asb = { ...asb, bk: b64u(await deriveBackupKey(rk.raw)) }; }
+  // rkRaw (v0.13): a recovery key the person already saved (the password recovery key): the backup goes under
+  // it, and there is no new key to show.
+  if (bk) { rk = rkRaw ? null : await newRecoveryKey(); asb = { ...asb, bk: b64u(await deriveBackupKey(rkRaw || rk.raw)) }; }
   asb = backup.bumpAsb(asb);
   const devlist = await nextOf(list, change);
   const { boxes, skipped } = await boxesFor(asb, devlist, prekeys, { skipStale });
   const out = { asb, devlist, boxes, skipped, rk };
   const local = await localMeta();
   if (sync || bk) {
-    const next = { ...JSON.parse(JSON.stringify(meta || backup.emptyMeta())), ...(bk ? { rk: false } : {}) };
+    const next = { ...JSON.parse(JSON.stringify(meta || backup.emptyMeta())), ...(bk ? { rk: !!rkRaw } : {}) };
     const ver = metaWriteVer(metaVer, local);
     out.meta = { ver, blob: await backup.sealMeta(next, b64uOf(asb.sync, 32), { u: userId(), ver }) };
     out.metaValue = next;
@@ -428,6 +430,24 @@ export async function newRecoveryKeyFlow() {
   await keepKeys(x);
   emit();
   return x.rk.text;
+}
+
+/**
+ * v0.13: one recovery key for both (js/views/recover.js). The password recovery key just saved on this
+ * server becomes the encryption recovery key: the backup is sealed again under it (deriveBackupKey) and the
+ * other devices get the updated account keys. An encryption key waiting to be saved here is dropped: it no
+ * longer opens the backup.
+ */
+export async function adoptRecoveryKey(raw) {
+  if (E2.status !== 'ready') throw new Error('Encryption isn’t ready on this device.');
+  const { list, prekeys } = await ownList();
+  const x = await nextKeys(list, list.devs, prekeys, { epoch: false, bk: true, rkRaw: raw });
+  await call('e2ee.publish', { devlist: x.devlist, boxes: x.boxes, backup: x.backup, meta: x.meta });
+  await keepKeys(x);
+  await store.putSecret('rk', null);
+  E2.rk = null;
+  E2.rkSaved = true;
+  emit();
 }
 
 export const EPOCH_ROTATE = 7 * DAY;
