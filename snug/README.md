@@ -529,7 +529,10 @@ Real, and covered by tests with separate users:
     and checks each one, allows ports 80, 443, 8080 and 8443 only, stops at
     6 seconds and at 10 MB (4 MB for a page's picture), and caches for hours.
     Pictures are stored as Snug files in the conversation, so a reader's
-    browser never loads another site. The author or a moderator removes a
+    browser never loads another site. They count against the author's and
+    the house's file quotas, and go when the previews are removed or rebuilt
+    after an edit (pictures earlier versions left behind are swept once).
+    The author or a moderator removes a
     message's previews; `<https://...>` asks for none; Settings > Appearance >
     Link previews hides them; `SNUG_LINK_PREVIEWS=0` turns fetching off. In
     the desktop app, links friends on other PCs send get no preview unless

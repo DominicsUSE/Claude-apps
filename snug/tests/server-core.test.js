@@ -305,6 +305,39 @@ test('deleted messages: a preview’s picture is still removed once the undo win
   assert.equal(srv.db.get('SELECT 1 FROM files WHERE id = ?', f.id), undefined, 'the preview’s picture is removed');
 });
 
+// review-media 3 (pass 2): previews removed or rebuilt on a live message don't leave their pictures behind.
+const withPreview = async (text, title) => {
+  const f = await (await upload(ada.cookie, lounge, `preview ${title}`, 'preview.txt')).json();
+  srv.db.run('UPDATE files SET meta = ? WHERE id = ?', JSON.stringify({ embed: true, w: 1, h: 1 }), f.id);
+  const id = await send(ada, lounge, text);
+  srv.db.run('UPDATE messages SET embeds = ? WHERE id = ?', JSON.stringify([{ kind: 'link', url: 'https://example.org/p', host: 'example.org', title, image: { id: f.id, w: 1, h: 1 } }]), id);
+  return { f, id };
+};
+const fileGone = (fid) => srv.db.get('SELECT 1 FROM files WHERE id = ?', fid) === undefined && !existsSync(join(dir, 'files', fid));
+test('link previews: removing them removes the preview’s picture', async () => {
+  const { f, id } = await withPreview('see https://example.org/p', 'Off');
+  await ada.ok('msg.embeds', { conv: lounge, id, on: false });
+  assert.equal(srv.db.get('SELECT embeds FROM messages WHERE id = ?', id).embeds, null);
+  assert.ok(fileGone(f.id), 'the picture is removed with the preview');
+});
+test('link previews: an edit that rebuilds them removes the old picture', async () => {
+  const { f, id } = await withPreview('see https://example.org/p', 'Edit');
+  await ada.ok('msg.edit', { conv: lounge, id, text: 'see https://example.org/p again' });
+  for (let i = 0; i < 50 && srv.db.get('SELECT embeds FROM messages WHERE id = ?', id).embeds; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(srv.db.get('SELECT embeds FROM messages WHERE id = ?', id).embeds, null, 'this server fetches no previews, so the rebuild has none');
+  assert.ok(fileGone(f.id), 'the old picture is removed');
+});
+test('link previews: pictures orphaned by older builds are swept once', async () => {
+  const f = await (await upload(ada.cookie, lounge, 'old preview', 'preview.txt')).json();
+  srv.db.run('UPDATE files SET meta = ?, created = ? WHERE id = ?', JSON.stringify({ embed: true, w: 1, h: 1 }), Date.now() - 5 * DAY, f.id);
+  const kept = await withPreview('kept https://example.org/p', 'Kept');
+  srv.db.run('UPDATE files SET created = ? WHERE id = ?', Date.now() - 5 * DAY, kept.f.id);
+  srv.db.run("DELETE FROM sweep_marks WHERE name = 'embeds'"); // as on the first start of this build
+  for (let i = 0; i < 5; i++) srv.sweepFiles(Date.now());
+  assert.ok(fileGone(f.id), 'a preview picture no message names is removed');
+  assert.ok(srv.db.get('SELECT 1 FROM files WHERE id = ?', kept.f.id), 'one a message still shows stays');
+});
+
 test('disappearing: a database from before 0.12 gains the column and keeps its messages', () => {
   const d = mkdtempSync(join(tmpdir(), 'snug-ttl-'));
   try {

@@ -191,7 +191,9 @@ export const UNDO_MS = 11 * 60_000;
 export const UNATTACHED_MS = 24 * 3600_000;
 const OWNED = /^(avatar|banner|emoji|sticker|housepic|eventcover|sound):/;
 const FID = /f_[a-z0-9]{8,40}/g;
-export function createFileSweep({ db, filesDir, log = () => {} }) {
+// Whether anything still wants a file: a message that isn't past its undo window names it, a saved GIF,
+// a house emoji or sticker. Also used when a live message's previews are removed or rebuilt (server/messaging.js).
+export function fileChecker(db) {
   const cols = new Set(db.all('PRAGMA table_info(messages)').map((c) => c.name));
   const refCols = ['files', 'embeds', 'fwd'].filter((c) => cols.has(c)); // fixed names, never input
   const refSql = refCols.map((c) => `instr(coalesce(${c}, ''), ?) > 0`).join(' OR ');
@@ -208,6 +210,13 @@ export function createFileSweep({ db, filesDir, log = () => {} }) {
     if (hasTable('house_stickers') && db.get('SELECT 1 FROM house_stickers WHERE file = ?', fid)) return true;
     return false;
   };
+  return { wanted, refCols, live };
+}
+
+export function createFileSweep({ db, filesDir, log = () => {} }) {
+  const { wanted, refCols, live } = fileChecker(db);
+  // review-media 3: where the one-time walk over older link-preview pictures has got to.
+  db.run('CREATE TABLE IF NOT EXISTS sweep_marks (name TEXT PRIMARY KEY, mark INTEGER NOT NULL, until INTEGER NOT NULL)');
   const remove = (fid) => {
     db.run('DELETE FROM files WHERE id = ?', fid);
     try { unlinkSync(join(filesDir, fid)); } catch (e) { if (e.code !== 'ENOENT') log('error', 'file sweep', e); }
@@ -241,6 +250,23 @@ export function createFileSweep({ db, filesDir, log = () => {} }) {
         remove(f.id); removed++;
       }
       mark = batch.length === 200 ? batch[199].created : until;
+    }
+    // 3. Link-preview pictures that builds before this one left behind when previews were removed or
+    // rebuilt (review-media 3): walked once, 2000 rows of the files table per pass, up to the last row
+    // there when this build first ran. A picture younger than a day is step 2's.
+    let s = db.get("SELECT mark, until FROM sweep_marks WHERE name = 'embeds'");
+    if (!s) {
+      s = { mark: 0, until: db.get('SELECT COALESCE(MAX(rowid), 0) n FROM files').n };
+      db.run("INSERT INTO sweep_marks (name, mark, until) VALUES ('embeds', 0, ?)", s.until);
+    }
+    if (s.mark < s.until) {
+      const to = Math.min(s.mark + 2000, s.until);
+      for (const f of db.all(`SELECT id, conv FROM files WHERE rowid > ? AND rowid <= ? AND created < ? AND meta LIKE '%"embed":true%'`, s.mark, to, until)) {
+        if (OWNED.test(f.conv)) continue;
+        if (wanted(f.id, [f.conv], '', cutoff, now)) continue;
+        remove(f.id); removed++;
+      }
+      db.run("UPDATE sweep_marks SET mark = ? WHERE name = 'embeds'", to);
     }
     return removed;
   };

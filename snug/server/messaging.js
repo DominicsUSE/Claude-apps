@@ -31,7 +31,7 @@ import { newId, now } from './model.js';
 import { limiter, safeDecode } from './auth.js';
 import { safeFetch, readMeta, previewLinks } from './linkpreview.js';
 import { emojiImage } from './emoji.js';
-import { sniff } from './media.js';
+import { sniff, fileChecker, UNDO_MS } from './media.js';
 import { embedFileRefs } from './expiry.js'; // review-media 3
 import { stripInvisible, cleanFileName } from '../js/lib/util.js'; // sec-authz
 
@@ -272,6 +272,22 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
     }
   }
 
+  // Preview pictures a live message stopped naming (its previews removed or rebuilt): each is that
+  // message's own copy, so it goes unless something else still names it (review-media 3).
+  let checker = null;
+  const FIDS = /f_[a-z0-9]{8,40}/g;
+  function dropEmbedFiles(conv, mid, before, after = null) {
+    const keep = new Set(String(after || '').match(FIDS) || []);
+    for (const fid of new Set(String(before || '').match(FIDS) || [])) {
+      if (keep.has(fid)) continue;
+      const f = db.get('SELECT id, conv, meta FROM files WHERE id = ?', fid);
+      if (!f || !/"embed"\s*:\s*true/.test(f.meta || '')) continue;
+      checker ||= fileChecker(db);
+      if (checker.wanted(fid, [conv, f.conv], mid, Date.now() - UNDO_MS)) continue;
+      dropFiles([f]);
+    }
+  }
+
   // ---------- Link previews ----------
   const queue = [];
   let running = 0;
@@ -356,12 +372,14 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
         out.push(e);
       }
     }
-    // The message may have been edited, deleted or stripped of previews meanwhile.
+    // The message may have been edited, deleted or stripped of previews meanwhile: then the pictures
+    // just copied are named by nothing (review-media 3).
     const cur = M.liveMsg(mid);
-    if (!cur || cur.noembed || cur.text !== row.text) return;
     const next = out.length ? JSON.stringify(out) : null;
+    if (!cur || cur.noembed || cur.text !== row.text) { dropEmbedFiles(conv, mid, next, cur?.embeds); return; }
     if (next === (cur.embeds || null)) return;
     db.run('UPDATE messages SET embeds = ? WHERE id = ?', next, mid);
+    dropEmbedFiles(conv, mid, cur.embeds, next); // the pictures of the previews this replaces
     broadcast(conv, mid);
   }
   function queueEmbeds(conv, mid) {
@@ -596,6 +614,7 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
         queueEmbeds(conv, row.id);
       } else {
         db.run('UPDATE messages SET noembed = 1, embeds = NULL WHERE id = ?', row.id);
+        dropEmbedFiles(conv, row.id, row.embeds); // review-media 3: their pictures go too
         broadcast(conv, row.id);
       }
       return {};
