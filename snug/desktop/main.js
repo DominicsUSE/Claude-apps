@@ -1096,7 +1096,11 @@ const BUSY = new Set(["downloading", "verifying", "installing"]);
 // state: none | quiet (downloading or waiting in the background) | required (the update page is up).
 // phase: ready | required | downloading | verifying | waiting (verified, waiting for a quiet moment) |
 //        installing | installed | manual | error.
-const upd = { state: "none", info: null, phase: "ready", received: 0, total: 0, message: null, file: null, dl: false }; // dl: the error is a failed download (tried again by itself), not a failed install
+// asked: the person pressed Install now (or the fallback page's update button) for this version, so it installs
+// as soon as it is verified, not at a "quiet moment" (window hidden or unfocused, or a minute without input), which
+// doesn't come while they keep using Snug. Still never during a call or a data-file transfer. A failed download
+// clears it: the automatic retry waits for a quiet moment again.
+const upd = { state: "none", info: null, phase: "ready", received: 0, total: 0, message: null, file: null, dl: false, asked: false }; // dl: the error is a failed download (tried again by itself), not a failed install
 const UPDATE_RETRY_MS = 10 * 60_000;
 let shellStartedAt = Date.now();
 let updater = null;
@@ -1138,18 +1142,19 @@ let lastCheck = null; // { at, ok }: Settings > Desktop app says when this app l
 // install: the person asked for this update (Install now, or the fallback page's update button).
 async function checkUpdate({ install = false } = {}) {
   if (!canCheck()) return null;
-  if (BUSY.has(upd.phase)) return publicUpdate();
+  if (BUSY.has(upd.phase)) { if (install) upd.asked = true; return publicUpdate(); }
   let r;
   if (!cleaned) { cleaned = true; try { getUpdater().cleanup(); } catch { /* best effort */ } }
   try { r = await getUpdater().check(); lastCheck = { at: Date.now(), ok: true }; } catch { lastCheck = { at: Date.now(), ok: false }; return null; }
   // Once found it stays found: offline or an odd reply never lifts it.
   if (r.state !== "required") return upd.state !== "none" ? publicUpdate() : null;
   if (BUSY.has(upd.phase)) return publicUpdate();
-  if (upd.info?.version !== r.version) { upd.file = null; setUpdate({ info: r, phase: "required", received: 0, total: r.asset.size, message: null }); } else upd.info = r;
+  if (upd.info?.version !== r.version) { upd.file = null; upd.asked = false; setUpdate({ info: r, phase: "required", received: 0, total: r.asset.size, message: null }); } else upd.info = r;
   // The registry's minimum is above this version: it may not be used meanwhile.
   const forced = !!r.min && semverCmp(r.min, app.getVersion()) > 0;
   if (forced) upd.state = "required";
   else if (upd.state === "none" && autoInstall({ mode: updateMode(), forced, asked: install })) upd.state = "quiet";
+  if (install) upd.asked = true;
   // The last try couldn't put the new version in place: say so instead of trying again in a loop.
   if (getUpdater().takeFailure()) { upd.state = "required"; upd.dl = false; setUpdate({ phase: "error", message: UPDATE_ERRORS.install }); needsPerson(); }
   if (upd.state === "required") showUpdatePage();
@@ -1202,6 +1207,7 @@ async function startUpdate() {
   } catch (e) {
     console.warn("[snug] update failed:", e.code, e.message);
     upd.dl = true;
+    upd.asked = false; // the retry in 10 minutes waits for a quiet moment again; Settings offers Try again
     setUpdate({ phase: "error", message: UPDATE_ERRORS[e.code] || UPDATE_ERRORS.network });
     retryLater(UPDATE_RETRY_MS);
   }
@@ -1213,6 +1219,7 @@ function quietMoment() {
   // voice room or a call on it.
   try { if (server?.vaultBusy?.() || server?.voiceBusy?.()) return false; } catch { /* no server here */ }
   if (upd.state === "required") return true; // the update page is already in the way
+  if (upd.asked) return true; // the person pressed Install now: they are at the window, and that's the point
   if (typeof globalThis.snugUpdateQuiet === "boolean") return globalThis.snugUpdateQuiet; // the desktop test decides
   const q = updaterEnv().SNUG_UPDATE_QUIET; // and how it starts out (honoured like the other test variables: --dev-update)
   if (q === "0" || q === "1") return q === "1";
@@ -1298,11 +1305,18 @@ function scheduleCheck(first = false) {
 }
 globalThis.snugUpdateTimer = () => !!checkT; // for the desktop test
 // What Settings > Desktop app shows: the choice, when the app last asked, and a version waiting for Install now.
+// waiting: Install now applies (found and not started, or downloaded behind Snug and waiting for a quiet moment).
 const updateInfo = () => ({
-  ...publicUpdate(), mode: updateMode(), canCheck: canCheck(), lastCheck,
-  waiting: upd.state === "none" && !!upd.info && !BUSY.has(upd.phase),
+  ...publicUpdate(), mode: updateMode(), canCheck: canCheck(), lastCheck, asked: upd.asked,
+  waiting: !!upd.info && !upd.asked && (upd.state === "none" ? !BUSY.has(upd.phase) : upd.state === "quiet" && upd.phase === "waiting"),
 });
-const installNow = () => { if (upd.state === "none" && upd.info) { upd.state = "quiet"; startUpdate(); } };
+// asked: the person pressed Install now. Switching to Automatically isn't asking: that still waits for a quiet moment.
+const installNow = ({ asked = false } = {}) => {
+  if (!upd.info || upd.state === "required") return;
+  if (asked) upd.asked = true;
+  if (upd.state === "none") upd.state = "quiet";
+  startUpdate(); // downloads; a verified download installs once the moment allows (at once when asked)
+};
 ipcMain.handle("updates:get", (e) => (fromSnug(e.senderFrame.url) ? updateInfo() : null));
 ipcMain.handle("updates:set", (e, mode) => {
   if (!fromSnug(e.senderFrame.url)) return { error: "Not allowed." };
@@ -1310,7 +1324,7 @@ ipcMain.handle("updates:set", (e, mode) => {
   saveTrayPrefs({ updates: mode });
   if (mode === "manual") scheduleCheck();
   else if (!checkT) scheduleCheck(true);
-  if (mode === "auto") installNow(); // a version that was waiting for the person goes ahead
+  if (mode === "auto" && upd.state === "none") installNow(); // a version that was waiting for the person goes ahead
   return { settings: publicPrefs(), update: updateInfo() };
 });
 ipcMain.handle("updates:check", async (e) => {
@@ -1320,7 +1334,7 @@ ipcMain.handle("updates:check", async (e) => {
 });
 ipcMain.handle("updates:install", (e) => {
   if (!fromSnug(e.senderFrame.url)) return null;
-  installNow();
+  installNow({ asked: true });
   return updateInfo();
 });
 globalThis.snugUpdateState = publicUpdate;

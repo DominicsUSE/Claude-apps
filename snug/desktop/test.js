@@ -1143,6 +1143,88 @@ test("0.14 update choice: Tell me finds the version, says so and waits for Insta
   fs.rmSync(path.dirname((await two.app.evaluate(() => globalThis.snugUpdateInstalled)).file), { recursive: true, force: true });
 });
 
+// Bug (0.14.0): the person at the window presses Settings > Desktop app > Check now, then Install now, and
+// nothing happened: the update downloaded, then waited for a "quiet moment" (the window hidden or unfocused,
+// or nobody touching the computer for a minute), which doesn't come while they keep using Snug. Here nothing
+// is quiet (SNUG_UPDATE_QUIET=0, no test override): the buttons alone must install it.
+async function settingsUpdates(page) {
+  await page.click('.auth-link:has-text("Create an account")');
+  await page.fill("#auth-handle", "ula");
+  await page.fill("#auth-name", "Ula Update");
+  await page.fill("#auth-pass", "a long password");
+  await page.click(".auth-form button[type=submit]");
+  await page.waitForSelector(".nav");
+  await page.evaluate(() => import("/js/store.js").then((s) => import("/js/views/settings.js").then((v) => s.openLayer({ C: v.Settings, props: {} }))));
+  await page.click('.layer-nav .row:has-text("Desktop app")');
+  await page.locator("#ds-update-check").waitFor();
+}
+for (const mode of ["notify", "auto"]) {
+  test(`update buttons (${mode}): Check now, then Install now installs while the person is at the window`, async (t) => {
+    upd.badSums = false;
+    upd.version = "9.9.9";
+    const userData = fs.mkdtempSync(path.join(os.tmpdir(), `snug-desktop-update-click-${mode}-`));
+    t.after(() => removeDir(userData));
+    const { app, page } = await launchUpdate(userData, { config: { updates: mode } });
+    t.after(() => app.close().catch(() => {}));
+    await settingsUpdates(page);
+    assert.equal(await app.evaluate(() => globalThis.snugUpdateQuiet ?? null), null, "no test override: the real quiet check");
+    await page.click("#ds-update-check");
+    // Tell me: found, waiting for the person. Automatically: it downloads behind Snug first.
+    await page.locator("#ds-update-install").waitFor({ timeout: 40000 });
+    assert.match(await page.locator(".layer-body").textContent(), /Snug 9\.9\.9 is available/);
+    assert.equal(await app.evaluate(() => globalThis.snugUpdateInstalled ?? null), null, "nothing installed before the click");
+    await page.click("#ds-update-install");
+    // The update page comes up with the download and the install: the person sees it working.
+    await page.waitForURL(/update\.html$/, { timeout: 40000 }).catch(async (e) => {
+      throw new Error(`no update page (phase ${await updatePhase(app)}, log ${(await app.evaluate(() => globalThis.snugUpdateLog)).join(", ")}): ${e.message.split("\n")[0]}`);
+    });
+    await page.waitForSelector('body[data-phase="installed"]', { timeout: 40000 });
+    const rec = await app.evaluate(() => globalThis.snugUpdateInstalled);
+    assert.equal(rec.kind, "portable");
+    assert.match(rec.file, /Snug-9\.9\.9-portable\.exe$/);
+    const log = await app.evaluate(() => globalThis.snugUpdateLog);
+    assert.ok(log.indexOf("verified") < log.indexOf("installing"), "installed only after the checksum matched");
+    fs.rmSync(path.dirname(rec.file), { recursive: true, force: true });
+  });
+}
+// After Install now, a download that fails says why in Settings (not "You have the newest version") with Try
+// again; and the automatic retry 10 minutes later is not "asked" any more: it waits for a quiet moment instead
+// of restarting Snug long after the click.
+test("update buttons: Install now, then a failed download: Settings says so with Try again; the later retry waits for a quiet moment", async (t) => {
+  upd.badSums = true;
+  upd.version = "9.9.9";
+  t.after(() => { upd.badSums = false; });
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-update-fail-"));
+  t.after(() => removeDir(userData));
+  const { app, page } = await launchUpdate(userData, { config: { updates: "notify" } });
+  t.after(() => app.close().catch(() => {}));
+  await settingsUpdates(page);
+  await page.click("#ds-update-check");
+  await page.locator("#ds-update-install").waitFor({ timeout: 40000 });
+  await page.click("#ds-update-install");
+  await untilPhase(app, "error");
+  await page.locator("#ds-update-retry").waitFor({ timeout: 10000 });
+  const body = await page.locator(".layer-body").textContent();
+  assert.match(body, /didn’t match its checksum/, "the reason is shown");
+  assert.doesNotMatch(body, /You have the newest version/);
+  assert.equal(await app.evaluate(() => globalThis.snugUpdateShown()), false, "a failed download never gets in the way");
+  // The automatic retry (here: the next check) gets a good download while the person is busy: it waits.
+  upd.badSums = false;
+  await app.evaluate(() => globalThis.snugCheckUpdate());
+  await untilPhase(app, "waiting");
+  await new Promise((r) => setTimeout(r, 7000)); // more than one quiet-moment poll (5 s)
+  assert.equal(await updatePhase(app), "waiting", "not installed at a random later moment");
+  assert.equal(await app.evaluate(() => globalThis.snugUpdateInstalled ?? null), null, "nothing installed");
+  assert.equal(await app.evaluate(() => globalThis.snugUpdateShown()), false);
+  // Try again in Settings: the person asks again, and it installs.
+  await page.click("#ds-update-retry");
+  await page.waitForURL(/update\.html$/, { timeout: 40000 });
+  await page.waitForSelector('body[data-phase="installed"]', { timeout: 40000 });
+  const rec = await app.evaluate(() => globalThis.snugUpdateInstalled);
+  assert.match(rec.file, /Snug-9\.9\.9-portable\.exe$/);
+  fs.rmSync(path.dirname(rec.file), { recursive: true, force: true });
+});
+
 // ---------- sec-desktop: join mode against a stand-in server, the in-app server's switches, fuses ----------
 const http = require("http");
 function stubSite(handler) {
@@ -1521,6 +1603,39 @@ const devStore = (page) => page.evaluate(() => new Promise((resolve, reject) => 
     };
   };
 }));
+// The same bug on the fallback page (0.13.0 too): "Check for an app update" found the version, said it was on
+// its way, then waited for a quiet moment while the person stared at that page. Pressing it installs it.
+test("join mode, fallback: Check for an app update installs the new version while the person is at the window", async (t) => {
+  upd.badSums = false;
+  upd.version = "9.9.9";
+  await stubReady;
+  const host = stubSite((req, res) => {
+    if (req.url === "/api/version") { res.writeHead(404, { "content-type": "application/json" }); return res.end("{}"); }
+    res.writeHead(200, { "content-type": "text/html" });
+    return res.end("<!doctype html><title>Old Snug</title>");
+  });
+  const base = await host.ready;
+  t.after(() => host.srv.close());
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-fallback-update-"));
+  t.after(() => removeDir(userData));
+  const stub = `http://127.0.0.1:${updateStub.address().port}`;
+  const { app, page } = await launchWith(userData, {
+    config: { mode: "join", url: base },
+    env: { SNUG_UPDATE_URL: `${stub}/latest`, SNUG_NOTICES_URL: `${stub}/notices`, SNUG_UPDATE_KIND: "portable", SNUG_UPDATE_DRY_INSTALL: "1", SNUG_UPDATE_QUIET: "0", SNUG_UPDATE_CHECK: "manual" },
+  });
+  t.after(() => app.close().catch(() => {}));
+  await page.waitForSelector("#fallback");
+  await page.click("#update");
+  await page.locator('#status:has-text("Snug 9.9.9 is on its way")').waitFor({ timeout: 20000 });
+  await page.waitForURL(/update\.html$/, { timeout: 40000 }).catch(async (e) => {
+    throw new Error(`no update page (phase ${await updatePhase(app)}): ${e.message.split("\n")[0]}`);
+  });
+  await page.waitForSelector('body[data-phase="installed"]', { timeout: 40000 });
+  const rec = await app.evaluate(() => globalThis.snugUpdateInstalled);
+  assert.match(rec.file, /Snug-9\.9\.9-portable\.exe$/);
+  fs.rmSync(path.dirname(rec.file), { recursive: true, force: true });
+});
+
 const NOT_PROTECTED = /Your encryption keys aren’t protected by the system key store on this computer/;
 
 test("encryption keys and the OS key store: a 0.12.0 profile is upgraded without losing keys or messages; without a key store Settings says so", { skip: !!process.env.SNUG_BIN && "SNUG_KEYSTORE is only honoured when running from source" }, async (t) => {
