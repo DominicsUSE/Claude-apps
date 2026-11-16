@@ -175,6 +175,7 @@ const WHY = {
   'their-keys': (who) => `${who} hasn’t turned on end-to-end encryption`,
   'their-browser': (who) => `${who}’s browser or app can’t encrypt calls end to end`,
   waiting: (who) => `still setting it up with ${who}`,
+  p2p: (who) => `calls with ${who} on another PC aren’t end-to-end encrypted yet`,
 };
 export function e2eeWords(sec) {
   if (!sec) return null;

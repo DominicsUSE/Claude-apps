@@ -163,6 +163,8 @@ function newCallKey() {
 }
 function sendKeyTo(user) {
   if (!S.callE2ee) return;
+  // A friend on another PC (P2P): their devices aren't on this server, so no keys to seal to.
+  if (S.users[user]?.remote) { ckState(user).why = 'p2p'; return; }
   if (!crypt.worker || !crypt.key) { signal(user, { ck: { v: 1, t: 'no', why: crypt.why === 'keys' || crypt.why === 'off' ? 'keys' : 'browser' } }); return; }
   const { id, raw } = crypt.key;
   sealCallKey({ place: S.call.room, to: user, id, raw }).then((m) => {
@@ -247,7 +249,7 @@ export function callSecurity() {
   const list = [...peers.entries()].filter(([u]) => !crypt.refused.has(u));
   if (!S.call) return null;
   if (crypt.why) return { on: false, why: crypt.why, who: null };
-  if (!list.length) return { on: true, why: null, who: null, alone: true };
+  if (!list.length) return null; // nobody to talk to: nothing to label
   const off = list.find(([, p]) => !p.e2ee?.on);
   return off ? { on: false, why: off[1].e2ee?.why || 'waiting', who: off[0] } : { on: true, why: null, who: null };
 }

@@ -1101,8 +1101,8 @@ Real, and covered by tests with separate users:
     *Relayed*; its details never show anyone's IP address.
   - **End-to-end encrypted calls (0.14):** when everyone in a call has turned
     on end-to-end encryption and their browser has encoded transforms
-    (Chromium, the desktop app, Safari; `RTCRtpScriptTransform`, or
-    `createEncodedStreams`), every encoded frame of the microphone, camera,
+    (`RTCRtpScriptTransform`, or Chromium's `createEncodedStreams`; tested
+    in Chromium only), every encoded frame of the microphone, camera,
     screen and screen sound is sealed on the sending device with AES-256-GCM
     (WebCrypto) on top of WebRTC's DTLS-SRTP (`js/lib/callcrypt.js`, in a
     worker). Each person's device makes its own call key and sends it to each
