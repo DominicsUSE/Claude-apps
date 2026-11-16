@@ -306,3 +306,21 @@ test('a one-request upload still streaming counts against the quota', async () =
   assert.equal(await done, 201);
   p.close();
 });
+
+// review-media 1 (pass 2): GIF copies made at the same time can't all pass the quota check before any is stored.
+test('GIF copies made at the same time are counted while they are written', async () => {
+  const p = await person(B);
+  const gif = Buffer.concat([Buffer.from('GIF89a'), Buffer.alloc(300 * 1024, 1)]);
+  const up = await fetch(`${p.base}/api/files?conv=${p.room}`, { method: 'POST', headers: { cookie: p.cookie, origin: p.base, 'content-type': 'image/gif', 'x-file-name': 'race.gif' }, body: gif });
+  assert.equal(up.status, 201, await up.clone().text());
+  const f = await up.json();
+  const sent = await p.op('msg.send', { conv: p.room, id: 'm_quotarace000001', text: '', files: [{ id: f.id }] });
+  assert.equal(sent.ok, true, sent.error);
+  const rs = await Promise.all(Array.from({ length: 12 }, () => p.json('POST', '/api/gifs/use', { conv: p.room, file: f.id })));
+  const ok = rs.filter((r) => r.status === 201).length;
+  const owner = B.db.get('SELECT owner FROM files WHERE id = ?', f.id).owner;
+  const used = B.db.get('SELECT SUM(size) n FROM files WHERE owner = ?', owner).n;
+  assert.ok(used <= 1000 * 1024, `stored ${used} bytes against a 1000 KB quota (${ok} copies accepted)`);
+  assert.equal(ok, 2, 'two copies fit, the rest are refused');
+  p.close();
+});

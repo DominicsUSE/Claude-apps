@@ -343,7 +343,9 @@ export function createMediaOps({ db, M, hub, fail, ops = {} }) {
 
 // GIF search (server/gifs.js has the providers). Results, previews and picks
 // all go through here; only addresses a search of ours returned are fetched.
-export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, headers, env = process.env, fetch: fetchFn = globalThis.fetch, gifReg = null, room = () => null }) {
+export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, headers, env = process.env, fetch: fetchFn = globalThis.fetch, gifReg = null, room = () => null, hold = null }) {
+  // review-media 1: the bytes of a copy count as in flight from the check until its files row exists.
+  const reserve = hold || ((u, c, n) => { const r = room(u, c, n); return r ? { refused: r } : { release() {} }; });
   const providers = gifProviders(env, { fetch: fetchFn, reg: gifReg });
   const byId = new Map(providers.map((p) => [p.id, p]));
   const searchLimit = limiter({ capacity: 20, perSecond: 1 });
@@ -431,15 +433,17 @@ export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, he
       if (!saveLimit.take(user)) { error(res, 429, 'Too many GIFs at once. Wait a moment.'); return true; }
       const got = await byId.get(k.p).fetch(String(d.url));
       if (got.err) { error(res, 422, got.err); return true; }
-      const full = room(user, conv, got.data.length); // review-media 1: the quota and the disk floor, as for uploads
-      if (full) { error(res, full.status, full.message); return true; }
+      const held = reserve(user, conv, got.data.length); // review-media 1: the quota and the disk floor, as for uploads
+      if (held.refused) { error(res, held.refused.status, held.refused.message); return true; }
       const id = newId('f');
       const name = `${stripInvisible(String(d.title || 'GIF')).replace(/[\u0000-\u001f\u007f/\\]/g, '').trim().slice(0, 80) || 'GIF'}.${got.type === 'video/mp4' ? 'mp4' : got.type.split('/')[1]}`;
       // Openly licensed GIFs keep their credit (author, licence, where from) wherever they go.
       const meta = { gif: true, source: k.p, ...(k.credit ? { credit: k.credit } : {}) };
       if (Number.isInteger(d.w) && Number.isInteger(d.h) && d.w > 0 && d.h > 0) { meta.w = Math.min(8000, d.w); meta.h = Math.min(8000, d.h); }
-      await writeFile(join(filesDir, id), got.data, { mode: 0o600 });
-      db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, user, conv, name, got.type, got.data.length, Date.now(), JSON.stringify(meta));
+      try {
+        await writeFile(join(filesDir, id), got.data, { mode: 0o600 });
+        db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, user, conv, name, got.type, got.data.length, Date.now(), JSON.stringify(meta));
+      } finally { held.release(); }
       sendJson(res, 201, view(id, { name, size: got.data.length, type: got.type }, meta));
       return true;
     }
@@ -455,13 +459,15 @@ export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, he
       if (!src || !readableFile(M, user, src)) { error(res, 404, 'That GIF is no longer here.'); return true; }
       if (!isGif(src)) { error(res, 400, 'That isn’t a GIF.'); return true; }
       if (!saveLimit.take(user)) { error(res, 429, 'Too many GIFs at once. Wait a moment.'); return true; }
-      const full = room(user, conv, src.size); // review-media 1: a copy counts like an upload
-      if (full) { error(res, full.status, full.message); return true; }
+      const held = reserve(user, conv, src.size); // review-media 1: a copy counts like an upload, from the check on
+      if (held.refused) { error(res, held.refused.status, held.refused.message); return true; }
       const id = newId('f');
       const meta = { ...json(src.meta, {}), gif: true };
       if (Number.isInteger(d.w) && Number.isInteger(d.h) && d.w > 0 && d.h > 0) { meta.w = Math.min(8000, d.w); meta.h = Math.min(8000, d.h); }
-      await copyFile(join(filesDir, src.id), join(filesDir, id));
-      db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, user, conv, src.name, src.type, src.size, Date.now(), JSON.stringify(meta));
+      try {
+        await copyFile(join(filesDir, src.id), join(filesDir, id));
+        db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, user, conv, src.name, src.type, src.size, Date.now(), JSON.stringify(meta));
+      } finally { held.release(); }
       sendJson(res, 201, view(id, src, meta));
       return true;
     }

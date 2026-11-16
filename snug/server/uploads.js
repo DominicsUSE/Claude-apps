@@ -275,6 +275,17 @@ export function createUploads({ db, M, filesDir, sendJson, error, jsonBody, uplo
   function room(user, conv, size) {
     try { roomFor(user, conv, Number(size) || 0); return null; } catch (e) { if (e.expose) return { status: e.status, message: e.message }; throw e; }
   }
+  // For copies written with an await between the check and the files row (GIF reuse and import):
+  // { refused } or { release }. The bytes count as in flight until release(), so copies made at the
+  // same time can't all pass the check before any is stored (review-media 1).
+  function hold(user, conv, size) {
+    const n = Number(size) || 0;
+    let house;
+    try { ({ house } = roomFor(user, conv, n)); } catch (e) { if (e.expose) return { refused: { status: e.status, message: e.message } }; throw e; }
+    const sid = newId('s');
+    inflight.set(sid, { user, house, size: n });
+    return { release: () => { inflight.delete(sid); } };
+  }
 
-  return { http, single, sweep, room, limits: L };
+  return { http, single, sweep, room, hold, limits: L };
 }
