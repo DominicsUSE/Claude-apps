@@ -1107,9 +1107,13 @@ Real, and covered by tests with separate users:
     call works as before.
   - **Security code (0.13):** the connection details show a 6-digit code per
     person, made from both sides' DTLS certificate fingerprints. Read it out
-    loud: if both of you see the same code, nobody (the server included) is
-    sitting in the middle of your connection. It checks that one connection,
-    not who the person is, and Snug doesn't remember codes between calls.
+    loud: if both of you see the same code, it is much harder for anyone (the
+    server included) to sit in the middle of your connection. It is not a
+    guarantee: the code is only 6 digits and neither side commits to its
+    certificate first, so someone who controls the signalling and has enough
+    computing power could keep making certificates until the codes match. It
+    checks that one connection, not who the person is, and Snug doesn't
+    remember codes between calls.
   Tested by `tests/logic-voice.test.js` (5), `tests/server-voice.test.js`
   (13), `tests/e2e-voice-extra.test.js` (8), `tests/e2e-voice-mesh.test.js`
   (5, with five browsers for a voice room growing past 3 others; the wake
@@ -1411,7 +1415,8 @@ and call signalling. Push notifications say only "New message".
 - *Calls* are not end-to-end encrypted by this feature (they use WebRTC's own
   encryption, but signalling passes the server). Since 0.13 the connection
   details show a security code per person: matching codes, read out loud,
-  show that nobody swapped the connection's keys on the way.
+  make it much harder to swap the connection's keys on the way, but with only
+  6 digits a server with enough computing power could still make them match.
 
 **Not encrypted, by design.** Rooms in houses (their pages say so), reactions,
 group names and pictures. Polls and `/roll` are off in encrypted conversations

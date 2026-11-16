@@ -168,6 +168,8 @@ function RouteNote({ ids }) {
 }
 // A short code per person to read out loud (js/lib/callnet.js callCode): the
 // same on both sides unless something sits in the middle of the connection.
+// Only 6 digits and nobody commits to a fingerprint first, so a server that
+// tries enough certificates could make the codes match: the note says so.
 function CallCodes({ ids }) {
   const rows = ids.map((id) => [id, codeOf(id)]).filter(([, code]) => code);
   if (!rows.length) return null;
@@ -175,7 +177,7 @@ function CallCodes({ ids }) {
     <b class="act-qpop-title">Security codes</b>
     <ul class="act-code-list">${rows.map(([id, code]) => html`<li key=${id} class="act-code-row"><span class="trunc">${first(id)}</span>
       <span class="act-code num" aria-label=${`${first(id)}: ${code.split('').join(' ')}`}>${code.slice(0, 3)} ${code.slice(3)}</span></li>`)}</ul>
-    <p class="act-note">Calls are encrypted between the people in them; matching codes show nobody is in the middle. Read your code out loud: the other person should see the same one for you.</p>
+    <p class="act-note">Calls are encrypted between the people in them. Read your code out loud: the other person should see the same one for you. A match makes it much harder for anyone, the server included, to sit in the middle, but it’s only 6 digits, so it isn’t a guarantee.</p>
   </div>`;
 }
 // "Voice connected", with the worst connection's bars; click for everyone's numbers.

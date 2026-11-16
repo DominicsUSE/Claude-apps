@@ -201,7 +201,11 @@ test('security code: two people in a call see the same 6-digit code for each oth
     const row = page.locator(`.act-qpop .act-code-row:has-text("${name}") .act-code`);
     await row.waitFor();
     const text = (await row.textContent()).trim();
-    assert.match(await page.locator('.act-qpop').textContent(), /Calls are encrypted between the people in them; matching codes show nobody is in the middle/);
+    // It says what a match shows, and that 6 digits are no guarantee (a server can try certificates until codes match).
+    const note = await page.locator('.act-qpop').textContent();
+    assert.match(note, /A match makes it much harder for anyone, the server included, to sit in the middle/);
+    assert.match(note, /only 6 digits, so it isn’t a guarantee/);
+    assert.doesNotMatch(note, /nobody is in the middle/);
     await page.keyboard.press('Escape');
     return text;
   };

@@ -190,8 +190,11 @@ stronger than "end-to-end encrypted" is used.
 - **Calls and the server in the middle.** Calls are encrypted between the people in them (DTLS-SRTP), but the
   offers that carry each side's certificate fingerprint pass through the Snug server, so a server that
   swapped them could sit in the middle. Since 0.13 the connection details show a 6-digit security code per
-  person (a hash of both fingerprints): if both people read out the same code, the keys weren't swapped. It
-  only helps if people compare it, and it checks the connection, not who the other person is.
+  person (a hash of both fingerprints): if both people read out the same code, swapping the keys is much
+  harder, not impossible. The code is about 20 bits and neither side commits to its fingerprint before seeing
+  the other's, so a server in the middle can keep making certificates until both codes match (about a million
+  tries on average: seconds to minutes of computing). It only helps if people compare it, and it checks the
+  connection, not who the other person is.
 - **People you talk to.** Anyone in a conversation can copy, screenshot or forward it. Deleting a message
   removes it from Snug, not from someone else's copy.
 - **Disappearing messages are not unrecoverable.** The timer (0.12) removes a message from Snug's database,
