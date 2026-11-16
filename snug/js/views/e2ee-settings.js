@@ -64,14 +64,20 @@ function Devices({ Row }) {
   </div>`;
 }
 
-// Removing another device (spec 11.7): if it was lost or stolen, the recovery key is replaced too.
+// Removing another device (spec 11.7): always a new recovery key (review H3, second pass). "Lost or
+// stolen" says plainly that removing isn't enough then: the device keeps the account key.
+export function LostWarning() {
+  return html`<div class="e2-warn e2-lost-warn" role="alert"><${Icon} name="alert" size=${16} />
+    <span class="grow">${COPY.lostWarn}</span>
+    <button type="button" class="btn sm danger" onClick=${() => openModal(ResetSheet, {})}>${COPY.resetAction}</button></div>`;
+}
 function RemoveSheet({ d, onBusy }) {
   const [lost, setLost] = useState(false);
   const [busy, setBusy] = useState(false);
   const go = async () => {
     setBusy(true); onBusy?.(d.d);
     try {
-      const r = await removeDevice(d.d, { lost });
+      const r = await removeDevice(d.d);
       toast('Device removed.');
       if (r.recoveryKey) openModal(RecoveryKeyScreen, {}); else closeModal();
     } catch (e) { toast(failText(e)); setBusy(false); }
@@ -82,6 +88,7 @@ function RemoveSheet({ d, onBusy }) {
     <p class="modal-lead">${COPY.removeDeviceBody} It is also signed out.</p>
     <label class="e2-check"><input type="checkbox" id="e2-lost" checked=${lost} onChange=${(e) => setLost(e.target.checked)} />
       <span><b>${COPY.lostLabel}</b><span class="hint">${COPY.lostHint}</span></span></label>
+    ${lost && html`<${LostWarning} />`}
     <div class="modal-foot">
       <button class="btn" onClick=${closeModal}>Cancel</button>
       <button class="btn danger solid" disabled=${busy} aria-busy=${String(busy)} onClick=${go}>Remove</button>
@@ -139,11 +146,11 @@ function EncryptionPage({ Row }) {
   const flip = (v) => { setBusy(true); setHistory(v).then(() => toast(v ? 'History is on for new devices.' : 'History is off for new devices.'), (e) => toast(failText(e))).finally(() => setBusy(false)); };
   const newKey = () => openModal(Confirm, {
     title: 'Make a new recovery key?', text: 'Your old recovery key stops working. Save the new one somewhere safe.', action: 'Make a new key',
-    onConfirm: () => newRecoveryKeyFlow().then(() => openModal(RecoveryKeyScreen, {}), (e) => toast(failText(e))),
+    onConfirm: () => keyChange(newRecoveryKeyFlow),
   });
   const exposed = () => openModal(Confirm, {
     title: `${COPY.exposedTitle}?`, text: COPY.exposedBody, action: COPY.exposedAction,
-    onConfirm: () => keysExposed().then(() => openModal(RecoveryKeyScreen, {}), (e) => toast(failText(e))),
+    onConfirm: () => keyChange(keysExposed),
   });
   return html`<div class="e2-page">
     <h1>Encryption</h1>
@@ -180,6 +187,18 @@ function EncryptionPage({ Row }) {
       </ul>
     </div>
   </div>`;
+}
+
+// A change to the account keys the person asked for. A device too long offline to get them stops it
+// (never skipped quietly, review M2); the person is offered to remove it in the same step.
+function keyChange(run) {
+  return run().then(() => openModal(RecoveryKeyScreen, {}), (e) => {
+    if (e.code !== 'e2ee_device_stale') { toast(failText(e)); return; }
+    openModal(Confirm, {
+      title: COPY.staleRemove(e.label || 'that device'), text: COPY.staleRemoveBody, action: COPY.staleRemoveAction, danger: true,
+      onConfirm: () => removeDevice(e.device).then(() => keyChange(run), (x) => toast(failText(x))),
+    });
+  });
 }
 
 // A plain-http address that isn't this computer: the desktop app can encrypt there (its own code runs as a

@@ -277,12 +277,25 @@ function checkView() {
 }
 export { checkView };
 
+// Messages this device made and hasn't had back from the server yet (sending, queued, failed), as
+// objects (review H2, second pass): only these are "pending". A `state` on a message view the server
+// sends means nothing and is dropped (stripState), so the server can't pass a message off as one
+// still being sent from here, hide its "not encrypted" mark, or have this device send it as its own.
+const localMsgs = new WeakSet();
+export const markLocal = (m) => { if (m && typeof m === 'object') localMsgs.add(m); return m; };
+export const isLocalMsg = (m) => !!m && localMsgs.has(m);
+export const localPending = (list) => (list || []).filter((m) => m.state && localMsgs.has(m));
+export function stripState(list) {
+  for (const m of Array.isArray(list) ? list : [list]) if (m && typeof m === 'object' && 'state' in m) delete m.state;
+  return list;
+}
+
 // Open from the device copy, for a fast start and for working offline.
 export function loadCache(userId) {
   const c = local.get(KEYS.cache);
   if (!c || !c.me || (userId && c.me !== userId)) return false;
   Object.assign(S, blank(), c);
-  for (const list of Object.values(S.msgs)) for (const m of list) if (m.state === 'sending') m.state = 'queued';
+  for (const list of Object.values(S.msgs)) for (const m of list) if (m.state && m.author === S.me) { markLocal(m); if (m.state === 'sending') m.state = 'queued'; }
   if (opQueue.user === S.me) for (const x of opQueue.ops) replayOp(S, x.op, x.d); // changes made offline still show
   sweepExpired(); // what disappeared while this device was off never shows
   S.ready = true;
@@ -305,10 +318,11 @@ export function localRing(d) {
 export function applySnapshot(d) {
   const pending = {};
   for (const [conv, list] of Object.entries(S.msgs)) {
-    const p = list.filter((m) => m.state);
+    const p = localPending(list);
     if (p.length) pending[conv] = p;
   }
   const first = !S.ready;
+  for (const list of Object.values(d?.msgs || {})) stripState(list);
   Object.assign(S, blank(), d);
   S.voice = {};
   S.voiceState = {};

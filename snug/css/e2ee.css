@@ -72,3 +72,8 @@ textarea.e2-key-field { resize: vertical; min-height: calc(var(--h-field) * 1.6)
 .e2-unsealed { margin: 2px 0 var(--s-1); padding: 2px var(--s-2); font-size: var(--t-13, 13px); width: fit-content; max-width: 100%; }
 .msg.e2-unsealed-msg .msg-text { opacity: .85; }
 .e2-keyline.warn .dmline-ic svg { color: var(--amber); }
+/* A device added to this account elsewhere (review H3): over everything until answered. */
+.e2-own-added { position: fixed; z-index: 60; top: var(--s-3); left: 50%; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); align-items: center; box-shadow: var(--shadow-3, 0 8px 24px rgba(0,0,0,.25)); }
+.e2-own-added .btn { flex: none; }
+.e2-removed-dev, .e2-lost-warn { margin: var(--s-1) 0; }
+.e2-lost-warn { align-items: center; }

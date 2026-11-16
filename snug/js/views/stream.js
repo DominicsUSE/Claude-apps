@@ -34,7 +34,7 @@ import { DmLine } from './dm-manage.js'; // a group renamed, people added or gon
 import { msgFace, colourRole, BotBadge, PostTitle, RoleIconMark } from './places.js'; // nicknames, bots, role colours and icons, forum post titles
 import { messageItems, hiddenBlocked, BlockedLine, composerGate, GateNote, SlowNote, slowLeft } from './safety.js'; // blocks, reports, moderation, slowmode
 import { MessageExtras, ownsFiles, messagingMenuItems, PlusMenu, FormatBar, formatKey, ScheduledNote, UnreadBar } from './messaging.js'; // polls, previews, forwarding, stickers, formatting, scheduling
-import { EncBody, encMenuItems, EncComposerNote, RoomComposerHint, quoteText, UnsealedMark, unsealed, withKeyLines, KeyLine } from './e2ee-conv.js'; // end-to-end encrypted messages
+import { EncBody, encMenuItems, EncComposerNote, RoomComposerHint, quoteText, UnsealedMark, RemovedDeviceMark, unsealed, withKeyLines, KeyLine } from './e2ee-conv.js'; // end-to-end encrypted messages
 import { PeerState, Arriving } from './p2p.js'; // a message waiting for a friend on another PC, or held after their security code changed
 import { SvgPreview, PdfPreview, isSvgFile, isPdfFile } from './preview.js'; // SVG and PDF attachments
 
@@ -253,7 +253,7 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
     ${quoted && html`<button class="reply-ref" onClick=${() => { S.ui.jump = { conv, id: quoted.id, n: (S.ui.jump?.n || 0) + 1 }; emit(); }}>
       <${Avatar} user=${person(quoted.author)} />
       <b>${person(quoted.author).name}</b>
-      <span class="trunc">${quoteText(quoted, plain(quoted.text) || 'Attachment')}</span>
+      <span class="trunc">${quoteText(quoted, plain(quoted.text) || 'Attachment', conv)}</span>
     </button>`}
     <div class="msg-gutter">
       ${grouped
@@ -268,6 +268,7 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
       </div>`}
       <${PinnedMark} conv=${conv} id=${m.id} />
       <${UnsealedMark} conv=${conv} m=${m} />
+      <${RemovedDeviceMark} m=${m} />
       <${PostTitle} m=${m} />
       ${S.ui.editing === m.id
         ? html`<${EditBox} conv=${conv} m=${m} />`

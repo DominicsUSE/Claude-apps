@@ -34,6 +34,8 @@ import { groupMenu, roomMoveItems, roomDrag, groupDrag, mayArrange, GroupForm, H
 import { muteItems, rolesOff, setRolesOff, orderDms } from '../inbox.js'; // timed mutes, @role suppression, pinned and closed conversations
 import { newcomerSees } from '../lib/onboarding.js'; // newcomers see starter and voice rooms
 import { dmManageItems, groupFace } from './dm-manage.js'; // close, pin, rename, icon, add people, leave
+import { unsealed } from '../e2ee/conv.js'; // a message the server added to an encrypted conversation (review H2)
+import { COPY as E2COPY } from '../lib/e2ee/copy.js';
 import { EncInvite } from './e2ee-setup.js'; // the offer to turn on end-to-end encryption, above the direct messages
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
@@ -456,7 +458,8 @@ function DmRow({ id }) {
   const list = (S.msgs[id] || []).filter((m) => !m.sys);
   const last = list[list.length - 1];
   const who = last && (last.author === S.me ? 'You: ' : meta.user ? '' : `${person(last.author).name.split(' ')[0]}: `);
-  const text = last ? `${who}${plain(last.text).slice(0, 120) || (last.files?.length ? 'Sent a file' : '')}` : 'No messages yet';
+  const text = !last ? 'No messages yet' : unsealed(id, last) ? E2COPY.unsealed
+    : `${who}${plain(last.text).slice(0, 120) || (last.files?.length ? 'Sent a file' : '')}`;
   const face = meta.user ? html`<${Avatar} user=${meta.user} size=${40} presence />`
     : html`<span class="avatar" style="--sz:40px;--tile-c:0;--tile-ink-c:0">${meta.dm.members.length}</span>`;
   const unread = a.needs || a.soft;

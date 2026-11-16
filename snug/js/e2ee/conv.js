@@ -13,7 +13,7 @@
 // text at once; a new one is opened in the background and the page redraws.
 // Until then, or if it can't be opened, the message says so: never ciphertext.
 // Notifications for an encrypted message wait until it is open.
-import { S, emit, findMsg, msgHooks, signOutHooks, toast, subscribe } from '../store.js';
+import { S, emit, findMsg, msgHooks, signOutHooks, toast, subscribe, isLocalMsg } from '../store.js';
 import { call, on, transportHooks, resyncNow, uploadLimits } from '../server.js';
 import { needsChunks, uploadBlob } from '../lib/upload.js';
 import { b64u, b64uOf } from '../lib/e2ee/bytes.js';
@@ -25,7 +25,7 @@ import { editSet, cmpTuple } from '../lib/e2ee/rules.js';
 import { encryptFile, decryptFile } from '../lib/e2ee/attach.js';
 import { sniff } from '../lib/sniff.js';
 import { mentions } from '../lib/format.js';
-import { E2, ring, readyHooks } from './manager.js';
+import { E2, ring, readyHooks, pinHooks } from './manager.js';
 
 // ---------- which conversations are encrypted ----------
 /** The DM a conversation lives in (itself, or the DM a thread hangs off), or null for rooms. */
@@ -62,14 +62,23 @@ export function encryptedSince(conv) {
 }
 /**
  * A message in an encrypted conversation that came without an envelope: the server wrote or
- * changed it, so it is shown as not encrypted, delivered by the server. Lines the server writes
- * (calls, people added, renames) and messages still being sent from here aren't messages.
+ * changed it, so it is shown as not encrypted, delivered by the server. Exempt: the lines the
+ * server writes (calls, people joining or added, renames: rendered as lines, never as someone's
+ * message) and messages this device made that the server hasn't sent back yet. Nothing else the
+ * server sets (a `state`, `sys`) exempts a row (review H2, second pass).
  */
 export function unsealed(conv, m) {
-  if (!m || m.e2ee || m.state || m.sys || m.call || m.join || m.dmLine) return false;
+  if (!m || m.e2ee || m.call || m.join || m.dmLine) return false;
+  if (m.state && m.author === S.me && isLocalMsg(m)) return false;
   const since = encryptedSince(conv);
   if (since == null) return false;
   return !(typeof m.seq === 'number' && m.seq < since);
+}
+/** A row from before the conversation turned encrypted (as this device pinned it): marked as not encrypted. */
+export function beforeEncryption(conv, m) {
+  if (!m || m.e2ee || m.call || m.join || m.dmLine || m.state) return false;
+  const since = encryptedSince(conv);
+  return since != null && typeof m.seq === 'number' && m.seq < since;
 }
 
 // ---------- other people's keys ----------
@@ -81,6 +90,9 @@ on('e2ee.devices', (d) => {
   bundles.delete(d.user);
   if (d.user !== S.me && E2.status === 'ready' && Object.values(S.dms).some((x) => x.e2ee && x.members.includes(d.user))) fetchBundles([d.user]).then(emit, () => {});
 });
+
+// A pin changed (a safety number change accepted, a new list): the next send or open fetches again.
+pinHooks.push((u) => bundles.delete(u));
 
 // A person's list, checked (js/e2ee/manager.js): ours under our own account key and never older
 // than one this device has seen; others' against the key, version and hash pinned for them here
@@ -206,6 +218,7 @@ const keyOf = (id, rev) => `${id}:${rev}`;
 // The whole envelope, so a copy shown again must be this exact envelope (review H2).
 const fingerprint = (e) => { try { return canon({ h: e.h, n: e.n, c: e.c, sig: e.sig }); } catch { return null; } };
 const topRev = new Map(); // message id -> highest revision opened here (older ones are refused)
+const revLoaded = new Set(); // message ids whose newest revision in this device's store is in topRev
 
 async function sealAndSend(op, { conv, dm, id, kind, rev, users, body, re = null, at, extra = {} }) {
   const { dev } = ring;
@@ -217,7 +230,7 @@ async function sealAndSend(op, { conv, dm, id, kind, rev, users, body, re = null
     const rc = await recipients(users, fresh);
     const header = { conv: dm, place: conv, id, kind, rev, from: { u: S.me, d: dev.d }, ts: Date.now(), lv: rc.lv, ping: body.mentions || [], re, ...(at !== undefined ? { at } : {}) };
     const { env, k, K } = await seal({ header, body, dsk: dev.dsk.privateKey, recipients: rc });
-    opened.set(keyOf(id, rev), { body: { ...body, v: 1, conv: dm, place: conv, id, rev, from: header.from }, flags: [], fp: fingerprint(env) });
+    opened.set(keyOf(id, rev), { body: { ...body, v: 1, conv: dm, place: conv, id, rev, from: header.from }, flags: [], fp: fingerprint(env), mine: true });
     ring.store?.putSecret?.(`k:${keyOf(id, rev)}`, b64u(K)).catch?.(() => {});
     try {
       const r = await call(op, { conv, id, ...extra, e2ee: { ...env, k } });
@@ -354,20 +367,25 @@ function see(m, conv, older = false) {
   if (!older && h.rev < (topRev.get(m.id) ?? -1)) { failed(m, 'revision'); return; }
   m.encRev = h.rev;
   const done = opened.get(key);
-  // Opened before: only this exact envelope gets that text (the server can't show it elsewhere, or as someone else's).
-  if (done && done.fp === fingerprint(m.e2ee)) { apply(m, done); return; }
+  // Opened before: only this exact envelope gets that text (the server can't show it elsewhere, or as
+  // someone else's). As the current revision only once this device's stored newest revision is known.
+  // (A revision sealed here is the newest this device has: it was made from the one shown.)
+  if (done && done.fp === fingerprint(m.e2ee) && (older || done.mine || revLoaded.has(m.id))) { apply(m, done); return; }
   if (!m.enc || m.enc === true) m.enc = 'pending';
-  const q = queue.get(key) || { views: new Set(), k: null, conv: null, older: false };
+  const q = queue.get(key) || { views: new Set(), k: null, conv: null };
   q.views.add(m);
+  // Whether a view is an edit history's earlier version is a property of that view, never of the
+  // queue entry it shares with others (review H2-rev): one payload can't exempt the current view.
+  if (older) olderViews.add(m); else olderViews.delete(m);
   if (m.k && Object.keys(m.k).length) q.k = m.k;
   if (conv) q.conv = conv;
-  if (older) q.older = true;
   queue.set(key, q);
   clearTimeout(timer);
   timer = setTimeout(drain, 20);
 }
 // Message views inside any payload: { conv, m }, { conv, msgs: [...] }, { msgs: { conv: [...] } }, or anywhere else.
 const isMsg = (o) => o && typeof o.id === 'string' && typeof o.author === 'string' && o.e2ee?.h;
+const olderViews = new WeakSet(); // views that are an edit history's earlier versions (msg.edits only)
 export function scan(o, conv = null, depth = 0, older = false) {
   if (!o || typeof o !== 'object' || depth > 7) return;
   if (Array.isArray(o)) { for (const x of o) scan(x, conv, depth + 1, older); return; }
@@ -375,8 +393,17 @@ export function scan(o, conv = null, depth = 0, older = false) {
   for (const [k, v] of Object.entries(o)) {
     if (!v || typeof v !== 'object') continue;
     if (k === 'msgs' && !Array.isArray(v)) { for (const [c, list] of Object.entries(v)) scan(list, c, depth + 2, older); continue; }
-    scan(v, (k === 'm' || k === 'msgs') && typeof o.conv === 'string' ? o.conv : null, depth + 1, older || k === 'edits');
+    scan(v, (k === 'm' || k === 'msgs') && typeof o.conv === 'string' ? o.conv : null, depth + 1, older);
   }
+}
+/** An op's answer. Only the edit history (msg.edits) has earlier versions, and only under its `edits`. */
+export function scanReply(d, op) {
+  if (op === 'msg.edits' && d && typeof d === 'object') {
+    scan(d.current);
+    if (Array.isArray(d.edits)) for (const x of d.edits) if (isMsg(x)) see(x, null, true);
+    return;
+  }
+  scan(d);
 }
 
 async function drain() {
@@ -406,11 +433,29 @@ async function drain() {
   for (const [key, q] of batch) {
     const m = [...q.views][0];
     try {
-      const r = await openOne(m, q.k || wraps[key]?.k || {}, q);
+      const prev = opened.get(key);
+      const r = prev && prev.fp === fingerprint(m.e2ee) ? prev : await openOne(m, q.k || wraps[key]?.k || {}, q);
       opened.set(key, r);
       rememberEncrypted(r.body.conv);
-      for (const v of q.views) apply(v, r);
-      for (const fn of waiters.get(key) || []) fn(true);
+      // The revision check, per view (review H2-rev): a current view older than the newest revision
+      // this device has opened (kept in its store) is refused, whatever else shares its envelope.
+      const h = m.e2ee.h;
+      const top = Math.max(Number(await ring.store?.getSecret?.(`rev:${m.id}`).catch(() => 0)) || 0, topRev.get(m.id) ?? -1);
+      if (top > (topRev.get(m.id) ?? -1)) topRev.set(m.id, top);
+      revLoaded.add(m.id);
+      let current = false, any = false;
+      for (const v of q.views) {
+        if (fingerprint(v.e2ee) !== r.fp) { failed(v, 'ciphertext'); continue; } // only this exact envelope gets its text
+        if (!olderViews.has(v) && h.rev < top) { failed(v, 'revision'); continue; }
+        apply(v, r);
+        any = true;
+        if (olderViews.has(v)) continue;
+        current = true;
+        // The first envelope seen in a DM bounds where encryption began (review H2, second pass).
+        if (typeof v.seq === 'number' && v.seq > 0) ring.lowerConv?.(r.body.conv, v.seq).catch?.(() => {});
+      }
+      if (current) noteRev(m.id, h.rev);
+      for (const fn of waiters.get(key) || []) fn(any);
     } catch (e) {
       const why = e instanceof OpenFailure ? e.reason : 'error';
       for (const v of q.views) failed(v, why);
@@ -428,18 +473,18 @@ async function openOne(m, wraps, q = {}) {
   // one sealed after it left is refused.
   const sender = await ring.senderKey(m.author, h.from.d);
   if (!sender) throw new OpenFailure('unknown device');
-  if (sender.goneAt && h.ts > sender.goneAt + 10 * 60_000) throw new OpenFailure('removed device');
+  // h.ts is the sender's word (a lost device can backdate it); the server's time for the row counts
+  // too (review L4, second pass): one that reached the server after the removal is refused.
+  if (sender.goneAt && (h.ts > sender.goneAt + 10 * 60_000 || (Number(m.ts) || 0) > sender.goneAt + 10 * 60_000)) throw new OpenFailure('removed device');
   // Where the row really is: the conversation it was delivered in, when known (review H2).
   const place = q.conv || h.place;
   const dm = rootDm(place);
   if (dm && dm !== h.conv) throw new OpenFailure('moved');
-  if (!q.older) {
-    const top = Number(await store?.getSecret?.(`rev:${m.id}`).catch(() => 0)) || 0;
-    if (h.rev < Math.max(top, topRev.get(m.id) ?? -1)) throw new OpenFailure('revision');
-  }
+  const kcKey = `kc:${m.author}:${h.from.d}`;
+  const requireKc = !!(await store?.getSecret?.(kcKey).catch(() => null));
   const cachedKey = await store?.getSecret?.(`k:${keyOf(m.id, h.rev)}`).catch(() => null);
   const r = await open({
-    env: m.e2ee, expect: { conv: dm || h.conv, place, id: m.id, author: m.author },
+    env: m.e2ee, expect: { conv: dm || h.conv, place, id: m.id, author: m.author, requireKc },
     senderDsk: b64uOf(sender.dsk, 32), me: { u: S.me, d: dev.d },
     keys: { device: (kid) => dev.prekeys[kid]?.pair || null, history: (e) => keys.ahk[e] || null, cached: cachedKey ? b64uOf(cachedKey, 32) : null },
     wraps,
@@ -451,7 +496,8 @@ async function openOne(m, wraps, q = {}) {
   if (t && t.conv !== h.conv) throw new OpenFailure('moved');
   if (!h.place.startsWith('t:') && h.place !== h.conv) throw new OpenFailure('moved');
   if (!cachedKey) store?.putSecret?.(`k:${keyOf(m.id, h.rev)}`, b64u(r.K)).catch?.(() => {});
-  if (!q.older) noteRev(m.id, h.rev);
+  // This sender device commits to its keys: from now on an envelope from it without kc is refused (review L1).
+  if (h.kc !== undefined && !requireKc) store?.putSecret?.(kcKey, 1).catch?.(() => {});
   return { body: r.body, flags: sender.goneAt ? [...r.flags, 'removed-device'] : r.flags, fp: fingerprint(m.e2ee) };
 }
 
@@ -471,15 +517,15 @@ readyHooks.push(() => {
   for (const m of again) if (m.enc === 'locked') { m.enc = null; see(m); }
 });
 signOutHooks.push(() => {
-  bundles.clear(); changed.clear(); opened.clear(); topRev.clear(); queue.clear(); fileKeys.clear(); parts.clear(); locked = [];
+  bundles.clear(); changed.clear(); opened.clear(); topRev.clear(); revLoaded.clear(); queue.clear(); fileKeys.clear(); parts.clear(); locked = [];
   for (const u of blobs.values()) URL.revokeObjectURL(u);
   blobs.clear();
 });
 
 // ---------- the transport's hooks (js/server.js) ----------
-Object.assign(transportHooks, { scan, isEncrypted, downgraded, sendEncrypted, uploadEncrypted, whenOpen });
+Object.assign(transportHooks, { scan, scanReply, isEncrypted, downgraded, sendEncrypted, uploadEncrypted, whenOpen, unsealed, encryptedSince });
 // Opened again after a reload: the device copy keeps only envelopes (js/lib/offline.js cacheJson).
 readyHooks.push(() => { for (const [c, list] of Object.entries(S.msgs)) scan(list, c); });
 
 // For the end-to-end checks.
-export const _test = { opened, findMsg };
+export const _test = { opened, findMsg, topRev };

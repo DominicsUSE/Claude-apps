@@ -42,7 +42,7 @@ export function SafetyNumber({ user }) {
     ${body()}
     <div class="modal-foot">
       <button class="btn" onClick=${closeModal}>Close</button>
-      ${ready && s.state === 'changed' && html`<button class="btn" onClick=${async () => { await acceptChange(user, s.aik, s.ver); load(); }}>I understand</button>`}
+      ${ready && s.state === 'changed' && html`<button class="btn" onClick=${async () => { await acceptChange(user, s.aik); load(); }}>I understand</button>`}
       ${ready && html`<button class="btn primary" data-autofocus onClick=${toggle}>${s.verified ? COPY.verifyUnmark : COPY.verifyMark}</button>`}
     </div>
   </div>`;

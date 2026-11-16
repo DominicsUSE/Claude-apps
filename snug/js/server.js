@@ -14,7 +14,9 @@
 //   leave one looking open for minutes), dropped, and opened again.
 import {
   S, emit, toast, applySnapshot, useTransport, convMeta, jumpToMsg, signedOut, checkView, findMsg, localRing,
+  markLocal, isLocalMsg, localPending, stripState,
 } from './store.js';
+import { COPY as E2COPY } from './lib/e2ee/copy.js';
 import { needsMe, levelOf, isThread, roomIds } from './lib/attention.js';
 import { plain } from './lib/format.js';
 import { uploadBlob, needsChunks, fetchLimits } from './lib/upload.js'; // big files in resumable parts
@@ -30,8 +32,11 @@ const handlers = new Map();
 // Set by js/e2ee/conv.js (end-to-end encrypted conversations): scan() opens
 // every message view that arrives, sendEncrypted/uploadEncrypted seal what
 // goes out, whenOpen holds a notification until its message is open.
-export const transportHooks = { scan: null, isEncrypted: null, downgraded: null, sendEncrypted: null, uploadEncrypted: null, whenOpen: null };
-const scanIn = (d) => { try { transportHooks.scan?.(d); } catch (e) { console.warn('e2ee scan', e); } };
+// unsealed: a message without an envelope where there should be one; encryptedSince: where an
+// encrypted conversation began (null: not encrypted). scanReply: an op's answer (the edit history's
+// earlier versions are opened as such, review H2-rev).
+export const transportHooks = { scan: null, scanReply: null, isEncrypted: null, downgraded: null, sendEncrypted: null, uploadEncrypted: null, whenOpen: null, unsealed: null, encryptedSince: null };
+const scanIn = (d, op) => { try { if (op && transportHooks.scanReply) transportHooks.scanReply(d, op); else transportHooks.scan?.(d); } catch (e) { console.warn('e2ee scan', e); } };
 // The heartbeat (0.12). Tests may shorten these through window.snug.heartbeat.
 export const HEARTBEAT = { every: 10_000, dead: 25_000 };
 let lastRx = 0, beatTimer = null;
@@ -52,7 +57,7 @@ export function call(op, d = {}) {
   ws.send(JSON.stringify({ t: 'op', id, op, d }));
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => { waiting.delete(id); reject(new Error('The server didn’t answer in time. Try again.')); }, 15000);
-    waiting.set(id, { resolve, reject, t });
+    waiting.set(id, { resolve, reject, t, op });
   });
 }
 
@@ -105,7 +110,7 @@ function connect() {
       waiting.delete(msg.id);
       clearTimeout(w.t);
       // A refusal's code and data (e.g. e2ee_stale with the users whose keys changed) ride on the error.
-      if (msg.ok) { scanIn(msg.d); w.resolve(msg.d); } else w.reject(Object.assign(new Error(msg.error), msg.code ? { code: msg.code, data: msg.data } : {}));
+      if (msg.ok) { scanIn(msg.d, w.op); w.resolve(msg.d); } else w.reject(Object.assign(new Error(msg.error), msg.code ? { code: msg.code, data: msg.data } : {}));
     } else if (msg.t === 'ev') {
       scanIn(msg.d);
       try { ((typeof msg.ev === 'string' && Object.hasOwn(EVENTS, msg.ev) && EVENTS[msg.ev]) || ((d) => fire(msg.ev, d)))(msg.d); } catch (err) { console.error(msg.ev, err); } // sec-integrate: own keys only
@@ -208,6 +213,7 @@ function msgId() {
 // Put a message where the server's order says it belongs. Messages still
 // waiting for the server stay at the end.
 function place(conv, m) {
+  stripState(m); // a message view from the server is never "still sending" (review H2)
   const list = (S.msgs[conv] ||= []);
   const old = list.findIndex((x) => x.id === m.id);
   if (old >= 0) list.splice(old, 1);
@@ -218,7 +224,7 @@ function place(conv, m) {
 }
 
 export function sendMessage(conv, text, { replyTo, files, silent, replyPing, sticker, fwd } = {}) {
-  const m = { id: msgId(), author: S.me, ts: Date.now(), text, state: 'sending' };
+  const m = markLocal({ id: msgId(), author: S.me, ts: Date.now(), text, state: 'sending' });
   if (sticker) m.sticker = sticker; // encrypted conversations: a sticker or a forward travels in the sealed body (js/e2ee/conv.js)
   if (fwd) m.fwd = fwd;
   if (replyTo) m.replyTo = replyTo;
@@ -266,7 +272,7 @@ function send(conv, m) {
 export const retry = (conv, m) => send(conv, m);
 
 function flushQueue() {
-  for (const conv of Object.keys(S.msgs)) for (const m of S.msgs[conv]) if (m.state === 'queued') send(conv, m);
+  for (const conv of Object.keys(S.msgs)) for (const m of S.msgs[conv]) if (m.state === 'queued' && m.author === S.me && isLocalMsg(m)) send(conv, m);
 }
 
 const typingAt = {};
@@ -310,7 +316,7 @@ export async function loadHistory(conv, { before, fromId } = {}) {
   Object.assign(S.users, r.users);
   const list = (S.msgs[conv] ||= []);
   const have = new Set(list.map((m) => m.id));
-  list.unshift(...r.msgs.filter((m) => !have.has(m.id)));
+  list.unshift(...stripState(r.msgs).filter((m) => !have.has(m.id)));
   for (const m of r.msgs) delete S.cache[m.id];
   if (r.more) S.more[conv] = true; else delete S.more[conv];
   emit();
@@ -352,7 +358,8 @@ function notify(conv, m) {
   const who = S.users[m.author]?.name || 'Someone';
   const where = meta.kind === 'dm' ? '' : meta.kind === 'thread' ? `in a thread in ${meta.where}` : `in ${meta.title}`;
   // Previews off, or streamer mode: say that something came, not what (js/account.js).
-  const text = S.prefs.preview === false || S.prefs.streamer ? 'New message' : plain(m.text) || 'Sent an attachment';
+  // A message without an envelope in an encrypted conversation (review H2): its text is the server's, never shown as theirs.
+  const text = S.prefs.preview === false || S.prefs.streamer ? 'New message' : transportHooks.unsealed?.(conv, m) ? E2COPY.unsealed : plain(m.text) || 'Sent an attachment';
   if (shown()) {
     if (S.prefs.toasts) toast(text, { note: { user: m.author, where }, run: () => jumpToMsg(conv, m.id) });
   } else if (S.prefs.desktop && 'Notification' in window && Notification.permission === 'granted') {
@@ -447,8 +454,12 @@ const EVENTS = {
     Object.assign(S.users, users);
     Object.assign(S.threads, threads);
     for (const [conv, list] of Object.entries(msgs)) {
-      const pending = (S.msgs[conv] || []).filter((m) => m.state);
-      S.msgs[conv] = [...list, ...pending];
+      const pending = localPending(S.msgs[conv]);
+      stripState(list);
+      // In an encrypted conversation, rows go in the server's own order (seq), not the order it
+      // listed them, so a row given an old seq can't be shown as the newest (review H2).
+      const sorted = transportHooks.encryptedSince?.(conv) != null ? [...list].sort((a, b) => (a.seq ?? Infinity) - (b.seq ?? Infinity) || 0) : list;
+      S.msgs[conv] = [...sorted, ...pending];
     }
     for (const conv of Object.keys(msgs)) if (more[conv]) S.more[conv] = true; else delete S.more[conv];
     Object.assign(S.read, read);
@@ -458,7 +469,7 @@ const EVENTS = {
     Object.assign(S.users, users);
     S.dms[dm.id] = dm;
     if (!S.dmOrder.includes(dm.id)) S.dmOrder.unshift(dm.id);
-    if (!S.msgs[dm.id]) S.msgs[dm.id] = msgs || [];
+    if (!S.msgs[dm.id]) S.msgs[dm.id] = stripState(msgs || []);
   },
   self(d) {
     if (d.users) Object.assign(S.users, d.users);

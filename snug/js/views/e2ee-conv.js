@@ -8,7 +8,7 @@ import { S, openModal } from '../store.js';
 import { Icon } from '../ui/icons.js';
 import { COPY } from '../lib/e2ee/copy.js';
 import { E2, builtInCode } from '../e2ee/manager.js';
-import { isEncrypted, rootDm, changed, sendGate, downgraded, unsealed, encryptedSince } from '../e2ee/conv.js';
+import { isEncrypted, rootDm, changed, sendGate, downgraded, unsealed, beforeEncryption, encryptedSince } from '../e2ee/conv.js';
 import { acceptChange } from '../e2ee/manager.js';
 import { SafetyNumber, canVerify } from './e2ee-verify.js';
 import { SetupSheet } from './e2ee-setup.js';
@@ -92,7 +92,7 @@ export function EncBody({ m }) {
   </div>`;
 }
 /** The text a quote, notification or list shows for a message that may be encrypted. */
-export const quoteText = (m, plain) => (m?.e2ee && m.enc !== true ? COPY.encryptedQuote : plain);
+export const quoteText = (m, plain, conv) => (m?.e2ee && m.enc !== true ? COPY.encryptedQuote : conv && unsealed(conv, m) ? COPY.unsealed : plain);
 
 /**
  * A message in an encrypted conversation that came without an envelope (review H2): shown, but
@@ -104,21 +104,32 @@ export function UnsealedMark({ conv, m }) {
 }
 export { unsealed };
 
+/** A message sealed by a device its author has since removed (review L4): said on the message itself. */
+export function RemovedDeviceMark({ m }) {
+  if (!m?.e2ee || m.enc !== true || !m.encFlags?.includes('removed-device')) return null;
+  return html`<div class="e2-warn e2-removed-dev" role="note"><${Icon} name="alert" size=${14} /><span>${COPY.removedDeviceItem(firstName(m.author))}</span></div>`;
+}
+
 /**
  * Lines this device writes into an encrypted conversation (spec 12.3, review M4): a member's safety
  * number changed, or they added or removed a device. Kept on this device (sealed), placed by time.
  */
+// In the conversation and its threads; a change from before the first loaded message is pinned at the
+// top of what is loaded (review M4, second pass), so scrolling never hides that it happened.
 export function withKeyLines(conv, items) {
   const dm = S.dms[rootDm(conv)];
-  if (!dm || conv !== dm.id || encryptedSince(conv) == null || !E2.events?.length) return items;
+  if (!dm || encryptedSince(conv) == null || !E2.events?.length) return items;
   const lines = E2.events.filter((e) => e.u !== S.me && dm.members.includes(e.u)).sort((a, b) => a.ts - b.ts);
   if (!lines.length) return items;
   const msgs = items.filter((it) => it.type === 'msg');
   const first = msgs[0]?.m.ts ?? 0;
   const out = [...items];
+  const top = out.findIndex((it) => it.type === 'msg');
+  const early = new Set(lines.filter((e) => e.ts < first).slice(-5)); // the latest few, not a wall of lines
+  let pinned = 0;
   for (const e of lines) {
-    if (e.ts < first) continue;
     const line = { type: 'e2', key: `e2-${e.id}`, e };
+    if (e.ts < first) { if (early.has(e) && top >= 0) { out.splice(top + pinned, 0, line); pinned++; } continue; }
     let i = out.findIndex((it) => it.type === 'msg' && (it.m.state || it.m.ts > e.ts));
     if (i < 0) out.push(line);
     else {
@@ -140,7 +151,7 @@ export function KeyLine({ e }) {
 /** Message menu lines: a legacy message says it isn't encrypted; a failed one says why. */
 export function encMenuItems(conv, m) {
   if (unsealed(conv, m)) return [{ label: COPY.unsealed, icon: 'unlock', disabled: true, onSelect: () => {} }];
-  if (m.legacy) return [{ label: COPY.legacyItem, icon: 'unlock', disabled: true, onSelect: () => {} }];
+  if (m.legacy || beforeEncryption(conv, m)) return [{ label: COPY.legacyItem, icon: 'unlock', disabled: true, onSelect: () => {} }];
   if (m.e2ee && m.enc === 'failed') return [{ label: `Couldn’t decrypt: ${COPY.why[m.encWhy] || m.encWhy}`, icon: 'alert', disabled: true, onSelect: () => {} }];
   const out = [];
   if (m.e2ee && m.enc === true && m.encFlags?.includes('removed-device')) out.push({ label: COPY.removedDeviceItem(firstName(m.author)), icon: 'alert', disabled: true, onSelect: () => {} });
@@ -156,11 +167,16 @@ export function EncComposerNote({ conv }) {
   const dm = S.dms[rootDm(conv)];
   const gate = sendGate(dm.members);
   const seen = dm.members.filter((u) => u !== S.me && changed.has(u) && !gate.includes(u));
+  // Sending to a device someone added this week (review L4): said where you type, not only in the history.
+  const weekAgo = Date.now() - 7 * 86_400_000;
+  const gone = new Set((E2.events || []).filter((e) => e.kind === 'removed').map((e) => `${e.u}:${e.d}`));
+  const fresh = (E2.events || []).filter((e) => e.kind === 'added' && e.u !== S.me && dm.members.includes(e.u) && e.ts > weekAgo && !gone.has(`${e.u}:${e.d}`)).slice(-3);
   return html`
+    ${fresh.map((e) => html`<p class="e2-warn e2-newdev" role="status" key=${e.id}><${Icon} name="alert" size=${16} /><span>${COPY.newDeviceNote(S.users[e.u]?.name || 'Someone', e.label)}</span></p>`)}
     ${gate.map((u) => html`<div class="e2-warn e2-gate" role="alert" key=${u}><${Icon} name="alert" size=${16} />
       <span class="grow">${COPY.gate(S.users[u]?.name || 'Someone')}</span>
       <button class="btn sm" onClick=${() => openModal(SafetyNumber, { user: u })}>${COPY.verifyAgain}</button>
-      <button class="btn sm" onClick=${() => acceptChange(u, changed.get(u), 0)}>${COPY.sendAnyway}</button>
+      <button class="btn sm" onClick=${() => acceptChange(u, changed.get(u))}>${COPY.sendAnyway}</button>
     </div>`)}
     ${seen.map((u) => html`<p class="e2-warn" role="status" key=${u}><${Icon} name="alert" size=${16} /><span>${COPY.changedLine(S.users[u]?.name || 'Someone')}</span></p>`)}
     <p class="e2-compose-note hint"><${Icon} name="lock" size=${12} />${COPY.convOn}. ${COPY.previewsOff}</p>`;

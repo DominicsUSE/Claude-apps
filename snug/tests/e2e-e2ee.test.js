@@ -499,6 +499,7 @@ test('history epochs: a week-old history key is replaced; removing a device star
   const others = robinA.locator('.e2-dev:not(:has-text("(this device)")) button:has-text("Remove")');
   await others.first().click();
   await dialog(robinA).locator('button:has-text("Remove")').last().click();
+  robinKey = await saveKey(robinA); // every removal makes a new recovery key (review H3, second pass)
   await expectRow(() => srv.db.get('SELECT epoch FROM e2ee_accounts WHERE user = ?', robin).epoch === e0 + 2, 'removal starts a new epoch');
   await robinA.keyboard.press('Escape');
   // A new browser with the recovery key reads messages sealed to the old and the new history keys.
@@ -734,7 +735,7 @@ test('review H2, L2: an opened envelope shown elsewhere, as someone else, with a
     conv.scan({ conv: place, m: views.older });
     // The edit history itself still opens its earlier versions.
     const history = { current: { id: m.id, author: m.author, e2ee: hist.current.e2ee }, edits: hist.edits.map((x) => ({ id: x.id, author: x.author, ts: x.ts, e2ee: x.e2ee })) };
-    conv.scan(history);
+    conv.scanReply(history, 'msg.edits'); // as the msg.edits answer arrives
     await new Promise((r) => setTimeout(r, 1500));
     const out = Object.fromEntries(Object.entries(views).map(([k, v]) => [k, [v.enc, v.encWhy, v.text]]));
     out.history = [history.edits[0].enc, history.edits[0].text];
@@ -780,7 +781,8 @@ test('review H1: synced settings rolled back or removed by the server: this devi
     const b = await import('/js/lib/e2ee/backup.js');
     return b.sealMeta(b.emptyMeta(), ring.keys.sync, { u: window.snug.S.me, ver: 1 });
   });
-  assert.ok(srv.db.get('SELECT ver FROM e2ee_meta WHERE user = ?', robin).ver > 1);
+  const seenVer = srv.db.get('SELECT ver FROM e2ee_meta WHERE user = ?', robin).ver;
+  assert.ok(seenVer > 1);
   srv.db.run('UPDATE e2ee_meta SET ver = 1, blob = ? WHERE user = ?', first, robin);
   srv.db.run('UPDATE dms SET e2ee = NULL WHERE id = ?', dm);
   try {
@@ -798,7 +800,9 @@ test('review H1: synced settings rolled back or removed by the server: this devi
     await robinA.locator('.e2-meta-problem:has-text("older synced encryption settings")').waitFor();
     await robinA.locator('.e2-meta-problem button:has-text("Put this device’s copy back")').click();
     await robinA.waitForFunction(() => window.snug.e2ee.E2.metaProblem === null);
-    assert.equal(srv.db.get('SELECT ver FROM e2ee_meta WHERE user = ?', robin).ver, 2);
+    // Above the highest version this device saw, never at the server's 1 + 1 (review H1, second pass).
+    const repaired = srv.db.get('SELECT ver FROM e2ee_meta WHERE user = ?', robin).ver;
+    assert.ok(repaired > seenVer, `repaired at ${repaired}, not above ${seenVer}`);
     // Gone altogether after it was seen: an error too, never "empty".
     srv.db.run('DELETE FROM e2ee_meta WHERE user = ?', robin);
     await robinA.reload();
@@ -807,7 +811,7 @@ test('review H1: synced settings rolled back or removed by the server: this devi
     await openEncryptionSettings(robinA);
     await robinA.locator('.e2-meta-problem button').click();
     await robinA.waitForFunction(() => window.snug.e2ee.E2.metaProblem === null);
-    assert.equal(srv.db.get('SELECT ver FROM e2ee_meta WHERE user = ?', robin).ver, 1);
+    assert.ok(srv.db.get('SELECT ver FROM e2ee_meta WHERE user = ?', robin).ver > repaired);
   } finally {
     srv.db.run('UPDATE dms SET e2ee = 1 WHERE id = ?', dm);
   }

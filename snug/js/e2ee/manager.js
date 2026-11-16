@@ -26,7 +26,7 @@ import { safetyNumber } from '../lib/e2ee/fingerprint.js';
 import { supported } from '../lib/e2ee/support.js';
 import { newRecoveryKey, parseRecoveryKey, deriveBackupKey } from '../lib/recovery.js';
 import { openStore, deleteStore, memStore } from './store.js';
-import { metaCheck, listCheck } from '../lib/e2ee/highwater.js';
+import { metaCheck, listCheck, metaWriteVer } from '../lib/e2ee/highwater.js';
 import { random } from '../lib/e2ee/bytes.js';
 
 const DAY = 86_400_000;
@@ -151,6 +151,7 @@ async function onHello(d) {
         if (!dev.trusted) { dev.trusted = true; await save(); }
         await rotatePrekey();
         await loadLocal();
+        await ownList().catch(() => {}); // changes to this account's devices while this one was away
         await fetchAsbBoxes().catch((e) => console.warn('e2ee keys', e)); // newer account keys first: the settings may be under a new key
         await loadMeta();
         await maybeRotate().catch((e) => { console.warn('e2ee epoch', e); E2.rotateProblem = e.message; });
@@ -179,13 +180,14 @@ async function onHello(d) {
 // settling: this device's keys are being loaded for a new connection (js/e2ee/conv.js waits before opening messages).
 on('hello', (d) => { E2.settling = true; onHello(d).catch((e) => { console.warn('e2ee', e); E2.status = 'unsupported'; E2.support = { ok: false, reason: 'old' }; emit(); }).finally(() => { E2.settling = false; emit(); }); });
 on('e2ee.me', (me) => { E2.me = me; emit(); });
-on('e2ee.devices', (d) => { bundleCache.delete(d.user); if (d.user === userId()) refreshMe(); });
+// This account's own list changed: checked now (a device added elsewhere raises an alert here).
+on('e2ee.devices', (d) => { bundleCache.delete(d.user); if (d.user === userId()) { refreshMe(); if (E2.status === 'ready') ownList().then(emit, () => {}); } });
 on('e2ee.asb', () => { fetchAsbBoxes().then(() => loadMeta()).then(emit, () => {}); });
 on('e2ee.meta', () => { loadMeta().then(emit, () => {}); });
 signOutHooks.push(() => {
   clearInterval(rotateTimer);
   store?.close(); store = null; keys = null; dev = null; meta = null; linkKc = null;
-  bundleCache.clear(); pinCache.clear(); convs = {}; ownRec = null; localLoaded = false;
+  bundleCache.clear(); pinCache.clear(); selfAdded.clear(); convs = {}; ownRec = null; localLoaded = false;
   Object.assign(E2, { on: false, status: 'off', me: null, device: null, prompt: null, approvals: [], link: null, rk: null, rkSaved: false, notice: null, metaProblem: null, rotateProblem: null, events: [] });
 });
 
@@ -235,6 +237,7 @@ export async function setup({ history = true, existing = null } = {}) {
   dev = nd;
   await save();
   await store.putAsb(asb);
+  await store.putPlain('asbListVer', 1);
   meta = m; metaVer = 1;
   keys = k;
   await saveLocalMeta(1, m);
@@ -293,10 +296,13 @@ async function freshAsb(list) {
  *   bk:    a new recovery key, so the backup a removed device could open (with your password) is replaced.
  * Returns what to send and keep; the caller sends it with its own op.
  */
-async function nextKeys(list, devs, prekeys, { epoch = true, sync = false, bk = false } = {}) {
+async function nextKeys(list, devs, prekeys, { epoch = true, sync = false, bk = false, arcOn = false, skipStale = false } = {}) {
+  // Settings sealed again at the server's lower version would lower this device's mark (review H1,
+  // second pass): while the server's copy is behind, the person puts this device's copy back first.
+  if ((sync || bk) && E2.metaProblem) throw new Error(COPY_META_FIRST);
   let asb = await freshAsb(list);
   const change = { devs };
-  if (epoch && list.arc) {
+  if (epoch && (list.arc || arcOn)) {
     const x = await backup.addEpoch(asb);
     asb = x.asb;
     change.arc = { e: x.e, pub: asb.ahk[x.e].pub, at: Date.now() };
@@ -306,18 +312,32 @@ async function nextKeys(list, devs, prekeys, { epoch = true, sync = false, bk = 
   if (bk) { rk = await newRecoveryKey(); asb = { ...asb, bk: b64u(await deriveBackupKey(rk.raw)) }; }
   asb = backup.bumpAsb(asb);
   const devlist = await nextOf(list, change);
-  const boxes = await boxesFor(asb, devlist, prekeys);
-  const out = { asb, devlist, boxes, rk, backup: await backup.sealBackup(asb, b64uOf(asb.bk, 32), { ver: devlist.ver, aik: devlist.aik }) };
+  const { boxes, skipped } = await boxesFor(asb, devlist, prekeys, { skipStale });
+  const out = { asb, devlist, boxes, skipped, rk };
+  const local = await localMeta();
   if (sync || bk) {
     const next = { ...JSON.parse(JSON.stringify(meta || backup.emptyMeta())), ...(bk ? { rk: false } : {}) };
-    out.meta = { ver: metaVer + 1, blob: await backup.sealMeta(next, b64uOf(asb.sync, 32), { u: userId(), ver: metaVer + 1 }) };
+    const ver = metaWriteVer(metaVer, local);
+    out.meta = { ver, blob: await backup.sealMeta(next, b64uOf(asb.sync, 32), { u: userId(), ver }) };
     out.metaValue = next;
   }
+  // The backup also carries the settings version and the conversations seen encrypted, so a device
+  // recovered from it isn't fooled by settings rolled back to before it existed (review H1-newdev).
+  const seen = { mv: out.meta?.ver || Math.max(metaVer, local?.ver || 0), convs: { ...convs } };
+  out.backup = await backup.sealBackup(withSeen(asb, seen), b64uOf(asb.bk, 32), { ver: devlist.ver, aik: devlist.aik });
   return out;
+}
+const COPY_META_FIRST = 'Your synced encryption settings on the server are older than this device’s copy. Put this device’s copy back first (Settings, Encryption).';
+// What a device being added or recovered learns of the settings it must not go below (review H1-newdev).
+const SEEN_MAX = 24 * 1024;
+function withSeen(asb, seen) {
+  try { if (canon(seen).length > SEEN_MAX) seen = { mv: seen.mv }; } catch { seen = { mv: seen.mv }; }
+  return { ...asb, seen };
 }
 // After the server took nextKeys' result: keep the new keys here (and a new recovery key to show).
 async function keepKeys(x) {
   await store.putAsb(x.asb);
+  await store.putPlain('asbListVer', x.devlist.ver);
   await loadKeys(x.asb);
   await noteOwn(x.devlist);
   if (x.meta) { meta = x.metaValue; metaVer = x.meta.ver; await saveLocalMeta(metaVer, meta); E2.metaProblem = null; }
@@ -327,14 +347,15 @@ async function keepKeys(x) {
 /**
  * Remove a device (another one, or this one when others remain). A new history epoch starts in
  * the same step (when history is on), sealed only to the devices that stay, and for another
- * device a new settings key, so the removed one can't open history or settings sent after it.
- * lost: it was lost or stolen, so the recovery key is replaced too (the removed device holds the
- * key to the old backup); the new one is in E2.rk to save. Returns { recoveryKey }.
+ * device a new settings key and a new recovery key (review H3, second pass): the removed device
+ * holds the key to the old backup, and with the account password could fetch a backup sealed under
+ * it, so every removal replaces it, not only "lost or stolen". The new key is in E2.rk to save.
+ * Returns { recoveryKey }. (The removed device still holds the account key: see resetEncryption.)
  */
-export async function removeDevice(d, { lost = false } = {}) {
+export async function removeDevice(d) {
   const { list, prekeys } = await ownList();
   const self = d === dev?.d;
-  const x = await nextKeys(list, list.devs.filter((e) => e.d !== d), prekeys, { epoch: true, sync: !self, bk: !self && lost });
+  const x = await nextKeys(list, list.devs.filter((e) => e.d !== d), prekeys, { epoch: true, sync: !self, bk: !self });
   await call('e2ee.device.remove', { d, devlist: x.devlist, boxes: x.boxes, backup: x.backup, ...(x.meta ? { meta: x.meta } : {}) });
   if (self) { await forgetLocal(); await deleteStore(userId()).catch(() => {}); E2.status = 'new-device'; E2.device = null; } else await keepKeys(x);
   await refreshMe();
@@ -357,14 +378,22 @@ export async function keysExposed() {
   return x.rk.text;
 }
 
-/** History on new devices: on puts the newest history key in the list; off takes it out. */
+/**
+ * History on new devices: off takes the history key out of the list; on starts a new history epoch
+ * (review M2, second pass), sealed to the devices there now, since a device removed while history
+ * was off holds every older history key.
+ */
 export async function setHistory(onOff) {
-  const { list } = await ownList();
-  const asb = await store.getAsb();
-  const e = Math.max(...Object.keys(asb.ahk).map(Number));
-  const devlist = await nextOf(list, { arc: onOff ? { e, pub: asb.ahk[e].pub, at: Date.now() } : null });
-  await call('e2ee.publish', { devlist });
-  await noteOwn(devlist);
+  const { list, prekeys } = await ownList();
+  if (!onOff) {
+    const devlist = await nextOf(list, { arc: null });
+    await call('e2ee.publish', { devlist });
+    await noteOwn(devlist);
+  } else {
+    const x = await nextKeys(list, list.devs, prekeys, { epoch: true, arcOn: true });
+    await call('e2ee.publish', { devlist: x.devlist, boxes: x.boxes, backup: x.backup });
+    await keepKeys(x);
+  }
   await refreshMe();
 }
 
@@ -379,15 +408,18 @@ export async function newRecoveryKeyFlow() {
 }
 
 export const EPOCH_ROTATE = 7 * DAY;
+const COPY_SKIPPED = (labels) => `${labels.map((l) => `“${l}”`).join(', ')} ${labels.length > 1 ? 'haven’t' : 'hasn’t'} been online for a long time, so ${labels.length > 1 ? 'they were' : 'it was'} left out of this week’s new history key. Open Snug on ${labels.length > 1 ? 'them' : 'it'} to catch up, or remove ${labels.length > 1 ? 'them' : 'it'}.`;
 /** Weekly: a new history epoch, by the first trusted device online. */
 export async function rotateEpoch() {
   const run = async () => {
     const { list, prekeys } = await ownList();
     if (!list.arc) return false;
-    const x = await nextKeys(list, list.devs, prekeys, { epoch: true });
+    // A device not online for a long time (no valid prekey) is left out and named, rather than
+    // stopping the weekly key for everyone; it gets the newest keys with the next change after it's back.
+    const x = await nextKeys(list, list.devs, prekeys, { epoch: true, skipStale: true });
     try { await call('e2ee.publish', { devlist: x.devlist, boxes: x.boxes, backup: x.backup }); } catch (e) { if (e.code === 'e2ee_conflict') return false; throw e; } // another device won
     await keepKeys(x);
-    E2.rotateProblem = null;
+    E2.rotateProblem = x.skipped.length ? COPY_SKIPPED(x.skipped.map((e) => e.label)) : null;
     await refreshMe();
     return true;
   };
@@ -425,6 +457,7 @@ export async function resetEncryption({ password } = {}) {
   dev = nd;
   await save();
   await store.putAsb(asb);
+  await store.putPlain('asbListVer', devlist.ver);
   meta = m; metaVer = 1;
   E2.me = r.me;
   E2.device = { d: dev.d, label: dev.label, kind: dev.kind };
@@ -443,21 +476,23 @@ export async function resetEncryption({ password } = {}) {
 
 // The account secret bundle sealed to each other trusted device's prekey, signed by this device.
 const asbInfo = (u, d, kid) => `snug-e2ee-v1/asb\n${u}\n${d}\n${kid}`;
-async function boxesFor(asb, devlist, prekeys) {
-  const boxes = {};
+async function boxesFor(asb, devlist, prekeys, { skipStale = false } = {}) {
+  const boxes = {}, skipped = [];
   for (const e of devlist.devs) {
     if (e.d === dev.d) continue;
     const p = prekeys[e.d];
-    // Never skipped (review M2): a device left out would keep older keys without anyone knowing.
+    // Never skipped quietly (review M2): the weekly key leaves it out and names it (rotateProblem);
+    // a change the person makes stops and offers to remove it (code e2ee_device_stale).
     if (!p || !(await obj.verifyPrekey(p, { u: userId(), d: e.d, dsk: e.dsk }))) {
-      throw Object.assign(new Error(`Your device “${e.label}” hasn’t been online for a long time, so it can’t get your new encryption keys. Open Snug on it, or remove it, then try again.`), { code: 'e2ee_device_stale', device: e.d });
+      if (skipStale) { skipped.push({ d: e.d, label: e.label }); continue; }
+      throw Object.assign(new Error(`Your device “${e.label}” hasn’t been online for a long time, so it can’t get your new encryption keys. Open Snug on it, or remove it, then try again.`), { code: 'e2ee_device_stale', device: e.d, label: e.label });
     }
     const blob = await sealKey(b64uOf(p.pub, 32), asbInfo(userId(), e.d, p.kid), canon({ u: userId(), ver: devlist.ver }), utf8(canon({ asb, by: dev.d })));
     const h = b64u(await sig.sha256(blob));
     const s = b64u(await sig.signBytes(dev.dsk.privateKey, utf8(`snug-e2ee-v1/asbbox\n${canon({ u: userId(), d: e.d, kid: p.kid, ver: devlist.ver, h })}`)));
     boxes[e.d] = { kid: p.kid, blob: b64u(blob), by: dev.d, sig: s };
   }
-  return boxes;
+  return { boxes, skipped };
 }
 async function fetchAsbBoxes() {
   if (!dev || !keys) return;
@@ -465,6 +500,7 @@ async function fetchAsbBoxes() {
   const { boxes } = await call('e2ee.asb.fetch', { after });
   if (!boxes.length) return;
   const { list } = await ownList();
+  let held = false; // a box refused for now: the cursor stays before it, so it is tried again
   for (const { ver, box } of boxes) {
     try {
       const signer = list.devs.find((x) => x.d === box.by);
@@ -475,10 +511,14 @@ async function fetchAsbBoxes() {
       if (!ok) continue;
       const got = parseCanon(fromUtf8(await openKey(pair, asbInfo(userId(), dev.d, box.kid), canon({ u: userId(), ver }), blob)), 128 * 1024);
       if (!got?.asb || backup.asbProblem(got.asb) || await backup.asbAikPublic(got.asb) !== keys.aikPub) continue;
-      // Only newer account keys than these (review M2): an older box, or another one under the same serial, is refused.
-      const order = backup.asbOrder(await store.getAsb(), got.asb);
-      if (order === 'newer') { await store.putAsb(got.asb); await loadKeys(got.asb); } else if (order !== 'same') console.warn('e2ee: refused older account keys from the server');
-      await store.putPlain('asbVer', ver);
+      // Only newer account keys than these (review M2): never an older box, never one that drops a
+      // history key; a 0.12.0 device's box (no serial bump) is taken by its newer list version.
+      const { seen: _s, ...asb } = got.asb; // eslint-disable-line no-unused-vars
+      const verdict = backup.asbAccept(await store.getAsb(), asb, { ver, localVer: Number(await store.getPlain('asbListVer')) || 0 });
+      if (verdict === 'take') { await store.putAsb(asb); await store.putPlain('asbListVer', ver); await loadKeys(asb); }
+      if (verdict === 'refuse') { held = true; console.warn('e2ee: refused account keys that would drop a history key'); }
+      if (verdict === 'stale') console.warn('e2ee: refused older account keys from the server');
+      if (!held) await store.putPlain('asbVer', ver);
     } catch { /* a box that doesn't open now is tried again next time (a later one may replace it) */ }
   }
 }
@@ -518,7 +558,20 @@ function goneAfter(rec, list) {
 function deviceEvents(u, before, list) {
   if (!before) return [];
   const { added, removed } = obj.listDiff(before, list);
-  return [...added.map((x) => ({ key: `add:${u}:${x.d}`, u, kind: 'added', label: x.label })), ...removed.map((x) => ({ key: `rm:${u}:${x.d}`, u, kind: 'removed', label: x.label }))];
+  return [...added.map((x) => ({ key: `add:${u}:${x.d}`, u, kind: 'added', label: x.label, d: x.d })), ...removed.map((x) => ({ key: `rm:${u}:${x.d}`, u, kind: 'removed', label: x.label, d: x.d }))];
+}
+// Devices this device added itself (approved with a code): no alert here for those.
+const selfAdded = new Set();
+/**
+ * A device added to this account by something other than this device (review H3, second pass): a
+ * prominent alert on every other device until the person says it's theirs. A server with the
+ * account password, or a removed device that still holds the account key, could add one.
+ */
+export const ownAlerts = () => (E2.events || []).filter((e) => e.u === userId() && e.alert && !e.ack);
+export async function ackOwnAlert(id) {
+  E2.events = E2.events.map((e) => (e.id === id ? { ...e, ack: true } : e));
+  await store?.putSecret('events', E2.events).catch(() => {});
+  emit();
 }
 /**
  * This account's own list, checked: signed by our account key, and never older than (or a
@@ -532,7 +585,7 @@ export async function checkOwnList(list) {
   const v = listCheck(rec, list, h);
   if (v !== 'ok') throw Object.assign(new Error(COPY_OWN_ROLLBACK), { code: 'e2ee_rollback' });
   if (!rec || list.ver > rec.ver) {
-    const events = deviceEvents(userId(), rec, list);
+    const events = deviceEvents(userId(), rec, list).map((e) => (e.kind === 'added' && !selfAdded.has(e.d) && e.d !== dev?.d ? { ...e, alert: true } : e));
     ownRec = { aik: list.aik, ver: list.ver, h, devs: devsOf(list), gone: goneAfter(rec, list) };
     await store.putSecret('own.list', ownRec);
     await addEvents(events);
@@ -546,7 +599,13 @@ async function pinOf(u) {
   if (!pinCache.has(u)) pinCache.set(u, await store.getSecret(`pin:${u}`).catch(() => null));
   return pinCache.get(u);
 }
-async function savePin(u, rec) { pinCache.set(u, rec); await store.putSecret(`pin:${u}`, rec); }
+// js/e2ee/conv.js forgets the keys it fetched for u whenever u's pin changes.
+export const pinHooks = [];
+async function savePin(u, rec) {
+  pinCache.set(u, rec);
+  await store.putSecret(`pin:${u}`, rec);
+  for (const fn of pinHooks) { try { fn(u); } catch { /* a view's cache */ } }
+}
 /**
  * A contact's list, checked against what this device pinned for them (and, the first time here,
  * what the synced settings pinned): { list, changedAik } to use, or { list: null, why }.
@@ -592,6 +651,16 @@ export async function senderKey(u, d) {
 }
 /** Conversations this device has seen encrypted: { dm: e2eeSince } (local, and from the synced settings). */
 export const encryptedConvs = () => convs;
+/** The first envelope seen in dm opened at seq: a since pinned past it is lowered to it (review H2, second pass). */
+export async function lowerConv(dm, seq) {
+  if (!dm || !Number.isSafeInteger(seq) || seq <= 0 || !store || !localLoaded) return;
+  const cur = convs[dm];
+  if (typeof cur === 'number' && cur <= seq) return;
+  if (!cur) return; // not remembered yet: rememberConv pins it (and is lowered by the next one opened)
+  convs = { ...convs, [dm]: seq };
+  await store.putSecret('convs', convs).catch(() => {});
+  if (typeof meta?.convs?.[dm] === 'number' && meta.convs[dm] > seq && !E2.metaProblem) updateMeta((m) => { m.convs[dm] = seq; }).catch(() => {});
+}
 export async function rememberConv(dm, since) {
   if (!dm || convs[dm] || !store || !localLoaded) return;
   convs = { ...convs, [dm]: since || 1 };
@@ -612,7 +681,26 @@ async function localMeta() {
   const rec = await store.getSecret('meta.local').catch(() => null);
   return rec && rec.aik === keys.aikPub ? rec : null;
 }
-async function saveLocalMeta(ver, m) { await store.putSecret('meta.local', { aik: keys.aikPub, ver, meta: m }); }
+// Never lowered (review H1, second pass). partial: only the version is known here (from a recovery
+// backup), not the settings themselves, so this copy is never put back on the server.
+async function saveLocalMeta(ver, m, { partial = false } = {}) {
+  const cur = await localMeta();
+  if (cur && cur.ver > ver) return;
+  await store.putSecret('meta.local', { aik: keys.aikPub, ver, meta: m, ...(partial ? { partial: true } : {}) });
+}
+// A device being added (with a code) or recovered learns the settings version it must not go below,
+// and the conversations seen encrypted, from the approving device or the backup (review H1-newdev).
+async function seedSeen(seen) {
+  if (!seen || typeof seen !== 'object') return;
+  if (Number.isSafeInteger(seen.mv) && seen.mv > 0) {
+    const cur = await localMeta();
+    const full = seen.meta && typeof seen.meta === 'object' && !Array.isArray(seen.meta);
+    if (!cur || cur.ver < seen.mv) await saveLocalMeta(seen.mv, full ? { ...backup.emptyMeta(), ...seen.meta } : backup.emptyMeta(), { partial: !full });
+  }
+  if (seen.convs && typeof seen.convs === 'object' && !Array.isArray(seen.convs)) {
+    mergeConvs(Object.fromEntries(Object.entries(seen.convs).filter(([dm, since]) => typeof dm === 'string' && Number.isSafeInteger(since) && since > 0)));
+  }
+}
 async function loadMeta(retried = false) {
   if (!keys) return;
   const r = await call('e2ee.meta.get');
@@ -632,7 +720,7 @@ async function loadMeta(retried = false) {
   } else {
     E2.metaProblem = null;
     meta = opened || local?.meta || backup.emptyMeta();
-    if (opened && verdict === 'take') await saveLocalMeta(r.ver, meta);
+    if (opened && (verdict === 'take' || (verdict === 'same' && local?.partial))) await saveLocalMeta(r.ver, meta);
   }
   E2.rkSaved = !!meta.rk;
   mergeConvs(meta.convs);
@@ -657,12 +745,17 @@ async function updateMeta(fn) {
   throw new Error('Your encryption settings kept changing on another device. Try again.');
 }
 /** After a metaProblem, the person chooses to put this device's copy back on the server. */
+// Written above both the server's version and the highest this device has seen (review H1, second
+// pass): a lower write would lower this device's mark, and an older blob replayed later would pass.
 export async function repairMeta() {
+  const local = await localMeta();
+  if (local?.partial) throw new Error('This device doesn’t have a copy of your synced settings to put back, only how new they were. Fix it from another of your devices.');
   const r = await call('e2ee.meta.get');
   const m = meta || backup.emptyMeta();
-  const blob = await backup.sealMeta(m, keys.sync, { u: userId(), ver: r.ver + 1 });
-  await call('e2ee.meta.put', { ver: r.ver + 1, blob });
-  metaVer = r.ver + 1;
+  const ver = metaWriteVer(r.ver, local);
+  const blob = await backup.sealMeta(m, keys.sync, { u: userId(), ver });
+  await call('e2ee.meta.put', { ver, blob, repair: true });
+  metaVer = ver;
   await saveLocalMeta(metaVer, m);
   E2.metaProblem = null;
   emit();
@@ -713,12 +806,16 @@ async function finishLink() {
   if (!(await obj.verifyList(f.devlist)) || !f.devlist.devs.some((x) => x.d === dev.d && x.dsk === dev.dskPub)) throw new Error('The new device list didn’t check out.');
   const got = parseCanon(fromUtf8(await openKey(dev.prekeys[1].pair, `snug-e2ee-v1/link-asb\n${userId()}\n${dev.d}`, canon({ linkId, ver: f.devlist.ver }), box)), 128 * 1024);
   if (!got?.asb || await backup.asbAikPublic(got.asb) !== f.devlist.aik) throw new Error('The keys from your other device didn’t check out.');
-  await completeJoin(got.asb);
+  const { seen: _s, ...asb } = got.asb; // eslint-disable-line no-unused-vars
+  await completeJoin(asb, { listVer: f.devlist.ver, seen: got.seen });
   await noteOwn(f.devlist);
 }
-async function completeJoin(asb) {
+// seen: what the approving device (or the backup) says this account's settings were at, applied
+// before the server's settings are read, so they can't be rolled back to before this device existed.
+async function completeJoin(asb, { listVer = 0, seen = null } = {}) {
   await loadLocal();
   await store.putAsb(asb);
+  await store.putPlain('asbListVer', listVer);
   delete dev.linkId;
   dev.trusted = true;
   await save();
@@ -726,6 +823,7 @@ async function completeJoin(asb) {
   linkKc = null;
   E2.link = { ...(E2.link || {}), step: 'done' };
   E2.notice = null;
+  await seedSeen(seen).catch((e) => console.warn('e2ee seen', e));
   await loadMeta();
   await refreshMe();
 }
@@ -759,8 +857,13 @@ async function checkProof(a) {
   const { list } = await ownList();
   const devlist = await nextOf(list, { devs: [...list.devs, { d: a.d, dsk: a.dsk, kind: a.kind, label: a.label, added: Date.now() }] });
   const asb = await freshAsb(list); // the newest account keys, not an older copy
-  const box = await sealKey(b64uOf(a.prekey.pub, 32), `snug-e2ee-v1/link-asb\n${userId()}\n${a.d}`, canon({ linkId: a.linkId, ver: devlist.ver }), utf8(canon({ asb, by: dev.d })));
+  // With them, the settings this device has (and their version) and the conversations it saw
+  // encrypted, so the new device can't be handed older settings by the server (review H1-newdev).
+  let seen = { mv: Math.max(metaVer, (await localMeta())?.ver || 0), convs: { ...convs }, ...(meta && !E2.metaProblem ? { meta } : {}) };
+  try { if (canon(seen).length > SEEN_MAX) seen = { mv: seen.mv, convs: seen.convs }; if (canon(seen).length > SEEN_MAX) seen = { mv: seen.mv }; } catch { seen = { mv: seen.mv }; }
+  const box = await sealKey(b64uOf(a.prekey.pub, 32), `snug-e2ee-v1/link-asb\n${userId()}\n${a.d}`, canon({ linkId: a.linkId, ver: devlist.ver }), utf8(canon({ asb, by: dev.d, seen })));
   await call('e2ee.link.approve', { linkId: a.linkId, devlist, box: b64u(box), tag2: await link.tag2(a.Kc, box, devlist) });
+  selfAdded.add(a.d); // added here: no alert on this device
   await noteOwn(devlist);
   a.step = 'done';
   delete a.Kc;
@@ -783,8 +886,8 @@ export async function recover(text, { password, keep } = {}) {
   if (p.error) throw new Error(p.message);
   if (!dev || E2.status !== 'pending') await startLink();
   const got = await call('e2ee.backup.get', password ? { password } : {});
-  let asb;
-  try { asb = await backup.openBackup(got.blob, await deriveBackupKey(p.raw), userId()); } catch { throw new Error('That recovery key doesn’t open your backup. Check it against the one you saved.'); }
+  let asb, seen = null;
+  try { ({ seen = null, ...asb } = await backup.openBackup(got.blob, await deriveBackupKey(p.raw), userId())); } catch { throw new Error('That recovery key doesn’t open your backup. Check it against the one you saved.'); }
   const k = await backup.loadAsb(asb);
   const r = await call('e2ee.bundles', { users: [userId()] });
   const cur = r.users[userId()]?.list;
@@ -805,8 +908,8 @@ export async function recover(text, { password, keep } = {}) {
     const old = m0.blob ? await backup.openMeta(m0.blob, k.sync, { u: userId(), ver: m0.ver }).catch(() => null) : null;
     metaNext = { ...(old || backup.emptyMeta()), rk: false };
     extra = {
-      devlist, boxes: await boxesFor(next, devlist, r.users[userId()]?.prekeys || {}),
-      backup: await backup.sealBackup(next, b64uOf(next.bk, 32), { ver: devlist.ver, aik: devlist.aik }),
+      devlist, boxes: (await boxesFor(next, devlist, r.users[userId()]?.prekeys || {})).boxes,
+      backup: await backup.sealBackup(withSeen(next, { mv: m0.ver + 1, convs: seen?.convs || {} }), b64uOf(next.bk, 32), { ver: devlist.ver, aik: devlist.aik }),
       meta: { ver: m0.ver + 1, blob: await backup.sealMeta(metaNext, b64uOf(next.sync, 32), { u: userId(), ver: m0.ver + 1 }) },
     };
   } else {
@@ -815,7 +918,7 @@ export async function recover(text, { password, keep } = {}) {
   }
   await call('e2ee.recover', { linkId: dev.linkId, ...extra, ...(password ? { password } : {}) });
   if (metaNext) await saveLocalMeta(extra.meta.ver, metaNext);
-  await completeJoin(next);
+  await completeJoin(next, { listVer: extra.devlist.ver, seen });
   await noteOwn(extra.devlist);
   if (rk) { await store.putSecret('rk', rk.text); E2.rk = { text: rk.text, fresh: true }; E2.rkSaved = false; } else E2.rkSaved = true;
   emit();
@@ -849,11 +952,22 @@ export async function setVerified(u, aik, yes) {
   });
   emit();
 }
-/** After a safety number change: trust the new key (pin it) without marking it verified. */
-export async function acceptChange(u, aik, ver) {
+/**
+ * After a safety number change: trust the new key (pin it) without marking it verified. The pin is
+ * made from the person's signed list with that key, devices included, so their messages still check
+ * (a pin with no devices made every message from them "unknown device"). If the list can't be
+ * fetched now, the pin keeps version 0 so the next list fills it in.
+ */
+export async function acceptChange(u, aik) {
+  let rec = { aik, ver: 0, h: null, devs: [], gone: {} };
+  const r = await call('e2ee.bundles', { users: [u] }).catch(() => null);
+  const list = r?.users?.[u]?.list;
+  if (list && list.aik === aik && (await obj.verifyList(list, b64uOf(aik, 32)))) {
+    rec = { aik, ver: list.ver, h: await obj.listHash(list), devs: devsOf(list), gone: {} };
+  }
   const cur = await pinOf(u);
-  if (cur?.aik !== aik) await savePin(u, { aik, ver, h: null, devs: [], gone: {} });
-  await updateMeta((m) => { m.pins[u] = { aik, ver }; delete m.verified[u]; }).catch(() => {});
+  if (cur?.aik !== aik || !cur.devs?.length) await savePin(u, rec);
+  await updateMeta((m) => { m.pins[u] = { aik, ver: rec.ver, ...(rec.h ? { h: rec.h } : {}) }; delete m.verified[u]; }).catch(() => {});
   emit();
 }
 
@@ -861,7 +975,7 @@ export async function acceptChange(u, aik, ver) {
 export const ring = {
   get dev() { return dev; }, get keys() { return keys; }, get meta() { return meta; }, get store() { return store; },
   updateMeta: (fn) => updateMeta(fn),
-  checkOwnList, acceptContact, senderKey, encryptedConvs, rememberConv,
+  checkOwnList, acceptContact, senderKey, encryptedConvs, rememberConv, lowerConv,
 };
 
 // For tests: run without IndexedDB.

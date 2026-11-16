@@ -3,10 +3,11 @@
 // manager asks (setup on first sign-in, adding this browser, approving a new
 // device), so they never stack over another dialog.
 import { html, useState, useEffect } from '../../vendor/preact-htm.js';
-import { S, closeModal, openModal, toast, me } from '../store.js';
+import { S, closeModal, openModal, openLayer, toast, me } from '../store.js';
 import { Icon } from '../ui/icons.js';
 import { copyText } from '../ui/kit.js';
-import { E2, setup, confirmRecoveryKey, dismissPrompt, deviceKind, invitePending } from '../e2ee/manager.js';
+import { E2, setup, confirmRecoveryKey, dismissPrompt, deviceKind, invitePending, ownAlerts, ackOwnAlert } from '../e2ee/manager.js';
+import { settingsLayerOf } from './appearance.js';
 import { COPY } from '../lib/e2ee/copy.js';
 import { recoveryFileText } from '../lib/recovery.js';
 import { NewDeviceSheet, ApproveSheet } from './e2ee-link.js';
@@ -22,6 +23,20 @@ export function E2eeHost() {
     if (C) openModal(C, {});
   });
   return null;
+}
+
+// A device added to this account by something other than this device (review H3, second pass):
+// over everything, on every other device, until the person says it's theirs or goes to remove it.
+export function OwnAddedAlert() {
+  const list = E2.status === 'ready' ? ownAlerts() : [];
+  if (!list.length) return null;
+  const e = list[0];
+  const review = () => { const C = settingsLayerOf(); if (C) openLayer({ C, props: { page: 'e2ee' } }); };
+  return html`<div class="e2-warn e2-own-added" role="alert">
+    <${Icon} name="alert" size=${16} /><span class="grow">${COPY.ownAdded(e.label || 'a new device')}</span>
+    <button class="btn sm" onClick=${() => ackOwnAlert(e.id)}>${COPY.ownAddedMine}</button>
+    <button class="btn sm danger" onClick=${review}>${COPY.ownAddedReview}</button>
+  </div>`;
 }
 
 // Above the direct messages while the account hasn't turned encryption on: the offer, without interrupting.
