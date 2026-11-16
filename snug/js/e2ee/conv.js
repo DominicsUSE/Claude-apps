@@ -241,6 +241,14 @@ async function reupload(conv, f) {
 }
 
 const parts = new Map(); // file id -> its body part (key, nonce, hash), for files in opened messages
+// A padded file going where some device can't read padding (0.12/0.13 would show the padding as part of
+// the file): opened on this device and sealed again unpadded.
+async function unpadded(conv, id, part, name) {
+  const res = await fetch(`/api/files/${id}`, { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(`Couldn’t attach ${name || 'that file'}.`);
+  const bytes = await decryptFile(new Uint8Array(await res.arrayBuffer()), part);
+  return uploadEncrypted(conv, new Blob([bytes], { type: part.type || '' }), name || part.name || 'file');
+}
 /**
  * A copy of attachment f (from a message on screen) for encrypted conversation `to`: an encrypted
  * file is copied on the server as it is (its key goes in the new message); a plain one is fetched,
@@ -248,6 +256,10 @@ const parts = new Map(); // file id -> its body part (key, nonce, hash), for fil
  */
 export async function copyEncryptedFile(to, f) {
   const part = parts.get(f.id) || fileKeys.get(f.id);
+  if (f.encFile && part?.p && !(await convCan(to, 'pad'))) {
+    const up = await unpadded(to, f.id, part, f.name);
+    return { ...f, id: up.id, encFile: undefined };
+  }
   if (f.encFile && part) {
     const { id } = await call('e2ee.file.copy', { id: f.id, to });
     fileKeys.set(id, { k: part.k, n: part.n, csha: part.csha, ...(part.p ? { p: part.p } : {}), name: part.name || f.name, type: part.type, size: part.size });
@@ -302,6 +314,8 @@ export async function sendEncrypted(conv, m) {
   for (const f of m.files || []) {
     let id = f.id;
     if (!fileKeys.has(id)) { const up = await reupload(conv, f); id = up.id; f.id = id; }
+    // Padded while everyone here could read it, and someone can't any more (a draft sent later): unpadded.
+    if (fileKeys.get(id).p && !(await convCan(conv, 'pad'))) { const up = await unpadded(conv, id, fileKeys.get(id), f.name); id = up.id; f.id = id; }
     const key = fileKeys.get(id);
     files.push(clean({ id, k: key.k, n: key.n, csha: key.csha, p: key.p, name: f.name || key.name, type: key.type, size: key.size,
       w: f.w, h: f.h, duration: f.duration, peaks: f.peaks, voice: f.voice || undefined, spoiler: f.spoiler || undefined, alt: f.alt || undefined, gif: f.gif || undefined }));

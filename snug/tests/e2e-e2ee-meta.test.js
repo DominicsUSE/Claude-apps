@@ -193,6 +193,35 @@ test('E5: an attachment is padded to a size step on the server and opens byte fo
   assert.deepEqual(got.slice(0, 2), [1, padBucket(5000 + 5) + TAG]);
   got.splice(0, 2);
   assert.deepEqual(got, [5000, sha]);
+  padded = { id: fid, sha };
+});
+let padded;
+
+test('E5: a padded file forwarded to someone whose device can’t read padding goes unpadded (an older Snug opens it whole)', async () => {
+  // Priya turns encryption on as a 0.12/0.13 device would: it never signs its features.
+  const priya = await device('priya');
+  await priya.evaluate(() => {
+    const send = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (d) { if (typeof d === 'string' && d.includes('"e2ee.caps"')) return; return send.call(this, d); };
+  });
+  await turnOn(priya);
+  await priya.context().close();
+  assert.equal(srv.db.get("SELECT caps FROM e2ee_devices WHERE user = ? AND state = 'trusted'", idOf('priya')).caps, null);
+  await until(() => srv.db.get('SELECT e2ee FROM dms WHERE id = ?', 'd_priya')?.e2ee === 1, 'Robin and Priya’s DM turned encrypted');
+  await robin.waitForFunction(() => window.snug.S.dms.d_priya?.e2ee);
+  const got = await robin.evaluate(async ({ id }) => {
+    const conv = await import('/js/e2ee/conv.js');
+    const { decryptFile } = await import('/js/lib/e2ee/attach.js');
+    let f;
+    for (const l of Object.values(window.snug.S.msgs)) for (const m of l) for (const x of m.files || []) if (x.id === id) f = x;
+    const out = await conv.copyEncryptedFile('d_priya', f);
+    const key = conv.fileKeyOf(out.id);
+    const ct = new Uint8Array(await (await fetch(`/api/files/${out.id}`)).arrayBuffer());
+    // How a 0.12/0.13 device opens it: no padding marker read.
+    const b = await decryptFile(ct, { ...key, p: undefined });
+    return [key.p ?? null, ct.length, b.length, [...new Uint8Array(await crypto.subtle.digest('SHA-256', b))].map((x) => x.toString(16).padStart(2, '0')).join('')];
+  }, { id: padded.id });
+  assert.deepEqual(got, [null, 5000 + TAG, 5000, padded.sha]);
 });
 
 async function vote(page, mid, answer) {
@@ -257,6 +286,26 @@ test('E2: renaming the encrypted group seals the name: members see it, the serve
   const sealedTo = JSON.parse(srv.db.get('SELECT info_enc FROM dms WHERE id = ?', 'g_sat').info_enc).h.to.map(([u]) => u);
   assert.ok(sealedTo.includes(idOf('tomasz')), 'the newest revision is sealed to Tomasz');
   await tomasz.context().close();
+});
+
+test('E2: a re-seal for someone added that quietly changes the name is refused by members’ devices', async () => {
+  const jonas = await device('jonas');
+  await turnOn(jonas);
+  await until(() => srv.db.get('SELECT 1 FROM e2ee_devices WHERE user = ? AND caps IS NOT NULL', idOf('jonas')), 'Jonas’s device features');
+  const before = await ines.evaluate(() => window.snug.S.dms.g_sat.name);
+  assert.match(before, /^Glaze Night/);
+  // Robin adds Jonas and at once seals the information again "for members", but with another name (no line).
+  await robin.evaluate(async (u) => {
+    await (await import('/js/server.js')).call('dm.add', { dm: 'g_sat', users: [u] });
+    await (await import('/js/e2ee/conv.js')).setGroupInfo('g_sat', { name: 'Quiet rename' }, 'members');
+  }, idOf('jonas'));
+  await until(() => srv.db.get('SELECT info_what FROM dms WHERE id = ?', 'g_sat')?.info_what === 'members', 'the re-seal was stored');
+  const rev = JSON.parse(srv.db.get('SELECT info_enc FROM dms WHERE id = ?', 'g_sat').info_enc).h.rev;
+  for (const p of [ines, malik]) {
+    await p.waitForFunction(async (r) => (await import('/js/e2ee/conv.js'))._test.infoState.get('g_sat')?.rev === r, rev);
+    assert.equal(await p.evaluate(() => window.snug.S.dms.g_sat.name), before, 'the name before stays');
+  }
+  await jonas.context().close();
 });
 
 test('E3: a poll where someone is still on an older Snug is refused, naming the device', async () => {
