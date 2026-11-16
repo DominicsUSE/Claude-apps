@@ -112,7 +112,7 @@ test('S1: files are sealed in 64 KiB AES-GCM segments and read back whole or by 
       assert.ok(disk.subarray(0, 6).equals(MAGIC), 'starts with SNUGF1');
       assert.equal(disk.length, fc.sealedLength(size));
       if (size >= 32) assert.ok(!disk.includes(data.subarray(0, 32)), 'no plaintext on disk');
-      assert.equal((statSync(p).mode & 0o777).toString(8), '600');
+      if (process.platform !== 'win32') assert.equal((statSync(p).mode & 0o777).toString(8), '600'); // Windows has no POSIX modes
       assert.ok(readStoredSync(p).equals(data));
       assert.ok((await readStored(p)).equals(data));
       assert.equal(storedSize(p), size);

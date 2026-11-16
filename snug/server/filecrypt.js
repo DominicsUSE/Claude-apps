@@ -257,12 +257,16 @@ function sourceOf(fd, path) {
  */
 export async function sealFile(src, dst) {
   const fd = openSync(src, 'r');
+  let open = true;
+  const close = () => { if (open) { open = false; closeSync(fd); } };
   try {
     const st = fstatSync(fd);
     const same = resolve(src) === resolve(dst);
     const unchanged = () => { try { const now = statSync(src); return now.ino === st.ino && now.size === st.size; } catch { return false; } };
-    await writeFrom(dst, st.size, (off, n) => readExact(fd, n, off), 16, same ? unchanged : null);
-  } finally { closeSync(fd); }
+    // Sealing in place: the source is closed before the sealed copy is renamed over it, since Windows won't
+    // replace a file that is still open (Linux and macOS would).
+    await writeFrom(dst, st.size, (off, n) => readExact(fd, n, off), 16, same ? () => { close(); return unchanged(); } : null);
+  } finally { close(); }
   if (resolve(src) !== resolve(dst)) rmQuiet(src);
 }
 /** A stored file copied to a new id (GIF reuse, forwards, link previews): decrypted and sealed again for its new id. */
