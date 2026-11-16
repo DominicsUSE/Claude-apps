@@ -171,7 +171,7 @@ test('GET /api/privacy (no sign-in) says what is kept and for how long, and that
   assert.equal(d.pushTtlHours, 24);
 });
 
-test('0.14: with this Snug’s own TURN relay and no SNUG_STUN, /api/privacy says calls ask the relay, not a third party', async () => {
+test('0.14: with a TURN relay set and no SNUG_STUN, /api/privacy says calls ask the relay, not Google', async () => {
   const d2 = mkdtempSync(join(tmpdir(), 'snug-privacy-turn-'));
   const s2 = await startServer({ port: 0, dataDir: d2, quiet: true, iceEnv: { SNUG_TURN_URL: 'turn:turn.example.org:3478', SNUG_TURN_USER: 'u', SNUG_TURN_PASS: 'p' } });
   try {

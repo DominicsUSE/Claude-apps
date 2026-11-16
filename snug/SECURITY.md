@@ -287,7 +287,7 @@ built from `js/lib/privacy.js` and `GET /api/privacy` (`server/privacy.js`).
 - Snug sends no telemetry, analytics or crash reports, and the web client loads nothing from other origins
   (CSP `default-src 'self'`; tested in `tests/e2e-privacy.test.js`). Outside parties it does reach: the STUN
   server (Google by default when no TURN relay is configured; with `SNUG_TURN_URL` and no `SNUG_STUN`, the
-  relay's own address since 0.14; `SNUG_STUN=none` turns it off; the desktop app uses Cloudflare's STUN once it
+  relay's own address since 0.14, so whoever runs that relay sees addresses; `SNUG_STUN=none` turns it off; the desktop app uses Cloudflare's STUN once it
   has relay details from the registry), a TURN relay if configured, the browser's push service, the registry
   and Cloudflare (P2P), GitHub (desktop update checks: at start and every 22 to 26 hours, or only when asked,
   Settings > Desktop app), and GIF providers (only server-side or through the registry).

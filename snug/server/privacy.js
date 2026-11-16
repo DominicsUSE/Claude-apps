@@ -43,7 +43,8 @@ export function iceFacts(ice) {
   const urls = list.flatMap((s) => [].concat(s.urls || []));
   const stun = urls.filter((u) => /^stuns?:/.test(u));
   return {
-    // relay (0.14): only this Snug's own TURN relay is asked, so no third party sees addresses.
+    // relay (0.14): only the configured TURN relay is asked for STUN (no separate STUN service). Whoever runs
+    // that relay (this Snug's owner or a hosted service; the server can't tell) still sees addresses.
     stun: !stun.length ? 'none' : stun.every((u) => /\.l\.google\.com/.test(u)) ? 'google'
       : stun.every((u) => urls.some((t) => /^turns?:/.test(t) && t.replace(/^turns?:/, '').split('?')[0] === u.replace(/^stuns?:/, ''))) ? 'relay' : 'custom',
     turn: urls.some((u) => /^turns?:/.test(u)),

@@ -70,6 +70,11 @@ test('0.14 what Snug stores lists call records, the house join log, link preview
   assert.match(t, /GIF searches/);
   // End-to-end encryption: what the server can still see, said plainly.
   assert.match(keptFor(ABOUT, { e2ee: true }).join('\n'), /who is mentioned/);
+  // Encryption device records are not purged: they stay until removed or reset, and removed ones stay listed.
+  assert.match(keptFor(ABOUT, { e2ee: true }).join('\n'), /Encryption device records.*until the device is removed or encryption is reset.*removed devices stay listed/i);
+  // GIF results can sit in the directory's Cloudflare cache, keyed by the words searched.
+  assert.match(t, /GIF searches.*cached for an hour.*Cloudflare cache, keyed by the words searched.*not saved in the database/);
+  assert.doesNotMatch(t, /kept in memory for an hour/);
   // The desktop app: update checks and the directory.
   const d = keptFor(ABOUT, { desktopApp: true, updates: 'notify' }).join('\n');
   assert.match(d, /GitHub sees your internet address/);
@@ -78,13 +83,16 @@ test('0.14 what Snug stores lists call records, the house join log, link preview
   assert.match(keptFor({ ...ABOUT, mode: 'desktop' }, { p2p: true }).join('\n'), /directory.*keyed hash.*2 days/);
 });
 
-test('0.14 STUN: Google is named as a third party with the way to turn it off; this Snug’s own relay is not a third party', () => {
+test('0.14 STUN: Google is named as a third party with the way to turn it off; with a TURN relay, the relay is asked and its operator isn’t guessed', () => {
   const g = text(whoSeesWhat({ mode: 'host', stun: 'google' }));
   assert.match(g, /Google/);
   assert.match(g, /SNUG_STUN=none/);
   const r = text(whoSeesWhat({ mode: 'host', stun: 'relay', turn: true }));
   assert.doesNotMatch(r, /Google/);
   assert.match(r, /relay server/);
+  // The server can't know who runs the relay (it may be a hosted one), so it doesn't say no outside company is asked.
+  assert.doesNotMatch(r, /no outside company/);
+  assert.match(r, /whoever runs that relay sees your address/i);
   assert.match(text(whoSeesWhat({ mode: 'p2p', turn: true })), /STUN/);
 });
 
@@ -93,4 +101,14 @@ test('0.14 last active: today, or the date only', () => {
   assert.equal(lastActive(Date.UTC(2026, 10, 16), now), 'Active today');
   assert.match(lastActive(Date.UTC(2026, 10, 2), now), /^Last active .*2/);
   assert.doesNotMatch(lastActive(Date.UTC(2026, 10, 2), now), /:/, 'no time of day');
+});
+
+test('0.14 README: the SNUG_LOG_DAYS default matches the code, and encryption device records are not said to expire with sign-in', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { LOG_DAYS } = await import('../server/privacy.js');
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const row = readme.split('\n').find((l) => l.startsWith('| `SNUG_LOG_DAYS`'));
+  assert.match(row, new RegExp(`\\| \`${LOG_DAYS}\``));
+  assert.doesNotMatch(readme, /Signed-in devices and encryption keys: until signed out/);
+  assert.doesNotMatch(readme, /cached in memory for an hour, not stored/);
 });

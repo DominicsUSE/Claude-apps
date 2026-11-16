@@ -81,7 +81,7 @@ export function whoSeesWhat({
         stun === 'google'
           ? `To set up calls, your browser asks a Google server (STUN) for your public address. Google sees that address, not the call. Whoever runs ${here} can turn this off (SNUG_STUN=none) or use their own relay instead.`
           : stun === 'none' ? 'Calls don’t ask any outside server for your address.'
-            : stun === 'relay' ? `To set up calls, your browser asks ${here}’s own relay server for your public address, so no outside company is asked.`
+            : stun === 'relay' ? `To set up calls, your browser asks ${here}’s TURN relay server (the same one that passes calls on) for your public address, so no separate STUN company is asked. Whoever runs that relay sees your address, not the call.`
               : 'To set up calls, your browser asks this Snug’s chosen STUN server for your public address. Whoever runs that server sees your address, not the call.',
         linkPreviews
           ? `Link previews are fetched by ${here}, not your device, so linked sites see the server’s address, not yours.`
@@ -120,9 +120,12 @@ export function keptFor(a = {}, { e2ee = false, desktopApp = false, updates = 'a
     ...(a.linkCacheHours ? [`Link previews: the linked address and the preview fetched for it, ${hours(a.linkCacheHours)}. A preview shown under a message stays with that message.`] : []),
     ...(a.friendCooldownHours ? [`Friend requests that were declined or taken back: ${hours(a.friendCooldownHours)}, so the same request can’t be sent again at once.`] : []),
     `Notifications while Snug is closed: the push address your browser gave (run by its maker, like Google, Mozilla or Apple) is kept until that sign-in ends. Each note is encrypted to your device; the push service sees when one arrives and holds it ${hours(a.pushTtlHours ?? 24)} at most.`,
-    'GIF searches: the words go to the GIF service through this Snug (or the Snug directory), so the service never sees your address. Results are kept in memory for an hour, not stored.',
+    'GIF searches: the words go to the GIF service through this Snug (or the Snug directory), so the service never sees your address. Results are cached for an hour (in this Snug’s memory, or in the directory’s Cloudflare cache, keyed by the words searched), not saved in the database.',
   ];
-  if (e2ee) out.push('In end-to-end encrypted conversations the server can’t read messages, but it stores who sends to whom and when, how big each message is, and who is mentioned (so they can be notified).');
+  if (e2ee) {
+    out.push('In end-to-end encrypted conversations the server can’t read messages, but it stores who sends to whom and when, how big each message is, and who is mentioned (so they can be notified).');
+    out.push('Encryption device records (the device’s name, kind, when it was added and the day it was last used): until the device is removed or encryption is reset. Removed devices stay listed as removed.');
+  }
   if (a.backupDays) out.push(`Encrypted backups of the database are kept for ${days(a.backupDays)}, so something you delete can stay in a backup that long.`);
   if (p2p) out.push('The Snug directory keeps your account, your friends list (to tell you when they come online) and roughly when your PC last connected (updated at most once a day). It stores internet addresses only as a keyed hash, for abuse limits that go after 2 days.');
   if (desktopApp) {

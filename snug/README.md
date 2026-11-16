@@ -1263,7 +1263,7 @@ behind a reverse proxy that terminates TLS and passes WebSocket upgrades on
 | `SNUG_RP_ID` | The domain passkeys belong to (for example `example.org` to share them across `snug.example.org` and `chat.example.org`). Without it: the one `SNUG_HOSTS` name, or `localhost` on a server that only listens on this machine. Changing it later stops existing passkeys from working (passwords keep working) | the `SNUG_HOSTS` name |
 | `SNUG_HOSTS` | Host names this server answers to, comma separated (for example `snug.example.org`). Any other `Host` gets 421, which stops DNS-rebinding pages. A server bound to loopback always checks (localhost, IP addresses and `SNUG_ORIGINS` hosts pass). A server bound to a public address checks once this is set, and logs a warning until then | none |
 | `SNUG_STUN` | STUN servers for voice, comma separated; `none` asks no STUN server at all (a STUN server sees each caller's IP address) | with `SNUG_TURN_URL`, the TURN server's own address (0.14); otherwise Google's public server |
-| `SNUG_LOG_DAYS` | Days sign-in history and security events are kept (1 to 365) | `30` |
+| `SNUG_LOG_DAYS` | Days sign-in history and security events are kept (1 to 365) | `14` (30 before 0.14) |
 | `SNUG_TURN_URL`, `SNUG_TURN_USER`, `SNUG_TURN_PASS` | TURN relay for voice | none |
 | `SNUG_TURN_SECRET` | Shared secret of the TURN server's REST API (coturn `use-auth-secret`): each person gets their own credential, `<expiry>:<user id>` with a base64 HMAC-SHA1, valid 12 hours and refreshed by the `ice.refresh` op. When set, `SNUG_TURN_USER`/`SNUG_TURN_PASS` are never sent | none |
 | `SNUG_PUSH_CONTACT` | Contact the push services see in each VAPID token (`mailto:` or `https:`); Apple's requires a real one | `mailto:snug@example.invalid` |
@@ -1539,8 +1539,11 @@ mode you're in. The short version:
   - Sign-in history and security events: 14 days (`SNUG_LOG_DAYS`), addresses
     shortened, the kind of device ("Firefox on Windows"), not the browser's
     full string. Failed sign-in counters: 2 days, addresses only as a keyed hash.
-  - Signed-in devices and encryption keys: until signed out (30 days at most,
-    14 unused); when each was last used is kept to the day, not the time.
+  - Signed-in devices (sessions): until signed out (30 days at most, 14
+    unused). Encryption device records (name, kind, when added, day last
+    used): until the device is removed or encryption is reset; removed
+    devices stay listed as removed. When each was last used is kept to the
+    day, not the time.
   - Messages, files, profile, reactions, read positions, pins and saved
     messages: until deleted (deleted text goes after about 11 minutes).
     Call records (who called, answered or missed, how long) are a line in the
@@ -1551,13 +1554,16 @@ mode you're in. The short version:
   - Push notification addresses: until that sign-in ends; each note is
     encrypted to the device and waits at the push service (the browser
     maker's) a day at most. GIF searches go to the GIF service through the
-    server (or the registry), cached in memory for an hour, not stored.
+    server (or the registry); results are cached for an hour (in the server's
+    memory, or in the directory's Cloudflare cache, keyed by the words
+    searched), not saved in the database.
   - End-to-end encrypted conversations: the server still stores who sends to
     whom and when, message sizes, and who is mentioned (to notify them).
   - Encrypted database backups: 7 days.
-  - Outside parties: Google's STUN server when calls need it and this Snug has
-    no TURN relay of its own (`SNUG_STUN=none` turns it off); the TURN relay if
-    there is one; the browser's push service; in the desktop app, GitHub
+  - Outside parties: Google's STUN server when calls need it and no TURN relay
+    is set (`SNUG_STUN=none` turns it off); the TURN relay if there is one
+    (also asked for STUN when `SNUG_STUN` is unset; whoever runs it, this
+    Snug's owner or a hosted service, sees addresses); the browser's push service; in the desktop app, GitHub
     (update checks, see above) and the Snug directory on Cloudflare, which
     keeps accounts, friend lists and roughly when a PC last connected (updated
     once a day), and stores addresses only as keyed hashes for abuse limits

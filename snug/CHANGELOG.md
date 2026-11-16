@@ -18,7 +18,8 @@ goes back to an older version on its own (README, "Install, update, go back").
   ("Chrome on Windows"), not the browser's full string.
 - When a device, encryption key or friend's PC was last used is stored to the day, written at most daily.
   Settings > Account says *Active today* or *Last active 2 Nov 2026*.
-- Calls: with the server's own TURN relay and no `SNUG_STUN`, the relay answers STUN instead of Google. The
+- Calls: with a TURN relay set (`SNUG_TURN_URL`) and no `SNUG_STUN`, the relay answers STUN instead of Google
+  (whoever runs the relay sees addresses; the privacy page doesn't claim who that is). The
   desktop app drops Google's STUN once it has Cloudflare relay details. Without a relay, Google is named on the
   privacy page, with `SNUG_STUN=none`.
 - Desktop app: update checks at start and then about once a day with jitter (were hourly). **Settings >
