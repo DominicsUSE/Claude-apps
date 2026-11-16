@@ -575,6 +575,8 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
       if (place && isGroup(place)) hub.voiceLeave(shadowId(uid));
       return;
     }
+    // Back (after a short drop, say): if I'm in a group call with them, tell their PC again, which answers in kind.
+    for (const g of shared(uid)) if (inCallHere(g)) announce(g, [uid]);
     if (!contactSet().has(uid) || fwdT.has(uid)) return;
     const groups = shared(uid);
     if (!groups.length) return;
@@ -802,13 +804,14 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
   const callsOk = (u) => !X.capsKnown(u) || X.capsOf(u).includes('gcall'); // unknown: sent anyway (an older PC ignores it)
   const OLD_CALLS = (uids) => `${uids.map((u) => M.userRow(localId(u))?.name || 'Someone').join(', ')} ${uids.length === 1 ? 'needs' : 'need'} to update Snug before you can call this group.`;
   const inCallHere = (g) => hub.voicePlaceOf(X.owner()) === g;
-  function announce(g, to = null) {
+  // re: an answer to their grp.call, which isn't answered again (so two PCs that both have each other stop there).
+  function announce(g, to = null, re = false) {
     const call = hub.callOf(g);
     if (!call || !inCallHere(g)) return;
     for (const uid of to || state(g).members.keys()) {
       if (uid === me() || !online.has(uid) || X.blockedEither(shadowId(uid)) || !callsOk(uid)) continue;
       X.turnFor(uid);
-      links.ready(uid, 10_000).then((ok) => { if (ok && inCallHere(g)) links.sendEph(uid, 'grp.call', { g, call: hub.callOf(g)?.id || call.id, video: !!call.video }); });
+      links.ready(uid, 10_000).then((ok) => { if (ok && inCallHere(g)) links.sendEph(uid, 'grp.call', { g, call: hub.callOf(g)?.id || call.id, video: !!call.video, ...(re ? { re: 1 } : {}) }); });
     }
   }
   const callOp = (name) => wrap(name, (c, d, base) => {
@@ -825,7 +828,9 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
   X.EPHEMERAL['grp.call'] = (uid, d) => {
     if (!gate(uid) || !isGroup(d.g) || !amIn(d.g) || !state(d.g).members.has(uid) || typeof d.call !== 'string' || !CALL_ID.test(d.call)) return;
     const shadow = shadowId(uid);
-    if (X.blockedEither(shadow) || !M.inDm(d.g, shadow) || hub.voicePlaceOf(shadow) === d.g) return;
+    if (X.blockedEither(shadow) || !M.inDm(d.g, shadow)) return;
+    // Already in my copy of the call: their PC may have dropped me (it lost them for a moment), so answer once.
+    if (hub.voicePlaceOf(shadow) === d.g) { if (!d.re) announce(d.g, [uid], true); return; }
     X.turnFor(uid);
     const c = { user: shadow, ws: X.proxyFor(uid), peer: true, callId: d.call };
     try {
@@ -833,7 +838,7 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
       else ops['call.join'](c, { dm: d.g });
     } catch (e) { if (!(e instanceof UserError)) throw e; log('groups', 'call', e.message); return; }
     // They didn't have me in their copy of the call yet, if I'm in it: say so.
-    announce(d.g, [uid]);
+    announce(d.g, [uid], true);
   };
   X.hooks.callOk = (uid, place) => isGroup(place) && amIn(place) && state(place).members.has(uid);
   X.hooks.callTargets = (place) => (isGroup(place) && amIn(place) ? [...state(place).members.keys()].filter((u) => u !== me() && online.has(u) && callsOk(u)) : []);

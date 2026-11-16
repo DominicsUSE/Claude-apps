@@ -65,3 +65,26 @@ test('a group call across three PCs: ring, join on each PC, everyone mirrored ev
   assert.match(err, /gccal/);
   A.peer._setCaps(uidOf(c), null);
 });
+
+test('a group call survives a short drop in one PC’s registry connection: the others mirror it again once it is back', async () => {
+  const { A, B, C, a, b, c } = await threePcs(registry, pcs, ['flana', 'flbea', 'flcal']);
+  const g = (await a.ok('dm.open', { users: [b.id, c.id] })).id;
+  const all = [a.id, b.id, c.id].sort().join();
+  const members = (s) => s.db.all('SELECT user FROM dm_members WHERE dm = ? ORDER BY user', g).map((r) => r.user).join();
+  await until(() => members(B) === all && members(C) === all, 12_000, 'group');
+  await until(() => A.peer.capsOf(uidOf(b)).includes('gcall') && A.peer.capsOf(uidOf(c)).includes('gcall') && C.peer.capsOf(uidOf(a)).includes('gcall'), 10_000, 'caps');
+  await until(() => B.peer.isOnline(uidOf(c)) && C.peer.isOnline(uidOf(b)), 10_000, 'co-member presence');
+  await a.ok('call.start', { dm: g });
+  await b.next('call.ring', (r) => r.dm === g, 10_000);
+  await b.ok('call.join', { dm: g });
+  await c.next('call.ring', (r) => r.dm === g, 10_000).catch(() => {});
+  await c.ok('call.join', { dm: g });
+  for (const s of [A, B, C]) for (const u of [a, b, c]) await until(() => s.hub.voicePlaceOf(u.id) === g, 10_000, 'all in the call everywhere');
+  // Cal's PC loses its registry connection for a moment, then reconnects.
+  C.peer._signal.stop();
+  await until(() => !A.peer.isOnline(uidOf(c)), 10_000, 'Ana’s PC sees Cal offline');
+  C.peer._signal.start();
+  await until(() => A.peer.isOnline(uidOf(c)) && C.peer.isOnline(uidOf(a)) && B.peer.isOnline(uidOf(c)), 15_000, 'Cal back online');
+  assert.equal(C.hub.voicePlaceOf(c.id), g, 'Cal never left the call on his own PC');
+  for (const s of [A, B, C]) for (const u of [a, b, c]) await until(() => s.hub.voicePlaceOf(u.id) === g, 10_000, 'everyone in the call on every PC again');
+});
