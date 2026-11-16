@@ -4,7 +4,10 @@
 //
 // R itself never leaves the device. What is derived from it, with HKDF-SHA256 and salt
 // "snug-recovery", depends on the use (a server only ever sees the first):
-//   authKey  info "web-auth-v1"         sent to a host server, which keeps only a slow hash of it
+//   authKey  info "web-auth-v2\n<host>" sent to a host server, which keeps only a slow hash of it. <host>
+//            is the page's host name (location.hostname), so a server's owner can't replay what people
+//            send it on another server where the same key was saved (v0.12 review, second pass).
+//            "web-auth-v1" (no host) is what 0.12.0 saved; it is sent alongside only to use such a key.
 //   p2pSeed  info "p2p-rk-ed25519-v1"   seed of the Ed25519 key a desktop account is recovered with
 //   backup   info "e2ee-backup-v1"      the end-to-end encryption backup key (js/lib/e2ee)
 // None of them can be computed from another.
@@ -89,8 +92,10 @@ async function hkdf(raw, info, length = 32) {
   return new Uint8Array(bits);
 }
 
-/** What a host server may see: it stores only a slow hash of this. */
+/** What a 0.12.0 host server saw (no host name): still sent to use a key saved then. */
 export const deriveAuthKey = (raw) => hkdf(raw, 'web-auth-v1');
+/** What a host server may see, bound to its host name (lower case, as location.hostname): it stores only a slow hash. */
+export const deriveAuthKeyV2 = (raw, host) => hkdf(raw, `web-auth-v2\n${String(host).toLowerCase()}`);
 /** Seed of a desktop account's Ed25519 recovery key pair. */
 export const deriveP2pSeed = (raw) => hkdf(raw, 'p2p-rk-ed25519-v1');
 /** The end-to-end encryption backup key. */

@@ -218,3 +218,36 @@ test('owner reset: the recovery key is deleted too, in case someone else made it
   assert.equal(srv.db.get('SELECT COUNT(*) n FROM recovery WHERE user = ?', k.id).n, 0);
   assert.equal((await recover('rk-owner2', k.key.raw)).status, 401, 'that key no longer resets the password');
 });
+
+// ---------- v0.12 identity review, second pass: the proof is bound to the server's host name ----------
+
+test('recovery: a v2 proof is bound to this server\'s host name, so a proof sent to another server opens nothing here', async () => {
+  const { deriveAuthKeyV2 } = await import('../js/lib/recovery.js');
+  const v2 = async (raw, host) => b64u(await deriveAuthKeyV2(raw, host));
+  const who = await register('rk-host');
+  const key = await newRecoveryKey();
+  const r = await post('/api/recovery/set', { verifier: await v2(key.raw, '127.0.0.1'), v: 2 }, { cookie: who.cookie });
+  assert.equal(r.status, 200, await r.clone().text());
+  assert.equal(srv.db.get('SELECT v, host FROM recovery WHERE user = ?', who.id).v, 2);
+  // the old derivation (what any other server saw before) and a proof made for another server don't work here
+  assert.equal((await recover('rk-host', key.raw)).status, 401);
+  const elsewhere = await post('/api/recover', { handle: 'rk-host', proof: await v2(key.raw, 'evil.example'), proof1: await proofOf(key.raw) });
+  assert.equal(elsewhere.status, 401);
+  // opened at another address of this same server: the person is told where the key was saved
+  const other = await fetch(`http://localhost:${srv.port}/api/recover`, {
+    method: 'POST', headers: { origin: `http://localhost:${srv.port}`, 'x-forwarded-for': freshIp(), 'content-type': 'application/json' },
+    body: JSON.stringify({ handle: 'rk-host', proof: await v2(key.raw, 'localhost'), proof1: await proofOf(key.raw) }),
+  });
+  assert.equal(other.status, 401);
+  assert.equal((await other.json()).savedAt, '127.0.0.1');
+  const ok = await post('/api/recover', { handle: 'rk-host', proof: await v2(key.raw, '127.0.0.1'), proof1: await proofOf(key.raw) });
+  assert.equal(ok.status, 200, await ok.clone().text());
+});
+
+test('recovery: a key saved before v2 still works once (the client sends the old proof too) until a new key is saved', async () => {
+  const { deriveAuthKeyV2 } = await import('../js/lib/recovery.js');
+  const a = await withKey('rk-legacy'); // saved the 0.12.0 way: the v1 proof, no v
+  assert.equal(srv.db.get('SELECT v FROM recovery WHERE user = ?', a.id).v, null);
+  const res = await post('/api/recover', { handle: 'rk-legacy', proof: b64u(await deriveAuthKeyV2(a.key.raw, '127.0.0.1')), proof1: await proofOf(a.key.raw) });
+  assert.equal(res.status, 200, await res.clone().text());
+});
