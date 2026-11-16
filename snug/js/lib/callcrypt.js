@@ -27,6 +27,9 @@ export const TRAILER = 9;
 export const TAG = 16;
 export const KEY_BYTES = 32;
 export const KEEP_OLD_MS = 2000; // a receiver keeps a sender's previous key this long after the new one is in use
+// After a new key of mine, a person who hasn't acknowledged it this long is no longer counted as end to end:
+// I still encrypt to them under the key they have, which someone who left also has.
+export const ACK_WAIT_MS = 5000;
 
 const subtle = () => globalThis.crypto.subtle;
 const enc = new TextEncoder();
@@ -96,6 +99,7 @@ export class FrameCrypto {
     this.now = now;
     this.send = new Map();    // keyId -> { key, ctr: { hi, lo } }
     this.newest = null;       // my newest sender key id
+    this.newestAt = 0;        // when it was made
     this.peerKey = new Map(); // person -> the key id they acknowledged (what I encrypt to them with)
     this.recv = new Map();    // person -> { keys: Map(keyId -> { key, n }), n, cur, curSince, strict }
     this.counts = new Map();  // person -> { enc, plain, dec, drop, pass }
@@ -111,6 +115,7 @@ export class FrameCrypto {
     raw.fill(0);
     this.send.set(id & 255, { key, ctr: { hi: randomHi(), lo: 0 } });
     this.newest = id & 255;
+    this.newestAt = this.now();
   }
   /** That person acknowledged my key id: encrypt to them with it from now on. */
   useFor(peer, id) {
@@ -140,6 +145,7 @@ export class FrameCrypto {
   wipe() {
     this.send.clear(); this.peerKey.clear(); this.recv.clear(); this.counts.clear(); this.tamper.clear();
     this.newest = null;
+    this.newestAt = 0;
   }
   sendKeyIds() { return [...this.send.keys()]; }
   recvKeyIds(peer) { return [...(this.recv.get(peer)?.keys.keys() || [])]; }
@@ -194,10 +200,13 @@ export class FrameCrypto {
     for (const p of new Set([...this.counts.keys(), ...this.recv.keys(), ...this.peerKey.keys()])) {
       const c = this.counts.get(p) || { enc: 0, plain: 0, dec: 0, drop: 0, pass: 0, passKeyed: 0, rawOut: 0, rawIn: 0 };
       const strict = !!this.recv.get(p)?.strict, sendKey = this.peerKey.get(p) ?? null, recvKeys = this.recvKeyIds(p);
-      // End to end with this person: they hold my key and I hold theirs, nothing went either way
-      // that couldn't be sealed, and what they sent since I had their key opened (or they sent nothing).
-      const e2ee = sendKey != null && recvKeys.length > 0 && !c.rawOut && !c.rawIn && (strict || !c.passKeyed);
-      out[p] = { ...c, strict, sendKey, recvKeys, e2ee };
+      // Still on an older key of mine well after a new one was made: waiting for their acknowledgement.
+      const waiting = sendKey != null && sendKey !== this.newest && this.now() - this.newestAt > ACK_WAIT_MS;
+      // End to end with this person: they hold my newest key (or had a moment to acknowledge it) and I hold
+      // theirs, nothing went either way that couldn't be sealed, and what they sent since I had their key
+      // opened (or they sent nothing).
+      const e2ee = sendKey != null && !waiting && recvKeys.length > 0 && !c.rawOut && !c.rawIn && (strict || !c.passKeyed);
+      out[p] = { ...c, strict, sendKey, recvKeys, e2ee, waiting };
     }
     return out;
   }

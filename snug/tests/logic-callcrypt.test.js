@@ -5,7 +5,7 @@
 // that doesn't open once a sender has started encrypting to it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FrameCrypto, sealFrame, openFrame, clearBytes, frameKey, TRAILER, KEEP_OLD_MS } from '../js/lib/callcrypt.js';
+import { FrameCrypto, sealFrame, openFrame, clearBytes, frameKey, TRAILER, KEEP_OLD_MS, ACK_WAIT_MS } from '../js/lib/callcrypt.js';
 
 const raw = (n) => Uint8Array.from({ length: 32 }, (_, i) => (i * 7 + n) & 255);
 const frame = (n, fill = 0x42) => Uint8Array.from({ length: n }, (_, i) => (i < 10 ? 0x90 + i : fill + (i & 15)));
@@ -112,6 +112,28 @@ test('FrameCrypto: rotation on join and leave; the old key is kept about 2 s aft
   assert.deepEqual(b.recvKeyIds('ann'), [0]);
   // The new key never opened anything sealed under the old one, nor the other way round.
   await assert.rejects(openFrame(await frameKey(raw(5)), fresh, 1));
+});
+
+test('FrameCrypto: a new key someone hasn\'t acknowledged within a few seconds makes that person "not end to end" until they do', async () => {
+  let now = 1000;
+  const a = new FrameCrypto({ now: () => now });
+  await a.setSendKey(1, raw(9));
+  await a.addRecvKey('bob', 4, raw(10));
+  a.useFor('bob', 1);
+  await a.encrypt('bob', frame(40), 1);
+  assert.equal(a.stats().bob.e2ee, true);
+  // Someone left: a new key. Bob's acknowledgement (passed on by the server) doesn't come.
+  now += 10_000;
+  await a.setSendKey(2, raw(11));
+  assert.equal(a.stats().bob.e2ee, true, 'a moment to acknowledge it');
+  now += ACK_WAIT_MS + 1;
+  assert.equal(a.stats().bob.e2ee, false, 'still on a key the person who left holds: not labelled end to end');
+  assert.equal(a.stats().bob.waiting, true);
+  assert.equal((await a.encrypt('bob', frame(40), 1)).data.at(-1), 1, 'frames stay sealed under the old key meanwhile, never plain');
+  a.useFor('bob', 2);
+  assert.equal(a.stats().bob.e2ee, true);
+  assert.equal(a.stats().bob.waiting, false);
+  assert.deepEqual(a.sendKeyIds(), [2], 'the old key goes once nobody uses it');
 });
 
 test('FrameCrypto: dropping a person or the whole call forgets every key', async () => {
