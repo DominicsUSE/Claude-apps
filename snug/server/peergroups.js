@@ -433,9 +433,12 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
       if (later) applyItem(later);
     }
     if (from !== item.by && item.by !== me() && item.k === 'msg') rcptLater(item.by, g, item.id);
-    // Straight from its author: members online to me may not be reachable by the author (presence for friends
-    // only on a registry without quiet watches, review-media 4), so offer them my inventory a little later.
-    if (from === item.by && item.by !== me()) for (const u of st.members.keys()) if (u !== me() && u !== item.by && online.has(u)) nudge(u);
+    // Straight from its author, who is my friend: my other friends in the group may not be reachable by the author
+    // (presence for friends only on a registry without quiet watches, review-media 4), so as a friend of both I
+    // offer them my inventory a little later.
+    if (from === item.by && item.by !== me() && X.isFriend(shadowId(item.by))) {
+      for (const u of st.members.keys()) if (u !== me() && u !== item.by && online.has(u) && X.isFriend(shadowId(u))) nudge(u);
+    }
   }
   const nudgeT = new Map();
   function nudge(uid) {
@@ -566,6 +569,7 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
   X.hooks.online = (uid, on) => {
     if (!on) {
       clearTimeout(fwdT.get(uid)); fwdT.delete(uid);
+      clearTimeout(nudgeT.get(uid)); nudgeT.delete(uid);
       // Their PC went away: their stand-in leaves any group call here (0.13).
       const place = hub.voicePlaceOf(shadowId(uid));
       if (place && isGroup(place)) hub.voiceLeave(shadowId(uid));
