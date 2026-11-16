@@ -52,6 +52,13 @@ if (location.protocol === "http:" || location.protocol === "https:") {
     desktop: true,
     builtIn,
     hidden: () => hidden,
+    // The app's own page only: the secret its encryption storage key is derived from, kept by the OS key
+    // store (main.js e2ee:storekey). { protected, key, why }; key is 32 random bytes, base64url.
+    ...(builtIn ? {
+      e2eeStoreKey: () => ipcRenderer.invoke("e2ee:storekey").then((r) => (r && typeof r === "object"
+        ? { protected: r.protected === true, key: typeof r.key === "string" ? r.key.slice(0, 64) : null, why: String(r.why || "").slice(0, 20) || null }
+        : null)),
+    } : {}),
     show: () => ipcRenderer.send("window:show"),
     getKeepRunning: () => ipcRenderer.invoke("keep:get"),
     setKeepRunning: (on) => ipcRenderer.invoke("keep:set", on === true),

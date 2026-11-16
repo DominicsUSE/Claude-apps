@@ -34,7 +34,10 @@ export const COPY = {
     insecure: 'This address isn’t secure (http), so the browser won’t do encryption here. Use the https address, or the Snug app.',
     old: 'This browser is too old for end-to-end encryption. Update it, or use the Snug app.',
     storage: 'This browser won’t keep keys (private window storage is off). Use a normal window.',
+    locked: 'This computer’s encryption keys are locked: the system key store that protects them can’t open them now (it changed, or Snug’s data was copied from another computer). If it doesn’t come back, remove the keys here and add this computer again with another device or your recovery key.',
   },
+  keyStoreNone: 'Your encryption keys aren’t protected by the system key store on this computer, so a copy of Snug’s data folder includes keys that open your messages.',
+  keyStoreLockedAction: 'Remove this computer’s keys',
 
   pendingTitle: 'Approve this browser',
   pendingBody: 'Approve this browser from another device, or enter your recovery key, to read encrypted messages.',

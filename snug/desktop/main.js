@@ -98,6 +98,42 @@ const keyStore = {
   encrypt: (str) => require("electron").safeStorage.encryptString(str).toString("base64"),
   decrypt: (b64) => require("electron").safeStorage.decryptString(Buffer.from(b64, "base64")),
 };
+// The encryption storage key (js/e2ee/store.js) is derived from a secret kept here, wrapped by the OS key
+// store, and handed only to the app's own page (preload.js snugApp.e2eeStoreKey, checked again below). With no
+// key store (Linux basic_text) there is no secret, and the page keeps the 0.12.0 behaviour and says so in
+// Settings. SNUG_KEYSTORE=off|test is for the desktop test and only honoured when running from source: "off"
+// is a computer without a key store, "test" a stand-in for one (not protection) on machines that have none.
+const devKeyStore = app.isPackaged ? null : process.env.SNUG_KEYSTORE;
+const e2eeKeyStore = devKeyStore === "off" ? { name: "safeStorage", available: () => false }
+  : devKeyStore === "test" ? {
+    name: "test", available: () => true,
+    encrypt: (str) => Buffer.from(str).map((b) => b ^ 0x5a).toString("base64"),
+    decrypt: (b64) => Buffer.from(b64, "base64").map((b) => b ^ 0x5a).toString(),
+  } : { name: "safeStorage", ...keyStore };
+const e2eeStoreFile = () => path.join(app.getPath("userData"), "e2ee-store.json");
+// { protected: true, key } or { protected: false, why: "unavailable" | "locked" }. "locked": a secret was
+// kept but the key store can't give it back now (it changed, or this folder was copied from another computer).
+function e2eeStoreSecret() {
+  let file = null;
+  try { file = JSON.parse(fs.readFileSync(e2eeStoreFile(), "utf8")); } catch { /* none yet */ }
+  if (file) {
+    if (file.v !== 1 || file.enc !== e2eeKeyStore.name || !e2eeKeyStore.available()) return { protected: false, why: "locked" };
+    try {
+      const key = e2eeKeyStore.decrypt(String(file.key || ""));
+      if (/^[A-Za-z0-9_-]{43}$/.test(key)) return { protected: true, key };
+    } catch { /* the key store refused */ }
+    return { protected: false, why: "locked" };
+  }
+  if (!e2eeKeyStore.available()) return { protected: false, why: "unavailable" };
+  const key = require("crypto").randomBytes(32).toString("base64url");
+  try {
+    fs.mkdirSync(path.dirname(e2eeStoreFile()), { recursive: true });
+    const tmp = `${e2eeStoreFile()}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ v: 1, enc: e2eeKeyStore.name, key: e2eeKeyStore.encrypt(key) }), { mode: 0o600 });
+    fs.renameSync(tmp, e2eeStoreFile());
+  } catch { return { protected: false, why: "unavailable" }; }
+  return { protected: true, key };
+}
 // A per-launch secret in an httpOnly cookie lets this window sign back in after signing out (F5).
 const resumeSecret = require("crypto").randomBytes(32).toString("base64url");
 
@@ -1169,12 +1205,15 @@ ipcMain.on("update:page", (e) => { e.returnValue = String(e.senderFrame?.url || 
 ipcMain.on("fallback:page", (e) => { e.returnValue = String(e.senderFrame?.url || "").startsWith("file:") ? FALLBACK : null; });
 // Whether the Snug page runs the app's own code: the in-app server's page (host mode) or the pinned client
 // (join mode), in the main window only. The server's own page never is. (js/e2ee/manager.js deviceKind)
-ipcMain.on("page:builtin", (e) => {
+function builtInPage(e) {
   const main = !!win && !win.isDestroyed() && e.sender === win.webContents;
   const ses = e.sender.session;
-  e.returnValue = main && fromSnug(e.senderFrame?.url || "") && !ownPage
+  return main && fromSnug(e.senderFrame?.url || "") && !ownPage
     && ((config?.mode === "host" && ses === session.defaultSession) || (pinnedOn && ses === joinSes));
-});
+}
+ipcMain.on("page:builtin", (e) => { e.returnValue = builtInPage(e); });
+// The encryption storage key's secret (above): the app's own page only, never a server's own page.
+ipcMain.handle("e2ee:storekey", (e) => (builtInPage(e) ? e2eeStoreSecret() : null));
 // The fallback page (fallback.html): what to say, the server's own page, an app update, or another server.
 const fromFallback = (e) => String(e.senderFrame?.url || "").split(/[?#]/)[0] === FALLBACK;
 ipcMain.handle("fallback:info", (e) => (fromFallback(e) && fallbackInfo ? { ...pinned.fallbackText(fallbackInfo), host: new URL(fallbackInfo.host).host, note: pinned.OWN_PAGE_NOTE(new URL(fallbackInfo.host).host) } : null));

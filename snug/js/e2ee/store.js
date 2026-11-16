@@ -5,9 +5,22 @@
 // confirmed, the decrypted synced settings) is AES-GCM-encrypted under this
 // device's storage key SK, itself a non-extractable key in the same database.
 //
+// In the desktop app (its own page only), SK is instead derived from a secret
+// the app keeps under the operating system's key store (desktop/main.js,
+// snugApp.e2eeStoreKey), so what is in IndexedDB opens nothing by itself: the
+// database holds only a salt and a check value ("skw"). A 0.12.0 profile is
+// moved over the first time: every sealed entry is opened with the old SK and
+// sealed again under the new one, all written in one transaction with the old
+// SK removed. With no key store (Linux basic_text, a browser) SK stays as it
+// was (said in Settings). If the key store can't give the secret back (it
+// changed, or the data was copied to another computer) the store is "locked":
+// nothing is replaced, and Settings says so.
+//
 // Honest limit (said in Settings): script running in Snug's page can use every
-// key here. Non-extractable only stops it from copying the device keys out.
-import { utf8, fromUtf8, random } from '../lib/e2ee/bytes.js';
+// key here. Non-extractable only stops it from copying the device keys out. The
+// device's own signing and prekey private keys are non-extractable browser keys
+// in IndexedDB, not sealed under SK (on any platform).
+import { utf8, fromUtf8, random, b64uOf } from '../lib/e2ee/bytes.js';
 import { canon, parseCanon } from '../lib/e2ee/canon.js';
 
 const STORES = ['dev', 'asb', 'pins', 'keys', 'meta'];
@@ -32,36 +45,109 @@ function idbKv(db) {
     get: (s, k) => run(s, 'readonly', (o) => o.get(k)),
     put: (s, k, v) => run(s, 'readwrite', (o) => o.put(v, k)),
     del: (s, k) => run(s, 'readwrite', (o) => o.delete(k)),
+    keys: (s) => run(s, 'readonly', (o) => o.getAllKeys()),
+    // Several writes as one transaction: all of them or none. ops: [[store, key, value | undefined (delete)]]
+    batch: (ops) => new Promise((resolve, reject) => {
+      const tx = db.transaction([...new Set(ops.map((x) => x[0]))], 'readwrite');
+      for (const [st, k, v] of ops) { const o = tx.objectStore(st); if (v === undefined) o.delete(k); else o.put(v, k); }
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error || new Error('aborted'));
+    }),
     close: () => db.close(),
   };
 }
 function mapKv() {
   const m = new Map(STORES.map((s) => [s, new Map()]));
-  return { get: async (s, k) => m.get(s).get(k), put: async (s, k, v) => { m.get(s).set(k, v); }, del: async (s, k) => { m.get(s).delete(k); }, close() {} };
+  return {
+    get: async (s, k) => m.get(s).get(k), put: async (s, k, v) => { m.get(s).set(k, v); }, del: async (s, k) => { m.get(s).delete(k); },
+    keys: async (s) => [...m.get(s).keys()],
+    batch: async (ops) => { for (const [st, k, v] of ops) { if (v === undefined) m.get(st).delete(k); else m.get(st).set(k, v); } },
+    close() {},
+  };
 }
 
-function wrap(kv, dbName) {
-  let sk = null;
-  async function storageKey() {
-    if (sk) return sk;
-    sk = await kv.get('dev', 'sk');
-    if (!sk) { sk = await subtle().generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']); await kv.put('dev', 'sk', sk); }
-    return sk;
+// Entries sealed under SK (sealedPut): moved to a new SK together.
+const SEALED = ['asb', 'meta'];
+const CHECK = 'snug-e2ee-v1/store-check';
+/** The store is protected by the OS key store, but it can't give the secret back now. */
+export class StoreLocked extends Error {
+  constructor() { super('This device’s encryption keys are locked by the system key store.'); this.code = 'e2ee_locked'; }
+}
+// SK from the key store's secret: HKDF-SHA-256 with a random salt kept in the database, non-extractable.
+async function derive(secret, salt, dbName) {
+  const base = await subtle().importKey('raw', secret, 'HKDF', false, ['deriveKey']);
+  return subtle().deriveKey({ name: 'HKDF', hash: 'SHA-256', salt, info: utf8(`snug-e2ee-v1/store\n${dbName}`) }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+const gcm = async (key, label, bytes) => { const iv = random(12); return { iv, ct: new Uint8Array(await subtle().encrypt({ name: 'AES-GCM', iv, additionalData: utf8(label) }, key, bytes)) }; };
+const ungcm = async (key, label, box) => new Uint8Array(await subtle().decrypt({ name: 'AES-GCM', iv: box.iv, additionalData: utf8(label) }, key, box.ct));
+
+// osKey: () => Promise<{ protected, key (32 bytes, base64url), why } | null> (the desktop bridge), or null.
+function wrap(kv, dbName, osKey = null) {
+  let skP = null;
+  let protection = osKey ? null : 'none'; // 'os' | 'none' | 'locked', once known
+  const secret = async () => {
+    const r = await osKey?.().catch(() => null);
+    if (r?.protected && typeof r.key === 'string') { try { const k = b64uOf(r.key, 32); if (k) return { key: k }; } catch { /* not a key */ } }
+    return { why: r?.why || 'unavailable' };
+  };
+  async function load() {
+    const w = await kv.get('dev', 'skw');
+    if (w) {
+      const s = await secret();
+      if (!s.key) { protection = 'locked'; throw new StoreLocked(); }
+      const k = await derive(s.key, w.salt, dbName);
+      s.key.fill(0);
+      try { await ungcm(k, CHECK, w.check); } catch { protection = 'locked'; throw new StoreLocked(); }
+      protection = 'os';
+      return k;
+    }
+    const old = await kv.get('dev', 'sk');
+    const s = osKey ? await secret() : {};
+    if (s.key) {
+      // New, or a 0.12.0 profile: SK from the key store's secret; anything sealed under the old SK sealed again.
+      const salt = random(32);
+      const k = await derive(s.key, salt, dbName);
+      s.key.fill(0);
+      const ops = [];
+      if (old) {
+        for (const st of SEALED) {
+          for (const key of await kv.keys(st)) {
+            const box = await kv.get(st, key);
+            if (!box) continue;
+            const label = `${st}/${key}`;
+            ops.push([st, key, await gcm(k, label, await ungcm(old, label, box))]);
+          }
+        }
+      }
+      ops.push(['dev', 'skw', { v: 1, salt, check: await gcm(k, CHECK, utf8('ok')) }], ['dev', 'sk', undefined]);
+      await kv.batch(ops);
+      protection = 'os';
+      return k;
+    }
+    protection = 'none';
+    if (old) return old;
+    const k = await subtle().generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    await kv.put('dev', 'sk', k);
+    return k;
   }
+  // One load at a time (seals in parallel share it); a failed one is tried again next time.
+  const storageKey = () => (skP ||= load().catch((e) => { skP = null; throw e; }));
   async function seal(value, label) {
-    const iv = random(12);
-    const ct = new Uint8Array(await subtle().encrypt({ name: 'AES-GCM', iv, additionalData: utf8(label) }, await storageKey(), utf8(canon(value))));
-    return { iv, ct };
+    return gcm(await storageKey(), label, utf8(canon(value)));
   }
   async function unseal(box, label) {
     if (!box) return null;
-    const pt = await subtle().decrypt({ name: 'AES-GCM', iv: box.iv, additionalData: utf8(label) }, await storageKey(), box.ct);
-    return parseCanon(fromUtf8(new Uint8Array(pt)), 256 * 1024);
+    return parseCanon(fromUtf8(await ungcm(await storageKey(), label, box)), 256 * 1024);
   }
-  const sealedGet = async (store, key) => unseal(await kv.get(store, key), `${store}/${key}`);
+  // The key first: loading it may seal every entry again (a 0.12.0 profile), so the entry is read after.
+  const sealedGet = async (store, key) => { await storageKey(); return unseal(await kv.get(store, key), `${store}/${key}`); };
   const sealedPut = async (store, key, value) => kv.put(store, key, value == null ? null : await seal(value, `${store}/${key}`));
   return {
     name: dbName,
+    /** Loads the storage key now (moving a 0.12.0 profile over); throws StoreLocked if the key store won't open it. */
+    ready: () => storageKey(),
+    /** 'os': under the OS key store; 'none': not (no key store here); 'locked'; null before ready(). */
+    protection: () => protection,
     // This device: { d, dsk (CryptoKeyPair), dskPub, label, kind, kid, prekeys: { kid: { pair, pub, created, retired } } }
     getDevice: () => kv.get('dev', 'device'),
     putDevice: (dev) => kv.put('dev', 'device', dev),
@@ -75,14 +161,15 @@ function wrap(kv, dbName) {
   };
 }
 
-/** The store for one account on this device. */
-export async function openStore(userId) {
+/** The store for one account on this device (osKey: the desktop app's key store bridge, if any). */
+export async function openStore(userId, osKey = null) {
   const name = `snug-e2ee:${userId}`;
-  return wrap(idbKv(await openDb(name)), name);
+  return wrap(idbKv(await openDb(name)), name, osKey);
 }
 /** Forget this device's keys for an account (after "remove this device's keys"). */
 export function deleteStore(userId) {
   return new Promise((resolve) => { const r = indexedDB.deleteDatabase(`snug-e2ee:${userId}`); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
 }
 /** In memory only: tests, and nothing persists. */
-export const memStore = () => wrap(mapKv(), 'memory');
+export const memStore = (osKey = null) => wrap(mapKv(), 'memory', osKey);
+export const _test = { wrap, mapKv };

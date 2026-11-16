@@ -631,3 +631,59 @@ test('highwater (H1, second pass): settings are written above both the server’
   assert.equal(hw.metaWriteVer(1, { ver: 5 }), 6, 'after a rollback to 1, a repair writes at 6, not 2');
   assert.equal(hw.metaWriteVer(0, { ver: 7 }), 8, 'gone from the server');
 });
+
+test('storage key under the OS key store: a 0.12.0 store is sealed again without losing anything; locked when the secret is gone', async () => {
+  const { _test: T, StoreLocked } = await import('../js/e2ee/store.js');
+  const { b64u: enc, random: rnd } = await import('../js/lib/e2ee/bytes.js');
+  const kv = T.mapKv();
+  // As 0.12.0: no key store. A raw storage key in the database, secrets sealed under it.
+  const old = T.wrap(kv, 'snug-e2ee:u1');
+  await old.putAsb({ v: 1, aik: 'account keys' });
+  await old.putSecret('rk', 'RECOVERY-KEY');
+  await old.putSecret('convs', { d_1: 4 });
+  assert.equal(old.protection(), 'none');
+  const sk0 = await kv.get('dev', 'sk');
+  assert.ok(sk0, 'the old kind of storage key');
+  const secret = enc(rnd(32));
+  const os = (r) => async () => r;
+  // With a key store: moved over, every secret still there, and the old key gone.
+  const up = T.wrap(kv, 'snug-e2ee:u1', os({ protected: true, key: secret }));
+  assert.deepEqual(await up.getAsb(), { v: 1, aik: 'account keys' });
+  assert.equal(await up.getSecret('rk'), 'RECOVERY-KEY');
+  assert.deepEqual(await up.getSecret('convs'), { d_1: 4 });
+  assert.equal(up.protection(), 'os');
+  assert.equal(await kv.get('dev', 'sk'), undefined, 'no storage key left that opens anything by itself');
+  assert.deepEqual(Object.keys(await kv.get('dev', 'skw')).sort(), ['check', 'salt', 'v']);
+  // The sealed boxes no longer open with the old key.
+  const box = await kv.get('meta', 'rk');
+  await assert.rejects(globalThis.crypto.subtle.decrypt({ name: 'AES-GCM', iv: box.iv, additionalData: new TextEncoder().encode('meta/rk') }, sk0, box.ct));
+  // Opened again later with the same secret.
+  const again = T.wrap(kv, 'snug-e2ee:u1', os({ protected: true, key: secret }));
+  assert.equal(await again.getSecret('rk'), 'RECOVERY-KEY');
+  // The key store gone, or another secret: locked, and nothing is replaced.
+  for (const r of [{ protected: false, why: 'locked' }, { protected: false, why: 'unavailable' }, { protected: true, key: enc(rnd(32)) }, null]) {
+    const locked = T.wrap(kv, 'snug-e2ee:u1', os(r));
+    await assert.rejects(locked.ready(), (e) => e instanceof StoreLocked && e.code === 'e2ee_locked');
+    assert.equal(locked.protection(), 'locked');
+  }
+  assert.equal(await kv.get('dev', 'sk'), undefined);
+  assert.equal(await T.wrap(kv, 'snug-e2ee:u1', os({ protected: true, key: secret })).getSecret('rk'), 'RECOVERY-KEY', 'still opens with the right secret');
+  // No key store from the start: today's behaviour.
+  const kv2 = T.mapKv();
+  const plain = T.wrap(kv2, 'snug-e2ee:u2', os({ protected: false, why: 'unavailable' }));
+  await plain.putSecret('rk', 'X');
+  assert.equal(plain.protection(), 'none');
+  assert.ok(await kv2.get('dev', 'sk'));
+  // A new store with a key store: never a raw key.
+  const kv3 = T.mapKv();
+  const fresh = T.wrap(kv3, 'snug-e2ee:u3', os({ protected: true, key: secret }));
+  await fresh.putSecret('rk', 'Y');
+  assert.equal(await kv3.get('dev', 'sk'), undefined);
+  assert.equal(await fresh.getSecret('rk'), 'Y');
+  // Parallel first uses move it over once.
+  const kv4 = T.mapKv();
+  const o4 = T.wrap(kv4, 'snug-e2ee:u4');
+  await o4.putSecret('a', 1); await o4.putSecret('b', 2);
+  const u4 = T.wrap(kv4, 'snug-e2ee:u4', os({ protected: true, key: secret }));
+  assert.deepEqual(await Promise.all([u4.getSecret('a'), u4.getSecret('b'), u4.ready().then(() => 'ok')]), [1, 2, 'ok']);
+});

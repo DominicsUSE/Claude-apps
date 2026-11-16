@@ -25,7 +25,7 @@ import { sealKey, openKey } from '../lib/e2ee/hpke.js';
 import { safetyNumber } from '../lib/e2ee/fingerprint.js';
 import { supported } from '../lib/e2ee/support.js';
 import { newRecoveryKey, parseRecoveryKey, deriveBackupKey } from '../lib/recovery.js';
-import { openStore, deleteStore, memStore } from './store.js';
+import { openStore, deleteStore, memStore, StoreLocked } from './store.js';
 import { metaCheck, listCheck, metaWriteVer } from '../lib/e2ee/highwater.js';
 import { random } from '../lib/e2ee/bytes.js';
 
@@ -48,6 +48,7 @@ export const E2 = {
   metaProblem: null,     // 'rollback' | 'missing' | 'damaged': the server's synced settings are behind what this device has seen
   rotateProblem: null,   // why the weekly history key couldn't be replaced (a device that can't get new keys)
   events: [],            // key changes to show in conversations: { id, u, kind: 'aik'|'added'|'removed', label, ts }
+  keyStore: null,        // 'os': this device's storage key is under the OS key store (desktop app); 'none': not; 'locked'
 };
 
 let store = null, keys = null, dev = null, meta = null, metaVer = 0, linkKc = null, rotateTimer = null;
@@ -71,6 +72,18 @@ export function deviceLabel(ua = navigator.userAgent) {
   return builtInCode() ? `Snug app on ${os}` : `${browser} on ${os}`;
 }
 export const deviceKind = () => (builtInCode() ? 'app' : 'web');
+// The desktop app's key store bridge (preload.js snugApp.e2eeStoreKey), on its own page only.
+const osKey = () => (builtInCode() && typeof window.snugApp?.e2eeStoreKey === 'function' ? () => window.snugApp.e2eeStoreKey() : null);
+/**
+ * The OS key store can't open this computer's keys any more (it changed, or Snug's data was copied from
+ * another computer): the person may delete them here and add this computer again (another device, or the
+ * recovery key). Nothing is deleted on the server.
+ */
+export async function forgetLockedKeys() {
+  store?.close(); store = null;
+  await deleteStore(userId());
+  location.reload();
+}
 
 // --- this device's keys ------------------------------------------------------
 async function makeDevice() {
@@ -133,7 +146,14 @@ async function onHello(d) {
   if (!E2.on && info.me.state === 'none') { E2.status = 'off'; emit(); return; }
   E2.support ||= await supported().catch(() => ({ ok: false, reason: 'old' }));
   if (!E2.support.ok) { E2.status = 'unsupported'; emit(); return; }
-  try { store ||= await openStore(userId()); } catch { E2.support = { ok: false, reason: 'storage' }; E2.status = 'unsupported'; emit(); return; }
+  try { store ||= await openStore(userId(), osKey()); } catch { E2.support = { ok: false, reason: 'storage' }; E2.status = 'unsupported'; emit(); return; }
+  // The storage key (js/e2ee/store.js): under the OS key store in the desktop app; locked if that store can't open it now.
+  try { await store.ready(); } catch (e) {
+    E2.keyStore = store.protection();
+    E2.support = { ok: false, reason: e instanceof StoreLocked ? 'locked' : 'storage' }; E2.status = 'unsupported'; emit(); return;
+  }
+  E2.keyStore = store.protection();
+  if (E2.support?.reason === 'locked') E2.support = { ok: true };
   dev = await store.getDevice();
   const known = dev && info.me.devices.find((x) => x.d === dev.d);
   if (dev && !known) {
