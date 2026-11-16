@@ -122,7 +122,9 @@ test('turning it on: the first-run sheet, the recovery key typed back, keys kept
   await page.locator('.e2-ok:has-text("on for this device")').waitFor();
   await page.locator('text=Saved. You confirmed you have it.').waitFor();
   assert.equal(await page.locator('.e2-dev').count(), 1);
-  assert.match(await page.locator('.e2-limits').textContent(), /still sees who talks to whom/);
+  assert.match(await page.locator('.e2-limits').textContent(), /It still sees:/);
+  // The server's own list (GET /api/privacy) renders under it.
+  await page.locator('.e2-limits .e2-sees li:has-text("Who is in each DM and group")').waitFor();
   assert.match(await page.locator('.e2-limits').textContent(), /Snug’s code comes from this server/);
   assert.match(await page.locator('.e2-limits').textContent(), /aren’t sealed/); // 0.14: a browser's keys aren't sealed by a key store
   assert.doesNotMatch(await page.locator('.e2-limits').textContent(), /sealed with the system key store/);
@@ -351,13 +353,13 @@ test('encrypted DM: an edit, a reply quote and a thread reply all decrypt after 
   await ines.context().close();
 });
 
-test('encrypted DM: polls and /roll are off and say why; forwarding to a room warns and posts readable text; into the group it stays encrypted', async () => {
+test('encrypted DM: polls are sealed (0.14) and say so, /roll is off and says why; forwarding to a room warns and posts readable text; into the group it stays encrypted', async () => {
   await openDm(robinA, 'Ines Carvalho');
   await robinA.locator('.main .plus-btn').click();
-  const poll = robinA.locator('[role=menu] .menu-item:has-text("Polls aren’t available in encrypted conversations yet")');
-  await poll.waitFor();
-  assert.equal(await poll.isDisabled(), true);
-  await robinA.keyboard.press('Escape');
+  await robinA.locator('[role=menu] .menu-item:has-text("Poll")').click();
+  await dialog(robinA).locator('.hint:has-text("This poll is end-to-end encrypted")').waitFor();
+  assert.equal(await dialog(robinA).locator('text=Hide results until people vote').count(), 0, 'hiding results isn’t offered: nobody could enforce it');
+  await dialog(robinA).locator('button:has-text("Cancel")').click();
   await say(robinA, '/roll 2d6');
   await robinA.locator('.toast:has-text("a fair roll needs the server to see the result")').waitFor();
   assert.equal(await robinA.locator('.main [data-composer] textarea').inputValue(), '/roll 2d6', 'the command stays for editing');

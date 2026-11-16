@@ -90,7 +90,7 @@ export const COPY = {
   ownChanges: 'Recent changes to your devices',
   selfAdded: (label) => `A device was added: ${label}.`,
   selfRemoved: (label) => `A device was removed: ${label}.`,
-  serverSees: 'The server still sees who talks to whom, when, and how much; group names, reactions and pictures of groups; and which devices you have.',
+  serverSees: 'The server can’t read encrypted messages, reactions, polls, or (once everyone is on Snug 0.14 or later) group names and icons. It still sees:',
   roomsNot: 'Room messages are stored on this server and can be read by whoever runs it and by moderators. They aren’t end-to-end encrypted.',
 
   resetTitle: 'Reset end-to-end encryption',
@@ -101,7 +101,7 @@ export const COPY = {
 
   // Conversations (spec 16.4)
   convOn: 'End-to-end encrypted',
-  convPanel: 'Messages and attachments are encrypted on your device and can be read only on the devices of the people here. This server stores them encrypted. It still sees who talks to whom, when, and how much. Group names, reactions and pictures of the group aren’t encrypted.',
+  convPanel: 'Messages and attachments are encrypted on your device and can be read only on the devices of the people here. This server stores them encrypted. It still sees who talks to whom, when, and roughly how much. Reactions, polls and a group’s name and icon are encrypted too once everyone here is on Snug 0.14 or later; until then they aren’t.',
   convNotOn: 'Not end-to-end encrypted',
   convNot: (names, many) => `Not end-to-end encrypted. ${names} ${many ? 'haven’t' : 'hasn’t'} set up encryption yet. Messages are stored readable on this server.`,
   convNotYou: 'Not end-to-end encrypted. Turn it on for this device in Settings, Encryption. Messages are stored readable on this server.',

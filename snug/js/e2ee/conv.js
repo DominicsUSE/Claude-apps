@@ -20,8 +20,8 @@ import { b64u, b64uOf } from '../lib/e2ee/bytes.js';
 import { canon } from '../lib/e2ee/canon.js';
 import { COPY } from '../lib/e2ee/copy.js';
 import * as obj from '../lib/e2ee/objects.js';
-import { seal, open, OpenFailure } from '../lib/e2ee/envelope.js';
-import { editSet, cmpTuple } from '../lib/e2ee/rules.js';
+import { seal, open, OpenFailure, SIDE_KINDS } from '../lib/e2ee/envelope.js';
+import { editSet, cmpTuple, uncovered, resealed } from '../lib/e2ee/rules.js';
 import { encryptFile, decryptFile } from '../lib/e2ee/attach.js';
 import { sniff } from '../lib/sniff.js';
 import { mentions } from '../lib/format.js';
@@ -89,6 +89,7 @@ export const changed = new Map(); // user -> new aik, when someone's account key
 // again now, so a changed safety number shows before anyone sends.
 on('e2ee.devices', (d) => {
   bundles.delete(d.user);
+  sealedOnce.clear(); // someone's devices changed (new features signed): groups are looked at again
   if (d.user !== S.me && E2.status === 'ready' && Object.values(S.dms).some((x) => x.e2ee && x.members.includes(d.user))) fetchBundles([d.user]).then(emit, () => {});
 });
 
@@ -113,7 +114,7 @@ async function fetchBundles(users, fresh = false) {
     const r = await call('e2ee.bundles', { users: want.slice(i, i + 10) });
     for (const [u, b] of Object.entries(r.users)) {
       const got = b.list ? await accept(u, b.list) : { list: null };
-      bundles.set(u, { list: got.list, problem: got.problem || null, prekeys: b.prekeys || {}, ready: !!b.ready });
+      bundles.set(u, { list: got.list, problem: got.problem || null, prekeys: b.prekeys || {}, caps: b.caps || {}, ready: !!b.ready });
     }
   }
   return users.map((u) => bundles.get(u));
@@ -153,6 +154,44 @@ async function recipients(users, fresh) {
   return { to: to.sort(cmpTuple), ar: ar.sort(cmpTuple), lv };
 }
 
+// ---------- what every device here can handle (0.14) ----------
+// Each device signs the features it handles (js/lib/e2ee/objects.js makeCaps); a feature is used in a
+// conversation only once every device of every member signed for it, so 0.12/0.13 devices keep
+// working. Once seen here, a device keeps its features: the server can't take one away to make us
+// fall back to sending something in a form it can read.
+const capsSeen = new Map(); // device id -> features this device verified for it
+async function deviceCaps(u, e, signed) {
+  let pinned = capsSeen.get(e.d);
+  if (!pinned) { const s = await ring.store?.getSecret?.(`caps:${e.d}`).catch?.(() => null); pinned = Array.isArray(s) ? s : []; }
+  const got = signed ? (await obj.verifyCaps(signed, { u, d: e.d, dsk: e.dsk })) || [] : [];
+  const all = [...new Set([...pinned, ...got])].sort();
+  if (all.length !== pinned.length) ring.store?.putSecret?.(`caps:${e.d}`, all).catch?.(() => {});
+  capsSeen.set(e.d, all);
+  return all;
+}
+/** The devices among `users` (those messages are sealed to) that can't handle `feature`: [{ u, d, label }]. */
+export async function lacking(users, feature) {
+  const got = await fetchBundles(users);
+  const out = [];
+  for (let i = 0; i < users.length; i++) {
+    const b = got[i];
+    if (!b?.list) continue;
+    for (const e of b.list.devs) {
+      if (!b.prekeys[e.d]) continue; // not sealed to: no live prekey
+      if (!(await deviceCaps(users[i], e, b.caps?.[e.d])).includes(feature)) out.push({ u: users[i], d: e.d, label: e.label });
+    }
+  }
+  return out;
+}
+/** Whether every device in encrypted conversation conv handles `feature`. */
+export async function convCan(conv, feature) {
+  const dm = rootDm(conv);
+  if (!dm || !S.dms[dm]?.e2ee || E2.status !== 'ready') return false;
+  try { return !(await lacking(membersOf(dm), feature)).length; } catch { return false; }
+}
+/** "Robin’s Laptop, Ines’s Phone": devices on an older Snug, for a message that names them. */
+export const namedDevices = (list) => list.slice(0, 5).map((x) => `${S.users[x.u]?.name || 'Someone'}’s ${x.label}`).join(', ') + (list.length > 5 ? ` and ${list.length - 5} more` : '');
+
 // ---------- attachments ----------
 const fileKeys = new Map(); // uploaded file id -> body part { k, n, csha, name, type, size }
 // An unsent message's attachment keys, kept sealed with it across a reload (js/e2ee/local.js).
@@ -179,10 +218,13 @@ function shownType(bytes, f) {
 // A big file goes up in resumable parts (js/lib/upload.js), still only as ciphertext.
 export async function uploadEncrypted(conv, blob, name, { onProgress, signal } = {}) {
   const bytes = new Uint8Array(await blob.arrayBuffer());
-  const { ct, meta } = await encryptFile(bytes);
+  const pad = await convCan(conv, 'pad');
+  const limits = pad ? await uploadLimits() : null;
+  // 0.14: padded to a size step, never past the server's file limit (10 MB when it can't be asked).
+  const { ct, meta } = await encryptFile(bytes, { pad, max: limits?.maxFile || 10 * 1024 * 1024 });
   let data;
   if (needsChunks(ct.length)) {
-    data = await uploadBlob({ fetch: (...a) => fetch(...a), conv, blob: new Blob([ct]), name, onProgress, signal, limits: await uploadLimits(), enc: true });
+    data = await uploadBlob({ fetch: (...a) => fetch(...a), conv, blob: new Blob([ct]), name, onProgress, signal, limits: limits || (await uploadLimits()), enc: true });
   } else {
     let res;
     try {
@@ -212,6 +254,14 @@ async function reupload(conv, f) {
 }
 
 const parts = new Map(); // file id -> its body part (key, nonce, hash), for files in opened messages
+// A padded file going where some device can't read padding (0.12/0.13 would show the padding as part of
+// the file): opened on this device and sealed again unpadded.
+async function unpadded(conv, id, part, name) {
+  const res = await fetch(`/api/files/${id}`, { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(`Couldn’t attach ${name || 'that file'}.`);
+  const bytes = await decryptFile(new Uint8Array(await res.arrayBuffer()), part);
+  return uploadEncrypted(conv, new Blob([bytes], { type: part.type || '' }), name || part.name || 'file');
+}
 /**
  * A copy of attachment f (from a message on screen) for encrypted conversation `to`: an encrypted
  * file is copied on the server as it is (its key goes in the new message); a plain one is fetched,
@@ -219,9 +269,13 @@ const parts = new Map(); // file id -> its body part (key, nonce, hash), for fil
  */
 export async function copyEncryptedFile(to, f) {
   const part = parts.get(f.id) || fileKeys.get(f.id);
+  if (f.encFile && part?.p && !(await convCan(to, 'pad'))) {
+    const up = await unpadded(to, f.id, part, f.name);
+    return { ...f, id: up.id, encFile: undefined };
+  }
   if (f.encFile && part) {
     const { id } = await call('e2ee.file.copy', { id: f.id, to });
-    fileKeys.set(id, { k: part.k, n: part.n, csha: part.csha, name: part.name || f.name, type: part.type, size: part.size });
+    fileKeys.set(id, { k: part.k, n: part.n, csha: part.csha, ...(part.p ? { p: part.p } : {}), name: part.name || f.name, type: part.type, size: part.size });
     if (blobs.has(f.id)) blobs.set(id, blobs.get(f.id));
     return { ...f, id, encFile: undefined };
   }
@@ -273,14 +327,24 @@ export async function sendEncrypted(conv, m) {
   for (const f of m.files || []) {
     let id = f.id;
     if (!fileKeys.has(id)) { const up = await reupload(conv, f); id = up.id; f.id = id; }
+    // Padded while everyone here could read it, and someone can't any more (a draft sent later): unpadded.
+    if (fileKeys.get(id).p && !(await convCan(conv, 'pad'))) { const up = await unpadded(conv, id, fileKeys.get(id), f.name); id = up.id; f.id = id; }
     const key = fileKeys.get(id);
-    files.push(clean({ id, k: key.k, n: key.n, csha: key.csha, name: f.name || key.name, type: key.type, size: key.size,
+    files.push(clean({ id, k: key.k, n: key.n, csha: key.csha, p: key.p, name: f.name || key.name, type: key.type, size: key.size,
       w: f.w, h: f.h, duration: f.duration, peaks: f.peaks, voice: f.voice || undefined, spoiler: f.spoiler || undefined, alt: f.alt || undefined, gif: f.gif || undefined }));
   }
   const body = clean({ text: m.text || '', mentions: pingOf(m.text, users), files, sticker: m.sticker || undefined, fwd: m.fwd || undefined, silent: m.silent || undefined, replyPing: m.replyPing });
+  // 0.14: where every device can read it, the message replied to goes inside the sealed body and the
+  // server gets no reply link. Its author is notified through a declared mention instead (replyPing).
+  const hideRe = !!m.replyTo && (await convCan(conv, 're'));
+  if (hideRe) {
+    body.re = m.replyTo;
+    const target = findMsg(conv, m.replyTo)?.author;
+    if (m.replyPing !== false && target && target !== S.me && users.includes(target) && !body.mentions.includes(target) && body.mentions.length < 10) body.mentions = [...body.mentions, target];
+  }
   return sealAndSend('msg.send', {
-    conv, dm, id: m.id, kind: 'msg', rev: 0, users, body, re: m.replyTo || null,
-    extra: clean({ text: '', files: files.map((f) => ({ id: f.id })), replyTo: m.replyTo, silent: m.silent || undefined, replyPing: m.replyPing }),
+    conv, dm, id: m.id, kind: 'msg', rev: 0, users, body, re: hideRe ? null : m.replyTo || null,
+    extra: clean({ text: '', files: files.map((f) => ({ id: f.id })), replyTo: hideRe ? undefined : m.replyTo, silent: m.silent || undefined, replyPing: hideRe ? undefined : m.replyPing }),
   });
 }
 const clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
@@ -294,7 +358,9 @@ export async function scheduleEncrypted(conv, text, at, replyTo) {
   const dm = rootDm(conv);
   const users = membersOf(dm);
   const body = { text, mentions: pingOf(text, users) };
-  return sealAndSend('sched.create', { conv, dm, id: newMsgId(), kind: 'sched', rev: 0, users, body, re: replyTo || null, at, extra: clean({ text: '', at, replyTo }) });
+  const hideRe = !!replyTo && (await convCan(conv, 're'));
+  if (hideRe) body.re = replyTo;
+  return sealAndSend('sched.create', { conv, dm, id: newMsgId(), kind: 'sched', rev: 0, users, body, re: hideRe ? null : replyTo || null, at, extra: clean({ text: '', at, replyTo: hideRe ? undefined : replyTo }) });
 }
 
 /** An edit: a new envelope (rev + 1) for the original recipients who are still here. */
@@ -304,7 +370,7 @@ async function editEncrypted(conv, m, text) {
   if (!prev) throw new Error('Messages from before encryption was turned on can’t be edited here.');
   const before = opened.get(keyOf(m.id, prev.rev))?.body || {};
   const users = editSet(prev.to, membersOf(dm));
-  const body = clean({ text, mentions: pingOf(text, users), files: before.files, sticker: before.sticker, fwd: before.fwd });
+  const body = clean({ text, mentions: pingOf(text, users), files: before.files, sticker: before.sticker, fwd: before.fwd, re: before.re, poll: before.poll });
   // The reply it was sent as stays in the signed header of every revision (checked when opened).
   const re = prev.kind === 'edit' && prev.kc === undefined ? (m.replyTo ?? null) : (prev.re ?? null); // a 0.12.0 edit carried none
   await sealAndSend('msg.edit', { conv, dm, id: m.id, kind: 'edit', rev: prev.rev + 1, users, body, re });
@@ -323,6 +389,7 @@ let timer = null;
 
 function apply(m, r) {
   const b = r.body;
+  if (m.sideOf || m.infoOf) { m.enc = true; m.encFp = r.fp; m.sideBody = b; sideOpened(m); return; } // 0.14: a reaction, vote or group information
   m.text = b.text || '';
   m.files = (b.files || []).map((f) => ({
     id: f.id, kind: kindOf(f.type || '', f.voice), name: f.name || 'file', size: f.size || 0, w: f.w, h: f.h, duration: f.duration, peaks: f.peaks,
@@ -331,11 +398,15 @@ function apply(m, r) {
   if (!m.files.length) delete m.files;
   if (b.sticker) m.sticker = b.sticker;
   if (b.fwd) m.fwd = b.fwd;
+  // 0.14: the message replied to, from inside the sealed body (the header names none).
+  if (typeof b.re === 'string' && m.e2ee.h.re == null) { m.replyTo = b.re; m.encRe = b.re; }
+  if (b.poll) { const p = pollOf(b.poll); if (p) m.encPoll = p; else delete m.encPoll; }
   m.enc = true;
   m.encFp = r.fp;
   if (r.flags.length) m.encFlags = r.flags;
   for (const p of b.files || []) parts.set(p.id, p);
   for (const f of m.files || []) if (!f.src) loadFile(f, b.files.find((x) => x.id === f.id));
+  derive(m);
 }
 function failed(m, why) { m.enc = 'failed'; m.encWhy = why; m.text = ''; delete m.files; }
 
@@ -366,6 +437,7 @@ function aroundOk(m) {
   const h = m.e2ee.h;
   if (m.author !== h.from?.u) return 'author';
   const re = m.replyTo ?? null;
+  if (h.re == null && m.encRe !== undefined && re === m.encRe) return null; // a reply named inside the sealed body (0.14)
   const lenient = h.kind === 'edit' && h.kc === undefined;
   if (lenient ? (h.re != null && h.re !== re) : (h.re ?? null) !== re) return 'reply';
   return null;
@@ -408,7 +480,10 @@ const olderViews = new WeakSet(); // views that are an edit history's earlier ve
 export function scan(o, conv = null, depth = 0, older = false) {
   if (!o || typeof o !== 'object' || depth > 7) return;
   if (Array.isArray(o)) { for (const x of o) scan(x, conv, depth + 1, older); return; }
-  if (isMsg(o)) { see(o, conv, older); return; }
+  if (isMsg(o)) { see(o, conv, older); if (!older && Array.isArray(o.side)) seeSide(o, conv); return; }
+  if (typeof o.id === 'string' && Array.isArray(o.members) && o.info?.e2ee?.h) seeInfo(o); // a group's sealed name (0.14)
+  // A plain reaction change in an encrypted conversation: sealed reactions are added before it is applied.
+  if (typeof o.conv === 'string' && typeof o.id === 'string' && o.reactions && typeof o.reactions === 'object' && !o.author) plainReactions(o);
   for (const [k, v] of Object.entries(o)) {
     if (!v || typeof v !== 'object') continue;
     if (k === 'msgs' && !Array.isArray(v)) { for (const [c, list] of Object.entries(v)) scan(list, c, depth + 2, older); continue; }
@@ -508,7 +583,10 @@ async function openOne(m, wraps, q = {}) {
     keys: { device: (kid) => dev.prekeys[kid]?.pair || null, history: (e) => keys.ahk[e] || null, cached: cachedKey ? b64uOf(cachedKey, 32) : null },
     wraps,
   });
-  if ((h.rev === 0) !== (h.kind !== 'edit')) throw new OpenFailure('revision');
+  // A reaction, vote or group information opens only as one, under its own id (0.14); a message never as one.
+  const side = m.sideOf ? (m.slot === 'react' ? 'react' : 'vote') : m.infoOf ? 'info' : null;
+  if (side ? h.kind !== side : SIDE_KINDS.includes(h.kind)) throw new OpenFailure('kind');
+  if (!side && (h.rev === 0) !== (h.kind !== 'edit')) throw new OpenFailure('revision');
   if (h.kind === 'sched' && Math.abs((m.ts || 0) - h.at) > 2 * 60_000) throw new OpenFailure('time');
   // The thread a message says it is in must hang off the DM it says it is in.
   const t = h.place.startsWith('t:') ? S.threads[h.place] : null;
@@ -537,8 +615,282 @@ readyHooks.push(() => {
 });
 signOutHooks.push(() => {
   bundles.clear(); changed.clear(); opened.clear(); topRev.clear(); revLoaded.clear(); queue.clear(); fileKeys.clear(); parts.clear(); locked = [];
+  capsSeen.clear(); sides.clear(); sideState.clear(); views.clear(); infoState.clear();
   for (const u of blobs.values()) URL.revokeObjectURL(u);
   blobs.clear();
+});
+
+
+// ---------- 0.14: sealed reactions, polls and group information ----------
+// A reaction set, a poll vote, a poll's end and a group's name are envelopes like messages (kinds
+// react, vote, info), sealed to every member's devices and history keys and signed by the sending
+// device. They open through the same queue as messages, as views of their own (sideOf / infoOf),
+// under ids that name their slot, message and author, so the server can't move one elsewhere; an
+// older revision of one this device has seen is refused like an older edit. Counts are made here.
+const SLOT_KIND = { react: 'react', vote: 'vote', end: 'vote' };
+const sides = new Map(); // message id -> Map(side id -> its view)
+const sideState = new Map(); // message id -> { react: Map(user -> emoji[]), vote: Map(user -> { choices, ts }), end }
+const views = new Map(); // message id -> Set of message views carrying sealed side blobs
+const infoState = new Map(); // dm -> { fp, body }
+const stateOf = (id) => { let st = sideState.get(id); if (!st) { st = { react: new Map(), vote: new Map(), end: null }; sideState.set(id, st); } return st; };
+const EMOJI_MAX = 20;
+const cleanEmojis = (list) => (Array.isArray(list) ? [...new Set(list.filter((e) => typeof e === 'string' && e.length > 0 && e.length <= 32))].slice(0, EMOJI_MAX) : []);
+const plainText = (v, max) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f​-‏‪-‮⁦-⁩]/g, ' ').trim().slice(0, max) : '');
+
+/** A sealed poll body, checked: { question, answers: [{ text, emoji? }], multi, ends } or null. */
+function pollOf(p) {
+  if (!p || typeof p !== 'object') return null;
+  const question = plainText(p.question, 300);
+  const answers = Array.isArray(p.answers) ? p.answers.slice(0, 10).map((a) => clean({ text: plainText(a?.text, 55), emoji: typeof a?.emoji === 'string' && a.emoji.length <= 32 ? a.emoji : undefined })) : [];
+  if (!question || answers.length < 2 || answers.some((a) => !a.text) || !Number.isSafeInteger(p.ends)) return null;
+  return { question, answers, multi: p.multi === true, ends: p.ends };
+}
+function mergeRx(plain, react) {
+  const out = {};
+  for (const [e, who] of Object.entries(plain || {})) if (Array.isArray(who) && who.length) out[e] = [...who];
+  for (const [u, list] of react) for (const e of list) { const who = (out[e] ||= []); if (!who.includes(u)) who.push(u); }
+  return out;
+}
+// What a poll shows, counted here: the newest vote of each person sent before it ended, by the
+// sender's clock (as polls between PCs). Ended early only by its author's signed end.
+function pollView(m, st) {
+  const p = m.encPoll;
+  const end = st?.end && st.end.by === m.author ? st.end : null;
+  const ends = end ? Math.min(p.ends, end.ts) : p.ends;
+  const counts = p.answers.map(() => 0);
+  let total = 0;
+  for (const [, v] of st?.vote || []) {
+    if (v.ts > ends) continue;
+    let ch = [...new Set(v.choices.filter((i) => Number.isInteger(i) && i >= 0 && i < counts.length))].sort((a, b) => a - b);
+    if (!p.multi) ch = ch.slice(0, 1);
+    if (!ch.length) continue;
+    total++;
+    for (const i of ch) counts[i]++;
+  }
+  return { question: p.question, answers: p.answers, multi: p.multi, ends, ended: !!end || ends <= Date.now(), counts, total, by: m.author, enc: true };
+}
+/** Sealed reactions and poll counts onto one message view. */
+function derive(m) {
+  if (!m?.id) return;
+  const st = sideState.get(m.id);
+  if (st) { // also once the last sealed reaction is taken back
+    if (m.plainRx === undefined) m.plainRx = m.reactions || {};
+    const rx = mergeRx(m.plainRx, st.react);
+    if (Object.keys(rx).length) m.reactions = rx; else delete m.reactions;
+  }
+  if (m.encPoll) {
+    m.poll = pollView(m, st);
+    const mine = st?.vote.get(S.me)?.choices || [];
+    if (mine.length) S.pollVotes[m.id] = mine; else delete S.pollVotes[m.id];
+  }
+}
+function refresh(msgId, conv) {
+  for (const v of views.get(msgId) || []) derive(v);
+  const m = conv && findMsg(conv, msgId);
+  if (m) derive(m);
+  emit();
+}
+function seeSide(m, conv) {
+  const set = views.get(m.id) || new Set();
+  set.add(m);
+  views.set(m.id, set);
+  if (m.plainRx === undefined) m.plainRx = m.reactions || {};
+  for (const x of m.side) addSide(m.id, x.user, x.slot, x.e2ee, null, conv || x.e2ee?.h?.place);
+  derive(m);
+}
+function addSide(msg, user, slot, e2ee, k, conv) {
+  if (!e2ee?.h || !Object.hasOwn(SLOT_KIND, slot) || typeof msg !== 'string' || typeof user !== 'string') return;
+  const id = `${slot}:${msg}:${user}`;
+  const per = sides.get(msg) || new Map();
+  sides.set(msg, per);
+  const cur = per.get(id);
+  if (cur && fingerprint(cur.e2ee) === fingerprint(e2ee)) return;
+  const v = { id, author: user, e2ee, sideOf: msg, slot, conv, ...(k && Object.keys(k).length ? { k } : {}) };
+  per.set(id, v);
+  see(v, conv);
+}
+on('e2ee.side', (d) => addSide(d?.msg, d?.user, d?.slot, d?.e2ee, d?.k, d?.conv));
+// A plain reaction change ({ conv, id, reactions }) in an encrypted conversation: the sealed ones stay.
+function plainReactions(o) {
+  if (!isEncrypted(o.conv)) return;
+  const st = sideState.get(o.id);
+  const m = findMsg(o.conv, o.id);
+  if (m) m.plainRx = o.reactions;
+  if (st?.react.size) o.reactions = mergeRx(o.reactions, st.react);
+}
+function sideOpened(v) {
+  if (v.infoOf) { infoOpened(v); return; }
+  const b = v.sideBody || {};
+  if (b.target !== v.sideOf) return; // sealed for another message
+  const st = stateOf(v.sideOf);
+  if (v.slot === 'react') st.react.set(v.author, cleanEmojis(b.emojis));
+  else if (v.slot === 'vote') st.vote.set(v.author, { choices: Array.isArray(b.choices) ? b.choices.slice(0, 10) : [], ts: v.e2ee.h.ts });
+  else if (v.slot === 'end' && b.end === true) st.end = { ts: v.e2ee.h.ts, by: v.author };
+  if (v.slot === 'react' && !st.react.get(v.author).length) st.react.delete(v.author);
+  refresh(v.sideOf, v.conv);
+}
+
+// Seals and sends a side blob or group information with the next revision; a newer one sent from
+// another device meanwhile (e2ee_side_rev) means trying again above it.
+// once: an automatic one (sealing a group's information again for its members) stops instead, since
+// the newer one may carry a change this device hasn't opened yet.
+async function sealNext(op, { conv, dm, id, kind, users, body, extra, shown, once = false }) {
+  let rev = Math.max(topRev.get(id) ?? -1, shown ?? -1) + 1;
+  for (let tries = 0; tries < 3; tries++) {
+    try { return await sealAndSend(op, { conv, dm, id, kind, rev, users, body: { text: '', ...body }, extra }); } catch (e) {
+      if (e.code !== 'e2ee_side_rev' || once) throw e;
+      rev = Math.max(rev, (Number(e.data?.rev) || 0)) + 1;
+    }
+  }
+  throw new Error('That kept changing on another device. Try again in a moment.');
+}
+function sealSide(conv, m, slot, body) {
+  const dm = rootDm(conv);
+  const id = `${slot}:${m.id}:${S.me}`;
+  const shown = sides.get(m.id)?.get(id)?.e2ee?.h?.rev;
+  return sealNext('e2ee.side', { conv, dm, id, kind: SLOT_KIND[slot], users: membersOf(dm), body: { target: m.id, ...body }, extra: { msg: m.id, slot }, shown });
+}
+
+/** A reaction toggled in an encrypted conversation (js/store.js react already shows it). */
+async function reactEncrypted(conv, m, emoji, on) {
+  if (m.plainRx === undefined) {
+    // Nothing sealed seen on it yet: what the server sent is m.reactions before js/store.js changed it.
+    const p = Object.fromEntries(Object.entries(m.reactions || {}).map(([e, who]) => [e, [...who]]));
+    if (on) p[emoji] = (p[emoji] || []).filter((u) => u !== S.me); else p[emoji] = [...new Set([...(p[emoji] || []), S.me])];
+    if (!p[emoji].length) delete p[emoji];
+    m.plainRx = p;
+  }
+  const plainMine = (m.plainRx?.[emoji] || []).includes(S.me);
+  // Taking back a reaction sent before reactions were sealed here: plain, as it was given.
+  if (!on && plainMine) {
+    m.plainRx = { ...m.plainRx, [emoji]: m.plainRx[emoji].filter((u) => u !== S.me) };
+    return call('react', { conv, id: m.id, emoji, on: false });
+  }
+  if (!(await convCan(conv, 'react'))) return call('react', { conv, id: m.id, emoji, on }); // someone here is on an older Snug
+  const st = stateOf(m.id);
+  const before = st.react.get(S.me) || [];
+  const next = on ? [...new Set([...before, emoji])] : before.filter((e) => e !== emoji);
+  if (next.length > EMOJI_MAX) throw new Error(`You can add up to ${EMOJI_MAX} different reactions to one message.`);
+  if (next.length) st.react.set(S.me, next); else st.react.delete(S.me);
+  refresh(m.id, conv);
+  try { await sealSide(conv, m, 'react', { emojis: next }); } catch (e) {
+    if (before.length) st.react.set(S.me, before); else st.react.delete(S.me);
+    refresh(m.id, conv);
+    throw e;
+  }
+}
+msgHooks.react = (conv, m, emoji, on) => {
+  if (!m?.e2ee || !isEncrypted(conv)) return false; // rows from before encryption keep plain reactions
+  reactEncrypted(conv, m, emoji, on).catch((e) => { toast(e.message); resyncNow(); });
+  return true;
+};
+
+/** An encrypted poll: the question and answers are a sealed message; votes and the end are sealed too. */
+export async function sendPollEncrypted(conv, { question, answers, multi, hours }) {
+  const dm = rootDm(conv);
+  const users = membersOf(dm);
+  const lack = await lacking(users, 'poll');
+  if (lack.length) throw new Error(`Encrypted polls need everyone here on Snug 0.14 or later. Still on an older Snug: ${namedDevices(lack)}.`);
+  const poll = { question, answers, multi: !!multi, ends: Date.now() + hours * 3600_000 };
+  if (!pollOf(poll)) throw new Error('That poll isn’t valid.');
+  rememberEncrypted(dm);
+  return sealAndSend('msg.send', { conv, dm, id: newMsgId(), kind: 'msg', rev: 0, users, body: { text: '', mentions: [], poll }, extra: { text: '', poll: true } });
+}
+/** A vote (answers: indexes; [] takes it back) in an encrypted poll. */
+export async function voteEncrypted(conv, m, answers) {
+  const st = stateOf(m.id);
+  const before = st.vote.get(S.me);
+  st.vote.set(S.me, { choices: answers, ts: Date.now() });
+  refresh(m.id, conv);
+  try { await sealSide(conv, m, 'vote', { choices: answers }); } catch (e) {
+    if (before) st.vote.set(S.me, before); else st.vote.delete(S.me);
+    refresh(m.id, conv);
+    throw e;
+  }
+}
+/** Ending an encrypted poll early: signed by its author's device. */
+export const endPollEncrypted = (conv, m) => sealSide(conv, m, 'end', { end: true });
+
+// A group's name, icon and hue: sealed to its members (kind info). The server shows older Snug
+// "Encrypted group" and keeps no name; each member's device puts the real one in its place.
+function infoClean(b) {
+  const name = plainText(b?.name, 40);
+  const icon = typeof b?.icon === 'string' && b.icon.length <= 16 ? b.icon : null;
+  return { name: name || null, icon, hue: icon && Number.isInteger(b?.hue) ? b.hue : null };
+}
+function patchDm(view, b) {
+  if (!view) return;
+  if (b.name) view.name = b.name; else delete view.name;
+  if (b.icon) view.icon = { emoji: b.icon, hue: b.hue }; else delete view.icon;
+  view.infoSealed = true;
+}
+const resealing = new Set();
+// Someone added since it was sealed can't open it: one member's device seals it again for everyone
+// here now (the server keeps only the newest; a second device doing the same is refused, harmlessly).
+// view: the conversation as the server just sent it (S.dms still holds the one before, while scanning).
+function checkCover(dm, env, body, view = S.dms[dm]) {
+  const d = view || S.dms[dm];
+  if (!d?.e2ee || E2.status !== 'ready' || !d.members.includes(S.me)) return;
+  if (!uncovered(d.members, env.h)) return; // the same rule the server holds a re-seal to
+  const key = `${dm}:${fingerprint(env)}`;
+  if (resealing.has(key)) return;
+  resealing.add(key);
+  setTimeout(() => { setGroupInfo(dm, body, 'members').catch(() => {}); }, 150 + Math.floor(Math.random() * 1200));
+}
+function seeInfo(o) {
+  const e = o.info.e2ee;
+  const fp = fingerprint(e);
+  const cur = infoState.get(o.id);
+  if (cur?.fp === fp && cur.body) { patchDm(o, cur.body); checkCover(o.id, e, cur.body, o); return; }
+  // What this device showed before, so a re-seal for members can be held to it (js/lib/e2ee/rules.js resealed):
+  // the revision before, or for a group sealed the first time, the name the server had for it.
+  // Only the revision right before counts (prevRev), so a rename not opened yet is never mistaken for a change.
+  const was = S.dms[o.id];
+  const [prev, prevRev] = cur?.body ? [cur.body, cur.rev] : cur?.prev ? [cur.prev, cur.prevRev]
+    : was && !was.info && !was.infoSealed ? [infoClean({ name: was.name, icon: was.icon?.emoji, hue: was.icon?.hue }), -1] : [null, null];
+  infoState.set(o.id, { fp, body: null, prev, prevRev, view: o });
+  see({ id: `info:${o.id}`, author: e.h.from?.u, e2ee: e, infoOf: o.id, ...(o.info.k && Object.keys(o.info.k).length ? { k: o.info.k } : {}) }, o.id);
+}
+function infoOpened(v) {
+  const st = infoState.get(v.infoOf);
+  const fp = fingerprint(v.e2ee);
+  // Sealed again for members (no line in the conversation) but with another name or icon: the one before stays.
+  const what = st?.view?.info?.e2ee && fingerprint(st.view.info.e2ee) === fp ? st.view.info.what : null;
+  const rev = v.e2ee.h.rev;
+  const body = resealed(what, st?.prevRev === rev - 1 ? st.prev : null, infoClean(v.sideBody));
+  infoState.set(v.infoOf, { fp, body, rev, view: st?.view });
+  if (st?.view?.info?.e2ee && fingerprint(st.view.info.e2ee) === fp) patchDm(st.view, body);
+  const d = S.dms[v.infoOf];
+  if (d?.info?.e2ee && fingerprint(d.info.e2ee) === fp) patchDm(d, body);
+  checkCover(v.infoOf, v.e2ee, body);
+  emit();
+}
+/** Whether a group's name and icon are sealed (or will be on the next change). */
+export const infoSealed = (dm) => !!S.dms[dm]?.info || !!S.dms[dm]?.infoSealed;
+/** Renames a group, or changes its icon, sealed. patch: { name } or { icon, hue }; what: name | icon | members. */
+export async function setGroupInfo(dm, patch, what = 'name') {
+  const users = membersOf(dm);
+  const lack = await lacking(users, 'info');
+  if (lack.length) throw new Error(`A private group name needs everyone here on Snug 0.14 or later. Still on an older Snug: ${namedDevices(lack)}.`);
+  const st = infoState.get(dm);
+  const d = S.dms[dm] || {};
+  const cur = st?.body || (d.info ? null : { name: d.name || null, icon: d.icon?.emoji || null, hue: d.icon?.hue ?? null });
+  if (!cur) throw new Error('This group’s name hasn’t opened on this device yet. Try again in a moment.');
+  const body = infoClean({ ...cur, ...patch });
+  const shown = d.info?.e2ee?.h?.rev;
+  return sealNext('e2ee.info', { conv: dm, dm, id: `info:${dm}`, kind: 'info', users, body: clean(body), extra: { dm, what }, shown, once: what === 'members' });
+}
+// A group named before 0.14: once everyone's devices can, its name and icon are sealed and the
+// server forgets them (no line in the conversation: nothing changed for the people in it).
+const sealedOnce = new Set();
+async function sealExisting(dm) {
+  if (sealedOnce.has(dm)) return;
+  sealedOnce.add(dm);
+  if ((await convCan(dm, 'info')) && !S.dms[dm]?.info) await setGroupInfo(dm, {}, 'members');
+}
+subscribe(() => {
+  if (E2.status !== 'ready') return;
+  for (const [id, d] of Object.entries(S.dms)) if (d.e2ee && d.group && !d.info && (d.name || d.icon) && !sealedOnce.has(id)) sealExisting(id).catch(() => {});
 });
 
 // ---------- the transport's hooks (js/server.js) ----------
@@ -547,4 +899,4 @@ Object.assign(transportHooks, { scan, scanReply, isEncrypted, downgraded, sendEn
 readyHooks.push(() => { for (const [c, list] of Object.entries(S.msgs)) scan(list, c); });
 
 // For the end-to-end checks.
-export const _test = { opened, findMsg, topRev };
+export const _test = { opened, findMsg, topRev, sideState, infoState, capsSeen, parts };

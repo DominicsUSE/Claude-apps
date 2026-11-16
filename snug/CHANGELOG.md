@@ -41,7 +41,7 @@ goes back to an older version on its own (README, "Install, update, go back").
 - Desktop app: update checks at start and then about once a day with jitter (were hourly). **Settings >
   Desktop app > Updates**: *Automatically*, *Tell me* or *Only when I ask*.
 
-### Private by default
+### Stored data encrypted
 
 - **Attachment files are encrypted on disk** (AES-256-GCM in 64 KiB segments under a key from
   `data/secret.key`). Range requests still work; a damaged segment is refused, never sent. Older files stay
@@ -61,6 +61,31 @@ goes back to an older version on its own (README, "Install, update, go back").
 - **Going back to 0.13 or older**: files 0.14 stored or sealed can't be opened there (attachments, avatars,
   stickers, emoji, sounds, link-preview pictures), and the desktop app's copy of messages, drafts and changes
   waiting to send don't carry back. Returning to 0.14 makes them readable again.
+
+### Encrypted chats: less metadata
+
+- **Less for the server to see in end-to-end encrypted DMs and groups**, once everyone's devices are on 0.14
+  (each device signs what it can handle; until then the older form keeps working):
+  - Reactions are encrypted; each device counts them. An older Snug that tries a plain reaction there is told to update.
+  - A group's name and icon are encrypted to its members. The server keeps no name (older Snug shows
+    "Encrypted group"), lines say who renamed the group but not to what, and someone added gets the name too.
+  - Polls work in encrypted conversations again, encrypted with their votes; each device counts. "Hide results"
+    isn't offered there (nobody could enforce it). If someone is still on an older Snug, it names their device.
+  - The message a reply answers is inside the encrypted message; its author is notified by a mention.
+  - Encrypted attachments are padded to size steps, so the server sees roughly how big a file is.
+  - Padding never takes a file past the server's file limit, and a padded file forwarded to someone on an
+    older Snug is sealed again unpadded so it opens whole.
+  - When a group's name is first sealed, earlier "named the group" lines lose the name too.
+  - Limits (README, "Limits of the 0.14 sealing"): the first time your device sees a device, the server could
+    hold its features back and make yours use the older form; a new device can be shown an older revision;
+    someone added sees "Encrypted group" until a member's device seals the name again; the data download
+    leaves out sealed reactions, votes and group names.
+- Push notifications for encrypted conversations name only the sender, never the group or who else is in it.
+  New: **Hide names in notifications** (Settings > Encryption): no sender or place in any pushed
+  notification, and the note that replaces a ring names no caller. Message text in unencrypted
+  conversations still follows *Show message text*.
+- One list of what the server still sees of encrypted conversations, in the README, Settings > Encryption
+  and `GET /api/privacy`.
 
 ## 0.13.0
 

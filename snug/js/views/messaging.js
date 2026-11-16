@@ -8,7 +8,7 @@ import {
   openLightbox, markRead, setPref,
 } from '../store.js';
 import { call, on, sendMessage, uploadFile } from '../server.js';
-import { isEncrypted, downgraded, copyEncryptedFile, scheduleEncrypted, SCHEDULE_MAX } from '../e2ee/conv.js'; // end-to-end encrypted conversations
+import { isEncrypted, downgraded, copyEncryptedFile, scheduleEncrypted, SCHEDULE_MAX, sendPollEncrypted, voteEncrypted, endPollEncrypted } from '../e2ee/conv.js'; // end-to-end encrypted conversations
 import { COPY as E2COPY } from '../lib/e2ee/copy.js';
 import { can, canPost } from '../lib/perms.js';
 import { roomIds, isThread } from '../lib/attention.js';
@@ -47,6 +47,7 @@ function relEnd(ts) {
 }
 
 export function vote(conv, m, answers) {
+  if (m.poll?.enc) { voteEncrypted(conv, m, answers).catch(offlineSay); return Promise.resolve(); } // sealed votes (js/e2ee/conv.js)
   const before = S.pollVotes[m.id];
   if (answers.length) S.pollVotes[m.id] = answers; else delete S.pollVotes[m.id];
   emit();
@@ -59,7 +60,7 @@ export function vote(conv, m, answers) {
     offlineSay(e);
   });
 }
-const endPoll = (conv, m) => call('poll.end', { conv, id: m.id }).catch(offlineSay);
+const endPoll = (conv, m) => (m.poll?.enc ? endPollEncrypted(conv, m) : call('poll.end', { conv, id: m.id })).catch(offlineSay);
 
 export function Poll({ conv, m }) {
   const p = m.poll;
@@ -86,7 +87,7 @@ export function Poll({ conv, m }) {
   const role = p.multi ? 'checkbox' : 'radio';
   return html`<div class=${`poll${ended ? ' ended' : ''}`} role="group" aria-label=${`Poll: ${p.question}`}>
     <div class="poll-q">${p.question}</div>
-    <div class="poll-how">${ended ? 'Final results' : p.multi ? 'Choose any' : 'Choose one'}${p.hidden && !ended ? ' · Results show after you vote' : ''}</div>
+    <div class="poll-how">${ended ? 'Final results' : p.multi ? 'Choose any' : 'Choose one'}${p.hidden && !ended ? ' · Results show after you vote' : ''}${p.enc ? ' · Encrypted: votes are counted on each device' : ''}</div>
     <div class="poll-answers" role=${picking ? (p.multi ? 'group' : 'radiogroup') : 'list'} aria-label="Answers">
       ${p.answers.map((a, i) => {
         const n = p.counts?.[i] || 0;
@@ -135,12 +136,15 @@ export function PollModal({ conv, question = '', answers: given = [] }) {
   const [busy, setBusy] = useState(false);
   const set = (i, patch) => setAnswers(answers.map((a, j) => (j === i ? { ...a, ...patch } : a)));
   const filled = answers.filter((a) => a.text.trim());
+  const enc = isEncrypted(conv); // an encrypted poll: sealed here, counted on each device (js/e2ee/conv.js)
   const submit = (e) => {
     e.preventDefault();
     if (!q.trim()) return setError('Write the question.');
     if (filled.length < 2) return setError('Give at least two answers.');
     setBusy(true);
-    call('poll.create', { conv, id: newMsgId(), question: q.trim(), answers: filled.map((a) => ({ text: a.text.trim(), ...(a.emoji ? { emoji: a.emoji } : {}) })), hours, multi, hidden })
+    const list = filled.map((a) => ({ text: a.text.trim(), ...(a.emoji ? { emoji: a.emoji } : {}) }));
+    (enc ? sendPollEncrypted(conv, { question: q.trim(), answers: list, hours, multi })
+      : call('poll.create', { conv, id: newMsgId(), question: q.trim(), answers: list, hours, multi, hidden }))
       .then(() => closeModal(), (err) => { setBusy(false); setError(err.offline ? 'You’re offline. Try again when you’re back.' : err.message); });
     return undefined;
   };
@@ -171,7 +175,8 @@ export function PollModal({ conv, question = '', answers: given = [] }) {
       </select>
     </div>
     <label class="switch-row"><span><b>Allow more than one answer</b></span><${Switch} on=${multi} label="Allow more than one answer" onChange=${setMulti} /></label>
-    <label class="switch-row"><span><b>Hide results until people vote</b><span class="hint">Nobody sees counts before voting, until the poll ends.</span></span><${Switch} on=${hidden} label="Hide results until people vote" onChange=${setHidden} /></label>
+    ${enc ? html`<p class="hint">This poll is end-to-end encrypted. Each person’s device counts the votes, so results can’t be hidden until people vote. When it ends goes by each sender’s clock.</p>`
+      : html`<label class="switch-row"><span><b>Hide results until people vote</b><span class="hint">Nobody sees counts before voting, until the poll ends.</span></span><${Switch} on=${hidden} label="Hide results until people vote" onChange=${setHidden} /></label>`}
     ${error && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${error}</div>`}
     <div class="modal-foot">
       <button type="button" class="btn" onClick=${closeModal}>Cancel</button>
@@ -515,7 +520,7 @@ export function PlusMenu({ conv, text, update, insert, replyTo, onAttach }) {
       items: [
         onAttach && { label: t('composer.upload'), icon: 'clip', onSelect: onAttach },
         onAttach && { sep: true },
-        isEncrypted(conv) ? { label: E2COPY.pollsOff, icon: 'poll', disabled: true } : pollBlocked(conv) ? { label: pollBlocked(conv), icon: 'poll', disabled: true } : { label: t('composer.poll'), icon: 'poll', onSelect: () => openModal(PollModal, { conv }) },
+        !isEncrypted(conv) && pollBlocked(conv) ? { label: pollBlocked(conv), icon: 'poll', disabled: true } : { label: t('composer.poll'), icon: 'poll', onSelect: () => openModal(PollModal, { conv }) },
         { label: t('composer.sticker'), icon: 'sticker', onSelect: () => openPop({ anchor, align: 'start', label: 'Stickers', C: StickerPicker, props: { conv, replyTo } }) },
         { label: t('composer.time'), icon: 'calendar', onSelect: () => openModal(StampModal, { onInsert: (tok) => insert(`${tok} `) }) },
         { label: t('composer.schedule'), icon: 'clock', onSelect: () => openModal(ScheduleModal, { conv, text, replyTo, done: () => update('') }) },

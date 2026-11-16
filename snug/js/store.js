@@ -656,7 +656,7 @@ export function markConvRead(conv) {
 
 // Messages
 // Set by js/e2ee/conv.js: an edit in an end-to-end encrypted conversation is sealed there.
-export const msgHooks = { edit: null };
+export const msgHooks = { edit: null, react: null }; // react: sealed reactions in encrypted conversations (js/e2ee/conv.js)
 export function editMsg(conv, id, text) {
   const m = findMsg(conv, id);
   S.ui.editing = null;
@@ -697,7 +697,7 @@ export function react(conv, id, emoji) {
   if (!who.length) delete all[emoji];
   S.prefs.recent = [emoji, ...(S.prefs.recent || []).filter((e) => e !== emoji)].slice(0, 8);
   emit();
-  save('react', { conv, id, emoji, on });
+  if (!msgHooks.react?.(conv, m, emoji, on)) save('react', { conv, id, emoji, on });
 }
 
 export function toggleSave(conv, id) {

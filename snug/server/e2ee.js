@@ -16,7 +16,7 @@
 import { createPublicKey, verify as edVerify, randomBytes } from 'node:crypto';
 import { canon, parseCanon } from '../js/lib/e2ee/canon.js';
 import { b64u, b64uOf } from '../js/lib/e2ee/bytes.js';
-import { listProblem, prekeyProblem, isDeviceId, MAX_DEVICES, PREKEY_MAX_AGE } from '../js/lib/e2ee/objects.js';
+import { listProblem, prekeyProblem, capsProblem, isDeviceId, MAX_DEVICES, PREKEY_MAX_AGE } from '../js/lib/e2ee/objects.js';
 import { PROTO } from '../js/lib/proto.js';
 import { limiter, tokenHash, recentAuth, activeDay } from './auth.js';
 import { deviceLabel } from '../js/lib/account.js';
@@ -81,6 +81,15 @@ export function migrateE2ee(db) {
   // The public half of the current history key, kept while history is off too, so the same epoch
   // number can never come back with another key (review M2). Additive; empty for older rows.
   add('e2ee_accounts', 'epoch_pub', 'TEXT');
+  // 0.14: the features each device signed for (js/lib/e2ee/objects.js makeCaps), as signed. Additive; empty for older devices.
+  add('e2ee_devices', 'caps', 'TEXT');
+  // 0.14: an encrypted group's name, icon and hue, sealed to its members (server/e2ee-conv.js); empty for others.
+  add('dms', 'info_enc', 'TEXT');
+  add('dms', 'info_rev', 'INTEGER');
+  add('dms', 'info_what', 'TEXT'); // what the newest revision changed: name | icon | members (sealed again for someone who joined)
+  // 0.14: sealed reactions, poll votes and a poll's end, one envelope per message, person and slot.
+  db.exec(`CREATE TABLE IF NOT EXISTS e2ee_side (msg TEXT NOT NULL, user TEXT NOT NULL, slot TEXT NOT NULL,
+    rev INTEGER NOT NULL, env TEXT NOT NULL, PRIMARY KEY (msg, user, slot))`);
 }
 
 // --- signatures (node:crypto, the same check as server/peercrypto.js) -------
@@ -102,6 +111,15 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
   const account = (u) => db.get('SELECT * FROM e2ee_accounts WHERE user = ?', u);
   const deviceRow = (id) => db.get('SELECT * FROM e2ee_devices WHERE id = ?', id);
   const devicesOf = (u, states = ['trusted', 'pending']) => db.all(`SELECT * FROM e2ee_devices WHERE user = ? AND state IN (${states.map(() => '?').join(',')}) ORDER BY created`, u, ...states);
+  const capsOf = (row) => { const c = row?.caps ? parseCanon(row.caps, 4096) : null; return c && !capsProblem(c) ? c : null; };
+  // Whether every trusted device of every one of `users` signed for `feature` (0.14 sealed reactions, polls, ...).
+  const capable = (users, feature) => users.length > 0 && users.every((u) => {
+    const devs = db.all("SELECT caps FROM e2ee_devices WHERE user = ? AND state = 'trusted'", u);
+    return devs.length > 0 && devs.every((r) => capsOf(r)?.caps.includes(feature));
+  });
+  // The trusted devices among `users` that haven't signed for `feature`, for a refusal that names them.
+  const lacking = (users, feature) => users.flatMap((u) => db.all("SELECT id, label, caps FROM e2ee_devices WHERE user = ? AND state = 'trusted'", u)
+    .filter((r) => !capsOf(r)?.caps.includes(feature)).map((r) => ({ user: u, device: r.id, label: r.label })));
   const currentPrekey = (d) => db.get('SELECT * FROM e2ee_prekeys WHERE device = ? AND retired IS NULL ORDER BY kid DESC LIMIT 1', d);
   const off = () => fail('End-to-end encryption isn’t turned on for this server.');
   const noAccount = () => fail('Turn on end-to-end encryption first.');
@@ -331,7 +349,7 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
       if (row.seen !== activeDay(now()) || (session && row.session !== session)) db.run('UPDATE e2ee_devices SET seen = ?, session = COALESCE(?, session) WHERE id = ?', activeDay(now()), session, row.id);
       if (session) db.run('UPDATE sessions SET e2ee_device = ? WHERE hash = ?', row.id, session);
       const cur = currentPrekey(row.id);
-      return { state: row.state, kid: cur?.kid || 0, prekeyAt: cur?.created || 0 };
+      return { state: row.state, kid: cur?.kid || 0, prekeyAt: cur?.created || 0, caps: capsOf(row)?.caps || [] };
     },
 
     // Public keys of people this person talks to (or could start a conversation with). Someone who
@@ -351,12 +369,15 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
         if (!a) { out[u] = { ready: false }; continue; }
         const list = json(a.list);
         if (former) { out[u] = { ready: false, list, prekeys: {}, hist: !!a.hist, resetAt: a.reset_at || null, former: true }; continue; }
-        const prekeys = {};
+        const prekeys = {}, caps = {};
         for (const e of list.devs) {
           const p = currentPrekey(e.d);
-          if (p && deviceRow(e.d)?.state === 'trusted') prekeys[e.d] = json(p.body);
+          const row = deviceRow(e.d);
+          if (p && row?.state === 'trusted') prekeys[e.d] = json(p.body);
+          const cp = row?.state === 'trusted' && capsOf(row);
+          if (cp) caps[e.d] = cp; // 0.14: each device's signed features (clients check the signature themselves)
         }
-        out[u] = { ready: Object.keys(prekeys).length > 0, list, prekeys, hist: !!a.hist, resetAt: a.reset_at || null };
+        out[u] = { ready: Object.keys(prekeys).length > 0, list, prekeys, caps, hist: !!a.hist, resetAt: a.reset_at || null };
       }
       return { users: out };
     },
@@ -368,6 +389,20 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
       const prekey = checkPrekey(c.user, row.id, row.dsk, d.prekey, (cur?.kid || 0) + 1);
       db.tx(() => addPrekey(row.id, prekey));
       return { kid: prekey.kid };
+    },
+
+    // 0.14: the features this device handles, signed by it (js/lib/e2ee/objects.js makeCaps).
+    'e2ee.caps': (c, d) => {
+      const row = bound(c) || fail('Bind this device first.');
+      const cp = obj(d.caps, 'The device’s features');
+      if (capsProblem(cp) || cp.u !== c.user || cp.d !== row.id) fail('Those device features aren’t valid.');
+      if (Math.abs(cp.ts - now()) > FUTURE) fail('That time is off. Check this device’s clock.');
+      const prev = capsOf(row);
+      if (prev && prev.ts > cp.ts) fail('Those device features are older than the ones stored.');
+      if (!objectSigned(row.dsk, 'caps', cp)) fail('That signature doesn’t check out.');
+      db.run('UPDATE e2ee_devices SET caps = ? WHERE id = ?', canon(cp), row.id);
+      if (row.state === 'trusted') hub.toUsers(audienceOf(c.user), 'e2ee.devices', { user: c.user, ver: account(c.user)?.ver || 0 });
+      return { caps: cp.caps };
     },
 
     // A new signed list from a trusted device: a history epoch, history on or off, a label change.
@@ -618,7 +653,7 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
     meView,
     prekeyMaxAge: PREKEY_MAX_AGE,
   };
-  conv = createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, account, deviceRow });
+  conv = createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, account, deviceRow, capable, lacking });
   hub.e2ee.conv = conv;
   return { ...ops, ...conv.ops };
 }

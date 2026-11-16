@@ -268,7 +268,7 @@ test('server features in encrypted DMs: search finds nothing, push says "New mes
   const bad = await sendEnc(a, { dm: g, users, text: 'hi', ping: [x.id] });
   assert.match(bad.ack.error, /mention/);
   // Polls, rolls and forwards of encrypted messages need plaintext on the server: refused.
-  await a.sock.refused('poll.create', { conv: g, id: mid(), question: 'Lunch?', answers: [{ text: 'Yes' }, { text: 'No' }], hours: 1 }, /Polls aren’t available in encrypted/);
+  await a.sock.refused('poll.create', { conv: g, id: mid(), question: 'Lunch?', answers: [{ text: 'Yes' }, { text: 'No' }], hours: 1 }, /Polls aren’t available in encrypted conversations on this version\. Update Snug/);
   await a.sock.refused('cmd.roll', { conv: g, id: mid(), spec: '1d6' }, /roll/i);
   const { id: other } = await a.sock.ok('dm.open', { users: [x.id] }).catch(() => ({ id: null }));
   await a.sock.refused('msg.forward', { conv: g, id, to: other || g, newId: mid() }, /forwarded from your device/);

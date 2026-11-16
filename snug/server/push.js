@@ -121,6 +121,8 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
   const rate = limiter({ capacity: 5, perSecond: 0.05 });
   const subsLimit = limiter({ capacity: 10, perSecond: 0.2 });
   const stats = { sent: 0, gone: 0, failed: 0 };
+  // Whether a DM or group is end-to-end encrypted (the column comes with server/e2ee.js; absent: no).
+  const encryptedDm = (dm) => { try { return db.get('SELECT e2ee FROM dms WHERE id = ?', dm)?.e2ee === 1; } catch { return false; } };
 
   const levelFor = (user, w) => {
     if (w.dm) return M.notifyOf(user, w.dm) || 'all';
@@ -175,7 +177,11 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
       return db.all('SELECT u.name FROM dm_members m JOIN users u ON u.id = m.user WHERE m.dm = ? AND m.user != ? ORDER BY m.rowid', id, user).map((r) => r.name).join(', ');
     };
     const isGroup = (id) => (M.isGroupDm ? M.isGroupDm(id) : db.get('SELECT COUNT(*) n FROM dm_members WHERE dm = ?', id).n > 2);
-    if (w.type === 'room') where = `in ${roomName(w.id)}`;
+    // An end-to-end encrypted DM or group (0.14): the note names only the sender, never the
+    // group or the other people in it (its name is sealed to its members, server/e2ee-conv.js).
+    const sealed = !!w.dm && encryptedDm(w.dm);
+    if (sealed) where = '';
+    else if (w.type === 'room') where = `in ${roomName(w.id)}`;
     else if (w.type === 'thread') where = `in a thread in ${w.dm ? dmTitle(w.dm) : roomName(w.parent)}`;
     else if (isGroup(w.dm)) where = `in ${dmTitle(w.dm)}`;
     // A group call that others answered is still a missed call for this
@@ -187,7 +193,8 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
     // An end-to-end encrypted message: the server can't read it, so the note never says more than this.
     const text = row.sys && missedBy(row, user) ? 'Missed call' : hide || row.enc ? 'New message' : plain(row.text) || 'Sent an attachment';
     return {
-      title: where ? `${who} ${where}` : who,
+      // "Hide names in notifications" (prefs.notifyNames false): the note says something came, not from whom.
+      title: prefs.notifyNames === false ? 'Snug' : where ? `${who} ${where}` : who,
       body: text.length > PREVIEW ? `${text.slice(0, PREVIEW - 1)}…` : text,
       conv, msg: row.id, tag: `snug:${conv}`,
     };
@@ -249,19 +256,24 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
   // note that doesn't stay. Which rings were pushed, so only those get one:
   // "user\ncall" -> true, removed when that ring stops (every ring stops).
   const pushedRings = new Set();
+  function ringNoteFor(user, ring) {
+    const hideNames = (M.prefsOf?.(user) || {}).notifyNames === false;
+    const who = M.userRow(ring.from)?.name || 'Someone';
+    const d = db.get('SELECT name FROM dms WHERE id = ?', ring.dm);
+    // An encrypted group's name is sealed: "your group" (the server keeps none for those since 0.14).
+    const where = ring.group ? ` in ${!encryptedDm(ring.dm) && d?.name ? d.name : 'your group'}` : '';
+    return {
+      title: hideNames ? 'Snug' : `${who} is calling`, body: `${ring.video ? 'Video call' : 'Voice call'}${hideNames ? '' : where}`,
+      conv: ring.dm, tag: `snug:${ring.dm}`, call: true, ring: ring.call,
+    };
+  }
   function onRing(user, ring) {
     if (hub.connected(user)) return Promise.resolve();
     const u = M.userRow(user);
     if (!u || u.presence === 'focus' || M.notifyOf(user, ring.dm) === 'muted' || M.quietHours?.(user)) return Promise.resolve();
     const subs = db.all('SELECT p.* FROM push_subs p JOIN sessions s ON s.hash = p.session AND s.expires > ? WHERE p.user = ?', Date.now(), user);
     if (!subs.length || !rate.take(user)) return Promise.resolve();
-    const who = M.userRow(ring.from)?.name || 'Someone';
-    const d = db.get('SELECT name FROM dms WHERE id = ?', ring.dm);
-    const where = ring.group ? ` in ${d?.name || 'your group'}` : '';
-    const note = {
-      title: `${who} is calling`, body: `${ring.video ? 'Video call' : 'Voice call'}${where}`,
-      conv: ring.dm, tag: `snug:${ring.dm}`, call: true, ring: ring.call,
-    };
+    const note = ringNoteFor(user, ring);
     pushedRings.add(`${user}\n${ring.call}`);
     return Promise.all(subs.map((s) => deliver(s, note)));
   }
@@ -276,12 +288,14 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
     if (!pushedRings.delete(`${user}\n${ring.call}`)) return Promise.resolve();
     const subs = db.all('SELECT p.* FROM push_subs p JOIN sessions s ON s.hash = p.session AND s.expires > ? WHERE p.user = ?', Date.now(), user);
     if (!subs.length) return Promise.resolve();
-    const note = {
-      title: M.userRow(ring.from)?.name || 'Someone', body: RING_OVER[ring.reason] || 'Call ended',
-      conv: ring.dm, tag: `snug:${ring.dm}`, ringOver: ring.call,
-    };
+    const note = ringOverNoteFor(user, ring);
     return Promise.all(subs.map((s) => deliver(s, note)));
   }
+  // "Hide names in notifications" holds here too: no caller's name.
+  const ringOverNoteFor = (user, ring) => ({
+    title: (M.prefsOf?.(user) || {}).notifyNames === false ? 'Snug' : M.userRow(ring.from)?.name || 'Someone', body: RING_OVER[ring.reason] || 'Call ended',
+    conv: ring.dm, tag: `snug:${ring.dm}`, ringOver: ring.call,
+  });
 
   // Forget devices whose sign-in has ended (signed out, signed out
   // everywhere, a new password, or expired).
@@ -354,5 +368,7 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
   };
   // Tests: the note a message would make for this person.
   const noteOf = (user, msgId) => { const row = M.msg(msgId); const w = row && M.where(row.conv); return w ? noteFor(user, row.conv, w, row) : null; };
-  return { http, onMessage, onRing, onRingStop, onNote, prune, publicKey: keys.publicKey, stats, wouldPush, noteOf, reset: () => { rate.reset(); subsLimit.reset(); } };
+  const ringNoteOf = (user, ring) => ringNoteFor(user, ring);
+  const ringOverNoteOf = (user, ring) => ringOverNoteFor(user, ring);
+  return { http, onMessage, onRing, onRingStop, onNote, prune, publicKey: keys.publicKey, stats, wouldPush, noteOf, ringNoteOf, ringOverNoteOf, reset: () => { rate.reset(); subsLimit.reset(); } };
 }

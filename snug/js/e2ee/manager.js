@@ -160,7 +160,14 @@ const save = () => store.putDevice(kept(dev));
 async function bindHere() {
   const nonce = S.e2ee?.nonce;
   const s = b64u(await sig.signBytes(dev.dsk.privateKey, utf8(`snug-e2ee-v1/bind\n${userId()}\n${dev.d}\n${nonce}`)));
-  return call('e2ee.bind', { d: dev.d, sig: s });
+  const r = await call('e2ee.bind', { d: dev.d, sig: s });
+  // 0.14: the features this device handles, signed by it (js/lib/e2ee/objects.js makeCaps), when the
+  // server's copy lacks one. A server before 0.14 answers without caps: nothing to send.
+  if (Array.isArray(r?.caps) && obj.FEATURES.some((f) => !r.caps.includes(f))) {
+    const signed = await obj.makeCaps(dev.dsk.privateKey, { u: userId(), d: dev.d });
+    call('e2ee.caps', { caps: signed }).catch((e) => console.warn('e2ee caps', e.message));
+  }
+  return r;
 }
 
 // Weekly prekey; private halves deleted 14 days after they were retired.

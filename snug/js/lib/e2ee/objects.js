@@ -83,6 +83,32 @@ export async function verifyPrekey(p, { u, d, dsk, now = Date.now() }) {
   return !!key && verifyObject(key, 'prekey', p);
 }
 
+// What a device can handle beyond 0.12/0.13 (0.14): sealed reactions, private room information,
+// encrypted polls, reply targets inside the sealed body, padded attachments. Signed by the device
+// (a separate object, so 0.12/0.13 clients, which check device lists field by field, never see it),
+// so the server can't claim a device has one it hasn't. A conversation uses one only once every
+// device of every member has it.
+export const FEATURES = ['react', 'info', 'poll', 're', 'pad'];
+export function capsProblem(c) {
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return 'not an object';
+  if (Object.keys(c).sort().join(',') !== 'caps,d,sig,t,ts,u,v') return 'fields';
+  if (c.v !== 1 || c.t !== 'caps' || typeof c.u !== 'string' || !USER_ID.test(c.u) || !isDeviceId(c.d) || !int(c.ts)) return 'header';
+  if (!Array.isArray(c.caps) || c.caps.length > 32 || new Set(c.caps).size !== c.caps.length
+    || c.caps.some((x) => typeof x !== 'string' || !/^[a-z0-9-]{1,16}$/.test(x))) return 'caps';
+  return null;
+}
+export async function makeCaps(dskPriv, { u, d, caps = FEATURES, ts = Date.now() }) {
+  const c = { v: 1, t: 'caps', u, d, caps: [...caps].sort(), ts };
+  if (capsProblem({ ...c, sig: 'x' })) throw new Error('caps: bad fields');
+  return signObject(dskPriv, 'caps', c);
+}
+/** The features device d of user u signed for, or null if the object isn't theirs. */
+export async function verifyCaps(c, { u, d, dsk }) {
+  if (capsProblem(c) || c.u !== u || c.d !== d) return null;
+  const key = typeof dsk === 'string' ? b64uOf(dsk, 32) : dsk;
+  return key && (await verifyObject(key, 'caps', c)) ? c.caps : null;
+}
+
 /**
  * What a client does with a contact's (or its own account's) list, given what
  * it has pinned for that account ({ aik, ver } or null):

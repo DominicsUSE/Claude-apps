@@ -9,7 +9,10 @@ import { aesSeal, aesOpen, sha256, signBytes, verifyBytes } from './sig.js';
 import { sealKey, openKey } from './hpke.js';
 
 export const SUITE = 'hpke-x25519-sha256-aes256gcm/ed25519';
-export const KINDS = ['msg', 'edit', 'sched'];
+// 0.14 adds sealed reactions (react), poll votes and a poll's end (vote) and a group's name and
+// icon (info); 0.12/0.13 clients refuse these kinds, and are never sent one to open as a message.
+export const KINDS = ['msg', 'edit', 'sched', 'react', 'vote', 'info'];
+export const SIDE_KINDS = ['react', 'vote', 'info'];
 export const CAPS = { header: 8 * 1024, ct: 40 * 1024, wraps: 110, text: 4000, total: 64 * 1024 };
 const P = 'snug-e2ee-v1/';
 

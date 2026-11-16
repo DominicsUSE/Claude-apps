@@ -2,8 +2,9 @@
 // the recovery key, history on new devices, the account's devices, and plain
 // words about what it protects and what it doesn't. Listed only when this
 // server offers encryption or the account already has keys.
-import { html, useState } from '../../vendor/preact-htm.js';
-import { S, openModal, closeModal, toast, subscribe } from '../store.js';
+import { html, useState, useEffect } from '../../vendor/preact-htm.js';
+import { S, openModal, closeModal, toast, subscribe, setPref } from '../store.js';
+import { api } from '../server.js';
 import { Icon } from '../ui/icons.js';
 import { Switch } from '../ui/kit.js';
 import { Confirm } from './modals.js';
@@ -193,13 +194,16 @@ function EncryptionPage({ Row }) {
     ${ready && html`<${Row} label=${COPY.exposedTitle} hint=${COPY.exposedBody} top>
       <button class="btn" onClick=${exposed}>${COPY.exposedAction}</button>
     <//>`}
+    <${Row} label="Hide names in notifications" hint="Notifications pushed to your devices don’t say who sent the message or where. Whether they show the message text is up to “Show message text” (Settings, Notifications). For encrypted conversations they never show it, and never name the group or who else is in it.">
+      <${Switch} on=${S.prefs.notifyNames === false} label="Hide names in notifications" onChange=${(v) => setPref('notifyNames', !v)} />
+    <//>
     ${(ready || E2.status === 'pending' || E2.status === 'new-device') && html`<${Row} label=${COPY.resetTitle} hint=${COPY.resetBody} top>
       <button class="btn danger" onClick=${() => openModal(ResetSheet, {})}>${COPY.resetAction}</button>
     <//>`}
     <div class="detail e2-limits">
       <h2 class="e2-h2">What it does and doesn’t do</h2>
       <ul>
-        <li>${COPY.serverSees}</li>
+        <li>${COPY.serverSees} <${ServerSees} /></li>
         <li>${COPY.roomsNot}</li>
         ${deviceKind() === 'web' && html`<li>${COPY.browserNote}</li>`}
         ${plainHttp() && html`<li>${COPY.plainHttp}</li>`}
@@ -208,6 +212,14 @@ function EncryptionPage({ Row }) {
       </ul>
     </div>
   </div>`;
+}
+
+// What the server still sees of encrypted conversations: the server's own list (GET /api/privacy, server/e2ee-conv.js).
+function ServerSees() {
+  const [list, setList] = useState(null);
+  useEffect(() => { api('/api/privacy').then((r) => setList(Array.isArray(r?.e2eeServerSees) ? r.e2eeServerSees : []), () => setList([])); }, []);
+  if (!list?.length) return null;
+  return html`<ul class="e2-sees">${list.map((x) => html`<li key=${x.id}>${x.text}</li>`)}</ul>`;
 }
 
 // A change to the account keys the person asked for. A device too long offline to get them stops it

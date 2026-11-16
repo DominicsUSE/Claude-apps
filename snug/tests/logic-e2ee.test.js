@@ -712,3 +712,23 @@ test('storage key under the OS key store: a 0.12.0 store is sealed again without
   const u4 = T.wrap(kv4, 'snug-e2ee:u4', os({ protected: true, key: secret }));
   assert.deepEqual(await Promise.all([u4.getSecret('a'), u4.getSecret('b'), u4.ready().then(() => 'ok')]), [1, 2, 'ok']);
 });
+
+test('rules (0.14): a group’s information is sealed again only for someone it doesn’t cover; such a re-seal keeps the name and icon', () => {
+  const h = { to: [['u1', 'd1', 1], ['u2', 'd2', 1]], ar: [['u3', 1]] };
+  assert.equal(rules.uncovered(['u1', 'u2', 'u3'], h), false);
+  assert.equal(rules.uncovered(['u1', 'u2', 'u3', 'u4'], h), true);
+  assert.equal(rules.uncovered(['u1'], h), false, 'someone leaving needs nothing sealed again');
+  const prev = { name: 'Pottery club', icon: '🏺', hue: 30 };
+  // A re-seal for members (no line in the conversation) that changes the name or icon: the one before stays.
+  assert.deepEqual(rules.resealed('members', prev, { name: 'Renamed quietly', icon: '🏺', hue: 30 }), prev);
+  assert.deepEqual(rules.resealed('members', prev, { name: 'Pottery club', icon: '🐸', hue: 30 }), prev);
+  assert.deepEqual(rules.resealed('members', prev, { ...prev }), prev);
+  // A rename (which writes a line) changes it; with nothing known before, the device takes what it opened.
+  assert.deepEqual(rules.resealed('name', prev, { name: 'Glaze night', icon: '🏺', hue: 30 }), { name: 'Glaze night', icon: '🏺', hue: 30 });
+  assert.deepEqual(rules.resealed('members', null, { name: 'New here', icon: null, hue: null }), { name: 'New here', icon: null, hue: null });
+});
+
+test('copy (0.14): the conversation panel says reactions, polls and group names are encrypted once everyone is on 0.14', () => {
+  assert.doesNotMatch(COPY.convPanel, /Group names, reactions and pictures of the group aren’t encrypted/);
+  assert.match(COPY.convPanel, /Reactions, polls and a group’s name and icon are encrypted too once everyone here is on Snug 0\.14 or later/);
+});
