@@ -63,7 +63,9 @@ export function matchExpr(fts) {
 // Close matches for a word the index doesn't know: indexed words that start
 // with the same letter and are one edit away (two for longer words). Edits
 // are insertions, deletions, substitutions and swaps of neighbours.
-export function closeWords(db, word, max = 8) {
+// `ok(term)` says whether a term counts (review-media 2: only words the searcher could find, so the cap of
+// `max` is applied after the visibility filter and words in conversations they can't read leave no trace).
+export function closeWords(db, word, max = 8, ok = () => true) {
   if (word.length < 4) return [];
   const first = word[0];
   const limit = word.length > 6 ? 2 : 1;
@@ -71,7 +73,7 @@ export function closeWords(db, word, max = 8) {
     first, first + '\u{10FFFF}', word.length - limit, word.length + limit);
   const out = [];
   for (const { term } of rows) {
-    if (term !== word && editDistance(word, term, limit) <= limit) out.push(term);
+    if (term !== word && editDistance(word, term, limit) <= limit && ok(term)) out.push(term);
     if (out.length >= max) break;
   }
   return out;

@@ -143,6 +143,17 @@ test('search: a close match when nothing matches exactly, and the reply says so'
   assert.equal((await ada.ok('search', { q: 'xylophonic' })).hits.length, 0);
 });
 
+// review-media 2: close-match candidates are chosen among words the searcher could find, so words in
+// conversations they can't read neither crowd out their own nor show up as a missing result.
+test('search: close-match candidates come only from what the searcher can read', async () => {
+  for (const c of 'abcdefgh') await send(ada, lounge, `vorpa${c}`);
+  const own = (await cy.ok('house.create', { name: 'Cy Search', hue: 50 })).room;
+  const mine = await send(cy, own, 'my vorpaz is here');
+  const r = await cy.ok('search', { q: 'vorpaq' });
+  assert.deepEqual(r.hits.map((h) => h.m.id), [mine], 'eight unreadable close words do not hide the readable one');
+  assert.equal(r.close, true);
+});
+
 test('search: an existing database without the index is indexed when it opens', () => {
   const d = mkdtempSync(join(tmpdir(), 'snug-fts-'));
   try {

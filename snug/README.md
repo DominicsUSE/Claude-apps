@@ -264,9 +264,9 @@ Real, and covered by tests with separate users:
   index (SQLite FTS5): results in order of relevance (more of the words, in
   shorter messages, gently favouring recent ones), the start of a word finds
   the whole word (`thursd` finds *Thursday*), accents fold both ways (`zasis`
-  finds *žąsis*), and when nothing matches exactly it tries indexed words one
-  or two letters away and says *Showing close matches* (that is all the
-  typo tolerance there is). Operators, permissions and filters are as
+  finds *žąsis*), and when nothing matches exactly it tries words one or two
+  letters away, taken only from messages that search could return, and says
+  *Showing close matches* (that is all the typo tolerance there is). Operators, permissions and filters are as
   before. One-letter words, emoji and symbols are matched as plain text, as
   is everything if the SQLite in your Node has no FTS5 (`SNUG_FTS=0` forces
   that). An existing database is indexed when 0.12 first opens it. Deleted
