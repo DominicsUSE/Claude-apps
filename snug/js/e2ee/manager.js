@@ -185,7 +185,7 @@ on('e2ee.meta', () => { loadMeta().then(emit, () => {}); });
 signOutHooks.push(() => {
   clearInterval(rotateTimer);
   store?.close(); store = null; keys = null; dev = null; meta = null; linkKc = null;
-  bundleCache.clear(); pinCache.clear(); convs = {}; ownRec = null;
+  bundleCache.clear(); pinCache.clear(); convs = {}; ownRec = null; localLoaded = false;
   Object.assign(E2, { on: false, status: 'off', me: null, device: null, prompt: null, approvals: [], link: null, rk: null, rkSaved: false, notice: null, metaProblem: null, rotateProblem: null, events: [] });
 });
 
@@ -487,7 +487,7 @@ async function fetchAsbBoxes() {
 // own.list: { aik, ver, h, devs, gone } this account's newest list seen here; pin:<u>: the same for a
 // contact; convs: { dm: e2eeSince } conversations seen encrypted; events: key changes to show;
 // meta.local: { aik, ver, meta } the newest synced settings opened here.
-let ownRec = null, convs = {};
+let ownRec = null, convs = {}, localLoaded = false; // nothing is written before what is stored was read
 const pinCache = new Map();
 const MAX_EVENTS = 300, MAX_GONE = 40;
 const devsOf = (list) => list.devs.map((x) => ({ d: x.d, dsk: x.dsk, label: x.label, kind: x.kind }));
@@ -495,9 +495,11 @@ async function loadLocal() {
   ownRec = await store.getSecret('own.list').catch(() => null);
   convs = (await store.getSecret('convs').catch(() => null)) || {};
   E2.events = (await store.getSecret('events').catch(() => null)) || [];
+  localLoaded = true;
 }
+const ensureLocal = async () => { if (!localLoaded && store) await loadLocal(); };
 async function addEvents(list) {
-  if (!list.length) return;
+  if (!list.length || !localLoaded) return;
   const seen = new Set(E2.events.map((e) => e.key));
   const fresh = list.filter((e) => !seen.has(e.key)).map((e) => ({ id: b64u(random(9)), ts: Date.now(), ...e }));
   if (!fresh.length) return;
@@ -524,6 +526,7 @@ function deviceEvents(u, before, list) {
  */
 export async function checkOwnList(list) {
   if (!(await obj.verifyList(list, b64uOf(keys.aikPub, 32)))) return null;
+  await ensureLocal();
   const h = await obj.listHash(list);
   const rec = ownRec?.aik === list.aik ? ownRec : null;
   const v = listCheck(rec, list, h);
@@ -552,6 +555,7 @@ async function savePin(u, rec) { pinCache.set(u, rec); await store.putSecret(`pi
  * lines in the conversations shared with them.
  */
 export async function acceptContact(u, list) {
+  await ensureLocal();
   const local = await pinOf(u);
   const synced = meta?.pins?.[u] || null;
   let pin = local || synced;
@@ -579,6 +583,7 @@ export async function acceptContact(u, list) {
 }
 /** The signing key of device d of user u, from the newest list this device accepted: { dsk, goneAt } or null. */
 export async function senderKey(u, d) {
+  await ensureLocal();
   const rec = u === userId() ? ownRec : await pinOf(u);
   const cur = rec?.devs?.find((x) => x.d === d);
   if (cur) return { dsk: cur.dsk, goneAt: null };
@@ -588,12 +593,13 @@ export async function senderKey(u, d) {
 /** Conversations this device has seen encrypted: { dm: e2eeSince } (local, and from the synced settings). */
 export const encryptedConvs = () => convs;
 export async function rememberConv(dm, since) {
-  if (!dm || convs[dm] || !store) return;
+  if (!dm || convs[dm] || !store || !localLoaded) return;
   convs = { ...convs, [dm]: since || 1 };
   await store.putSecret('convs', convs).catch(() => {});
   if (!meta?.convs?.[dm]) updateMeta((m) => { (m.convs ||= {})[dm] = since || 1; }).catch(() => {});
 }
 function mergeConvs(from) {
+  if (!localLoaded) return;
   let changed = false;
   for (const [dm, since] of Object.entries(from || {})) if (!convs[dm]) { convs = { ...convs, [dm]: since }; changed = true; }
   if (changed) store.putSecret('convs', convs).catch(() => {});
