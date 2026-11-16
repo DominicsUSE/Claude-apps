@@ -240,6 +240,11 @@ built from `js/lib/privacy.js` and `GET /api/privacy` (`server/privacy.js`).
   server (Google by default, `SNUG_STUN=none` turns it off), a TURN relay if configured, the browser's push
   service, the registry and Cloudflare (P2P), GitHub (desktop updates), and Tenor (only server-side, only if
   the server owner enables GIF search).
+- Desktop first-run page (0.13): its **Privacy** link starts a short-lived copy of the app's server on
+  127.0.0.1 only, with an empty temporary data folder, and shows `/privacy` in a separate window on an in-memory
+  session (no permissions, other links open in the browser). Closing the window stops that server and deletes
+  the folder. A pasted `https://host/join/<code>` saves only the origin; the code is handed to the page once
+  as a `snug://join/<code>` link, which the page checks like any other.
 
 ## Controls in place
 

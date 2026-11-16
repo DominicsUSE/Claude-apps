@@ -61,7 +61,11 @@ test:e2e:calls`, `test:e2e:video`, `test:e2e:messages`, `test:e2e:emoji`,
 `test:e2e:notify`, `test:e2e:safety`, `test:e2e:messaging`,
 `test:e2e:places`, `test:e2e:voice-options`, `test:e2e:account`,
 `test:e2e:integration`. The notifications file uses Playwright's newer
-headless Chromium (`channel: 'chromium'`).
+headless Chromium (`channel: 'chromium'`). `tests/e2e-a11y.test.js` (0.13)
+runs axe-core (vendored for the test only in `tests/helpers`, MPL-2.0, never
+shipped) on sign-in, Home, a room, Settings, the quick switcher and the phone
+layout and fails on serious or critical problems; it can't judge wording,
+order or meaning, so it is a floor.
 
 ## The desktop app
 
@@ -128,7 +132,9 @@ On first run it asks where Snug should run:
   address from **Snug > Copy the address for other people**, in a browser or
   in their own Snug app. Over that plain address they can write but not use
   voice, because browsers only allow the microphone on secure pages.
-- **Join a Snug.** Type the address of a Snug that someone else runs. The app
+- **Join a Snug.** Type the address of a Snug that someone else runs, or paste
+  the invitation link they sent (`https://host/join/<code>`): the address is
+  saved and the invitation opens once you're in (0.13). The app
   runs its own built-in copy of the Snug page at that address (in a separate
   session, with that server's sign-in and connection), so the server's own
   JavaScript never runs in the app: someone running the server can't change
@@ -146,7 +152,11 @@ On first run it asks where Snug should run:
   Choosing another such address restarts the app. Joining a server for the
   first time after updating to 0.12 asks you to sign in once more.
 
-**Snug > Change where Snug runs** brings the choice back.
+**Snug > Change where Snug runs** brings the choice back. The first-run page's
+**Privacy** link opens the privacy page in a window of its own, served by a
+short-lived copy of the app's server with nothing in it (a temporary folder,
+this computer only), removed when the window closes; a Snug someone else runs
+has its own page at `/privacy`.
 
 **Friends on other PCs (v0.12).** The app's first screen offers **Create my
 account**: pick a Snug username and you're in. No email, phone number or
@@ -621,6 +631,10 @@ Real, and covered by tests with separate users:
   - **Welcome for newcomers** (House settings > Newcomers, one page): the
     role newcomers join as, the starter rooms, a few lines of welcome, and
     interests to pick that grant roles (never roles that manage or moderate anything).
+  - **Show every room to newcomers** (0.13, House settings > Overview >
+    Joining): new members see every room in their sidebar at once, instead of
+    the starter and voice rooms first. On for houses made from the Friends and
+    Gaming templates, off for others (and for houses made before 0.13).
   - **House templates** (Friends, Study group, Gaming, Club) and copying the
     structure of a house you manage (rooms, roles, access; never messages or members).
   - **Insights** for owners: members, who wrote this week, joins and leaves
@@ -934,6 +948,10 @@ Real, and covered by tests with separate users:
     autocomplete and `:shortcodes:`), and **Frequently used** from your own
     counts. `:wave:` becomes 👋 when sent; unknown names stay as typed.
     Reactions take skin tones, ZWJ families and subdivision flags.
+  - **Double-tap to react** (0.13): on a touch screen, two quick taps on a
+    message react with ❤️, or the emoji picked in Settings > Text and
+    messages (or Off; kept on that device). Not on links, pictures or
+    buttons; a long press still opens the message's sheet.
   - **Mentions.** `@` suggests people, the house's mentionable roles (with
     their colour) and, only for people who may post notices, `@everyone` and
     `@here` with how many people each notifies. A non-announcer's `@everyone`
@@ -1127,7 +1145,8 @@ Real, and covered by tests with separate users:
     conversation.
   - **Timed mutes**: *Mute for…* 15 minutes, 1, 8 or 24 hours, or until you
     turn it back on, from a house's, room's or conversation's menu, which then
-    says "Muted until 14:30". The server works out the time and refuses other
+    says "Muted until 14:30"; choosing one also says so in a note with Undo,
+    which puts the old level back (0.13). The server works out the time and refuses other
     values; an expired mute counts as unset everywhere (badges, push, rings),
     and the server tells your devices when it ends.
   - **Suppress @role mentions** per house (its menu): role mentions there no
@@ -1495,7 +1514,8 @@ pane or dialog one layer at a time instead of leaving the app. A High
 contrast setting (which also follows the system's contrast preference)
 darkens secondary text and outlines and thickens the focus ring.
 Newcomers to a house see three starter rooms and one first step, and
-the rest opens after their first message. Saved messages take a note.
+the rest opens after their first message (unless the owner chose to show
+every room from the start). Saved messages take a note.
 Search reads like a sentence (`from:sunniva in:"glaze lab" has:image`) and
 the filter chips write those words for you. No promotions anywhere.
 

@@ -4,6 +4,29 @@ Snug's releases, newest first. Every version's files stay on the releases page
 (<https://github.com/DominicsUSE/Claude-apps/releases?q=snug-v>); the desktop app updates itself and never
 goes back to an older version on its own (README, "Install, update, go back").
 
+## 0.13.0
+
+### Changed
+
+- **English only**: the Lithuanian translation and Settings > Appearance > Language are gone. A device, an
+  account or a 0.12.0 client that still says Lithuanian gets English, with no error. The clock's first choice
+  reads *Match my browser*.
+
+### New
+
+- Paste an invitation link (or a code) into the quick switcher (`Ctrl`/`⌘ K`): *Join with this invitation*
+  joins and opens the house, or says why the link doesn't work.
+- House settings > Overview: **Show every room to newcomers**. On for new Friends and Gaming houses.
+- *Mute for…* confirms with "Muted until 22:40" (or "Muted") and **Undo**.
+- Phones: **double-tap a message to react** (❤️, or your pick in Settings > Text and messages, or off).
+- The privacy page lists disappearing messages, with what they can't do.
+- Desktop first-run page: a **Privacy** link, a layout its own CSP allows, and a pasted invitation link
+  (`https://host/join/<code>`) opens that invitation once you're in.
+- PDF previews show text in fonts a file doesn't carry (pdf.js's character maps and standard fonts, fetched
+  from your Snug when needed). Message pictures load as they come into view.
+- An automated accessibility check (axe-core, tests only) on the main screens; it fixed the font choices'
+  ARIA.
+
 ## 0.12.0
 
 ### Private conversations
