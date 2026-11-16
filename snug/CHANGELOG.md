@@ -4,7 +4,28 @@ Snug's releases, newest first. Every version's files stay on the releases page
 (<https://github.com/DominicsUSE/Claude-apps/releases?q=snug-v>); the desktop app updates itself and never
 goes back to an older version on its own (README, "Install, update, go back").
 
+## 0.14.0
+
+### Private by default
+
+- **Attachment files are encrypted on disk** (AES-256-GCM in 64 KiB segments under a key from
+  `data/secret.key`). Range requests still work; a damaged segment is refused, never sent. Older files stay
+  readable and are sealed in the background (`SNUG_FILES_REENCRYPT=off` to skip). This protects a copied
+  files folder or disk backup without `secret.key`, not a running server.
+- **No plaintext database copies left behind**: a damaged database put aside at a restore is sealed with the
+  backup key (and deleted after 7 days); 0.13's plaintext `snug.db.damaged-*` and crash temp files are
+  sealed or removed at start.
+- **Desktop app: this device's copy of messages is sealed** under the storage key the OS key store protects
+  (cache, drafts, reply targets, draft attachments, changes waiting to send), even with encryption off. 0.13's
+  plaintext copy is moved over and deleted. New device signing keys and prekeys are sealed too; Settings >
+  Encryption offers *Renew this computer's key* for one made before.
+- **Browsers: Settings > Your data > Keep a copy of messages on this device** (on by default), saying that
+  browser storage isn't protected against someone copying the profile. Off keeps the copy in this tab only.
+- Tests check that saving, using and adopting a recovery key never sends the key, its text or its backup
+  key, and that what the server keeps can't open the encryption backup.
+
 ## 0.13.0
+
 
 ### Changed
 

@@ -191,6 +191,29 @@ stronger than "end-to-end encrypted" is used.
 - **The machine that hosts a server.** Houses and their conversations live in that server's SQLite database,
   which is not encrypted as a whole. Whoever runs a Snug server, or gets its disk, can read its houses. Use
   full-disk encryption and keep `data/secret.key` (or `SNUG_DATA_KEY`) stored apart from backups.
+- **Stored data at rest (0.14), what is and isn't covered.** Attachment files in `data/files` (uploads,
+  GIF, sticker and link-preview copies, pictures, friends' files fetched between PCs) are encrypted on disk
+  (`server/filecrypt.js`: AES-256-GCM in 64 KiB segments, each with its own tag, under a key derived with
+  HKDF from the data key; a changed, moved or cut segment is refused, never sent). Database snapshots were
+  already encrypted; since 0.14 a damaged database put aside at a restore is sealed the same way and deleted
+  after 7 days, and restore or snapshot temp files a crash left are removed at start. This protects a copied
+  `files` or `backups` folder, or a disk backup, taken **without** `secret.key` (or, on the desktop, without
+  the OS key store that wraps it). It does **not** protect against someone who controls the running server
+  or can read `secret.key`: the server decrypts files to send them. The live `snug.db` (and its WAL) is still
+  not encrypted. Files from before 0.14 are read as they are and sealed in the background
+  (`SNUG_FILES_REENCRYPT=off` stops that); uploads still arriving (`files/partial`) and friends' files still
+  being fetched (`*.part`) are plaintext until complete. If `secret.key` can't be read at start, new files
+  are stored unencrypted for that run (a throwaway key would lose them) and the log says so.
+- **This device's copy of messages (0.14).** In the desktop app, the cached messages, drafts, reply targets,
+  draft attachments and changes waiting to send are AES-GCM blobs in IndexedDB under the device storage key,
+  which comes from a secret the OS key store protects (made even when end-to-end encryption is off; 0.13's
+  plaintext copy in localStorage is moved and deleted the first time). New device signing keys and new
+  prekey private keys are kept the same way (PKCS#8 sealed under that key, used as non-extractable keys);
+  older ones stay plain browser keys until they age out (prekeys) or the computer is renewed in Settings >
+  Encryption (signing key, offered when another device can approve). In a browser the copy stays in
+  localStorage: browser storage isn't protected against someone who copies the profile, and Settings > Your
+  data says so and can turn the copy off (memory only). Anyone using the computer as you can open Snug and
+  read it either way.
 - **The registry operator.** The registry holds every account's vault key (wrapped under its own secrets). Its
   operator, or anyone who obtains both the Durable Object data and those secrets, could decrypt a data file
   they also obtain. The registry never sees messages between PCs.

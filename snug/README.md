@@ -1270,6 +1270,7 @@ behind a reverse proxy that terminates TLS and passes WebSocket upgrades on
 | `SNUG_QUOTA_MB` | Room for each person's files, in MB (`0`: no quota) | `2048` |
 | `SNUG_HOUSE_QUOTA_MB` | Room for the files in each house's rooms, in MB (`0`: no quota) | `10240` |
 | `SNUG_DISK_FLOOR_MB` | Free disk space an upload must leave, in MB | `1024` |
+| `SNUG_FILES_REENCRYPT=off` | Don't seal attachment files from before 0.14 in the background (they stay readable either way) | on |
 
 **Someone lost their password and their recovery key?** After checking who is
 asking (Snug can't do that part), run `npm run reset-password -- <username>`
@@ -1281,7 +1282,12 @@ end-to-end encrypted.
 
 Back up the `data` folder; it is the whole state. Keep `data/secret.key` (or
 `SNUG_DATA_KEY`) with it but stored apart: without it two-factor sign-in can't be
-checked, and with the database alone nobody can make codes. Change the sample password
+checked, and with the database alone nobody can make codes. Since 0.14 it also
+opens the attachment files and the database snapshots: they are encrypted on disk
+under keys derived from it, so a backup without it can't be restored, and a copied
+`files` or `backups` folder without it shows nothing. The live `snug.db` is not
+encrypted, and whoever runs the server (or can read `secret.key`) can read
+everything; use full-disk encryption too (SECURITY.md, "Stored data at rest"). Change the sample password
 before seeding anything that faces the internet, or better, do not seed there.
 
 ## Security
