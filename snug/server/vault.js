@@ -22,6 +22,7 @@ import { newId } from './model.js';
 import { APP_VERSION } from './peersignal.js';
 import { cleanPrefs } from '../js/lib/account.js';
 import { suspicious } from './seclog.js'; // sec-registry: alerts in the security log
+import { readStoredSync, writeStoredSync } from './filecrypt.js'; // 0.14: files encrypted at rest
 
 const DAY = 86_400_000;
 const MAX_PIC = 2 * 1024 * 1024;
@@ -183,7 +184,7 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
     const f = db.get('SELECT type, size FROM files WHERE id = ?', fileId);
     if (!f || f.size > MAX_PIC || !PIC_TYPES.includes(f.type)) return null;
     try {
-      const data = readFileSync(join(filesDir, fileId));
+      const data = readStoredSync(join(filesDir, fileId));
       return data.length > MAX_PIC ? null : { type: f.type, data: data.toString('base64') };
     } catch { return null; }
   }
@@ -375,7 +376,7 @@ export function createVault({ db, M, hub, peer, dataDir, filesDir, keyStore = nu
     if (!img || !PIC_TYPES.includes(img.type) || data.length > MAX_PIC) return undefined;
     if (kind === 'avatar' && (img.w < 64 || img.h < 64 || img.w > 2048 || img.h > 2048)) return undefined;
     const id = newId('f');
-    writeFileSync(join(filesDir, id), data, { mode: 0o600 });
+    writeStoredSync(join(filesDir, id), data);
     created.push(id);
     db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       id, o, `${kind}:${o}`, kind, img.type, data.length, Date.now(), JSON.stringify({ w: img.w, h: img.h }));

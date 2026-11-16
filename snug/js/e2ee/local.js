@@ -4,7 +4,7 @@
 // (js/e2ee/store.js, "meta/local.unsent") and comes back once the keys are open after a reload, when a
 // waiting message is sent. Attachments uploaded for such a draft stay in this tab only. A conversation
 // counts as private once it is encrypted, or this device has seen it encrypted.
-import { S, emit, unsentHooks, signOutHooks, markLocal, isLocalMsg } from '../store.js';
+import { S, emit, unsentHooks, signOutHooks, markLocal, isLocalMsg, copy } from '../store.js';
 import { retry } from '../server.js';
 import { splitUnsent } from '../lib/offline.js';
 import { E2, ring, readyHooks } from './manager.js';
@@ -41,7 +41,7 @@ function snapshot() {
 function keep() {
   const store = ring.store;
   if (!restored || !store || !S.me) return;
-  const json = snapshot();
+  const json = copy.mode === 'memory' ? null : snapshot(); // 0.14: "Keep a copy … on this device" off: this tab only
   if (json === last || (json && json.length > MAX)) return; // too much to seal: it stays in this tab only
   last = json;
   writing = writing.then(() => store.putSecret(KEY, json)).catch(() => {});

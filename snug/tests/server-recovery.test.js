@@ -268,3 +268,80 @@ test('recovery (v0.13): the status says a key was saved by an older version (v1)
   const b = await register('rk-nokey13');
   assert.equal((await (await get('/api/recovery', { cookie: b.cookie })).json()).old, false);
 });
+
+// ---------- 0.14 S5: one recovery key for the password and the encryption backup doesn't weaken encryption ----------
+import { deriveAuthKeyV2 } from '../js/lib/recovery.js';
+import { Sock, newDevice, deviceEntry, devicePublic, bind, obj, backup } from './helpers/e2ee.js';
+
+// Every form of a secret that must never travel: raw bytes in hex, base64, base64url; the typed text with and
+// without dashes, in either case; the base32 body.
+function forms(raw, text = null) {
+  const b = Buffer.from(raw);
+  const out = [b.toString('hex'), b.toString('base64'), b.toString('base64url'), b.toString('base64').replace(/=+$/, '')];
+  if (text) {
+    const bare = text.replace(/-/g, '');
+    out.push(text, text.toLowerCase(), bare, bare.toLowerCase(), bare.slice(0, 32), bare.slice(0, 32).toLowerCase());
+  }
+  return out;
+}
+test('S5: saving, using and adopting one recovery key: no request carries the key, its text or its backup key; the recovery row can’t open the backup', async () => {
+  const sent = []; // every body this client sends: HTTP and socket
+  const send = async (method, path, body, o) => { if (body) sent.push(JSON.stringify(body)); return req(method, path, body, o); };
+  const res = await send('POST', '/api/register', { handle: 'rk-s5', name: 'rk-s5', password: PW });
+  assert.equal(res.status, 201);
+  const who = { id: (await res.json()).user.id, cookie: cookieOf(res) };
+  const host = '127.0.0.1';
+  const proofs = async (raw) => ({ v2: b64u(await deriveAuthKeyV2(raw, host)), v1: b64u(await deriveAuthKey(raw)) });
+
+  // Encryption on, its backup under the first recovery key (as js/e2ee/manager.js setup does).
+  const sock = await new Sock(srv, who.cookie).connect();
+  const wsSend = sock.ws.send.bind(sock.ws);
+  sock.ws.send = (data) => { sent.push(String(data)); return wsSend(data); };
+  const dev = await newDevice(who.id);
+  const rk1 = await newRecoveryKey();
+  const bk1 = await deriveBackupKey(rk1.raw);
+  const asb = await backup.newAsb(who.id);
+  asb.bk = b64u(bk1);
+  const keys = await backup.loadAsb(asb);
+  const list1 = await obj.makeList(keys.aik, { u: who.id, ver: 1, aik: keys.aikPub, devs: [deviceEntry(dev)], arc: { e: 1, pub: asb.ahk[1].pub, at: Date.now() } });
+  await sock.ok('e2ee.setup', { devlist: list1, device: devicePublic(dev), prekey: dev.prekeys[dev.kid].signed, backup: await backup.sealBackup(asb, bk1, { ver: 1, aik: keys.aikPub }), meta: await backup.sealMeta(backup.emptyMeta(), keys.sync, { u: who.id, ver: 1 }), hist: true });
+  await bind(sock, dev);
+
+  // Save: the same key for the password (js/views/recover.js saveKey).
+  assert.equal((await send('POST', '/api/recovery/set', { verifier: (await proofs(rk1.raw)).v2, v: 2 }, { cookie: who.cookie })).status, 200);
+  // Use: "Forgot your password?" (both proofs, as the client sends them), then a new password.
+  const p1 = await proofs(rk1.raw);
+  const used = await send('POST', '/api/recover', { handle: 'rk-s5', proof: p1.v2, proof1: p1.v1 });
+  assert.equal(used.status, 200, await used.clone().text());
+  const fin = await send('POST', '/api/recover/finish', { ticket: (await used.json()).ticket, password: NEW });
+  assert.equal(fin.status, 200);
+  const fresh = cookieOf(fin);
+  // Adopt: a new key saved for the password becomes the encryption key (adoptRecoveryKey: e2ee.publish).
+  const rk2 = await newRecoveryKey();
+  const bk2 = await deriveBackupKey(rk2.raw);
+  assert.equal((await send('POST', '/api/recovery/set', { verifier: (await proofs(rk2.raw)).v2, v: 2 }, { cookie: fresh })).status, 200);
+  const sock2 = await new Sock(srv, fresh).connect();
+  const ws2Send = sock2.ws.send.bind(sock2.ws);
+  sock2.ws.send = (data) => { sent.push(String(data)); return ws2Send(data); };
+  await bind(sock2, dev);
+  const asb2 = { ...asb, bk: b64u(bk2) };
+  const list2 = await obj.makeList(keys.aik, { ...list1, ver: 2 });
+  await sock2.ok('e2ee.publish', { devlist: list2, boxes: {}, backup: await backup.sealBackup(asb2, bk2, { ver: 2, aik: keys.aikPub }) });
+
+  const bodies = sent.join('\n');
+  assert.ok(sent.length >= 8, 'every step was captured');
+  for (const [what, raw, text] of [['recovery key 1', rk1.raw, rk1.text], ['recovery key 2', rk2.raw, rk2.text], ['backup key 1', bk1], ['backup key 2', bk2]]) {
+    for (const f of forms(raw, text)) assert.equal(bodies.includes(f), false, `${what} travelled (${f.slice(0, 6)}…)`);
+  }
+  // What the server keeps, and everything it was sent, opens nothing: only bk2 opens the backup.
+  const blob = JSON.parse(srv.db.get('SELECT blob FROM e2ee_backup WHERE user = ?', who.id).blob);
+  const row = srv.db.get('SELECT hash FROM recovery WHERE user = ?', who.id);
+  assert.match(row.hash, /^scrypt\$/);
+  const candidates = [];
+  for (const raw of [rk1.raw, rk2.raw]) { const p = await proofs(raw); candidates.push(Buffer.from(p.v2, 'base64url'), Buffer.from(p.v1, 'base64url')); }
+  for (const part of row.hash.split('$')) { const b = Buffer.from(part, 'base64'); if (b.length) candidates.push(b.length >= 32 ? b.subarray(0, 32) : Buffer.concat([b, Buffer.alloc(32 - b.length)])); }
+  for (const k of candidates) await assert.rejects(backup.openBackup(blob, new Uint8Array(k.subarray(0, 32)), who.id), 'the server’s copy can’t open the backup');
+  assert.equal((await backup.openBackup(blob, bk2, who.id)).u, who.id, 'the backup key derived from the key itself does');
+  await assert.rejects(backup.openBackup(blob, bk1, who.id), 'the old key no longer opens it');
+  await sock.close(); await sock2.close();
+});

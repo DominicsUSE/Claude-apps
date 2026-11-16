@@ -19,7 +19,7 @@
 //   POST /api/uploads/<id>/done           -> 201 { id: 'f_…', name, size, kind } (the same as /api/files)
 //   POST /api/uploads/<id>/cancel         -> {}
 // Every call is POST or GET, so the server's cross-site check covers them all.
-import { createWriteStream, statfsSync, openSync, readSync, closeSync, writeFileSync, unlinkSync, renameSync, statSync, truncateSync, readdirSync, mkdirSync } from 'node:fs';
+import { createWriteStream, statfsSync, openSync, readSync, closeSync, writeFileSync, unlinkSync, statSync, truncateSync, readdirSync, mkdirSync } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
 import { join } from 'node:path';
@@ -27,6 +27,7 @@ import { newId } from './model.js';
 import { uploadType, fileKind } from './media.js';
 import { cleanFileName } from '../js/lib/util.js';
 import { safeDecode } from './auth.js';
+import { sealFile } from './filecrypt.js'; // 0.14: stored encrypted at rest
 
 const MB = 1024 * 1024;
 const ABANDONED_MS = 24 * 3600_000;
@@ -137,10 +138,11 @@ export function createUploads({ db, M, filesDir, sendJson, error, jsonBody, uplo
     return n;
   }
   const rm = (p) => { try { unlinkSync(p); } catch (e) { if (e.code !== 'ENOENT') log('error', 'upload cleanup', e); } };
-  function storeFile({ user, conv, name, header, path, size, enc = false }) {
+  // 0.14: the assembled plaintext is sealed into place under the files key (server/filecrypt.js) and removed.
+  async function storeFile({ user, conv, name, header, path, size, enc = false }) {
     const type = enc ? 'application/octet-stream' : uploadType(header, head(path));
     const id = newId('f');
-    renameSync(path, join(filesDir, id));
+    await sealFile(path, join(filesDir, id));
     db.run('INSERT INTO files (id, owner, conv, name, type, size, created, enc) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, user, conv, enc ? 'file' : name, type, size, Date.now(), enc ? 1 : null);
     return { id, name: enc ? 'file' : name, size, kind: enc ? 'file' : fileKind(type) };
   }
@@ -168,7 +170,9 @@ export function createUploads({ db, M, filesDir, sendJson, error, jsonBody, uplo
         throw e;
       }
       if (got !== size) { rm(tmp); return error(res, 400, 'The file didn’t arrive whole. Try again.'); }
-      return sendJson(res, 201, storeFile({ user, conv, name, header: req.headers['content-type'], path: tmp, size, enc }));
+      let stored;
+      try { stored = await storeFile({ user, conv, name, header: req.headers['content-type'], path: tmp, size, enc }); } finally { rm(tmp); }
+      return sendJson(res, 201, stored);
     } finally { inflight.delete(sid); }
   }
 
@@ -220,8 +224,17 @@ export function createUploads({ db, M, filesDir, sendJson, error, jsonBody, uplo
         if (!gate.ok) throw httpError(403, gate.why);
         encMatches(row.conv, !!row.enc);
         if (statSync(part).size !== row.size) truncateSync(part, row.size);
+        // Still counted (the row stays) and not written to while it is sealed; a cancel meanwhile wins.
+        writing.add(row.id);
+        let stored;
+        try { stored = await storeFile({ user, conv: row.conv, name: row.name, header: row.type, path: part, size: row.size, enc: !!row.enc }); } finally { writing.delete(row.id); rm(part); }
+        if (!db.get('SELECT 1 FROM uploads WHERE id = ?', row.id)) {
+          db.run('DELETE FROM files WHERE id = ?', stored.id);
+          rm(join(filesDir, stored.id));
+          throw httpError(404, 'That upload was cancelled.');
+        }
         db.run('DELETE FROM uploads WHERE id = ?', row.id);
-        sendJson(res, 201, storeFile({ user, conv: row.conv, name: row.name, header: row.type, path: part, size: row.size, enc: !!row.enc }));
+        sendJson(res, 201, stored);
         return true;
       }
       // A part. Only the next bytes, never past the declared size, never two at once.

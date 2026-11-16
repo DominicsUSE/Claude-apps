@@ -10,6 +10,7 @@ import {
   S, me, emit, setPref, updateMe, toast, openModal, closeModal, openLayer, closeLayer, signedOut, setNotify, setPresence,
   markConvRead, markAllRead, convMeta,
 } from '../store.js';
+import { keepsCopy, setKeepCopy } from '../store.js'; // 0.14: this device's copy of messages
 import { api, call, stopTransport } from '../server.js';
 import { leaveVoice } from '../voice.js';
 import { pushSignOut } from '../push.js';
@@ -585,6 +586,10 @@ export function DataPage() {
     <${Row} label="Download your data" hint="One zip file: your profile, settings, notes, friends, houses, every message you wrote, the whole of each direct conversation you’re in, files you uploaded, reactions, sign-in history and devices, as data and as text you can read. Three times an hour.">
       <button class="btn" disabled=${busy} onClick=${download}><${Icon} name="file" size=${16} />${busy ? 'Preparing…' : 'Download'}</button>
     <//>
+    ${['plain', 'memory'].includes(keepsCopy()) && html`<${Row} label="Keep a copy of messages on this device" hint="Snug opens faster and works offline with a copy of your recent messages, drafts and changes not sent yet in this browser. Browser storage isn’t protected: anyone who can copy this browser’s profile can read that copy. Off, nothing is kept once you close this tab.">
+      <${Switch} on=${keepsCopy() === 'plain'} label="Keep a copy of messages on this device" onChange=${setKeepCopy} />
+    <//>`}
+    ${keepsCopy() === 'sealed' && html`<p class="hint" id="copy-sealed">Snug’s copy of your recent messages, drafts and changes not sent yet is encrypted on this computer with a key its system key store keeps. A copy of Snug’s data folder alone doesn’t show them. Anyone who can use this computer as you can still open Snug and read them.</p>`}
     <div class="set-head">End your account</div>
     <${Row} label="Deactivate" hint="Signs you out everywhere and shows you as offline. Sign in again any time to come back as you were.">
       <button class="btn" onClick=${() => openModal(Confirmed, {

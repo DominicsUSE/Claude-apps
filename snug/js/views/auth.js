@@ -23,10 +23,10 @@ import { usePasskeySignIn } from './passkeys.js'; // v0.12: passkey sign-in wher
 import { signupProblems, signupField, inviteWhy } from '../lib/onboarding.js'; // every sign-up problem at once; why an invitation fails
 import { t } from '../lib/i18n.js'; // words in the chosen language (js/locales)
 
-function entered(user) {
+async function entered(user) {
   S.me = user.id;
   S.auth = 'in';
-  loadCache(user.id);
+  await loadCache(user.id).catch(() => false); // 0.14: the sealed device copy opens asynchronously
   emit();
   startTransport();
 }

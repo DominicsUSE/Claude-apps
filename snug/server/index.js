@@ -31,7 +31,9 @@ import { createRecovery } from './recovery.js'; // v0.12: "Forgot your password?
 import { createKeyAuth } from './keyauth.js'; // v0.12: desktop accounts that need no GitHub account
 import { createNotices } from './notices.js'; // v0.10 A: registry notices, bans and admin
 import { createVault } from './vault.js'; // v0.10 C: the account's data file
-import { restoreIfDamaged, scheduleSnapshots, KEEP as KEEP_SNAPSHOTS } from './dbbackup.js'; // sec-registry REG-L6: database snapshots
+import { useFilesKey, reencryptDir } from './filecrypt.js'; // 0.14: attachment files encrypted at rest
+import { randomBytes } from 'node:crypto';
+import { restoreIfDamaged, cleanupDataDir, scheduleSnapshots, KEEP as KEEP_SNAPSHOTS } from './dbbackup.js'; // sec-registry REG-L6: database snapshots
 import {
   sessionUser, endAllSessions, readCookie, sessionCookie, COOKIE, limiter, safeDecode,
   clientIp, ipKey, secureCookies, // sec-auth
@@ -117,9 +119,16 @@ export async function startServer({
   const dataKey = dataDir === ':memory:' ? null : loadDataKey({ dataDir, keyStore, log: bootLog });
   const dbKey = dataKey && !dataKey.unusable ? dataKey : null;
   if (dbKey) restoreIfDamaged({ dataDir, dataKey: dbKey, log: bootLog });
+  // 0.14: no plaintext database copy stays beside the live one (damaged copies sealed, temp files removed).
+  if (dataDir !== ':memory:') cleanupDataDir({ dataDir, dataKey: dbKey, log: bootLog });
   const db = openDb(dataDir === ':memory:' ? ':memory:' : join(dataDir, 'snug.db'));
   const filesDir = join(dataDir === ':memory:' ? join(ROOT, 'data', 'test-files') : dataDir, 'files');
   await mkdir(filesDir, { recursive: true, mode: 0o700 });
+  // 0.14: files written from now on are encrypted under a key from the data key (server/filecrypt.js); never under
+  // a throwaway key (an unreadable secret.key), which would lose them. Tests in memory use one key per process.
+  const filesKeyFrom = dbKey || (dataDir === ':memory:' ? MEMORY_FILES_KEY : null);
+  const stopFilesKey = filesKeyFrom ? useFilesKey(filesDir, filesKeyFrom) : () => {};
+  if (!filesKeyFrom) bootLog('security', 'secret.key could not be read: new attachment files are stored unencrypted until it is restored');
   const M = createModel(db);
   // sec-web W5: every log line is redacted (webhook tokens, cookies, keys) and kept on one line.
   const log = bootLog;
@@ -207,6 +216,14 @@ export async function startServer({
   // Deleted messages can be restored for ten minutes; after that their content is gone for good.
   const sweepFiles = createFileSweep({ db, filesDir, log }); // sec-authz: deleted attachments and never-sent uploads (server/media.js)
   const retention = createRetention({ db, filesDir, log }); // 0.14: operational metadata past its window, once an hour
+  // 0.14: plaintext files from before are sealed in the background, a few at a time (SNUG_FILES_REENCRYPT=off: not).
+  // Files no row names (left by a crash, a failed delete or an older version) are sealed too, not deleted:
+  // Snug can't be sure nothing still uses them.
+  let closing = false;
+  const reencryptFiles = () => reencryptDir(filesDir, { keep: () => !closing, log });
+  const reencryptOn = filesKeyFrom && dataDir !== ':memory:' && !['0', 'off', 'false', 'no'].includes(String(process.env.SNUG_FILES_REENCRYPT ?? 'on').trim().toLowerCase());
+  const reencryptTimer = reencryptOn ? setInterval(() => { reencryptFiles().catch((e) => log('error', 'file re-encrypt', e)); }, 15 * 60_000) : null;
+  reencryptTimer?.unref?.();
   const sweep = setInterval(() => {
     try { expiry.sweep(); } catch (e) { log('error', 'expiry sweep', e); } // 0.12: disappearing messages, before their files go
     try { sweepFiles(); } catch (e) { log('error', 'file sweep', e); } // sec-authz: before the files column is cleared below
@@ -486,11 +503,14 @@ export async function startServer({
     vault, // v0.10 C: the data file (server/vault.js)
     refreshKind: () => keyAuth.refreshKind(), // v0.12: tests read the registry's account kind now (a 0.11.x socket gets no recovery frames)
     dbSnapshots, // sec-registry REG-L6: dbSnapshots?.now() writes a snapshot (tests)
+    reencryptFiles, // 0.14: seal plaintext files from older versions now (tests; it also runs every 15 minutes)
     // For tests: forget every rate limit, the socket ones and the sign-in ones.
     resetLimits: () => { hub.resetLimits(); authLimit.reset(); uploadLimit.reset(); mediaHttp.reset(); accountHttp.reset(); passkeys.reset(); recovery.reset(); openLimit.reset(); inviteLimit.reset(); cspLimit.reset(); sec.reset(); }, // sec-web: openLimit, inviteLimit, cspLimit, sec
-    close: () => new Promise((r) => { vault.flush(); vault.close(); dbSnapshots?.stop(); clearInterval(sweep); gh.close(); keyAuth.close(); notices.close(); peer.close(); hub.close(); server.close(() => { db.close(); r(); }); server.closeAllConnections?.(); }),
+    close: () => new Promise((r) => { closing = true; clearInterval(reencryptTimer); stopFilesKey(); vault.flush(); vault.close(); dbSnapshots?.stop(); clearInterval(sweep); gh.close(); keyAuth.close(); notices.close(); peer.close(); hub.close(); server.close(() => { db.close(); r(); }); server.closeAllConnections?.(); }),
   };
 }
+
+const MEMORY_FILES_KEY = randomBytes(32);
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === normalize(process.argv[1])) {
   startServer().catch((e) => { console.error(e); process.exit(1); });

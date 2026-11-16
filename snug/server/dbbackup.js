@@ -10,16 +10,22 @@
 //   desktop). A copy of the backups folder alone is unreadable. The newest KEEP files are kept.
 //   File: "SNUGBAK1" | iv(12) | ciphertext | tag(16); AAD = "snug-db-backup-v1\n" + file name.
 // - restoreIfDamaged(): before the database is opened. When snug.db exists but can't be opened or fails
-//   PRAGMA quick_check, it is moved aside (snug.db.damaged-<time>) and the newest snapshot that decrypts and
-//   passes integrity_check takes its place.
+//   PRAGMA quick_check, the newest snapshot that decrypts and passes integrity_check takes its place. 0.14: the
+//   damaged file (and its -wal, -shm) is sealed the same way into backups/damaged-<time>.snugdmg and the
+//   plaintext removed, so no readable copy of the database is left beside the live one (openDamaged reads it).
+// - cleanupDataDir(): at start. Seals plaintext damaged copies an older version left (snug.db.damaged-<time>),
+//   removes restore and snapshot temp files a crash left, and deletes sealed damaged copies after 7 days.
 import { DatabaseSync } from 'node:sqlite';
 import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, renameSync, unlinkSync, readdirSync, existsSync, mkdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 
 export const KEEP = 7;
 const MAGIC = Buffer.from('SNUGBAK1');
 const NAME = /^snug-(\d{8}-\d{6})(?:-\d+)?\.db\.snugbak$/;
+const DAMAGED = /^snug\.db\.damaged-(\d+)(-wal|-shm)?$/; // what 0.13 left, in plaintext
+const SEALED_DAMAGED = /^damaged-\d+(?:-wal|-shm)?\.snugdmg$/;
+export const DAMAGED_KEEP_MS = 7 * 86_400_000;
 const rm = (f) => { try { unlinkSync(f); } catch { /* gone */ } };
 const aad = (name) => Buffer.from(`snug-db-backup-v1\n${name}`);
 export const backupKey = (dataKey) => createHmac('sha256', dataKey).update('snug:db-backup').digest();
@@ -90,11 +96,21 @@ export function restoreIfDamaged({ dataDir, dataKey, log = () => {} }) {
     try {
       writeFileSync(tmp, unseal(key, name, readFileSync(join(backupDir(dataDir), name))), { mode: 0o600 });
       if (!check(tmp)) throw new Error('integrity');
-      const damaged = `${file}.damaged-${Date.now()}`;
-      renameSync(file, damaged);
-      for (const ext of ['-wal', '-shm']) if (existsSync(file + ext)) renameSync(file + ext, damaged + ext);
+      const t = Date.now();
+      let damaged = null;
+      // The damaged file and its -wal and -shm go before the snapshot takes its place (SQLite would apply an old WAL).
+      for (const ext of ['', '-wal', '-shm']) {
+        if (!existsSync(file + ext)) continue;
+        let at;
+        try { at = sealAside(dataDir, key, file + ext, `damaged-${t}${ext}.snugdmg`); } catch (e) {
+          at = `${file}.damaged-${t}${ext}`; // can't seal (disk full): kept in plaintext; cleanupDataDir seals it later
+          renameSync(file + ext, at);
+          log('security', 'could not seal the damaged database copy', e.message);
+        }
+        if (!ext) damaged = at;
+      }
       renameSync(tmp, file);
-      log('security', 'snug.db was damaged; restored the snapshot', name, 'and kept the damaged file as', damaged);
+      log('security', 'snug.db was damaged; restored the snapshot', name, 'and kept the damaged file, sealed with the backup key, as', damaged);
       return { restored: name, damaged };
     } catch (e) {
       rm(tmp);
@@ -103,6 +119,54 @@ export function restoreIfDamaged({ dataDir, dataKey, log = () => {} }) {
   }
   log('security', 'snug.db looks damaged and no snapshot could be restored');
   return null;
+}
+
+// A plaintext file moved into the backups folder, sealed under the backup key (the original removed). Returns its path.
+function sealAside(dataDir, key, src, name) {
+  const dir = backupDir(dataDir);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const out = join(dir, name);
+  try {
+    writeFileSync(`${out}.part`, seal(key, name, readFileSync(src)), { mode: 0o600 });
+    renameSync(`${out}.part`, out);
+  } catch (e) { rm(`${out}.part`); throw e; }
+  rm(src);
+  return out;
+}
+/** The plaintext of a sealed damaged copy (backups/damaged-<time>.snugdmg), for whoever holds the data key. */
+export function openDamaged({ path, dataKey }) { return unseal(backupKey(dataKey), basename(path), readFileSync(path)); }
+
+/**
+ * At start, before the database is used: no plaintext copy of the database stays behind. Seals damaged copies
+ * an older version kept in plaintext (only with a usable data key), removes restore and snapshot temp files a
+ * crash left, and deletes sealed damaged copies older than 7 days. Returns { sealed: [paths], removed: [paths] }.
+ */
+export function cleanupDataDir({ dataDir, dataKey, log = () => {}, now = Date.now() }) {
+  const out = { sealed: [], removed: [] };
+  const gone = (p) => { rm(p); if (!existsSync(p)) out.removed.push(p); };
+  let names = [];
+  try { names = readdirSync(dataDir); } catch { return out; }
+  const key = dataKey ? backupKey(dataKey) : null;
+  for (const n of names) {
+    if (/^\.restore-.*\.tmp-db$/.test(n)) { gone(join(dataDir, n)); continue; }
+    const m = DAMAGED.exec(n);
+    if (!m || !key) continue;
+    try {
+      const at = sealAside(dataDir, key, join(dataDir, n), `damaged-${m[1]}${m[2] || ''}.snugdmg`);
+      out.sealed.push(at);
+      log('security', 'sealed a plaintext copy of a damaged database with the backup key:', n, 'is now', at);
+    } catch (e) { log('security', 'could not seal', n, e.message); }
+  }
+  const dir = backupDir(dataDir);
+  let inBackups = [];
+  try { inBackups = readdirSync(dir); } catch { return out; }
+  for (const n of inBackups) {
+    const p = join(dir, n);
+    if (n.endsWith('.tmp-db') || n.endsWith('.part')) { gone(p); continue; }
+    if (!SEALED_DAMAGED.test(n)) continue;
+    try { if (statSync(p).mtimeMs < now - DAMAGED_KEEP_MS) { gone(p); log('security', 'deleted a sealed damaged database copy older than 7 days:', p); } } catch { /* gone */ }
+  }
+  return out;
 }
 
 /** Daily snapshots for a running server. Returns { now(), stop() }. */

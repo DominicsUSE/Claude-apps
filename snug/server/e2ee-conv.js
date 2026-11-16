@@ -17,13 +17,14 @@
 //   and features that need plaintext on the server (polls, /roll, server-side
 //   forwarding, link previews) are off there.
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { canon, parseCanon } from '../js/lib/e2ee/canon.js';
 import { b64u, b64uOf } from '../js/lib/e2ee/bytes.js';
 import { envelopeProblem, CAPS } from '../js/lib/e2ee/envelope.js';
 import { requiredSet, checkRecipients, wrapKeys, editSet } from '../js/lib/e2ee/rules.js';
 import { newId, now } from './model.js';
+import { copyStoredSync } from './filecrypt.js'; // 0.14: files encrypted at rest
 
 const P = 'snug-e2ee-v1/';
 const SKEW = 10 * 60_000;
@@ -451,7 +452,7 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
     const full = cfg.room?.(c.user, to, src.size); // review-media 1: the quota and the disk floor, as for uploads
     if (full) fail(full.message);
     const id = newId('f');
-    copyFileSync(join(cfg.filesDir, src.id), join(cfg.filesDir, id));
+    copyStoredSync(join(cfg.filesDir, src.id), join(cfg.filesDir, id));
     db.run('INSERT INTO files (id, owner, conv, name, type, size, created, enc) VALUES (?, ?, ?, ?, ?, ?, ?, 1)', id, c.user, to, 'file', 'application/octet-stream', src.size, Date.now());
     return { id };
   };

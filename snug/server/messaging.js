@@ -23,8 +23,7 @@
 // - Stickers: up to 30 per house (PNG, APNG or WebP, at most 512 KB and 320 by
 //   320 pixels, read from the file), managed by roles with the Manage emoji
 //   permission, sent by members of that house anywhere they can post.
-import { copyFileSync, existsSync, unlinkSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { newId, now } from './model.js';
@@ -34,6 +33,7 @@ import { emojiImage } from './emoji.js';
 import { sniff, fileChecker, UNDO_MS } from './media.js';
 import { embedFileRefs } from './expiry.js'; // review-media 3
 import { stripInvisible, cleanFileName } from '../js/lib/util.js'; // sec-authz
+import { writeStored, copyStoredSync } from './filecrypt.js'; // 0.14: files encrypted at rest
 
 export const POLL_HOURS = [1, 4, 8, 24, 72, 168];
 export const POLL_MAX_ANSWERS = 10;
@@ -258,7 +258,7 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
     const full = cfg.room(owner, conv, src.size);
     if (full) fail(full.message);
     const id = newId('f');
-    copyFileSync(join(cfg.filesDir, src.id), join(cfg.filesDir, id));
+    copyStoredSync(join(cfg.filesDir, src.id), join(cfg.filesDir, id)); // 0.14: sealed again for its new id
     // 0.13: a copy of a friend's file from another PC is the copier's own file, not a cache of theirs
     // (server/peer.js would neither serve it to anyone nor keep its bytes past the cache size).
     let keep = src.meta ?? null;
@@ -315,7 +315,7 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
   }
   async function storeMedia(media) {
     const hash = createHash('sha256').update(media.body).digest('hex').slice(0, 40);
-    await writeFile(join(cfg.filesDir, `lc_${hash}`), media.body, { mode: 0o600 });
+    await writeStored(join(cfg.filesDir, `lc_${hash}`), media.body);
     return { hash, type: media.type, w: media.w, h: media.h, size: media.body.length };
   }
   // A link's preview data, from the cache or the network. Null for nothing to show.
@@ -370,7 +370,7 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
           // review-media 1: a preview's copy is skipped when the author or the house is out of room.
           if (existsSync(src) && !cfg.room(row.author, conv, data.media.size)) {
             const fid = newId('f');
-            copyFileSync(src, join(cfg.filesDir, fid));
+            copyStoredSync(src, join(cfg.filesDir, fid));
             const ext = data.media.type.split('/')[1];
             db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
               fid, row.author, conv, `preview.${ext}`, data.media.type, data.media.size, Date.now(), JSON.stringify({ embed: true, w: data.media.w, h: data.media.h }));
@@ -789,7 +789,7 @@ export function createMessagingHttp({ db, M, filesDir, sendJson, error, body, he
       if (img.w > MAX_STICKER_SIDE || img.h > MAX_STICKER_SIDE) { error(res, 422, `That image is ${img.w} by ${img.h} pixels. Stickers can be up to ${MAX_STICKER_SIDE} by ${MAX_STICKER_SIDE}.`); return true; }
       const name = cleanFileName(safeDecode(String(req.headers['x-file-name'] || 'sticker')), 'sticker'); // sec-authz
       const id = newId('f');
-      await writeFile(join(filesDir, id), data, { mode: 0o600 });
+      await writeStored(join(filesDir, id), data);
       db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         id, user, `sticker:${house}`, name, img.type, data.length, Date.now(), JSON.stringify({ sticker: true, w: img.w, h: img.h }));
       sendJson(res, 201, { id, name, size: data.length, w: img.w, h: img.h, type: img.type });

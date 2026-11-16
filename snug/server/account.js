@@ -42,10 +42,8 @@
 // - Failure counters (privacy): the address part of a per-account-and-address
 //   key is an HMAC under the data key, never the address itself.
 import { createHmac, randomBytes, timingSafeEqual, createHash } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
 import { sendFile, suspicious, securityEvent } from './seclog.js'; // sec-web W1; sec-integrate: the audit trail feeds the detectors directly
 import { join } from 'node:path';
-import { createReadStream } from 'node:fs';
 import { newId } from './model.js';
 import { zipWriter } from './zip.js'; // privacy: Download my data as one zip
 import {
@@ -56,6 +54,7 @@ import {
 import { HUES, stripInvisible } from '../js/lib/util.js'; // sec-authz: stripInvisible
 import { imageInfo } from './messaging.js';
 import { cleanPrefs, upgradePrefs, mergePrefs, inQuiet, hasKeyword, everyonePing, MAX_PREFS_BYTES, deviceLabel } from '../js/lib/account.js';
+import { writeStored, readStored } from './filecrypt.js'; // 0.14: files encrypted at rest
 
 export { deviceLabel };
 export const BACKUP_CODES = 10;
@@ -1032,10 +1031,7 @@ export function createAccountHttp({
       res.end();
     } catch { try { res.destroy(); } catch { /* gone */ } }
   }
-  const readAll = (path) => new Promise((resolve) => {
-    const chunks = [];
-    createReadStream(path).on('data', (c) => chunks.push(c)).on('end', () => resolve(Buffer.concat(chunks))).on('error', () => resolve(null));
-  });
+  const readAll = (path) => readStored(path).catch(() => null); // 0.14: decrypted from the files folder
   const exportReadme = (d) => [
     `Your Snug data, as of ${d.exported}.`,
     '',
@@ -1145,7 +1141,7 @@ export function createAccountHttp({
       const img = imageInfo(data);
       if (!img || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(img.type)) { error(res, 415, 'Banners need to be PNG, JPEG, GIF or WebP pictures.'); return true; }
       const id = newId('f');
-      await writeFile(join(filesDir, id), data, { mode: 0o600 });
+      await writeStored(join(filesDir, id), data);
       db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         id, user, `banner:${user}`, 'banner', img.type, data.length, Date.now(), JSON.stringify({ w: img.w, h: img.h }));
       sendJson(res, 201, { id, w: img.w, h: img.h, type: img.type });

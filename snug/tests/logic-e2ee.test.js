@@ -522,6 +522,31 @@ test('copy: no banned claims in encryption wording or the docs; rooms are never 
   assert.ok(!/secure/i.test(COPY.roomsNot));
 });
 
+test('copy (0.14): “sealed with the system key store” is said only of an app device whose keys are sealed', async () => {
+  const { storageNoteFor } = await import('../js/lib/e2ee/copy.js');
+  const SEALED = /sealed with the system key store/;
+  const all = [
+    [{ kind: 'app', keyStore: 'os', sealed: true }, true],
+    [{ kind: 'app', keyStore: 'os', sealed: false }, false], // made before 0.14
+    [{ kind: 'app', keyStore: 'os', sealed: null }, true], // no keys on this computer yet: any made here are sealed
+    [{ kind: 'app', keyStore: 'none', sealed: false }, false], // no key store on this computer
+    [{ kind: 'app', keyStore: 'locked', sealed: true }, false],
+    [{ kind: 'web', keyStore: 'none', sealed: false }, false], // a browser, or the app on a server's own page
+    [{ kind: 'web', keyStore: 'os', sealed: true }, false],
+  ];
+  for (const [where, sealed] of all) {
+    const t = storageNoteFor(where);
+    assert.match(t, /^Script running in Snug’s page can use the keys on this device and read your account keys/, JSON.stringify(where));
+    assert.equal(SEALED.test(t), sealed, `${JSON.stringify(where)}: ${t}`);
+    for (const w of BANNED) assert.ok(!t.toLowerCase().includes(w), `"${w}" appears`);
+  }
+  // Unsealed keys: the note says a copy of the stored data includes them; an old app device is told how to seal them.
+  assert.match(storageNoteFor({ kind: 'web', keyStore: 'none', sealed: false }), /aren’t sealed/);
+  assert.match(storageNoteFor({ kind: 'app', keyStore: 'os', sealed: false }), /made before.*Reset encryption/s);
+  assert.match(storageNoteFor({ kind: 'app', keyStore: 'none', sealed: false }), /aren’t sealed/);
+  assert.doesNotMatch(storageNoteFor({ kind: 'app', keyStore: 'os', sealed: null }), /made before/);
+});
+
 // ---------- review fixes (L1, L3, M2, M3, H1) ----------
 import * as hw from '../js/lib/e2ee/highwater.js';
 

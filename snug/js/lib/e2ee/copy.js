@@ -29,7 +29,10 @@ export const COPY = {
 
   browserNote: 'In a browser, Snug’s code comes from this server each time you open it. Whoever runs the server could change it to read your messages. The Snug app uses its own built-in code.',
   plainHttp: 'This server’s address isn’t https. Encrypted messages and attachments stay encrypted, but everything else (your password, room messages, names, who talks to whom) crosses the network readable to anyone on it.',
-  storageNote: 'Script running in Snug’s page can use the keys on this device. They can’t be copied out of the browser, but your account keys (needed on all your devices) can be read by that script.',
+  storageNote: 'Script running in Snug’s page can use the keys on this device and read your account keys (needed on all your devices).',
+  storageSealed: 'This computer’s own keys are sealed with the system key store, which that script can open too.',
+  storagePlain: 'This device’s own keys can’t be copied out by that script, but they aren’t sealed: a copy of the stored data (the browser profile, or Snug’s data folder) includes them.',
+  storageOld: 'This computer’s own keys were made before Snug sealed them with the system key store, so a copy of Snug’s data folder includes them. Reset encryption, or renew this computer’s key from another device, to get sealed ones.',
   unsupported: {
     insecure: 'This address isn’t secure (http), so the browser won’t do encryption here. Use the https address, or the Snug app.',
     old: 'This browser is too old for end-to-end encryption. Update it, or use the Snug app.',
@@ -136,3 +139,14 @@ export const COPY = {
 
 // Words that must never appear in user-facing encryption copy or the docs.
 export const BANNED = ['unhackable', 'anonymous', 'military-grade', 'zero-knowledge'];
+
+/**
+ * 0.14: the storage line of “What it does and doesn’t do” for this device. Keys are sealed only in the
+ * Snug app with a working system key store and a device key made there (manager.js deviceKeySealed()).
+ * `sealed` is null while this device has no keys yet: any it makes under the key store are sealed.
+ */
+export function storageNoteFor({ kind, keyStore, sealed }) {
+  const app = kind === 'app';
+  const rest = app && keyStore === 'os' ? (sealed === false ? COPY.storageOld : COPY.storageSealed) : COPY.storagePlain;
+  return `${COPY.storageNote} ${rest}`;
+}

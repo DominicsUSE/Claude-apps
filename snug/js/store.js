@@ -24,6 +24,34 @@ const local = {
   del(k) { try { localStorage.removeItem(k); } catch { /* blocked */ } },
 };
 
+// 0.14: where this device's copy of messages is kept: the cached data, drafts, reply targets, attachments
+// waiting in a draft and the changes made offline. 'plain': localStorage, as before (a browser). 'sealed':
+// AES-GCM blobs under the device storage key in IndexedDB (the desktop app's own page, where that key comes
+// from the OS key store; js/devicecopy.js). 'pending': sealed once it is open (nothing is written before, or
+// it would replace what was kept). 'memory': this tab only (a browser with "Keep a copy of messages on this
+// device" off). 'locked': the key store can't open it now, so nothing is written or deleted.
+const COPY_PREF = 'snug.keepCopy';
+Object.assign(KEYS, { copyUser: 'snug.copyUser' });
+export const copyHooks = { open: null, write: null, clear: null }; // set by js/devicecopy.js
+const sealedPage = () => typeof window !== 'undefined' && window.snugApp?.builtIn === true && typeof window.snugApp?.e2eeStoreKey === 'function';
+const browserKeeps = () => { try { return localStorage.getItem(COPY_PREF) !== 'off'; } catch { return true; } };
+const firstMode = () => (sealedPage() ? 'pending' : browserKeeps() ? 'plain' : 'memory');
+export const copy = { mode: firstMode() };
+const COPY_NAME = { [KEYS.cache]: 'cache', [KEYS.drafts]: 'drafts', [KEYS.reply]: 'reply', [KEYS.ops]: 'ops', [KEYS.files]: 'files' };
+const kept = {
+  get: (k) => (copy.mode === 'plain' ? local.get(k) : null),
+  set(k, v) {
+    if (copy.mode === 'plain') return local.set(k, v);
+    if (copy.mode !== 'sealed') return null; // pending, memory, locked: nothing written
+    copyHooks.write?.(COPY_NAME[k], typeof v === 'string' ? v : JSON.stringify(v));
+    return true;
+  },
+  del(k) {
+    if (copy.mode === 'sealed') copyHooks.write?.(COPY_NAME[k], null);
+    if (copy.mode !== 'locked') local.del(k);
+  },
+};
+
 const DEFAULT_PREFS = {
   theme: 'system', density: 'regular', text: 'm', motion: 'system', contrast: 'system',
   toasts: true, desktop: false, houseShut: {}, groupShut: {}, recent: [],
@@ -61,7 +89,7 @@ function freshUi() {
     trail: [],           // phone: the house page under the open room, so Back returns to it
     tab: 'home',
     marker: {}, hold: {}, win: {}, loaded: {}, jump: null, editing: null,
-    reply: local.get(KEYS.reply) || {}, // what each draft replies to, kept across a reload (0.12)
+    reply: kept.get(KEYS.reply) || {}, // what each draft replies to, kept across a reload (0.12)
     menu: null, pop: null, modal: null, layer: null, quick: null, lightbox: null,
     toasts: [], search: null, joinCode: null,
   };
@@ -72,8 +100,8 @@ export const S = {
   auth: 'checking',      // 'checking' | 'out' | 'in' | 'unreachable'
   ready: false,          // true once there is data to show, from the server or the device cache
   prefs: { ...DEFAULT_PREFS, ...(upgradePrefs(local.get(KEYS.prefs)) || {}) },
-  drafts: local.get(KEYS.drafts) || {},
-  draftFiles: local.get(KEYS.files) || {}, // attachments uploaded for a draft, not sent yet (0.12, js/views/stream.js)
+  drafts: kept.get(KEYS.drafts) || {},
+  draftFiles: kept.get(KEYS.files) || {}, // attachments uploaded for a draft, not sent yet (0.12, js/views/stream.js)
   typing: {}, speaking: {}, call: null, peers: {},
   // Calls in direct conversations (js/calls.js): each live call's details by
   // conversation, the calls ringing for me, and how my last call ended.
@@ -99,8 +127,9 @@ export const resync = () => transport.resync();
 // Send a change; if it does not go through, say so and fetch the truth again.
 // Offline, reactions, edits, deletes and saves wait on this device and go
 // once the connection is back (0.12), instead of quietly undoing themselves.
-let opQueue = (() => { const q = local.get(KEYS.ops); return Array.isArray(q?.ops) ? q : { user: null, ops: [] }; })();
-const saveQueue = () => { if (!local.set(KEYS.ops, opQueue)) storageFull(); };
+const queueOf = (q) => (Array.isArray(q?.ops) ? q : { user: null, ops: [] });
+let opQueue = queueOf(kept.get(KEYS.ops));
+const saveQueue = () => { if (kept.set(KEYS.ops, opQueue) === false) storageFull(); };
 export const queuedChanges = () => (opQueue.user === S.me ? opQueue.ops.length : 0);
 function save(op, d) {
   return call(op, d).catch((e) => {
@@ -233,7 +262,8 @@ function writeCache() {
   cacheAt = Date.now();
   const json = cacheData();
   if (json === lastCache) return;
-  if (local.set(KEYS.cache, json)) lastCache = json; else storageFull();
+  const ok = kept.set(KEYS.cache, json);
+  if (ok) lastCache = json; else if (ok === false) storageFull();
 }
 export function persist() {
   clearTimeout(saveTimer);
@@ -242,9 +272,9 @@ export function persist() {
     releaseBackground();
     local.set(KEYS.prefs, S.prefs);
     const { open } = splitUnsent({ drafts: S.drafts, reply: S.ui.reply, files: S.draftFiles }, isPrivate);
-    local.set(KEYS.drafts, open.drafts);
-    local.set(KEYS.reply, open.reply);
-    local.set(KEYS.files, open.files);
+    kept.set(KEYS.drafts, open.drafts);
+    kept.set(KEYS.reply, open.reply);
+    kept.set(KEYS.files, open.files);
     unsentHooks.keep?.();
     if (!cacheTimer) cacheTimer = setTimeout(writeCache, Math.max(0, 2000 - (Date.now() - cacheAt)));
   }, 400);
@@ -297,10 +327,36 @@ export function stripState(list) {
   return list;
 }
 
-// Open from the device copy, for a fast start and for working offline.
-export function loadCache(userId) {
-  const c = local.get(KEYS.cache);
+// 0.14: the sealed device copy, opened for this account (the desktop app): 0.13's plaintext entries are moved
+// into it first (js/devicecopy.js). Without a key store it is kept as in a browser; locked, in this tab only.
+async function openSealedCopy(userId) {
+  const id = userId || local.get(KEYS.copyUser);
+  if (!id || !copyHooks.open) return null;
+  let got;
+  try { got = await copyHooks.open(id); } catch { copy.mode = 'locked'; return null; }
+  if (copy.mode !== 'pending') return null; // signed out meanwhile
+  if (!got) {
+    copy.mode = browserKeeps() ? 'plain' : 'memory';
+    S.drafts = { ...(kept.get(KEYS.drafts) || {}), ...S.drafts };
+    S.ui.reply = { ...(kept.get(KEYS.reply) || {}), ...S.ui.reply };
+    S.draftFiles = { ...(kept.get(KEYS.files) || {}), ...S.draftFiles };
+    if (!opQueue.ops.length) opQueue = queueOf(kept.get(KEYS.ops));
+    return kept.get(KEYS.cache);
+  }
+  copy.mode = 'sealed';
+  local.set(KEYS.copyUser, id);
+  S.drafts = { ...(got.drafts || {}), ...S.drafts };
+  S.ui.reply = { ...(got.reply || {}), ...S.ui.reply };
+  S.draftFiles = { ...(got.files || {}), ...S.draftFiles };
+  if (!opQueue.ops.length) opQueue = queueOf(got.ops);
+  return got.cache;
+}
+
+// Open from the device copy, for a fast start and for working offline. 0.14: asynchronous (the sealed copy).
+export async function loadCache(userId) {
+  const c = copy.mode === 'pending' ? await openSealedCopy(userId) : kept.get(KEYS.cache);
   if (!c || !c.me || (userId && c.me !== userId)) return false;
+  if (S.ready) return true; // the server's picture came first: it is newer
   Object.assign(S, blank(), c);
   for (const list of Object.values(S.msgs)) for (const m of list) if (m.state && m.author === S.me) { markLocal(m); if (m.state === 'sending') m.state = 'queued'; }
   if (opQueue.user === S.me) for (const x of opQueue.ops) replayOp(S, x.op, x.d); // changes made offline still show
@@ -356,12 +412,12 @@ export function applySnapshot(d) {
 export const signOutHooks = [];
 export function signedOut() {
   for (const f of signOutHooks) { try { f(); } catch { /* the rest still runs */ } }
-  local.del(KEYS.cache);
+  kept.del(KEYS.cache);
   lastCache = '';
   // 0.12: the next person on this browser doesn't get these.
   opQueue = { user: null, ops: [] };
   for (const k of Object.keys(offlineReads)) delete offlineReads[k]; // read markers made offline (review-media 8)
-  for (const k of [KEYS.ops, KEYS.reply, KEYS.files]) local.del(k);
+  for (const k of [KEYS.ops, KEYS.reply, KEYS.files]) kept.del(k);
   S.draftFiles = {};
   Object.assign(S, blank());
   S.ready = false;
@@ -373,7 +429,11 @@ export function signedOut() {
   local.del(KEYS.last);
   // A shared browser: the next person never sees the last one's drafts.
   S.drafts = {};
-  local.del(KEYS.drafts);
+  kept.del(KEYS.drafts);
+  // 0.14: the sealed copy goes too, and the next account opens its own.
+  try { copyHooks.clear?.(); } catch { /* the rest still runs */ }
+  local.del(KEYS.copyUser);
+  copy.mode = firstMode();
   // Whether this is a phone is about the screen, not the person: keep it, or
   // the next sign-in draws the desktop layout on a phone.
   S.ui = { ...freshUi(), phone: S.ui.phone };
@@ -919,5 +979,16 @@ export function toast(text, opts = {}) {
 export function dismissToast(id) {
   if (!S.ui.toasts.some((t) => t.id === id)) return;
   S.ui.toasts = S.ui.toasts.filter((t) => t.id !== id);
+  emit();
+}
+
+// 0.14: "Keep a copy of messages on this device" (a browser; the desktop app always keeps it sealed). Off, the
+// copy, drafts and changes made offline stay in this tab only, and what was kept is deleted now.
+export const keepsCopy = () => copy.mode;
+export function setKeepCopy(on) {
+  if (copy.mode !== 'plain' && copy.mode !== 'memory') return;
+  try { if (on) localStorage.removeItem(COPY_PREF); else localStorage.setItem(COPY_PREF, 'off'); } catch { /* storage off */ }
+  copy.mode = on ? 'plain' : 'memory';
+  if (on) { lastCache = ''; persist(); } else for (const k of Object.keys(COPY_NAME)) local.del(k);
   emit();
 }

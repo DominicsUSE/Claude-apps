@@ -16,10 +16,17 @@
 // changed, or the data was copied to another computer) the store is "locked":
 // nothing is replaced, and Settings says so.
 //
+// 0.14: the same SK, made even when encryption isn't turned on, seals this device's copy of messages,
+// drafts, reply targets and the offline queue in the desktop app (putSealedText, js/devicecopy.js), and
+// (where SK is under the OS key store) new prekey private keys and new device signing keys
+// (sealBytes/openBytes, js/e2ee/manager.js): kept as PKCS#8 sealed under SK, imported non-extractable
+// into memory when the keys are opened.
+//
 // Honest limit (said in Settings): script running in Snug's page can use every
-// key here. Non-extractable only stops it from copying the device keys out. The
-// device's own signing and prekey private keys are non-extractable browser keys
-// in IndexedDB, not sealed under SK (on any platform).
+// key here. Non-extractable only stops it from copying the device keys out. In a
+// browser, and for device keys made before 0.14, the device's own signing and
+// prekey private keys are non-extractable browser keys in IndexedDB, not sealed
+// under SK.
 import { utf8, fromUtf8, random, b64uOf } from '../lib/e2ee/bytes.js';
 import { canon, parseCanon } from '../lib/e2ee/canon.js';
 
@@ -142,6 +149,9 @@ function wrap(kv, dbName, osKey = null) {
   // The key first: loading it may seal every entry again (a 0.12.0 profile), so the entry is read after.
   const sealedGet = async (store, key) => { await storageKey(); return unseal(await kv.get(store, key), `${store}/${key}`); };
   const sealedPut = async (store, key, value) => kv.put(store, key, value == null ? null : await seal(value, `${store}/${key}`));
+  // 0.14: text of any size (the device copy), and raw bytes (PKCS#8 private keys), sealed under SK.
+  const textPut = async (key, text) => kv.put('meta', key, text == null ? null : await gcm(await storageKey(), `meta/${key}`, utf8(text)));
+  const textGet = async (key) => { await storageKey(); const box = await kv.get('meta', key); return box ? fromUtf8(await ungcm(await storageKey(), `meta/${key}`, box)) : null; };
   return {
     name: dbName,
     /** Loads the storage key now (moving a 0.12.0 profile over); throws StoreLocked if the key store won't open it. */
@@ -155,6 +165,12 @@ function wrap(kv, dbName, osKey = null) {
     putAsb: (asb) => sealedPut('asb', 'asb', asb),
     getSecret: (k) => sealedGet('meta', k),
     putSecret: (k, v) => sealedPut('meta', k, v),
+    /** 0.14: a sealed text entry (null deletes it; the delete is started at once, so it lands before a close). */
+    getSealedText: (k) => textGet(k),
+    putSealedText: (k, text) => (text == null ? kv.del('meta', k) : textPut(k, text)),
+    /** 0.14: bytes sealed under SK with a label, as { iv, ct } kept by the caller. */
+    sealBytes: async (label, bytes) => gcm(await storageKey(), label, bytes),
+    openBytes: async (label, box) => ungcm(await storageKey(), label, box),
     getPlain: (k) => kv.get('pins', k),
     putPlain: (k, v) => kv.put('pins', k, v),
     close: () => kv.close(),
@@ -166,8 +182,24 @@ export async function openStore(userId, osKey = null) {
   const name = `snug-e2ee:${userId}`;
   return wrap(idbKv(await openDb(name)), name, osKey);
 }
+// 0.14: one store per account in this page, shared by encryption (js/e2ee/manager.js) and the device copy
+// (js/devicecopy.js), so they never make two storage keys at once. Closing it lets the next call open it again.
+const shared = new Map();
+export function sharedStore(userId, osKey = null) {
+  if (!shared.has(userId)) {
+    const p = openStore(userId, osKey).then((st) => {
+      const close = st.close;
+      st.close = () => { if (shared.get(userId) === p) shared.delete(userId); close(); };
+      return st;
+    });
+    p.catch(() => { if (shared.get(userId) === p) shared.delete(userId); });
+    shared.set(userId, p);
+  }
+  return shared.get(userId);
+}
 /** Forget this device's keys for an account (after "remove this device's keys"). */
 export function deleteStore(userId) {
+  shared.delete(userId);
   return new Promise((resolve) => { const r = indexedDB.deleteDatabase(`snug-e2ee:${userId}`); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
 }
 /** In memory only: tests, and nothing persists. */

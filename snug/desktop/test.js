@@ -1374,6 +1374,9 @@ test("join mode, pinned: the app's own client runs at a plain-http LAN address, 
   await page.click('.layer-nav .row:has-text("Encryption")');
   await page.locator('.layer-col :text("Snug app (built-in code)")').first().waitFor();
   await page.locator('.layer-col :text("isn’t https")').first().waitFor(); // plain http: what crosses the network unencrypted is said
+  // 0.14: "sealed with the system key store" only where it is true: a working key store (this device was made under it just now).
+  const sealedHere = await page.evaluate(() => window.snug.e2ee.E2.keyStore === "os");
+  assert.equal(/sealed with the system key store/.test(await page.locator(".e2-limits").textContent()), sealedHere);
   // A house to post a file in (house rooms aren't encrypted, so a plain upload is right there).
   await page.keyboard.press("Escape");
   await page.click(".rail-add");
@@ -1609,6 +1612,161 @@ test("encryption keys and the OS key store: a 0.12.0 profile is upgraded without
   assert.equal(dev5.skw, "check,salt,v");
   assert.notEqual(JSON.parse(fs.readFileSync(storeFile, "utf8")).key, JSON.parse(fs.readFileSync(`${storeFile}.locked`, "utf8")).key, "a new secret");
   assert.equal(fs.existsSync(`${storeFile}.locked`), true, "the secret that couldn't be opened is put aside, not deleted");
+  await app.close();
+});
+
+// ---------- 0.14 S3: this device's copy of messages, sealed under the storage key (js/devicecopy.js) ----------
+// What localStorage holds, as one string, and the sealed "copy.*" entries of the account's store.
+const localText = (page) => page.evaluate(() => Object.entries(localStorage).map(([k, v]) => `${k}=${v}`).join("\n"));
+const sealedCopy = (page) => page.evaluate(() => new Promise((resolve, reject) => {
+  const r = indexedDB.open(`snug-e2ee:${window.snug.S.me}`);
+  r.onerror = () => reject(r.error);
+  r.onsuccess = () => {
+    const tx = r.result.transaction("meta", "readonly");
+    const st = tx.objectStore("meta");
+    const keys = st.getAllKeys();
+    const vals = st.getAll();
+    tx.oncomplete = () => {
+      const out = {};
+      keys.result.forEach((k, i) => { if (String(k).startsWith("copy.")) { const v = vals.result[i]; out[k] = v && v.ct ? new TextDecoder("latin1").decode(v.ct) : null; } });
+      r.result.close();
+      resolve(out);
+    };
+  };
+}));
+
+test("S3: in the app, the copy of messages, drafts and the offline queue are sealed under the storage key; 0.13's plaintext copy is moved and deleted", { skip: !!process.env.SNUG_BIN && "SNUG_KEYSTORE is only honoured when running from source" }, async (t) => {
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-copy-"));
+  t.after(() => removeDir(userData));
+  const H = await import(require("url").pathToFileURL(path.join(__dirname, "..", "tests", "helpers", "e2ee.js")).href);
+  // 1. No key store (as 0.13 everywhere): the copy is plain localStorage.
+  let { app, page } = await launchWith(userData, { config: { mode: "host" }, env: { SNUG_KEYSTORE: "off" } });
+  await signUpIn(page, "cara");
+  const srv = { port: await app.evaluate(() => globalThis.snugHostForTest().port) };
+  const cookie = (await app.evaluate(({ session }, url) => session.defaultSession.cookies.get({ url }), `http://127.0.0.1:${srv.port}`)).map((c) => `${c.name}=${c.value}`).join("; ");
+  const sock = await new H.Sock(srv, cookie).connect();
+  const { room } = await sock.ok("house.create", { name: "Cara’s place", hue: 30 });
+  await sock.ok("msg.send", { conv: room, id: "m_copytest00000001", text: "plain words before the upgrade" });
+  await page.waitForFunction(() => Object.values(window.snug.S.msgs).flat().some((m) => m.text === "plain words before the upgrade"));
+  await page.evaluate((r) => { window.snug.S.drafts[r] = "a draft typed before the upgrade"; window.snug.emit(); }, room);
+  await page.waitForFunction(() => (localStorage.getItem("snug.cache") || "").includes("plain words before the upgrade") && (localStorage.getItem("snug.drafts") || "").includes("a draft typed"), null, { timeout: 15000 });
+  await sock.close();
+  await app.close();
+
+  // 2. A key store: moved into the sealed copy, deleted from localStorage, and opened from there.
+  ({ app, page } = await launchWith(userData, { env: { SNUG_KEYSTORE: "test" } }));
+  await page.waitForSelector(".nav");
+  await page.waitForFunction(() => window.snug.S.ready);
+  assert.equal(await page.evaluate((r) => window.snug.S.drafts[r], room), "a draft typed before the upgrade", "the draft came back from the sealed copy");
+  const moved = await localText(page);
+  assert.doesNotMatch(moved, /plain words before|a draft typed/, "no message or draft text left in localStorage");
+  const srv2 = { port: await app.evaluate(() => globalThis.snugHostForTest().port) };
+  const cookie2 = (await app.evaluate(({ session }, url) => session.defaultSession.cookies.get({ url }), `http://127.0.0.1:${srv2.port}`)).map((c) => `${c.name}=${c.value}`).join("; ");
+  const sock2 = await new H.Sock(srv2, cookie2).connect();
+  await sock2.ok("msg.send", { conv: room, id: "m_copytest00000002", text: "words after the upgrade" });
+  await page.waitForFunction(() => Object.values(window.snug.S.msgs).flat().some((m) => m.text === "words after the upgrade"));
+  await new Promise((r) => setTimeout(r, 3000)); // the copy is written at most every 2 seconds
+  const sealed = await sealedCopy(page);
+  assert.ok(sealed["copy.cache"] && sealed["copy.drafts"], "the copy and the drafts are sealed entries");
+  for (const [k, v] of Object.entries(sealed)) assert.doesNotMatch(v || "", /words after|plain words|a draft typed/, `${k} holds no plaintext`);
+
+  // 3. After a reload: still nothing readable in localStorage, and the draft is still there.
+  await page.reload();
+  await page.waitForSelector(".nav");
+  await page.waitForFunction(() => window.snug.S.ready);
+  assert.equal(await page.evaluate((r) => window.snug.S.drafts[r], room), "a draft typed before the upgrade");
+  assert.doesNotMatch(await localText(page), /words after|plain words|a draft typed/, "after a reload, localStorage holds no message text");
+  await page.click('.me-row [aria-label="Settings"], .me-panel [aria-label="Settings"]');
+  await page.click('.layer-nav .row:has-text("Your data")');
+  await page.locator("#copy-sealed").waitFor();
+  await sock2.close();
+  await app.close();
+});
+
+// ---------- 0.14 S4: this device's signing and prekey private keys sealed under the storage key ----------
+// The device record as IndexedDB keeps it: which private keys are live CryptoKeys, and which are sealed boxes.
+const deviceRecord = (page, change = null) => page.evaluate((ch) => new Promise((resolve, reject) => {
+  const r = indexedDB.open(`snug-e2ee:${window.snug.S.me}`);
+  r.onerror = () => reject(r.error);
+  r.onsuccess = () => {
+    const tx = r.result.transaction("dev", "readwrite");
+    const st = tx.objectStore("dev");
+    const g = st.get("device");
+    g.onsuccess = () => {
+      const dev = g.result;
+      if (ch === "age") { for (const p of Object.values(dev.prekeys)) p.created -= 8 * 86_400_000; st.put(dev, "device"); }
+      resolve({
+        kid: dev.kid,
+        dsk: { priv: dev.dsk.privateKey instanceof CryptoKey, sealed: !!dev.dskSealed?.ct },
+        prekeys: Object.fromEntries(Object.entries(dev.prekeys).map(([k, p]) => [k, { priv: p.pair.privateKey instanceof CryptoKey, sealed: !!p.sealed?.ct }])),
+      });
+    };
+    tx.oncomplete = () => r.result.close();
+  };
+}), change);
+
+test("S4: in the app, new device signing and prekey private keys are sealed under the storage key; after a rotation and a restart messages still open", { skip: !!process.env.SNUG_BIN && "SNUG_KEYSTORE is only honoured when running from source" }, async (t) => {
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-sealedkeys-"));
+  t.after(() => removeDir(userData));
+  const H = await import(require("url").pathToFileURL(path.join(__dirname, "..", "tests", "helpers", "e2ee.js")).href);
+  let { app, page } = await launchWith(userData, { config: { mode: "host" }, env: { SNUG_KEYSTORE: "test" } });
+  await signUpIn(page, "dana");
+  await e2eeTurnOn(page);
+  assert.equal(await page.evaluate(() => window.snug.e2ee.E2.keyStore), "os");
+  let rec = await deviceRecord(page);
+  assert.deepEqual(rec.dsk, { priv: false, sealed: true }, "the signing key is kept sealed, never as a CryptoKey");
+  assert.deepEqual(rec.prekeys, { 1: { priv: false, sealed: true } });
+  await encryptionPage(page);
+  await page.locator('.e2-limits :text("sealed with the system key store")').waitFor();
+  await page.keyboard.press("Escape");
+  // Fay writes to Dana in an encrypted DM.
+  const srv = { port: await app.evaluate(() => globalThis.snugHostForTest().port) };
+  const cookie = (await app.evaluate(({ session }, url) => session.defaultSession.cookies.get({ url }), `http://127.0.0.1:${srv.port}`)).map((c) => `${c.name}=${c.value}`).join("; ");
+  const fay = await H.register(srv, "fay4");
+  fay.sock = await new H.Sock(srv, fay.cookie).connect();
+  fay.dev = await H.newDevice(fay.id);
+  const { acct, payload } = await H.setupPayload(fay.id, fay.dev);
+  fay.acct = acct;
+  await fay.sock.ok("e2ee.setup", payload);
+  await H.bind(fay.sock, fay.dev);
+  const dana = { id: await page.evaluate(() => window.snug.S.me) };
+  await fay.sock.ok("friend.request", { handle: "dana" });
+  const danaSock = await new H.Sock(srv, cookie).connect();
+  await danaSock.ok("friend.accept", { user: fay.id });
+  await danaSock.close();
+  const { id: dm } = await fay.sock.ok("dm.open", { users: [dana.id] });
+  const users = [dana.id, fay.id].sort();
+  const send = async (text) => {
+    const id = `m_${[...H.random(16)].map((b) => "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36]).join("")}`;
+    const { e2ee } = await H.sealFrom(fay, { conv: dm, id, users, body: { text } });
+    await fay.sock.ok("msg.send", { conv: dm, id, text: "", e2ee });
+    return id;
+  };
+  const opens = (id, text) => page.waitForFunction(([mid, tx]) => Object.values(window.snug.S.msgs).flat().some((m) => m.id === mid && m.enc === true && m.text === tx), [id, text], { timeout: 30000 });
+  const first = await send("before the rotation");
+  await opens(first, "before the rotation");
+  // A week on: the prekey is due, so the next start makes a new one, sealed too.
+  await deviceRecord(page, "age");
+  await fay.sock.close();
+  await app.close();
+  ({ app, page } = await launchWith(userData, { env: { SNUG_KEYSTORE: "test" } }));
+  await page.waitForFunction(() => window.snug?.e2ee.E2.status === "ready", null, { timeout: 30000 });
+  // The app's server listens on a new port after a restart: Fay reconnects there.
+  fay.sock = await new H.Sock({ port: await app.evaluate(() => globalThis.snugHostForTest().port) }, fay.cookie).connect();
+  await H.bind(fay.sock, fay.dev);
+  await page.waitForFunction(() => new Promise((res) => { const r = indexedDB.open(`snug-e2ee:${window.snug.S.me}`); r.onsuccess = () => { const g = r.result.transaction("dev").objectStore("dev").get("device"); g.onsuccess = () => { r.result.close(); res(g.result.kid >= 2); }; }; }), null, { timeout: 30000 });
+  rec = await deviceRecord(page);
+  for (const [kid, p] of Object.entries(rec.prekeys)) assert.deepEqual(p, { priv: false, sealed: true }, `prekey ${kid}: no raw private CryptoKey in IndexedDB`);
+  await opens(first, "before the rotation");
+  const second = await send("after the rotation");
+  await opens(second, "after the rotation");
+  await fay.sock.close();
+  await app.close();
+  // After a restart, both still open with the keys unsealed from IndexedDB.
+  ({ app, page } = await launchWith(userData, { env: { SNUG_KEYSTORE: "test" } }));
+  await page.waitForFunction(() => window.snug?.e2ee.E2.status === "ready", null, { timeout: 30000 });
+  await opens(first, "before the rotation");
+  await opens(second, "after the rotation");
   await app.close();
 });
 

@@ -123,7 +123,14 @@ from **Settings > Desktop app**). Every release's notes carry the same steps.
   desktop app's encryption keys under the system key store, 0.12 can't open
   them, so encrypted messages can't be read in that app until it is updated
   again, or until that computer is removed from another device (Settings >
-  Encryption) and added again. With *Automatically* (the default), the app
+  Encryption) and added again. Going back from 0.14 to 0.13 or older: files
+  0.14 stored (attachments, avatars, stickers, emoji, sounds, link-preview
+  pictures, and older files once the background job has sealed them, within
+  hours) can't be opened by the older version, and the desktop app's copy of
+  messages, drafts and changes waiting to send don't carry back (0.14 moved
+  them into sealed storage). Turning off `SNUG_FILES_REENCRYPT` doesn't prevent
+  this, since new files are always sealed. Returning to 0.14 makes them
+  readable again. With *Automatically* (the default), the app
   takes the newest release again at its next check, so a person can go back
   only for a while; *Tell me* or *Only when I ask* keeps the older one until
   they install. **To stop a broken release for everyone**, the owner edits
@@ -1315,6 +1322,7 @@ behind a reverse proxy that terminates TLS and passes WebSocket upgrades on
 | `SNUG_QUOTA_MB` | Room for each person's files, in MB (`0`: no quota) | `2048` |
 | `SNUG_HOUSE_QUOTA_MB` | Room for the files in each house's rooms, in MB (`0`: no quota) | `10240` |
 | `SNUG_DISK_FLOOR_MB` | Free disk space an upload must leave, in MB | `1024` |
+| `SNUG_FILES_REENCRYPT=off` | Don't seal attachment files from before 0.14 in the background (they stay readable either way) | on |
 
 **Someone lost their password and their recovery key?** After checking who is
 asking (Snug can't do that part), run `npm run reset-password -- <username>`
@@ -1326,7 +1334,12 @@ end-to-end encrypted.
 
 Back up the `data` folder; it is the whole state. Keep `data/secret.key` (or
 `SNUG_DATA_KEY`) with it but stored apart: without it two-factor sign-in can't be
-checked, and with the database alone nobody can make codes. Change the sample password
+checked, and with the database alone nobody can make codes. Since 0.14 it also
+opens the attachment files and the database snapshots: they are encrypted on disk
+under keys derived from it, so a backup without it can't be restored, and a copied
+`files` or `backups` folder without it shows nothing. The live `snug.db` is not
+encrypted, and whoever runs the server (or can read `secret.key`) can read
+everything; use full-disk encryption too (SECURITY.md, "Stored data at rest"). Change the sample password
 before seeding anything that faces the internet, or better, do not seed there.
 
 ## Security
