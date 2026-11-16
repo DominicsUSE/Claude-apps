@@ -151,9 +151,13 @@ built from `js/lib/privacy.js` and `GET /api/privacy` (`server/privacy.js`).
 - Who sees that someone is online (everyone sharing a place, friends only, nobody) and typing are applied to
   every frame the server sends (`hub.outFilter`), not only in the browser: presence, status, the "last wrote"
   lines, house voice-room lists for people not in the room, and houses' online and in-voice counts. Message
-  times and who is in a voice room, for people in it, stay visible. In P2P mode, friends only also leaves group
-  co-members who aren't friends out of the PC's watch list at the registry, which shares presence only between
-  PCs that watch each other.
+  times and who is in a voice room, for people in it, stay visible. In P2P mode, friends only watches group
+  co-members who aren't friends "quietly" at the registry: it sends them no presence, and their PCs can signal
+  (sig, relay, TURN) to the PC only after it has contacted them in its current registry session, the same
+  answer as offline otherwise. The PC contacts each such co-member when they come online, so group messages,
+  files and calls keep connecting directly; a modified client on their side can therefore still tell when the
+  PC is online. A registry without quiet watches (no `quiet` in its `ready` frame) gets the older behaviour:
+  those co-members aren't watched, so neither side can open a link to the other.
 - In P2P mode, link previews for links friends send are off unless the PC's owner turns them on, since the
   fetch reveals the PC's address to the linked site.
 - Deleting an account can erase what the person wrote (messages, files, reactions, poll votes, sign-in and

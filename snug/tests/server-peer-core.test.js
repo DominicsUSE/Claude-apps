@@ -6,7 +6,7 @@ process.env.SNUG_GROUP_FWD_MS = '200';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startRegistry, startPc, signUp, until, mid } from './helpers/p2p.js';
-import { threePcs } from './helpers/groups.js';
+import { threePcs, texts } from './helpers/groups.js';
 import { dmIdFor } from '../server/peercrypto.js';
 
 let registry;
@@ -154,4 +154,26 @@ test('presence "friends only": co-members of a group across PCs who aren’t fri
   // Back to everyone: the co-member sees B again.
   await b.ok('prefs.set', { prefs: { presenceTo: 'everyone' } });
   await until(() => C.peer.isOnline(uidOf(b)), 10_000, 'C sees B again');
+});
+
+// review-media 4 (pass 2): friends only hides me from group co-members who aren't friends without cutting
+// them off: the registry is told they're quiet (no presence, they reach me once my PC contacted theirs),
+// and group messages still go both ways directly, with no common friend online to pass them on.
+test('presence "friends only": group messages still go both ways between co-members who aren’t friends', async () => {
+  const t = await threePcs(registry, pcs, ['fogana', 'fogbea', 'fogcal']);
+  const { A, B, C, a, b, c } = t;
+  const g = (await a.ok('dm.open', { users: [b.id, c.id] })).id;
+  const all = [a.id, b.id, c.id].sort().join();
+  const members = (s) => s.db.all('SELECT user FROM dm_members WHERE dm = ? ORDER BY user', g).map((r) => r.user).join();
+  await until(() => members(B) === all && members(C) === all, 12_000, 'group on every PC');
+  await until(() => C.peer.isOnline(uidOf(b)) && B.peer.isOnline(uidOf(c)), 10_000, 'co-member presence');
+  await b.ok('prefs.set', { prefs: { presenceTo: 'friends' } });
+  await until(() => !C.peer.isOnline(uidOf(b)), 10_000, 'C no longer sees B online');
+  // The common friend goes away, so nobody can pass messages on.
+  await A.close(); pcs.splice(pcs.indexOf(A), 1);
+  await c.ok('msg.send', { conv: g, id: mid(), text: 'from cal while ana is away' });
+  await until(() => texts(B, g).includes('from cal while ana is away'), 15_000, 'B gets C’s message');
+  await b.ok('msg.send', { conv: g, id: mid(), text: 'from bea while ana is away' });
+  await until(() => texts(C, g).includes('from bea while ana is away'), 15_000, 'C gets B’s message');
+  assert.equal(C.peer.isOnline(uidOf(b)), false, 'C still isn’t shown B online');
 });

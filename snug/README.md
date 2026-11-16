@@ -1388,9 +1388,14 @@ mode you're in. The short version:
   with, friends only, nobody), which also hides your status, your "Recently
   here" and "last wrote" lines, that you're in a voice room (from anyone not
   in it with you) and you from houses' online counts. People still see when
-  each message was sent. On the desktop app, friends only also stops sharing
-  presence with members of your groups across PCs who aren't your friends
-  (both ways: you don't see them online either); typing on or off (off stops sending and showing it, and
+  each message was sent. On the desktop app, friends only also hides you from
+  members of your groups across PCs who aren't your friends: the registry
+  doesn't tell their PCs you're online. Group messages, files and calls
+  between you still connect directly, because your PC contacts theirs when
+  they come online, so their PC (not their Snug) can tell you're online while
+  that happens. With a registry that predates this, your PC doesn't connect
+  to them at all and group messages between you wait for a friend of both to
+  pass them on; typing on or off (off stops sending and showing it, and
   nothing is sent while invisible); who can message, befriend or invite you.
   Read receipts don't exist in Snug.
 - **Your data**: Settings > Your data downloads one zip (profile, settings,

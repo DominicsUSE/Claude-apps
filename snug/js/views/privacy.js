@@ -62,7 +62,7 @@ export function PrivacyOverview({ openGuide }) {
 
 // What "Who sees when you're online" covers, and what stays visible whatever it says (review-media 4 and 6).
 export const PRESENCE_HINT = 'Also your status, your “Recently here” and “last wrote” lines, and that you’re in a voice room, for anyone not in it with you. People still see when each message was sent, and people in a voice room with you see you there.';
-export const PRESENCE_HINT_P2P = 'With friends only, members of your groups with friends on other PCs who aren’t your friends don’t see you online, and you don’t see them online either.';
+export const PRESENCE_HINT_P2P = 'With friends only, members of your groups on other PCs who aren’t your friends don’t see you online. Your PC still connects to theirs to swap group messages, so their PC can tell you’re online while it does.';
 
 // Settings > Privacy and safety: when you're online, typing, and (desktop) friends' link previews.
 export function PrivacyControls({ Row }) {
