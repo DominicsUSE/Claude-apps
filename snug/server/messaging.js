@@ -259,8 +259,17 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
     if (full) fail(full.message);
     const id = newId('f');
     copyFileSync(join(cfg.filesDir, src.id), join(cfg.filesDir, id));
+    // 0.13: a copy of a friend's file from another PC is the copier's own file, not a cache of theirs
+    // (server/peer.js would neither serve it to anyone nor keep its bytes past the cache size).
+    let keep = src.meta ?? null;
+    if (meta === undefined && keep) {
+      try {
+        const m = JSON.parse(keep);
+        if (m?.remote) { for (const k of ['remote', 'have', 'rid', 'used', 'decl', 'failed']) delete m[k]; keep = JSON.stringify(m); }
+      } catch { /* kept as it was */ }
+    }
     db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      id, owner, conv, src.name, src.type, src.size, Date.now(), meta === undefined ? src.meta ?? null : JSON.stringify(meta));
+      id, owner, conv, src.name, src.type, src.size, Date.now(), meta === undefined ? keep : JSON.stringify(meta));
     return id;
   }
 

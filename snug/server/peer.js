@@ -27,7 +27,7 @@ import {
 import { UserError, rtcSignal } from './ops.js'; // sec-integrate: rtcSignal, the same check a local call member gets
 import { limiter } from './auth.js';
 import { uploadType, AUDIO_TYPES, VIDEO_TYPES } from './media.js';
-import { imageInfo } from './messaging.js';
+import { imageInfo, POLL_HOURS } from './messaging.js';
 import { HUES } from '../js/lib/util.js';
 
 const DAY = 86_400_000;
@@ -49,8 +49,8 @@ const MSG_ID = /^m_[a-z0-9]{8,40}$/;
 // 0.12: what this PC understands beyond 0.11, told to friends in its signed
 // profile. A friend's PC is only sent these frames once its profile lists them
 // (a 0.11 PC refuses a frame it doesn't know): thread replies over the link,
-// pins, and the disappearing-messages timer.
-export const PEER_CAPS = ['thread', 'pin', 'ttl'];
+// pins, and the disappearing-messages timer. 0.13: polls (a poll, its votes and its end).
+export const PEER_CAPS = ['thread', 'pin', 'ttl', 'poll'];
 const TTLS = [0, 3_600_000, 86_400_000, 7 * 86_400_000, 30 * 86_400_000];
 const CALL_ID = /^call_[a-z0-9]{8,40}$/;
 const HASH = /^[A-Za-z0-9_-]{43}$/;
@@ -413,7 +413,10 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       snap.kver, snap.ver, d.sig, JSON.stringify({ avatar: mediaOk(pr.avatar, MAX_PIC), banner: mediaOk(pr.banner, MAX_PIC), ...(Number.isSafeInteger(pr.maxFile) && pr.maxFile > 0 ? { maxFile: pr.maxFile } : {}) }), uid);
     // 0.12: what their PC understands (none listed: a 0.11 PC).
     const caps = Array.isArray(pr.caps) ? [...new Set(pr.caps.filter((x) => typeof x === 'string' && /^[a-z0-9.]{1,24}$/.test(x)))].slice(0, 32) : [];
+    const capsBefore = p.caps || '[]';
     db.run('UPDATE peers SET caps = ? WHERE uid = ?', JSON.stringify(caps), uid);
+    // 0.13: what their conversations offer (polls, the timer) follows: the owner's page gets them again.
+    if (JSON.stringify(caps) !== capsBefore && owner()) for (const r of db.all('SELECT dm FROM dm_members WHERE user = ?', shadow)) hub.sendDm(owner(), r.dm);
     stats.profileApplied++;
     hub.userChanged(shadow);
     // A new username: believed only if the registry agrees (section 6.2).
@@ -669,9 +672,9 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       if (conv !== dm && replyTo === d.t) replyTo = null;
       if (conv === dm && !replyTo && root?.conv === dm) replyTo = root.id;
       const files = acceptFiles(uid, conv, d.files);
-      ops['msg.send']({ ...asShadow(shadow), ts: Math.min(ts, Date.now() + 60_000) }, {
+      sendWithExtras({ ...asShadow(shadow), ts: Math.min(ts, Date.now() + 60_000) }, {
         conv, id: d.id, text: typeof d.text === 'string' ? d.text : '', files, ...(replyTo ? { replyTo } : {}),
-      });
+      }, extrasIn(d));
       if (files.length) queueMicrotask(() => fetchPending(uid));
     },
     'dm.edit': (uid, d) => ops['msg.edit'](asShadow(shadowId(uid)), { conv: convFor(dmIdFor(myUid(), uid), d.id), id: d.id, text: d.text }),
@@ -688,8 +691,77 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       if (!TTLS.includes(d.ttl)) fail('Bad timer.');
       ops['conv.ttl']({ ...asShadow(shadowId(uid)), ts: Math.min(ts, Date.now() + 60_000) }, { conv: ensureDm(uid), ttl: d.ttl });
     },
+    // 0.13, sent only to PCs that list 'poll': a poll, a vote (the voter's whole choice, latest wins), its end.
+    'dm.poll': (uid, d, ts) => {
+      const shadow = shadowId(uid);
+      if (!isFriend(shadow)) fail('Not friends.');
+      if (typeof d.id !== 'string' || !MSG_ID.test(d.id)) fail('Bad message id.');
+      const dm = ensureDm(uid);
+      const root = typeof d.t === 'string' && MSG_ID.test(d.t) ? M.liveMsg(d.t) : null;
+      const conv = root && root.conv === dm && !root.sys ? `t:${root.id}` : dm;
+      applyPoll({ ...asShadow(shadow), ts: Math.min(ts, Date.now() + 60_000) }, conv, d);
+    },
+    'dm.vote': (uid, d, ts) => {
+      if (!isFriend(shadowId(uid))) fail('Not friends.');
+      applyVote(shadowId(uid), convFor(dmIdFor(myUid(), uid), d.id), d.id, d.answers, Math.min(ts, Date.now() + 60_000));
+    },
+    'dm.pollend': (uid, d, ts) => {
+      if (!isFriend(shadowId(uid))) fail('Not friends.');
+      applyPollEnd(shadowId(uid), convFor(dmIdFor(myUid(), uid), d.id), d.id, Math.min(ts, Date.now()));
+    },
     profile: (uid, d) => applyProfile(uid, d),
   };
+  // ---------- Polls from friends' PCs (0.13), shared with groups across PCs ----------
+  // The poll is made with the same op as the author's shadow, then closes when the author's PC said.
+  function applyPoll(c, conv, d) {
+    if (typeof d.id !== 'string' || !MSG_ID.test(d.id) || typeof d.question !== 'string' || !Array.isArray(d.answers) || d.answers.length > 10
+      || !Number.isSafeInteger(d.ends)) fail('Bad poll.');
+    if (M.msg(d.id)) return;
+    const answers = d.answers.map((a) => ({ text: typeof a?.text === 'string' ? a.text : '', ...(typeof a?.emoji === 'string' && a.emoji ? { emoji: a.emoji } : {}) }));
+    const longest = POLL_HOURS[POLL_HOURS.length - 1];
+    ops['poll.create'](c, { conv, id: d.id, question: d.question, answers, hours: longest, multi: d.multi === true, hidden: d.hidden === true });
+    const t = c.ts || Date.now();
+    db.run('UPDATE polls SET ends = ? WHERE msg = ?', Math.max(0, Math.min(d.ends, t + longest * 3_600_000)), d.id);
+    pollChanged(conv, d.id);
+  }
+  const pollOf = (conv, id) => {
+    const row = typeof id === 'string' && MSG_ID.test(id) ? M.liveMsg(id) : null;
+    return row && row.conv === conv ? db.get('SELECT * FROM polls WHERE msg = ?', id) : null;
+  };
+  // A vote: the voter's choices as they were at `ts`. An older vote than the one held changes nothing.
+  function applyVote(user, conv, id, answers, ts) {
+    const p = pollOf(conv, id);
+    if (!p || !Array.isArray(answers) || answers.length > 10) return false;
+    if ((p.ended && p.ended <= ts) || p.ends <= ts) return false;
+    const n = json(p.answers, []).length;
+    const picks = [...new Set(answers)];
+    if (!picks.every((a) => Number.isInteger(a) && a >= 0 && a < n) || (!p.multi && picks.length > 1)) return false;
+    const last = db.get('SELECT MAX(ts) t FROM poll_votes WHERE msg = ? AND user = ?', id, user)?.t;
+    if (last && last > ts) return false;
+    db.tx(() => {
+      db.run('DELETE FROM poll_votes WHERE msg = ? AND user = ?', id, user);
+      for (const a of picks) db.run('INSERT INTO poll_votes (msg, user, answer, ts) VALUES (?, ?, ?, ?)', id, user, a, ts);
+    });
+    pollChanged(conv, id);
+    return true;
+  }
+  // Only the person who started a poll ends it; it ends at the time their PC said.
+  function applyPollEnd(user, conv, id, at) {
+    const p = pollOf(conv, id);
+    if (!p || p.by !== user || p.ended) return false;
+    db.run('UPDATE polls SET ended = ?, closed = 1 WHERE msg = ?', Math.min(at, Date.now()), id);
+    // Votes cast after the author's end don't count anywhere.
+    db.run('DELETE FROM poll_votes WHERE msg = ? AND ts > ?', id, Math.min(at, Date.now()));
+    pollChanged(conv, id);
+    return true;
+  }
+  // The only page that reads a conversation with friends on other PCs here is the owner's.
+  function pollChanged(conv, id) {
+    try {
+      const v = ops['poll.view']({ user: owner(), ws: null }, { conv, id });
+      toOwner('poll', { conv, id, poll: v.poll });
+    } catch (e) { if (!(e instanceof UserError)) throw e; }
+  }
   // Attachment metadata from a friend's PC (bytes come later from their PC): local file rows owned by their shadow.
   function acceptFiles(uid, conv, list) {
     const shadow = shadowId(uid);
@@ -708,6 +780,68 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       files.push({ id, ...(Number.isInteger(f.w) && Number.isInteger(f.h) ? { w: f.w, h: f.h } : {}) });
     }
     return files;
+  }
+  // ---------- Forwarded messages and stickers (0.13) ----------
+  // Out: the card as a friend's PC can show it (who wrote it by uid and name, when, the text, a sticker's name).
+  // A PC without forwarded cards (0.11, 0.12.0) reads `text`: the note, the quoted message and who wrote it.
+  function fwdOut(f) {
+    if (!f || typeof f !== 'object') return null;
+    const a = f.author === owner() ? myUid() : isRemote(f.author) ? uidOf(f.author) : null;
+    const name = String(M.userRow(f.author)?.name || 'Someone').slice(0, 64);
+    return {
+      ...(a ? { a } : {}), name, ts: Number.isSafeInteger(f.ts) ? f.ts : 0, text: String(f.text || '').slice(0, 4000),
+      ...(f.sticker?.name ? { sticker: { name: String(f.sticker.name).slice(0, 64) } } : {}),
+    };
+  }
+  function fwdText(note, f) {
+    const quoted = f.text ? f.text.split('\n').map((l) => `> ${l}`).join('\n') : '';
+    const said = `${quoted}${quoted ? '\n' : ''}— ${f.name}, forwarded`;
+    return [note, said].filter(Boolean).join('\n\n').slice(0, 4000);
+  }
+  // The extra fields of a message frame (dm.msg, a group's msg item) for one that is a forward or a sticker.
+  function extrasOut(m) {
+    const fwd = fwdOut(m.fwd);
+    return {
+      ...(fwd ? { text: fwdText(m.text || '', fwd), note: String(m.text || ''), fwd } : {}),
+      ...(m.sticker?.name ? { sticker: { name: String(m.sticker.name).slice(0, 64) } } : {}),
+    };
+  }
+  // In: the card as stored here, the author mapped to someone this PC knows (else only their name shows).
+  const cleanName = (n) => (typeof n === 'string' ? n.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, ' ').trim().slice(0, 64) : '') || 'Someone';
+  function extrasIn(d) {
+    const out = {};
+    const f = d && typeof d.fwd === 'object' && d.fwd ? d.fwd : null;
+    if (f && typeof f.text === 'string' && f.text.length <= 4000 && Number.isSafeInteger(f.ts)) {
+      const a = isUid(f.a) ? f.a : null;
+      const author = a === myUid() ? owner() : a && M.userRow(shadowId(a)) ? shadowId(a) : null;
+      out.fwd = { conv: null, id: null, author, name: cleanName(f.name), ts: f.ts, text: f.text, ...(f.sticker && typeof f.sticker.name === 'string' ? { sticker: { name: cleanName(f.sticker.name) } } : {}) };
+      out.text = typeof d.note === 'string' ? d.note : '';
+    }
+    if (d && d.sticker && typeof d.sticker.name === 'string') out.sticker = { id: null, name: cleanName(d.sticker.name), house: null };
+    return out.fwd || out.sticker ? out : null;
+  }
+  // Send a friend's message here with its card or sticker on it: the message event already carries them.
+  const inExtras = new Map();
+  const baseMsgView = M.msgView;
+  M.msgView = (row, rx) => {
+    const m = baseMsgView(row, rx);
+    const x = inExtras.get(row.id);
+    if (x?.fwd && !m.fwd) m.fwd = x.fwd;
+    if (x?.sticker && !m.sticker) m.sticker = x.sticker;
+    return m;
+  };
+  function sendWithExtras(c, d, x) {
+    if (!x) return ops['msg.send'](c, d);
+    if (x.fwd) { d.text = x.text; M.emptyOk?.add(d); }
+    inExtras.set(d.id, x);
+    let r;
+    try { r = ops['msg.send'](c, d); } finally { inExtras.delete(d.id); }
+    const row = M.msg(d.id);
+    if (row && !row.fwd && !row.sticker) {
+      db.run('UPDATE messages SET fwd = ?, sticker = ?, fold = ? WHERE id = ?', x.fwd ? JSON.stringify(x.fwd) : null, x.sticker ? JSON.stringify(x.sticker) : null,
+        M.foldText(`${d.text || ''} ${x.fwd?.text || ''} ${x.sticker?.name || ''}`, json(row.files, [])), d.id);
+    }
+    return r;
   }
   function ingestDurable(uid, Pf) {
     const fn = Object.hasOwn(DURABLE, Pf.t) ? DURABLE[Pf.t] : null;
@@ -1018,6 +1152,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
   // Messages and what happens to them follow their thread's conversation (0.12, bug B3).
   const sendableMsg = (c, conv) => sendable(c, threadParent(conv) || conv);
   wrap('msg.send', (c, d, base) => {
+    if (localOnly.has(d.id)) return base(c, d); // a poll's message: the poll itself goes (dm.poll)
     const shadow = sendableMsg(c, d.conv);
     if (!shadow) {
       const r = remoteOfDm(threadParent(d.conv) || d.conv);
@@ -1044,7 +1179,8 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
         // link (0.11) gets it as a reply to that message instead, so it still reads in context.
         const root = String(d.conv).startsWith('t:') ? String(d.conv).slice(2) : null;
         const thread = root ? (can(shadow, 'thread') ? { t: root } : (!m.replyTo ? { replyTo: root } : {})) : {};
-        outbox.push(shadow, 'dm.msg', m.id, JSON.stringify({ id: m.id, text: m.text, ...(m.replyTo ? { replyTo: m.replyTo } : {}), ...thread, ...(files.length ? { files } : {}) }), at);
+        // A forward or a sticker (0.13) carries its card; `text` stays what an older PC shows.
+        outbox.push(shadow, 'dm.msg', m.id, JSON.stringify({ id: m.id, text: m.text, ...(m.replyTo ? { replyTo: m.replyTo } : {}), ...thread, ...(files.length ? { files } : {}), ...extrasOut(m) }), at);
         const uid = uidOf(shadow);
         if (!links.want(uid) || !links.isUp(uid)) toOwner('msg.state', { conv: d.conv, id: m.id, state: 'waiting' });
       });
@@ -1087,11 +1223,62 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     if (shadow && !can(shadow, 'ttl')) v.ttlBlocked = OLD_PC(shadow);
     return v;
   };
-  // Polls don't travel between PCs yet: refused plainly rather than left on one PC (0.12, bug B3).
+  // Polls (0.13): the poll, each vote and its end go to the friend's PC as their own frames, once its
+  // profile says it understands them. An older PC would keep only the question: refused plainly instead.
+  const OLD_POLL = (shadow) => `${M.userRow(shadow)?.name || 'Your friend'}’s Snug needs an update before you can share a poll here. Until then, they’d only see the question.`;
+  const localOnly = new Set(); // ids of polls being made: their message goes as a poll, not as a dm.msg
   if (ops['poll.create']) wrap('poll.create', (c, d, base) => {
-    if (remoteOfDm(threadParent(d.conv) || d.conv)) fail('Polls with friends on other PCs aren’t available yet.');
-    return base(c, d);
+    const shadow = sendableMsg(c, d.conv);
+    if (!shadow) {
+      if (!c.peer && !mine(c) && remoteOfDm(threadParent(d.conv) || d.conv)) fail('You don’t have access to this conversation.');
+      return base(c, d);
+    }
+    const fresh = typeof d.id === 'string' && !M.msg(d.id);
+    if (fresh) {
+      if (!isFriend(shadow) || blockedEither(shadow)) fail(`You can only message ${M.userRow(shadow).name} while you’re friends.`);
+      if (!can(shadow, 'poll')) fail(OLD_POLL(shadow));
+      if (outbox.full(shadow)) fail(`Too many messages are waiting for ${M.userRow(shadow).name} to come online.`);
+    }
+    if (fresh) localOnly.add(d.id);
+    let r;
+    try { r = base(c, d); } finally { localOnly.delete(d.id); }
+    const p = fresh && r?.m ? db.get('SELECT * FROM polls WHERE msg = ?', r.m.id) : null;
+    if (p) {
+      const at = Math.round(reg.now());
+      const root = String(d.conv).startsWith('t:') ? String(d.conv).slice(2) : null;
+      later(() => {
+        outbox.push(shadow, 'dm.poll', p.msg, JSON.stringify({ id: p.msg, question: p.question, answers: json(p.answers, []).map((a) => ({ text: a.text, ...(a.emoji ? { emoji: a.emoji } : {}) })), multi: !!p.multi, hidden: !!p.hidden, ends: p.ends, ...(root ? { t: root } : {}) }), at);
+        links.want(uidOf(shadow));
+      });
+    }
+    return r;
   });
+  if (ops['poll.vote']) wrap('poll.vote', (c, d, base) => {
+    const shadow = sendableMsg(c, d.conv);
+    const r = base(c, d);
+    if (shadow && can(shadow, 'poll') && Array.isArray(r?.votes)) {
+      const at = Math.round(reg.now());
+      later(() => { outbox.push(shadow, 'dm.vote', d.id, JSON.stringify({ id: d.id, answers: r.votes }), at); links.want(uidOf(shadow)); });
+    }
+    return r;
+  });
+  if (ops['poll.end']) wrap('poll.end', (c, d, base) => {
+    const shadow = sendableMsg(c, d.conv);
+    const was = shadow ? db.get('SELECT ended FROM polls WHERE msg = ?', d.id) : null;
+    const r = base(c, d);
+    if (shadow && can(shadow, 'poll') && was && !was.ended) {
+      const at = Math.round(reg.now());
+      later(() => { outbox.push(shadow, 'dm.pollend', d.id, JSON.stringify({ id: d.id }), at); links.want(uidOf(shadow)); });
+    }
+    return r;
+  });
+  const baseDmView2 = M.dmView;
+  M.dmView = (id, viewer) => {
+    const v = baseDmView2(id, viewer);
+    const shadow = v && viewer === owner() ? remoteOfDm(id) : null;
+    if (shadow && !can(shadow, 'poll')) v.pollBlocked = OLD_POLL(shadow);
+    return v;
+  };
   wrap('typing', (c, d, base) => {
     const r = base(c, d);
     const shadow = sendable(c, d.conv);
@@ -1402,6 +1589,8 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     _g: {
       hooks: G, DURABLE, EPHEMERAL, owner, myUid, active, isRemote, uidOf, peerOf, isFriend, isContact, blockedEither,
       ensureShadow, shadowFor, verifyFrom, acceptFiles, fetchPending, later, toOwner, asShadow, outbox, links, online, fitsPeers, capsOf, threadParent, // fitsPeers, capsOf, threadParent: 0.12
+      localOnly, applyPoll, applyVote, applyPollEnd, // 0.13: polls
+      extrasOut, extrasIn, sendWithExtras, // 0.13: forwarded messages and stickers
       hashOf: (id) => blobs.hashOf(id), now: () => reg.now(), watchSoon, kver: () => Number(self?.kver) || 1,
     },
   });

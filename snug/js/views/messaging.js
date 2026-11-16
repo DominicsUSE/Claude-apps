@@ -17,7 +17,6 @@ import { fmtStamp, STAMP_STYLES } from '../lib/format.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Rich, Switch } from '../ui/kit.js';
 import { EmojiPicker } from './emoji.js';
-import { remoteOf, isPeerGroup } from './p2p.js'; // 0.12: polls don't travel between PCs yet
 import { t } from '../lib/i18n.js'; // words in the chosen language (js/locales)
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
@@ -219,9 +218,10 @@ export function Embeds({ conv, m }) {
 // ---------- Forwarding ----------
 function Forwarded({ m, Files }) {
   const f = m.fwd;
-  const u = person(f.author);
+  // 0.13: forwarded from a friend's PC, by someone this PC doesn't know: their name as that PC gave it.
+  const u = !S.users[f.author] && f.name ? { ...person(f.author), name: f.name } : person(f.author);
   // The way back only for people who can read the original.
-  const from = convMeta(f.conv);
+  const from = f.conv ? convMeta(f.conv) : null; // from a friend's PC (0.13): no way back from here
   return html`<div class="fwd">
     <div class="fwd-label"><${Icon} name="forward" size=${14} />Forwarded</div>
     <div class="fwd-card">
@@ -260,7 +260,7 @@ async function forwardHere(conv, m, to, note) {
   }
   if (isEncrypted(to)) { sendMessage(to, note, { files, fwd }); return; }
   const quoted = fwd.text ? fwd.text.split('\n').map((l) => `> ${l}`).join('\n') : '';
-  const said = `${quoted}${quoted ? '\n' : ''}— ${person(fwd.author).name}, forwarded`;
+  const said = `${quoted}${quoted ? '\n' : ''}— ${!S.users[fwd.author] && fwd.name ? fwd.name : person(fwd.author).name}, forwarded`;
   sendMessage(to, [note, said].filter(Boolean).join('\n\n'), { files });
 }
 
@@ -503,8 +503,8 @@ function StampModal({ onInsert }) {
 }
 
 // ---------- The composer: + menu, formatting bar and shortcuts ----------
-// A conversation (or its thread) with friends on other PCs: polls aren't offered there (the server refuses them too).
-const acrossPcs = (conv) => { const c = isThread(conv) ? S.threads[conv]?.conv : conv; return !!c && (!!remoteOf(c) || isPeerGroup(c)); };
+// 0.13: polls travel between PCs, but not to a friend's PC that needs an update: the server says who (pollBlocked).
+const pollBlocked = (conv) => { const c = isThread(conv) ? S.threads[conv]?.conv : conv; return (c && S.dms[c]?.pollBlocked) || null; };
 export function PlusMenu({ conv, text, update, insert, replyTo, onAttach }) {
   const open = (e) => {
     const anchor = rectOf(e);
@@ -513,7 +513,7 @@ export function PlusMenu({ conv, text, update, insert, replyTo, onAttach }) {
       items: [
         onAttach && { label: t('composer.upload'), icon: 'clip', onSelect: onAttach },
         onAttach && { sep: true },
-        isEncrypted(conv) ? { label: E2COPY.pollsOff, icon: 'poll', disabled: true } : !acrossPcs(conv) && { label: t('composer.poll'), icon: 'poll', onSelect: () => openModal(PollModal, { conv }) },
+        isEncrypted(conv) ? { label: E2COPY.pollsOff, icon: 'poll', disabled: true } : pollBlocked(conv) ? { label: pollBlocked(conv), icon: 'poll', disabled: true } : { label: t('composer.poll'), icon: 'poll', onSelect: () => openModal(PollModal, { conv }) },
         { label: t('composer.sticker'), icon: 'sticker', onSelect: () => openPop({ anchor, align: 'start', label: 'Stickers', C: StickerPicker, props: { conv, replyTo } }) },
         { label: t('composer.time'), icon: 'calendar', onSelect: () => openModal(StampModal, { onInsert: (tok) => insert(`${tok} `) }) },
         { label: t('composer.schedule'), icon: 'clock', onSelect: () => openModal(ScheduleModal, { conv, text, replyTo, done: () => update('') }) },

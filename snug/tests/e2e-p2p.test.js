@@ -275,6 +275,59 @@ test('edits, deletes and reactions reach the other PC, both ways', async () => {
   await b.close();
 });
 
+// 0.13: polls between PCs.
+test('a poll made from the + menu reaches Bob’s PC; both votes show the same counts on both screens; ending it ends it there', async () => {
+  const { alice, bob } = pages;
+  const dm = await alice.evaluate(() => window.snug.S.ui.view.id);
+  await goto(bob, { type: 'conv', id: dm });
+  await alice.click('.main .composer .plus-btn');
+  await alice.click('.menu-item:has-text("Create a poll")');
+  await alice.fill('#poll-q', 'Which kiln shelf?');
+  await alice.fill('.modal input[aria-label="Answer 1"]', 'Top shelf');
+  await alice.fill('.modal input[aria-label="Answer 2"]', 'Bottom shelf');
+  await alice.click('.modal button:has-text("Post poll")');
+  await alice.locator('.modal').waitFor({ state: 'detached' });
+  const bpoll = bob.locator('.main .poll:has-text("Which kiln shelf?")');
+  await bpoll.waitFor({ timeout: 20000 });
+  assert.equal(await bpoll.locator('.poll-a').count(), 2);
+  await bpoll.locator('.poll-a:has-text("Bottom shelf")').click();
+  await bpoll.locator('.poll-a.done.mine:has-text("Bottom shelf") .poll-n:has-text("100%")').waitFor();
+  const apoll = alice.locator('.main .poll:has-text("Which kiln shelf?")');
+  await apoll.locator('.poll-a:has-text("Top shelf")').click();
+  // Both votes on both screens: 50% each.
+  for (const p of [apoll, bpoll]) {
+    await p.locator('.poll-a:has-text("Top shelf") .poll-n:has-text("50%")').waitFor({ timeout: 20000 });
+    await p.locator('.poll-a:has-text("Bottom shelf") .poll-n:has-text("50%")').waitFor({ timeout: 20000 });
+  }
+  await apoll.locator('button:has-text("End now")').click();
+  await bpoll.locator('.poll-how:has-text("Final results")').waitFor({ timeout: 20000 });
+});
+
+// 0.13: forwarding a whole message (its picture too) into a conversation with a friend on another PC.
+test('forwarding a message with a picture to Bob: he sees the forwarded card with the picture', async () => {
+  const { alice, bob } = pages;
+  const dm = await alice.evaluate(() => window.snug.S.ui.view.id);
+  await goto(bob, { type: 'conv', id: dm });
+  const a = await clientOf(alice, pcs.A);
+  const up = await (await fetch(`${pcs.A.base}/api/files?conv=${dm}`, { method: 'POST', headers: { cookie: a.cookie, origin: pcs.A.base, 'content-type': 'image/png', 'x-file-name': 'glaze.png' }, body: png(48, 32, [20, 160, 90]) })).json();
+  await a.ok('msg.send', { conv: dm, id: mid(), text: 'test tile from the kiln', files: [{ id: up.id, w: 48, h: 32 }] });
+  await a.close();
+  const m = alice.locator('.main .msg:has-text("test tile from the kiln")').last();
+  await m.waitFor();
+  await m.hover();
+  await m.locator('.msg-actions button[aria-label="More actions"]').click();
+  await alice.click('.menu-item:has-text("Forward")');
+  await alice.click('.modal .fwd-dest:has-text("bob")');
+  await alice.fill('.modal textarea', 'look at the colour');
+  await alice.click('.modal button:has-text("Forward")');
+  await alice.locator('.modal').waitFor({ state: 'detached' });
+  const card = bob.locator('.main .msg:has-text("look at the colour") .fwd-card');
+  await card.waitFor({ timeout: 20000 });
+  assert.match(await card.textContent(), /test tile from the kiln/);
+  // The picture comes over from Alice's PC and shows inside the card.
+  await bob.waitForFunction(() => [...document.querySelectorAll('.main .fwd-card img')].some((i) => i.complete && i.naturalWidth === 48), null, { timeout: 20000 });
+});
+
 test('profile: a new name and picture reach Bob once, and the picture is served from his PC', async () => {
   const { alice, bob } = pages;
   const before = pcs.B.peer.stats().profileApplied;

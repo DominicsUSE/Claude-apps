@@ -414,6 +414,11 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
       const later = json(r.body, null)?.item;
       if (later) applyItem(later);
     }
+    // Votes and an end that came before their poll (passed on by someone else) count once it is here.
+    if (item.k === 'poll') for (const r of db.all("SELECT body FROM grp_items WHERE g = ? AND json_extract(body, '$.item.k') IN ('vote', 'pollend') AND json_extract(body, '$.item.d.id') = ? ORDER BY ts", g, item.id)) {
+      const later = json(r.body, null)?.item;
+      if (later) applyItem(later);
+    }
     if (from !== item.by && item.by !== me() && item.k === 'msg') rcptLater(item.by, g, item.id);
     // Straight from its author: members online to me may not be reachable by the author (presence for friends
     // only on a registry without quiet watches, review-media 4), so offer them my inventory a little later.
@@ -459,7 +464,7 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
             const conv = root && root.conv === g && !root.sys ? `t:${root.id}` : g;
             const replyTo = d.replyTo && !(conv !== g && d.replyTo === d.t) ? d.replyTo : null;
             const files = item.by === me() ? [] : X.acceptFiles(item.by, conv, d.files);
-            ops['msg.send'](c, { conv, id: own(item.id), text: d.text, files, ...(replyTo ? { replyTo } : {}) });
+            X.sendWithExtras(c, { conv, id: own(item.id), text: d.text, files, ...(replyTo ? { replyTo } : {}) }, X.extrasIn(d));
             if (files.length) queueMicrotask(() => X.fetchPending(item.by));
           } else if (item.k === 'edit') {
             const newest = db.get("SELECT MAX(ts) t FROM grp_items WHERE g = ? AND id != ? AND json_extract(body, '$.item.k') = 'edit' AND json_extract(body, '$.item.d.id') = ?", g, item.id, d.id)?.t;
@@ -469,6 +474,14 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
           else if (item.k === 'react') ops.react(c, { conv: convIn(g, d.id), id: d.id, emoji: d.emoji, on: d.on === true });
           else if (item.k === 'pin') ops[d.on ? 'msg.pin' : 'msg.unpin'](c, { conv: g, id: d.id });
           else if (item.k === 'ttl') ops['conv.ttl'](c, { conv: g, ttl: d.ttl });
+          else if (item.k === 'poll') {
+            const root = d.t ? M.liveMsg(d.t) : null;
+            X.applyPoll(c, root && root.conv === g && !root.sys ? `t:${root.id}` : g, { ...d, id: own(item.id) });
+          } else if (item.k === 'vote') {
+            // Only this member's latest vote counts, whatever order their votes arrive in.
+            const newer = db.get("SELECT MAX(ts) t FROM grp_items WHERE g = ? AND by = ? AND id != ? AND json_extract(body, '$.item.k') = 'vote' AND json_extract(body, '$.item.d.id') = ?", g, item.by, item.id, d.id)?.t;
+            if (!(newer > item.ts)) X.applyVote(by, convIn(g, d.id), d.id, d.answers, item.ts);
+          } else if (item.k === 'pollend') X.applyPollEnd(by, convIn(g, d.id), d.id, item.ts);
         } finally {
           if (temp) db.run('DELETE FROM dm_members WHERE dm = ? AND user = ?', g, by);
         }
@@ -660,7 +673,7 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
   const groupOf = (conv) => (isGroup(conv) ? conv : isGroup(X.threadParent(conv)) ? X.threadParent(conv) : null);
   const inGroup = (c, conv) => !!groupOf(conv) && !c.peer;
   wrap('msg.send', (c, d, base) => {
-    if (!inGroup(c, d.conv)) return base(c, d);
+    if (!inGroup(c, d.conv) || X.localOnly.has(d.id)) return base(c, d); // localOnly: a poll's message (the poll item goes instead)
     const g = groupOf(d.conv);
     if (!mineC(c) || !amIn(g)) fail('You don’t have access to this conversation.');
     const fresh = typeof d.id === 'string' && !M.msg(d.id);
@@ -680,7 +693,8 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
         }
         const root = g !== d.conv ? String(d.conv).slice(2) : null;
         const replyTo = m.replyTo || root; // a PC without threads (0.11) shows a thread reply as a reply to its first message
-        myItem(g, 'msg', { text: m.text || '', ...(replyTo ? { replyTo } : {}), ...(root ? { t: root } : {}), ...(files.length ? { files } : {}) }, m.id, m.ts);
+        // A forward or a sticker (0.13) carries its card; `text` stays what an older PC shows.
+        myItem(g, 'msg', { text: m.text || '', ...(replyTo ? { replyTo } : {}), ...(root ? { t: root } : {}), ...(files.length ? { files } : {}), ...X.extrasOut(m) }, m.id, m.ts);
       });
     }
     return r;
@@ -707,10 +721,54 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
   const baseDmView = M.dmView;
   M.dmView = (id, viewer) => {
     const v = baseDmView(id, viewer);
-    if (v && isGroup(id) && viewer === X.owner() && amIn(id)) { const old = olderPcs(id); if (old.length) v.ttlBlocked = OLD_PCS(old); }
+    if (v && isGroup(id) && viewer === X.owner() && amIn(id)) {
+      const old = olderPcs(id);
+      if (old.length) v.ttlBlocked = OLD_PCS(old);
+      const np = noPolls(id);
+      if (np.length) v.pollBlocked = OLD_POLLS(np);
+    }
     return v;
   };
-  wrap('poll.create', (c, d, base) => { if (groupOf(d.conv)) fail('Polls with friends on other PCs aren’t available yet.'); return base(c, d); });
+  // Polls (0.13): a poll item, then each member's votes (their whole choice; the latest counts) and its end.
+  // Only once every other member's PC says it knows polls; otherwise the message names who needs to update.
+  const noPolls = (g) => [...state(g).members.keys()].filter((u) => u !== me() && !X.capsOf(u).includes('poll'));
+  const OLD_POLLS = (uids) => `${uids.map((u) => M.userRow(localId(u))?.name || 'Someone').join(', ')} ${uids.length === 1 ? 'needs' : 'need'} to update Snug before you can share a poll here. Until then, they’d only see the question.`;
+  wrap('poll.create', (c, d, base) => {
+    if (!inGroup(c, d.conv)) return base(c, d);
+    const g = groupOf(d.conv);
+    if (!mineC(c) || !amIn(g)) fail('You don’t have access to this conversation.');
+    const fresh = typeof d.id === 'string' && !M.msg(d.id);
+    if (!fresh) return base(c, d);
+    const old = noPolls(g);
+    if (old.length) fail(OLD_POLLS(old));
+    X.localOnly.add(d.id);
+    let r;
+    try { r = base(c, d); } finally { X.localOnly.delete(d.id); }
+    const p = r?.m ? db.get('SELECT * FROM polls WHERE msg = ?', r.m.id) : null;
+    if (p) {
+      const root = g !== d.conv ? String(d.conv).slice(2) : null;
+      const answers = json(p.answers, []).map((a) => ({ text: a.text, ...(a.emoji ? { emoji: a.emoji } : {}) }));
+      X.later(() => myItem(g, 'poll', { question: p.question, answers, multi: !!p.multi, hidden: !!p.hidden, ends: p.ends, ...(root ? { t: root } : {}) }, p.msg, r.m.ts));
+    }
+    return r;
+  });
+  wrap('poll.vote', (c, d, base) => {
+    if (!inGroup(c, d.conv)) return base(c, d);
+    const g = groupOf(d.conv);
+    if (!mineC(c) || !amIn(g)) fail('You don’t have access to this conversation.');
+    const r = base(c, d);
+    if (Array.isArray(r?.votes)) X.later(() => myItem(g, 'vote', { id: d.id, answers: r.votes }));
+    return r;
+  });
+  wrap('poll.end', (c, d, base) => {
+    if (!inGroup(c, d.conv)) return base(c, d);
+    const g = groupOf(d.conv);
+    if (!mineC(c) || !amIn(g)) fail('You don’t have access to this conversation.');
+    const was = db.get('SELECT ended FROM polls WHERE msg = ?', d.id);
+    const r = base(c, d);
+    if (was && !was.ended) X.later(() => myItem(g, 'pollend', { id: d.id }));
+    return r;
+  });
   wrap('call.start', (c, d, base) => { if (isGroup(d.dm)) fail(NO_CALLS); return base(c, d); });
   wrap('call.join', (c, d, base) => { if (isGroup(d.dm)) fail(NO_CALLS); return base(c, d); });
 
@@ -737,9 +795,11 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
         const st = state(g);
         const rows = db.all('SELECT * FROM messages WHERE conv = ? AND sys IS NULL ORDER BY seq DESC LIMIT 5000', g).reverse();
         const rx = M.reactions(rows.map((r) => r.id));
-        const msgs = rows.map((r) => {
+        const t = Date.now();
+        const msgs = rows.filter((r) => !(r.expires && r.expires <= t)).map((r) => {
           const a = r.author === owner ? my : String(r.author).slice(2);
           const m = { id: r.id, a, ts: r.ts, text: String(r.text || '').slice(0, 4000) };
+          if (r.expires) m.exp = r.expires; // 0.13: when it disappears
           if (r.reply_to) m.r = r.reply_to;
           if (r.edited) m.e = r.edited;
           if (r.deleted) m.d = r.deleted;
@@ -747,7 +807,7 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
           if (x.length) m.x = x;
           return m;
         });
-        return { g, name: st.name, icon: st.icon, ops: opRows(g), msgs };
+        return { g, name: st.name, icon: st.icon, ops: opRows(g), msgs, ttl: M.ttlOf?.(g) || 0 };
       });
       return exportGroups(groups);
     },
@@ -774,19 +834,23 @@ export function createGroups({ db, M, hub, ops, peer, log = () => {} }) {
         if (!D.get('SELECT 1 FROM dms WHERE id = ?', grp.g)) D.run('INSERT INTO dms (id, name, created) VALUES (?, ?, ?)', grp.g, st2.name, st2.created || Date.now());
         D.run('UPDATE dms SET name = ?, owner = ?, icon = ?, icon_hue = ? WHERE id = ?', st2.name, exists(local(st2.owner)) ? local(st2.owner) : owner, st2.icon?.emoji || null, st2.icon?.hue ?? null, grp.g);
         for (const uid of [my, ...[...st2.members.keys()].filter((u) => u !== my)]) if (exists(local(uid))) D.run('INSERT OR IGNORE INTO dm_members (dm, user) VALUES (?, ?)', grp.g, local(uid));
+        const withTtl = Number.isSafeInteger(grp.ttl); // 0.13 file: each message's exp is complete
         for (const m of grp.msgs) {
           if (!m || typeof m.id !== 'string' || !/^m_[a-z0-9]{8,40}$/.test(m.id) || !isUid(m.a) || !Number.isSafeInteger(m.ts) || typeof m.text !== 'string' || m.text.length > 4000) throw new Error('bad group message');
+          if (Number.isSafeInteger(m.exp) && m.exp <= Date.now()) continue; // its time has passed: it stays gone
           const author = local(m.a);
           if (!exists(author)) continue;
           const was = D.get('SELECT conv FROM messages WHERE id = ?', m.id);
           if (was) { if (was.conv !== grp.g) throw new Error('message id taken'); continue; }
-          D.run('INSERT INTO messages (id, conv, author, ts, text, fold, reply_to, edited, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          D.run('INSERT INTO messages (id, conv, author, ts, text, fold, reply_to, edited, deleted, expires) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             m.id, grp.g, author, m.ts, m.text, M.foldText(m.text, []), typeof m.r === 'string' ? m.r : null,
-            Number.isSafeInteger(m.e) ? m.e : null, Number.isSafeInteger(m.d) ? m.d : null);
+            Number.isSafeInteger(m.e) ? m.e : null, Number.isSafeInteger(m.d) ? m.d : null, Number.isSafeInteger(m.exp) ? m.exp : null);
+          if (withTtl && !Number.isSafeInteger(m.exp)) D.run('UPDATE messages SET expires = NULL WHERE id = ?', m.id);
           for (const x of Array.isArray(m.x) ? m.x.slice(0, 100) : []) {
             if (x && isUid(x.u) && typeof x.e === 'string' && x.e.length <= 32 && exists(local(x.u))) D.run('INSERT OR IGNORE INTO reactions (msg, user, emoji, ts) VALUES (?, ?, ?, ?)', m.id, local(x.u), x.e, m.ts);
           }
         }
+        ctx?.restoreTtl?.(grp.g, grp.ttl, owner, Date.now()); // 0.13: the group's timer
       }
       invalidate();
       queueMicrotask(() => { invalidate(); X.watchSoon(); });
