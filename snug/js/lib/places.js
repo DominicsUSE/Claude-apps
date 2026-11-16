@@ -137,7 +137,7 @@ export const HUE_IDS = [...HUES.map(([v]) => v), ...RETIRED_HUES]; // retired on
 // House templates. Rooms with "only" are private to those roles.
 export const TEMPLATES = [
   {
-    id: 'friends', label: 'Friends', hint: 'A lounge, plans and a room to hang out in.',
+    id: 'friends', label: 'Friends', hint: 'A lounge, plans and a room to hang out in.', showAllRooms: true,
     about: 'Our corner of the internet.',
     roles: [{ key: 'friend', name: 'Friend', hue: 142, perms: ['post', 'invite', 'pin'] }],
     groups: [
@@ -158,7 +158,7 @@ export const TEMPLATES = [
     ],
   },
   {
-    id: 'gaming', label: 'Gaming', hint: 'Announcements, clips, looking for a group and squad rooms.',
+    id: 'gaming', label: 'Gaming', hint: 'Announcements, clips, looking for a group and squad rooms.', showAllRooms: true,
     about: 'Where we squad up.',
     roles: [
       { key: 'mod', name: 'Moderator', hue: 255, perms: ['post', 'announce', 'pin', 'moderate', 'invite', 'kick', 'timeout', 'voicemod'], icon: '🛡️' },

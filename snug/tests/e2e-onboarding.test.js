@@ -257,6 +257,36 @@ test('the quick switcher: paste an invitation link, press Enter, land in the hou
   } finally { await close(robin); await close(bex); }
 });
 
+test('the owner turns on Show every room to newcomers: a fresh joiner’s sidebar lists every room, with no Browse row', async () => {
+  const robin = await open({ handle: 'robin' });
+  const gwen = await open({ handle: 'gwen' });
+  try {
+    await robin.click('.rail-house:has-text("Kiln & Co.")');
+    await robin.click('.nav .ctx-house');
+    await robin.click('.menu-item:has-text("House settings")');
+    await robin.click('.layer-nav .row:has-text("Overview")');
+    const sw = robin.locator('.set-row:has-text("Show every room to newcomers") [role=switch]');
+    assert.equal(await sw.getAttribute('aria-checked'), 'false', 'off in a house made before 0.13');
+    await sw.click();
+    await robin.locator('.set-row:has-text("Show every room to newcomers") [role=switch][aria-checked="true"]').waitFor();
+    for (let i = 0; i < 50 && !srv.db.get("SELECT show_all_rooms v FROM houses WHERE id = 'kiln'").v; i++) await robin.waitForTimeout(100);
+    assert.equal(srv.db.get("SELECT show_all_rooms v FROM houses WHERE id = 'kiln'").v, 1);
+    await robin.keyboard.press('Escape');
+
+    const { code } = await invite(robin);
+    await gwen.goto(`${url}/join/${code}`);
+    await gwen.click('.modal >> text=Join Kiln & Co.');
+    await gwen.waitForFunction(() => window.snug.S.ui.view.id === 'k_floor');
+    assert.equal(await gwen.evaluate(() => window.snug.S.houses.kiln.newcomer), true, 'still a newcomer: nothing written yet');
+    await gwen.locator('.nav .row:has-text("Glaze lab")').waitFor();
+    await gwen.locator('.nav .row:has-text("Wheel room")').waitFor();
+    assert.equal(await gwen.locator('.nav .row:has-text("Browse")').count(), 0);
+  } finally {
+    srv.db.run("UPDATE houses SET show_all_rooms = 0 WHERE id = 'kiln'");
+    await close(gwen); await close(robin);
+  }
+});
+
 test('sign out from the menu under your name, after a short question; this device forgets the drafts', async () => {
   const malik = await open({ handle: 'malik' });
   try {

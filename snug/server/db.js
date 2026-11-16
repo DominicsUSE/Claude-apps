@@ -227,6 +227,9 @@ const COLUMNS = [
   ['houses', 'public', 'INTEGER NOT NULL DEFAULT 0'],
   ['houses', 'topic', 'TEXT'],
   ['houses', 'rules', "TEXT NOT NULL DEFAULT ''"],
+  // 0.13: newcomers see every room from the start, not only the starter and
+  // voice rooms (js/lib/onboarding.js newcomerSees). House configuration.
+  ['houses', 'show_all_rooms', 'INTEGER NOT NULL DEFAULT 0'],
   // Server-written lines in a conversation (call records), as JSON. Null for people's messages.
   ['messages', 'sys', 'TEXT'],
 ];

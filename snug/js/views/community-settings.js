@@ -224,6 +224,9 @@ export function CommunityOverview({ house }) {
       <//>
       <${Row} label="Notifications for new members" hint="Where they start. Each person can change it from the house menu.">
         <${Seg} label="Default notifications for new members" value=${h.defaultNotify || 'all'} options=${[['all', 'Everything'], ['mentions', 'Only mentions']]} onChange=${(v) => updateHouse(house, { defaultNotify: v })} />
+      <//>
+      <${Row} label="Show every room to newcomers" hint=${h.showAllRooms ? 'New members see every room in their sidebar from the start.' : 'New members see the starter and voice rooms first; the rest appear after their first message. They can read any room before that.'}>
+        <${Switch} on=${!!h.showAllRooms} label="Show every room to newcomers" onChange=${(v) => updateHouse(house, { showAllRooms: v })} />
       <//>`}
     <div class="set-head cm-danger-head">Danger zone</div>
     <div class="cm-danger">

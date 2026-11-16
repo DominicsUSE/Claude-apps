@@ -92,6 +92,8 @@ test('newcomerSees: starter rooms and every voice and stage room; everything onc
   const seen = (house) => Object.values(S.rooms).filter((r) => newcomerSees(house, r.id, r.kind)).map((r) => r.id);
   assert.deepEqual(seen(h), ['desk', 'floor', 'show', 'wheel', 'watch']);
   assert.deepEqual(seen({ ...h, newcomer: false }), ['desk', 'floor', 'show', 'wheel', 'watch', 'glaze']);
+  // The owner's "Show every room to newcomers": everything from the start.
+  assert.deepEqual(seen({ ...h, showAllRooms: true }), ['desk', 'floor', 'show', 'wheel', 'watch', 'glaze']);
 });
 
 test('messageable: shared houses, existing conversations and accepted friends, as the server allows', () => {

@@ -112,3 +112,33 @@ test('the Messages list comes newest activity first, and each conversation says 
     assert.deepEqual(snap.dmOrder.filter((d) => [withX, withY].includes(d)), [withX, withY], 'the one with the newest message first');
   } finally { me.close(); x.close(); y.close(); }
 });
+
+test('house.update saves "Show every room to newcomers"; Friends and Gaming start with it on, others off', async () => {
+  const ava = await Client.make('ava_all');
+  const bo = await Client.make('bo_all');
+  try {
+    const houseOf = async (c, id) => (await c.reconnect()).houses[id];
+    const { house } = await ava.ok('house.create', { name: 'Plain', hue: 25 });
+    assert.equal((await houseOf(ava, house)).showAllRooms, false, 'off by default');
+    await ava.ok('house.update', { house, showAllRooms: true });
+    assert.equal((await houseOf(ava, house)).showAllRooms, true);
+    assert.equal(srv.db.get('SELECT show_all_rooms v FROM houses WHERE id = ?', house).v, 1, 'stored');
+    // Someone who joins sees it too (their sidebar lists every room).
+    const { code } = await ava.ok('invite.create', { house });
+    await bo.ok('invite.accept', { code });
+    const seen = await houseOf(bo, house);
+    assert.equal(seen.newcomer, true);
+    assert.equal(seen.showAllRooms, true);
+    // Only someone who may change the house; and only yes or no.
+    assert.equal((await bo.op('house.update', { house, showAllRooms: false })).ok, false);
+    assert.equal((await ava.op('house.update', { house, showAllRooms: 'yes' })).ok, false);
+    await ava.ok('house.update', { house, showAllRooms: false });
+    assert.equal((await houseOf(ava, house)).showAllRooms, false);
+    // Templates.
+    for (const [template, want] of [['friends', true], ['gaming', true], ['study', false], ['club', false]]) {
+      srv.resetLimits(); // one new house after another
+      const r = await ava.ok('house.create', { name: `T ${template}`, hue: 25, template });
+      assert.equal((await houseOf(ava, r.house)).showAllRooms, want, template);
+    }
+  } finally { ava.close(); bo.close(); }
+});

@@ -80,9 +80,10 @@ export function signupField(message = '', status = 0) {
 // Newcomers see their starter rooms and every voice and stage room: there is
 // no history in a voice room to earn, and hearing people is how many people
 // say hello. The rest joins the sidebar after their first message; every room
-// can be read before that (server/ops.js never gated reading).
+// can be read before that (server/ops.js never gated reading). A house whose
+// owner turned on "Show every room to newcomers" (showAllRooms) lists them all.
 export function newcomerSees(house, roomId, kind) {
-  return !house?.newcomer || house.starter.includes(roomId) || VOICE_KINDS.includes(kind);
+  return !house?.newcomer || !!house.showAllRooms || house.starter.includes(roomId) || VOICE_KINDS.includes(kind);
 }
 
 // Where someone lands after joining: the first starter room they can write

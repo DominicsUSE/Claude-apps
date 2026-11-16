@@ -321,7 +321,7 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
   M.houseView = (houseId, viewer) => {
     const v = baseHouseView(houseId, viewer);
     if (!v) return v;
-    const h = db.get('SELECT welcome, interests, join_role FROM houses WHERE id = ?', houseId);
+    const h = db.get('SELECT welcome, interests, join_role, show_all_rooms FROM houses WHERE id = ?', houseId);
     const joined = v.house.joined;
     const roleRows = Object.fromEntries(db.all('SELECT id, icon, hoist, mentionable FROM roles WHERE house = ?', houseId).map((r) => [r.id, r]));
     for (const r of v.house.roles) {
@@ -352,6 +352,7 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
       if (v.house.firstStep?.room && hidden.has(v.house.firstStep.room)) v.house.firstStep = undefined;
     }
     v.house.welcome = h.welcome || '';
+    v.house.showAllRooms = !!h.show_all_rooms; // newcomers see every room (js/lib/onboarding.js newcomerSees)
     v.house.interests = json(h.interests, []);
     if (joined) {
       v.house.extra = {};
@@ -588,6 +589,17 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
     hub.sendHouse(c.user, r.house);
     return r;
   });
+  // "Show every room to newcomers" (House settings > Newcomers): yes or no,
+  // saved once the rest of the update (and its permission check) went through.
+  wrap('house.update', (c, d, base) => {
+    if (d?.showAllRooms === undefined) return base(c, d);
+    if (typeof d.showAllRooms !== 'boolean') fail('Show every room to newcomers is on or off.');
+    const { showAllRooms, ...rest } = d;
+    const r = base(c, rest);
+    db.run('UPDATE houses SET show_all_rooms = ? WHERE id = ?', showAllRooms ? 1 : 0, d.house);
+    hub.houseChanged(d.house);
+    return r;
+  });
 
   // Push (server/push.js): an @mention of a mentionable role this person has
   // counts as for them, as it does in the browser (js/lib/attention.js).
@@ -622,7 +634,7 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
           name: n, kind, topic, tags: (x.tags || []).map((tn) => ({ id: newId('tg'), name: tn })), required: !!x.required,
           private: !!x.only, overrides: (x.only || []).map((k) => ({ type: 'role', target: k, allow: ['view'], deny: [] })),
         })) })),
-        welcome: '', interests: [],
+        welcome: '', interests: [], showAllRooms: !!t.showAllRooms, // newcomers see every room (Friends, Gaming)
       };
     } else {
       const src = houseRow(d.from);
@@ -641,6 +653,7 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
         })),
         welcome: src.welcome || '',
         interests: json(src.interests, []),
+        showAllRooms: !!src.show_all_rooms,
         ownerName: roles[0].name,
       };
     }
@@ -678,7 +691,7 @@ export function createPlacesOps({ db, M, hub, fail, ops }) {
           if (!firstText && r.kind === 'text' && !r.private) firstText = rid;
         }
       });
-      db.run('UPDATE houses SET starter = ? WHERE id = ?', JSON.stringify(starter), hid);
+      db.run('UPDATE houses SET starter = ?, show_all_rooms = ? WHERE id = ?', JSON.stringify(starter), plan.showAllRooms ? 1 : 0, hid);
       db.run("INSERT INTO member_log (house, user, ts, kind) VALUES (?, ?, ?, 'join')", hid, c.user, t);
     });
     hub.sendHouseContent(c.user, hid);
