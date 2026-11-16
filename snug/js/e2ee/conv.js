@@ -25,6 +25,7 @@ import { editSet, cmpTuple, uncovered, resealed } from '../lib/e2ee/rules.js';
 import { encryptFile, decryptFile } from '../lib/e2ee/attach.js';
 import { sniff } from '../lib/sniff.js';
 import { mentions } from '../lib/format.js';
+import { freshOr } from '../lib/callnet.js';
 import { E2, ring, readyHooks, pinHooks } from './manager.js';
 import './local.js'; // drafts and unsent messages of encrypted conversations, sealed (review L2)
 
@@ -131,6 +132,16 @@ export async function callDevices(u, fresh = false) {
     if (p && (await obj.verifyPrekey(p, { u, d: e.d, dsk: e.dsk }))) out.push({ d: e.d, dsk: e.dsk, kid: p.kid, pub: b64uOf(p.pub, 32) });
   }
   return out;
+}
+
+/**
+ * calls C2: the device ids in one person's signed list as checked here, fetched afresh (once more after a
+ * failure, then the last list checked here: js/lib/callnet.js freshOr); null with no list to check.
+ */
+export async function listedDevices(u) {
+  const b = await freshOr(async () => (await fetchBundles([u], true))[0], () => bundles.get(u));
+  if (b?.problem || !b?.list) return null;
+  return b.list.devs.map((e) => e.d);
 }
 
 /** Members a verified contact's send waits on: a verified person whose account key changed. */

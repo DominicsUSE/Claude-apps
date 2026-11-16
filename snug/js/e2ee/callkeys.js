@@ -13,8 +13,9 @@
 // of every offer and answer are signed with this device's key, so a server
 // that swapped certificates to sit in the middle of a call is caught.
 import { S } from '../store.js';
-import { E2, ring } from './manager.js';
-import { callDevices } from './conv.js';
+import { E2, ring, callStore } from './manager.js';
+import { callDevices, listedDevices, sendGate } from './conv.js';
+import { signerBook } from '../lib/callsigners.js';
 import { sealKey, openKey } from '../lib/e2ee/hpke.js';
 import * as sig from '../lib/e2ee/sig.js';
 import { b64u, b64uOf, utf8 } from '../lib/e2ee/bytes.js';
@@ -81,6 +82,36 @@ export async function verifyFingerprint(from, d, stmt, sigText) {
   const s = b64uOf(sigText, 64);
   return !!s && sig.verifyBytes(dsk, s, utf8(stmt));
 }
+// ---------- C2: who signed calls with me before ----------
+// Each device of someone whose signed offer, answer or call key checked here is
+// remembered on this device (js/lib/callsigners.js: sealed under its storage key,
+// js/e2ee/store.js; never sent anywhere). A later call from them that arrives
+// unsigned is then judged against their signed list (js/lib/callnet.js
+// unsignedVerdict) instead of being taken as an older Snug. The store is opened
+// for this even when the server's hello says encryption is off (callStore).
+// Read once before a call is joined (loadCallSigners), so an unsigned offer from
+// someone never remembered waits on nothing.
+const lockSigners = (fn) => (globalThis.navigator?.locks?.request ? navigator.locks.request(`snug-callsig:${S.me}`, fn) : fn());
+let book = { me: null, b: null };
+const mine = () => { if (book.me !== S.me || !book.b) book = { me: S.me, b: signerBook({ open: callStore, lock: lockSigners }) }; return book.b; };
+export const loadCallSigners = () => mine().load();
+/** The devices of u that signed calls with this device before: [device ids]. */
+export const callSigners = (u) => mine().get(u);
+/** The same, if already known (null while it is still to be read from this device's store). */
+export const signersNow = (u) => mine().now(u);
+/** Device d of u signed something of this call that checked. */
+export async function rememberSigner(u, d) {
+  if (!u || !d || u === S.me) return;
+  await mine().remember(u, d);
+}
+/** Their signers still in their list (`listed`): the others are forgotten. */
+export const pruneSigners = (u, listed) => mine().prune(u, listed);
+/** u's account key changed and they are a verified contact not accepted again: an empty or new list isn't their reset. */
+export const keyHeld = (u) => sendGate([u]).length > 0;
+/** The account uses encryption but this device can't sign calls (not added, waiting, locked, unsupported). */
+export const signsElsewhere = () => E2.on === true && E2.me?.state === 'ready' && !callKeysReady();
+export { listedDevices };
+
 /** Both devices' identity keys, for the longer security code: mine and theirs (raw), or null. */
 export async function identityKeys(from, d) {
   const theirs = await deviceKey(from, d);

@@ -15,6 +15,8 @@ goes back to an older version on its own (README, "Install, update, go back").
   calls and house voice rooms; P2P calls with friends on other PCs stay *in transit only*.
 - **Connections signed by the device.** Each side signs its certificate fingerprint; a connection whose
   fingerprint doesn't match is stopped with a warning. Both signed: a 12-digit code and *Verified device*.
+- **No quiet downgrade to unsigned.** A device remembers who signed calls with it; a later unsigned call from
+  them is stopped with the same warning while that signing device is still in their list.
 - **Hide my IP address is on by default** whenever the server has a relay (the old default moves to it); only
   relay candidates leave the device. With no relay, Snug says before you join who will see your IP address.
 - **TURN credentials last an hour** and no longer name your account; fetched again before they run out. With

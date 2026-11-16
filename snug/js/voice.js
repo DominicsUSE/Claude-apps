@@ -27,10 +27,13 @@ import { summarize, uplinkPoor } from './lib/netquality.js';
 // Send caps, adaptive steps, the relay choice, new connection or renegotiation (js/lib/callnet.js).
 import {
   sendCaps, adaptStep, hasTurn, relayWanted, relayInsisted, sdpSession, callCode, screenPref,
-  relayMode, relayCandidate, relayOnlySdp, sdpFingerprints, sdpUfrag, fpStatement, readFpAttr, withFpAttr, deviceCode,
+  relayMode, relayCandidate, relayOnlySdp, sdpFingerprints, sdpUfrag, fpStatement, readFpAttr, withFpAttr, deviceCode, unsignedVerdict,
 } from './lib/callnet.js';
 // Call keys sealed to each person's devices, and offers and answers signed by this device (calls C1, C2).
-import { callKeysReady, e2eeOffered, myDevice, sealCallKey, openCallKey, signFingerprint, parseFpAttr, verifyFingerprint, identityKeys } from './e2ee/callkeys.js';
+import {
+  callKeysReady, e2eeOffered, myDevice, sealCallKey, openCallKey, signFingerprint, parseFpAttr, verifyFingerprint, identityKeys,
+  loadCallSigners, callSigners, signersNow, rememberSigner, pruneSigners, listedDevices, keyHeld, signsElsewhere,
+} from './e2ee/callkeys.js';
 
 // user -> { pc, audio, screenAudio, queue, stopLevel, polite, makingOffer,
 //           ignoreOffer, settingAnswer, chain, kinds, video, tx, id, relay,
@@ -188,6 +191,7 @@ function onCallKey(from, m) {
     crypt.worker.postMessage({ t: 'recv', peer: from, id, raw: raw.buffer, req }, [raw.buffer]);
     st.ckSeen = true;
     st.ckDev = m.d;
+    rememberSigner(from, m.d).catch(() => {});
     // A device that signs its keys signs its offers too (calls C2): an offer from them without it, or signed by another device, was changed on the way.
     const p = peers.get(from);
     if (p?.fp && p.fp.d !== m.d) { refusePeer(from); return undefined; }
@@ -292,16 +296,45 @@ async function sdpOut(user, desc) {
   return { type: desc.type, sdp };
 }
 async function sendSdp(user, desc) { signal(user, { sdp: await sdpOut(user, desc) }); }
-// 'ok' to go on, or 'refuse'.
+// 'ok' to go on, 'refuse', or 'unsigned' (refused: their device signed calls with me before).
+// Only the signature on the offer or answer guards the connection itself: a call
+// key that doesn't come, or a "can't" ({ck:{t:'no'}}), next to a signed offer
+// leaves the server outside it (the call is then labelled in transit only).
 async function checkSdp(from, p, desc) {
   const st = ckState(from);
-  const unsigned = (recheck = null) => {
-    if (st.ckSeen) return 'refuse';
+  const asOlder = (recheck) => {
     st.unsigned = true;
     if (recheck) (st.recheck ||= []).push(recheck);
     else st.stripped = true; // no signature at all: nothing can make up for it
     p.fp = null;
     return 'ok';
+  };
+  // Someone whose device signed calls with me before doesn't quietly turn into an older Snug.
+  // Nobody remembered (known at once, loaded when the connection began): no wait, as before.
+  // Asked before the "on another PC" flag, which is only the server's word: a friend really on
+  // another PC is never remembered (their devices aren't on this server).
+  const unsigned = (recheck = null) => {
+    if (st.ckSeen) return 'refuse';
+    const now = signersNow(from);
+    if (now && !now.length) return asOlder(recheck);
+    return (async () => {
+      const was = now || (await callSigners(from).catch(() => []));
+      if (was.length) {
+        const offered = e2eeOffered();
+        const listed = offered ? await listedDevices(from).catch(() => null) : null;
+        // A signature from a device in their list that couldn't be checked a moment ago (a failed fetch): once more.
+        if (recheck && listed?.includes(recheck.d)) {
+          const again = await verifyFingerprint(from, recheck.d, recheck.stmt, recheck.sig).catch(() => null);
+          if (again === false) return 'refuse';
+          if (again === true) { p.fp = { d: recheck.d, fingerprint: recheck.fingerprint, ufrag: recheck.ufrag }; rememberSigner(from, recheck.d).catch(() => {}); return 'ok'; }
+        }
+        const v = unsignedVerdict({ signers: was, listed, offered, held: offered && keyHeld(from) });
+        if (v === 'alarm') return 'unsigned';
+        if (v === 'notice') { pruneSigners(from, listed).catch(() => {}); noticeUnsigned(from); }
+        if (v === 'off') noticeUnsigned(from, 'off');
+      }
+      return asOlder(recheck);
+    })();
   };
   const attr = readFpAttr(desc.sdp);
   if (!attr) return unsigned();
@@ -320,16 +353,40 @@ async function checkSdp(from, p, desc) {
   // unless their key, when it opens, comes from that device and the signature then checks (onCallKey).
   if (ok !== true) return unsigned({ p, d: a.d, stmt, sig: a.sig, fingerprint, ufrag });
   p.fp = { d: a.d, fingerprint, ufrag };
+  rememberSigner(from, a.d).catch(() => {});
   return 'ok';
 }
 export const callAlarm = () => S.callAlarm || null;
-function refusePeer(user) {
+function refusePeer(user, why = 'refuse') {
   if (!S.call || crypt.refused.has(user)) return;
   crypt.refused.add(user);
   dropPeer(user);
-  S.callAlarm = { user, room: S.call.room, at: Date.now() };
-  toast(`Snug stopped the connection to ${S.users[user]?.name || 'someone'}: the security details that arrived don’t match what their device signed. Someone may be trying to listen in. Don’t continue this call; check with them another way.`);
+  S.callAlarm = { user, room: S.call.room, at: Date.now(), why };
+  const name = S.users[user]?.name || 'someone';
+  toast(why === 'unsigned'
+    ? `Snug stopped the connection to ${name}: their device has signed calls with you before, but this one came without a signature from any device of theirs. Someone may be trying to listen in. Don’t continue this call; check with them another way.`
+    : `Snug stopped the connection to ${name}: the security details that arrived don’t match what their device signed. Someone may be trying to listen in. Don’t continue this call; check with them another way.`);
   emit();
+}
+// Their devices that signed calls with me before are all gone from their list (removed, or encryption
+// reset): this call goes on in transit only, and says why once.
+// The server saying it offers no encryption at all ('off', the host turned it off) is said the same way.
+const noticed = new Set();
+function noticeUnsigned(user, why = 'gone') {
+  if (noticed.has(`${why} ${user}`)) return;
+  noticed.add(`${why} ${user}`);
+  const name = S.users[user]?.name || 'this person';
+  toast(why === 'off'
+    ? `Calls with ${name} were end-to-end encrypted before, but this server now says it doesn’t offer end-to-end encryption. This call is encrypted in transit only; if you didn’t expect that, check with them another way.`
+    : `Calls with ${name} were end-to-end encrypted before, but the devices of theirs that did that aren’t in their list any more (removed, or encryption reset). This call is encrypted in transit only.`);
+}
+// This account uses encryption but this device can't sign calls: anyone who had an encrypted call with
+// one of my other devices stops this one as a possible eavesdropper (above), so say why here, once.
+let toldSignsElsewhere = false;
+function tellSignsElsewhere() {
+  if (toldSignsElsewhere || !signsElsewhere()) return;
+  toldSignsElsewhere = true;
+  toast('This browser isn’t set up for end-to-end encryption, so people you’ve had encrypted calls with on another device will see this call stopped. Add this browser in Settings, Encryption, first.');
 }
 
 // Which of my streams is which. Sent before any track is added, so it reaches
@@ -645,7 +702,8 @@ async function handleSignal(from, p, data) {
     if (data.sdp) {
       const desc = data.sdp;
       // calls C2: checked first, so the collision below is judged on the state after this wait.
-      if ((await checkSdp(from, p, desc)) === 'refuse') { refusePeer(from); return; }
+      const verdict = await checkSdp(from, p, desc);
+      if (verdict !== 'ok') { refusePeer(from, verdict); return; }
       if (peers.get(from) !== p) return;
       const ready = !p.makingOffer && (pc.signalingState === 'stable' || p.settingAnswer);
       const collision = desc.type === 'offer' && !ready;
@@ -821,6 +879,7 @@ function stop() {
   out = null;
   stopCrypt();
   crypt.refused.clear();
+  noticed.clear();
   lastUsers = '';
   S.call = null;
   S.peers = {};
@@ -873,8 +932,9 @@ export async function joinVoice(room, { start = false, video = false, listen = f
     stopMyLevel = watchLevel(S.me, mic);
     watchMic(mic);
   }
-  // calls C1: the media encryption worker, ready before any connection exists.
-  await startCrypt();
+  // calls C1: the media encryption worker, ready before any connection exists; C2: who signed calls with me before.
+  await Promise.all([startCrypt(), loadCallSigners().catch(() => {})]);
+  tellSignsElsewhere();
   if (S.call !== c) { stopCrypt(); mic?.getTracks().forEach((t) => t.stop()); return 'ok'; }
   try {
     c.status = 'joining';

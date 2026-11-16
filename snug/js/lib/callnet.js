@@ -171,6 +171,31 @@ export function withFpAttr(sdp, value) {
   const line = `a=${FP_ATTR}:${value}\r\n`;
   return at < 0 ? `${clean.replace(/\r\n$/, '')}\r\n${line}` : clean.slice(0, at) + line + clean.slice(at);
 }
+// An offer or answer that arrives with no signature this device can check, from
+// someone whose device signed calls with me before (`signers`, kept on this
+// device): 'alarm' while one of those devices is still in their signed list
+// (`listed`; null when there is no list to check, withheld or rolled back), so a
+// server can't make a 0.14 device look like an older Snug by stripping
+// signatures and call keys; 'notice' once none is (they removed it or reset
+// encryption: the call goes on in transit only, and says so); 'ok' when they
+// never signed to me (an older Snug, as before). `held`: their account key
+// changed and they are a verified contact who hasn't been accepted again, so an
+// empty or new list is not taken as their reset ('alarm'). `offered` false: the
+// server says it offers no encryption at all ('off': in transit only, said
+// loudly, and nothing forgotten, so the check is back once it is on again).
+export function unsignedVerdict({ signers = [], listed = null, offered = true, held = false } = {}) {
+  if (!signers.length) return 'ok';
+  if (!offered) return 'off';
+  if (held || !Array.isArray(listed)) return 'alarm';
+  return signers.some((d) => listed.includes(d)) ? 'alarm' : 'notice';
+}
+// fetch() once more after `wait` ms if it fails (a dropped line, the rate limit),
+// then what `cached()` gives (the last list checked on this device), else null.
+export async function freshOr(fetch, cached, wait = 1500) {
+  try { return await fetch(); } catch { /* once more */ }
+  if (wait) await new Promise((r) => setTimeout(r, wait));
+  try { return await fetch(); } catch { return cached() ?? null; }
+}
 // The longer code once both devices signed: both identity keys and both
 // fingerprints, sorted so both sides hash the same, as 12 digits in three
 // groups of four.

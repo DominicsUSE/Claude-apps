@@ -197,6 +197,19 @@ export function sharedStore(userId, osKey = null) {
   }
   return shared.get(userId);
 }
+/**
+ * calls C2: the shared store only if this device already has one for the account (never made here),
+ * with its storage key loaded; null otherwise (no store, a browser that can't list its databases, locked).
+ */
+export async function existingStore(userId, osKey = null) {
+  if (!shared.has(userId)) {
+    const all = typeof indexedDB?.databases === 'function' ? await indexedDB.databases().catch(() => null) : null;
+    if (!all?.some((x) => x.name === `snug-e2ee:${userId}`)) return null;
+  }
+  const st = await sharedStore(userId, osKey);
+  await st.ready();
+  return st;
+}
 /** Forget this device's keys for an account (after "remove this device's keys"). */
 export function deleteStore(userId) {
   shared.delete(userId);

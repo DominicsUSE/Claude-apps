@@ -1144,6 +1144,17 @@ Real, and covered by tests with separate users:
     middle) ends that connection with a warning and is never retried in that
     call. A device that sends signed keys must sign its offers too, so
     stripping the signature is caught as well. Older Snugs ignore the line.
+    Each device remembers, on itself only, which of a person's devices signed
+    a call with it; a later call from that person that arrives unsigned is
+    stopped with the same warning while one of those devices is still in
+    their signed device list (so a server can't strip signatures and call
+    keys to pass them off as an older Snug, or by marking them as a friend
+    on another PC). Once none is (removed, or encryption reset) the call
+    goes on *in transit only* and says why; a verified contact's new account
+    key must be accepted first. A server with encryption turned off gets the
+    same notice. A person who still has a signing device but calls from a
+    browser without encryption set up is stopped too, and that browser says
+    so when the call starts: set it up, or remove the old device.
   - **Devices in the call.** The call's options menu lists microphones,
     speakers and cameras and switches at once. A chosen microphone that is
     unplugged falls back to the default with a toast; a new system default is
