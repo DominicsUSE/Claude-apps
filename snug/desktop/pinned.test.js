@@ -45,13 +45,23 @@ test("bundled: the page's own files come from the app, with exactly the headers 
   const ctx = { origin: host, appDir: APP, rules };
   const get = (p, init) => P.bundled(new Request(host + p, init), ctx);
   const same = ["content-type", "content-security-policy", "content-security-policy-report-only", "cache-control", "x-frame-options", "cross-origin-resource-policy", "referrer-policy", "permissions-policy", "service-worker-allowed"];
+  const page = new Set(["/", "/join/abc123", "/m/c1/m2", "/settings"]);
   for (const p of ["/", "/join/abc123", "/m/c1/m2", "/settings", "/js/app.js", "/css/base.css", "/brand/favicon.svg", "/sw.js"]) {
     const mine = await get(p);
     const theirs = await fetch(host + p);
     assert.equal(mine.status, theirs.status, p);
-    for (const h of same) assert.equal(mine.headers.get(h), theirs.headers.get(h), `${p} ${h}`);
+    // The page's policy differs only where pinning narrows scripts and workers (review M6, second pass).
+    for (const h of same) {
+      const want = page.has(p) && h.startsWith("content-security-policy") ? P.pinnedCsp(theirs.headers.get(h), host) : theirs.headers.get(h);
+      assert.equal(mine.headers.get(h), want, `${p} ${h}`);
+    }
     assert.equal(await mine.text(), await theirs.text(), `${p} body`);
   }
+  // Pinned, scripts and workers come only from the app's own folders, never from /api at the host's origin.
+  const csp = (await get("/")).headers.get("content-security-policy");
+  assert.match(csp, new RegExp(`script-src ${host}/js/ ${host}/vendor/;`));
+  assert.match(csp, new RegExp(`worker-src ${host}/vendor/ ${host}/sw.js;`));
+  assert.doesNotMatch(csp, /script-src 'self'|worker-src 'self'/);
   // https adds upgrade-insecure-requests to the page's policy, as the server does behind https.
   const secure = await P.bundled(new Request("https://snug.example.com/"), { ...ctx, origin: "https://snug.example.com" });
   assert.match(secure.headers.get("content-security-policy"), /; upgrade-insecure-requests$/);

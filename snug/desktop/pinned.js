@@ -80,7 +80,17 @@ async function bundled(req, { origin, appDir, rules }) {
   let body;
   try { body = await fs.promises.readFile(path.join(appDir, ...rel.split("/"))); } catch { return notFound(); }
   const headers = { ...rules.base, ...rules.staticHeaders(rel, u.protocol === "https:") };
+  if (rel === "index.html") for (const k of ["Content-Security-Policy", "Content-Security-Policy-Report-Only"]) if (headers[k]) headers[k] = pinnedCsp(headers[k], origin);
   return new Response(req.method === "HEAD" ? null : body, { status: 200, headers });
+}
+// The page's policy, pinned (review M6, second pass): scripts and workers only from the app's own
+// folders at the host's address, never 'self' as a whole, so nothing the host serves under /api/
+// can run as a script or a worker in the page, whatever request headers the protocol handler sees.
+// (The page's files are served from the app here and never redirect, so the paths always apply.)
+function pinnedCsp(csp, origin) {
+  return csp
+    .replace("script-src 'self'", `script-src ${origin}/js/ ${origin}/vendor/`)
+    .replace("worker-src 'self'", `worker-src ${origin}/vendor/ ${origin}/sw.js`);
 }
 
 // Everything else, to the host through the window's session (its cookies are sent and kept there).
@@ -88,11 +98,12 @@ async function bundled(req, { origin, appDir, rules }) {
 // redirect (so the page follows it itself, and the window's will-redirect guard sees where it goes),
 // and requests that change something carry Origin: <host>, which the host checks.
 //
-// The host's answers are data for the bundled page, never code at the host's origin: a request the
-// browser makes to load a document, a frame, a script or a worker from /api is refused here without
-// asking the host, and every answer that comes back is marked nosniff with a sandboxing policy (so
+// The host's answers are data for the bundled page, never code at the host's origin. What stops a
+// script or worker from /api is the page's own policy (pinnedCsp: scripts and workers only from the
+// app's folders). Every answer that comes back is also marked nosniff with a sandboxing policy (so
 // even one that ends up shown as a page runs nothing), and can't widen a service worker's scope.
-// Pictures, sound and video still load (Sec-Fetch-Dest image, audio, video), as do fetches (empty).
+// The Sec-Fetch-Dest refusal below is kept for engines that pass that header to the handler; the
+// desktop test shows Electron's protocol handler doesn't see it for scripts or workers.
 const NO_BODY = new Set([101, 204, 205, 304]);
 const NEVER_CODE = new Set(["document", "iframe", "frame", "script", "worker", "sharedworker", "serviceworker"]);
 const API_CSP = "sandbox; default-src 'none'";
@@ -159,4 +170,4 @@ function fallbackText({ state, host, server, app }) {
 const OWN_PAGE_NOTE = (host) => `The server’s own page runs code from ${host}. Encrypted conversations there depend on trusting whoever runs it.`;
 const OWN_PAGE_SUFFIX = " — server’s own page";
 
-module.exports = { PARTITION, insecureOrigin, loadRules, verdict, readVersion, checkVersion, bundled, passThrough, pin, unpin, fallbackText, OWN_PAGE_NOTE, OWN_PAGE_SUFFIX };
+module.exports = { PARTITION, insecureOrigin, loadRules, verdict, readVersion, checkVersion, bundled, pinnedCsp, passThrough, pin, unpin, fallbackText, OWN_PAGE_NOTE, OWN_PAGE_SUFFIX };
