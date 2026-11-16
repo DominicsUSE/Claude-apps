@@ -275,7 +275,18 @@ export function createKeyAuth({ db, M, hub, peer, gh, opts = {}, secure = false,
       if (s?.uid && !['gone', 'revoked', 'needs-signin'].includes(s.state)) { err(res, 409, 'This PC is already linked to a Snug account.'); return true; }
       // v0.12 review: a PC that still holds an account (moved away or stopped) takes only that account's own
       // recovery key, checked here, before the registry starts a 72 h move of some other account to this PC.
-      if (s?.uid && s.state !== 'gone' && identity.get('rk') !== rk.pub) { err(res, 409, 'This PC is linked to another Snug account.'); return true; }
+      // Second pass: the key this PC stored may be stale (replaced on another PC, or never stored), so on a
+      // mismatch the registry is asked whose key it is (nothing changes there) and only another uid is refused.
+      if (s?.uid && s.state !== 'gone' && identity.get('rk') !== rk.pub) {
+        let whose;
+        try { whose = await reg.recoveryWhose(rk); } catch (e) {
+          log('id', 'recover whose', e.code || 'error');
+          err(res, statusOf(e), regMessage(e), e.code);
+          return true;
+        }
+        if (!whose) { err(res, 404, 'That recovery key doesn’t match a Snug account. Check each group against the key you saved.', 'not_found'); return true; }
+        if (whose.uid !== s.uid) { err(res, 409, 'This PC is linked to another Snug account.'); return true; }
+      }
       let r;
       try { r = await reg.recover(rk); } catch (e) {
         log('id', 'recover', e.code || 'error');

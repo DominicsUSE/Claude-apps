@@ -71,6 +71,7 @@ export const KEY_ROUTES = {
   '/v1/move/accept': 'moveAccept',
   '/v1/recovery/set': 'recoverySet',
   '/v1/recovery/cancel': 'recoveryCancel',
+  '/v1/recovery/whose': 'recoveryWhose',
   '/v1/link/github': 'linkGithub',
   '/v1/link/github/remove': 'unlinkGithub',
   '/v1/release/key': 'releaseKey',
@@ -381,6 +382,24 @@ export const KeyAcctMixin = {
         fail('taken');
       }
     }
+  },
+
+  /**
+   * v0.12 review, second pass: {rk, ts, rsig} -> {uid} of the account whose current recovery key rk is, so a
+   * PC that still holds an account can tell its own account's key (one replaced elsewhere) from another
+   * account's before /v1/recover starts a move. Only the key's holder can ask (rsig by rk over
+   * "snug-reg-v1\nrecovery-whose\n<rk>\n<ts>"); nothing changes.
+   */
+  async recoveryWhose(b, ip) {
+    this.ipLimit('ipLookup', ip);
+    const { rk, ts, rsig } = b;
+    need(isKey(rk) && isTs(ts) && isSig(rsig));
+    this.fresh(ts);
+    if (!this.row('SELECT 1 AS x FROM recovery_keys WHERE rk=?', rk)) fail('not_found');
+    if (!(await verifyEd25519(rk, rsig, `snug-reg-v1\nrecovery-whose\n${rk}\n${ts}`))) fail('bad_signature');
+    const r = this.row('SELECT uid FROM recovery_keys WHERE rk=?', rk);
+    if (!r || !this.accountByUid(r.uid)) fail('not_found');
+    return { uid: r.uid };
   },
 
   // ---------- POST /v1/recover: the old PC is lost; the recovery key starts a 72 h move ----------

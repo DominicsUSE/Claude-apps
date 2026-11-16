@@ -362,3 +362,29 @@ test('a GitHub account: a first recovery key waits 7 days, and a GitHub sign-in 
   assert.equal(a.peer.statusFor(c.id).recovery.pendingAt, null);
   c.close();
 });
+
+// ---------- v0.12 identity review, second pass ----------
+
+test('a revoked PC whose stored recovery key is stale still takes its own account\'s current key (the registry is asked whose it is)', async () => {
+  const a = await pc();
+  const ra = await create(a, 'staleback');
+  const oa = await client(a, ra.cookie);
+  await until(() => a.peer.statusFor(oa.id)?.registry === 'connected', 8000, 'connected');
+  const b = await pc();
+  const s = await post(b, '/api/id/move/start');
+  const waiting = post(b, '/api/id/move/wait', { flow: s.data.flow });
+  await oa.ok('id.moveAccept', { code: s.data.code });
+  const w = await waiting;
+  assert.equal(w.data.state, 'signed-in');
+  await until(() => a.peer.identity.self()?.state === 'revoked', 10000, 'revoked');
+  // on the new PC the key is replaced (with the old one, so at once); the old PC never hears of it
+  const ob = await client(b, w.cookie);
+  await until(() => b.peer.identity.self()?.state === 'ok', 20000, 'b active');
+  const n = await ob.ok('id.recoveryNew', { old: ra.data.recovery.code });
+  assert.equal(n.state, 'set');
+  assert.notEqual(a.peer.identity.get('rk'), (await kindOf(b)).recovery.rk, 'the old PC holds a stale key');
+  const mv = await post(a, '/api/id/recover', { code: n.code });
+  assert.equal(mv.status, 200, JSON.stringify(mv.data));
+  assert.equal(mv.data.state, 'moving');
+  oa.close(); ob.close();
+});

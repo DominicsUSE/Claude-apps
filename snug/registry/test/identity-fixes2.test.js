@@ -259,3 +259,17 @@ test('M6 /32: past the /32 count, sign-ups still work but the proof of work gets
     await R.close();
   }
 });
+
+test('Low: /v1/recovery/whose names the account of a recovery key, only to its holder, and changes nothing', async () => {
+  const u = await account(uniq('whose'));
+  const whose = (r, signer = r) => {
+    const ts = reg.ts();
+    return reg.call('/v1/recovery/whose', { rk: r.ik, ts, rsig: signer.sign(`snug-reg-v1\nrecovery-whose\n${r.ik}\n${ts}`) });
+  };
+  const w = await whose(u.r);
+  assert.equal(w.status, 200, JSON.stringify(w.body));
+  assert.equal(w.body.uid, u.uid);
+  assert.equal((await whose(u.r, makeKeys())).body.error, 'bad_signature');
+  assert.equal((await whose(makeKeys())).status, 404);
+  assert.equal((await kind(u)).body.move, null, 'no move started');
+});
