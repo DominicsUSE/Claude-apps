@@ -184,6 +184,25 @@ test('E2 private room information: the name and icon are sealed to members, the 
   await close([a, b, c, d, old]);
 });
 
+test('E2: a group named before 0.14: sealing its information takes the name out of the earlier rename lines too', async () => {
+  const { ps, g, users } = await group('mg', [{}, {}, { caps: null }]);
+  const [a, b, c] = ps;
+  await a.sock.ok('dm.rename', { dm: g, name: 'Zebra Secret Club' });
+  await b.sock.ok('dm.rename', { dm: g, name: 'Zebra Nightowls' });
+  await c.sock.ok('e2ee.caps', { caps: await obj.makeCaps(c.dev.dsk.privateKey, { u: c.id, d: c.dev.d }) });
+  const { e2ee } = await sealFrom(b, { conv: g, id: `info:${g}`, users, kind: 'info', rev: 0, body: { text: '', name: 'Zebra Nightowls', icon: null, hue: null } });
+  assert.equal((await b.sock.op('e2ee.info', { dm: g, what: 'members', e2ee })).ok, true);
+  assert.equal(srv.db.get('SELECT name FROM dms WHERE id = ?', g).name, null);
+  const lines = srv.db.all("SELECT text, sys FROM messages WHERE conv = ? AND text LIKE '%the group%' ORDER BY seq", g);
+  assert.deepEqual(lines.map((l) => l.text), ['mg-0 renamed the group', 'mg-1 renamed the group']);
+  for (const l of lines) assert.deepEqual({ ...JSON.parse(l.sys), by: 0 }, { kind: 'dm', act: 'info', by: 0, enc: true });
+  const hist = await c.sock.ok('history', { conv: g });
+  assert.equal(JSON.stringify(hist).includes('Zebra'), false, 'history names no name');
+  assert.equal(srv.db.get("SELECT COUNT(*) n FROM messages_fts WHERE messages_fts MATCH 'zebra'").n, 0, 'the search index has no old name');
+  assert.equal(dbText().includes('Zebra'), false, 'the old names are gone from the database');
+  await close(ps);
+});
+
 test('E3 encrypted polls: refused naming older devices; votes and the end are sealed; counts agree for all three; the server has no question or answers', async () => {
   const mixed = await group('poll-old', [{}, {}, { caps: ['react'] }]);
   const p0 = mixed.ps[0];

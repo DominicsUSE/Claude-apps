@@ -460,6 +460,18 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
     const [m] = M.withReactions([M.msg(mid)]);
     hub.toConv(dm, 'msg', { conv: dm, m, user: hub.userView(by) });
   };
+  // A group named before 0.14: its earlier rename lines name it. Sealing it the first time takes the name
+  // out of them ("Ada renamed the group", as a sealed rename reads), and out of the search index with them.
+  function scrubNames(dm) {
+    for (const r of db.all("SELECT id, text, sys FROM messages WHERE conv = ? AND sys LIKE '%\"act\":\"rename\"%'", dm)) {
+      let x;
+      try { x = JSON.parse(r.sys); } catch { continue; }
+      if (x?.kind !== 'dm' || x.act !== 'rename' || !x.name) continue;
+      const tail = ` named the group ${x.name}`;
+      const text = `${r.text.endsWith(tail) ? r.text.slice(0, -tail.length) : nameOf(x.by)} renamed the group`;
+      db.run('UPDATE messages SET text = ?, fold = ?, sys = ? WHERE id = ?', text, '', JSON.stringify({ kind: 'dm', act: 'info', by: x.by, enc: true }), r.id);
+    }
+  }
   ops['e2ee.info'] = (c, d) => {
     const dm = typeof d?.dm === 'string' ? d.dm : '';
     if (!db.get('SELECT 1 FROM dms WHERE id = ?', dm) || !M.inDm(dm, c.user)) fail('You’re not in that conversation.');
@@ -468,7 +480,8 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
     const users = members(dm);
     if (!capable(users, 'info')) fail(oldDevices('A private group name needs everyone here on Snug 0.14 or later', lacking(users, 'info')), { code: 'e2ee_old_devices' });
     const what = ['name', 'icon', 'members'].includes(d.what) ? d.what : fail('That isn’t valid.');
-    const prev = db.get('SELECT info_rev FROM dms WHERE id = ?', dm)?.info_rev ?? -1;
+    const was = db.get('SELECT info_rev, info_enc FROM dms WHERE id = ?', dm);
+    const prev = was?.info_rev ?? -1;
     const rev = d.e2ee?.h?.rev;
     if (!Number.isSafeInteger(rev) || rev <= prev) fail('The group was changed on another device. Snug is trying again.', { code: 'e2ee_side_rev', data: { rev: prev } });
     const key = `info:${dm}`;
@@ -478,6 +491,7 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
       // The readable name and icon go: from now on only members' devices know them.
       db.run('UPDATE dms SET info_enc = ?, info_rev = ?, name = NULL, icon = NULL, icon_hue = NULL WHERE id = ?', canon(v.env), rev, dm);
       replaceWraps(key, v.h, v.k);
+      if (!was?.info_enc) scrubNames(dm);
     });
     if (what !== 'members') infoLine(dm, c.user, what);
     for (const u of users) hub.sendDm(u, dm);
