@@ -1,6 +1,4 @@
-// English: the source of truth for every word js/lib/i18n.js t() looks up.
-// Other languages have the same keys (or fewer: a missing one falls back to
-// this file). Keys are flat and dotted by the screen they belong to. A value is
+// English: every word js/lib/i18n.js t() looks up (Snug ships English only). Keys are flat and dotted by the screen they belong to. A value is
 // a string with {name} placeholders, or a plural object { one, other } picked
 // by Intl.PluralRules for vars.count.
 //
@@ -28,11 +26,6 @@ export default {
   'time.morning': 'Good morning',
   'time.afternoon': 'Good afternoon',
   'time.evening': 'Good evening',
-
-  // ---------- Language (Settings > Appearance) ----------
-  'lang.label': 'Language',
-  'lang.hint': 'The words Snug uses on screen. Messages stay as people wrote them.',
-  'lang.auto': 'Match my browser',
 
   // ---------- Signing in (js/views/auth.js) ----------
   'auth.invitedBy': '{name} invited you to {house}',
@@ -325,7 +318,7 @@ export default {
   'look.zoomHint': 'Makes everything bigger or smaller, like the browser’s zoom.',
   'look.clock': 'Clock',
   'look.clockHint': 'Times on messages and in lists.',
-  'look.matchLanguage': 'Match language',
+  'look.matchBrowser': 'Match my browser',
   'look.h12': '12-hour',
   'look.h24': '24-hour',
   'look.colour': 'Colour',

@@ -13,15 +13,9 @@ try {
   if (p.display === 'compact') r.setAttribute('data-display', 'compact');
   if (p.font === 'hyperlegible') r.setAttribute('data-font', 'hyperlegible');
   if (p.tone && p.tone !== 'violet' && p.tone !== 'coral') r.setAttribute('data-tone', p.tone); // coral: the old default
-  // The language (js/language.js, js/lib/i18n.js matchLanguage): the last choice
-  // on this device, else the first language in the browser's list Snug has.
-  var lang = localStorage.getItem('snug.lang');
-  if (lang !== 'en' && lang !== 'lt') {
-    lang = 'en';
-    var ls = navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language];
-    for (var i = 0; i < ls.length; i++) { var b = String(ls[i] || '').toLowerCase().split(/[-_]/)[0]; if (b === 'en' || b === 'lt') { lang = b; break; } }
-  }
-  r.lang = lang;
+  // Snug speaks English only (js/lib/i18n.js); a 'lt' kept by 0.12.0 is forgotten.
+  r.lang = 'en';
+  if (localStorage.getItem('snug.lang') === 'lt') localStorage.removeItem('snug.lang');
   // The look js/account.js applied last time on this device (custom theme and
   // accent colours, this-device-only settings). Only data-* attributes with
   // plain values, and colour properties as hex or rgb(), are accepted.

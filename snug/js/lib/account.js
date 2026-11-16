@@ -91,8 +91,9 @@ export const PREF_RULES = {
   // Desktop: previews for links friends on other PCs send (fetching one shows the site this PC's address).
   friendPreviews: ['bool', null, false],
   // --- end privacy ---
-  // The language Snug speaks (js/lib/i18n.js, js/language.js): 'auto' follows the browser.
-  lang: ['enum', ['auto', 'en', 'lt'], 'auto'],
+  // The language Snug speaks (js/lib/i18n.js, js/language.js): English only
+  // since 0.13; a 'lt' from 0.12.0 reads as 'auto' (RENAMED, below).
+  lang: ['enum', ['auto', 'en'], 'auto'],
 };
 // customThemes: [{ id, name, base, bg, surface, text, accent }], ids unique.
 function cleanThemes(v, fail) {
@@ -162,7 +163,7 @@ const PLACE_ID = /^[\w:.-]{1,80}$/;
 // violet now, so a stored 'coral' accent or tone (nearly always the old
 // default) means violet. The server applies this to what it reads back and to
 // every change; the browser to what it adopts and keeps on the device.
-const RENAMED = { accent: { coral: 'violet' }, tone: { coral: 'violet' } };
+const RENAMED = { accent: { coral: 'violet' }, tone: { coral: 'violet' }, lang: { lt: 'auto' } };
 export function upgradePrefs(p) {
   if (!p || typeof p !== 'object' || Array.isArray(p)) return p;
   let out = p;

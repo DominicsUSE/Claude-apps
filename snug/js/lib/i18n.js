@@ -1,25 +1,24 @@
-// Words in the person's language. Pure: no DOM and no state of the app, so the
-// browser and Node (tests, the server's shared helpers) use it alike; the
-// server never changes the language, so everything it says stays English.
+// Words on screen. Snug ships English only (0.13 dropped the Lithuanian
+// translation and the Language picker); the lookup stays so every screen
+// reads its words from one table. Pure: no DOM and no state of the app, so the
+// browser and Node (tests, the server's shared helpers) use it alike.
 //
 // - t('key', { name }) looks the key up in the active language, then in
 //   English (the source of truth, js/locales/en.js), then gives the key back.
 //   {name} placeholders are filled from vars; a missing value leaves the
 //   placeholder, so the gap is visible instead of silent.
 // - A value can be a plural object, { one, few, many, other }, picked with
-//   Intl.PluralRules for vars.count in that language (Lithuanian uses all four).
+//   Intl.PluralRules for vars.count in that language.
 // - setLocale(code) / locale(); onLocale(f) hears changes (js/lib/util.js
 //   rebuilds its date formats with it).
 // - fmtNumber / fmtDate format with the active language through Intl.
 import en from '../locales/en.js';
-import lt from '../locales/lt.js';
 
 // Each language named in its own words, as people look for it.
 export const LANGUAGES = [
   { code: 'en', name: 'English' },
-  { code: 'lt', name: 'Lietuvių' },
 ];
-const TABLES = { en, lt };
+const TABLES = { en };
 let current = 'en';
 const listeners = new Set();
 const rules = new Map();

@@ -20,8 +20,7 @@ import {
 import { ACTIONS, bindings, comboKeys, conflictOf, eventCombo } from '../lib/keys.js';
 import { SOUND_KINDS, SOUND_PACKS, packOf, soundFor } from '../lib/account.js';
 import { playSound, SOUND_LIST, effectivePrefs, setLook, deviceLook, setDeviceOnly, resolveTheme } from '../account.js';
-import { t, LANGUAGES } from '../lib/i18n.js'; // words in the chosen language (js/locales)
-import { languagePref, setLanguage } from '../language.js'; // Settings > Appearance > Language
+import { t } from '../lib/i18n.js'; // the words on screen (js/locales/en.js)
 // The real message component, handed over by js/views/settings.js (importing
 // js/views/stream.js from here would make an import cycle through the settings).
 let Message = () => null;
@@ -255,16 +254,6 @@ function FontPicker() {
 
 // ---------- Appearance page ----------
 const opt = (v, label) => [v, label];
-// Settings > Appearance > Language: "Match my browser" (the default) or a
-// language, each named in its own words. Follows the account (js/language.js).
-function LanguageRow() {
-  return html`<${Row} label=${t('lang.label')} hint=${t('lang.hint')}>
-    <select class="field" id="set-lang" aria-label=${t('lang.label')} value=${languagePref()} onChange=${(e) => setLanguage(e.target.value)}>
-      <option value="auto">${t('lang.auto')}</option>
-      ${LANGUAGES.map((l) => html`<option key=${l.code} value=${l.code} lang=${l.code}>${l.name}</option>`)}
-    </select>
-  <//>`;
-}
 
 export function AppearancePage() {
   const sp = S.prefs;
@@ -275,7 +264,6 @@ export function AppearancePage() {
   return html`
     <h1>${t('settings.page.look')}</h1>
     <p class="lead">${t('look.lead')}</p>
-    <${LanguageRow} />
     <${AppearancePreview} />
     <${Row} label=${t('look.deviceOnly')} hint=${dev ? t('look.deviceOnlyOn') : t('look.deviceOnlyOff')}>
       <div class="acc-inline">
@@ -345,7 +333,7 @@ export function AppearancePage() {
       <${Seg} label=${t('look.zoom')} value=${p.zoom} options=${[80, 90, 100, 110, 125, 150].map((v) => [v, `${v}%`])} onChange=${(v) => setLook('zoom', v)} />
     <//>
     <${Row} label=${t('look.clock')} hint=${t('look.clockHint')}>
-      <${Seg} label=${t('look.clock')} value=${sp.clock} options=${[opt('auto', t('look.matchLanguage')), opt('12', t('look.h12')), opt('24', t('look.h24'))]} onChange=${(v) => setPref('clock', v)} />
+      <${Seg} label=${t('look.clock')} value=${sp.clock} options=${[opt('auto', t('look.matchBrowser')), opt('12', t('look.h12')), opt('24', t('look.h24'))]} onChange=${(v) => setPref('clock', v)} />
     <//>
     <div class="set-head">${t('look.colour')}</div>
     <${Row} label=${t('look.saturation')} hint=${t('look.saturationHint')}>

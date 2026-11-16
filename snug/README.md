@@ -297,14 +297,6 @@ Real, and covered by tests with separate users:
   addresses, keys or passwords). The page pings the server every 10 seconds
   and drops a connection that says nothing for 25 seconds, so a phone
   changing networks reconnects within about half a minute.
-- **Languages** (0.12): English and Lithuanian, chosen in Settings >
-  Appearance > Language (or *Match my browser*). The choice
-  follows the account and stays on the sign-in screen after signing out.
-  Translated so far: sign-in and sign-up, the sidebar and Home, the message
-  box, settings page titles, the Appearance page and the *Start or join a
-  house* dialog; everything else, including server errors, is still English.
-  The Lithuanian text has not been reviewed by a native speaker yet. New
-  languages go in `js/locales/` (see `js/lib/i18n.js`).
 - In-app notes and desktop notifications while a tab is open.
 - Notifications when Snug is closed (Settings > Notifications > *Notify me
   when Snug is closed*): Web Push through the browser's own push service, with

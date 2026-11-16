@@ -99,7 +99,7 @@ goes back to an older version on its own (README, "Install, update, go back").
 - Files are not signed yet, so Windows and macOS warn when you install (see the install page).
 - No outside security review of the encryption protocol yet. Desktop keys are not yet wrapped by the
   operating system's key store.
-- Lithuanian is partial and unreviewed. Polls don't work with friends on other PCs (they are refused rather
+- Polls don't work with friends on other PCs (they are refused rather
   than half-working). Calls through a real TURN relay have only been tested against a simulated one.
 - Devices on 0.12 builds from before the release can't link to 0.12.0 devices (the link code changed).
 
