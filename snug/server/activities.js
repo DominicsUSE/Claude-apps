@@ -288,7 +288,8 @@ export function createActivitiesOps({ db, M, hub, fail, ops = {} }) {
     const iceExp = iceExpOf(ice);
     return iceExp ? { ice, iceExp } : { ice };
   };
-  hub.helloExtras?.push((ws, u) => { const iceExp = iceExpOf(hub.iceFor(u)); return iceExp ? { iceExp } : {}; });
+  // callE2ee: this server passes on { ck } call-key signals (calls C1); servers before 0.14 refuse them.
+  hub.helloExtras?.push((ws, u) => { const iceExp = iceExpOf(hub.iceFor(u)); return iceExp ? { iceExp, callE2ee: 1 } : { callE2ee: 1 }; });
 
   // ---------- Coming back after a drop, refused ----------
   // A held voice slot whose owner may no longer come back (banned, timed out,

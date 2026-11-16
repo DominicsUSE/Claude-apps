@@ -211,6 +211,31 @@ test('data saver: { want: { camera } } is a signal with one true or false, rebui
   closeAll(a, b);
 });
 
+test('call keys (calls C1): { ck } carries a sealed key, an acknowledgement or why not, rebuilt from known fields with a size cap; the hello says the server passes it on', async () => {
+  const { rtcSignal } = await import('../server/ops.js');
+  const box = 'A'.repeat(108);
+  const key = { v: 1, t: 'key', place: 'd_x', from: 'u_a', d: 'dv_abcdefghijklmnopqrst', to: 'u_b', id: 7, ts: 1_700_000_000_000, w: [['dv_bcdefghijklmnopqrstu', 3, box]], sig: 'S'.repeat(86) };
+  assert.deepEqual(rtcSignal({ ck: key }), { ck: key });
+  assert.deepEqual(rtcSignal({ ck: { v: 1, t: 'ack', id: 255 } }), { ck: { v: 1, t: 'ack', id: 255 } });
+  assert.deepEqual(rtcSignal({ ck: { v: 1, t: 'no', why: 'browser' } }), { ck: { v: 1, t: 'no', why: 'browser' } });
+  assert.throws(() => rtcSignal({ ck: { ...key, extra: 'x' } }), 'unknown fields');
+  assert.throws(() => rtcSignal({ ck: { ...key, id: 256 } }));
+  assert.throws(() => rtcSignal({ ck: { ...key, w: Array.from({ length: 13 }, () => key.w[0]) } }), 'at most 12 devices');
+  assert.throws(() => rtcSignal({ ck: { ...key, w: [['dv_x', 1, 'B'.repeat(5000)]] } }), 'size cap');
+  assert.throws(() => rtcSignal({ ck: { v: 1, t: 'no', why: '<script>' } }));
+  assert.throws(() => rtcSignal({ ck: { v: 2, t: 'ack', id: 1 } }));
+  // The fingerprint statement rides inside the SDP string, as before.
+  const sdp = 'v=0\r\na=x-snug-fp:v1 dv_abcdefghijklmnopqrst sig\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n';
+  assert.equal(rtcSignal({ sdp: { type: 'offer', sdp } }).sdp.sdp, sdp);
+  const { a, b, hangout } = await people('ck');
+  assert.equal(a.hello.callE2ee, 1, 'clients send { ck } only to a server that says it passes it on');
+  await a.ok('voice.join', { room: hangout });
+  await b.ok('voice.join', { room: hangout });
+  await b.ok('rtc', { to: a.id, data: { ck: { v: 1, t: 'ack', id: 3 } } });
+  assert.deepEqual((await a.next('rtc', (r) => r.from === b.id)).data, { ck: { v: 1, t: 'ack', id: 3 } });
+  closeAll(a, b);
+});
+
 test('video permission: a role without "Share camera and screen" is refused camera and screen; taking it away mid-call turns them off', async () => {
   const { a, b, hangout, house } = await people('vp');
   const role = srv.db.get('SELECT join_role FROM houses WHERE id = ?', house).join_role;

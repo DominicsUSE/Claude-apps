@@ -88,7 +88,7 @@ function linksOf(v) {
   });
 }
 
-// sec-authz: a WebRTC signal is one of { sdp }, { candidate }, { kinds } or { want } (js/voice.js).
+// sec-authz: a WebRTC signal is one of { sdp }, { candidate }, { kinds }, { want } or { ck } (js/voice.js).
 const RTC_SDP_MAX = 24_000;
 const badSignal = () => fail('That signal isn’t valid.');
 const sOrNull = (v, max) => (v === null || v === undefined ? null : typeof v === 'string' && v.length <= max ? v : badSignal());
@@ -126,7 +126,29 @@ export function rtcSignal(data) {
     if (Object.keys(v).length !== 1 || typeof v.camera !== 'boolean') badSignal();
     return { want: { camera: v.camera } };
   }
+  // calls C1 (js/e2ee/callkeys.js): a call key sealed to the other person's devices, an
+  // acknowledgement of one, or why this person can't encrypt. The server can't open any of it.
+  if (k === 'ck') return { ck: callKeySignal(v) };
   return badSignal();
+}
+const CK_MAX = 6000;
+const ckStr = (x, max) => (typeof x === 'string' && x.length >= 1 && x.length <= max && /^[\w:.-]+$/.test(x) ? x : badSignal());
+const ckByte = (x) => (Number.isInteger(x) && x >= 0 && x <= 255 ? x : badSignal());
+function callKeySignal(v) {
+  if (v.v !== 1) badSignal();
+  const keys = Object.keys(v).sort().join();
+  if (v.t === 'ack') { if (keys !== 'id,t,v') badSignal(); return { v: 1, t: 'ack', id: ckByte(v.id) }; }
+  if (v.t === 'no') { if (keys !== 't,v,why' || !['browser', 'keys'].includes(v.why)) badSignal(); return { v: 1, t: 'no', why: v.why }; }
+  if (v.t !== 'key' || keys !== 'd,from,id,place,sig,t,to,ts,v,w') badSignal();
+  if (!Array.isArray(v.w) || !v.w.length || v.w.length > 12) badSignal();
+  const out = {
+    v: 1, t: 'key', place: ckStr(v.place, 80), from: ckStr(v.from, 80), d: ckStr(v.d, 40), to: ckStr(v.to, 80), id: ckByte(v.id),
+    ts: Number.isSafeInteger(v.ts) && v.ts > 0 ? v.ts : badSignal(),
+    w: v.w.map((x) => (Array.isArray(x) && x.length === 3 && Number.isSafeInteger(x[1]) && x[1] >= 0 ? [ckStr(x[0], 40), x[1], ckStr(x[2], 400)] : badSignal())),
+    sig: ckStr(v.sig, 100),
+  };
+  if (JSON.stringify(out).length > CK_MAX) badSignal();
+  return out;
 }
 
 export function createOps({ db, M, hub }) {
