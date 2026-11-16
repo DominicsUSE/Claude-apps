@@ -1097,7 +1097,10 @@ Real, and covered by tests with separate users:
     than going direct. **With no relay** on the server, a voice room says
     "This connects directly: people in … can see your IP address" above *Join
     voice*, an incoming call says it on the card, and starting a call asks
-    once on each device (*Join* or *Cancel*). The connection shows *Direct* or
+    once on each device (*Join* or *Cancel*). PC-to-PC calls get the
+    registry's relay only when the call starts, so they don't say this
+    beforehand: with no relay from the registry they go direct unless *Hide my
+    IP from friends* is on. The connection shows *Direct* or
     *Relayed*; its details never show anyone's IP address.
   - **End-to-end encrypted calls (0.14):** when everyone in a call has turned
     on end-to-end encryption and their browser has encoded transforms

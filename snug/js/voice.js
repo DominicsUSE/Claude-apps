@@ -424,11 +424,13 @@ function refreshIce() {
   return refreshingIce;
 }
 let noRelayToast = 0;
-// calls C3: with no relay on this server (and not the desktop app's PC-to-PC
-// calls, which say so on a friend's profile), a call connects straight to the
+// calls C3: with no relay on this server, a call connects straight to the
 // other people's devices, so they can see my IP address. Said before joining:
 // a note on the voice room and the incoming call, and once per device before
-// starting a call (js/calls.js).
+// starting a call (js/calls.js). Not for the desktop app's PC-to-PC calls: the
+// registry's relay is fetched only when a call starts (server/peer.js
+// turnFor), so beforehand there is no telling; without one they go direct
+// unless "Hide my IP from friends" is on. Nothing says so yet (README, SECURITY.md).
 export const connectsDirectly = () => !hasTurn(S.ice) && !(S.p2p?.enabled && S.p2p.owner) && relayMode(vp()) !== 'all';
 const DIRECT_OK = 'snug.directOk';
 export function directAcknowledged() { try { return localStorage.getItem(DIRECT_OK) === '1'; } catch { return false; } }

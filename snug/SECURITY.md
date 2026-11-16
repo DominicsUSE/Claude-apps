@@ -236,8 +236,11 @@ back to *in transit only*; the label then says so. Not reviewed by anyone outsid
   relay's operator sees your address, when and how much. TURN credentials last an hour and their username is a
   hash of the person and the day keyed with a key only Snug's server holds (not the secret the relay shares), not
   the account id; a static TURN login (no `SNUG_TURN_SECRET`) is the
-  same for everyone and never expires, and the server warns about it at startup. Without a relay a call
-  connects directly and the other people see your address; Snug says so before you join. Anyone can turn
+  same for everyone and never expires, and the server warns about it at startup. On a Snug server without a
+  relay a call connects directly and the other people see your address; Snug says so before you join. The
+  desktop app's PC-to-PC calls with friends get a relay from the registry when the call starts; if the registry
+  has none, the call connects directly without that notice, unless *Hide my IP from friends* is on (then it
+  doesn't connect). Anyone can turn
   *Hide my IP address* off.
 - **People you talk to.** Anyone in a conversation can copy, screenshot or forward it. Deleting a message
   removes it from Snug, not from someone else's copy.
