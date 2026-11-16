@@ -55,6 +55,12 @@ goes back to an older version on its own (README, "Install, update, go back").
   privacy page, with `SNUG_STUN=none`.
 - Desktop app: update checks at start and then about once a day with jitter (were hourly). **Settings >
   Desktop app > Updates**: *Automatically*, *Tell me* or *Only when I ask*.
+- **Fix: pressing the update button seemed to do nothing.** After *Install now* (Settings > Desktop app), and
+  in join mode after the fallback page's *Check for an app update* (0.13 too), the update downloaded and then
+  waited for a quiet moment (Snug hidden or unfocused, or a minute without touching the computer), so while you
+  kept using Snug nothing happened, and Settings showed no progress. Pressing the button now installs as soon as
+  the download is verified (never during a call or a data file transfer); Settings shows the progress, and a
+  failed download says why, with *Try again* (the automatic retry waits for a quiet moment again).
 
 ### Stored data encrypted
 

@@ -57,14 +57,27 @@ function UpdateRows({ Row }) {
   const [u, setU] = useState(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => { app()?.getUpdates?.().then(setU, () => setU(null)); }, []);
+  // While a download runs (behind Snug, or after Install now), follow it: Install now shows up once it is
+  // ready, and the progress is visible instead of a button that seems to do nothing.
+  const moving = !!u && ['downloading', 'verifying', 'waiting', 'installing'].includes(u.phase) && !u.waiting;
+  useEffect(() => {
+    if (!moving) return undefined;
+    const t = setInterval(() => app()?.getUpdates?.().then((r) => { if (r) setU(r); }, () => {}), 1000);
+    return () => clearInterval(t);
+  }, [moving]);
   if (!u) return null;
   const mode = u.mode || 'auto';
   const pick = (m) => app().setUpdateMode(m).then((r) => { if (r?.error) { toast(r.error); return; } if (r?.update) setU(r.update); }, () => {});
   const check = () => { setBusy(true); app().checkForUpdates().then((r) => { if (r) setU(r); }, () => {}).finally(() => setBusy(false)); };
   const install = () => app().installUpdate().then((r) => { if (r) setU(r); }, () => {});
+  // A download that failed (after Install now, or behind Snug): say why, and let the person try again.
+  const failed = u.phase === 'error' && !!u.version;
   const when = u.lastCheck?.at ? new Date(u.lastCheck.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : null;
   const status = !u.canCheck ? 'This copy of Snug doesn’t check for updates (it isn’t an installed release).'
     : u.waiting ? `Snug ${u.version} is available.`
+      : failed ? `Snug ${u.version} is available. ${u.message || 'Snug couldn’t download it. Try again.'}`
+      : u.asked && u.phase === 'downloading' && u.total ? `Downloading Snug ${u.version}… ${Math.floor((100 * u.received) / u.total)}%. Snug restarts to install it when it’s ready.`
+        : u.asked && ['downloading', 'verifying', 'waiting', 'installing'].includes(u.phase) ? `Installing Snug ${u.version}. Snug restarts when it’s ready${u.phase === 'waiting' ? ' (after the call or the data file transfer)' : ''}.`
       : ['downloading', 'verifying', 'waiting', 'installing'].includes(u.phase) ? `Snug ${u.version} is being installed. Snug restarts when you’re not using it.`
         : when ? (u.lastCheck.ok ? `You have the newest version (${u.current}). Last checked ${when}.` : `Snug couldn’t reach GitHub at ${when}. Check your connection and try again.`)
           : `You have Snug ${u.current}.`;
@@ -76,6 +89,7 @@ function UpdateRows({ Row }) {
     <${Row} label="Version" hint=${status}>
       ${u.waiting
         ? html`<button class="btn primary" id="ds-update-install" onClick=${install}>Install now</button>`
+        : failed ? html`<button class="btn primary" id="ds-update-retry" onClick=${install}>Try again</button>`
         : html`<button class="btn" id="ds-update-check" disabled=${busy || !u.canCheck} onClick=${check}>${busy ? 'Checking…' : 'Check now'}</button>`}
     <//>`;
 }
