@@ -49,16 +49,18 @@ import { E2, safetyFor } from './e2ee/manager.js'; // end-to-end encryption on t
 import { E2eeHost } from './views/e2ee-setup.js'; // opens the encryption sheets when they're needed
 import './e2ee/conv.js'; // end-to-end encrypted conversations: sealing and opening messages
 import { desktopTest } from './desktop.js'; // the desktop app's badge, global voice keys, idle, snug:// links
+import { t } from './lib/i18n.js'; // words in the chosen language (js/locales)
+import './language.js'; // the chosen language applied before the first render, and <html lang>
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 
 // Desktop Messages with no conversation open (there are none yet).
 function MessagesEmpty() {
-  return html`<section class="main view" aria-label="Messages">
-    <header class="bar"><h1 class="bar-title"><${Icon} name="room" />Messages</h1></header>
+  return html`<section class="main view" aria-label=${t('nav.messages')}>
+    <header class="bar"><h1 class="bar-title"><${Icon} name="room" />${t('nav.messages')}</h1></header>
     <div class="view-body">
-      <${Empty} icon="room" title="No conversations yet" text="Write to a friend, or to someone you met in one of your communities. Groups start the same way.">
-        <button class="btn primary" onClick=${() => openModal(NewMessage)}><${Icon} name="compose" size=${16} />New message</button>
+      <${Empty} icon="room" title=${t('messages.emptyTitle')} text=${t('messages.emptyText')}>
+        <button class="btn primary" onClick=${() => openModal(NewMessage)}><${Icon} name="compose" size=${16} />${t('nav.newMessage')}</button>
       <//>
     </div>
   </section>`;
@@ -132,12 +134,14 @@ function Desktop() {
 
 // The phone is its own product: one screen at a time, tabs where thumbs are.
 const TABS = [
-  { id: 'home', label: 'Home', icon: 'house' },
-  { id: 'messages', label: 'Messages', icon: 'room' },
-  { id: 'discover', label: 'Discover', icon: 'compass' },
-  { id: 'catchup', label: 'Catch up', icon: 'tray' },
-  { id: 'you', label: 'You', icon: 'user' },
+  { id: 'home', key: 'nav.home', icon: 'house' },
+  { id: 'messages', key: 'nav.messages', icon: 'room' },
+  { id: 'discover', key: 'nav.discover', icon: 'compass' },
+  { id: 'catchup', key: 'tab.catchUp', icon: 'tray' },
+  { id: 'you', key: 'tab.you', icon: 'user' },
 ];
+
+const tabLabel = (tab) => t(tab.key);
 
 function TabHead({ title, children }) {
   return html`<header class="bar"><h1 class="bar-title">${title}</h1><div class="bar-end">${children}</div></header>`;
@@ -158,13 +162,13 @@ function YouTab() {
     </button>
     <${LiveDock} />
     <div class="you-list">
-      ${row('people', 'Friends', () => go({ type: 'friends' }), requests ? html`<span class="badge">${requests}</span>` : '')}
-      ${row('save', 'Saved messages', () => go({ type: 'saved' }), S.saved.length ? html`<span class="faint num">${S.saved.length}</span>` : '')}
-      ${row('search', 'Search messages', () => go({ type: 'search', q: '' }))}
-      ${row('bell', 'Notifications', () => openLayer({ C: Settings, props: { page: 'notify' } }))}
-      ${row('palette', 'Appearance', () => openLayer({ C: Settings, props: { page: 'look' } }))}
-      ${row('sliders', 'All settings', () => openLayer({ C: Settings, props: {} }))}
-      ${!p2pOwner() && row('leave', 'Sign out', confirmSignOut)}
+      ${row('people', t('nav.friends'), () => go({ type: 'friends' }), requests ? html`<span class="badge">${requests}</span>` : '')}
+      ${row('save', t('you.saved'), () => go({ type: 'saved' }), S.saved.length ? html`<span class="faint num">${S.saved.length}</span>` : '')}
+      ${row('search', t('you.search'), () => go({ type: 'search', q: '' }))}
+      ${row('bell', t('settings.page.notify'), () => openLayer({ C: Settings, props: { page: 'notify' } }))}
+      ${row('palette', t('settings.page.look'), () => openLayer({ C: Settings, props: { page: 'look' } }))}
+      ${row('sliders', t('you.allSettings'), () => openLayer({ C: Settings, props: {} }))}
+      ${!p2pOwner() && row('leave', t('you.signOut'), confirmSignOut)}
     </div>
   </div>`;
 }
@@ -177,22 +181,22 @@ function Phone() {
   let body;
   if (tab === 'home') body = html`<${Home} />`;
   else if (tab === 'messages') {
-    body = html`<${TabHead} title="Messages">
+    body = html`<${TabHead} title=${t('nav.messages')}>
       <button class="ib" aria-label="Jump to or search" onClick=${() => openQuick()}><${Icon} name="search" /></button>
       <button class="ib" aria-label="New message" onClick=${() => openModal(NewMessage)}><${Icon} name="compose" /></button>
     <//><div class="nav-scroll"><${NavDirect} /></div>`;
   } else if (tab === 'discover') body = html`<${Discover} />`;
   else if (tab === 'catchup') body = html`<${CatchUp} />`;
-  else body = html`<${TabHead} title="You" /><${YouTab} />`;
+  else body = html`<${TabHead} title=${t('tab.you')} /><${YouTab} />`;
 
   return html`<div class="phone" onTouchStart=${edgeStart} onTouchEnd=${edgeEnd}>
     <div class="screen root" aria-hidden=${S.ui.depth > 0 ? 'true' : undefined}>
       <div class="tab-body">${body}</div>
-      ${!isOnline() && html`<div class="conn" role="status"><${Icon} name="offline" size=${16} />Can\u2019t reach Snug. Messages wait and send when it\u2019s back.</div>`}
+      ${!isOnline() && html`<div class="conn" role="status"><${Icon} name="offline" size=${16} />${t('phone.cantReach')}</div>`}
       ${tab !== 'you' && html`<${LiveDock} />`}
       <nav class="tabs" role="tablist" aria-label="Sections">
         ${TABS.map((t) => html`<button key=${t.id} class="tab" role="tab" aria-selected=${String(tab === t.id)} onClick=${() => setTab(t.id)}>
-          <${Icon} name=${t.icon} size=${24} />${t.label}
+          <${Icon} name=${t.icon} size=${24} />${tabLabel(t)}
           ${counts[t.id] > 0 && html`<span class="badge" aria-label=${`${counts[t.id]} for you`}>${counts[t.id] > 99 ? '99+' : counts[t.id]}</span>`}
         </button>`)}
       </nav>

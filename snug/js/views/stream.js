@@ -37,6 +37,7 @@ import { MessageExtras, ownsFiles, messagingMenuItems, PlusMenu, FormatBar, form
 import { EncBody, encMenuItems, EncComposerNote, RoomComposerHint, quoteText } from './e2ee-conv.js'; // end-to-end encrypted messages
 import { PeerState, Arriving } from './p2p.js'; // a message waiting for a friend on another PC, or held after their security code changed
 import { SvgPreview, PdfPreview, isSvgFile, isPdfFile } from './preview.js'; // SVG and PDF attachments
+import { t } from '../lib/i18n.js'; // words in the chosen language (js/locales)
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 const atBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 48;
@@ -618,10 +619,10 @@ export function Composer({ conv, placeholder }) {
         <textarea ref=${ta} rows="1" placeholder=${placeholder} aria-label=${placeholder} value=${text}
           onInput=${onInput} onKeyDown=${onKey} onPaste=${onPaste} onBlur=${() => setAc(null)}></textarea>
         <${GifButton} conv=${conv} />
-        <button class="ib" aria-label="Insert an emoji" data-tip="Emoji"
-          onClick=${(e) => openPop({ anchor: rectOf(e), align: 'end', label: 'Insert an emoji', C: EmojiPicker, props: { onPick: (c) => { closePop(); const k = parseKey(c); if (k) picked.current.set(k.name, c); insert(asTyped(c)); } } })}><${Icon} name="smile" /></button>
+        <button class="ib" aria-label=${t('composer.emoji')} data-tip=${t('composer.emojiTip')}
+          onClick=${(e) => openPop({ anchor: rectOf(e), align: 'end', label: t('composer.emoji'), C: EmojiPicker, props: { onPick: (c) => { closePop(); const k = parseKey(c); if (k) picked.current.set(k.name, c); insert(asTyped(c)); } } })}><${Icon} name="smile" /></button>
         <${VoiceButton} conv=${conv} />
-        <button class="ib send" aria-label=${over ? 'Send message: too long to send' : 'Send message'} data-tip=${over ? 'Too long to send' : 'Send'} data-key="Enter" disabled=${!canSend} onClick=${submit}><${Icon} name="send" /></button>
+        <button class="ib send" aria-label=${over ? t('composer.tooLong') : t('composer.send')} data-tip=${over ? t('composer.tooLongTip') : t('composer.sendTip')} data-key="Enter" disabled=${!canSend} onClick=${submit}><${Icon} name="send" /></button>
       </div>
     </div>
     <input type="file" hidden multiple ref=${fileIn} onChange=${(e) => { addFiles([...e.target.files]); e.target.value = ''; }} />

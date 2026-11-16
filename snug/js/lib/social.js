@@ -1,6 +1,7 @@
 // The social side of Snug: friends, what is happening right now, events.
 // Pure functions of the state, shared by the views and (for the rules) the server.
 import { MIN, DAY } from './util.js';
+import { t } from './i18n.js';
 
 // What a house can say it is about. The server only accepts these.
 export const TOPICS = ['Games', 'Music', 'Art & making', 'Tech', 'Study', 'Sports', 'Local', 'Books', 'Film & TV', 'Just chatting'];
@@ -96,9 +97,9 @@ export function mutualHouses(S, userId) {
 
 export function greeting(now) {
   const h = new Date(now).getHours();
-  if (h >= 5 && h < 12) return 'Good morning';
-  if (h >= 12 && h < 18) return 'Good afternoon';
-  return 'Good evening';
+  if (h >= 5 && h < 12) return t('time.morning');
+  if (h >= 12 && h < 18) return t('time.afternoon');
+  return t('time.evening');
 }
 
 // Interests and links, cleaned the way the server cleans them.

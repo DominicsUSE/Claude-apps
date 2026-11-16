@@ -18,6 +18,7 @@ import { Icon } from '../ui/icons.js';
 import { Avatar, Rich, Switch } from '../ui/kit.js';
 import { EmojiPicker } from './emoji.js';
 import { remoteOf, isPeerGroup } from './p2p.js'; // 0.12: polls don't travel between PCs yet
+import { t } from '../lib/i18n.js'; // words in the chosen language (js/locales)
 
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 const ALPHA = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -509,16 +510,16 @@ export function PlusMenu({ conv, text, update, insert, replyTo, onAttach }) {
     openMenu({
       anchor, align: 'start',
       items: [
-        onAttach && { label: 'Upload a file', icon: 'clip', onSelect: onAttach },
+        onAttach && { label: t('composer.upload'), icon: 'clip', onSelect: onAttach },
         onAttach && { sep: true },
-        isEncrypted(conv) ? { label: E2COPY.pollsOff, icon: 'poll', disabled: true } : !acrossPcs(conv) && { label: 'Create a poll', icon: 'poll', onSelect: () => openModal(PollModal, { conv }) },
-        { label: 'Send a sticker', icon: 'sticker', onSelect: () => openPop({ anchor, align: 'start', label: 'Stickers', C: StickerPicker, props: { conv, replyTo } }) },
-        { label: 'Insert a time', icon: 'calendar', onSelect: () => openModal(StampModal, { onInsert: (tok) => insert(`${tok} `) }) },
-        { label: 'Schedule a message', icon: 'clock', onSelect: () => openModal(ScheduleModal, { conv, text, replyTo, done: () => update('') }) },
+        isEncrypted(conv) ? { label: E2COPY.pollsOff, icon: 'poll', disabled: true } : !acrossPcs(conv) && { label: t('composer.poll'), icon: 'poll', onSelect: () => openModal(PollModal, { conv }) },
+        { label: t('composer.sticker'), icon: 'sticker', onSelect: () => openPop({ anchor, align: 'start', label: 'Stickers', C: StickerPicker, props: { conv, replyTo } }) },
+        { label: t('composer.time'), icon: 'calendar', onSelect: () => openModal(StampModal, { onInsert: (tok) => insert(`${tok} `) }) },
+        { label: t('composer.schedule'), icon: 'clock', onSelect: () => openModal(ScheduleModal, { conv, text, replyTo, done: () => update('') }) },
       ].filter(Boolean),
     });
   };
-  return html`<button class="ib plus-btn" aria-label=${onAttach ? 'Add: file, poll, sticker, time, schedule' : 'More: poll, sticker, time, schedule'} data-tip=${onAttach ? 'Upload a file, poll, sticker and more' : 'Poll, sticker, time, schedule'} aria-haspopup="menu" onClick=${open}><${Icon} name="plus" /></button>`;
+  return html`<button class="ib plus-btn" aria-label=${onAttach ? t('composer.plus') : t('composer.plusMore')} data-tip=${onAttach ? t('composer.plusTip') : t('composer.plusMoreTip')} aria-haspopup="menu" onClick=${open}><${Icon} name="plus" /></button>`;
 }
 
 const WRAPS = {

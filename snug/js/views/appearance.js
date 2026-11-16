@@ -20,6 +20,8 @@ import {
 import { ACTIONS, bindings, comboKeys, conflictOf, eventCombo } from '../lib/keys.js';
 import { SOUND_KINDS, SOUND_PACKS, packOf, soundFor } from '../lib/account.js';
 import { playSound, SOUND_LIST, effectivePrefs, setLook, deviceLook, setDeviceOnly, resolveTheme } from '../account.js';
+import { t, LANGUAGES } from '../lib/i18n.js'; // words in the chosen language (js/locales)
+import { languagePref, setLanguage } from '../language.js'; // Settings > Appearance > Language
 // The real message component, handed over by js/views/settings.js (importing
 // js/views/stream.js from here would make an import cycle through the settings).
 let Message = () => null;
@@ -58,9 +60,9 @@ export function AppearancePreview() {
   // The messages exist only while the preview draws (the quote looks them up).
   S.msgs[PV] = list;
   useLayoutEffect(() => { delete S.msgs[PV]; });
-  return html`<section class=${`ap-preview${shut ? ' collapsed' : ''}`} aria-label="Preview">
-    <div class="ap-preview-head"><span>Preview</span>
-      <button class="btn quiet" aria-expanded=${String(!shut)} onClick=${() => setShut(!shut)}>${shut ? 'Show' : 'Hide'}</button></div>
+  return html`<section class=${`ap-preview${shut ? ' collapsed' : ''}`} aria-label=${t('look.preview')}>
+    <div class="ap-preview-head"><span>${t('look.preview')}</span>
+      <button class="btn quiet" aria-expanded=${String(!shut)} onClick=${() => setShut(!shut)}>${shut ? t('look.show') : t('look.hide')}</button></div>
     <div class="ap-preview-body" aria-hidden="true" inert>
       ${list.map((m, i) => html`<${Message} key=${m.id} conv=${PV} m=${m} grouped=${i > 0 && list[i - 1].author === m.author && m.id !== 'pv3'} />`)}
     </div>
@@ -85,7 +87,7 @@ function ThemeCards() {
   return html`<div class="ap-cards" role="radiogroup" aria-label="Theme">
     ${cards.map((id) => {
       const look = id === 'system' ? presetLook(matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : presetLook(id);
-      const label = id === 'system' ? 'Match device' : THEME_PRESETS[id].label;
+      const label = id === 'system' ? t('look.matchDevice') : THEME_PRESETS[id].label;
       return html`<button key=${id} type="button" role="radio" class="ap-card" data-theme-id=${id} aria-checked=${String(cur === id)}
         aria-label=${`${label}${THEME_NOTES[id] ? `. ${THEME_NOTES[id]}` : ''}`} onClick=${() => setLook('theme', id)}>
         <${Swatch} ...${look} />
@@ -252,98 +254,111 @@ function FontPicker() {
 
 // ---------- Appearance page ----------
 const opt = (v, label) => [v, label];
+// Settings > Appearance > Language: "Match my browser" (the default) or a
+// language, each named in its own words. Follows the account (js/language.js).
+function LanguageRow() {
+  return html`<${Row} label=${t('lang.label')} hint=${t('lang.hint')}>
+    <select class="field" id="set-lang" aria-label=${t('lang.label')} value=${languagePref()} onChange=${(e) => setLanguage(e.target.value)}>
+      <option value="auto">${t('lang.auto')}</option>
+      ${LANGUAGES.map((l) => html`<option key=${l.code} value=${l.code} lang=${l.code}>${l.name}</option>`)}
+    </select>
+  <//>`;
+}
+
 export function AppearancePage() {
   const sp = S.prefs;
   const p = effectivePrefs();
   const dev = !!deviceLook();
   const [, force] = useState(0);
+  const always = opt('always', t('look.always')), hover = opt('hover', t('look.onHover')), never = opt('never', t('look.never')), motion = opt('auto', t('look.matchMotion'));
   return html`
-    <h1>Appearance</h1>
-    <p class="lead">Changes apply as you make them, and follow you to every device you sign in on.</p>
+    <h1>${t('settings.page.look')}</h1>
+    <p class="lead">${t('look.lead')}</p>
+    <${LanguageRow} />
     <${AppearancePreview} />
-    <${Row} label="Use these settings on this device only" hint=${dev ? 'Theme, zoom, text size, spacing, message display and sidebar width stay on this device. Other settings still follow you.' : 'Keep theme, zoom, text size, spacing, display and sidebar width just for this device.'}>
+    <${Row} label=${t('look.deviceOnly')} hint=${dev ? t('look.deviceOnlyOn') : t('look.deviceOnlyOff')}>
       <div class="acc-inline">
-        ${dev && html`<button class="btn quiet" onClick=${() => { setDeviceOnly(true); force((n) => n + 1); }}>Reset to synced</button>`}
-        <${Switch} on=${dev} label="Use these settings on this device only" onChange=${(v) => { setDeviceOnly(v); force((n) => n + 1); }} />
+        ${dev && html`<button class="btn quiet" onClick=${() => { setDeviceOnly(true); force((n) => n + 1); }}>${t('look.resetSynced')}</button>`}
+        <${Switch} on=${dev} label=${t('look.deviceOnly')} onChange=${(v) => { setDeviceOnly(v); force((n) => n + 1); }} />
       </div>
     <//>
-    <div class="set-head">Themes</div>
+    <div class="set-head">${t('look.themes')}</div>
     <${ThemeCards} />
     <${MyThemes} />
-    <div class="set-head">Accent</div>
-    <${Row} label="Accent colour" hint=${customId(p.theme) ? 'Your theme has its own accent. This applies to the built-in themes.' : 'Buttons, switches, the selected row and the focus ring. Snug’s violet still marks what needs you.'} top>
+    <div class="set-head">${t('look.accent')}</div>
+    <${Row} label=${t('look.accentColour')} hint=${customId(p.theme) ? t('look.accentOwn') : t('look.accentHint')} top>
       <${AccentPicker} />
     <//>
-    <div class="set-head">Messages</div>
-    <${Row} label="Message display" hint="Compact puts the name and time on the same line as the message.">
-      <${Seg} label="Message display" value=${p.display} options=${[opt('cozy', 'Cozy'), opt('compact', 'Compact')]} onChange=${(v) => setLook('display', v)} />
+    <div class="set-head">${t('look.messages')}</div>
+    <${Row} label=${t('look.display')} hint=${t('look.displayHint')}>
+      <${Seg} label=${t('look.display')} value=${p.display} options=${[opt('cozy', t('look.cozy')), opt('compact', t('look.compact'))]} onChange=${(v) => setLook('display', v)} />
     <//>
-    <${Row} label="Pictures in compact" hint=${p.display === 'compact' ? 'Show people’s pictures beside compact messages.' : 'Only applies to Compact.'}>
-      <${Switch} on=${sp.compactAvatars} label="Show pictures in compact" onChange=${(v) => setPref('compactAvatars', v)} />
+    <${Row} label=${t('look.compactPics')} hint=${p.display === 'compact' ? t('look.compactPicsOn') : t('look.compactPicsOff')}>
+      <${Switch} on=${sp.compactAvatars} label=${t('look.compactPicsSwitch')} onChange=${(v) => setPref('compactAvatars', v)} />
     <//>
-    <${Row} label="Spacing" hint="Room between groups of messages.">
-      <${Seg} label="Spacing" value=${p.density} options=${[opt('snug', 'Tight'), opt('regular', 'Regular'), opt('roomy', 'Roomy')]} onChange=${(v) => setLook('density', v)} />
+    <${Row} label=${t('look.spacing')} hint=${t('look.spacingHint')}>
+      <${Seg} label=${t('look.spacing')} value=${p.density} options=${[opt('snug', t('look.tight')), opt('regular', t('look.regular')), opt('roomy', t('look.roomy'))]} onChange=${(v) => setLook('density', v)} />
     <//>
-    <${Row} label="Line height" hint="Space between the lines of a message.">
-      <${Seg} label="Line height" value=${sp.lineHeight} options=${[opt('tight', 'Tight'), opt('normal', 'Normal'), opt('loose', 'Loose')]} onChange=${(v) => setPref('lineHeight', v)} />
+    <${Row} label=${t('look.lineHeight')} hint=${t('look.lineHeightHint')}>
+      <${Seg} label=${t('look.lineHeight')} value=${sp.lineHeight} options=${[opt('tight', t('look.tight')), opt('normal', t('look.normal')), opt('loose', t('look.loose'))]} onChange=${(v) => setPref('lineHeight', v)} />
     <//>
-    <div class="set-head">Chat</div>
-    <${Row} label="Times on messages" hint="Hidden until you point at a message, or always shown.">
-      <${Seg} label="Times on messages" value=${sp.showTimes} options=${[opt('always', 'Always'), opt('hover', 'On hover')]} onChange=${(v) => setPref('showTimes', v)} />
+    <div class="set-head">${t('look.chat')}</div>
+    <${Row} label=${t('look.times')} hint=${t('look.timesHint')}>
+      <${Seg} label=${t('look.times')} value=${sp.showTimes} options=${[always, hover]} onChange=${(v) => setPref('showTimes', v)} />
     <//>
-    <${Row} label="Big emoji" hint="A message that is only emoji shows them large.">
-      <${Switch} on=${sp.jumboEmoji !== false} label="Big emoji" onChange=${(v) => setPref('jumboEmoji', v)} />
+    <${Row} label=${t('look.bigEmoji')} hint=${t('look.bigEmojiHint')}>
+      <${Switch} on=${sp.jumboEmoji !== false} label=${t('look.bigEmoji')} onChange=${(v) => setPref('jumboEmoji', v)} />
     <//>
-    <${Row} label="Emoji size" hint="Emoji inside messages.">
-      <${Seg} label="Emoji size" value=${sp.emojiSize} options=${[opt('s', 'Small'), opt('m', 'Medium'), opt('l', 'Large')]} onChange=${(v) => setPref('emojiSize', v)} />
+    <${Row} label=${t('look.emojiSize')} hint=${t('look.emojiSizeHint')}>
+      <${Seg} label=${t('look.emojiSize')} value=${sp.emojiSize} options=${[opt('s', t('look.small')), opt('m', t('look.medium')), opt('l', t('look.large'))]} onChange=${(v) => setPref('emojiSize', v)} />
     <//>
-    <${Row} label="Reactions" hint="Show the reactions under messages.">
-      <${Switch} on=${sp.showReactions !== false} label="Show reactions" onChange=${(v) => setPref('showReactions', v)} />
+    <${Row} label=${t('look.reactions')} hint=${t('look.reactionsHint')}>
+      <${Switch} on=${sp.showReactions !== false} label=${t('look.reactionsSwitch')} onChange=${(v) => setPref('showReactions', v)} />
     <//>
-    <${Row} label="Play GIFs" hint="Match motion follows your Motion setting; Always plays them even with reduced motion.">
-      <${Seg} label="Play GIFs" value=${sp.gifAutoplay} options=${[opt('auto', 'Match motion'), opt('always', 'Always'), opt('hover', 'On hover'), opt('never', 'Never')]} onChange=${(v) => setPref('gifAutoplay', v)} />
+    <${Row} label=${t('look.gifs')} hint=${t('look.gifsHint')}>
+      <${Seg} label=${t('look.gifs')} value=${sp.gifAutoplay} options=${[motion, always, hover, never]} onChange=${(v) => setPref('gifAutoplay', v)} />
     <//>
-    <${Row} label="Animated emoji" hint="Custom emoji that move.">
-      <${Seg} label="Animated emoji" value=${sp.animatedEmoji} options=${[opt('auto', 'Match motion'), opt('always', 'Always'), opt('hover', 'On hover'), opt('never', 'Never')]} onChange=${(v) => setPref('animatedEmoji', v)} />
+    <${Row} label=${t('look.animEmoji')} hint=${t('look.animEmojiHint')}>
+      <${Seg} label=${t('look.animEmoji')} value=${sp.animatedEmoji} options=${[motion, always, hover, never]} onChange=${(v) => setPref('animatedEmoji', v)} />
     <//>
-    <${Row} label="Spoilers" hint="Hidden text shows when you select it, or always.">
-      <${Seg} label="Spoilers" value=${sp.spoilers} options=${[opt('click', 'On click'), opt('always', 'Always show')]} onChange=${(v) => setPref('spoilers', v)} />
+    <${Row} label=${t('look.spoilers')} hint=${t('look.spoilersHint')}>
+      <${Seg} label=${t('look.spoilers')} value=${sp.spoilers} options=${[opt('click', t('look.onClick')), opt('always', t('look.alwaysShow'))]} onChange=${(v) => setPref('spoilers', v)} />
     <//>
-    <${Row} label="People’s name styles" hint="Fonts and colours people chose for their names.">
-      <${Switch} on=${sp.showNameStyles !== false} label="Show people’s name styles" onChange=${(v) => setPref('showNameStyles', v)} />
+    <${Row} label=${t('look.nameStyles')} hint=${t('look.nameStylesHint')}>
+      <${Switch} on=${sp.showNameStyles !== false} label=${t('look.nameStylesSwitch')} onChange=${(v) => setPref('showNameStyles', v)} />
     <//>
-    <${Row} label="Chat background" hint="A faint pattern behind messages. Off with high contrast.">
-      <${Seg} label="Chat background" value=${sp.chatBg} options=${[opt('plain', 'Plain'), opt('dots', 'Dots'), opt('grid', 'Grid'), opt('arches', 'Arches'), opt('grain', 'Grain')]} onChange=${(v) => setPref('chatBg', v)} />
+    <${Row} label=${t('look.chatBg')} hint=${t('look.chatBgHint')}>
+      <${Seg} label=${t('look.chatBg')} value=${sp.chatBg} options=${[opt('plain', t('look.bgPlain')), opt('dots', t('look.bgDots')), opt('grid', t('look.bgGrid')), opt('arches', t('look.bgArches')), opt('grain', t('look.bgGrain'))]} onChange=${(v) => setPref('chatBg', v)} />
     <//>
-    <div class="set-head">Text</div>
-    <${Row} label="Font" hint="Atkinson Hyperlegible was drawn for low vision: letters that are easy to tell apart. Serif and System use your device’s own fonts." top>
+    <div class="set-head">${t('look.text')}</div>
+    <${Row} label=${t('look.font')} hint=${t('look.fontHint')} top>
       <${FontPicker} />
     <//>
-    <${Row} label="Code font" hint="For code in messages.">
-      <${Seg} label="Code font" value=${sp.codeFont} options=${[opt('mono', 'Atkinson Mono'), opt('system-mono', 'System mono')]} onChange=${(v) => setPref('codeFont', v)} />
+    <${Row} label=${t('look.codeFont')} hint=${t('look.codeFontHint')}>
+      <${Seg} label=${t('look.codeFont')} value=${sp.codeFont} options=${[opt('mono', 'Atkinson Mono'), opt('system-mono', t('look.systemMono'))]} onChange=${(v) => setPref('codeFont', v)} />
     <//>
-    <${Row} label="Text size" hint="12 to 20 pixels. Every size in Snug scales with it.">
-      <${LookSlider} id="acc-font" k="fontScale" label="Text size" min=${12} max=${20} unit="px" />
+    <${Row} label=${t('look.textSize')} hint=${t('look.textSizeHint')}>
+      <${LookSlider} id="acc-font" k="fontScale" label=${t('look.textSize')} min=${12} max=${20} unit="px" />
     <//>
-    <${Row} label="Zoom" hint="Makes everything bigger or smaller, like the browser’s zoom.">
-      <${Seg} label="Zoom" value=${p.zoom} options=${[80, 90, 100, 110, 125, 150].map((v) => [v, `${v}%`])} onChange=${(v) => setLook('zoom', v)} />
+    <${Row} label=${t('look.zoom')} hint=${t('look.zoomHint')}>
+      <${Seg} label=${t('look.zoom')} value=${p.zoom} options=${[80, 90, 100, 110, 125, 150].map((v) => [v, `${v}%`])} onChange=${(v) => setLook('zoom', v)} />
     <//>
-    <${Row} label="Clock" hint="Times on messages and in lists.">
-      <${Seg} label="Clock" value=${sp.clock} options=${[opt('auto', 'Match language'), opt('12', '12-hour'), opt('24', '24-hour')]} onChange=${(v) => setPref('clock', v)} />
+    <${Row} label=${t('look.clock')} hint=${t('look.clockHint')}>
+      <${Seg} label=${t('look.clock')} value=${sp.clock} options=${[opt('auto', t('look.matchLanguage')), opt('12', t('look.h12')), opt('24', t('look.h24'))]} onChange=${(v) => setPref('clock', v)} />
     <//>
-    <div class="set-head">Colour</div>
-    <${Row} label="Saturation" hint="Turn colours down, all the way to greys.">
-      <${LookSlider} id="acc-sat" k="saturation" label="Saturation" min=${0} max=${100} step=${5} unit="%" />
+    <div class="set-head">${t('look.colour')}</div>
+    <${Row} label=${t('look.saturation')} hint=${t('look.saturationHint')}>
+      <${LookSlider} id="acc-sat" k="saturation" label=${t('look.saturation')} min=${0} max=${100} step=${5} unit="%" />
     <//>
-    <${Row} label="Role colours on names" hint="Names take the colour of their highest coloured role.">
-      <${Switch} on=${sp.roleColors !== false} label="Role colours on names" onChange=${(v) => setPref('roleColors', v)} />
+    <${Row} label=${t('look.roleColours')} hint=${t('look.roleColoursHint')}>
+      <${Switch} on=${sp.roleColors !== false} label=${t('look.roleColours')} onChange=${(v) => setPref('roleColors', v)} />
     <//>
-    <div class="set-head">Layout</div>
-    <${Row} label="Sidebar width" hint="Or drag the sidebar’s edge.">
-      <${LookSlider} id="acc-side" k="sidebarW" label="Sidebar width" min=${200} max=${420} step=${4} unit="px" />
+    <div class="set-head">${t('look.layout')}</div>
+    <${Row} label=${t('look.sidebarW')} hint=${t('look.sidebarWHint')}>
+      <${LookSlider} id="acc-side" k="sidebarW" label=${t('look.sidebarW')} min=${200} max=${420} step=${4} unit="px" />
     <//>
-    <${Row} label="Contrast and motion" hint="On the Accessibility page.">
-      <button class="btn" onClick=${() => settingsLayer && openLayer({ C: settingsLayer, props: { page: 'a11y' } })}>Accessibility</button>
+    <${Row} label=${t('look.contrastMotion')} hint=${t('look.contrastMotionHint')}>
+      <button class="btn" onClick=${() => settingsLayer && openLayer({ C: settingsLayer, props: { page: 'a11y' } })}>${t('settings.page.a11y')}</button>
     <//>`;
 }
 
@@ -614,7 +629,7 @@ export function KeysEditor() {
   const reset = (id) => { const next = { ...custom }; delete next[id]; setPref('keys', next); setErr({}); };
   const groups = [...new Set(ACTIONS.map((a) => a.group))];
   return html`
-    <h1>Keyboard</h1>
+    <h1>${t('settings.page.keys')}</h1>
     <p class="lead">Everything works without a mouse. Change any shortcut below: press Record, then the keys. Voice shortcuts work in a call, even while you type.</p>
     <div class="acc-inline" style="justify-content:flex-end">
       <button class="btn" disabled=${!Object.keys(custom).length} onClick=${() => { setPref('keys', {}); setErr({}); toast('Shortcuts are back to how they started.'); }}>Reset all</button>

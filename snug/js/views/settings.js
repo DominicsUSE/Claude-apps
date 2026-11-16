@@ -36,6 +36,7 @@ import { registerAdminPage } from './admin.js'; // v0.10 A: Settings > Admin, on
 import { registerVaultPage } from './vault-settings.js'; // v0.10 C: Settings > Your data > Data file
 import { registerE2eePage } from './e2ee-settings.js'; // Settings > Encryption (end-to-end encryption), when the server offers it
 import { registerConnectionPage } from './connection.js'; // 0.12: Settings > Connection
+import { t } from '../lib/i18n.js'; // words in the chosen language (js/locales)
 
 
 function Row({ label, hint, children, top }) {
@@ -126,13 +127,13 @@ function Layer({ title, icon, pages, page, setPage, children, foot, startOpen })
   const mode = !phone ? '' : inPage ? ' phone-page' : ' phone-list';
   return html`<div class=${`layer${mode}`} role="dialog" aria-modal="true" aria-label=${title} tabindex="-1" ref=${ref} onKeyDown=${onKey}>
     ${phone && inPage && html`<div class="layer-top">
-      <button class="ib layer-back" aria-label=${`All ${title === 'Settings' ? 'settings' : `${title} settings`}`} data-tip="Back" onClick=${toList}><${Icon} name="back" /></button>
+      <button class="ib layer-back" aria-label=${title === t('settings.title') ? t('settings.all') : `${title} settings`} data-tip=${t('common.back')} onClick=${toList}><${Icon} name="back" /></button>
       <span class="layer-top-title trunc">${label}</span>
     </div>`}
-    <nav class="layer-nav" aria-label=${`${title} sections`}>
+    <nav class="layer-nav" aria-label=${t('settings.sections', { title })}>
       ${phone && html`<div class="layer-nav-title trunc">${title}</div>`}
       <h2>${icon}${title}</h2>
-      <input class="field" type="search" placeholder="Find a setting" aria-label="Find a setting" value=${q} onInput=${(e) => setQ(e.target.value)} />
+      <input class="field" type="search" placeholder=${t('settings.find')} aria-label=${t('settings.find')} value=${q} onInput=${(e) => setQ(e.target.value)} />
       ${groups(shown).map((g) => {
         const rows = g.pages.map((p) => html`<button key=${p.id} class=${`row${page === p.id ? ' sel' : ''}`} aria-current=${page === p.id ? 'page' : undefined} onClick=${() => pick(p.id)}>
           <span class="row-ic"><${Icon} name=${p.icon} size=${18} /></span><span class="grow trunc">${p.label}</span>
@@ -146,11 +147,11 @@ function Layer({ title, icon, pages, page, setPage, children, foot, startOpen })
           ${rows}
         </div>`;
       })}
-      ${!shown.length && html`<p class="faint" style="padding:4px 8px">No setting called “${q}”</p>`}
+      ${!shown.length && html`<p class="faint" style="padding:4px 8px">${t('settings.noMatch', { q })}</p>`}
       <div class="layer-foot">${foot}</div>
     </nav>
     <div class="layer-body"><div class="layer-col">${children}</div></div>
-    <button class="ib layer-close" aria-label="Close settings" data-tip="Close" data-key="Esc" onClick=${closeLayer}><${Icon} name="x" /></button>
+    <button class="ib layer-close" aria-label=${t('settings.close')} data-tip=${t('common.close')} data-key="Esc" onClick=${closeLayer}><${Icon} name="x" /></button>
   </div>`;
 }
 
@@ -165,7 +166,7 @@ const PAGES = [
 function Profile() {
   const u = me();
   return html`
-    <h1>Profile</h1>
+    <h1>${t('settings.page.profile')}</h1>
     <p class="lead">How you appear to people in every house and conversation.</p>
     <${Row} label="Name"><input class="field set-field" value=${u.name} maxlength="40" aria-label="Name" onChange=${(e) => e.target.value.trim() && updateMe({ name: e.target.value.trim() })} /><//>
     <${Row} label="About you" hint="A few lines on your profile. Message formatting works here." top>
@@ -255,7 +256,7 @@ function LinksEditor({ list }) {
 function Notify() {
   const houses = S.houseOrder.map((id) => S.houses[id]);
   return html`
-    <h1>Notifications</h1>
+    <h1>${t('settings.page.notify')}</h1>
     <p class="lead">One setting per place, three choices. Rooms follow their house unless you change one from its menu.</p>
     <${Row} label="Pop-ups" hint="A small note at the top when something needs you and you’re looking elsewhere.">
       <${Switch} on=${S.prefs.toasts} label="Pop-ups" onChange=${(v) => setPref('toasts', v)} />
@@ -315,16 +316,16 @@ async function signOut(everywhere) {
   stopTransport();
   closeLayer();
   signedOut();
-  toast(everywhere ? 'You’re signed out on every device.' : 'You’re signed out.');
+  toast(everywhere ? t('signout.everywhere') : t('signout.done'));
 }
 
 // Sign out from the menu under your name and the phone's You tab: one
 // short question first, since it sits beside everyday items.
 export function confirmSignOut() {
   openModal(Confirm, {
-    title: 'Sign out?',
-    text: 'You’ll need your username and password to come back. Your houses and messages stay on the server; anything you were still writing on this device is cleared.',
-    action: 'Sign out',
+    title: t('signout.title'),
+    text: t('signout.text'),
+    action: t('signout.action'),
     onConfirm: () => signOut(false),
   });
 }
@@ -336,7 +337,7 @@ PAGES.splice(PAGES.findIndex((p) => p.id === 'account'), 0, { id: 'privacy', lab
   // The full privacy page (js/views/privacy.js), also at /privacy for anyone.
   { id: 'guide', label: 'Privacy guide', icon: 'info', words: 'privacy policy data stored kept retention how long logs ip address diagnostics analytics tracking anonymous law police court encrypt' });
 VIEWS.privacy = () => html`<${PrivacyPage} openGuide=${() => goPage?.('guide')} />`;
-VIEWS.guide = () => html`<h1>Privacy guide</h1><${PrivacyGuide} level=${2} />`;
+VIEWS.guide = () => html`<h1>${t('settings.page.guide')}</h1><${PrivacyGuide} level=${2} />`;
 // Voice and video (js/views/voiceopts-settings.js), after Notifications.
 PAGES.splice(PAGES.findIndex((p) => p.id === 'notify') + 1, 0, { id: 'voice', label: 'Voice and video', icon: 'voice', words: 'voice video microphone mic speaker headphones camera webcam push to talk ptt sensitivity noise suppression echo gain volume screen share quality sounds afk deafen calls ringtone ring volume ring on who can ring muted warning camera quality resolution frame rate mirror microphone volume output volume reconnect' });
 VIEWS.voice = VoiceSettings;
@@ -372,6 +373,17 @@ arrange(PAGES, [
 registerE2eePage({ PAGES, VIEWS, Row }); // after arrange: it comes and goes with the server's setting, placed after Privacy
 
 let goPage = null; // the open Settings layer's page switch, for links between pages
+// Page and section names in the chosen language (js/locales). Pages other
+// modules add keep their own label until they have a key. The English words
+// stay searchable, so "theme" still finds Appearance in any language.
+const SECTION_KEY = { You: 'settings.section.you', App: 'settings.section.app', Admin: 'settings.section.admin' };
+function translatedPages() {
+  return PAGES.map((p) => {
+    const key = `settings.page.${p.id}`;
+    const label = t(key) === key ? p.label : t(key);
+    return { ...p, label, section: SECTION_KEY[p.section] ? t(SECTION_KEY[p.section]) : p.section, words: label === p.label ? p.words : `${p.words || ''} ${p.label}` };
+  });
+}
 export function Settings({ page: start }) {
   const [page, setPage] = useState(start || 'profile');
   goPage = setPage;
@@ -383,7 +395,7 @@ export function Settings({ page: start }) {
   }, []);
   const V = VIEWS[page];
   const shown = S.conn.version || ver;
-  return html`<${Layer} title="Settings" icon=${html`<${Icon} name="sliders" />`} pages=${PAGES} page=${page} setPage=${setPage} startOpen=${!!start}
+  return html`<${Layer} title=${t('settings.title')} icon=${html`<${Icon} name="sliders" />`} pages=${translatedPages()} page=${page} setPage=${setPage} startOpen=${!!start}
     foot=${html`<${Nook} size=${16} /><span class="set-version">${shown ? `Snug ${shown}` : 'Snug'}</span>`}>
     <${V} />
   <//>`;

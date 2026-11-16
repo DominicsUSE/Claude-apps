@@ -17,6 +17,7 @@ import { forMeHooks, needsMe, levelOf, forMe } from './lib/attention.js';
 import { can } from './lib/perms.js';
 import { plain } from './lib/format.js';
 import { setClock } from './lib/util.js';
+import { rememberLanguage, deviceLanguage, applyLanguage } from './language.js'; // Settings > Appearance > Language
 
 export const SYNCED = Object.keys(PREF_RULES);
 const local = {
@@ -30,6 +31,10 @@ const OWNER = 'snug.prefsOwner';
 const SENT = 'snug.prefsSent';
 // Settings this device has never had start from the defaults.
 for (const k of SYNCED) if (!(k in S.prefs)) S.prefs[k] = structuredClone(PREF_DEFAULTS[k]);
+// The language is also kept on its own (js/language.js), written the moment it
+// changes, while S.prefs is saved a moment later: after a quick reload it is
+// the fresher copy of this person's choice.
+if (local.get(OWNER) && deviceLanguage()) S.prefs.lang = deviceLanguage();
 // The old three-step text size becomes the 12-20px scale.
 if (S.prefs.text && S.prefs.text !== 'm') { if (S.prefs.fontScale === 16) S.prefs.fontScale = S.prefs.text === 's' ? 14 : 18; S.prefs.text = 'm'; }
 
@@ -44,6 +49,8 @@ function adopt(server) {
   server = upgradePrefs(server);
   for (const k of SYNCED) S.prefs[k] = k in server ? structuredClone(server[k]) : structuredClone(PREF_DEFAULTS[k]);
   setSent(pick(S.prefs));
+  rememberLanguage(S.prefs.lang); // the sign-in screen speaks it after signing out
+  applyLanguage();
   applyAppearance();
 }
 // Back to the defaults: the settings here belong to nobody now.
@@ -92,7 +99,9 @@ on('open', () => {
   // Someone else's settings (a shared device): never this person's, never uploaded.
   if (owner && owner !== S.me) forget();
   if (!Object.keys(server).length && !local.get(flag)) {
-    // First time on any device: what this device already had becomes the account's.
+    // First time on any device: what this device already had becomes the account's,
+    // including the language the sign-in screen was in.
+    if (deviceLanguage()) S.prefs.lang = deviceLanguage();
     setSent(Object.fromEntries(SYNCED.map((k) => [k, PREF_DEFAULTS[k]])));
     push();
   } else {
@@ -105,6 +114,7 @@ on('open', () => {
     const mine = base ? SYNCED.filter((k) => k in base && !same(now[k], base[k])) : [];
     adopt(server);
     for (const k of mine) S.prefs[k] = now[k];
+    if (mine.includes('lang')) rememberLanguage(S.prefs.lang);
     if (mine.length) { applyAppearance(); push(); }
   }
   local.set(OWNER, S.me);

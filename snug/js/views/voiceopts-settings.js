@@ -1,5 +1,6 @@
 // Settings > Voice and video (this device), and House settings > Voice
 // (the soundboard, and each voice room's user limit and bitrate).
+import { t } from '../lib/i18n.js'; // the page name in the chosen language (js/locales)
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { S, toast, openModal, person, emit } from '../store.js';
 import { call } from '../server.js';
@@ -232,7 +233,7 @@ export function VoiceSettings() {
   const desktop = !!window.snugApp?.setPushToTalk;
   const tuned = [...new Set([...Object.keys(v.volumes), ...Object.keys(v.muted)])].filter((id) => S.users[id]);
   return html`
-    <h1>Voice and video</h1>
+    <h1>${t('settings.page.voice')}</h1>
     <p class="lead">How you sound, what you hear and what you show, on this device. Changes apply at once, in a call too.</p>
     ${!hasMedia && html`<p class="vo-err" role="alert">This browser can’t use a microphone or camera here. Voice needs a secure (https) page.</p>`}
 

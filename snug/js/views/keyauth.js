@@ -12,6 +12,7 @@ import { copyText } from '../ui/kit.js';
 import { Lockup } from '../ui/brand.js';
 import { recoveryFileText } from '../lib/recovery.js';
 import { NameStep } from './auth.js'; // the same username picker as GitHub sign-up (a circular import, used at render only)
+import { t, intlLocale } from '../lib/i18n.js'; // words and dates in the chosen language (js/locales)
 
 addIcons({
   key: 'M7 13.500a3.500 3.500 0 1 0 0-7 3.500 3.500 0 0 0 0 7Z|M10.500 10H17|M14.500 10v2.500|M16.500 10v2', // as js/views/p2p.js
@@ -19,7 +20,7 @@ addIcons({
 });
 
 const Err = ({ id, text }) => html`<div class="err" id=${id} role="alert"><${Icon} name="alert" size=${16} /><span>${text}</span></div>`;
-const when = (t) => new Date(t).toLocaleString(undefined, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+const when = (ts) => new Date(ts).toLocaleString(intlLocale(), { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 export const SHORT_NAME_TEXT = 'Usernames of 2 or 3 characters are open to new accounts after 30 days. Pick a longer one for now.';
 
 /**
@@ -135,21 +136,21 @@ export function KeyAuth({ cfg, onPassword, onGitHub, entered }) {
   } else if (step === 'have') {
     body = html`
       <div class="auth-head">
-        <h1 id="auth-title">Welcome back</h1>
-        <p class="auth-sub">How would you like to bring your account to this PC?</p>
+        <h1 id="auth-title">${t('key.welcomeBack')}</h1>
+        <p class="auth-sub">${t('key.haveSub')}</p>
       </div>
       <div class="auth-choices" role="list">
         <button type="button" class="auth-choice" id="auth-other-pc" role="listitem" onClick=${startCode}>
-          <${Icon} name="screen" size=${20} /><span><b>My other PC is here</b><span>Type a code on it. Your account moves at once, with your chats.</span></span>
+          <${Icon} name="screen" size=${20} /><span><b>${t('key.otherPc')}</b><span>${t('key.otherPcSub')}</span></span>
         </button>
         <button type="button" class="auth-choice" id="auth-lost-pc" role="listitem" onClick=${() => setStep('recover')}>
-          <${Icon} name="key" size=${20} /><span><b>I lost my other PC</b><span>Use the recovery key you saved.</span></span>
+          <${Icon} name="key" size=${20} /><span><b>${t('key.lostPc')}</b><span>${t('key.lostPcSub')}</span></span>
         </button>
         ${cfg.github && html`<button type="button" class="auth-choice" id="auth-github-path" role="listitem" onClick=${onGitHub}>
-          <${Icon} name="external" size=${20} /><span><b>I used GitHub before</b><span>Sign in with GitHub, as before.</span></span>
+          <${Icon} name="external" size=${20} /><span><b>${t('key.usedGithub')}</b><span>${t('key.usedGithubSub')}</span></span>
         </button>`}
       </div>
-      <p class="auth-swap"><button type="button" class="auth-link" onClick=${() => back()}>Back</button></p>`;
+      <p class="auth-swap"><button type="button" class="auth-link" onClick=${() => back()}>${t('common.back')}</button></p>`;
   } else if (step?.kind === 'code') {
     body = html`
       <div class="auth-head">
@@ -181,26 +182,26 @@ export function KeyAuth({ cfg, onPassword, onGitHub, entered }) {
       <button class="btn primary auth-submit" id="auth-moving-continue" onClick=${() => entered(step.user)}>Continue</button>`;
   } else if (step?.kind === 'stop') {
     body = html`
-      <div class="auth-head"><h1 id="auth-title">That didn’t work</h1></div>
+      <div class="auth-head"><h1 id="auth-title">${t('key.stopped')}</h1></div>
       <${Err} id="auth-form-err" text=${step.text} />
-      <button class="btn primary auth-submit" onClick=${step.retry || (() => back())}>Try again</button>
-      <p class="auth-swap"><button type="button" class="auth-link" onClick=${() => back()}>Back</button></p>`;
+      <button class="btn primary auth-submit" onClick=${step.retry || (() => back())}>${t('common.tryAgain')}</button>
+      <p class="auth-swap"><button type="button" class="auth-link" onClick=${() => back()}>${t('common.back')}</button></p>`;
   } else {
     body = html`
       <div class="auth-head">
-        <h1 id="auth-title">${cfg.resume ? 'Welcome back' : 'Welcome to Snug'}</h1>
-        <p class="auth-sub">Talk with your friends on any PC. Messages go straight from your PC to theirs.</p>
+        <h1 id="auth-title">${cfg.resume ? t('key.welcomeBack') : t('key.welcome')}</h1>
+        <p class="auth-sub">${t('key.sub')}</p>
       </div>
       <div class="auth-gh">
-        ${cfg.resume && html`<button class="btn primary auth-submit" id="auth-resume" disabled=${busy} onClick=${resume}>Continue as @${cfg.resume}</button>`}
-        ${!cfg.resume && html`<button class="btn primary auth-submit" id="auth-create" onClick=${() => setStep('create')}>Create my account</button>
-          <button class="btn auth-submit" id="auth-have" onClick=${() => setStep('have')}>I already have an account</button>`}
+        ${cfg.resume && html`<button class="btn primary auth-submit" id="auth-resume" disabled=${busy} onClick=${resume}>${t('key.continueAs', { name: cfg.resume })}</button>`}
+        ${!cfg.resume && html`<button class="btn primary auth-submit" id="auth-create" onClick=${() => setStep('create')}>${t('key.create')}</button>
+          <button class="btn auth-submit" id="auth-have" onClick=${() => setStep('have')}>${t('key.have')}</button>`}
         ${error && html`<${Err} id="auth-form-err" text=${error} />`}
-        <p class="auth-fine">No email, phone number or GitHub account needed. Your account lives on this PC, and a recovery key you save brings it back.</p>
+        <p class="auth-fine">${t('key.fine')}</p>
       </div>
       <p class="auth-swap">
-        ${cfg.owner ? 'Someone else here?' : 'Only on this PC?'}
-        <button type="button" class="auth-link" id="auth-use-password" onClick=${onPassword}>Use a password account</button>
+        ${cfg.owner ? t('key.someoneElse') : t('key.onlyThisPc')}
+        <button type="button" class="auth-link" id="auth-use-password" onClick=${onPassword}>${t('key.usePassword')}</button>
       </p>`;
   }
   return html`<div class="auth">

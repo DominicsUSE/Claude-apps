@@ -1,4 +1,5 @@
 // Small pure helpers shared by every module.
+import { t, onLocale, intlLocale } from './i18n.js';
 
 let seq = 0;
 export const uid = (prefix = 'x') => `${prefix}_${Date.now().toString(36)}${(seq++).toString(36)}`;
@@ -13,33 +14,40 @@ export function sameDay(a, b) {
   return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
 }
 
-let timeFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
-const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
-const shortFmt = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' });
-let fullFmt = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+// Times and dates in the active language (js/lib/i18n.js); English keeps the
+// browser's own English, so en-GB still reads day-month.
+let timeFmt, dayFmt, shortFmt, fullFmt;
 // Settings > Appearance > Clock (js/account.js): 'auto' follows the language, or force 12 or 24 hours.
 let clockMode = 'auto';
+function buildFormats() {
+  const loc = intlLocale();
+  const hc = clockMode === '24' ? { hourCycle: 'h23' } : clockMode === '12' ? { hourCycle: 'h12' } : {};
+  timeFmt = new Intl.DateTimeFormat(loc, { hour: 'numeric', minute: '2-digit', ...hc });
+  dayFmt = new Intl.DateTimeFormat(loc, { weekday: 'long', day: 'numeric', month: 'long' });
+  shortFmt = new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short' });
+  fullFmt = new Intl.DateTimeFormat(loc, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit', ...hc });
+}
+buildFormats();
+onLocale(buildFormats);
 export function setClock(mode = 'auto') {
   if (mode === clockMode) return;
   clockMode = mode;
-  const hc = mode === '24' ? { hourCycle: 'h23' } : mode === '12' ? { hourCycle: 'h12' } : {};
-  timeFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', ...hc });
-  fullFmt = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit', ...hc });
+  buildFormats();
 }
 
 export const fmtTime = (ts) => timeFmt.format(ts);
 export const fmtFull = (ts) => fullFmt.format(ts);
 
 export function fmtDay(ts, now = Date.now()) {
-  if (sameDay(ts, now)) return 'Today';
-  if (sameDay(ts, now - DAY)) return 'Yesterday';
+  if (sameDay(ts, now)) return t('time.today');
+  if (sameDay(ts, now - DAY)) return t('time.yesterday');
   return dayFmt.format(ts);
 }
 
 // Compact stamp for lists: a time today, otherwise a short date.
 export function fmtWhen(ts, now = Date.now()) {
   if (sameDay(ts, now)) return fmtTime(ts);
-  if (sameDay(ts, now - DAY)) return `Yesterday ${fmtTime(ts)}`;
+  if (sameDay(ts, now - DAY)) return t('time.yesterdayAt', { time: fmtTime(ts) });
   return shortFmt.format(ts);
 }
 

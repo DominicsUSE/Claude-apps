@@ -4,6 +4,7 @@
 // two-factor step at sign-in, the keyboard shortcuts sheet, quick switcher
 // actions and the sidebar's resize grip. The rules live in js/lib/account.js
 // and every check is repeated by server/account.js.
+import { t } from '../lib/i18n.js'; // page names in the chosen language (js/locales)
 import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import {
   S, me, emit, setPref, updateMe, toast, openModal, closeModal, openLayer, closeLayer, signedOut, setNotify, setPresence,
@@ -138,7 +139,7 @@ export function A11yPage() {
   const p = S.prefs;
   const tts = typeof speechSynthesis !== 'undefined';
   return html`
-    <h1>Accessibility</h1>
+    <h1>${t('settings.page.a11y')}</h1>
     <p class="lead">Ways to make Snug easier to read and use. They follow you to every device.</p>
     <${Row} label="Font" hint="Atkinson Hyperlegible was drawn for low vision: letters that are easy to tell apart (I, l and 1; O and 0). Fonts are on the Appearance page.">
       <button class="btn" onClick=${() => SettingsC && openLayer({ C: SettingsC, props: { page: 'look' } })}>Choose a font</button>
@@ -292,7 +293,7 @@ export function NotifyMore() {
 export function StreamerPage() {
   const p = S.prefs;
   return html`
-    <h1>Streamer mode</h1>
+    <h1>${t('settings.page.streamer')}</h1>
     <p class="lead">For sharing your screen or streaming: Snug hides what could identify you or let strangers in.</p>
     <${Row} label="Streamer mode" hint=${`Hides usernames, invitation links and codes, two-factor secrets and the text of notifications. ${MOD} Shift S turns it on and off from anywhere.`}>
       <${Switch} on=${p.streamer} label="Streamer mode" onChange=${(v) => setPref('streamer', v)} />
@@ -493,7 +494,7 @@ export function SecurityPage() {
   const u = me();
   const a = acc();
   return html`
-    <h1>Account and security</h1>
+    <h1>${t('settings.page.account')}</h1>
     <p class="lead">Signed in as <b style="font-weight:500">${u.name}</b> (<span class="secret">@${u.handle}</span>).</p>
     <${Row} label="Connection" hint=${S.conn.socket === 'open' ? 'Connected. Changes reach everyone at once.' : 'Not connected. Changes wait until Snug is back.'}>
       <span class="sub" style="display:flex;gap:8px;align-items:center"><i class=${`pres inline ${S.conn.socket === 'open' ? 'open' : 'offline'}`}></i>${S.conn.socket === 'open' ? 'Online' : 'Offline'}</span>
@@ -573,7 +574,7 @@ export function DataPage() {
   const needCode = acc().totp;
   const p2p = p2pOwner(); // GitHub-secured: typing the username confirms; delete frees the username after a GitHub check
   return html`
-    <h1>Your data</h1>
+    <h1>${t('settings.page.data')}</h1>
     <p class="lead">What Snug keeps about you, and how to take it with you or end it.</p>
     <${Row} label="Download your data" hint="One zip file: your profile, settings, notes, friends, houses, every message you wrote, the whole of each direct conversation you’re in, files you uploaded, reactions, sign-in history and devices, as data and as text you can read. Three times an hour.">
       <button class="btn" disabled=${busy} onClick=${download}><${Icon} name="file" size=${16} />${busy ? 'Preparing…' : 'Download'}</button>

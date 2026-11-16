@@ -12,13 +12,14 @@ import { call, api } from '../server.js';
 import { TemplatePick, startArgs } from './places-start.js'; // start a house from a template or another house
 import { LocalNote, p2pOwner } from './p2p.js'; // houses stay on this PC; groups can't include friends on other PCs yet
 import { parseInvite, inviteWhy, messageable, whyNotMessageable, localOnly } from '../lib/onboarding.js'; // pasted invitations, who can be messaged
+import { t } from '../lib/i18n.js'; // words in the chosen language (js/locales)
 
 export function Confirm({ title, text, action, danger, onConfirm }) {
   return html`
     <h2>${title}</h2>
     <p class="modal-lead">${text}</p>
     <div class="modal-foot">
-      <button class="btn" data-autofocus onClick=${closeModal}>Cancel</button>
+      <button class="btn" data-autofocus onClick=${closeModal}>${t('common.cancel')}</button>
       <button class=${`btn ${danger ? 'danger solid' : 'primary'}`} onClick=${() => { closeModal(); onConfirm(); }}>${action}</button>
     </div>`;
 }
@@ -100,40 +101,40 @@ export function Invite({ house, fresh }) {
   const [sent, setSent] = useState('');
   const [error, setError] = useState('');
   useEffect(() => {
-    call('invite.create', { house }).then((r) => setLink(`${location.origin}/join/${r.code}`), (e) => setLinkError(e.offline ? 'You\u2019re offline, so a link can\u2019t be made right now.' : e.message));
+    call('invite.create', { house }).then((r) => setLink(`${location.origin}/join/${r.code}`), (e) => setLinkError(e.offline ? t('invite.linkOffline') : e.message));
   }, []);
   const byName = (e) => {
     e.preventDefault();
-    if (!handle.trim()) return setError('Type a username.');
+    if (!handle.trim()) return setError(t('invite.typeUsername'));
     setError(''); setSent('');
-    call('invite.user', { house, handle: handle.trim() }).then((r) => { setSent(`${r.name} is invited. They\u2019ll find it in Catch up.`); setHandle(''); }, (err) => setError(err.offline ? 'You\u2019re offline. Try again when you\u2019re back.' : err.message));
+    call('invite.user', { house, handle: handle.trim() }).then((r) => { setSent(t('invite.sent', { name: r.name })); setHandle(''); }, (err) => setError(err.offline ? t('common.offline') : err.message));
     return undefined;
   };
-  const as = h.roles.find((r) => r.id === h.joinRole)?.name || 'a member';
+  const as = h.roles.find((r) => r.id === h.joinRole)?.name || t('invite.aMember');
   return html`
-    <h2>${fresh ? `${h.name} is ready` : `Invite people to ${h.name}`}</h2>
+    <h2>${fresh ? t('invite.ready', { house: h.name }) : t('invite.title', { house: h.name })}</h2>
     <p class="modal-lead">${fresh
-      ? `A house is better with your people in it. Send them this link: anyone who has it can join as ${as} for the next 14 days. You can make another link any time from the house menu.`
-      : `Anyone with this link can join as ${as} for the next 14 days. They can read every room straight away, and see the voice rooms and ${plural(h.starter.length, 'starter room')} in their list; the rest joins their list once they say hello.`}</p>
+      ? t('invite.leadFresh', { role: as })
+      : t('invite.lead', { role: as, count: h.starter.length })}</p>
     <div class="copy-row">
-      <input class="field" readonly value=${link || (linkError ? '' : 'Making a link\u2026')} aria-label="Invitation link" onFocus=${(e) => e.target.select()} />
-      <button class="btn primary" data-autofocus disabled=${!link} onClick=${() => copyText(link)}><${Icon} name="copy" size=${16} />Copy link</button>
+      <input class="field" readonly value=${link || (linkError ? '' : t('invite.making'))} aria-label=${t('invite.link')} onFocus=${(e) => e.target.select()} />
+      <button class="btn primary" data-autofocus disabled=${!link} onClick=${() => copyText(link)}><${Icon} name="copy" size=${16} />${t('invite.copy')}</button>
     </div>
     ${linkError && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${linkError}</div>`}
     ${link && html`<${LocalAddressNote} />`}
-    ${link && html`<div class="invite-app"><button class="btn quiet" onClick=${() => copyText(`snug://join/${link.split('/join/')[1]}`)}><${Icon} name="link" size=${16} />Copy app link</button><span class="hint">Opens straight in the Snug desktop app.</span></div>`}
+    ${link && html`<div class="invite-app"><button class="btn quiet" onClick=${() => copyText(`snug://join/${link.split('/join/')[1]}`)}><${Icon} name="link" size=${16} />${t('invite.copyApp')}</button><span class="hint">${t('invite.appHint')}</span></div>`}
     <form class="form invite-by-name" onSubmit=${byName} novalidate>
       <div>
-        <label class="label" for="invite-handle">Or invite someone already on Snug</label>
+        <label class="label" for="invite-handle">${t('invite.byName')}</label>
         <div class="copy-row">
-          <input id="invite-handle" class=${`field${error ? ' bad' : ''}`} placeholder="username" value=${handle} autocomplete="off" onInput=${(e) => { setHandle(e.target.value); setError(''); }} />
-          <button class="btn" type="submit">Invite</button>
+          <input id="invite-handle" class=${`field${error ? ' bad' : ''}`} placeholder=${t('invite.usernamePlaceholder')} value=${handle} autocomplete="off" onInput=${(e) => { setHandle(e.target.value); setError(''); }} />
+          <button class="btn" type="submit">${t('invite.invite')}</button>
         </div>
         ${error ? html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${error}</div>` : sent ? html`<div class="hint" role="status">${sent}</div>` : null}
         <${LocalNote} text="Friends on other PCs can’t join houses yet." />
       </div>
     </form>
-    <div class="modal-foot"><button class="btn" onClick=${closeModal}>${fresh ? 'Later' : 'Done'}</button></div>`;
+    <div class="modal-foot"><button class="btn" onClick=${closeModal}>${fresh ? t('invite.later') : t('common.done')}</button></div>`;
 }
 
 // Arriving from an invitation link. The preview is public, so it works before joining.
@@ -148,11 +149,11 @@ export function JoinByLink({ code, onBack }) {
   const dismiss = () => { S.ui.joinCode = null; if (onBack) onBack(); else closeModal(); };
   const go = () => {
     setBusy(true);
-    joinByCode(code).catch((e) => { setBusy(false); setError(e.offline ? 'You\u2019re offline. Try again when you\u2019re back.' : e.message); });
+    joinByCode(code).catch((e) => { setBusy(false); setError(e.offline ? t('common.offline') : e.message); });
   };
   if (error && !info) {
-    return html`<div class="join-bad" role="alert"><h2>That invitation doesn\u2019t work</h2><p class="modal-lead">${error}</p></div>
-      <div class="modal-foot"><button class="btn" data-autofocus onClick=${dismiss}>${onBack ? 'Try another link' : 'Close'}</button></div>`;
+    return html`<div class="join-bad" role="alert"><h2>${t('invite.bad')}</h2><p class="modal-lead">${error}</p></div>
+      <div class="modal-foot"><button class="btn" data-autofocus onClick=${dismiss}>${onBack ? t('join.tryAnother') : t('common.close')}</button></div>`;
   }
   if (!info) return html`<div class="join-card" aria-busy="true"><div class="join-head"><span class="skel join-skel-tile"></span><div class="join-id"><span class="skel join-skel-line"></span><span class="skel join-skel-line short"></span></div></div></div>`;
   const h = info.house;
@@ -160,20 +161,20 @@ export function JoinByLink({ code, onBack }) {
   // The house's invitation background and icon (server/community.js), shown to whoever holds the link.
   const pic = (id) => `/api/housepics/${id}?invite=${encodeURIComponent(code)}`;
   return html`<div class=${`join-card${h.splash ? ' has-splash' : ''}`} style=${h.splash ? `--splash:url("${pic(h.splash)}")` : ''}>
-    ${info.paused && html`<div class="join-paused" role="status">This house has paused new members for now. Try again later.</div>`}
+    ${info.paused && html`<div class="join-paused" role="status">${t('join.paused')}</div>`}
     <div class="join-head" style=${`--hue:${hueOf(h.hue)}`}>
       <span class=${`tile xl${h.icon ? ' pic' : ''}`}>${h.mark}${h.icon ? html`<img src=${pic(h.icon)} alt="" onError=${(e) => e.currentTarget.remove()} />` : null}</span>
       <div class="join-id">
-        ${info.by && html`<span class="join-kicker">${info.by} invited you</span>`}
+        ${info.by && html`<span class="join-kicker">${t('join.invitedYou', { name: info.by })}</span>`}
         <h2>${h.name}</h2>
-        <div class="join-meta num">${plural(h.members, 'member')}</div>
+        <div class="join-meta num">${t('house.members', { count: h.members })}</div>
       </div>
     </div>
     ${h.about && html`<p class="join-about">${h.about}</p>`}
     ${error && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${error}</div>`}
     <div class="modal-foot" style="margin-top:0">
-      <button class="btn" onClick=${dismiss}>${onBack ? 'Back' : 'Not now'}</button>
-      <button class="btn primary" data-autofocus disabled=${busy} aria-busy=${busy ? 'true' : undefined} onClick=${go}>${busy ? 'Joining\u2026' : already ? 'Open' : `Join ${h.name}`}</button>
+      <button class="btn" onClick=${dismiss}>${onBack ? t('common.back') : t('common.notNow')}</button>
+      <button class="btn primary" data-autofocus disabled=${busy} aria-busy=${busy ? 'true' : undefined} onClick=${go}>${busy ? t('join.joining') : already ? t('join.open') : t('join.join', { house: h.name })}</button>
     </div>
   </div>`;
 }
@@ -213,8 +214,8 @@ export function JoinPreview({ house }) {
 export function AddHouse({ mode: first = 'start' } = {}) {
   const [mode, setMode] = useState(first);
   return html`<div class="add-house">
-    <h2 id="add-house-title">${mode === 'join' ? 'Join a house' : 'Start a house'}</h2>
-    <${Seg} label="Start or join" value=${mode} options=${[['start', 'Start a house'], ['join', 'Join with an invite']]} onChange=${setMode} />
+    <h2 id="add-house-title">${mode === 'join' ? t('addHouse.join') : t('addHouse.start')}</h2>
+    <${Seg} label=${t('addHouse.startOrJoin')} value=${mode} options=${[['start', t('addHouse.start')], ['join', t('addHouse.joinTab')]]} onChange=${setMode} />
     ${mode === 'join' ? html`<${JoinWithInvite} />` : html`<${StartHouse} />`}
   </div>`;
 }
@@ -226,32 +227,32 @@ function JoinWithInvite() {
   const [code, setCode] = useState(null);
   const submit = (e) => {
     e.preventDefault();
-    if (!text.trim()) { setError('Paste the invitation link or code you were sent.'); document.getElementById('join-invite')?.focus(); return; }
+    if (!text.trim()) { setError(t('addHouse.pasteEmpty')); document.getElementById('join-invite')?.focus(); return; }
     const c = parseInvite(text);
-    if (!c) { setError('That doesn\u2019t look like an invitation. They look like https://\u2026/join/abc123, or just the code at the end.'); document.getElementById('join-invite')?.focus(); return; }
+    if (!c) { setError(t('addHouse.notInvite')); document.getElementById('join-invite')?.focus(); return; }
     setError('');
     setCode(c);
   };
   if (code) return html`<${JoinByLink} key=${code} code=${code} onBack=${() => setCode(null)} />`;
   return html`<form class="form" onSubmit=${submit} novalidate>
-    <p class="modal-lead" style="margin:0">Someone sent you a link to their house? Paste it here to see the house before you join.</p>
+    <p class="modal-lead" style="margin:0">${t('addHouse.joinLead')}</p>
     <div>
-      <label class="label" for="join-invite">Invitation link or code</label>
+      <label class="label" for="join-invite">${t('addHouse.linkOrCode')}</label>
       <input id="join-invite" class=${`field${error ? ' bad' : ''}`} data-autofocus autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="300"
         placeholder="https://\u2026/join/abc123" value=${text} aria-invalid=${String(!!error)} aria-describedby="join-invite-msg"
         onInput=${(e) => { setText(e.target.value); setError(''); }} />
       ${error ? html`<div class="err" id="join-invite-msg" role="alert"><${Icon} name="alert" size=${14} />${error}</div>`
-        : html`<div class="hint" id="join-invite-msg">A whole link, a snug:// app link, or only the code all work.</div>`}
+        : html`<div class="hint" id="join-invite-msg">${t('addHouse.linkHint')}</div>`}
     </div>
     ${S.invites.length > 0 && html`<div>
-      <span class="label">Or accept an invitation you\u2019ve had</span>
+      <span class="label">${t('addHouse.acceptHad')}</span>
       ${S.invites.map((inv) => html`<button type="button" key=${inv.house} class="menu-item invite-pick" onClick=${() => openModal(JoinPreview, { house: inv.house })}>
-        <${Tile} house=${S.houses[inv.house]} /><span class="grow trunc">${S.houses[inv.house].name}</span><span class="end">from ${(S.users[inv.from]?.name || 'someone').split(' ')[0]}</span>
+        <${Tile} house=${S.houses[inv.house]} /><span class="grow trunc">${S.houses[inv.house].name}</span><span class="end">${t('addHouse.from', { name: (S.users[inv.from]?.name || t('addHouse.someone')).split(' ')[0] })}</span>
       </button>`)}
     </div>`}
     <div class="modal-foot" style="margin-top:0">
-      <button type="button" class="btn" onClick=${closeModal}>Cancel</button>
-      <button type="submit" class="btn primary">Look at the house</button>
+      <button type="button" class="btn" onClick=${closeModal}>${t('common.cancel')}</button>
+      <button type="submit" class="btn primary">${t('addHouse.look')}</button>
     </div>
   </form>`;
 }
@@ -267,60 +268,60 @@ function StartHouse() {
   const submit = (e) => {
     e.preventDefault();
     const clean = name.trim();
-    if (!clean) { setError('Give the house a name.'); document.getElementById('house-name')?.focus(); return undefined; }
+    if (!clean) { setError(t('addHouse.needName')); document.getElementById('house-name')?.focus(); return undefined; }
     setBusy(true);
     // house.create takes a name and a colour; being public and a topic are
     // house settings, saved straight after.
     createHouse({ name: clean, hue, ...startArgs(start) }).then((id) => {
       if (id && (open || topic)) {
         call('house.update', { house: id, public: open, topic: topic || null })
-          .catch((err) => toast(err.offline ? 'Your house is ready, but being public wasn\u2019t saved. Change it in House settings.' : err.message));
+          .catch((err) => toast(err.offline ? t('addHouse.publicNotSaved') : err.message));
       }
       // A new house is empty: inviting people is the next step, so offer it now.
       if (id && S.houses[id]) openModal(Invite, { house: id, fresh: true });
-    }, (err) => { setBusy(false); setError(err.offline ? 'You\u2019re offline. Try again when you\u2019re back.' : err.message); });
+    }, (err) => { setBusy(false); setError(err.offline ? t('common.offline') : err.message); });
     return undefined;
   };
   const mark = [...name.trim()][0]?.toUpperCase() || '?';
   return html`<form class="form" onSubmit=${submit} novalidate aria-labelledby="add-house-title">
     <div>
-      <p class="modal-lead" style="margin:0">A place for your people, with rooms to write in and a voice room. You\u2019ll get a link to invite them next.</p>
+      <p class="modal-lead" style="margin:0">${t('addHouse.startLead')}</p>
       <${LocalNote} />
     </div>
-    ${S.invites.length > 0 && html`<p class="hint">You have ${plural(S.invites.length, 'invitation')} waiting. Choose Join with an invite to see ${S.invites.length === 1 ? 'it' : 'them'}.</p>`}
+    ${S.invites.length > 0 && html`<p class="hint">${t('addHouse.waiting', { count: S.invites.length })}</p>`}
     <div class="house-name-row">
       <span class="tile lg" style=${`--hue:${hue}`} aria-hidden="true">${mark}</span>
       <div class="grow">
-        <label class="label" for="house-name">Name</label>
-        <input id="house-name" class="field" data-autofocus maxlength="40" placeholder="Night shift bakers" value=${name}
+        <label class="label" for="house-name">${t('addHouse.name')}</label>
+        <input id="house-name" class="field" data-autofocus maxlength="40" placeholder=${t('addHouse.namePlaceholder')} value=${name}
           aria-invalid=${String(!!error)} aria-describedby="house-name-msg" onInput=${(e) => { setName(e.target.value); setError(''); }} />
         ${error ? html`<div class="err" id="house-name-msg" role="alert"><${Icon} name="alert" size=${14} />${error}</div>`
-          : html`<div class="hint" id="house-name-msg">Rename it or add rooms any time.</div>`}
+          : html`<div class="hint" id="house-name-msg">${t('addHouse.nameHint')}</div>`}
       </div>
     </div>
     <${TemplatePick} value=${start} onChange=${setStart} />
     <div>
-      <span class="label" id="house-hue">Colour</span>
+      <span class="label" id="house-hue">${t('addHouse.colour')}</span>
       <div class="swatches" role="group" aria-labelledby="house-hue">
         ${HUES.map(([v, label]) => html`<button type="button" key=${v} class="swatch strong" style=${`--hue:${v}`} aria-pressed=${String(hue === v)} aria-label=${label} onClick=${() => setHue(v)}></button>`)}
       </div>
     </div>
     <div>
-      <span class="label" id="house-topic">What it’s about <span class="faint">(optional)</span></span>
+      <span class="label" id="house-topic">${t('addHouse.about')} <span class="faint">${t('addHouse.optional')}</span></span>
       <div class="topic-chips" role="group" aria-labelledby="house-topic">
         ${TOPICS.map((t) => html`<button type="button" key=${t} class="chip" aria-pressed=${String(topic === t)} onClick=${() => setTopic(topic === t ? null : t)}>${t}</button>`)}
       </div>
     </div>
     <div class="set-inline">
       <div class="grow">
-        <b id="house-public">Open to everyone</b>
-        <span>${open ? 'It shows in Discover, and anyone can join as a newcomer.' : 'Only people you invite can join. You can open it later.'}</span>
+        <b id="house-public">${t('addHouse.open')}</b>
+        <span>${open ? t('addHouse.openOn') : t('addHouse.openOff')}</span>
       </div>
       <button type="button" class="switch" role="switch" aria-checked=${String(open)} aria-labelledby="house-public" onClick=${() => setOpen(!open)}></button>
     </div>
     <div class="modal-foot" style="margin-top:0">
-      <button type="button" class="btn" onClick=${closeModal}>Cancel</button>
-      <button type="submit" class="btn primary" disabled=${busy} aria-busy=${String(busy)}>${busy ? 'Creating\u2026' : 'Create house'}</button>
+      <button type="button" class="btn" onClick=${closeModal}>${t('common.cancel')}</button>
+      <button type="submit" class="btn primary" disabled=${busy} aria-busy=${String(busy)}>${busy ? t('addHouse.creating') : t('addHouse.create')}</button>
     </div>
   </form>`;
 }

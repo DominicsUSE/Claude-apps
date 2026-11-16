@@ -91,6 +91,8 @@ export const PREF_RULES = {
   // Desktop: previews for links friends on other PCs send (fetching one shows the site this PC's address).
   friendPreviews: ['bool', null, false],
   // --- end privacy ---
+  // The language Snug speaks (js/lib/i18n.js, js/language.js): 'auto' follows the browser.
+  lang: ['enum', ['auto', 'en', 'lt'], 'auto'],
 };
 // customThemes: [{ id, name, base, bg, surface, text, accent }], ids unique.
 function cleanThemes(v, fail) {
