@@ -15,8 +15,10 @@
 // Signed in (this PC's account only):
 //   GET  /api/id/recovery          {code, username} while the person hasn't confirmed they saved it
 //   POST /api/id/recovery/confirm {last}
-// Ops: id.recoveryShow, id.recoveryConfirm, id.recoveryNew {old?}, id.recoveryCancel {code},
-//      id.movePeek {code}, id.moveAccept {code}, id.linkGithub {flow}, id.unlinkGithub, id.releaseCheck {code}.
+// Ops: id.recoveryShow, id.recoveryConfirm, id.recoveryNew {old?}, id.recoveryCancel {code, what?},
+//      id.recoveryCancelGh {flow, what?}, id.movePeek {code}, id.moveAccept {code}, id.linkGithub {flow, code?},
+//      id.unlinkGithub {code?}, id.releaseCheck {code}. what = 'key' | 'link' (none: both); code on link and
+//      unlink = the recovery key, which makes the change at once (v0.12 review, second pass).
 //
 // What this does not do: nothing here makes one person equal one account, and the recovery key is the only
 // way back for someone who loses this PC without GitHub linked. Snug can't reset it.
@@ -84,9 +86,11 @@ export function createKeyAuth({ db, M, hub, peer, gh, opts = {}, secure = false,
     if (o) hub.toUser(o, 'p2p', peer.statusFor(o));
   }
   // What the registry says about the account: its kind, recovery key and GitHub link, and how a move started.
+  // v0.12 review, second pass: a PC still moving in asks too (the registry takes the pending key here), so the
+  // owner who lost the old PC sees changes waiting on the account in time to cancel them.
   async function refreshKind() {
     const s = self();
-    if (!s?.uid || s.state !== 'ok' || unsupported) return;
+    if (!s?.uid || (s.state !== 'ok' && s.state !== 'moving') || unsupported) return;
     let k;
     try { k = await reg.signedCall('/v1/account/kind', 'account-kind', {}); } catch (e) {
       if (routeOff(e)) unsupported = true;
@@ -107,7 +111,7 @@ export function createKeyAuth({ db, M, hub, peer, gh, opts = {}, secure = false,
     pushStatus();
   }
   if (enabled && peer._signal) {
-    peer._signal.on('ready', (m) => { if (m.mode !== 'pending') refreshKind().catch(() => {}); });
+    peer._signal.on('ready', () => { refreshKind().catch(() => {}); }); // a pending socket too (moving in)
     peer._signal.on('rebind', () => { refreshKind().catch(() => {}); });
     peer._signal.on('recovery', () => { refreshKind().catch(() => {}); });
   }
@@ -358,6 +362,16 @@ export function createKeyAuth({ db, M, hub, peer, gh, opts = {}, secure = false,
   if (enabled) {
     const ownerOnly = (c) => { if (!peer.isOwner(c.user) || c.peer) fail('Only this PC’s Snug account can do that.'); };
     const active = () => { if (self()?.state !== 'ok') fail('Your account isn’t active on this PC right now.'); };
+    // Cancelling a change waiting on the account also works on a PC that is moving in (second pass).
+    const activeOrMoving = () => { if (!['ok', 'moving'].includes(self()?.state)) fail('Your account isn’t active on this PC right now.'); };
+    const whatOf = (w) => { if (w !== undefined && w !== 'key' && w !== 'link') fail('Choose what to cancel.'); return w; };
+    // What a cancel changes in this PC's saved state: the new recovery key (and the copy this PC kept to show
+    // once) and/or the GitHub change. A cancel of the GitHub change leaves a new recovery key alone.
+    const afterCancel = (what) => {
+      if (what !== 'link') { identity.set('rk_pending_at', null); identity.dropRecovery(); identity.set('rk_saved', '1'); }
+      if (what !== 'key') identity.set('gh_change', null);
+      pushStatus();
+    };
     const reg2 = async (fn, msgs = {}) => {
       try { return await fn(); } catch (e) {
         if (e instanceof UserError) throw e;
@@ -398,13 +412,10 @@ export function createKeyAuth({ db, M, hub, peer, gh, opts = {}, secure = false,
     };
     hub.ops['id.recoveryCancel'] = async (c, d) => {
       ownerOnly(c);
+      const what = whatOf(d.what);
       const rk = await recoverySigner((await keyOf(d.code)).raw);
-      await reg2(() => reg.recoveryCancel(rk), { bad_signature: 'That isn’t your current recovery key.', not_found: 'Your account has no recovery key yet.' });
-      identity.set('rk_pending_at', null);
-      identity.set('gh_change', null); // it also stops a GitHub link or unlink that was waiting (H3)
-      identity.dropRecovery(); // the new key that was waiting is gone; the current one stays
-      identity.set('rk_saved', '1');
-      pushStatus();
+      await reg2(() => reg.recoveryCancel(rk, what), { bad_signature: 'That isn’t your current recovery key.', not_found: 'Your account has no recovery key yet.' });
+      afterCancel(what);
       return {};
     };
     const codeMsgs = { not_found: 'That code isn’t right or has expired. Make a new one on your new PC.', bad_request: 'That code is for this PC. Type it on your other PC instead.', key_in_use: 'That code belongs to a PC that already has an account.' };
@@ -421,38 +432,50 @@ export function createKeyAuth({ db, M, hub, peer, gh, opts = {}, secure = false,
       log('id', 'moved this account to another PC with a pairing code');
       return {};
     };
+    // The recovery key typed with a link or unlink (optional): the change happens at once (second pass).
+    const coSigner = async (code) => (code ? (await recoverySigner((await keyOf(code)).raw)).sign : undefined);
+    const rkWrong = { bad_signature: 'That isn’t your current recovery key. Check it, or leave it empty.' };
     hub.ops['id.linkGithub'] = async (c, d) => {
       ownerOnly(c);
       active();
+      const rsign = await coSigner(d.code);
       const ticket = gh?.takeTicket?.(d.flow, 'link-account');
       if (!ticket) fail('That GitHub sign-in took too long. Start again.');
-      const r = await reg2(() => reg.signedCall('/v1/link/github', 'link-github', { ticket }), { already_claimed: 'That GitHub account already has a Snug username. Use another GitHub account.', forbidden: 'That GitHub account can’t be linked.' });
-      // v0.12 review H3: the link works after 7 days (an older registry linked at once and said only ok)
+      const r = await reg2(() => reg.signedCall('/v1/link/github', 'link-github', { ticket }, { rsign }), {
+        ...rkWrong,
+        already_claimed: 'That GitHub account already has a Snug username. Use another GitHub account.',
+        already_linked: 'A GitHub account is already linked. Unlink it first.',
+        forbidden: 'That GitHub account can’t be linked.',
+      });
+      // v0.12 review H3: without the recovery key the link works after 7 days (an older registry linked at once
+      // and said only ok)
       if (r.state === 'pending') identity.set('gh_change', JSON.stringify({ change: 'link', at: r.at }));
-      else identity.set('gh_linked', '1');
+      else { identity.set('gh_linked', '1'); identity.set('gh_change', null); }
       pushStatus();
       return { state: r.state || 'set', at: r.at || null };
     };
-    hub.ops['id.unlinkGithub'] = async (c) => {
+    hub.ops['id.unlinkGithub'] = async (c, d = {}) => {
       ownerOnly(c);
       active();
-      const r = await reg2(() => reg.signedCall('/v1/link/github/remove', 'unlink-github', {}));
+      const rsign = await coSigner(d.code);
+      const r = await reg2(() => reg.signedCall('/v1/link/github/remove', 'unlink-github', {}, { rsign }), rkWrong);
       if (r.state === 'pending') identity.set('gh_change', JSON.stringify({ change: 'unlink', at: r.at }));
       else { identity.set('gh_linked', '0'); identity.set('gh_change', null); }
       pushStatus();
       return { state: r.state || 'done', at: r.at || null };
     };
-    // A GitHub account: its GitHub sign-in stops a recovery key waiting to take effect (one this PC's account
-    // didn't add, perhaps). The flow is /api/gh/start {purpose: 'recovery-cancel'} (server/ghauth.js).
+    // GitHub sign-in stops a change waiting on the account (one this PC's account didn't ask for, perhaps): a
+    // GitHub account's new recovery key; a keypair account's new recovery key or unlink, through its linked
+    // GitHub (second pass). Also from a PC that is moving in. The flow is /api/gh/start {purpose:
+    // 'recovery-cancel'} (server/ghauth.js).
     hub.ops['id.recoveryCancelGh'] = async (c, d) => {
       ownerOnly(c);
-      active();
+      activeOrMoving();
+      const what = whatOf(d.what);
       const ticket = gh?.takeTicket?.(d.flow, 'recovery-cancel');
       if (!ticket) fail('That GitHub sign-in took too long. Start again.');
-      await reg2(() => reg.recoveryCancelGh(ticket));
-      identity.set('rk_pending_at', null);
-      identity.dropRecovery();
-      pushStatus();
+      await reg2(() => reg.recoveryCancelGh(ticket, what), { not_found: 'That GitHub account isn’t linked to your Snug account.' });
+      afterCancel(what);
       return {};
     };
     // Delete: the recovery key frees the username (server/account.js asks M.p2pConfirmed, then M.p2pDelete).

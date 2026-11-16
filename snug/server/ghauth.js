@@ -208,7 +208,10 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
   function outcome(f, a) {
     const uid = a.account?.uid;
     if (f.purpose === 'release' || f.purpose === 'recovery-cancel') {
-      if (a.status === 'ok' && uid && uid === self()?.uid) settle(f, 'confirmed', { ticket: a.ticket });
+      // v0.12 review, second pass: a cancel also works from a PC that is moving in (the registry answers
+      // pending or rebind for its key), as long as it is this PC's account.
+      const okStatus = a.status === 'ok' || (f.purpose === 'recovery-cancel' && (a.status === 'pending' || a.status === 'rebind'));
+      if (okStatus && uid && uid === self()?.uid) settle(f, 'confirmed', { ticket: a.ticket });
       else settle(f, 'error', { message: 'That’s not the GitHub account this Snug account uses.' });
       return;
     }
@@ -274,14 +277,13 @@ export function createGhAuth({ db, M, hub, peer, opts = {}, secure = false, log 
     if (post && path === '/api/gh/start') {
       const d = await json(req);
       const f = { status: 'pending', waiters: new Set(), trouble: 0 };
-      // v0.12: 'recovery-cancel': a GitHub account's GitHub sign-in stops a recovery key waiting to take effect.
+      // v0.12: 'recovery-cancel': GitHub sign-in stops a recovery key (or, through a linked GitHub, an unlink) waiting.
       if (d.purpose === 'release' || d.purpose === 'link-account' || d.purpose === 'recovery-cancel' || d.link === true) {
         const user = userOf(req);
         if (!user) { err(res, 401, 'Sign in first.'); return true; }
         if (d.purpose === 'release' || d.purpose === 'link-account' || d.purpose === 'recovery-cancel') {
           if (!peer.isOwner(user)) { err(res, 403, 'Only this PC’s Snug account can do that.'); return true; }
           if (d.purpose === 'link-account' && !keyAccount()) { err(res, 409, 'Your account already signs in with GitHub.'); return true; }
-          if (d.purpose === 'recovery-cancel' && keyAccount()) { err(res, 409, 'Use your recovery key to cancel this.'); return true; }
           f.purpose = d.purpose;
         } else {
           if (!isLocal(user)) { err(res, 403, 'This account can’t connect GitHub.'); return true; }
