@@ -138,6 +138,9 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
     ws.e2eeDevice = null;
     return { proto: PROTO, e2ee: { on, nonce: ws.e2eeNonce, me: meView(u) } };
   });
+  // Whether u wrote an encrypted message in a direct conversation or group `viewer` is in (or a thread under one).
+  const wroteTo = (viewer, u) => !!db.get(`SELECT 1 FROM dm_members d JOIN messages m ON m.conv = d.dm WHERE d.user = ? AND m.author = ? AND m.enc IS NOT NULL
+    UNION ALL SELECT 1 FROM dm_members d JOIN threads t ON t.conv = d.dm JOIN messages m ON m.conv = t.id WHERE d.user = ? AND m.author = ? AND m.enc IS NOT NULL LIMIT 1`, viewer, u, viewer, u);
   // The people who need to know when this person's devices change: themselves and everyone sharing a DM.
   const audienceOf = (u) => [u, ...db.all('SELECT DISTINCT d2.user AS id FROM dm_members d1 JOIN dm_members d2 ON d1.dm = d2.dm WHERE d1.user = ? AND d2.user != ?', u, u).map((r) => r.id)];
   let conv = null; // encrypted conversations (server/e2ee-conv.js), made below
@@ -326,17 +329,23 @@ export function createE2eeOps({ db, M, hub, fail, ops: all = {}, on = false }) {
       return { state: row.state, kid: cur?.kid || 0, prekeyAt: cur?.created || 0 };
     },
 
-    // Public keys of people this person talks to (or could start a conversation with).
+    // Public keys of people this person talks to (or could start a conversation with). Someone who
+    // only wrote encrypted messages in a conversation this person still reads (a former member of a
+    // group) gets their signed device list alone, so those messages can still be checked and opened,
+    // but no prekeys: nothing new is sealed to them.
     'e2ee.bundles': (c, d) => {
       if (!bundleLimit.take(c.user)) fail('You’re going a little fast. Wait a moment and try again.');
       if (!Array.isArray(d.users) || d.users.length > 10) fail('Ask for up to 10 people at a time.');
       const peers = M.dmPeers(c.user);
       const out = {};
       for (const u of new Set(d.users)) {
-        if (typeof u !== 'string' || (u !== c.user && !peers.has(u))) continue;
+        if (typeof u !== 'string') continue;
+        const former = u !== c.user && !peers.has(u);
+        if (former && !wroteTo(c.user, u)) continue;
         const a = account(u);
         if (!a) { out[u] = { ready: false }; continue; }
         const list = json(a.list);
+        if (former) { out[u] = { ready: false, list, prekeys: {}, hist: !!a.hist, resetAt: a.reset_at || null, former: true }; continue; }
         const prekeys = {};
         for (const e of list.devs) {
           const p = currentPrekey(e.d);
