@@ -382,12 +382,22 @@ test('E6: when what everyone’s devices handle can’t be checked, nothing goes
     const row = await until(() => srv.db.get('SELECT reply_to FROM messages WHERE id = ?', rid), 'the reply is stored');
     assert.equal(row.reply_to, null);
 
-    // An attachment: not uploaded unpadded.
+    // An attachment: never uploaded unpadded. Padded is the private form, so it still goes up (the
+    // check runs again when the message is sent, and un-pads there only if a device positively can't).
     await failNext();
     const up = await robin.evaluate(async (c) => {
-      try { await (await import('/js/e2ee/conv.js')).uploadEncrypted(c, new Blob([new Uint8Array(5000)]), 'check.bin'); return 'uploaded'; } catch (e) { return e.message; }
+      const conv = await import('/js/e2ee/conv.js');
+      try { const r = await conv.uploadEncrypted(c, new Blob([new Uint8Array(5000)]), 'check.bin'); return { p: conv.fileKeyOf(r.id)?.p ?? null }; } catch (e) { return { error: e.message }; }
     }, dm);
-    assert.match(up, CHECK);
+    assert.deepEqual(up, { p: 1 }, 'uploaded padded when the check can’t answer');
+
+    // Offline with nobody's keys here yet: says so in words, and still no plain reaction.
+    await robin.evaluate(async () => { (await import('/js/e2ee/conv.js'))._test.bundles.clear(); window.__ops = []; window.__sock = window.snug.S.conn.socket; window.snug.S.conn.socket = 'closed'; });
+    try {
+      await robin.evaluate(async ([c, m]) => (await import('/js/store.js')).react(c, m, '🌵'), [dm, id]);
+      await robin.locator('.toast', { hasText: /You’re offline/ }).first().waitFor();
+    } finally { await robin.evaluate(() => { window.snug.S.conn.socket = window.__sock; }); }
+    assert.deepEqual(await ops('react'), [], 'no plain reaction sent while offline');
 
     // Keys not ready on this device: no answer either way, so nothing plainer is used.
     const notReady = await robin.evaluate(async (c) => {

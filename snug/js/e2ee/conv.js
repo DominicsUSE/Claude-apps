@@ -231,7 +231,9 @@ function shownType(bytes, f) {
 // A big file goes up in resumable parts (js/lib/upload.js), still only as ciphertext.
 export async function uploadEncrypted(conv, blob, name, { onProgress, signal } = {}) {
   const bytes = new Uint8Array(await blob.arrayBuffer());
-  const pad = await convCan(conv, 'pad');
+  // Padded unless a device here positively can't read padding. When that can't be told yet (offline,
+  // keys not fetched), padded: the private form; sendEncrypted checks again and un-pads only then.
+  const pad = await convCan(conv, 'pad').catch(() => true);
   const limits = pad ? await uploadLimits() : null;
   // 0.14: padded to a size step, never past the server's file limit (10 MB when it can't be asked).
   const { ct, meta } = await encryptFile(bytes, { pad, max: limits?.maxFile || 10 * 1024 * 1024 });
@@ -794,7 +796,7 @@ async function reactEncrypted(conv, m, emoji, on) {
 }
 msgHooks.react = (conv, m, emoji, on) => {
   if (!m?.e2ee || !isEncrypted(conv)) return false; // rows from before encryption keep plain reactions
-  reactEncrypted(conv, m, emoji, on).catch((e) => { toast(e.message); resyncNow(); });
+  reactEncrypted(conv, m, emoji, on).catch((e) => { toast(e.offline ? 'You’re offline. Try again once you’re back.' : e.message); resyncNow(); });
   return true;
 };
 
