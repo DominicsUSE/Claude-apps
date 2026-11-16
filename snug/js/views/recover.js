@@ -54,14 +54,23 @@ async function saveKey(key, extra = {}, { fromE2 = false } = {}) {
 // ---------- v0.13: one key for both ----------
 // The encryption backup goes under a password recovery key just saved: now if encryption is on and unlocked
 // here, or once it is (right after "Forgot your password?" the app hasn't loaded encryption yet). The key is
-// kept in memory only, for at most two minutes.
+// kept in memory only, for at most two minutes. If that passes (this browser still has to be added, say) or
+// the move fails, `apart` (a flag, not the key) says the backup stayed under the previous key, and Home and
+// Settings say so until a new key does both.
 let adoptRaw = null;
 let adoptTimer = null;
 let adopting = false;
+let apart = false;
+const APART = 'Your encrypted history still opens with your previous recovery key, not the new one. Keep the old key until you make a new one here, so one key does both.';
+const hasE2Keys = () => !!E2.me && E2.me.state !== 'none';
 function forEncryption(raw) {
   adoptRaw = raw;
   clearTimeout(adoptTimer);
-  adoptTimer = setTimeout(() => { adoptRaw = null; }, 120_000);
+  adoptTimer = setTimeout(() => {
+    if (!adoptRaw) return;
+    adoptRaw = null;
+    if (hasE2Keys()) { apart = true; toast(APART); emit(); }
+  }, 120_000);
   adoptSoon();
 }
 async function adoptSoon() {
@@ -71,11 +80,14 @@ async function adoptSoon() {
   adoptRaw = null;
   try {
     await adoptRecoveryKey(raw);
+    apart = false;
     toast('Your recovery key now also opens your encrypted history.');
   } catch (e) {
+    apart = true;
     toast(`Your encrypted history still uses your older recovery key: ${e.message}`);
   }
   adopting = false;
+  emit();
 }
 // A new encryption recovery key (a device removed, "My keys may be exposed", a new one in Settings >
 // Encryption) is offered as the password recovery key too, until it is used or put off. Memory only.
@@ -89,7 +101,7 @@ subscribe(() => {
     if (S.account?.passwordAccount) { offer = t; emit(); }
   }
 });
-signOutHooks.push(() => { adoptRaw = null; offer = null; lastE2 = null; clearTimeout(adoptTimer); });
+signOutHooks.push(() => { adoptRaw = null; apart = false; offer = null; lastE2 = null; clearTimeout(adoptTimer); });
 
 function UseE2Key() {
   const [password, setPassword] = useState('');
@@ -105,6 +117,7 @@ function UseE2Key() {
       if (p.error) throw new Error(p.message);
       await saveKey({ raw: p.raw }, passkey ? { passkey } : { password, code: code.replace(/\s/g, '') }, { fromE2: true });
       offer = null;
+      apart = false;
       closeModal();
       toast('Done. Your encryption recovery key is also your password recovery key now.');
     } catch (x) { setErr(x.message); setBusy(false); }
@@ -131,6 +144,23 @@ function E2KeyOffer({ sfx = '' }) {
     </div>
     <button class="btn primary" id=${`rk-e2-use${sfx}`} onClick=${() => openModal(UseE2Key, {})}>Use it</button>
     <button class="btn quiet" id=${`rk-e2-later${sfx}`} onClick=${() => { offer = null; emit(); redraw((n) => n + 1); }}>Not now</button>
+  </div>`;
+}
+
+// The encryption backup stayed under the previous key (see forEncryption). A new key made here moves it,
+// once encryption is unlocked on this device.
+function KeysApart({ sfx = '' }) {
+  if (!apart || !S.account?.passwordAccount) return null;
+  const ready = E2.status === 'ready';
+  return html`<div class="rk-remind rk-apart" role="region" aria-labelledby=${`rk-apart-title${sfx}`}>
+    <span class="row-ic"><${Icon} name="shield" /></span>
+    <div class="grow">
+      <b id=${`rk-apart-title${sfx}`}>Your encrypted history still uses your previous recovery key</b>
+      <span class="faint">${ready
+        ? 'Make a new recovery key so one key opens your encrypted history and resets a forgotten password. Keep the old one until then.'
+        : 'Keep that key: it opens your encrypted history. Once encryption is unlocked on this device, make a new recovery key here so one key does both.'}</span>
+    </div>
+    ${ready && html`<button class="btn primary" id=${`rk-apart-go${sfx}`} onClick=${() => openMakeRecoveryKey({ replace: true })}>Make a new one</button>`}
   </div>`;
 }
 
@@ -187,6 +217,7 @@ export function RecoveryReminder() {
   const a = S.account;
   const [, redraw] = useState(0);
   if (offer && a?.passwordAccount) return html`<${E2KeyOffer} />`;
+  if (apart && a?.passwordAccount) return html`<${KeysApart} />`;
   const old = !!a?.recovery?.set && !!a.recovery.old;
   if (!a?.passwordAccount || !a.recovery || (a.recovery.set && !old) || later) return null;
   return html`<div class="rk-remind" role="region" aria-labelledby="rk-remind-title" data-old=${old ? 'true' : undefined}>
@@ -208,6 +239,7 @@ export function RecoveryRows({ Row }) {
   if (!S.account?.passwordAccount || !r) return null;
   return html`<div class="set-head">Recovery key</div>
     <${E2KeyOffer} sfx="-settings" />
+    ${!offer && html`<${KeysApart} sfx="-settings" />`}
     <${Row} label=${r.set ? 'Saved' : 'Not made yet'} hint=${r.set
       ? `${r.old ? 'Make a new recovery key: yours was saved by an older version of Snug. It still works until you replace it. ' : ''}Made ${new Date(r.created).toLocaleDateString()}. If you forget your password, it lets you set a new one; it works once. It also gets past two-factor sign-in, so keep it as safe as your password. Whoever runs this server can’t read it.`
       : 'A key you keep on paper or in a password manager. If you forget your password, it lets you set a new one, with no email.'}>

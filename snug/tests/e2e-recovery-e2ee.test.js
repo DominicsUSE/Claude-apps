@@ -178,3 +178,71 @@ test('one key: a device removed in Settings > Encryption; its new recovery key, 
   await A.locator('#rk-recovered').waitFor();
   await A.context().close();
 });
+
+// v0.13 review: after "Forgot your password?" on a browser that must still be added, the new key waits two
+// minutes for encryption, then the app says the encrypted history still uses the previous key, and offers a
+// key that does both once encryption is unlocked.
+test('one key: when encryption isn’t ready in time, Home says the encrypted history still uses the previous key', async () => {
+  const D1 = await newPage('tomasz');
+  await signIn(D1, 'tomasz', PASSWORD);
+  await turnOn(D1);
+  await D1.evaluate(() => { window.snug.S.ui.view = { type: 'home' }; window.snug.emit(); });
+  await D1.locator('#rk-e2-later').click();
+  await D1.locator('#rk-remind-go').click();
+  await D1.locator('#rk-key').waitFor();
+  const k1 = await keyText(D1);
+  await D1.fill('#rk-last', k1.slice(-4));
+  await D1.click('#rk-saved');
+  await D1.fill('#rk-pw', PASSWORD);
+  await D1.click('#rk-pw-go');
+  await D1.locator('.toast:has-text("also opens your encrypted history")').waitFor();
+  await D1.context().close();
+  // A new browser, with a clock the test moves: "Forgot your password?" with k1, then k2.
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const D2 = await ctx.newPage();
+  D2.setDefaultTimeout(15000);
+  D2.on('pageerror', (e) => errors.push(`tomasz-new: ${e.message}`));
+  await D2.clock.install();
+  await D2.goto(url);
+  await D2.waitForSelector('.auth-form');
+  await D2.click('#auth-forgot');
+  await D2.fill('#rk-handle', 'tomasz');
+  await D2.fill('#rk-key-in', k1);
+  await D2.click('#rk-check');
+  const pw2 = 'a new kiln door';
+  await D2.fill('#rk-new-pass', pw2);
+  await D2.click('#rk-set-pass');
+  await D2.locator('#rk-key').waitFor();
+  const k2 = await keyText(D2);
+  const b1 = backupBlob('tomasz');
+  await D2.fill('#rk-last', k2.slice(-4));
+  await D2.click('#rk-saved');
+  await D2.waitForFunction(() => window.snug?.S.conn.socket === 'open');
+  await waitStatus(D2, 'new-device');
+  await D2.clock.fastForward('02:01');
+  await D2.locator('.toast:has-text("still opens with your previous recovery key")').waitFor();
+  assert.equal(backupBlob('tomasz'), b1, 'the backup is still under k1');
+  await D2.waitForFunction(() => window.snug?.S.conn.socket === 'open' && window.snug.e2ee.E2.status === 'new-device'); // the jump may drop the socket
+  // The browser is added with k1 (it still opens the backup); Home then offers a key that does both.
+  await dialog(D2).locator('button:has-text("Use my recovery key")').click();
+  await dialog(D2).locator('#e2-rk-in').fill(k1);
+  await dialog(D2).locator('button:has-text("Use recovery key")').click();
+  await dialog(D2).locator('h2:has-text("Encryption is back on this device")').waitFor();
+  await dialog(D2).locator('button:has-text("Done")').click();
+  await waitStatus(D2, 'ready');
+  await D2.evaluate(() => { window.snug.S.ui.view = { type: 'home' }; window.snug.emit(); });
+  // (the clock jump reconnected the socket, and its second hello can leave an "Add this browser" prompt behind)
+  await D2.waitForTimeout(500);
+  if (await dialog(D2).locator('button:has-text("Not now")').count()) await dialog(D2).locator('button:has-text("Not now")').click();
+  await D2.locator('#rk-apart-go').click();
+  await D2.locator('#rk-key').waitFor();
+  const k3 = await keyText(D2);
+  await D2.fill('#rk-last', k3.slice(-4));
+  await D2.click('#rk-saved');
+  await D2.locator('#rk-pw, .toast:has-text("also opens your encrypted history")').first().waitFor(); // a password, unless the sign-in was fresh enough
+  if (await D2.locator('#rk-pw').count()) { await D2.fill('#rk-pw', pw2); await D2.click('#rk-pw-go'); }
+  await D2.locator('.toast:has-text("also opens your encrypted history")').waitFor();
+  await D2.locator('.rk-apart').waitFor({ state: 'detached' });
+  assert.notEqual(backupBlob('tomasz'), b1);
+  await ctx.close();
+});
