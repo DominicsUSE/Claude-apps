@@ -2,7 +2,8 @@
 // one-time code; the person types it on the new device. The server relays
 // everything but never sees the code, so it can't vouch for keys it swapped in:
 //   Kc   = HKDF-SHA256(code, salt "snug-e2ee-v1/link", info linkId)
-//   tag1 = HMAC(Kc, "snug-e2ee-v1/link-b\n" + canon({linkId, u, d, dsk, prekey}))  new device -> trusted one
+//   tag1 = HMAC(Kc, "snug-e2ee-v1/link-b2\n" + canon({linkId, u, d, dsk, prekey, label, kind}))  new device -> trusted one
+//          (label and kind too, so the name the device list will show can't be changed on the way)
 //   tag2 = HMAC(Kc, "snug-e2ee-v1/link-a\n" + b64u(SHA-256(box)) + "\n" + canon(devlist))  trusted -> new
 // One attempt per code and ten minutes per link make guessing 60 bits hopeless.
 import { b64u, b64uOf, crockford, normCrockford, equal, random, utf8 } from './bytes.js';
@@ -24,8 +25,8 @@ export function parseLinkCode(text) {
 
 export const linkKey = (code, linkId) => hkdf(utf8(code), 'snug-e2ee-v1/link', linkId, 32);
 
-export async function tag1(Kc, { linkId, u, d, dsk, prekey }) {
-  return b64u(await hmac(Kc, `snug-e2ee-v1/link-b\n${canon({ linkId, u, d, dsk, prekey })}`));
+export async function tag1(Kc, { linkId, u, d, dsk, prekey, label = null, kind = null }) {
+  return b64u(await hmac(Kc, `snug-e2ee-v1/link-b2\n${canon({ linkId, u, d, dsk, prekey, label, kind })}`));
 }
 export async function tag2(Kc, box, devlist) {
   return b64u(await hmac(Kc, `snug-e2ee-v1/link-a\n${b64u(await sha256(box))}\n${canon(devlist)}`));

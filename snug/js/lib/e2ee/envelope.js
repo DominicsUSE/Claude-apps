@@ -18,6 +18,10 @@ export const arcInfo = (u, e) => `${P}arc\n${u}\n${e}`;
 export const aadOf = (h) => utf8(`${P}msg\n${canon(h)}`);
 export const headerHash = (h) => sha256(utf8(`${P}hdr\n${canon(h)}`));
 const sigText = async (hh, n, c) => utf8(`${P}env\n${b64u(hh)}\n${b64u(n)}\n${b64u(await sha256(c))}`);
+// Key commitment (review L1): AES-GCM alone isn't key-committing, so the signed header names the
+// message key: kc = SHA-256("snug-e2ee-v1/kc" || K || n). A wrap that yields another key is refused
+// before anything is decrypted. Envelopes from 0.12.0 clients have no kc and open as before.
+export const keyCommit = async (K, n) => b64u(await sha256(concat(utf8(`${P}kc`), K, n)));
 
 // Padding: the body's canonical JSON grows to a multiple of 256 bytes up to
 // 4 KB, then of 1 KB, so lengths say less about what was written.
@@ -43,6 +47,7 @@ export function headerProblem(h) {
   if (!Array.isArray(h.ping) || h.ping.length > 10 || h.ping.some((u) => typeof u !== 'string')) return 'ping';
   if (h.re !== null && typeof h.re !== 'string') return 're';
   if (h.kind === 'sched' ? !Number.isSafeInteger(h.at) : h.at !== undefined) return 'at';
+  if (h.kc !== undefined && !b64uOf(h.kc, 32)) return 'header';
   try { if (utf8(canon(h)).length > CAPS.header) return 'header too large'; } catch { return 'header'; }
   return null;
 }
@@ -66,10 +71,10 @@ export function envelopeProblem(env) {
  *   recipients: { to: [[u, d, kid, pubRaw]], ar: [[u, e, pubRaw]] }
  * Returns { env: {h, n, c, sig}, k: { "d:<device>"|"a:<u>:<e>": b64u wrap }, K }.
  */
-export async function seal({ header, body, dsk, recipients, K = random(32), n = random(12) }) {
+export async function seal({ header, body, dsk, recipients, K = random(32), n = random(12), commit = true }) {
   const to = recipients.to.map(([u, d, kid]) => [u, d, kid]);
   const ar = recipients.ar.map(([u, e]) => [u, e]);
-  const h = { ...header, v: 1, s: SUITE, to, ar };
+  const h = { ...header, v: 1, s: SUITE, to, ar, ...(commit ? { kc: await keyCommit(K, n) } : {}) }; // commit: false only makes a 0.12.0-style envelope (tests)
   const why = headerProblem(h);
   if (why) throw new Error(`envelope: ${why}`);
   const inner = pad({ ...body, v: 1, conv: h.conv, place: h.place, id: h.id, rev: h.rev, from: h.from });
@@ -109,15 +114,22 @@ export async function open({ env, expect, senderDsk, me, keys, wraps = {} }) {
   const n = b64uOf(env.n, 12), c = b64uOf(env.c), sig = b64uOf(env.sig, 64);
   const hh = await headerHash(h);
   if (!(await verifyBytes(senderDsk, sig, await sigText(hh, n, c)))) no('signature');
-  let K = null;
+  let K = null, uncommitted = false;
+  // A key from a wrap (or the cache) counts only if the header commits to it (when it has kc).
+  const committed = async (k) => {
+    if (!k || k.length !== 32) return null;
+    if (h.kc !== undefined && (await keyCommit(k, n)) !== h.kc) { uncommitted = true; return null; }
+    return k;
+  };
   const mine = h.to.find(([u, d]) => u === me.u && d === me.d);
-  const tryOpen = async (pair, info, w) => { try { return pair && w ? await openKey(pair, info, hh, b64uOf(w)) : null; } catch { return null; } };
+  const tryOpen = async (pair, info, w) => { try { return pair && w ? await committed(await openKey(pair, info, hh, b64uOf(w))) : null; } catch { return null; } };
   if (mine) K = await tryOpen(await keys.device?.(mine[2]), wrapInfo(me.u, me.d, mine[2]), wraps[`d:${me.d}`]);
   for (const [u, e] of h.ar) {
     if (K || u !== me.u) continue;
     K = await tryOpen(await keys.history?.(e), arcInfo(u, e), wraps[`a:${u}:${e}`]);
   }
-  if (!K && keys.cached) K = keys.cached;
+  if (!K && keys.cached) K = await committed(keys.cached);
+  if (!K && uncommitted) no('commitment');
   if (!K || K.length !== 32) no('no key');
   let body;
   try { body = JSON.parse(fromUtf8(await aesOpen(K, n, c, aadOf(h)))); } catch { no('ciphertext'); }

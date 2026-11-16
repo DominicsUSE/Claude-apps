@@ -23,6 +23,24 @@ export function trimForCache(data, keep = CACHE_PER_CONV) {
   return out;
 }
 
+// The device copy as JSON (js/store.js). Nothing decrypted on this device is written: an
+// end-to-end encrypted message keeps only its envelope (opened again after a reload), wherever it
+// sits (conversations, pins, saved, the scheduled list). Local previews (blob: URLs) only work in
+// this tab, so they are left out too.
+const OPENED = ['text', 'files', 'sticker', 'fwd', 'enc', 'encRev', 'encFlags', 'encWhy', 'k'];
+export function cacheJson(data, keep = CACHE_PER_CONV) {
+  return JSON.stringify(trimForCache(data, keep), (k, v) => {
+    if (k === 'src' && typeof v === 'string' && v.startsWith('blob:')) return undefined;
+    if (v && typeof v === 'object' && !Array.isArray(v) && v.e2ee && typeof v.id === 'string') {
+      const out = { ...v };
+      for (const f of OPENED) delete out[f];
+      out.text = '';
+      return out;
+    }
+    return v;
+  });
+}
+
 // Changes that are safe to send late, in order, once each.
 export const QUEUED_OPS = new Set(['react', 'msg.edit', 'msg.delete', 'msg.restore', 'saved.set', 'saved.note', 'highlight.set']);
 // What a queued change is about: a later change to the same thing replaces it.

@@ -21,7 +21,19 @@ export function asbProblem(a) {
   if (!b64uOf(a.aik) || !key32(a.sync) || !key32(a.bk)) return 'asb';
   if (!a.ahk || typeof a.ahk !== 'object' || Array.isArray(a.ahk)) return 'asb';
   for (const [e, k] of Object.entries(a.ahk)) if (!/^[1-9]\d{0,8}$/.test(e) || !k || !b64uOf(k.sk) || !key32(k.pub)) return 'asb';
+  if (a.n !== undefined && (!Number.isSafeInteger(a.n) || a.n < 0)) return 'asb';
   return null;
+}
+
+// The ASB's serial (review M2): every change to the account keys (a history epoch, a new recovery
+// or settings key) makes a copy with n + 1. A device takes a box only if it is newer than what it
+// holds, so the server can't hand back an older box. No n (0.12.0) counts as 0.
+export const bumpAsb = (asb, change = {}) => ({ ...asb, ...change, n: (asb.n || 0) + 1 });
+/** got compared with what this device holds: 'newer' | 'same' | 'older' | 'fork' (same serial, other keys). */
+export function asbOrder(local, got) {
+  const a = local?.n || 0, b = got?.n || 0;
+  if (b !== a) return b > a ? 'newer' : 'older';
+  return canon(local) === canon(got) ? 'same' : 'fork';
 }
 
 /**

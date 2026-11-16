@@ -10,7 +10,7 @@ import { plain } from './lib/format.js';
 import { unreadOf, isThread, roomIds } from './lib/attention.js';
 import { upgradePrefs } from './lib/account.js';
 import { dropExpired } from './lib/expiry.js'; // 0.12: disappearing messages
-import { trimForCache, queueOp, replayOp, QUEUED_OPS } from './lib/offline.js'; // 0.12: the device copy and offline changes
+import { cacheJson, queueOp, replayOp, QUEUED_OPS } from './lib/offline.js'; // 0.12: the device copy and offline changes
 import { landingRoom } from './lib/onboarding.js'; // where a newcomer lands after joining
 
 export const PAGE = 40;
@@ -180,8 +180,8 @@ let saveTimer;
 function cacheData() {
   const out = {};
   for (const k of DATA) out[k] = S[k];
-  // Local image previews are only valid in this tab.
-  return JSON.stringify(trimForCache(out), (k, v) => (k === 'src' && typeof v === 'string' && v.startsWith('blob:') ? undefined : v));
+  // Local image previews are only valid in this tab; decrypted messages are kept as envelopes only.
+  return cacheJson(out);
 }
 // Long conversations (0.12): what has been scrolled far back, or piled up in a
 // conversation that isn't open, is let go once it's all been read; scrolling
