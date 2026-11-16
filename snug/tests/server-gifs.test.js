@@ -210,6 +210,47 @@ test('a desktop PC searches through the registry end to end: the GIF site only e
   } finally { await A.close(); await registry.close(); }
 });
 
+// 0.14 fix: the 0.13 desktop app with a keypair account (no GitHub). The live registry's Openverse calls were
+// refused (Openverse limits anonymous calls per address, and every Cloudflare Worker shares one), and the picker
+// blamed this PC ("too many searches from this server"). Now it says which GIF site turned the registry away.
+test('a keypair account on a desktop PC: GIF search through the registry, and a GIF site that refuses the registry is named', async () => {
+  const { startLocalRegistry } = await import('../registry/dev.js');
+  const { startPc, Client } = await import('./helpers/p2p.js');
+  const registry = await startLocalRegistry({ env: { OWNER_GITHUB_IDS: '900001', GIF_OPENVERSE_BASE: here } });
+  const A = await startPc(registry);
+  try {
+    const made = await fetch(`${A.base}/api/id/create`, { method: 'POST', headers: { origin: A.base, 'content-type': 'application/json' }, body: JSON.stringify({ username: 'keygifs' }) });
+    assert.equal(made.status, 200, await made.clone().text());
+    const cookie = made.headers.get('set-cookie').split(';')[0];
+    const me = (await made.json()).user;
+    assert.equal(A.peer.identity.self().username, 'keygifs');
+    const get = (p) => fetch(A.base + p, { headers: { cookie } });
+    assert.deepEqual((await (await get('/api/gifs/config')).json()).sources.map((x) => x.id), ['registry']);
+
+    openverseStatus = 429;
+    const refused = await get('/api/gifs?q=kitten');
+    assert.equal(refused.status, 429);
+    const why = (await refused.json()).error;
+    assert.match(why, /Openverse is turning away GIF searches from the Snug registry/);
+    assert.doesNotMatch(why, /from this server/);
+
+    openverseStatus = 200;
+    const found = await (await get('/api/gifs?q=kitten')).json();
+    const r0 = found.results.find((g) => g.id === 'ov1');
+    assert.ok(r0, JSON.stringify(found));
+    assert.equal(r0.credit.text, 'Ada Lovelace, CC BY-SA 4.0, via Openverse');
+    const prev = await get(r0.preview);
+    assert.equal(prev.status, 200);
+    await prev.arrayBuffer();
+    const c = new Client(A, cookie, me.id);
+    await c.connect();
+    const room = (await c.ok('house.create', { name: 'Keys', hue: 10 })).room;
+    const imp = await fetch(`${A.base}/api/gifs/import`, { method: 'POST', headers: { cookie, origin: A.base, 'content-type': 'application/json' }, body: JSON.stringify({ conv: room, url: r0.url, title: r0.title }) });
+    assert.equal(imp.status, 201, await imp.clone().text());
+    await c.close();
+  } finally { openverseStatus = 200; await A.close(); await registry.close(); }
+});
+
 // review-media 1: a GIF fetched and stored by the server counts against the uploader's quota.
 test('a picked GIF is refused once the person is out of room', async () => {
   await withServer({ SNUG_GIF_PROVIDER: 'openverse', SNUG_OPENVERSE_BASE: here, SNUG_QUOTA_MB: '1' }, async ({ base, cookie, room, get, post }) => {

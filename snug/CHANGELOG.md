@@ -27,6 +27,14 @@ goes back to an older version on its own (README, "Install, update, go back").
   PC's copy of the call didn't have the other yet, so neither started the connection). Now, after a short wait
   with no connection, one of them starts it.
 
+### Fixes
+
+- **Fix: GIF search in the desktop app gave only an error.** Openverse turns away nearly all anonymous calls
+  from the registry (it limits them per address, and every Cloudflare Worker shares one). The registry can now
+  ask Openverse with its own credentials (`OPENVERSE_CLIENT_ID`/`OPENVERSE_CLIENT_SECRET`), passes a search to
+  the next GIF site in `GIF_PROVIDERS` when one refuses, and the error names the site that refused instead of
+  blaming your PC. Search still goes through the registry, so GIF sites never see your address.
+
 ### Privacy: less tracking, shorter retention
 
 - **What Snug stores and for how long**: the privacy page and README list everything the server keeps, with

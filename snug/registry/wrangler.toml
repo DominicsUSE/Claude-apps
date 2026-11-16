@@ -42,6 +42,9 @@ POW_BITS = "20"
 #   TURN_KEY_TOKEN    optional. Cloudflare TURN key API token.
 #   TENOR_KEY         optional (0.12). A free Google Cloud key for Tenor GIF search (GIF_PROVIDERS=tenor).
 #   GIF_TOKEN_SECRET  optional (0.12). Keys GIF search tokens; derived from GH_HMAC_SECRET when unset.
+#   OPENVERSE_CLIENT_ID, OPENVERSE_CLIENT_SECRET  needed for Openverse from a deployed Worker (0.14): a registered,
+#                     e-mail-verified Openverse application. Without them Openverse refuses most anonymous calls,
+#                     because every Cloudflare Worker reaches it from one shared address (README section 6).
 
 [[durable_objects.bindings]]
 name = "HUB"
