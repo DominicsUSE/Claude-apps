@@ -17,6 +17,7 @@ import { createRequire } from 'node:module';
 import { startServer } from '../server/index.js';
 import { openDb } from '../server/db.js';
 import { seedDatabase } from '../server/seed.js';
+import { waitAsync } from './helpers/wait.js';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -193,7 +194,7 @@ test('e2eeSince: a since pinned past the first envelope seen is lowered to it, s
   await openDm(robin, 'Ines Carvalho');
   await textOf(robin, 'hello from Ines').waitFor();
   const firstEnvSeq = srv.db.get('SELECT MIN(seq) s FROM messages WHERE conv = ? AND enc IS NOT NULL', dm).s;
-  await robin.waitForFunction(async ({ dm, s }) => (await import('/js/e2ee/conv.js')).encryptedSince(dm) <= s, { dm, s: firstEnvSeq });
+  await waitAsync(robin, async ({ dm, s }) => (await import('/js/e2ee/conv.js')).encryptedSince(dm) <= s, { dm, s: firstEnvSeq });
   const MARK = `LATE${Date.now().toString(36)}`;
   srv.hub.toUser(R, 'msg', { conv: dm, m: { id: `m_late${Date.now().toString(36)}`, author: I, ts: Date.now(), text: `${MARK} plain`, seq: firstEnvSeq + 1_000_000 } });
   await robin.locator(`.main .msg:has-text("${MARK}") .e2-unsealed`).waitFor();

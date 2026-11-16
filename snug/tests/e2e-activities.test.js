@@ -12,6 +12,7 @@ import { createRequire } from 'node:module';
 import { startServer } from '../server/index.js';
 import { openDb } from '../server/db.js';
 import { seedDatabase } from '../server/seed.js';
+import { waitAsync } from './helpers/wait.js';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -83,7 +84,7 @@ async function joinWheel(page) {
   await page.click('.stage .btn.primary:has-text("Join voice")');
   await page.locator('.stage [aria-label="Leave voice"]').waitFor();
 }
-const connected = (page, n) => page.waitForFunction(async (want) => {
+const connected = (page, n) => waitAsync(page, async (want) => {
   const peers = Object.values(await window.snug.voiceStats());
   return peers.length === want && peers.every((p) => p.state === 'connected' && p.bytes > 1000);
 }, n, { timeout: 25000, polling: 300 });

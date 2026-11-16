@@ -16,6 +16,7 @@ import { createRequire } from 'node:module';
 import { startServer } from '../server/index.js';
 import { openDb } from '../server/db.js';
 import { seedDatabase } from '../server/seed.js';
+import { waitAsync } from './helpers/wait.js';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -70,7 +71,7 @@ async function openDm(page, title) {
 }
 // Connected to `n` others, with audio arriving from each and its element playing.
 async function connected(page, n) {
-  await page.waitForFunction(async (want) => {
+  await waitAsync(page, async (want) => {
     const peers = Object.values(await window.snug.voiceStats());
     return peers.length === want && peers.every((p) => p.state === 'connected' && p.bytes > 1000);
   }, n, { timeout: 25000, polling: 300 });
@@ -79,7 +80,7 @@ async function connected(page, n) {
 async function hearing(page) {
   const t0 = Object.values(await page.evaluate(() => window.snug.voiceStats())).map((p) => p.audioTime);
   assert.ok(t0.every((t) => typeof t === 'number'), `an audio element per peer: ${JSON.stringify(t0)}`);
-  await page.waitForFunction(async (before) => {
+  await waitAsync(page, async (before) => {
     const now = Object.values(await window.snug.voiceStats());
     return now.length === before.length && now.every((p, i) => p.audioTime > before[i] + 0.5 && p.audioPaused === false);
   }, t0, { timeout: 10000, polling: 250 });
