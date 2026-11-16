@@ -47,7 +47,7 @@ export async function startMockGithub({ port = 0, clientId = 'Iv1.test', clientS
     return token;
   };
 
-  const server = http.createServer(async (req, res) => {
+  const server = http.createServer({ keepAliveTimeout: 65_000 }, async (req, res) => { // long keep-alive: see dev.js
     const u = new URL(req.url, 'http://x');
     const body = await readBody(req);
     const ua = req.headers['user-agent'] || null;
