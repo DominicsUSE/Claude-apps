@@ -360,8 +360,10 @@ export function createModel(db) {
       // return (the same filters), so words in conversations the searcher
       // can't read neither take a candidate's place nor show (review-media 2).
       if (!rows.length) {
+        // The candidate is a whole word of the index, so the probe matches it exactly: one word's list of
+        // messages, not every word it starts.
         const findable = (w) => !!db.get(`SELECT 1 FROM messages WHERE seq IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?)
-          AND ${where.join(' AND ')} LIMIT 1`, `"${w}"*`, ...params);
+          AND ${where.join(' AND ')} LIMIT 1`, `"${w}"`, ...params);
         const alts = split.fts.map((parts) => (parts.length === 1 ? [parts[0], ...closeWords(db, parts[0], 8, findable)] : [parts.join(' ')]));
         if (alts.some((a) => a.length > 1)) {
           rows = ranked(alts.map((a) => `(${a.map((w) => `"${w}"*`).join(' OR ')})`).join(' AND '));

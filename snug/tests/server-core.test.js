@@ -154,6 +154,19 @@ test('search: close-match candidates come only from what the searcher can read',
   assert.equal(r.close, true);
 });
 
+// review-media 2 (pass 2): the candidate scan has no row window, so words in conversations the searcher
+// can't read can't push a readable close word out of it (a counting oracle once padded to the edge).
+test('search: many unreadable words before a readable close word do not hide it', async () => {
+  const A = 'abcdefghijklmnopqrstuvwxyz';
+  const pad = Array.from({ length: 20500 }, (_, i) => `qa${A[Math.floor(i / 676) % 26]}${A[Math.floor(i / 26) % 26]}${A[i % 26]}${A[Math.floor(i / 17576) % 26]}`);
+  srv.db.run("INSERT INTO messages (id, conv, author, ts, text, fold) VALUES ('m_corepad000001x', ?, ?, ?, '', ?)", lounge, ada.id, Date.now(), pad.join(' '));
+  const own = (await cy.ok('house.create', { name: 'Cy Window', hue: 60 })).room;
+  const mine = await send(cy, own, 'the qzzzzz is mine');
+  const r = await cy.ok('search', { q: 'qzzzzy' });
+  assert.deepEqual(r.hits.map((h) => h.m.id), [mine], '20500 unreadable q-words do not hide the readable one');
+  assert.equal(r.close, true);
+});
+
 test('search: an existing database without the index is indexed when it opens', () => {
   const d = mkdtempSync(join(tmpdir(), 'snug-fts-'));
   try {
