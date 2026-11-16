@@ -87,7 +87,9 @@ export async function startLocalRegistry(opts = {}) {
     });
   };
 
-  const server = http.createServer(async (req, res) => {
+  // keepAliveTimeout well past a client's idle reuse, so a reused socket is never closed under a request
+  // (the default 5 s raced fetch's connection reuse on slow Windows CI runners; same as server/index.js).
+  const server = http.createServer({ keepAliveTimeout: 65_000 }, async (req, res) => {
     try {
       const body = req.method === 'GET' || req.method === 'HEAD' ? null : await readBody(req, 1 << 20);
       const r = await worker.fetch(toRequest(req, body), rt.env, { waitUntil() {} });
