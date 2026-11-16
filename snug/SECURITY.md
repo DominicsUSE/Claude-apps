@@ -234,7 +234,8 @@ back to *in transit only*; the label then says so. Not reviewed by anyone outsid
 - **Your IP address in calls.** With a TURN relay, calls and voice rooms are relay-only by default (0.14), and
   only relay candidates leave the device, so the people in a call see the relay's address, not yours. The
   relay's operator sees your address, when and how much. TURN credentials last an hour and their username is a
-  keyed hash of the person and the day, not the account id; a static TURN login (no `SNUG_TURN_SECRET`) is the
+  hash of the person and the day keyed with a key only Snug's server holds (not the secret the relay shares), not
+  the account id; a static TURN login (no `SNUG_TURN_SECRET`) is the
   same for everyone and never expires, and the server warns about it at startup. Without a relay a call
   connects directly and the other people see your address; Snug says so before you join. Anyone can turn
   *Hide my IP address* off.

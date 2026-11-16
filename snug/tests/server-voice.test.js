@@ -555,6 +555,9 @@ test('TURN: with a shared secret each person gets a credential that verifies, ru
     assert.notEqual(tag, a.id);
     assert.ok(!turn.username.includes(a.id), 'no account id in the TURN username');
     assert.match(tag, /^[A-Za-z0-9_-]{16}$/);
+    // Not even with the shared secret the TURN server holds: the tag is keyed with a key only Snug's server has.
+    const day = Math.floor(Date.now() / 86_400_000);
+    for (const d of [day - 1, day, day + 1]) assert.notEqual(tag, createHmac('sha256', SECRET).update(`${a.id}|${d}`).digest('base64url').slice(0, 16), 'the TURN secret alone gives the tag away');
     const left = Number(expiry) - Date.now() / 1000;
     assert.ok(left > 55 * 60 && left <= 3600 + 5, `expires in about an hour: ${left}`);
     // Still the coturn use-auth-secret scheme: the credential is HMAC-SHA1 of the username.
@@ -583,13 +586,16 @@ test('TURN credentials (calls C4): the same tag all day for one person, differen
   const { turnCredential, TURN_TTL_S, iceExpOf } = await import('../server/voiceopts.js');
   assert.equal(TURN_TTL_S, 3600);
   const t = Date.UTC(2026, 10, 16, 9, 0, 0);
-  const a1 = turnCredential(SECRET, 'u_ann', t), a2 = turnCredential(SECRET, 'u_ann', t + 3 * 3600_000);
-  const b1 = turnCredential(SECRET, 'u_bob', t);
+  const KEY = Buffer.alloc(32, 7);
+  const a1 = turnCredential(SECRET, KEY, 'u_ann', t), a2 = turnCredential(SECRET, KEY, 'u_ann', t + 3 * 3600_000);
+  const b1 = turnCredential(SECRET, KEY, 'u_bob', t);
   const tag = (c) => c.username.split(':')[1];
   assert.equal(tag(a1), tag(a2), 'stable within a day (one relay allocation per person per day can be told apart, no more)');
   assert.notEqual(tag(a1), tag(b1));
-  assert.notEqual(tag(turnCredential(SECRET, 'u_ann', t + 86_400_000)), tag(a1), 'a new tag each day');
-  assert.notEqual(tag(turnCredential('another-secret', 'u_ann', t)), tag(a1), 'the tag needs the secret');
+  assert.notEqual(tag(turnCredential(SECRET, KEY, 'u_ann', t + 86_400_000)), tag(a1), 'a new tag each day');
+  assert.notEqual(tag(turnCredential(SECRET, Buffer.alloc(32, 8), 'u_ann', t)), tag(a1), 'the tag needs the server’s own key');
+  assert.equal(tag(turnCredential('another-secret', KEY, 'u_ann', t)), tag(a1), 'the TURN secret plays no part in it');
+  assert.equal(a1.credential, createHmac('sha1', SECRET).update(a1.username).digest('base64'), 'the credential is still the coturn one');
   assert.equal(Number(a1.username.split(':')[0]), t / 1000 + 3600);
   assert.equal(iceExpOf([{ urls: ['turn:x'], ...a1 }]), (t / 1000 + 3600) * 1000 - 5 * 60_000);
   assert.equal(iceExpOf([{ urls: ['stun:x'] }]), null);
