@@ -97,7 +97,7 @@ const no = (reason) => { throw new OpenFailure(reason); };
 /**
  * Opens one message. Any failure throws OpenFailure with a short reason (for
  * the message menu); nothing of the ciphertext is ever shown.
- *   expect: { conv (root DM), place, id, author, rev? } from the stored row
+ *   expect: { conv (root DM), place, id, author, rev?, requireKc? } from the stored row
  *   senderDsk: raw public key of h.from.d, taken from the sender's verified device list
  *   me: { u, d }
  *   keys: { device(kid) -> CryptoKeyPair|null, history(e) -> CryptoKeyPair|null, cached: Uint8Array|null }
@@ -111,6 +111,8 @@ export async function open({ env, expect, senderDsk, me, keys, wraps = {} }) {
   if (h.from.u !== expect.author) no('author');
   if (expect.rev !== undefined && h.rev !== expect.rev) no('revision');
   if (expect.kind && h.kind !== expect.kind) no('kind');
+  // A sender device seen committing to its keys before (review L1, second pass) can't leave kc out.
+  if (expect.requireKc && h.kc === undefined) no('commitment');
   const n = b64uOf(env.n, 12), c = b64uOf(env.c), sig = b64uOf(env.sig, 64);
   const hh = await headerHash(h);
   if (!(await verifyBytes(senderDsk, sig, await sigText(hh, n, c)))) no('signature');

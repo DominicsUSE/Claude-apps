@@ -591,3 +591,43 @@ test('backup (M2): the account keys carry a serial; a box with an older one, or 
   assert.equal(backup.asbOrder(next, { ...next, sync: b64u(random(32)) }), 'fork');
   assert.equal(backup.asbProblem({ ...asb, n: -1 }), 'asb');
 });
+
+// ---------- second review pass (M2, L1, H1) ----------
+test('backup (M2, second pass): a box from a 0.12.0 device (no serial bump) with a newer list version is taken when it keeps every history key; an older one or one that drops a key is not', async () => {
+  const asb = backup.bumpAsb(await backup.newAsb('u_alice'), {}); // n 1, as a fixed device left it at list version 4
+  const fixed = backup.bumpAsb((await backup.addEpoch(asb)).asb); // n 2: an ordinary newer box
+  assert.equal(backup.asbAccept(asb, fixed, { ver: 5, localVer: 4 }), 'take');
+  // A 0.12.0 device's weekly rotation: the same serial (it copies n), a new epoch, a newer list version.
+  const old = (await backup.addEpoch(asb)).asb;
+  assert.equal(backup.asbOrder(asb, old), 'fork', 'what the first pass refused for good');
+  assert.equal(backup.asbAccept(asb, old, { ver: 5, localVer: 4 }), 'take');
+  const { n: _n, ...noSerial } = old; // eslint-disable-line no-unused-vars
+  assert.equal(backup.asbAccept(asb, noSerial, { ver: 5, localVer: 4 }), 'take', 'a 0.12.0 ASB with no serial at all');
+  // The same box replayed at a list version this device already passed: stale, never taken.
+  assert.equal(backup.asbAccept(asb, old, { ver: 4, localVer: 4 }), 'stale');
+  assert.equal(backup.asbAccept(asb, old, { ver: 3, localVer: 4 }), 'stale');
+  // A newer list version that drops or replaces a history key this device holds: refused (and kept for a retry).
+  const { 1: _gone, ...fewer } = old.ahk; // eslint-disable-line no-unused-vars
+  assert.equal(backup.asbAccept(asb, { ...old, ahk: fewer }, { ver: 6, localVer: 4 }), 'refuse');
+  assert.equal(backup.asbAccept(asb, { ...old, ahk: { ...old.ahk, 1: fixed.ahk[2] } }, { ver: 6, localVer: 4 }), 'refuse');
+  assert.equal(backup.asbAccept(asb, { ...asb }, { ver: 6, localVer: 4 }), 'same');
+  // No list version known here (a device from before this pass): the serial decides, as before.
+  assert.equal(backup.asbAccept(asb, fixed, { ver: 5, localVer: 0 }), 'take');
+  assert.equal(backup.asbAccept(fixed, asb, { ver: 5, localVer: 0 }), 'stale');
+});
+
+test('envelope (L1, second pass): once a sender device has committed to its keys, an envelope from it without kc is refused', async () => {
+  const a = await account('u_alice'), b = await account('u_bob');
+  const h = header({ u: a.u, d: a.devs[0].d });
+  const old = await env.seal({ header: h, body: { text: 'no commitment' }, dsk: a.devs[0].dsk.privateKey, recipients: recipientsOf([a, b], { history: false }), commit: false });
+  const base = { env: old.env, expect: expectOf(h), senderDsk: unb64u(a.devs[0].entry.dsk), me: { u: b.u, d: b.devs[0].d }, keys: keysFor(b, b.devs[0]), wraps: old.k };
+  assert.equal((await env.open(base)).body.text, 'no commitment', 'from a device never seen committing');
+  await assert.rejects(env.open({ ...base, expect: { ...expectOf(h), requireKc: true } }), (e) => e instanceof env.OpenFailure && e.reason === 'commitment');
+});
+
+test('highwater (H1, second pass): settings are written above both the server’s version and the highest this device has seen', () => {
+  assert.equal(hw.metaWriteVer(3, null), 4);
+  assert.equal(hw.metaWriteVer(3, { ver: 2 }), 4);
+  assert.equal(hw.metaWriteVer(1, { ver: 5 }), 6, 'after a rollback to 1, a repair writes at 6, not 2');
+  assert.equal(hw.metaWriteVer(0, { ver: 7 }), 8, 'gone from the server');
+});

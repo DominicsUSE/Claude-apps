@@ -21,3 +21,10 @@ export function listCheck(local, list, h) {
   if (list.ver === local.ver && local.h && h !== local.h) return 'fork';
   return 'ok';
 }
+
+/**
+ * The version a settings write uses (review H1, second pass): above both the server's version and
+ * the highest this device has seen, so putting this device's copy back after a rollback never lowers
+ * its own mark (an older blob replayed later is still a rollback).
+ */
+export const metaWriteVer = (serverVer, local) => Math.max(serverVer || 0, local?.ver || 0) + 1;
