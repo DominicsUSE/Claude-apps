@@ -178,7 +178,9 @@ test('recovery key: made from Home after sign-up, then "Forgot your password?" s
   await p.fill('#rk-key-in', key.replace(/-/g, ' ').toLowerCase());
   await p.click('#rk-check');
   await p.locator('#rk-new-pass').waitFor();
-  assert.deepEqual(Object.keys(bodies[0]).sort(), ['handle', 'proof']);
+  // proof: bound to this server's host name; proof1: the 0.12.0 proof, which opens only a key saved then
+  assert.deepEqual(Object.keys(bodies[0]).sort(), ['handle', 'proof', 'proof1']);
+  assert.notEqual(bodies[0].proof, bodies[0].proof1);
   assert.ok(!JSON.stringify(bodies[0]).includes(key.replace(/-/g, '').slice(0, 12)), 'the key itself is not sent');
   await p.fill('#rk-new-pass', 'a brand new garden gate');
   await p.click('#rk-set-pass');
