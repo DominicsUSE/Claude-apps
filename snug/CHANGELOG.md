@@ -23,6 +23,9 @@ goes back to an older version on its own (README, "Install, update, go back").
   TURN set, the relay answers STUN, not an outside server. A static TURN login gets a startup warning.
 - **Smaller call records:** who started it, how it went, when, how long, and who missed it, no longer who took
   part. The disappearing-messages sweep and account erasure cut it down further. Older records still read.
+- **Fix: group calls across PCs.** Two people who joined moments apart weren't connected to each other (each
+  PC's copy of the call didn't have the other yet, so neither started the connection). Now, after a short wait
+  with no connection, one of them starts it.
 
 ### Privacy: less tracking, shorter retention
 

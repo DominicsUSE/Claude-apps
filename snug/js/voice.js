@@ -770,8 +770,26 @@ on('rtc', ({ from, data }) => {
 // connected restarts.
 const awayNow = new Set();
 let lastUsers = '';
+// Someone in the call I have no connection with. Whoever joins offers to those already there, but across PCs
+// each PC keeps its own copy of a group call (server/peergroups.js): two people who join moments apart may
+// each be told only of those there before, and neither offers. After a grace with no offer from them, I offer;
+// the side that isn't polite goes first, so usually only one does (crossing offers settle as any other).
+const LATE_OFFER_MS = 1500;
+const lateOffers = new Map();
+let callUsers = [];
+function offerLate(user) {
+  if (lateOffers.has(user)) return;
+  const c = S.call;
+  const wait = String(S.me) > String(user) ? LATE_OFFER_MS * 2 : LATE_OFFER_MS;
+  lateOffers.set(user, setTimeout(() => {
+    lateOffers.delete(user);
+    if (S.call !== c || c.status !== 'live' || peers.has(user) || !callUsers.includes(user) || awayNow.has(user) || crypt.refused.has(user)) return;
+    peer(user, true);
+  }, wait));
+}
 on('voice', ({ room, users, state }) => {
   if (S.call?.room !== room) return;
+  callUsers = [...users];
   for (const u of [...peers.keys()]) if (!users.includes(u)) dropPeer(u);
   for (const u of [...crypt.refused]) if (!users.includes(u)) crypt.refused.delete(u);
   // Someone joined or left: a new key of mine, so newcomers can't open what came before and leavers what comes after.
@@ -788,6 +806,7 @@ on('voice', ({ room, users, state }) => {
     if (p && S.call.status === 'live') resumeLine(u, p);
   }
   for (const u of [...awayNow]) if (!users.includes(u)) awayNow.delete(u);
+  for (const u of users) if (u !== S.me && !peers.has(u) && !awayNow.has(u) && !crypt.refused.has(u)) offerLate(u);
 });
 function resumeLine(user, p) {
   tellKinds(user);
@@ -875,6 +894,9 @@ function stop() {
   pendingKinds.clear();
   pendingWant.clear();
   awayNow.clear();
+  for (const t of lateOffers.values()) clearTimeout(t);
+  lateOffers.clear();
+  callUsers = [];
   wasMany = false;
   out = null;
   stopCrypt();
