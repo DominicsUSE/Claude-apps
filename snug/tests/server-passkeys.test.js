@@ -350,6 +350,49 @@ test('passkeys (v0.13): a fresh passkey check replaces the password and code for
   assert.equal((await call('POST', '/api/passkeys/step', {}, { cookie: fresh })).status, 400);
 });
 
+test('passkeys (v0.13 review): a fresh passkey check also stands in on the two-factor settings, deactivate and delete', async () => {
+  const who = await register('pk-everywhere');
+  const { a } = await addPasskey(who);
+  const WebSocket = (await import('ws')).default;
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, { headers: { cookie: who.cookie, origin: ORIGIN, host: LH } });
+  const acks = new Map();
+  let seq = 0;
+  await new Promise((r) => ws.on('message', (b) => { const m = JSON.parse(b); if (m.t === 'hello') r(); if (m.t === 'ack') acks.get(m.id)?.(m); }));
+  const op = (o, d) => new Promise((r) => { const id = ++seq; acks.set(id, r); ws.send(JSON.stringify({ t: 'op', id, op: o, d })); });
+  // turning on two-factor: the passkey instead of the password (the new authenticator's code is still needed)
+  const secret = unbase32((await op('totp.begin', {})).d.secret);
+  const on = await op('totp.enable', { passkey: await stepProof(who, a), code: totpAt(secret, Date.now()) });
+  assert.equal(on.ok, true, on.error);
+  // new backup codes and turning it off: the passkey instead of the password and the code
+  const codes = await op('totp.codes', { passkey: await stepProof(who, a) });
+  assert.equal(codes.ok, true, codes.error);
+  assert.equal(codes.d.codes.length, on.d.codes.length);
+  // a spent check is refused
+  const spent = await stepProof(who, a);
+  assert.equal((await op('totp.codes', { passkey: spent })).ok, true);
+  const again = await op('totp.disable', { passkey: spent });
+  assert.equal(again.ok, false);
+  assert.match(again.error, /passkey didn’t confirm/);
+  srv.resetLimits();
+  const off = await op('totp.disable', { passkey: await stepProof(who, a) });
+  assert.equal(off.ok, true, off.error);
+  ws.close();
+  // delete: the username is still typed; a wrong one doesn't spend the check
+  const proof = await stepProof(who, a);
+  const typo = await call('POST', '/api/account/delete', { passkey: proof, confirm: 'pk-elsewhere' }, { cookie: who.cookie });
+  assert.equal(typo.status, 401);
+  assert.match(typo.body.error, /Type your username/);
+  const gone = await call('POST', '/api/account/delete', { passkey: proof, confirm: 'pk-everywhere' }, { cookie: who.cookie });
+  assert.equal(gone.status, 200, JSON.stringify(gone.body));
+  assert.equal((await call('POST', '/api/login', { handle: 'pk-everywhere', password: PW })).status, 401);
+  // deactivate
+  const de = await register('pk-deact');
+  const { a: d } = await addPasskey(de);
+  const r = await call('POST', '/api/account/deactivate', { passkey: await stepProof(de, d) }, { cookie: de.cookie });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(srv.db.get('SELECT deactivated FROM users WHERE id = ?', de.id).deactivated, 1);
+});
+
 test('passkeys (v0.13): Settings learns the passkey user id, so a new name can be passed to the provider', async () => {
   const who = await register('pk-renamer');
   assert.equal((await call('GET', '/api/passkeys', null, { cookie: who.cookie })).body.userId, null, 'none before a passkey');

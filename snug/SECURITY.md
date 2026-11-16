@@ -49,9 +49,12 @@ Security fixes go into the newest release only; there are no backports.
   owner out. The owner's `npm run reset-password` deletes the key too. Optional **passkeys** add a sign-in
   that phishing pages can't replay (bound to the server's domain); only their public halves are stored.
   Since 0.13 a passkey checked just now (single-use challenge for that account, user verification
-  required) can replace the password and code where Snug asks again; a failed check counts like a wrong
-  password. The same recovery key now also seals the encryption backup when saved on a device with
-  encryption unlocked, so whoever holds it can both reset the password and read the encrypted history
+  required) can replace the password and code when you change the password, remove a passkey, replace a
+  recovery key, turn two-factor sign-in on or off, make new backup codes, or deactivate or delete the
+  account (the username is still typed to delete). Changing your username, and deleting or handing over a
+  house, still ask for the password or code. A failed check counts like a wrong password.
+  The same recovery key now also seals the encryption backup when saved on a device with encryption
+  unlocked, so whoever holds it can both reset the password and read the encrypted history
   backup, as the README always said it would.
 - **Account takeover with a recovery key.** Someone who copies the recovery key only starts a **move**,
   which waits 72 hours unless the current PC approves. The current PC is told it was the recovery key, can

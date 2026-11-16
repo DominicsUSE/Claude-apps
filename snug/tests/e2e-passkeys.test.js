@@ -11,6 +11,7 @@ import { createRequire } from 'node:module';
 import { startServer } from '../server/index.js';
 import { openDb } from '../server/db.js';
 import { seedDatabase } from '../server/seed.js';
+import { totpAt, unbase32 } from '../server/account.js';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -275,6 +276,31 @@ test('passkeys (v0.13): change the password with the passkey instead of the old 
   assert.equal(await login(PASSWORD), 401, 'the old one doesn’t');
   assert.equal(srv.db.get("SELECT COUNT(*) n FROM auth_events e JOIN users u ON u.id = e.user WHERE u.handle = 'priya' AND e.event = 'password.change'").n, 1);
   await p.waitForSelector('.nav'); // still signed in on this device
+  await p.context().close();
+});
+
+// v0.13 review: the passkey also stands in when two-factor sign-in is turned on and off.
+test('passkeys (v0.13): turn two-factor sign-in on and off with the passkey instead of the password', async () => {
+  const p = await page(LOCAL);
+  await authenticator(p);
+  await signIn(p, 'malik');
+  await accountSettings(p);
+  await p.click('#pk-add');
+  await p.fill('#pk-pw', PASSWORD);
+  await p.click('#pk-go');
+  await p.locator('#pk-list .pk-name').waitFor();
+  await p.click('.layer-body button:has-text("Set up")');
+  const secret = unbase32((await p.locator('.acc-secret code').textContent()).replace(/\s/g, ''));
+  assert.equal(await p.locator('#tf-passkey').count(), 0, 'offered once the code is typed');
+  await p.fill('#tf-code', totpAt(secret, Date.now()));
+  await p.click('#tf-passkey');
+  await p.locator('h2:has-text("Two-factor sign-in is on")').waitFor();
+  await p.click('button:has-text("I’ve saved them")');
+  await p.click('.layer-body button:has-text("Turn off")');
+  await p.click('#cf-passkey');
+  await p.locator('.toast:has-text("Two-factor sign-in is off.")').waitFor();
+  const events = srv.db.all("SELECT e.event FROM auth_events e JOIN users u ON u.id = e.user WHERE u.handle = 'malik' AND e.event LIKE 'totp.%' ORDER BY e.rowid").map((r) => r.event);
+  assert.deepEqual(events, ['totp.enable', 'totp.disable']);
   await p.context().close();
 });
 

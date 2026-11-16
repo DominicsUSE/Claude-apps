@@ -459,9 +459,10 @@ export function createAccountOps({ db, M, hub, fail, ops = {} }) {
   const sendAccount = (u, d, exceptWs) => hub.toUser(u, 'account', d, exceptWs);
   const currentHash = (c) => (c.ws?.token ? tokenHash(c.ws.token) : null);
   const audit = (event, c, extra = {}) => core(db).audit(event, { user: c.user, agent: c.ws?.agent || '', ...extra });
-  // Password (and code, when two-factor is on) for an op; the op's own words for each failure.
+  // Password (and code, when two-factor is on) for an op, or (v0.13) a passkey checked just now; the op's own
+  // words for each failure.
   async function stepUp(c, d, { needCode = true, words = {} } = {}) {
-    const r = await R.stepUp(c.user, { password: d.password, code: typeof d.code === 'string' ? d.code.replace(/\s/g, '') : '', token: c.ws?.token, needCode });
+    const r = await R.stepUp(c.user, { password: d.password, code: typeof d.code === 'string' ? d.code.replace(/\s/g, '') : '', passkey: d.passkey, token: c.ws?.token, needCode });
     if (r) fail(words[r.field] || r.message);
   }
   // Every session but this one ends: after a password change, or turning on two-factor sign-in.
@@ -769,6 +770,12 @@ export function createAccountHttp({
         return { status: 401, message: 'Confirm on GitHub first (or sign out and back in), then delete.' };
       }
       return null;
+    }
+    // v0.13: or a passkey checked just now, for the password and the code (after the username, so a typo
+    // doesn't spend the check).
+    if (d.passkey != null) {
+      if (handle && !typed) return { status: 401, message: `Type your username, ${row.handle}, to confirm.` };
+      return R.stepUp(user, { passkey: d.passkey, token: tokenOf(req) });
     }
     const r = await R.stepUp(user, { password: d.password, code: d.code, token: tokenOf(req), needCode: false });
     if (r) return r;

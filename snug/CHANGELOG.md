@@ -11,8 +11,9 @@ goes back to an older version on its own (README, "Install, update, go back").
 - One recovery key for both: a password recovery key you save also becomes your end-to-end encryption
   recovery key on a device with encryption on, and a new encryption recovery key is offered as your
   password recovery key too. A key saved by 0.12.0 keeps working; Home and Settings ask you to replace it.
-- A passkey can stand in for your password (and code) when you change the password, remove a passkey or
-  replace a recovery key. Changing your name or username tells your passkey provider, where supported.
+- A passkey can stand in for your password (and code) when you change the password, remove a passkey,
+  replace a recovery key, turn two-factor sign-in on or off, make new backup codes, or deactivate or delete
+  your account. Changing your name or username tells your passkey provider, where supported.
 - Desktop: a GitHub link still waiting, or a GitHub account's first recovery key, can be cancelled from the
   same PC or with GitHub (registry: `/v1/recovery/drop`, and `/v1/recovery/cancel` takes the waiting link's
   GitHub account, and stops every link waiting for it). Cancelling a waiting link with GitHub needs that
