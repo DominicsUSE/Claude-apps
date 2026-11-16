@@ -293,6 +293,8 @@ export async function reencryptDir(dir, { limit = 200, keep = () => true, log = 
   let names = [];
   try { names = readdirSync(dir); } catch { return out; }
   for (const name of names) {
+    // A temp file a crash left mid-write: gone after an hour.
+    if (name.startsWith('.') && name.endsWith('.sealing')) { try { if (statSync(join(dir, name)).mtimeMs < Date.now() - 3600_000) unlinkSync(join(dir, name)); } catch { /* gone */ } continue; }
     if (out.checked >= limit) break;
     if (!STORED.test(name)) continue;
     const path = join(dir, name);
