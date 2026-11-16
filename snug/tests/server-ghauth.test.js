@@ -158,6 +158,9 @@ test('returning, moving to another PC, resume and the password-free account', as
   const bc = new Client(b, mv.cookie, mv.data.user.id);
   await bc.connect();
   assert.equal(bc.hello.p2p.state, 'moving');
+  // The stop reaches the new PC over its registry connection: wait until that is up (on a slow runner it can
+  // still be in its reconnect wait here, and would then hear the stop only at its next try).
+  if (bc.hello.p2p.registry !== 'connected') await bc.next('p2p', (d) => d.registry === 'connected', 20_000);
   const stopped = bc.next('p2p', (d) => d.state === 'needs-signin', 20_000);
   await owner.ok('id.rebind', { approve: false });
   await stopped;
