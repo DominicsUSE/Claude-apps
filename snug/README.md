@@ -1116,7 +1116,7 @@ Real, and covered by tests with separate users:
     remember codes between calls.
   Tested by `tests/logic-voice.test.js` (5), `tests/server-voice.test.js`
   (13), `tests/e2e-voice-extra.test.js` (8), `tests/e2e-voice-mesh.test.js`
-  (5, with five browsers for a voice room growing past 3 others; the wake
+  (6, with five browsers for a voice room growing past 3 others; the wake
   lock and the media session are stand-ins there) and `tests/e2e-activities.test.js`
   (4, in two browsers). Not tested: a real network drop (the tests close the
   socket without a clean goodbye), a real device being unplugged (the track's
