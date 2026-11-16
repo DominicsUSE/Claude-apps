@@ -29,11 +29,13 @@ goes back to an older version on its own (README, "Install, update, go back").
 
 ### Fixes
 
-- **Fix: GIF search in the desktop app gave only an error.** Openverse turns away nearly all anonymous calls
-  from the registry (it limits them per address, and every Cloudflare Worker shares one). The registry can now
-  ask Openverse with its own credentials (`OPENVERSE_CLIENT_ID`/`OPENVERSE_CLIENT_SECRET`), passes a search to
-  the next GIF site in `GIF_PROVIDERS` when one refuses, and the error names the site that refused instead of
-  blaming your PC. Search still goes through the registry, so GIF sites never see your address.
+- **GIF search in the desktop app gave only an error.** Most likely cause: Openverse limits anonymous calls per
+  address, and every Cloudflare Worker reaches it from one shared address, so it turns the registry away. The
+  registry can now ask Openverse with its own credentials (`OPENVERSE_CLIENT_ID`/`OPENVERSE_CLIENT_SECRET`),
+  passes a search to the next GIF site in `GIF_PROVIDERS` when one refuses, and the error names the site that
+  refused instead of blaming your PC. This takes effect only once the registry is redeployed **and** given
+  Openverse credentials or a second source (e.g. `GIF_PROVIDERS = "openverse,commons"`); until then searches
+  are still refused. Search still goes through the registry, so GIF sites never see your address.
 
 ### Privacy: less tracking, shorter retention
 

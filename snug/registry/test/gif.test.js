@@ -14,7 +14,7 @@ const seen = [];
 test.before(async () => {
   mock = createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
-    seen.push({ path: u.pathname, ua: req.headers['user-agent'] || '' });
+    seen.push({ path: u.pathname, ua: req.headers['user-agent'] || '', auth: req.headers.authorization || '' });
     if (u.pathname === '/v1/images/') {
       res.setHeader('content-type', 'application/json');
       const item = (id, url) => ({ id, title: `Wave ${id}`, url: url || `${here}/m/${id}.gif`, thumbnail: `${here}/m/${id}-t.gif`, creator: 'Ada', license: 'by', license_version: '4.0', foreign_landing_url: `https://example.org/${id}`, width: 100, height: 80 });
@@ -115,8 +115,9 @@ test('gif search: per-token limit; GIF_PROVIDERS=off turns every gif route off; 
 // 0.14 fix. Openverse throttles anonymous calls by address, and every Cloudflare Worker reaches it from one
 // shared address (cross-zone subrequests carry CF-Connecting-IP 2a06:98c0:3600::103), so anonymous search
 // from the live registry is refused. This stand-in does the same: 429 unless the registry's own token comes.
+// It issues ov-token-1, ov-token-2, ... and accepts those in `valid`; `tokenStatus` makes the token endpoint fail.
 function strictOpenverse() {
-  const s = { calls: [], tokenCalls: [] };
+  const s = { calls: [], tokenCalls: [], valid: new Set(), issued: 0, tokenStatus: 0 };
   s.server = createServer(async (req, res) => {
     const u = new URL(req.url, 'http://x');
     const auth = req.headers.authorization || '';
@@ -126,11 +127,15 @@ function strictOpenverse() {
       for await (const c of req) body += c;
       const b = Object.fromEntries(new URLSearchParams(body));
       s.tokenCalls.push({ type: req.headers['content-type'], body: b });
+      if (s.tokenStatus) { res.writeHead(s.tokenStatus); return res.end('{}'); }
       if (b.grant_type !== 'client_credentials' || b.client_id !== 'ov-id' || b.client_secret !== 'ov-secret') { res.writeHead(401); return res.end('{}'); }
+      const t = `ov-token-${++s.issued}`;
+      s.valid.add(t);
       res.setHeader('content-type', 'application/json');
-      return res.end(JSON.stringify({ access_token: 'ov-token-1', token_type: 'Bearer', expires_in: 36000, scope: 'read write' }));
+      return res.end(JSON.stringify({ access_token: t, token_type: 'Bearer', expires_in: 36000, scope: 'read write' }));
     }
-    if (auth !== 'Bearer ov-token-1') { res.writeHead(429, { 'content-type': 'application/json' }); return res.end('{"detail":"Request was throttled."}'); }
+    if (auth && !s.valid.has(auth.replace(/^Bearer /, ''))) { res.writeHead(401, { 'content-type': 'application/json' }); return res.end('{"detail":"Invalid token."}'); }
+    if (!auth) { res.writeHead(429, { 'content-type': 'application/json' }); return res.end('{"detail":"Request was throttled."}'); }
     if (u.pathname === '/v1/images/') {
       res.setHeader('content-type', 'application/json');
       return res.end(JSON.stringify({ results: [{ id: 'k1', title: 'Kitten', url: `${here}/m/k1.gif`, thumbnail: `${s.base}/v1/images/k1/thumb/`, creator: 'Ada', license: 'by', license_version: '4.0', foreign_landing_url: 'https://example.org/k1', width: 100, height: 80 }] }));
@@ -141,6 +146,8 @@ function strictOpenverse() {
   });
   return new Promise((r) => s.server.listen(0, '127.0.0.1', () => { s.base = `http://127.0.0.1:${s.server.address().port}`; r(s); }));
 }
+// Stand-ins close after their test whether it passed or not, so a failing assertion can't leave the file hanging.
+const closing = (t, s) => { t.after(() => { s.server.closeAllConnections(); return new Promise((r) => s.server.close(r)); }); return s; };
 // A Wikimedia Commons stand-in that answers.
 function commonsStandIn() {
   const s = { calls: 0 };
@@ -158,8 +165,8 @@ function commonsStandIn() {
   return new Promise((r) => s.server.listen(0, '127.0.0.1', () => { s.base = `http://127.0.0.1:${s.server.address().port}`; r(s); }));
 }
 
-test('gif search when Openverse turns anonymous calls away: the registry’s own Openverse token, sent only to Openverse', async () => {
-  const ov = await strictOpenverse();
+test('gif search when Openverse turns anonymous calls away: the registry’s own Openverse token, sent only to Openverse', async (t) => {
+  const ov = closing(t, await strictOpenverse());
   const anon = await start({ env: { GIF_OPENVERSE_BASE: ov.base } });
   try {
     const u = await anon.signUp(950005, 'gifanon');
@@ -191,14 +198,16 @@ test('gif search when Openverse turns anonymous calls away: the registry’s own
     assert.equal(ov.calls.find((c) => c.path === '/v1/images/k1/thumb/').auth, 'Bearer ov-token-1');
     seen.length = 0;
     assert.equal((await get(reg, k1.url, token)).status, 200);
-    assert.ok(seen.some((s) => s.path === '/m/k1.gif'));
+    const gif = seen.find((s) => s.path === '/m/k1.gif');
+    assert.ok(gif);
+    assert.equal(gif.auth, '', 'the GIF\u2019s own site never sees the Openverse token');
     assert.ok(ov.calls.every((c) => c.path.startsWith('/v1/')), 'only Openverse got the token');
-  } finally { await reg.close(); ov.server.closeAllConnections(); ov.server.close(); }
+  } finally { await reg.close(); }
 });
 
-test('gif search: a GIF site that refuses hands over to the next one configured; a clear message when none answers', async () => {
-  const ov = await strictOpenverse();
-  const cm = await commonsStandIn();
+test('gif search: a GIF site that refuses hands over to the next one configured; a clear message when none answers', async (t) => {
+  const ov = closing(t, await strictOpenverse());
+  const cm = closing(t, await commonsStandIn());
   const reg = await start({ env: { GIF_PROVIDERS: 'openverse,commons', GIF_OPENVERSE_BASE: ov.base, GIF_COMMONS_BASE: cm.base } });
   try {
     const u = await reg.signUp(950007, 'giffall');
@@ -211,7 +220,7 @@ test('gif search: a GIF site that refuses hands over to the next one configured;
     assert.equal(d.results[0].credit.text, 'Bo, CC0, via Wikimedia Commons');
     // Asking for one source by name gets that source only.
     assert.equal((await get(reg, '/v1/gif/search?q=cat&source=openverse', token)).status, 429);
-  } finally { await reg.close(); cm.server.closeAllConnections(); cm.server.close(); }
+  } finally { await reg.close(); }
   const down = await start({ env: { GIF_PROVIDERS: 'openverse,commons', GIF_OPENVERSE_BASE: ov.base, GIF_COMMONS_BASE: 'http://127.0.0.1:1' } });
   try {
     const u = await down.signUp(950008, 'gifdown');
@@ -222,5 +231,60 @@ test('gif search: a GIF site that refuses hands over to the next one configured;
     assert.equal(d.error, 'unavailable');
     assert.match(d.message, /Openverse/);
     assert.match(d.message, /Wikimedia Commons/);
-  } finally { await down.close(); ov.server.closeAllConnections(); ov.server.close(); }
+  } finally { await down.close(); }
+});
+
+const ovEnv = (ov, extra = {}) => ({ env: { GIF_OPENVERSE_BASE: ov.base, OPENVERSE_CLIENT_ID: 'ov-id', OPENVERSE_CLIENT_SECRET: 'ov-secret', ...extra } });
+
+test('gif search: when Openverse won\u2019t give the registry a token, it asks again a minute later, not on every search', async (t) => {
+  const ov = closing(t, await strictOpenverse());
+  ov.tokenStatus = 503;
+  const reg = await start(ovEnv(ov));
+  try {
+    const u = await reg.signUp(950009, 'gifback');
+    const { token } = (await mint(reg, u)).body;
+    assert.equal((await get(reg, '/v1/gif/search?q=b1', token)).status, 429, 'no token: anonymous, refused');
+    assert.equal((await get(reg, '/v1/gif/search?q=b2', token)).status, 429);
+    assert.equal(ov.tokenCalls.length, 1, 'one token request inside the minute');
+    ov.tokenStatus = 0;
+    await reg.clock.advance(61_000);
+    assert.equal((await get(reg, '/v1/gif/search?q=b3', token)).status, 200, 'a minute on: asks again, gets one');
+    assert.equal(ov.tokenCalls.length, 2);
+  } finally { await reg.close(); }
+});
+
+test('gif search: a token Openverse no longer takes (401) is dropped and a fresh one asked for', async (t) => {
+  const ov = closing(t, await strictOpenverse());
+  const reg = await start(ovEnv(ov));
+  try {
+    const u = await reg.signUp(950010, 'gifrevoke');
+    const { token } = (await mint(reg, u)).body;
+    assert.equal((await get(reg, '/v1/gif/search?q=r1', token)).status, 200);
+    ov.valid.clear(); // Openverse revokes ov-token-1
+    assert.notEqual((await get(reg, '/v1/gif/search?q=r2', token)).status, 200);
+    const r = await get(reg, '/v1/gif/search?q=r3', token);
+    assert.equal(r.status, 200, 'the next search gets a fresh token');
+    assert.equal(ov.tokenCalls.length, 2);
+    assert.equal(ov.calls.at(-1).auth, 'Bearer ov-token-2');
+  } finally { await reg.close(); }
+});
+
+test('gif search: a token request that throws before it is sent still backs off and is retried', async (t) => {
+  const ov = closing(t, await strictOpenverse());
+  const reg = await start(ovEnv(ov));
+  let broken = true;
+  const real = reg.env.__fetch; // the shim's counted fetch; this one throws on the spot for the token request
+  reg.env.__fetch = (url, init) => {
+    if (broken && String(url).endsWith('/v1/auth_tokens/token/')) throw new TypeError('bad request init');
+    return real(url, init);
+  };
+  try {
+    const u = await reg.signUp(950011, 'gifthrow');
+    const { token } = (await mint(reg, u)).body;
+    assert.equal((await get(reg, '/v1/gif/search?q=t1', token)).status, 429);
+    broken = false;
+    await reg.clock.advance(61_000);
+    assert.equal((await get(reg, '/v1/gif/search?q=t2', token)).status, 200, 'not stuck without a token');
+    assert.equal(ov.tokenCalls.length, 1);
+  } finally { await reg.close(); }
 });

@@ -110,7 +110,11 @@ async function openverseToken(env, ov, ua, nowMs) {
   if (c?.t && c.exp > nowMs) return c.t;
   if (c?.failUntil > nowMs) return null;
   if (c?.p) return c.p;
-  const p = (async () => {
+  // The pending slot goes in first, so whatever the request settles to (even a throw before its first await)
+  // replaces it rather than being overwritten by it.
+  const slot = {};
+  ovTokens.set(k, slot);
+  slot.p = (async () => {
     try {
       const r = await (env.__fetch || fetch)(`${ov}/v1/auth_tokens/token/`, {
         method: 'POST', redirect: 'manual',
@@ -127,8 +131,7 @@ async function openverseToken(env, ov, ua, nowMs) {
       return null;
     }
   })();
-  ovTokens.set(k, { p });
-  return p;
+  return slot.p;
 }
 
 function providers(env, nowMs = Date.now()) {
