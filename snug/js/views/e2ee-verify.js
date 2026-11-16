@@ -34,7 +34,7 @@ export function SafetyNumber({ user }) {
       <p class="e2-state" role="status">${s.verified ? html`<${Icon} name="check" size=${16} />${COPY.verified}` : html`<${Icon} name="lock" size=${16} />${COPY.notVerified}`}</p>
       <h3 class="e2-h3">${u.name}’s devices</h3>
       <ul class="e2-devs">${s.devices.map((d, i) => html`<li key=${i}><b>${d.label}</b><span class="hint">${COPY.deviceKind[d.kind]}</span></li>`)}</ul>
-      <p class="hint">Messages in this conversation aren’t end-to-end encrypted yet in this version of Snug; these are the keys they will be encrypted to.</p>`;
+      <p class="hint">Encrypted messages to ${u.name} are sealed to these devices. Snug shows a line in your conversations when they change.</p>`;
   };
   const ready = s && (s.state === 'ready' || s.state === 'changed');
   return html`<div class="e2-sheet" aria-labelledby="e2-sn-title">

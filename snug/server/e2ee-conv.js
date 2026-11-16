@@ -282,8 +282,8 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
       const row = typeof d?.id === 'string' && M.liveMsg(d.id);
       if (!row?.enc) return r;
       const edits = db.all('SELECT enc, ts FROM msg_edits WHERE msg = ? AND enc IS NOT NULL ORDER BY ts DESC, rowid DESC LIMIT ?', row.id, MAX_EDITS)
-        .map((e) => ({ id: row.id, author: row.author, e2ee: encEnv(e.enc), ts: e.ts })).filter((e) => e.e2ee);
-      return { current: { id: row.id, author: row.author, e2ee: encEnv(row.enc), ts: row.edited || row.ts }, edits };
+        .map((e) => ({ id: row.id, author: row.author, e2ee: encEnv(e.enc), ts: e.ts, ...(row.reply_to ? { replyTo: row.reply_to } : {}) })).filter((e) => e.e2ee);
+      return { current: { id: row.id, author: row.author, e2ee: encEnv(row.enc), ts: row.edited || row.ts, ...(row.reply_to ? { replyTo: row.reply_to } : {}) }, edits };
     };
   }
 
@@ -395,7 +395,7 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
   function schedRow(r) {
     const v = { id: r.id, conv: r.conv, text: r.text, replyTo: r.reply_to || undefined, at: r.at, created: r.created };
     const s = r.enc ? parseCanon(r.enc, 256 * 1024) : null;
-    if (s?.env) v.m = { id: s.env.h.id, author: r.user, ts: r.at, e2ee: s.env, k: {} };
+    if (s?.env) v.m = { id: s.env.h.id, author: r.user, ts: r.at, e2ee: s.env, k: {}, ...(r.reply_to ? { replyTo: r.reply_to } : {}) };
     return v;
   }
   function schedWraps(user, device, schedId) {

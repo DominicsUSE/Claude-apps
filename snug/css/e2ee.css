@@ -68,3 +68,7 @@ textarea.e2-key-field { resize: vertical; min-height: calc(var(--h-field) * 1.6)
 .e2-room-hint { display: flex; align-items: center; gap: var(--s-2); margin: 0 0 var(--s-1); font-size: var(--t-12); color: var(--text-3); }
 .e2-room-hint .btn { flex: none; }
 .e2-note-mark { display: inline-flex; align-items: center; color: var(--text-3); flex: none; }
+/* Review H2/M4: a message without an envelope in an encrypted conversation; key and device change lines. */
+.e2-unsealed { margin: 2px 0 var(--s-1); padding: 2px var(--s-2); font-size: var(--t-13, 13px); width: fit-content; max-width: 100%; }
+.msg.e2-unsealed-msg .msg-text { opacity: .85; }
+.e2-keyline.warn .dmline-ic svg { color: var(--amber); }

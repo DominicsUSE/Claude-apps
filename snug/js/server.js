@@ -41,7 +41,12 @@ const noteProblem = (text) => { S.conn.lastError = { text, at: Date.now() }; };
 export function on(ev, fn) { if (!handlers.has(ev)) handlers.set(ev, new Set()); handlers.get(ev).add(fn); }
 const fire = (ev, d) => handlers.get(ev)?.forEach((fn) => fn(d));
 
+// Ops that put readable content into a conversation (and where it is named). In a conversation
+// this account has seen encrypted that the server now reports as plain, none goes out (review M5).
+const CONTENT_OPS = { 'msg.send': 'conv', 'msg.edit': 'conv', 'sched.create': 'conv', 'poll.create': 'conv', 'cmd.roll': 'conv', 'sticker.send': 'conv', 'msg.forward': 'to' };
+const DOWNGRADED = 'This server says this conversation isn’t encrypted any more. Snug won’t send here in plain text.';
 export function call(op, d = {}) {
+  if (CONTENT_OPS[op] && !d?.e2ee && transportHooks.downgraded?.(d?.[CONTENT_OPS[op]])) return Promise.reject(Object.assign(new Error(DOWNGRADED), { code: 'e2ee_downgraded' }));
   if (!ws || ws.readyState !== 1 || S.conn.socket !== 'open') return Promise.reject(offline());
   const id = ++seq;
   ws.send(JSON.stringify({ t: 'op', id, op, d }));
@@ -239,7 +244,7 @@ function send(conv, m) {
   // Recorded voice messages say so; any attachment may be a spoiler and have a description (server/chat.js).
   const files = (m.files || []).map((f) => ({ id: f.id, w: f.w, h: f.h, duration: f.duration, peaks: f.peaks, voice: f.voice || undefined, spoiler: f.spoiler || undefined, alt: f.alt || undefined }));
   // A conversation this account knows as encrypted, now reported as plain: never sent in the clear.
-  if (transportHooks.downgraded?.(conv)) { m.state = 'failed'; m.error = 'This server says this conversation isn’t encrypted any more. Snug won’t send here in plain text.'; emit(); return; }
+  if (transportHooks.downgraded?.(conv)) { m.state = 'failed'; m.error = DOWNGRADED; emit(); return; }
   // An end-to-end encrypted conversation: sealed on this device first (js/e2ee/conv.js).
   const sent = transportHooks.isEncrypted?.(conv) ? transportHooks.sendEncrypted(conv, m)
     : call('msg.send', { conv, id: m.id, text: m.text, replyTo: m.replyTo, files, silent: m.silent || undefined, replyPing: m.replyPing });
@@ -279,6 +284,7 @@ export function sendTyping(conv) {
 let limitsP = null;
 export const uploadLimits = () => (limitsP ||= fetchLimits(fetch).then((l) => { if (!l) limitsP = null; return l; }));
 export async function uploadFile(conv, blob, name, { onProgress, signal } = {}) {
+  if (transportHooks.downgraded?.(conv)) throw Object.assign(new Error(DOWNGRADED), { code: 'e2ee_downgraded' }); // never uploaded readable there
   if (transportHooks.isEncrypted?.(conv)) return transportHooks.uploadEncrypted(conv, blob, name, { onProgress, signal });
   if (needsChunks(blob.size)) {
     return uploadBlob({ fetch: (...a) => fetch(...a), conv, blob, name, onProgress, signal, limits: await uploadLimits() });

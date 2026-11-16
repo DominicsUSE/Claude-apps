@@ -6,6 +6,7 @@ import { closeModal, openModal, toast } from '../store.js';
 import { Icon } from '../ui/icons.js';
 import { E2, startLink, submitCode, recover, currentDevices, approveAsk, rejectLink, clearApproval, dismissPrompt } from '../e2ee/manager.js';
 import { COPY } from '../lib/e2ee/copy.js';
+import { RecoveryKeyScreen } from './e2ee-setup.js'; // a new recovery key after leaving devices out (cycle-safe: used only when drawing)
 
 const failText = (e) => (e?.offline ? 'You’re offline. Try again once you’re back.' : e?.message || 'That didn’t work. Try again.');
 const Err = ({ text, id }) => text && html`<div class="err" id=${id} role="alert"><${Icon} name="alert" size=${14} />${text}</div>`;
@@ -91,8 +92,13 @@ export function RecoverScreen() {
     setBusy(false);
   };
   if (done) {
+    // Devices left out were treated as lost: a new recovery key was made, to save now.
+    const fresh = E2.rk?.fresh;
     return html`<div class="e2-sheet"><h2>Encryption is back on this device</h2><p class="modal-lead">${COPY.recoverDone}</p>
-      <div class="modal-foot"><button class="btn primary" data-autofocus onClick=${closeModal}>Done</button></div></div>`;
+      ${fresh && html`<p class="hint">You left devices out, so your recovery key was replaced: the old one no longer opens your backup. Save the new one.</p>`}
+      <div class="modal-foot">${fresh
+        ? html`<button class="btn primary" data-autofocus onClick=${() => openModal(RecoveryKeyScreen, {})}>Save your new recovery key</button>`
+        : html`<button class="btn primary" data-autofocus onClick=${closeModal}>Done</button>`}</div></div>`;
   }
   const toggle = (d) => setKeep((k) => (k.includes(d) ? k.filter((x) => x !== d) : [...k, d]));
   return html`<form class="form e2-sheet" onSubmit=${go} aria-labelledby="e2-rec-title">
