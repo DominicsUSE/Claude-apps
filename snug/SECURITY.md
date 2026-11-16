@@ -229,12 +229,23 @@ built from `js/lib/privacy.js` and `GET /api/privacy` (`server/privacy.js`).
   answer as offline otherwise. The PC contacts each such co-member when they come online, so group messages,
   files and calls keep connecting directly; a modified client on their side can therefore still tell when the
   PC is online. A registry without quiet watches (no `quiet` in its `ready` frame) gets the older behaviour:
-  those co-members aren't watched, so neither side can open a link to the other.
+  those co-members aren't watched, so neither side can open a link to the other; a member who gets a group
+  message straight from its author offers it to the other online members (0.13), so it still arrives through
+  a friend of both.
 - In P2P mode, link previews for links friends send are off unless the PC's owner turns them on, since the
   fetch reveals the PC's address to the linked site.
 - Deleting an account can erase what the person wrote (messages, files, reactions, poll votes, sign-in and
-  security history); report rows moderators already hold and copies on other PCs stay. Encrypted database
-  snapshots keep up to 7 days, so erased content can survive that long in a snapshot.
+  security history); report rows moderators already hold stay. Encrypted database snapshots keep up to 7
+  days, so erased content can survive that long in a snapshot. In P2P mode (0.13), before the account is
+  released, each friend's PC gets a delete for each of the person's messages (and groups across PCs a signed
+  delete item); the PC waits up to 8 seconds for those online to take them. A PC that is offline then keeps
+  its copy, and a modified Snug can ignore the request: it is a request, not a guarantee. Deleted messages'
+  text is cleared on those PCs after the usual 10-minute undo window.
+- 0.13 frames between PCs (polls and votes, group-call signalling, forwarded cards) are sent only to PCs
+  whose signed profile (or, for group co-members who aren't friends, link-authenticated inventory frame)
+  lists the capability. They are checked like other frames: a vote only counts for the voter's own stand-in
+  and only before the poll ended, only the poll's author can end it, and group-call signalling is accepted
+  only from members whose stand-in is in that call.
 - Snug sends no telemetry, analytics or crash reports, and the web client loads nothing from other origins
   (CSP `default-src 'self'`; tested in `tests/e2e-privacy.test.js`). Outside parties it does reach: the STUN
   server (Google by default, `SNUG_STUN=none` turns it off), a TURN relay if configured, the browser's push
