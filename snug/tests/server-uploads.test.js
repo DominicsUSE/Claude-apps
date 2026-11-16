@@ -132,8 +132,11 @@ test('chunked upload: a cut connection loses only that part, and the upload resu
   const st = await (await p.json('GET', `/api/uploads/${id}`)).json();
   assert.equal(st.received, 64 * 1024, 'the broken part does not count');
   let o = st.received;
-  while (o < data.length) {
+  // The server may still be finishing with the cut part for a moment: it answers 409 with where it is, and
+  // the client carries on from there (server/uploads.js), as here.
+  for (let busy = 0; o < data.length;) {
     const r = await p.chunk(id, o, data.subarray(o, o + 64 * 1024));
+    if (r.status === 409 && busy++ < 20) { o = (await r.json()).received; await new Promise((ok) => setTimeout(ok, 100)); continue; }
     assert.equal(r.status, 200);
     o = (await r.json()).received;
   }
