@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { start, makeKeys, OWNER_ID, HOUR, DAY } from './helpers.js';
 import { registerStr, recoverStr, powInput } from '../src/keyacct.js';
+import { fingerprint } from '../../server/peercrypto.js'; // the security code the app shows
 
 let reg;
 let nextGh = 71000;
@@ -242,6 +243,23 @@ test('H3: an armed forced move completes only for the key it was armed for', asy
   assert.equal(mr.status, 200, JSON.stringify(mr.body));
   near(mr.body.at, reg.clock.now(), 'forced');
   assert.equal(await lookupIk(owner, g.uid), mine.ik);
+
+  // bound by the security code the new PC shows (spaces and case don't matter)
+  const g2 = await reg.signUp(nextGh++, uniq('ghfp'));
+  const pc2 = makeKeys();
+  assert.equal((await adm(owner, { a: 'move.force', uid: g2.uid, fp: fingerprint(pc2.ik, pc2.xk).toLowerCase() })).body.state, 'armed');
+  assert.ok((await rebind(makeKeys(), g2.ghId)).body.at > reg.clock.now() + 71 * HOUR, 'another key: not forced');
+  near((await rebind(pc2, g2.ghId)).body.at, reg.clock.now(), 'the coded key: forced');
+  assert.equal(await lookupIk(owner, g2.uid), pc2.ik);
+  assert.equal((await adm(owner, { a: 'move.force', uid: g2.uid, fp: 'not a code' })).status, 400);
+  // the coded key's move already waiting: it completes now; someone else's waiting move does not
+  const g3 = await reg.signUp(nextGh++, uniq('ghfw'));
+  const pc3 = makeKeys();
+  await rebind(pc3, g3.ghId);
+  assert.equal((await adm(owner, { a: 'move.force', uid: g3.uid, fp: fingerprint(makeKeys().ik, makeKeys().xk) })).body.state, 'armed');
+  assert.equal(await lookupIk(owner, g3.uid), g3.k.ik, 'not the waiting move of another key');
+  assert.equal((await adm(owner, { a: 'move.force', uid: g3.uid, fp: fingerprint(pc3.ik, pc3.xk) })).body.state, 'done');
+  assert.equal(await lookupIk(owner, g3.uid), pc3.ik);
 
   // a keypair account: the recovery move of the bound key, not another one
   const u = await account(uniq('kfo'));

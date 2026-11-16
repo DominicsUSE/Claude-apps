@@ -15,7 +15,7 @@ import {
 import { AdminMixin, ADMIN_SCHEMA } from './admin.js';
 import { XferMixin } from './xfer.js';
 import { VaultKeyMixin, VAULT_SCHEMA } from './vaultkey.js';
-import { KeyAcctMixin, KEY_SCHEMA, KEY_STATUS, KEY_MESSAGES } from './keyacct.js';
+import { KeyAcctMixin, KEY_SCHEMA, KEY_STATUS, KEY_MESSAGES, keyFp } from './keyacct.js';
 import { GifMixin } from './gif.js'; // 0.12: GIF search tokens
 
 const SCHEMA = [
@@ -500,7 +500,12 @@ export class Hub {
   async rebind(b, ip) {
     this.ipLimit('ipAccount', ip);
     const { ticket, ts, sig } = b;
+    // v0.12 review H3: the moving key's security code, for a move.force bound to one (an await, so before
+    // withTicket's synchronous part; used only if the ticket still names the same keys there).
+    const t0 = isTicket(ticket) ? this.ticket(await sha256(ticket)) : null;
+    const fp0 = t0 ? await keyFp(t0.ik, t0.xk) : null;
     return this.withTicket(ticket, ts, sig, () => `snug-reg-v1\nrebind\n${ticket}\n${ts}`, (t, h) => {
+      const fp = t0 && t0.ik === t.ik && t0.xk === t.xk ? fp0 : null;
       const acc = this.accountByGhh(t.ghh);
       if (!acc) fail('not_found');
       this.refuseBanned(acc.uid);
@@ -509,7 +514,7 @@ export class Hub {
       // sec-registry REG-M2: an owner-armed recovery: this GitHub-proved move completes at once (audited).
       // v0.12: by the account's ghh, which is the ticket's for a GitHub account and "a:<uid>" for a linked keypair one.
       // v0.12 review H3: only for the key the force was armed for (admin.js takeMoveForce).
-      const forced = this.row('SELECT 1 AS x FROM move_force WHERE ghh=? AND until>?', acc.ghh, now) && this.takeMoveForce(acc.ghh, t.ik);
+      const forced = this.row('SELECT 1 AS x FROM move_force WHERE ghh=? AND until>?', acc.ghh, now) && this.takeMoveForce(acc.ghh, t.ik, fp);
       if (forced) {
         this.tx(() => {
           this.sql.exec('INSERT OR REPLACE INTO pending_rebind(uid,ik,xk,at,created) VALUES(?,?,?,?,?)', acc.uid, t.ik, t.xk, now, now);

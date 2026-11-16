@@ -165,6 +165,10 @@ has it can start moving your account (your old PC is told and can stop it).
   finishes after 72 hours, or sooner if the old PC says yes.
 - **GitHub** is optional: **I used GitHub before** signs in as in 0.11, and an
   account made without GitHub can link one in Settings as a second way to move.
+  A link (and an unlink) takes effect 7 days later; until then your recovery
+  key can cancel it, so someone with only your PC can't add their own GitHub.
+  A new recovery key made without the old one waits 7 days the same way, and so
+  does a GitHub account's first recovery key (a GitHub sign-in cancels it).
 
 New accounts cost a few seconds of computer work (a "proof of work") and are
 limited per network address, which slows down mass sign-ups but doesn't stop
@@ -859,8 +863,8 @@ Real, and covered by tests with separate users:
     last used; sign one out, or every other one, and their sockets close at once.
   - **Recovery key** (v0.12, password accounts on a server): no email needed. Home
     reminds you to make one; Settings > Account and security makes a new one (the
-    password, and a code when two-factor is on, unless you signed in in the last ten
-    minutes). It is 36 letters and numbers in 9 groups of 4 (`js/lib/recovery.js`),
+    password, and a code when two-factor is on; only a first key, within ten minutes
+    of signing up or of using the old key, is saved without it). It is 36 letters and numbers in 9 groups of 4 (`js/lib/recovery.js`),
     shown once: save it as a file, print it or copy it, then type the last group back.
     The browser sends only a key derived from it (HKDF, label `web-auth-v1`); the
     server keeps a scrypt hash of that, so whoever runs the server can't read or use
@@ -869,8 +873,8 @@ Real, and covered by tests with separate users:
     new password: every other device signs out, your passkeys are removed (in case
     someone else added one), and, if you tick "I lost my authenticator app too",
     two-factor sign-in turns off. A key works once; you make a new one straight
-    after. Wrong keys count per account (5 free, then waits from 15 minutes) and per
-    address. Anyone with your key and username can get in, as with a password, and
+    after. Wrong keys count per account and address (5 free, then waits from 15
+    minutes; tries from other addresses never lock you out) and per address. Anyone with your key and username can get in, as with a password, and
     the screens say so. The same key will open the end-to-end encryption backup
     (a different derived key, `e2ee-backup-v1`, which the server can't compute).
   - **Passkeys** (v0.12, password accounts on a server): **Sign in with a passkey**
@@ -1200,7 +1204,8 @@ behind a reverse proxy that terminates TLS and passes WebSocket upgrades on
 asking (Snug can't do that part), run `npm run reset-password -- <username>`
 (add `--two-factor` to also turn off their two-factor sign-in). It prints a
 temporary password once, signs out every device, removes their passkeys and
-records it in the account's activity. It can't bring back anything that was
+recovery key (in case someone else made either) and records it in the account's
+activity. It can't bring back anything that was
 end-to-end encrypted.
 
 Back up the `data` folder; it is the whole state. Keep `data/secret.key` (or
@@ -1226,9 +1231,10 @@ before seeding anything that faces the internet, or better, do not seed there.
 - **Recovery keys and passkeys** (v0.12): the server stores only a scrypt hash
   of a key derived from the recovery key, and only the public half of each
   passkey (with a random WebAuthn user id, never the account id). Recovery
-  tries are limited per address and per account; a used key is spent once,
-  even when two attempts race. Passkey challenges are single use and last 5
-  minutes; the RP ID never comes from the `Host` header alone.
+  tries are limited per address and per account and address; a used key is
+  spent once, even when two attempts race; replacing a key needs the password.
+  Passkey challenges are single use and last 5 minutes, at most 30 waiting per
+  network (/48) or account; the RP ID never comes from the `Host` header alone.
 - **Audit**: sign-ins, failures and security changes go to the `auth_events`
   table (30 days by default, `SNUG_LOG_DAYS`; addresses truncated) and the log
   as JSON lines, never with a password, code, token or full address; bursts

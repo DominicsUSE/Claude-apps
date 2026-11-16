@@ -13,7 +13,7 @@
 //
 // Concurrency rule (hub.js): every read-check-write happens in one synchronous block after the last await.
 import { check, normalize, skeleton } from '../../js/lib/usernames.js';
-import { b64u, sha256, hmacHex, verifyEd25519, randomBytes, randomId } from './crypto.js';
+import { b64u, fromB64u, sha256, hmacHex, verifyEd25519, randomBytes, randomId } from './crypto.js';
 import {
   fail, need, ID_RE, isUid, isKey, isSig, isTs, rawName, isUnique, semverCmp, isSemver, REBIND_DELAY, REBIND_BLOCK, KNOCK_TTL, MAX_KNOCK_BOX,
 } from './common.js';
@@ -39,8 +39,9 @@ export const KEY_SCHEMA = [
   // v0.12 review H3: a GitHub link change made by the device alone (ghh = link that GitHub account, NULL =
   // unlink). It takes effect at `at` unless the recovery key cancels it (/v1/recovery/cancel).
   'CREATE TABLE IF NOT EXISTS link_pending (uid TEXT PRIMARY KEY, ghh TEXT, at INTEGER NOT NULL, created INTEGER NOT NULL)',
-  // v0.12 review H3: the one device key an armed move.force completes a move for (admin.js takeMoveForce)
-  'CREATE TABLE IF NOT EXISTS move_force_key (ghh TEXT PRIMARY KEY, ik TEXT NOT NULL)',
+  // v0.12 review H3: the one device key an armed move.force completes a move for (admin.js takeMoveForce):
+  // k = "ik:<device key>" or "fp:<its security code, 32 characters>"
+  'CREATE TABLE IF NOT EXISTS move_force_key (ghh TEXT PRIMARY KEY, k TEXT NOT NULL)',
 ];
 
 // Additive error codes: 0.11 clients never call the routes that return them.
@@ -108,6 +109,30 @@ function earlyP(b) {
   } catch {
     return null;
   }
+}
+
+/** A security code as people type it -> its 32 characters (upper case, no spaces), or null. */
+export function normFp(s) {
+  if (typeof s !== 'string' || s.length > 64) return null;
+  const c = s.toUpperCase().replace(/[\s-]+/g, '');
+  return /^[A-Z2-7]{32}$/.test(c) ? c : null;
+}
+/** The security code the app shows for a device key (server/peercrypto.js fingerprint), without spaces. */
+export async function keyFp(ik, xk) {
+  const a = fromB64u(ik);
+  const x = fromB64u(xk);
+  const buf = new Uint8Array(a.length + x.length);
+  buf.set(a);
+  buf.set(x, a.length);
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', buf));
+  const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = 0, v = 0, out = '';
+  for (const b of d) {
+    v = (v << 8) | b;
+    bits += 8;
+    while (bits >= 5) { out += B32[(v >>> (bits - 5)) & 31]; bits -= 5; }
+  }
+  return out.slice(0, 32);
 }
 
 /** Leading zero bits of a digest. */
@@ -181,6 +206,13 @@ export const KeyAcctMixin = {
   },
   liveCode(h) {
     return this.row('SELECT * FROM move_codes WHERE h=? AND exp>? AND done IS NULL', h, this.now());
+  },
+  /** For admin move.force {uid, fp}: {ik, fp} of the move waiting now, computed before the synchronous part. */
+  async pendingFpFor(b) {
+    const d = earlyP(b);
+    if (!d || d.a !== 'move.force' || d.fp === undefined || !isUid(d.uid)) return null;
+    const p = this.pending(d.uid);
+    return p ? { ik: p.ik, fp: await keyFp(p.ik, p.xk) } : null;
   },
   /** A keypair account in its first 72 hours gets the smaller budgets (L.new*). */
   limitFor(acc, kind) {
@@ -312,6 +344,7 @@ export const KeyAcctMixin = {
     if (!r0) fail('not_found');
     const msg = recoverStr({ rk, ik, xk, ts });
     if (!(await verifyEd25519(rk, rsig, msg)) || !(await verifyEd25519(ik, sig, msg))) fail('bad_signature');
+    const fp = await keyFp(ik, xk); // for a move.force bound to a security code
     // --- synchronous from here ---
     const r = this.row('SELECT uid FROM recovery_keys WHERE rk=?', rk);
     const acc = r && r.uid === r0.uid ? this.accountByUid(r.uid) : null;
@@ -322,7 +355,7 @@ export const KeyAcctMixin = {
     const now = this.now();
     // An owner-armed recovery (admin move.force) completes this move at once, as for a GitHub-proved one,
     // and only for the key it was armed for (v0.12 review H3).
-    const forced = this.row('SELECT 1 AS x FROM move_force WHERE ghh=? AND until>?', acc.ghh, now) && this.takeMoveForce(acc.ghh, ik);
+    const forced = this.row('SELECT 1 AS x FROM move_force WHERE ghh=? AND until>?', acc.ghh, now) && this.takeMoveForce(acc.ghh, ik, fp);
     if (forced) {
       this.tx(() => {
         this.sql.exec('INSERT OR REPLACE INTO pending_rebind(uid,ik,xk,at,created) VALUES(?,?,?,?,?)', acc.uid, ik, xk, now, now);

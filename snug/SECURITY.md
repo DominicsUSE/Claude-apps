@@ -43,12 +43,23 @@ Security fixes go into the newest release only; there are no backports.
   the server keeps only a scrypt hash of a key derived from it, so a database thief or the server's owner
   can't use it. Using it signs out every device and removes passkeys; a key works once. Anyone holding the
   key and the username can do the same, so it is as sensitive as the password, and it gets past two-factor
-  sign-in (someone who forgot a password has often lost the phone too). Optional **passkeys** add a sign-in
+  sign-in (someone who forgot a password has often lost the phone too). So replacing a key needs the
+  password (and a code): a session alone may save only a first key, within 10 minutes of signing up or of
+  using the old key. Wrong keys are counted per account and address, so tries from elsewhere can't lock the
+  owner out. The owner's `npm run reset-password` deletes the key too. Optional **passkeys** add a sign-in
   that phishing pages can't replay (bound to the server's domain); only their public halves are stored.
 - **Account takeover with a recovery key.** Someone who copies the recovery key only starts a **move**,
   which waits 72 hours unless the current PC approves. The current PC is told it was the recovery key, can
-  stop it, and can then replace the key with the old one in hand (the copy stops working at once). A new
-  key set without the old one waits 7 days, and the old key can cancel it.
+  stop it, and can then replace the key with the old one in hand (the copy stops working at once). The copy
+  can't stop the PC from pressing Stop: the recovery key and the device key keep separate replay counters,
+  and signed changes can be dated at most a minute ahead.
+- **A stolen current PC.** The PC's key alone can't add a second proof at once: a new recovery key set
+  without the old one, a GitHub account's first recovery key, and linking or unlinking GitHub on an account
+  without GitHub all wait 7 days, and the recovery key (or, for a GitHub account, a GitHub sign-in) cancels
+  them. Deleting the account through a linked GitHub needs a link at least 7 days old. The registry owner's
+  forced move (`move.force`) is bound to the security code of the person's new PC, so the thief can't use it
+  up with a move of its own. The PC's key can still move the account at once with a pairing code and stop
+  other moves; recovery from that is the registry owner's forced move (`registry/SECURITY.md`).
 - **Account takeover through GitHub.** Someone who phishes or steals the GitHub login only starts a
   **move**, which waits 72 hours (or the approval of the current PC). The current PC is told and can stop it.
   Until then the newcomer gets no vault key and no data file.
@@ -137,8 +148,13 @@ stronger than "end-to-end encrypted" is used.
   72-hour wait, a move started with a stolen GitHub login completes. Keep GitHub two-factor sign-in on.
 - **A stolen recovery key combined with an absent owner,** the same way. And a lost PC plus a lost recovery key
   (with no GitHub linked) means the account is gone: nobody, including Snug, can reset it.
-- **One person, many accounts.** Accounts without GitHub cost a proof of work, an address budget (3 a day per
-  /48) and a global budget. These slow down mass sign-ups; they do not stop someone with many addresses.
+- **One person, many accounts.** Accounts without GitHub cost a proof of work (checked again at sign-up
+  against the difficulty then), address budgets (3 a day per /48, 20 a day per IPv6 /32) and a global budget
+  over a sliding hour. These slow down mass sign-ups; they do not stop someone with many addresses.
+- **The same recovery key on two servers.** The proof a browser sends for a server account's recovery key
+  is the same on every server (it isn't bound to the server's name), so the owner of one server could use it
+  on another server where the person saved the same key. Snug makes a new key for each account; don't type
+  one account's key into another server.
 
 ### Privacy and data kept
 
@@ -168,8 +184,8 @@ built from `js/lib/privacy.js` and `GET /api/privacy` (`server/privacy.js`).
 | Passwords | scrypt (N=2^15, r=8, p=3), common-password list, no username in the password, rehash on sign-in | `server/auth.js` |
 | Brute force | Per-address and per-account limits with doubling waits kept in the database; IPv6 grouped by prefix | `server/auth.js`, `registry/src` |
 | Two-factor | TOTP encrypted under the data key, backup codes stored as HMACs, attempt limits | `server/account.js` |
-| Recovery key (server accounts) | Only scrypt(HKDF(key)) stored; per-address and per-account limits; single use; every session ended on use | `server/recovery.js` |
-| Passkeys | Single-use 5-minute challenges, origin and RP ID checks, user verification required, counter regression refused, RP ID never from the `Host` header alone | `server/webauthn.js`, `server/passkeys.js` |
+| Recovery key (server accounts) | Only scrypt(HKDF(key)) stored; per-address and per-account-and-address limits; single use; every session ended on use; replacing it needs the password; the owner's reset deletes it | `server/recovery.js`, `server/tools/reset-password.js` |
+| Passkeys | Single-use 5-minute challenges (at most 30 outstanding per /48 or account, sign-in options limited per /64 and /48), origin and RP ID checks, user verification required, counter regression refused, RP ID never from the `Host` header alone | `server/webauthn.js`, `server/passkeys.js` |
 | Sessions | 256-bit tokens, hashed at rest, `__Host-` cookies, absolute and idle expiry, revoke-all | `server/auth.js` |
 | Authorization | Server-side checks on every op, one shared permission and role model | `js/lib/perms.js`, `js/lib/safety.js`, `js/lib/places.js` |
 | Input and output | Type and length checks on every field, prepared SQL, token-tree rendering, strict CSP | `server/`, `js/`, `server/index.js` |
