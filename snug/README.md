@@ -1281,8 +1281,8 @@ before seeding anything that faces the internet, or better, do not seed there.
   HTML. A strict Content-Security-Policy allows scripts only from Snug itself.
 - **Uploads**: `SNUG_MAX_FILE_MB` limit (100 MB by default), streamed to disk,
   with quotas and a free-disk floor that also cover uploads still arriving
-  and the server's own copies (forwards, stickers, GIFs, link previews; not yet
-  end-to-end encrypted file copies); fetched only by people who can read the
+  and the server's own copies (forwards, stickers, GIFs, link previews, and
+  copies of end-to-end encrypted files); fetched only by people who can read the
   conversation, served with `nosniff` and a sandboxing policy. Anything that
   is not a known image type downloads instead of opening; SVG and PDF previews
   are drawn in the page from the bytes (SVG as an image, which runs no script).
