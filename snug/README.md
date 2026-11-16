@@ -1410,11 +1410,42 @@ history key too. A device that hasn't been online for over a month is left out o
 weekly history key (Settings names it), and is offered for removal when you make new
 keys.
 
-**What the server still sees.** Who talks to whom and when, how many messages and
-roughly how long (sizes are padded), who is in each group, group names and icons,
-reactions, read state, typing, presence, pins and saves, which devices each person
-has, IP addresses, the GIF searches and picks you make, which stickers are fetched,
-and call signalling. Push notifications say only "New message".
+**Since 0.14, more of it is sealed.** Once every device of everyone in a conversation
+is on Snug 0.14 or later (each device signs the features it handles, so the server
+can't add one), these are encrypted too: reactions (one sealed set per person and
+message; counts are made on each device), a group's name and icon (the server keeps
+no name; older Snug shows "Encrypted group", and the line in the conversation says
+who renamed it, not to what), polls with their votes and their end (each device
+counts; "hide results" isn't offered there, since nobody can enforce it, and when a
+poll ends goes by each sender's clock), which message a reply answers (only a thread
+still names the message it hangs off), and attachment sizes (padded to 4 KiB steps up
+to 64 KiB, then steps of a quarter more; the quota counts the padded size). Until then
+the older form keeps working, and polls or a private group name say which device is
+still on an older Snug. Link previews are never made in encrypted conversations.
+Push notifications for an encrypted conversation name only the sender (never the
+group or who else is in it) and say "New message"; "Hide names in notifications"
+(Settings > Encryption) leaves out the sender too.
+
+**What the server still sees.** For encrypted direct messages and groups, the one
+list (Settings > Encryption and `GET /api/privacy` show the same):
+
+- Who wrote each message, and in which conversation
+- When each message was sent, edited or deleted
+- Roughly how long each message is and how big each file is (both padded to size steps)
+- Who is in each DM and group, who added or removed whom, and who owns a group
+- That someone renamed a group or changed its icon (not the new name or icon)
+- Who a message mentions or notifies about a reply, so they get a notification
+- Which message a thread hangs off
+- That someone reacted to a message, voted in a poll or ended one, and when (not the emoji, the vote or the poll)
+- How far each person has read
+- Who is typing (unless typing notes are off)
+- Who is online, and their status
+- Which messages are pinned or saved
+- Each account’s devices, their names and when they were last used
+- Your IP address while you’re connected, and your sign-in history
+- GIF searches, which go through the server
+- Calls: who called, when, who joined, and the connection set-up between devices
+- Everything in house rooms: rooms aren’t end-to-end encrypted
 
 **What it doesn't protect against.**
 - *Whoever serves the code.* In a browser, Snug's JavaScript comes from the server
@@ -1458,12 +1489,14 @@ and call signalling. Push notifications say only "New message".
   make it much harder to swap the connection's keys on the way, but with only
   6 digits a server with enough computing power could still make them match.
 
-**Not encrypted, by design.** Rooms in houses (their pages say so), reactions,
-group names and pictures. Polls and `/roll` are off in encrypted conversations
-(a fair roll and a vote count need the server to see them), and link previews are
-not made there. Server search can't look inside them; the search page searches
-them on your device instead, and can decrypt further back on request. Your data
-download contains encrypted messages as the encrypted envelopes the server stores.
+**Not encrypted, by design.** Rooms in houses (their pages say so). `/roll` is off
+in encrypted conversations (a fair roll needs the server to see it), and link
+previews are not made there. Reactions, polls and group names in a conversation
+where someone is still on Snug 0.13 or older stay as they were (readable by the
+server) until everyone updates. Server search can't look inside encrypted
+conversations; the search page searches them on your device instead, and can
+decrypt further back on request. Your data download contains encrypted messages as
+the encrypted envelopes the server stores.
 
 **Needs a secure page.** Browsers only offer the needed cryptography on `https://`
 pages, `localhost` and the desktop app. A browser joining a desktop host over plain

@@ -4,6 +4,24 @@ Snug's releases, newest first. Every version's files stay on the releases page
 (<https://github.com/DominicsUSE/Claude-apps/releases?q=snug-v>); the desktop app updates itself and never
 goes back to an older version on its own (README, "Install, update, go back").
 
+## 0.14.0
+
+### Changed
+
+- **Less for the server to see in end-to-end encrypted DMs and groups**, once everyone's devices are on 0.14
+  (each device signs what it can handle; until then the older form keeps working):
+  - Reactions are encrypted; each device counts them. An older Snug that tries a plain reaction there is told to update.
+  - A group's name and icon are encrypted to its members. The server keeps no name (older Snug shows
+    "Encrypted group"), lines say who renamed the group but not to what, and someone added gets the name too.
+  - Polls work in encrypted conversations again, encrypted with their votes; each device counts. "Hide results"
+    isn't offered there (nobody could enforce it). If someone is still on an older Snug, it names their device.
+  - The message a reply answers is inside the encrypted message; its author is notified by a mention.
+  - Encrypted attachments are padded to size steps, so the server sees roughly how big a file is.
+- Push notifications for encrypted conversations name only the sender, never the group or who else is in it.
+  New: **Hide names in notifications** (Settings > Encryption).
+- One list of what the server still sees of encrypted conversations, in the README, Settings > Encryption
+  and `GET /api/privacy`.
+
 ## 0.13.0
 
 ### Changed

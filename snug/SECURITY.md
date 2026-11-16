@@ -147,8 +147,8 @@ offers to remove it.
 
 It does not protect against whoever serves the browser's JavaScript (an operator who changes the code
 can read messages in a browser; the desktop app runs its own built-in code, also when it joins another server, except on a server's own page, which its window title names; when it joins another server, the server's `/api` answers reach the page only as data: the page's policy allows scripts and workers only from the app's own folders (never from `/api`), and every answer is marked nosniff with a sandboxing Content-Security-Policy and can't widen a service worker's scope; the window itself never navigates to the server's `/api/` (only to an attachment download, whose redirects are watched). Electron's protocol handler never sees `Sec-Fetch-Dest`, so nothing relies on it. In the desktop app's own page, the storage key that seals the device's secrets (account and history keys, the recovery key, message keys, settings, unsent drafts) is derived from a secret the operating system's key store (Electron `safeStorage`) protects, so a copy of the data folder alone doesn't open them; on a computer without one (Linux with no keyring) it is a plain browser key in IndexedDB, as in a browser, and Settings says so. The device's own signing and prekey private keys are non-extractable browser keys in IndexedDB on every platform, so a copy of the data folder still opens messages sealed to that device while its prekey is kept, up to three weeks), membership decided by the
-server (ghost members), withheld or delayed messages, metadata (who, when, how much, group names,
-reactions, devices, IP addresses), compromised devices and people in the conversation, history readable
+server (ghost members), withheld or delayed messages, metadata (who, when, how much, members, devices,
+IP addresses; the full list is below and at `GET /api/privacy`), compromised devices and people in the conversation, history readable
 with the history key (on by default) or the recovery key and password, messages sent before a
 conversation turned encrypted, and calls. There is no per-message forward secrecy, no deniability and no
 automatic recovery after a compromise: a prekey stays usable to senders for up to 30 days, a history key
@@ -181,6 +181,36 @@ trusted device and typed on the new one (HMAC over the exact keys, name and kind
 (160 random bits; it opens an AES-256-GCM backup of the account keys). No external audit has been done;
 the protocol description should be reviewed by someone outside the implementation before any wording
 stronger than "end-to-end encrypted" is used.
+
+**Less metadata (0.14).** Each device publishes the features it handles as an object signed by its own
+signing key (`caps`, separate from the device list, which 0.12/0.13 clients check field by field); the
+server can't add a feature, and a client keeps the features it has seen for a device, so the server can't
+take one away to make it fall back. A feature is used in a conversation only when every trusted device of
+every member signed for it; until then the older form keeps working. Then: reactions are one sealed
+envelope per person and message (kind `react`, the person's set of emoji, at most 20); poll votes and a
+poll's end are sealed envelopes (kind `vote`; only the poll's author can end it, and both the server and
+each client check that), counted on each device, with the end judged by the sender's clock; the poll itself
+is a sealed message (the server is told only that it is a poll, so it can refuse one where an older device
+couldn't count it, naming that device); a group's name, icon and hue are one sealed envelope (kind `info`)
+that a member's device seals again when someone joins, and the server keeps no name for it; the message a
+reply answers is inside the sealed body (a thread still names its root, since the server delivers it as its
+own conversation), and a reply's author is notified through a declared mention; attachments are padded
+before sealing (a version byte, a 4-byte length, the file, zeros up to 4 KiB steps to 64 KiB, then steps of
+1.25×; files sealed before open as before). Each of these envelopes is sealed and signed like a message,
+under an id that names its slot, message and author (so the server can't move one), with a revision that
+only goes up (the server refuses an older one; a device refuses one older than it has seen). Once a
+conversation can seal them, the server refuses the plain form (taking back an old plain reaction still
+works). Push notifications for encrypted conversations name only the sender, and with "Hide names in
+notifications" not even that. Link previews are never made there (the server has no text to look at).
+
+**What the server still sees of encrypted conversations** (the list in `server/e2ee-conv.js`, served by
+`GET /api/privacy` and repeated in the README): who wrote each message and where; when it was sent, edited
+or deleted; padded sizes of messages and files; members, who added or removed whom, and the owner; that a
+group was renamed or its icon changed; declared mentions; the root of each thread; that someone reacted,
+voted or ended a poll, and when; read positions; typing; presence; pins and saves; devices; IP addresses
+and sign-in history; GIF searches; call records and call set-up; and everything in house rooms, which
+aren't end-to-end encrypted. The sizes and timing of all of these, and of the sealed envelopes, can still
+say something about what is in them.
 
 ### What Snug cannot protect against
 
