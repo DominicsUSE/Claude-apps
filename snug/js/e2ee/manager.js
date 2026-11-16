@@ -657,9 +657,8 @@ export async function lowerConv(dm, seq) {
   const cur = convs[dm];
   if (typeof cur === 'number' && cur <= seq) return;
   if (!cur) return; // not remembered yet: rememberConv pins it (and is lowered by the next one opened)
-  convs = { ...convs, [dm]: seq };
+  convs = { ...convs, [dm]: seq }; // kept here only: each device lowers its own (no settings write per message opened)
   await store.putSecret('convs', convs).catch(() => {});
-  if (typeof meta?.convs?.[dm] === 'number' && meta.convs[dm] > seq && !E2.metaProblem) updateMeta((m) => { m.convs[dm] = seq; }).catch(() => {});
 }
 export async function rememberConv(dm, since) {
   if (!dm || convs[dm] || !store || !localLoaded) return;

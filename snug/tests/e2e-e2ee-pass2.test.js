@@ -204,6 +204,7 @@ test('H2-rev: one payload carrying an old revision both as current and under som
   const MARK = `REV${Date.now().toString(36)}`;
   await say(robin, `${MARK} original`);
   await textOf(robin, `${MARK} original`).waitFor();
+  await msgIdOf(robin, `${MARK} original`); // the server has it (Arrow Up edits the last one it has)
   await robin.locator('.main [data-composer] textarea').press('ArrowUp');
   await robin.locator('.main .msg-edit textarea').fill(`${MARK} edited`);
   await robin.locator('.main .msg-edit textarea').press('Enter');
