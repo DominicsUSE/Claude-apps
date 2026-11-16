@@ -4,6 +4,25 @@ Snug's releases, newest first. Every version's files stay on the releases page
 (<https://github.com/DominicsUSE/Claude-apps/releases?q=snug-v>); the desktop app updates itself and never
 goes back to an older version on its own (README, "Install, update, go back").
 
+## 0.13.0
+
+### Private conversations
+
+- The desktop app protects the key that seals your encryption keys with the operating system's key store
+  (safeStorage). A 0.12 profile is moved over the first time, without losing keys or messages. Without a
+  key store (some Linux setups), Settings > Encryption says so.
+- Drafts and messages waiting to send in encrypted conversations are no longer kept as text in the
+  browser's storage; they are sealed on the device and come back after a reload.
+- Messages from someone who has left a group can still be checked and opened after a reload or on a new
+  device.
+- Join mode never shows one of the server's `/api` answers as the window's page. The screen-share picker
+  runs no inline script.
+
+### Known limits
+
+- The desktop app's own signing and prekey private keys are still browser keys in its storage, not sealed
+  by the key store. Attachments added to a draft in an encrypted conversation aren't kept across a reload.
+
 ## 0.12.0
 
 ### Private conversations

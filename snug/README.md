@@ -1389,6 +1389,13 @@ and call signalling. Push notifications say only "New message".
   device's keys can keep reading what is sealed to them until then.
 - *Endpoints and people.* A compromised device, or anyone in the conversation, can
   read, copy or screenshot what they receive.
+- *Keys on this device.* In the desktop app, the key that seals your account keys,
+  recovery key, message keys and unsent drafts is protected by the operating
+  system's key store (Windows DPAPI, the macOS Keychain, a Linux keyring), so a copy
+  of Snug's data folder alone doesn't open them. Without a key store (some Linux
+  setups) Settings > Encryption says your keys aren't protected by it. In a browser
+  they are kept like any site's data. Either way, code running as you on that
+  computer can use them.
 - *Messages from before.* Messages sent before a conversation turned encrypted stay
   stored readable on the server (each says so in its menu), and database snapshots
   taken before keep them until they age out.
