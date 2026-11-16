@@ -455,30 +455,56 @@ test('who can ring me: friends only stops a non-friend’s ring and its push, a 
 });
 
 // ---------- TURN ----------
-test('TURN: with a shared secret each person gets a credential that verifies, runs out in about 12 hours, and the static password is never sent', async () => {
+test('TURN: with a shared secret each person gets a credential that verifies, runs out in about an hour, can’t be linked to their account, and the static password is never sent', async () => {
   const a = await Client.make('turnann', 'Ann Turn');
-  const check = (ice) => {
+  const check = (ice, iceExp) => {
     assert.deepEqual(ice[0], { urls: ['stun:stun.example.org:3478'] });
     const turn = ice[1];
     assert.deepEqual(turn.urls, ['turn:turn.example.org:3478']);
-    const [expiry, user] = turn.username.split(':');
-    assert.equal(user, a.id);
+    const [expiry, tag] = turn.username.split(':');
+    // calls C4: the TURN operator sees an opaque tag, never the account id.
+    assert.notEqual(tag, a.id);
+    assert.ok(!turn.username.includes(a.id), 'no account id in the TURN username');
+    assert.match(tag, /^[A-Za-z0-9_-]{16}$/);
     const left = Number(expiry) - Date.now() / 1000;
-    assert.ok(left > 11 * 3600 && left <= 12 * 3600 + 5, `expires in about 12 hours: ${left}`);
+    assert.ok(left > 55 * 60 && left <= 3600 + 5, `expires in about an hour: ${left}`);
+    // Still the coturn use-auth-secret scheme: the credential is HMAC-SHA1 of the username.
     assert.equal(turn.credential, createHmac('sha1', SECRET).update(turn.username).digest('base64'));
     assert.ok(!JSON.stringify(ice).includes('static'), 'no static login');
+    // When it runs out, so the client refreshes before making a connection (js/voice.js).
+    assert.equal(iceExp, Number(expiry) * 1000 - 5 * 60_000);
   };
-  check(a.hello.ice);
-  check((await a.ok('ice.refresh')).ice);
+  check(a.hello.ice, a.hello.iceExp);
+  const r = await a.ok('ice.refresh');
+  check(r.ice, r.iceExp);
   const me = await (await fetch(`${base}/api/me`, { headers: { cookie: a.cookie } })).json();
-  check(me.ice);
+  check(me.ice, Number(me.ice[1].username.split(':')[0]) * 1000 - 5 * 60_000);
   // Refreshing is rate limited.
   for (let i = 0; i < 3; i++) await a.op('ice.refresh');
   assert.match(await a.refused('ice.refresh'), /Wait/);
   const { iceConfig } = await import('../server/voiceopts.js');
-  assert.deepEqual(iceConfig({ SNUG_TURN_URL: 'turn:t.example', SNUG_TURN_USER: 'u', SNUG_TURN_PASS: 'p' })[1], { urls: ['turn:t.example'], username: 'u', credential: 'p' }, 'without a secret the static login is the fallback');
+  const warned = [];
+  assert.deepEqual(iceConfig({ SNUG_TURN_URL: 'turn:t.example', SNUG_TURN_USER: 'u', SNUG_TURN_PASS: 'p' }, { warn: (m) => warned.push(m) }).at(-1), { urls: ['turn:t.example'], username: 'u', credential: 'p' }, 'without a secret the static login is the fallback');
+  assert.match(warned.join(' '), /static TURN login/i, 'a static login is warned about at startup');
   assert.equal(iceConfig({}).length, 1, 'no TURN configured: STUN only');
   a.ws.close();
+});
+
+test('TURN credentials (calls C4): the same tag all day for one person, different people get different tags, expiry follows the clock', async () => {
+  const { turnCredential, TURN_TTL_S, iceExpOf } = await import('../server/voiceopts.js');
+  assert.equal(TURN_TTL_S, 3600);
+  const t = Date.UTC(2026, 10, 16, 9, 0, 0);
+  const a1 = turnCredential(SECRET, 'u_ann', t), a2 = turnCredential(SECRET, 'u_ann', t + 3 * 3600_000);
+  const b1 = turnCredential(SECRET, 'u_bob', t);
+  const tag = (c) => c.username.split(':')[1];
+  assert.equal(tag(a1), tag(a2), 'stable within a day (one relay allocation per person per day can be told apart, no more)');
+  assert.notEqual(tag(a1), tag(b1));
+  assert.notEqual(tag(turnCredential(SECRET, 'u_ann', t + 86_400_000)), tag(a1), 'a new tag each day');
+  assert.notEqual(tag(turnCredential('another-secret', 'u_ann', t)), tag(a1), 'the tag needs the secret');
+  assert.equal(Number(a1.username.split(':')[0]), t / 1000 + 3600);
+  assert.equal(iceExpOf([{ urls: ['turn:x'], ...a1 }]), (t / 1000 + 3600) * 1000 - 5 * 60_000);
+  assert.equal(iceExpOf([{ urls: ['stun:x'] }]), null);
+  assert.equal(iceExpOf([{ urls: ['turn:x'], username: 'u', credential: 'p' }]), null, 'a static login has no expiry');
 });
 
 test('STUN: SNUG_STUN=none leaves the STUN server out (it sees callers’ IP addresses); unset uses the public default', async () => {
@@ -486,6 +512,8 @@ test('STUN: SNUG_STUN=none leaves the STUN server out (it sees callers’ IP add
   assert.deepEqual(iceConfig({ SNUG_STUN: 'none' }), []);
   assert.deepEqual(iceConfig({ SNUG_STUN: ' NONE ', SNUG_TURN_URL: 'turn:t.example', SNUG_TURN_USER: 'u', SNUG_TURN_PASS: 'p' }), [{ urls: ['turn:t.example'], username: 'u', credential: 'p' }]);
   assert.match(iceConfig({})[0].urls[0], /^stun:/);
+  // calls C3: with TURN configured and SNUG_STUN unset, no outside STUN server (the TURN server answers STUN).
+  assert.deepEqual(iceConfig({ SNUG_TURN_URL: 'turn:t.example', SNUG_TURN_SECRET: 's' })('u_x').map((s) => s.urls), [['turn:t.example']]);
 });
 
 test('grace: SNUG_VOICE_GRACE_MS only shortens the grace under the test runner', async () => {

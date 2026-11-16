@@ -17,6 +17,7 @@
 // - Drawing, moving and reacting are rate limited per person and per place.
 import { newId } from './model.js';
 import { limiter } from './auth.js';
+import { iceExpOf } from './voiceopts.js'; // calls C4: when short-lived TURN credentials run out
 import {
   BOARD_COLOURS, BOARD_WIDTHS, BOARD_LIMITS, VOICE_REACTIONS, GAMES, GAME_KINDS, ACTIVITY_KINDS, emptyBoard, gameResult, moveCell,
 } from '../js/lib/games.js';
@@ -280,10 +281,14 @@ export function createActivitiesOps({ db, M, hub, fail, ops = {} }) {
   };
 
   // ---------- Fresh TURN credentials (server/voiceopts.js iceConfig) ----------
+  // calls C4: with when they run out (iceExp), so a client refreshes before it connects.
   out['ice.refresh'] = (c) => {
     take(L.ice, c.user, 'Wait a moment before asking again.');
-    return { ice: hub.iceFor(c.user) };
+    const ice = hub.iceFor(c.user);
+    const iceExp = iceExpOf(ice);
+    return iceExp ? { ice, iceExp } : { ice };
   };
+  hub.helloExtras?.push((ws, u) => { const iceExp = iceExpOf(hub.iceFor(u)); return iceExp ? { iceExp } : {}; });
 
   // ---------- Coming back after a drop, refused ----------
   // A held voice slot whose owner may no longer come back (banned, timed out,

@@ -123,7 +123,7 @@ export async function startServer({
   const log = bootLog;
 
   // STUN, and TURN with a static login or (SNUG_TURN_SECRET) short-lived credentials per person (server/voiceopts.js).
-  const ice = iceConfig(iceEnv);
+  const ice = iceConfig(iceEnv, { warn: bootLog });
 
   const authLimit = limiter({ capacity: 10, perSecond: 10 / 900 });   // 10 tries per 15 minutes
   const uploadLimit = limiter({ capacity: 20, perSecond: 0.2 });

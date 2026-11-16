@@ -67,26 +67,39 @@ export function wavInfo(buf) {
 // ---------- STUN and TURN (voice and calls track) ----------
 // SNUG_STUN: comma-separated STUN URLs. SNUG_TURN_URL: TURN URLs. With
 // SNUG_TURN_SECRET (the coturn "use-auth-secret" / REST API scheme), every
-// person gets their own credential that runs out after TURN_TTL_S: the
-// username is "<expiry>:<user id>" and the credential is the base64
+// person gets their own credential that runs out after TURN_TTL_S (an hour):
+// the username is "<expiry>:<tag>" and the credential is the base64
 // HMAC-SHA1 of it under the secret, so the TURN server checks it without
-// asking Snug. Without a secret, SNUG_TURN_USER / SNUG_TURN_PASS are sent as
-// they are; with one, they are never sent.
-export const TURN_TTL_S = 12 * 3600;
+// asking Snug. calls C4: the tag is a keyed hash of the person and the day,
+// so whoever runs the TURN server can't link a relay allocation to a Snug
+// account. Without a secret, SNUG_TURN_USER / SNUG_TURN_PASS are sent as they
+// are to everyone (warned about at startup); with one, they are never sent.
+export const TURN_TTL_S = 3600;
+const DAY_MS = 86_400_000;
 export function turnCredential(secret, user, now = Date.now(), ttl = TURN_TTL_S) {
-  const username = `${Math.floor(now / 1000) + ttl}:${user}`;
+  const day = Math.floor(now / DAY_MS);
+  const tag = createHmac('sha256', secret).update(`${user}|${day}`).digest('base64url').slice(0, 16);
+  const username = `${Math.floor(now / 1000) + ttl}:${tag}`;
   return { username, credential: createHmac('sha1', secret).update(username).digest('base64') };
 }
+// When a list's short-lived TURN credentials run out, less five minutes to
+// fetch new ones (ms), or null when it has none (no TURN, or a static login).
+export function iceExpOf(ice) {
+  const exps = [].concat(ice || []).map((s) => /^(\d{9,12}):/.exec(typeof s?.username === 'string' ? s.username : '')?.[1]).filter(Boolean).map(Number);
+  return exps.length ? Math.min(...exps) * 1000 - 5 * 60_000 : null;
+}
 // SNUG_STUN=none leaves STUN out (a STUN server sees each caller's IP
-// address); unset, Google's public one is used.
-export function iceConfig(env = process.env) {
-  // privacy: SNUG_STUN=none asks no STUN server at all (Google's is the default when it isn't set; a STUN server sees each caller's IP address).
-  const raw = env.SNUG_STUN ? String(env.SNUG_STUN).trim() : 'stun:stun.l.google.com:19302';
+// address). Unset: with TURN configured, none (calls C3: a TURN server answers
+// STUN too, so nobody else needs to see addresses); without TURN, Google's
+// public one.
+export function iceConfig(env = process.env, { warn = () => {} } = {}) {
+  const turnUrls = (env.SNUG_TURN_URL || '').split(',').map((u) => u.trim()).filter(Boolean);
+  const raw = env.SNUG_STUN ? String(env.SNUG_STUN).trim() : turnUrls.length ? 'none' : 'stun:stun.l.google.com:19302';
   const urls = /^none$/i.test(raw) ? [] : raw.split(',').map((u) => u.trim()).filter(Boolean);
   const stun = urls.length ? [{ urls }] : [];
-  const turnUrls = (env.SNUG_TURN_URL || '').split(',').map((u) => u.trim()).filter(Boolean);
   if (!turnUrls.length) return stun;
   if (env.SNUG_TURN_SECRET) return (user) => [...stun, { urls: turnUrls, ...turnCredential(env.SNUG_TURN_SECRET, user) }];
+  warn('Warning: a static TURN login (SNUG_TURN_USER/SNUG_TURN_PASS) goes to every client and never expires. Set SNUG_TURN_SECRET for short-lived credentials.');
   return [...stun, { urls: turnUrls, username: env.SNUG_TURN_USER, credential: env.SNUG_TURN_PASS }];
 }
 
