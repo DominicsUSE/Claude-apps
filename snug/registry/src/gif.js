@@ -13,6 +13,12 @@
 // Settings: GIF_PROVIDERS (vars; "openverse" by default, "commons" opt-in, "tenor" needs the
 // TENOR_KEY secret, "off" turns the routes off); GIF_CONTACT (vars) goes into the User-Agent as
 // Wikimedia asks; GIF_TOKEN_SECRET (secret) optional, otherwise derived from GH_HMAC_SECRET.
+// OPENVERSE_CLIENT_ID + OPENVERSE_CLIENT_SECRET (secrets, 0.14): a registered Openverse application. Openverse
+// limits anonymous calls per address, and every Cloudflare Worker reaches it from one shared address
+// (cross-zone subrequests carry CF-Connecting-IP 2a06:98c0:3600::103), so without these, anonymous Openverse
+// search from a deployed registry is refused almost always. With them the registry asks with its own token
+// (OAuth2 client credentials, Openverse's /v1/auth_tokens/token/), limited per application instead.
+// A source that refuses or fails hands over to the next one in GIF_PROVIDERS (0.14).
 import { hmacHex } from './crypto.js';
 import { fail } from './common.js';
 import { DAY } from './limits.js';
@@ -91,17 +97,60 @@ const credit = (author, lic, source, link) => {
 const onHosts = (raw, hosts, test) => { try { const u = new URL(raw); return test ? u.host === test : u.protocol === 'https:' && hosts.includes(u.host); } catch { return false; } };
 const hostOf = (b) => { try { return new URL(b).host; } catch { return ''; } };
 
-function providers(env) {
+// The registry's Openverse token (OPENVERSE_CLIENT_ID/SECRET), kept in this Worker instance's memory until a
+// minute before it runs out. null when there are no credentials or Openverse won't give one (then the call
+// goes out anonymously, as before, and a refusal hands over to the next source).
+export const SOURCE_LABELS = { openverse: 'Openverse', commons: 'Wikimedia Commons', tenor: 'Tenor' };
+const ovTokens = new Map(); // `${base}\n${clientId}` -> { t, exp } | { failUntil } | { p: Promise }
+async function openverseToken(env, ov, ua, nowMs) {
+  const id = env.OPENVERSE_CLIENT_ID, secret = env.OPENVERSE_CLIENT_SECRET;
+  if (typeof id !== 'string' || !id || typeof secret !== 'string' || !secret) return null;
+  const k = `${ov}\n${id}`;
+  const c = ovTokens.get(k);
+  if (c?.t && c.exp > nowMs) return c.t;
+  if (c?.failUntil > nowMs) return null;
+  if (c?.p) return c.p;
+  // The pending slot goes in first, so whatever the request settles to (even a throw before its first await)
+  // replaces it rather than being overwritten by it.
+  const slot = {};
+  ovTokens.set(k, slot);
+  slot.p = (async () => {
+    try {
+      const r = await (env.__fetch || fetch)(`${ov}/v1/auth_tokens/token/`, {
+        method: 'POST', redirect: 'manual',
+        headers: { 'User-Agent': ua, Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ grant_type: 'client_credentials', client_id: id, client_secret: secret }).toString(),
+      });
+      const d = r.ok ? await r.json() : null;
+      if (typeof d?.access_token !== 'string' || !/^[\w.~+/=-]{8,512}$/.test(d.access_token)) throw new Error('no token');
+      const life = Math.min(Math.max(Number(d.expires_in) || 3600, 120), 30 * DAY / 1000);
+      ovTokens.set(k, { t: d.access_token, exp: nowMs + (life - 60) * 1000 });
+      return d.access_token;
+    } catch {
+      ovTokens.set(k, { failUntil: nowMs + 60_000 }); // ask again in a minute, not on every search
+      return null;
+    }
+  })();
+  return slot.p;
+}
+
+function providers(env, nowMs = Date.now()) {
   const ua = `Snug-registry/0.12 (GIF search for Snug desktop${env.GIF_CONTACT ? `; ${String(env.GIF_CONTACT).replace(/[^\w@.:/+~%#?&=-]/g, '').slice(0, 120)}` : ''})`;
-  const get = (url) => (env.__fetch || fetch)(url, { headers: { 'User-Agent': ua, Accept: 'application/json' }, redirect: 'manual' });
+  const get = (url, extra = {}) => (env.__fetch || fetch)(url, { headers: { 'User-Agent': ua, Accept: 'application/json', ...extra }, redirect: 'manual' });
   const ov = String(env.GIF_OPENVERSE_BASE || 'https://api.openverse.org').replace(/\/+$/, '');
+  // The Openverse token goes to Openverse's own host only, never to a site an image is on.
+  const ovAuth = async () => { const t = await openverseToken(env, ov, ua, nowMs); return t ? { Authorization: `Bearer ${t}` } : {}; };
   const cm = String(env.GIF_COMMONS_BASE || 'https://commons.wikimedia.org').replace(/\/+$/, '');
   const tn = String(env.GIF_TENOR_BASE || 'https://tenor.googleapis.com').replace(/\/+$/, '');
   const testOv = env.GIF_OPENVERSE_BASE ? hostOf(ov) : null, testCm = env.GIF_COMMONS_BASE ? hostOf(cm) : null, testTn = env.GIF_TENOR_BASE ? hostOf(tn) : null;
   return {
     ua,
+    // Headers for fetching a file: the Openverse token for Openverse's own thumbnails, nothing for anyone else.
+    async fileHeaders(u) { return hostOf(u) && hostOf(u) === hostOf(ov) ? ovAuth() : {}; },
     async openverse(q) {
-      const r = await get(`${ov}/v1/images/?${new URLSearchParams({ q, extension: 'gif', mature: 'false', page_size: '20' })}`);
+      const auth = await ovAuth();
+      const r = await get(`${ov}/v1/images/?${new URLSearchParams({ q, extension: 'gif', mature: 'false', page_size: '20' })}`, auth);
+      if (r.status === 401 && auth.Authorization) ovTokens.delete(`${ov}\n${env.OPENVERSE_CLIENT_ID}`); // a fresh one next time
       if (!r.ok) throw Object.assign(new Error('provider'), { status: r.status });
       const d = await r.json();
       return (Array.isArray(d?.results) ? d.results : []).filter((g) => g && g.mature !== true).map((g) => {
@@ -166,17 +215,32 @@ export async function gifWorker(req, env, ctx, reply, now) {
   if (url.pathname === '/v1/gif/search') {
     if (!counted('s', token, T.gifSearchHour || GIF_LIMITS.searchHour, now)) return reply(429, { error: 'rate_limited', message: 'Too many GIF searches. Wait a while.' });
     const q = String(url.searchParams.get('q') || '').trim().slice(0, 100);
-    const src = sources.includes(url.searchParams.get('source')) ? url.searchParams.get('source') : sources[0];
-    if (!q) return reply(200, { results: [], source: src });
-    const key = new Request(`https://gif-cache.snug/search/${src}?q=${encodeURIComponent(q.toLowerCase())}`);
-    let list = null;
-    const hit = cache && (await cache.match(key));
-    if (hit) list = await hit.json();
-    else {
-      try { list = await providers(env)[src](q); } catch (e) {
-        return reply(e.status === 429 ? 429 : 502, { error: e.status === 429 ? 'rate_limited' : 'unavailable', message: 'GIF search isn’t answering right now.' });
+    const asked = sources.includes(url.searchParams.get('source')) ? url.searchParams.get('source') : null;
+    if (!q) return reply(200, { results: [], source: asked || sources[0] });
+    // The source asked for by name, only; otherwise each configured source in turn until one answers.
+    const P = providers(env, now);
+    let list = null, src = null;
+    const failed = []; // { s, status }
+    for (const s of asked ? [asked] : sources) {
+      const key = new Request(`https://gif-cache.snug/search/${s}?q=${encodeURIComponent(q.toLowerCase())}`);
+      const hit = cache && (await cache.match(key));
+      if (hit) { list = await hit.json(); src = s; break; }
+      try { list = await P[s](q); } catch (e) {
+        failed.push({ s, status: e.status || 0 });
+        // Which GIF site refused and how (no query, no address), for `wrangler tail`.
+        if (typeof env.TEST_CLOCK !== 'function') console.warn('registry: gif source', s, e.status || 'unreachable');
+        continue;
       }
+      src = s;
       if (cache) ctx?.waitUntil?.(cache.put(key, new Response(JSON.stringify(list), { headers: { 'content-type': 'application/json', 'cache-control': 'public, max-age=3600' } })));
+      break;
+    }
+    if (!src) {
+      const names = failed.map((f) => SOURCE_LABELS[f.s] || f.s).join(' and ');
+      const limited = failed.every((f) => f.status === 429);
+      return reply(limited ? 429 : 502, limited
+        ? { error: 'rate_limited', message: `${names} ${failed.length > 1 ? 'are' : 'is'} turning away GIF searches from the Snug registry right now. Try again later.` }
+        : { error: 'unavailable', message: `GIF search isn’t answering right now: ${names} didn’t answer the Snug registry. Try again later.` });
     }
     const file = async (u) => `/v1/gif/file?${new URLSearchParams({ u, s: await signUrl(env, u) })}`;
     const results = await Promise.all(list.map(async (g) => ({ ...g, url: await file(g.url), preview: await file(g.preview), source: src })));
@@ -192,7 +256,8 @@ export async function gifWorker(req, env, ctx, reply, now) {
   const hit = cache && (await cache.match(key));
   if (hit) return hit;
   let r;
-  try { r = await (env.__fetch || fetch)(u, { redirect: 'manual', headers: { 'User-Agent': providers(env).ua } }); } catch { return reply(502, { error: 'unavailable', message: 'The GIF couldn’t be fetched.' }); }
+  const P = providers(env, now);
+  try { r = await (env.__fetch || fetch)(u, { redirect: 'manual', headers: { 'User-Agent': P.ua, ...(await P.fileHeaders(u)) } }); } catch { return reply(502, { error: 'unavailable', message: 'The GIF couldn’t be fetched.' }); }
   if (r.status !== 200 || !r.body) return reply(502, { error: 'unavailable', message: 'The GIF couldn’t be fetched.' });
   if (Number(r.headers.get('content-length')) > MAX_GIF) return reply(413, { error: 'bad_request', message: 'That GIF is over 10 MB.' });
   const reader = r.body.getReader();

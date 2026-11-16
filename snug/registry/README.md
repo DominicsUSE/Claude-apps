@@ -152,9 +152,19 @@ hour) live in each Worker instance's memory, so they are best-effort; the token 
 - `GIF_CONTACT` (vars): a URL or e-mail for the User-Agent, which Wikimedia's User-Agent policy asks for.
   Use a project or contact page, never a personal address you don't want public.
 - `GIF_TOKEN_SECRET` (secret, optional): otherwise derived from `GH_HMAC_SECRET`.
-- Openverse's anonymous limits are tight (a few searches a minute per address, 20 results a page); the
-  registry's one address shares them for every desktop user, and the hour-long cache helps. If that is
-  not enough, register free Openverse API credentials (not yet wired in; it would be a small change).
+- **Openverse needs credentials on a deployed registry (0.14).** Its anonymous limits are per address and
+  tight (code defaults 5 an hour, 100 a day), and every Cloudflare Worker reaches it from one shared address
+  (cross-zone subrequests carry `CF-Connecting-IP: 2a06:98c0:3600::103`), so anonymous search from the
+  Worker is refused almost always: desktop GIF search shows an error. Register an Openverse application
+  (`POST https://api.openverse.org/v1/auth_tokens/register/` with a name, description and a project
+  e-mail; then verify the e-mail), and set `npx wrangler secret put OPENVERSE_CLIENT_ID` and
+  `OPENVERSE_CLIENT_SECRET`. The Worker then gets its own token (OAuth2 client credentials, kept in memory
+  until shortly before it runs out) and sends it to Openverse's host only, never to a site an image is on.
+- A source that refuses or fails hands over to the next one in `GIF_PROVIDERS` (e.g. `openverse,commons`),
+  unless the search names a source. When none answers, the error names the GIF sites that refused, and the
+  desktop app shows it. `npx wrangler tail` shows which source failed with what status (never the words).
+- Searches are cached with the Cache API, which Cloudflare documents as working on custom domains; on
+  `*.workers.dev` it may do nothing, so every search can reach the GIF site.
 - Free tier: each search is one Worker request plus up to 20 preview files (each one request), so
   roughly 4,000 searches a day fit in the 100k-request free Workers allowance next to everything else.
 

@@ -191,7 +191,11 @@ function registry(env, { fetchFn, reg }) {
     sources: () => tok?.sources || [],
     async search(q) {
       const r = await grab(`/v1/gif/search?${new URLSearchParams({ q })}`);
-      if (!r.ok) throw Object.assign(new Error(String(r.status)), { status: r.status });
+      if (!r.ok) {
+        // The registry says what went wrong (0.14: which GIF site turned it away); pass that on, as plain text.
+        const why = strip((await r.json().catch(() => null))?.message, 200);
+        throw Object.assign(new Error(String(r.status)), { status: r.status, ...(why ? { userMessage: why } : {}) });
+      }
       const d = await r.json();
       return (Array.isArray(d?.results) ? d.results : []).map((g) => {
         if (typeof g?.url !== 'string' || typeof g?.preview !== 'string') return null;

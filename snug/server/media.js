@@ -413,7 +413,7 @@ export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, he
       if (!hit || Date.now() - hit.at > HOUR) {
         let list;
         try { list = await p.search(q); } catch (e) {
-          error(res, e.status === 429 ? 429 : 502, e.status === 429 ? `${p.label} is getting too many searches from this server. Try again in a few minutes.` : 'GIF search isn’t answering right now. Try again in a moment.');
+          error(res, e.status === 429 ? 429 : 502, e.userMessage || (e.status === 429 ? `${p.label} is getting too many searches from this server. Try again in a few minutes.` : 'GIF search isn’t answering right now. Try again in a moment.'));
           return true;
         }
         hit = { at: Date.now(), list };
