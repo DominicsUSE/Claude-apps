@@ -246,6 +246,10 @@ built from `js/lib/privacy.js` and `GET /api/privacy` (`server/privacy.js`).
   lists the capability. They are checked like other frames: a vote only counts for the voter's own stand-in
   and only before the poll ended, only the poll's author can end it, and group-call signalling is accepted
   only from members whose stand-in is in that call.
+- A forwarded card from a friend's PC says who wrote the forwarded message, and a modified PC can put any
+  name and words there. The receiving PC ties the card to someone's account (their picture and name as this
+  PC knows them) only when it holds a message of theirs with those exact words; otherwise the card shows the
+  name it was given and says Snug can't check who wrote it.
 - Snug sends no telemetry, analytics or crash reports, and the web client loads nothing from other origins
   (CSP `default-src 'self'`; tested in `tests/e2e-privacy.test.js`). Outside parties it does reach: the STUN
   server (Google by default, `SNUG_STUN=none` turns it off), a TURN relay if configured, the browser's push

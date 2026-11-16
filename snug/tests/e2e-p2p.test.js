@@ -326,6 +326,15 @@ test('forwarding a message with a picture to Bob: he sees the forwarded card wit
   assert.match(await card.textContent(), /test tile from the kiln/);
   // The picture comes over from Alice's PC and shows inside the card.
   await bob.waitForFunction(() => [...document.querySelectorAll('.main .fwd-card img')].some((i) => i.complete && i.naturalWidth === 48), null, { timeout: 20000 });
+  // Bob's PC holds Alice's message with those words, so the card is hers and carries no warning.
+  assert.equal(await bob.locator('.main .msg:has-text("look at the colour") .fwd-unchecked').count(), 0);
+  // A card whose words Bob's PC can't find (a modified PC could send one) shows only the name it was given, and says so.
+  const bobUid = pcs.B.peer.identity.self().uid;
+  const id = mid();
+  pcs.A.peer._outbox.push(`u_${bobUid}`, 'dm.msg', id, JSON.stringify({ id, text: '> I never said this\n— bob, forwarded', note: '', fwd: { a: bobUid, name: 'bob', ts: Date.now(), text: 'I never said this' } }), Date.now());
+  pcs.A.peer._links.want(bobUid);
+  const forged = bob.locator('.main .msg:has-text("I never said this")');
+  await forged.locator('.fwd-unchecked:has-text("can’t check who wrote it")').waitFor({ timeout: 20000 });
 });
 
 test('profile: a new name and picture reach Bob once, and the picture is served from his PC', async () => {

@@ -222,8 +222,10 @@ function Forwarded({ m, Files }) {
   const u = !S.users[f.author] && f.name ? { ...person(f.author), name: f.name } : person(f.author);
   // The way back only for people who can read the original.
   const from = f.conv ? convMeta(f.conv) : null; // from a friend's PC (0.13): no way back from here
+  // Their PC gave the name, and this PC holds no message of that person's with these words: say so.
+  const unchecked = !f.conv && !S.users[f.author];
   return html`<div class="fwd">
-    <div class="fwd-label"><${Icon} name="forward" size=${14} />Forwarded</div>
+    <div class="fwd-label"><${Icon} name="forward" size=${14} />Forwarded${unchecked && html`<span class="fwd-unchecked">from another PC. Snug can’t check who wrote it.</span>`}</div>
     <div class="fwd-card">
       <div class="fwd-head"><${Avatar} user=${u} size=${20} /><b>${u.name}</b><time class="faint" datetime=${new Date(f.ts).toISOString()} data-tip=${fmtFull(f.ts)}>${fmtWhen(f.ts)}</time></div>
       ${f.text && html`<div class="msg-text"><${Rich} text=${f.text} /></div>`}

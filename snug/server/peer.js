@@ -799,7 +799,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
   function fwdOut(f) {
     if (!f || typeof f !== 'object') return null;
     const a = f.author === owner() ? myUid() : isRemote(f.author) ? uidOf(f.author) : null;
-    const name = String(M.userRow(f.author)?.name || 'Someone').slice(0, 64);
+    const name = String((f.author && M.userRow(f.author)?.name) || f.name || 'Someone').slice(0, 64);
     return {
       ...(a ? { a } : {}), name, ts: Number.isSafeInteger(f.ts) ? f.ts : 0, text: String(f.text || '').slice(0, 4000),
       ...(f.sticker?.name ? { sticker: { name: String(f.sticker.name).slice(0, 64) } } : {}),
@@ -825,8 +825,15 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     const f = d && typeof d.fwd === 'object' && d.fwd ? d.fwd : null;
     if (f && typeof f.text === 'string' && f.text.length <= 4000 && Number.isSafeInteger(f.ts)) {
       const a = isUid(f.a) ? f.a : null;
-      const author = a === myUid() ? owner() : a && M.userRow(shadowId(a)) ? shadowId(a) : null;
-      out.fwd = { conv: null, id: null, author, name: cleanName(f.name), ts: f.ts, text: f.text, ...(f.sticker && typeof f.sticker.name === 'string' ? { sticker: { name: cleanName(f.sticker.name) } } : {}) };
+      const who = a === myUid() ? owner() : a && M.userRow(shadowId(a)) ? shadowId(a) : null;
+      // The sending PC says who wrote it; a modified one could put words in anyone's mouth. So the card is tied to
+      // someone's account here only when this PC holds a message of theirs with those words; else only the given name shows.
+      const sn = f.sticker && typeof f.sticker.name === 'string' ? f.sticker.name : null;
+      const held = !who ? null : f.text
+        ? db.get('SELECT ts FROM messages WHERE author = ? AND text = ? AND deleted IS NULL ORDER BY abs(ts - ?) LIMIT 1', who, f.text, f.ts)
+        : sn ? db.get("SELECT ts FROM messages WHERE author = ? AND text = '' AND deleted IS NULL AND sticker IS NOT NULL AND json_extract(sticker, '$.name') = ? ORDER BY abs(ts - ?) LIMIT 1", who, sn, f.ts) : null;
+      const author = held ? who : null;
+      out.fwd = { conv: null, id: null, author, name: cleanName(f.name), ts: held ? held.ts : f.ts, text: f.text, ...(f.sticker && typeof f.sticker.name === 'string' ? { sticker: { name: cleanName(f.sticker.name) } } : {}) };
       out.text = typeof d.note === 'string' ? d.note : '';
     }
     if (d && d.sticker && typeof d.sticker.name === 'string') out.sticker = { id: null, name: cleanName(d.sticker.name), house: null };

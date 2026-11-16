@@ -102,6 +102,7 @@ button.poll-a:active { background: var(--bg-4); }
 /* ---------- Forwarded messages ---------- */
 .fwd { margin: var(--s-1) 0; max-width: 520px; }
 .fwd-label { display: flex; align-items: center; gap: var(--s-1); font-size: var(--t-12); font-style: italic; color: var(--text-3); margin-bottom: var(--s-1); }
+.fwd-unchecked { font-style: normal; }
 .fwd-card { padding: var(--s-1) var(--s-3); border-left: 4px solid var(--line-strong); border-radius: var(--r-row); display: grid; gap: var(--s-1); }
 .fwd-head { display: flex; align-items: center; gap: var(--s-2); font-size: var(--t-13); }
 .fwd-head b { font-weight: var(--w-semibold); }

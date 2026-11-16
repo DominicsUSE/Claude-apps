@@ -30,7 +30,7 @@ async function upload(s, c, conv, body) {
 const row = (s, id) => s.db.get('SELECT * FROM messages WHERE id = ?', id);
 const fwdOf = (s, id) => JSON.parse(row(s, id)?.fwd || 'null');
 
-let t, pic, src;
+let t, pic, src, grp;
 test('a message with a picture, forwarded into a direct conversation with a friend on another PC: the card and the file arrive', async () => {
   t = await threePcs(registry, pcs, ['fwdana', 'fwdbea', 'fwdcal']);
   const { A, B, C, a, b, c } = t;
@@ -90,7 +90,7 @@ test('forwarding Bea’s own message back to her, with no note: her PC shows her
 
 test('forwarding into a group across PCs: every member’s PC gets the card and the picture', async () => {
   const { A, B, C, a, b, c } = t;
-  const g = (await a.ok('dm.open', { users: [b.id, c.id] })).id;
+  const g = grp = (await a.ok('dm.open', { users: [b.id, c.id] })).id;
   const all = [a.id, b.id, c.id].sort().join();
   const members = (s) => s.db.all('SELECT user FROM dm_members WHERE dm = ? ORDER BY user', g).map((r) => r.user).join();
   await until(() => members(B) === all && members(C) === all, 12_000, 'group on every PC');
@@ -107,4 +107,30 @@ test('forwarding into a group across PCs: every member’s PC gets the card and 
   assert.equal(fwdOf(C, id).author, c.id);
   const fid = JSON.parse(row(B, id).files)[0].id;
   await until(() => JSON.parse(B.db.get('SELECT meta FROM files WHERE id = ?', fid).meta).have === 1, 12_000, 'the photo on Bea’s PC');
+});
+
+test('a forwarded card from a friend’s PC only carries a real account when this PC holds that person’s message', async () => {
+  const { A, B, b, c } = t;
+  assert.ok(B.db.get('SELECT 1 FROM users WHERE id = ?', c.id), 'Bea’s PC knows Cal from the group');
+  // A modified PC sends Bea a "forward" of words Cal never wrote, and of words she never wrote.
+  const send = (fwd) => {
+    const id = mid();
+    A.peer._outbox.push(b.id, 'dm.msg', id, JSON.stringify({ id, text: `> ${fwd.text}\n— x, forwarded`, note: '', fwd }), Date.now());
+    A.peer._links.want(uidOf(b));
+    return id;
+  };
+  const cal = send({ a: uidOf(c), name: 'Cal (really)', ts: Date.now() - 3600_000, text: 'I owe Ana 500' });
+  const bea = send({ a: uidOf(b), name: 'fwdbea', ts: Date.now() - 3600_000, text: 'I said Ana can have my car' });
+  await until(() => row(B, cal) && row(B, bea), 12_000, 'on Bea’s PC');
+  assert.equal(fwdOf(B, cal).author, null, 'not shown as Cal’s account');
+  assert.equal(fwdOf(B, cal).name, 'Cal (really)', 'only the name the other PC gave');
+  assert.equal(fwdOf(B, bea).author, null, 'not shown as Bea herself');
+  // Words Cal did write in the group, which Bea's PC holds, keep his account and the time he wrote them.
+  const said = mid();
+  await c.ok('msg.send', { conv: grp, id: said, text: 'kiln opens at nine' });
+  await until(() => row(B, said), 12_000, 'Cal’s group message on Bea’s PC');
+  const real = send({ a: uidOf(c), name: 'fwdcal', ts: 1, text: 'kiln opens at nine' });
+  await until(() => row(B, real), 12_000, 'the true one on Bea’s PC');
+  assert.equal(fwdOf(B, real).author, c.id);
+  assert.equal(fwdOf(B, real).ts, row(B, said).ts);
 });
