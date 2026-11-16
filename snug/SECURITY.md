@@ -244,10 +244,14 @@ or a missing one from a device that signs its keys, ends that connection with a 
 itself only (sealed in its encryption store, never sent), which of a person's devices have signed a call with
 it; an unsigned offer or answer from that person later ends the connection with the same warning while one of
 those devices is still in their signed device list (or no list can be checked), so a server can't strip
-signatures and call keys to make a 0.14 device look like an older Snug. Once none is (removed, or encryption
-reset) the call goes on *in transit only* with a notice; calling from a browser without encryption keys while a
-signing device is still listed is stopped too. A first call with someone is not covered (nothing to remember
-yet). With both sides signed the security code is 12 digits from both device keys and fingerprints
+signatures and call keys to make a 0.14 device look like an older Snug. The server marking someone as a friend
+on another PC doesn't skip this, and the record is read even when the server's hello says encryption is off.
+Once none of those devices is listed (removed, or encryption reset) the call goes on *in transit only* with a
+notice, except for a verified contact whose new account key hasn't been accepted (stopped). A server that says
+it offers no encryption at all (the host turned `SNUG_E2EE` off) gets the same notice, and the record is kept.
+Calling from a browser without encryption keys while a signing device is still listed is stopped too, and that
+browser says why when the call starts. A first call with someone is not covered (nothing to remember yet), nor
+is a reset faked for a contact who isn't verified (as for messages). With both sides signed the security code is 12 digits from both device keys and fingerprints
 (*Verified device*).
 
 It does not hide who is in which call, when, for how long or how much was sent (the server and any relay see
@@ -256,7 +260,8 @@ devices), it doesn't cover calls with someone who hasn't turned encryption on, a
 encoded transforms, or P2P calls with friends on other PCs (these say *in transit only*), and whoever serves the
 web client's JavaScript could change it. A server could also withhold call keys so a call falls back to
 *in transit only* (the label then says so); withholding signatures as well works only on a first call between
-two devices, or with someone whose signing devices have all left their list. Not reviewed by anyone outside the implementation.
+two devices, with someone whose signing devices have all left their list, or by turning encryption off for the
+whole server (said in the call and everywhere else). Not reviewed by anyone outside the implementation.
 
 ### What Snug cannot protect against
 

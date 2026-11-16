@@ -559,7 +559,7 @@ test('after a signed call, a later call from the same person whose signatures an
     await ines.click('.main .bar .call-btn[aria-label="Start a voice call"]');
     await robin.locator('.incoming .inc-accept').click();
     await ines.locator('.stage .act-alarm[role=alert]:has-text("Snug stopped the connection to Robin")').waitFor({ timeout: 20000 });
-    await ines.locator('.toast:has-text("arrived without its signature")').waitFor();
+    await ines.locator('.toast:has-text("came without a signature from any device of theirs")').waitFor();
     assert.ok(strip.n.sdp > 0, 'signature lines were stripped');
     assert.deepEqual(await ines.evaluate(() => window.snug.voiceTest.crypt().refused), [robinId]);
     assert.equal((await ines.evaluate(() => window.snug.voiceStats())).robin, undefined, 'no connection to Robin');
@@ -596,4 +596,63 @@ test('a first call with someone on an older Snug (never signs, never sends call 
     assert.deepEqual(await ines.evaluate(() => window.snug.voiceTest.crypt().refused), []);
     await robin.click('.stage.call [aria-label="Leave call"]');
   } finally { strip.restore(); }
+});
+
+// A first signed call between Robin and Ines (Robin calls, so both devices sign and check).
+async function signedCall(robin, ines) {
+  await turnOnEncryption(robin, 'robin');
+  await turnOnEncryption(ines, 'ines');
+  await openDm(robin, 'Ines Carvalho');
+  await robin.click('.main .bar .call-btn[aria-label="Start a voice call"]');
+  await ines.locator('.incoming .inc-accept').click();
+  const st = await voiceOf(ines, 'robin', (s) => s?.state === 'connected' && s.fpSigned);
+  assert.deepEqual({ state: st?.state, fpSigned: st?.fpSigned }, { state: 'connected', fpSigned: true });
+  await robin.click('.stage.call [aria-label="Leave call"]');
+  await ines.locator('.stage.call').waitFor({ state: 'detached' });
+}
+
+test('after a signed call, a server that also marks each of them as "on another PC" still can\'t pass the call off as unsigned', async () => {
+  const robin = await person('robin');
+  const ines = await person('ines');
+  await signedCall(robin, ines);
+  const robinId = srv.db.get("SELECT id FROM users WHERE handle = 'robin'").id;
+  const inesId = srv.db.get("SELECT id FROM users WHERE handle = 'ines'").id;
+  await ines.locator('.main .bar-title:has-text("Robin Hale")').waitFor();
+  const strip = stripSigning();
+  // The user views the server sends: the other person as a friend on another PC (kept so through any update).
+  const markRemote = (page, id) => page.evaluate((u) => { setInterval(() => { const v = window.snug.S.users[u]; if (v) v.remote = true; }, 20); }, id);
+  try {
+    await ines.click('.main .bar .call-btn[aria-label="Start a voice call"]');
+    await robin.locator('.incoming .inc-accept').waitFor();
+    await markRemote(ines, robinId);
+    await markRemote(robin, inesId);
+    await robin.locator('.incoming .inc-accept').click();
+    await ines.locator('.stage .act-alarm[role=alert]:has-text("Snug stopped the connection to Robin")').waitFor({ timeout: 20000 });
+    assert.ok(strip.n.sdp > 0, 'signature lines were stripped');
+    assert.deepEqual(await ines.evaluate(() => window.snug.voiceTest.crypt().refused), [robinId]);
+    await ines.waitForTimeout(1500);
+    assert.notEqual((await robin.evaluate(() => window.snug.voiceStats())).ines?.state, 'connected', 'Robin never connects unsigned');
+    await ines.click('.stage.call [aria-label="Leave call"]');
+  } finally { strip.restore(); }
+});
+
+test('calling from a browser that isn\'t set up for encryption, after a signed call from one that is: the other side stops it, and that browser says why', async () => {
+  const robin = await person('robin');
+  const ines = await person('ines');
+  await signedCall(robin, ines);
+  const robinId = srv.db.get("SELECT id FROM users WHERE handle = 'robin'").id;
+  await robin.context().close();
+  // Robin on another browser, which she doesn't add.
+  const other = await person('robin');
+  const dialog = other.locator('.modal[role=dialog]');
+  await dialog.locator('h2:has-text("Add this browser")').waitFor();
+  await dialog.locator('button:has-text("Not now")').click();
+  await dialog.waitFor({ state: 'detached' });
+  await openDm(other, 'Ines Carvalho');
+  await other.click('.main .bar .call-btn[aria-label="Start a voice call"]');
+  await other.locator('.toast:has-text("This browser isn’t set up for end-to-end encryption")').waitFor();
+  await ines.locator('.incoming .inc-accept').click();
+  await ines.locator('.stage .act-alarm[role=alert]:has-text("Snug stopped the connection to Robin")').waitFor({ timeout: 20000 });
+  assert.deepEqual(await ines.evaluate(() => window.snug.voiceTest.crypt().refused), [robinId]);
+  await other.click('.stage.call [aria-label="Leave call"]');
 });

@@ -25,7 +25,7 @@ import { sealKey, openKey } from '../lib/e2ee/hpke.js';
 import { safetyNumber } from '../lib/e2ee/fingerprint.js';
 import { supported } from '../lib/e2ee/support.js';
 import { newRecoveryKey, parseRecoveryKey, deriveBackupKey } from '../lib/recovery.js';
-import { sharedStore, deleteStore, memStore, StoreLocked } from './store.js'; // 0.14: one store shared with the device copy (js/devicecopy.js)
+import { sharedStore, existingStore, deleteStore, memStore, StoreLocked } from './store.js'; // 0.14: one store shared with the device copy (js/devicecopy.js)
 import { metaCheck, listCheck, metaWriteVer } from '../lib/e2ee/highwater.js';
 import { random } from '../lib/e2ee/bytes.js';
 
@@ -1091,6 +1091,10 @@ export const ring = {
   updateMeta: (fn) => updateMeta(fn),
   checkOwnList, acceptContact, senderKey, encryptedConvs, rememberConv, lowerConv,
 };
+
+// calls C2 (js/e2ee/callkeys.js): this device's store even when the server's hello left it closed (encryption
+// said to be off): what this device remembers about calls must not hang on what the server says. Never made here.
+export const callStore = async () => store || (userId() ? existingStore(userId(), osKey()).catch(() => null) : null);
 
 // For tests: run without IndexedDB.
 export const _test = { memStore, useStore: (s) => { store = s; } };
