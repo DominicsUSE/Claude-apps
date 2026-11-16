@@ -379,3 +379,22 @@ test('end-to-end encryption fallback: a browser without encoded transforms conne
   await sunniva.click('.stage .act-conn');
   await sunniva.locator('.act-qpop .act-e2ee-note:has-text("Dara’s browser or app can’t encrypt calls end to end")').waitFor();
 });
+
+test('someone on an older Snug (0.13 and before never send a call key nor say why not): the label names their app after a few seconds, not "still setting it up"', async () => {
+  const robin = await person('robin');
+  await turnOnEncryption(robin);
+  const ines = await person('ines');
+  await turnOnEncryption(ines); // 0.13 had encryption keys too: Robin seals his key to her device and hears nothing back
+  const inesId = srv.db.get("SELECT id FROM users WHERE handle = 'ines'").id;
+  // Ines's app stands in for a 0.13 one: nothing of hers about call keys reaches anyone.
+  const real = srv.hub.rtcRelay;
+  srv.hub.rtcRelay = (from, to, data) => (from === inesId && data?.ck ? true : real(from, to, data));
+  try {
+    await joinWheel(robin);
+    await joinWheel(ines);
+    await connected(robin, 1);
+    await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.e2eeWhy === 'their-app', null, { timeout: 30000 });
+    await robin.click('.stage .act-conn');
+    await robin.locator('.act-qpop .act-e2ee-note:has-text("Ines’s Snug is too old to encrypt calls end to end")').waitFor();
+  } finally { srv.hub.rtcRelay = real; }
+});

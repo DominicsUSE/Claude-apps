@@ -113,8 +113,10 @@ function signal(to, data) { call('rtc', { to, data }).catch(() => {}); }
 // browser without encoded transforms) gets the media as before, and the call
 // says so. Everything is forgotten when the call ends.
 const crypt = { worker: null, mode: null, why: null, key: null, req: 0, waits: new Map(), refused: new Set() };
-const ckOf = new Map(); // user -> { acked, keyed, ckSeen, ckDev, unsigned, why }
-const ckState = (u) => { let x = ckOf.get(u); if (!x) ckOf.set(u, (x = { acked: null, keyed: false, ckSeen: false, ckDev: null, unsigned: false, why: null })); return x; };
+const ckOf = new Map(); // user -> { acked, keyed, ckSeen, ckDev, unsigned, heard, why }
+const ckState = (u) => { let x = ckOf.get(u); if (!x) ckOf.set(u, (x = { acked: null, keyed: false, ckSeen: false, ckDev: null, unsigned: false, heard: false, why: null })); return x; };
+// Connected this long without a word about call keys from them (no key, no "can't"): an older Snug (0.13 and before).
+const CK_WAIT_MS = 10_000;
 const transformMode = () => (typeof RTCRtpScriptTransform === 'function' ? 'script'
   : typeof RTCRtpSender !== 'undefined' && typeof RTCRtpSender.prototype.createEncodedStreams === 'function' ? 'streams' : null);
 // Called before joining (so before any connection of the call): whether its
@@ -174,6 +176,7 @@ function sendKeyTo(user) {
 }
 function onCallKey(from, m) {
   const st = ckState(from);
+  st.heard = true;
   if (m.t === 'no') { st.why = m.why === 'keys' ? 'their-keys' : 'their-browser'; emit(); return; }
   if (m.t === 'ack') { if (crypt.worker && crypt.key) { crypt.worker.postMessage({ t: 'use', peer: from, id: m.id }); st.acked = m.id; } return; }
   if (m.t !== 'key' || !crypt.worker) return;
@@ -244,6 +247,7 @@ function e2eeOf(user, p, stats) {
   const st = ckOf.get(user);
   if (crypt.why) return { on: false, why: crypt.why };
   if (st?.why) return { on: false, why: st.why };
+  if (!st?.heard && p.upSince && Date.now() - p.upSince > CK_WAIT_MS) return { on: false, why: 'their-app' };
   return { on: !!(stats?.e2ee && st?.keyed && st.acked != null), why: stats?.e2ee ? null : 'waiting' };
 }
 // The whole call, for the label in it (js/views/activities.js): on only when every connection is.
@@ -527,6 +531,7 @@ function onLineState(user, p, state = p.pc.connectionState) {
   const { pc } = p;
   setPeerState(user, state);
   if (state === 'connected') {
+    p.upSince ||= Date.now();
     clearTimeout(p.graceTimer);
     p.graceTimer = null;
     capBitrate(p);

@@ -1115,7 +1115,8 @@ Real, and covered by tests with separate users:
     it. Video prefers VP8, whose header is left readable for the packetiser.
     The call says **End-to-end encrypted** only when every connection is;
     otherwise **Encrypted in transit only (DTLS-SRTP)** and why (this browser
-    can't, *name* hasn't turned on encryption, an older Snug). In a house's
+    can't, *name* hasn't turned on encryption, *name*'s Snug is too old, or a
+    new key someone hasn't acknowledged within 5 seconds). In a house's
     voice room, keys go only to the devices of the people listed in it. The
     server still sees who is in which call, when, and for how long; P2P
     calls with friends on other PCs stay *in transit only*.

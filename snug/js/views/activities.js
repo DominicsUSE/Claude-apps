@@ -174,6 +174,7 @@ const WHY = {
   server: () => 'this Snug server is too old to pass call keys on',
   'their-keys': (who) => `${who} hasn’t turned on end-to-end encryption`,
   'their-browser': (who) => `${who}’s browser or app can’t encrypt calls end to end`,
+  'their-app': (who) => `${who}’s Snug is too old to encrypt calls end to end`,
   waiting: (who) => `still setting it up with ${who}`,
   p2p: (who) => `calls with ${who} on another PC aren’t end-to-end encrypted yet`,
 };
