@@ -604,8 +604,10 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       WHERE f.user = ? AND f.state IN ('friends', 'outgoing') AND u.remote = 1
       AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.user = f.user AND b.other = f.other) OR (b.user = f.other AND b.other = f.user))
       LIMIT 500`, owner()).map((r) => uidOf(r.user)).filter(Boolean);
-    // Co-members of groups across PCs are watched too (presence is shared with them).
-    for (const uid of G.watch()) {
+    // Co-members of groups across PCs are watched too (presence is shared with them), unless I show my
+    // presence to friends only: the directory shares presence only between people who watch each other, so
+    // not watching them is what hides me from them (and them from me). review-media 4.
+    if (!friendsOnlyNow()) for (const uid of G.watch()) {
       if (uids.length >= 500) break;
       if (isUid(uid) && uid !== myUid() && !uids.includes(uid) && remote.has(shadowId(uid)) && !blockedEither(shadowId(uid))) uids.push(uid);
     }
@@ -846,11 +848,16 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       // Invisible: the registry stops announcing me (section 7.3).
       const vis = visibleNow();
       if (vis !== lastVisible) { lastVisible = vis; signal.send({ t: 'visible', on: vis }); }
+      const fo = friendsOnlyNow();
+      if (fo !== lastFriendsOnly) { lastFriendsOnly = fo; watchSoon(); }
     }
   };
   let lastVisible = true;
+  let lastFriendsOnly = false;
   // Invisible, or "who sees that I'm online: nobody" (server/privacy.js): the directory doesn't announce me.
   const visibleNow = () => ownerRow()?.presence !== 'offline' && M.presenceToAll?.(owner()) !== false;
+  // "Who sees that I'm online: friends only" (server/privacy.js): group co-members aren't watched (sendWatch).
+  function friendsOnlyNow() { return (M.prefsOf?.(owner()) || {}).presenceTo === 'friends'; }
   const baseSnap = hub.snapshotFor;
   hub.snapshotFor = (u) => {
     const snap = baseSnap(u);

@@ -137,3 +137,21 @@ test('B3 in groups across PCs: thread replies, pins and the timer reach every me
   await until(() => row(A, id) && row(B, id), 10_000, 'message everywhere');
   assert.equal(row(A, id).expires, row(C, id).expires);
 });
+
+// review-media 4: "friends only" on a PC stops group co-members who aren't friends from seeing it online.
+test('presence "friends only": co-members of a group across PCs who aren’t friends stop seeing me online; friends still do', async () => {
+  const t = await threePcs(registry, pcs, ['prsgina', 'prshal', 'prsivy']);
+  const { A, B, C, a, b, c } = t;
+  const g = (await a.ok('dm.open', { users: [b.id, c.id] })).id;
+  const all = [a.id, b.id, c.id].sort();
+  const members = (s) => s.db.all('SELECT user FROM dm_members WHERE dm = ? ORDER BY user', g).map((r) => r.user).join();
+  await until(() => members(B) === all.join() && members(C) === all.join(), 12_000, 'group on every PC');
+  // B and C aren't friends, but share the group, so each sees the other online.
+  await until(() => C.peer.isOnline(uidOf(b)) && B.peer.isOnline(uidOf(c)), 10_000, 'co-member presence');
+  await b.ok('prefs.set', { prefs: { presenceTo: 'friends' } });
+  await until(() => !C.peer.isOnline(uidOf(b)), 10_000, 'C no longer sees B online');
+  assert.equal(A.peer.isOnline(uidOf(b)), true, 'a friend still does');
+  // Back to everyone: the co-member sees B again.
+  await b.ok('prefs.set', { prefs: { presenceTo: 'everyone' } });
+  await until(() => C.peer.isOnline(uidOf(b)), 10_000, 'C sees B again');
+});
