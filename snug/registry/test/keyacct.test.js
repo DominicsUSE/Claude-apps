@@ -517,6 +517,41 @@ test('purge: an account whose device never connected within 7 days frees its nam
   }
 });
 
+test('idle purge (KEY_ACCOUNT_IDLE_DAYS): an idle account goes; an active one, one with a recovery move waiting and a GitHub-linked one stay', async () => {
+  // Off by default: nothing in wrangler.toml sets it.
+  const toml = (await import('node:fs')).readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8');
+  assert.doesNotMatch(toml, /^\s*KEY_ACCOUNT_IDLE_DAYS\s*=/m);
+  const r2 = await start({ env: { POW_BITS: '2', KEY_ACCOUNT_IDLE_DAYS: '30' } });
+  try {
+    const mk = async (p) => { const a = await account(uniq(p), { R: r2 }); const u = { uid: a.uid, k: a.k, r: a.r, name: a.account.username }; (await connectV(u, '0.12.0', u.k, r2)).close(); return u; };
+    const idle = await mk('idl');
+    const active = await mk('act');
+    const moving = await mk('mov');
+    const linked = await mk('lnk');
+    // linked: GitHub linked at once with the recovery key
+    const t = await ghTicket(linked.k, nextGh++, r2);
+    const l = await sp(linked, '/v1/link/github', 'link-github', { ticket: t.ticket }, { R: r2, extra: (msg) => ({ rsig: linked.r.sign(msg) }) });
+    assert.equal(l.body.state, 'done', JSON.stringify(l.body));
+    // active: its app stays connected
+    const live = await connectV(active, '0.12.0', active.k, r2);
+    await r2.clock.advance(30 * 86_400_000 - 3_600_000);
+    // moving: someone with the recovery key starts a move an hour before the purge would come
+    const { res } = await recover(moving, makeKeys(), { R: r2 });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    await r2.clock.advance(2 * 3_600_000);
+    await r2.clock.advance(1000);
+    const exists = (u) => r2.runtime.sql('SELECT 1 AS x FROM accounts WHERE uid=?', u.uid).length === 1;
+    assert.equal(exists(idle), false, 'the idle account is purged');
+    assert.equal((await r2.call(`/v1/check?name=${idle.name}`)).body.ok, true);
+    assert.equal(exists(active), true, 'a connected account stays');
+    assert.equal(exists(moving), true, 'an account with a recovery move waiting stays');
+    assert.equal(exists(linked), true, 'a GitHub-linked account stays');
+    live.close();
+  } finally {
+    await r2.close();
+  }
+});
+
 test('new keypair accounts: smaller lookup budget for 72 h; first rename after 7 days; short names after 30', async () => {
   const r2 = await start({ env: { POW_BITS: '2', TEST_LIMITS: { newLookupDay: [2, DAY] } } });
   try {

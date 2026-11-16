@@ -834,11 +834,14 @@ export const KeyAcctMixin = {
     const gone = this.rows(`SELECT a.* FROM key_meta m JOIN accounts a ON a.uid=m.uid
       WHERE m.first_auth IS NULL AND m.created<=? AND m.uid NOT IN (SELECT uid FROM bans)
       AND m.uid NOT IN (SELECT uid FROM pending_rebind) LIMIT 200`, t - NEVER_CONNECTED);
+    // KEY_ACCOUNT_IDLE_DAYS (off unless set): accounts not seen for that long go too, except banned ones, ones
+    // with a move waiting, ones still connected, and (v0.13) ones with a GitHub account linked: that GitHub
+    // account can still bring them back.
     const idleDays = Number(this.env.KEY_ACCOUNT_IDLE_DAYS) || 0;
     if (idleDays > 0) {
       gone.push(...this.rows(`SELECT a.* FROM key_meta m JOIN accounts a ON a.uid=m.uid
         WHERE m.seen IS NOT NULL AND m.seen<=? AND m.uid NOT IN (SELECT uid FROM bans)
-        AND m.uid NOT IN (SELECT uid FROM pending_rebind) LIMIT 200`, t - idleDays * DAY)
+        AND m.uid NOT IN (SELECT uid FROM pending_rebind) AND m.uid NOT IN (SELECT uid FROM gh_links) LIMIT 200`, t - idleDays * DAY)
         .filter((a) => !this.normalSocket(a.uid)));
     }
     for (const a of gone) this.dropAccount(a);
@@ -847,6 +850,12 @@ export const KeyAcctMixin = {
       (SELECT MIN(at) FROM link_pending) AS lp`);
     let next = Infinity;
     for (const v of [r.rp, r.mc, r.ps, r.lp, r.kc == null ? null : r.kc + NEVER_CONNECTED]) if (v != null) next = Math.min(next, v);
+    // The idle purge looks again when the longest-idle account would be due, and at most once a day for the
+    // ones it keeps.
+    if (idleDays > 0) {
+      const s = this.row('SELECT MIN(seen) AS s FROM key_meta WHERE seen IS NOT NULL')?.s;
+      if (s != null) next = Math.min(next, Math.max(s + idleDays * DAY, t + DAY));
+    }
     return next;
   },
 };
