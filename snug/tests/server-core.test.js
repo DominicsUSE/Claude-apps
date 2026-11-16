@@ -403,6 +403,9 @@ test('the app shell list: every file the app needs offline, versioned, and nothi
   for (const f of ['/', '/js/app.js', '/js/store.js', '/css/tokens.css', '/vendor/preact-htm.js', '/fonts/inter-latin.woff2', '/brand/manifest.json']) assert.ok(shell.files.includes(f), f);
   assert.equal(shell.files.some((f) => /^\/(api|ws|data|server|docs)\b/.test(f) || f.includes('..')), false);
   assert.equal(shell.files.includes('/sw.js'), false, 'the worker is never cached by itself');
+  // pdf.js's character maps and standard fonts (about 2.5 MB) are fetched when a PDF needs one, not kept up front.
+  assert.ok(shell.files.includes('/vendor/pdfjs/pdf.min.js'));
+  assert.equal(shell.files.some((f) => f.startsWith('/vendor/pdfjs/cmaps/') || f.startsWith('/vendor/pdfjs/standard_fonts/')), false);
 });
 
 // PNG width and height from the IHDR chunk.

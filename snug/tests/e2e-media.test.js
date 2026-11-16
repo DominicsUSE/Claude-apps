@@ -216,6 +216,64 @@ test('PDF: the first page shows in the conversation; Open goes through the pages
   await msg(ines, 'a fake one').last().locator('a.file:has-text("not-really.pdf")').waitFor({ timeout: 20000 });
 });
 
+// One page with text in fonts the file doesn't carry: Helvetica, Symbol, and a Japanese font through a
+// predefined character map (UniJIS-UCS2-H), as many PDFs made in Japan are.
+function pdfFonts() {
+  const text = 'BT /F1 30 Tf 72 700 Td (Helvetica here) Tj ET BT /F2 30 Tf 72 600 Td (abgd) Tj ET BT /F3 30 Tf 72 500 Td <65E5672C> Tj ET';
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R /F2 6 0 R /F3 7 0 R >> >> /Contents 4 0 R >>',
+    `<< /Length ${text.length} >>\nstream\n${text}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Symbol >>',
+    '<< /Type /Font /Subtype /Type0 /BaseFont /KozMinPr6N-Regular /Encoding /UniJIS-UCS2-H /DescendantFonts [8 0 R] >>',
+    '<< /Type /Font /Subtype /CIDFontType0 /BaseFont /KozMinPr6N-Regular /CIDSystemInfo << /Registry (Adobe) /Ordering (Japan1) /Supplement 6 >> /FontDescriptor 9 0 R >>',
+    '<< /Type /FontDescriptor /FontName /KozMinPr6N-Regular /Flags 6 /FontBBox [0 -200 1000 900] /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 700 /StemV 80 >>',
+  ];
+  let out = '%PDF-1.4\n';
+  const offs = [];
+  objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offs.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`;
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, 'latin1');
+}
+
+test('PDF: text in fonts the file doesn’t carry shows, with pdf.js’s own character maps and standard fonts from this server', async () => {
+  const asked = [];
+  const warned = [];
+  const listen = (p) => {
+    p.on('request', (r) => { const u = new URL(r.url()); if (u.pathname.startsWith('/vendor/pdfjs/')) asked.push(u.pathname); });
+    // (A note that this computer lacks the Japanese font itself is fine: pdf.js draws a stand-in.)
+    const hear = (m) => { if (/cMapUrl|standardFontDataUrl|fetchStandardFontData|fetchBuiltInCMap|failed to fetch|Unable to load/i.test(m.text())) warned.push(m.text()); };
+    p.on('console', hear);
+    p.on('worker', (w) => w.on('console', hear));
+  };
+  listen(ines);
+  await attach(robin, { name: 'fonts.pdf', mimeType: 'application/pdf', buffer: pdfFonts() });
+  await ready(robin, 'fonts.pdf');
+  await send(robin, 'fonts it lacks');
+  const card = msg(ines, 'fonts it lacks').last().locator('.pdf-file');
+  await card.locator('.tfile-head:has-text("1 page")').waitFor({ timeout: 20000 });
+  // Each line of text left ink on page 1.
+  const ink = await card.locator('canvas').evaluate((c) => {
+    const g = c.getContext('2d');
+    const band = (top, bottom) => { // PDF y (from the bottom of a 792-high page) to canvas rows
+      const y0 = Math.round(c.height * (1 - bottom / 792)), y1 = Math.round(c.height * (1 - top / 792));
+      const d = g.getImageData(0, y0, c.width, Math.max(1, y1 - y0)).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 0 && d[i] < 120 && d[i + 1] < 120 && d[i + 2] < 120) n++;
+      return n;
+    };
+    return { helvetica: band(690, 735), symbol: band(590, 635), japanese: band(490, 535) };
+  });
+  assert.ok(ink.helvetica > 50 && ink.symbol > 50 && ink.japanese > 50, `every line drawn: ${JSON.stringify(ink)}`);
+  assert.ok(asked.includes('/vendor/pdfjs/cmaps/UniJIS-UCS2-H.bcmap'), `the character map came from this server: ${asked.join(', ')}`);
+  assert.ok(asked.includes('/vendor/pdfjs/standard_fonts/FoxitSymbol.pfb'), `the Symbol font came from this server: ${asked.join(', ')}`);
+  assert.deepEqual(warned, [], 'no font warnings');
+});
+
 test('text files: shown as text, never as markup; a big one shows its start and says so', async () => {
   await attach(robin, [
     { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('line one\n<b>not bold</b><img src=x onerror="window.__txt=1">\nline three') },

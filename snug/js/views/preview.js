@@ -80,13 +80,20 @@ async function loadPdfjs() {
   }
   return pdfjs;
 }
+const PDF_CMAPS = new URL('../../vendor/pdfjs/cmaps/', import.meta.url).href;
+const PDF_FONTS = new URL('../../vendor/pdfjs/standard_fonts/', import.meta.url).href;
 const docs = new Map(); // file id -> Promise<PDFDocumentProxy>, a few at a time
 async function openPdf(id, url) {
   if (!docs.has(id)) {
     docs.set(id, (async () => {
       const [lib, data] = await Promise.all([loadPdfjs(), getBytes(url)]);
       if (!looksLikePdf(data)) throw Object.assign(new Error('not a pdf'), { bad: true });
-      return lib.getDocument({ data, isEvalSupported: false, disableAutoFetch: true, disableStream: true, enableXfa: false, stopAtErrors: false }).promise;
+      return lib.getDocument({
+        data, isEvalSupported: false, disableAutoFetch: true, disableStream: true, enableXfa: false, stopAtErrors: false,
+        // pdf.js's own character maps and standard fonts (vendor/pdfjs/cmaps, standard_fonts), from this server,
+        // so text in fonts a PDF doesn't carry (Chinese, Japanese and Korean ones, Symbol, ZapfDingbats) still shows.
+        cMapUrl: PDF_CMAPS, cMapPacked: true, standardFontDataUrl: PDF_FONTS,
+      }).promise;
     })().catch((e) => { docs.delete(id); throw e; }));
     while (docs.size > 6) { const [k, p] = docs.entries().next().value; docs.delete(k); p.then((d) => d.destroy(), () => {}); }
   }

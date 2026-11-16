@@ -64,6 +64,8 @@ export function createShell({ root, dirs }) {
 
   // The files sw.js keeps: the page and everything under the public folders
   // (not docs/, which only the README links to, and not the worker itself).
+  // pdf.js's character maps and standard fonts are fetched when a PDF needs one.
+  const ON_DEMAND = new Set(['vendor/pdfjs/cmaps', 'vendor/pdfjs/standard_fonts']);
   let list = null, listAt = 0;
   function shellList() {
     if (list && Date.now() - listAt < 30_000) return list; // files can change under a running server (a deploy, development)
@@ -73,7 +75,7 @@ export function createShell({ root, dirs }) {
     const walk = (dir) => {
       for (const e of readdirSync(join(root, dir), { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
         const rel = `${dir}${e.name}`;
-        if (e.isDirectory()) walk(`${rel}/`);
+        if (e.isDirectory()) { if (!ON_DEMAND.has(rel)) walk(`${rel}/`); }
         else if (e.isFile() && !e.name.startsWith('.')) {
           const st = statSync(join(root, rel));
           files.push(`/${rel}`);

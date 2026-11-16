@@ -970,7 +970,9 @@ Real, and covered by tests with separate users:
   - **Previews.** SVG shows as a picture made from its own bytes in an image
     element, which runs no script and loads nothing from elsewhere. PDFs show
     their first page, and Open goes through every page (pdf.js, loaded only
-    when a PDF comes into view, given the bytes in memory). Text and code files
+    when a PDF comes into view, given the bytes in memory). Text in fonts a PDF
+    doesn't carry uses pdf.js's own character maps and standard fonts, served
+    by your Snug when a PDF needs them (0.13). Text and code files
     show their first lines, always as text; a big one shows its first 64 KB and
     says so.
   - **Players.** Videos play inline with their first frame as a poster, our
