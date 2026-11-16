@@ -1100,8 +1100,8 @@ test("join mode: a server redirect to another site never takes over the window (
   const join = stubSite((req, res) => {
     if (req.url === "/api/version") { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ version: "0.12.0", proto: 12, minClient: 12, e2ee: 1 })); }
     // Pinned, only /api/ reaches the host (other paths load the app's own page, as on a real Snug server).
-    if (req.url === "/api/go") { res.writeHead(302, { location: `${otherBase}/landed` }); return res.end(); }
-    if (req.url === "/api/file") { res.writeHead(302, { location: "file:///etc/hostname" }); return res.end(); }
+    if (req.url === "/api/go" || req.url === "/api/files/go") { res.writeHead(302, { location: `${otherBase}/landed` }); return res.end(); }
+    if (req.url === "/api/files/file") { res.writeHead(302, { location: "file:///etc/hostname" }); return res.end(); }
     res.writeHead(200, { "content-type": "text/html" });
     return res.end("<!doctype html><title>stand-in Snug</title><p>a Snug someone else runs</p>");
   });
@@ -1122,10 +1122,19 @@ test("join mode: a server redirect to another site never takes over the window (
     dialog.showMessageBox = async (_w, o) => { globalThis.testAsked.push(o.message); return { response: globalThis.testAnswer }; };
   });
 
-  // D1: /api/go answers 302 to another origin. will-navigate only sees /api/go (same origin); will-redirect stops the rest.
+  // Pinned, the window never navigates to the host's /api/ (it only ever shows the app's own page there):
+  // /api/go is refused before it is asked for, so its redirect never comes into play.
   await page.evaluate(() => { location.href = "/api/go"; });
+  await new Promise((r) => setTimeout(r, 1000));
+  assert.equal(page.url(), `${joinBase}/`, "still the app's page");
+  assert.ok(!join.hits.includes("/api/go"), "never asked for");
+  assert.deepEqual(await app.evaluate(() => globalThis.testOpened), [], "and not handed to the browser either");
+  // D1: a download (/api/files/<id>, the one /api/ address the window may go to) that the host answers with a
+  // 302 to another origin. will-navigate only sees the same origin; will-redirect stops the rest.
+  await page.evaluate(() => { location.href = "/api/files/go"; });
   await new Promise((r) => setTimeout(r, 1500));
   assert.equal(new URL(page.url()).origin, joinBase, "still the Snug address");
+  assert.ok(join.hits.includes("/api/files/go"));
   assert.ok(!other.hits.includes("/landed"), "the other site was never loaded in the window");
   assert.deepEqual(await app.evaluate(() => globalThis.testOpened), [`${otherBase}/landed`], "it opens in the browser instead");
 
@@ -1143,7 +1152,7 @@ test("join mode: a server redirect to another site never takes over the window (
   assert.equal(cam, "ok");
   assert.equal((await app.evaluate(() => globalThis.testAsked)).at(-1), "Let this Snug use your camera?");
   // A redirect into the file loader: never followed (an error page at most), never handed to the browser.
-  await page.evaluate(() => { location.href = "/api/file"; });
+  await page.evaluate(() => { location.href = "/api/files/file"; });
   await new Promise((r) => setTimeout(r, 1000));
   assert.ok(!page.url().startsWith("file:"), page.url());
   assert.equal((await app.evaluate(() => globalThis.testOpened)).length, 1);
@@ -1165,6 +1174,8 @@ test("join mode, pinned: a script or worker the host serves under /api/ never ru
   const { app, page } = await launchWith(userData, { config: { mode: "join", url: joinBase } });
   await page.waitForURL(`${joinBase}/`);
   await page.waitForSelector('link[href="/css/tokens.css"]', { state: "attached" });
+  // What the protocol handler itself sees as Sec-Fetch-Dest, per request it passes on (desktop/pinned.js).
+  await app.evaluate(() => { globalThis.snugPinnedDests = []; });
   const got = await page.evaluate(async () => {
     const script = await new Promise((r) => { const s = document.createElement("script"); s.src = "/api/evil.js"; s.onload = () => r("loaded"); s.onerror = () => r("blocked"); document.head.append(s); });
     const mod = await import("/api/evil-module.js").then(() => "loaded", () => "blocked");
@@ -1174,8 +1185,27 @@ test("join mode, pinned: a script or worker the host serves under /api/ never ru
   });
   assert.deepEqual(got, { script: "blocked", mod: "blocked", worker: "blocked", pwned: false });
   for (const u of ["/api/evil.js", "/api/evil-module.js", "/api/evil-worker.js"]) assert.equal(join.hits.includes(u), false, `${u} was requested from the host`);
-  // What the protocol handler passes on as Sec-Fetch-Dest for a page fetch (reported, for the record).
-  t.diagnostic(`Sec-Fetch-Dest the host saw for fetch("/api/data"): ${dests["/api/data"]}`);
+  // A top-level navigation to the host's /api/ is refused in the window (will-navigate), and the window stays on
+  // the app's own page: the host is never asked for it.
+  await page.evaluate(() => { window.location = "/api/x"; });
+  await new Promise((r) => setTimeout(r, 1000));
+  assert.equal(page.url(), `${joinBase}/`);
+  assert.equal(join.hits.includes("/api/x"), false, "/api/x was never requested");
+  assert.equal(await page.locator('link[href="/css/tokens.css"]').count(), 1, "still the app's page");
+  // A document load of /api/ in this session anyway (another window, not the guarded one), to see what the
+  // handler gets for a document. Recorded, not relied on: what refuses /api/ as a page is will-navigate.
+  await app.evaluate(async ({ BrowserWindow, session }, url) => {
+    const w = new BrowserWindow({ show: false, webPreferences: { session: session.fromPartition("persist:snug-join"), sandbox: true, contextIsolation: true } });
+    await w.loadURL(url).catch(() => {});
+    w.destroy();
+  }, `${joinBase}/api/doc`);
+  const seen = await app.evaluate(() => globalThis.snugPinnedDests);
+  const at = (u) => seen.find((x) => x.path === u)?.dest ?? "(not passed on)";
+  t.diagnostic(`Sec-Fetch-Dest at the protocol handler: fetch /api/data -> ${at("/api/data")}; document /api/doc -> ${at("/api/doc")}; the host saw ${dests["/api/data"]} for /api/data`);
+  // Scripts and workers from /api/ never reach the handler at all (the page's policy stops them first), so
+  // whatever Electron would pass for them, nothing under /api/ can run.
+  for (const u of ["/api/evil.js", "/api/evil-module.js", "/api/evil-worker.js"]) assert.equal(at(u), "(not passed on)", u);
+  assert.ok(seen.some((x) => x.path === "/api/data"), "the handler recorded the page's fetch");
   await app.close();
 });
 

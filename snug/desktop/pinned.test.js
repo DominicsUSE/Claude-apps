@@ -149,17 +149,14 @@ test("passThrough (pinned): the host's /api answers can't become a page, a scrip
   assert.equal(ok.headers.get("service-worker-allowed"), null);
   assert.equal(ok.headers.get("x-other"), "kept");
   assert.equal(await ok.text(), "<script>steal()</script>", "the body itself is the page's business");
-  const sent = net.made.length;
-  // Loaded as a document, a frame, a script or a worker: refused here, never asked of the host.
-  for (const dest of ["document", "iframe", "frame", "script", "worker", "sharedworker", "serviceworker"]) {
+  // Whatever Sec-Fetch-Dest says (Electron's handler never gets one: desktop/test.js), every answer is hardened
+  // the same way; pages and code from /api are stopped by will-navigate and the page's policy instead.
+  for (const dest of ["document", "script", "worker", "image", "video", "audio"]) {
     const r = await P.passThrough(net, ses, new Request(`${origin}/api/files/f_1`, { headers: { "sec-fetch-dest": dest } }), origin);
-    assert.equal(r.status, 403, dest);
+    assert.equal(r.status, 200, dest);
     assert.equal(r.headers.get("content-security-policy"), "sandbox; default-src 'none'", dest);
     assert.equal(r.headers.get("x-content-type-options"), "nosniff", dest);
   }
-  assert.equal(net.made.length, sent, "none of them reached the host");
-  // Images and media still load (the page shows pictures from /api/files).
-  for (const dest of ["image", "video", "audio"]) assert.equal((await P.passThrough(net, ses, new Request(`${origin}/api/files/f_1`, { headers: { "sec-fetch-dest": dest } }), origin)).status, 200, dest);
   // A redirect answer carries the same headers.
   const red = await P.passThrough(fakeNet((r) => r.emit("redirect", 302, "GET", `${origin}/x`, {})), ses, new Request(`${origin}/api/go`), origin);
   assert.equal(red.headers.get("content-security-policy"), "sandbox; default-src 'none'");
@@ -185,4 +182,16 @@ test("fallbackText: says which versions don't fit, never silently", () => {
   assert.match(P.fallbackText({ state: "old", host: "https://a.example", server: "0.11.1", app: "0.12.0" }).lead, /^a\.example runs Snug 0\.11\.1; this app has 0\.12\.0\./);
   assert.match(P.fallbackText({ state: "app-old", host: "https://a.example", server: "0.13.0", app: "0.12.0" }).title, /newer app/);
   assert.match(P.OWN_PAGE_NOTE("a.example"), /runs code from a\.example/);
+});
+
+test("navAllowed (pinned): the window goes only to the app's own page at the host's address, or a download", () => {
+  const origin = "http://snug.lan:47821";
+  for (const u of ["/", "/join/abc123", "/m/x", "/?x=1", "/docs/install.html", "/anything-the-app-routes"]) assert.equal(P.navAllowed(`${origin}${u}`, origin), true, u);
+  for (const u of ["/api/x", "/api/go", "/api/", "/api", "/API/x", "/%61pi/x", "/api/files", "/api/files/", "/api/files/f_1/../../me", "/api/gh/start", "/./api/x"]) assert.equal(P.navAllowed(`${origin}${u}`, origin), false, u);
+  // A download of an attachment: the host answers it as a file (and will-redirect watches where it goes).
+  assert.equal(P.navAllowed(`${origin}/api/files/f_1`, origin), true);
+  assert.equal(P.navAllowed(`${origin}/api/files/f_1?download=1`, origin), true);
+  // Another origin is main.js's business (it goes to the browser), never "allowed" here.
+  assert.equal(P.navAllowed("http://elsewhere.example/", origin), false);
+  assert.equal(P.navAllowed("not a url", origin), false);
 });

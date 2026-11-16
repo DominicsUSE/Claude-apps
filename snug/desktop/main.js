@@ -272,6 +272,9 @@ function createWindow({ ses = session.defaultSession, bounds, maximized, hidden 
   // Links in messages open in the default browser, never inside the app.
   w.webContents.setWindowOpenHandler(({ url }) => { external(url); return { action: "deny" }; });
   w.webContents.on("will-navigate", (ev, url) => {
+    // Pinned join mode: at the host's address the window shows only the app's own page (or a download),
+    // never another /api/ answer as a page (desktop/pinned.js navAllowed). Refused, not sent to the browser.
+    if (pinnedOn && fromSnug(url) && w.webContents.session === joinSes && !pinned.navAllowed(url, origin)) { ev.preventDefault(); return; }
     if (fromSnug(url) || url.startsWith(SETUP) || url.startsWith(FALLBACK)) return;
     ev.preventDefault();
     external(url);
