@@ -11,6 +11,7 @@ import { createBlobs } from '../server/peerblob.js';
 import { P2P_MAX_FILE, OLD_MAX_FILE, peerMaxFile } from '../server/peer.js';
 import { startRegistry, startPc, signUp, until, mid } from './helpers/p2p.js';
 import { dmIdFor } from '../server/peercrypto.js';
+import { threePcs } from './helpers/groups.js';
 
 // Two blob stores wired to each other in memory: `sender` serves, `receiver` fetches.
 function pair({ cutAfter = Infinity } = {}) {
@@ -146,5 +147,30 @@ test('between PCs: a 12 MB file goes to a friend whose Snug takes it; a friend o
     a.close(); b.close();
   } finally {
     await A.close(); await B.close(); await registry.close();
+  }
+});
+
+// review-media 8: a thread reply in a group across PCs is held to the same file-size check as the group.
+test('groups across PCs: a file over 10 MB in a thread reply is refused when a member’s PC is on 0.11', async () => {
+  const registry = await startRegistry();
+  const pcs = [];
+  try {
+    const { A, B, C, a, b, c } = await threePcs(registry, pcs, ['thrgina', 'thrhal', 'thrivy']);
+    const g = (await a.ok('dm.open', { users: [b.id, c.id] })).id;
+    const all = [a.id, b.id, c.id].sort();
+    const members = (s) => s.db.all('SELECT user FROM dm_members WHERE dm = ? ORDER BY user', g).map((r) => r.user).join();
+    await until(() => members(B) === all.join() && members(C) === all.join(), 12_000, 'group on every PC');
+    const root = mid();
+    await a.ok('msg.send', { conv: g, id: root, text: 'thread root' });
+    A.db.run("UPDATE peers SET media = '{}' WHERE uid = ?", b.id.slice(2)); // B is on 0.11
+    const big = Buffer.concat([Buffer.from('PK\u0003\u0004'), randomBytes(11 * 1024 * 1024)]);
+    const up = await (await fetch(`${A.base}/api/files?conv=t:${root}`, { method: 'POST', headers: { cookie: a.cookie, origin: A.base, 'content-type': 'application/zip', 'x-file-name': 'big.zip' }, body: big })).json();
+    assert.ok(up.id, JSON.stringify(up));
+    const err = await a.refused('msg.send', { conv: `t:${root}`, id: mid(), text: 'too big for B', files: [{ id: up.id }] });
+    assert.match(err, /takes files up to 10 MB/);
+    for (const x of [a, b, c]) x.close();
+  } finally {
+    for (const s of pcs) await s.close().catch(() => {});
+    await registry.close();
   }
 });

@@ -372,8 +372,10 @@ Real, and covered by tests with separate users:
   already had (the last 40 or so per conversation). What you write waits and
   sends once when the connection is back; edits and reactions made offline
   wait too. Searching offline covers only what is on the device. Nothing
-  from the API (messages, files, sign-in) is kept by the worker, and the
-  page is always fetched fresh when the server can be reached. It needs
+  from the API (messages, files, sign-in) is kept by the worker, nor are
+  the help pages under `/docs/`, and the page is always fetched fresh when
+  the server can be reached. Signing out also drops read markers still
+  waiting to be sent from offline. It needs
   HTTPS (or `localhost`); on plain HTTP over a network the browser offers no
   service worker, so Snug can't open offline there. The desktop app doesn't
   use it (it has its own server).

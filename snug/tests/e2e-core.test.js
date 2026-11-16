@@ -102,7 +102,7 @@ test('quiet hours: one weekday set to quiet all day is saved for every device', 
 // page.evaluate awaits the promise; page.waitForFunction would not wait for it.
 const shellKept = (page) => page.evaluate(async () => {
   for (let i = 0; i < 300; i++) {
-    if (await (await caches.open('snug-shell-v1')).match('/__version')) return;
+    if (await (await caches.open('snug-shell-v2')).match('/__version')) return;
     await new Promise((r) => setTimeout(r, 100));
   }
   throw new Error('the app shell was never kept');
@@ -154,7 +154,7 @@ test('PWA: the app shell is kept by the service worker and opens with no connect
   const page = await person('robin');
   // The worker installs and keeps every file of the app.
   await shellKept(page);
-  const kept = await page.evaluate(async () => (await (await caches.open('snug-shell-v1')).keys()).map((r) => new URL(r.url).pathname));
+  const kept = await page.evaluate(async () => (await (await caches.open('snug-shell-v2')).keys()).map((r) => new URL(r.url).pathname));
   assert.ok(kept.includes('/') && kept.includes('/js/app.js') && kept.includes('/css/tokens.css'));
   assert.equal(kept.some((p) => p.startsWith('/api/')), false, 'nothing from the API is kept');
   await go(page, 'Glaze lab');

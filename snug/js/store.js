@@ -339,6 +339,7 @@ export function signedOut() {
   lastCache = '';
   // 0.12: the next person on this browser doesn't get these.
   opQueue = { user: null, ops: [] };
+  for (const k of Object.keys(offlineReads)) delete offlineReads[k]; // read markers made offline (review-media 8)
   for (const k of [KEYS.ops, KEYS.reply, KEYS.files]) local.del(k);
   S.draftFiles = {};
   Object.assign(S, blank());

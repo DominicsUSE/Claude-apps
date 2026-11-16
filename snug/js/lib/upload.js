@@ -76,7 +76,16 @@ export async function uploadBlob({ fetch: fetchFn, conv, blob, name, type = blob
         try { const s = await call(base); if (s.res.ok) received = s.data.received; } catch (e2) { if (e2.name === 'AbortError') throw abortError(); }
         continue;
       }
-      if (r.res.status === 409 && Number.isSafeInteger(r.data.received)) { received = r.data.received; continue; }
+      if (r.res.status === 409 && Number.isSafeInteger(r.data.received)) {
+        // "Carry on from here". When here is where we already were (the server is still writing the last
+        // part), wait and back off rather than asking again at once (review-media 8).
+        if (r.data.received === received) {
+          if (++fails >= TRIES) throw new Error(`${name} stopped uploading: the server is still busy with it. Try again in a moment.`);
+          await wait(fails);
+        }
+        received = r.data.received;
+        continue;
+      }
       if (!r.res.ok) throw Object.assign(new Error(r.data.error || `Couldn’t upload ${name}.`), { final: true });
       received = r.data.received;
       fails = 0;
