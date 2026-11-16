@@ -116,6 +116,13 @@ test('calls: a missed call needs me, even in a quiet group; a call I took part i
   assert.equal(needsMe(S, 'd_ines', missed), true);
   assert.equal(forMe(S, 'd_ines', missed), true, 'shown as for me too');
   for (const m of [took, declined, mine]) assert.equal(needsMe(S, 'd_ines', m), false);
+  // calls C5: records from 0.14 list only who missed the call.
+  const newMissed = rec('ines', { by: 'ines', outcome: 'missed', started: NOW, missed: ['robin'] });
+  const newTook = rec('ines', { by: 'ines', outcome: 'answered', started: NOW, dur: 4000, missed: [] });
+  const cut = rec('ines', { outcome: 'missed' }); // what the expiry sweep leaves
+  assert.equal(needsMe(S, 'd_ines', newMissed), true);
+  assert.equal(needsMe(S, 'd_ines', newTook), false);
+  assert.equal(needsMe(S, 'd_ines', cut), false, 'a record cut down to its outcome needs nobody');
   // In a group set to "Only what needs me", a group call I missed still does.
   S.dms.g_sat.notify = 'mentions';
   const groupMissed = rec('malik', { id: 'call_e', by: 'malik', outcome: 'answered', dur: 9000, joined: ['malik', 'ines'], declined: [] });

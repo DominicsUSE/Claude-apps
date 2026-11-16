@@ -238,6 +238,16 @@ export function createPrivacy({ db, M, hub, ops, peer = null, facts = {}, filesD
     const files = db.all('SELECT id, conv FROM files WHERE owner = ?', user).filter((f) => !HOUSE_FILE.test(f.conv));
     db.tx(() => {
       db.run(`UPDATE messages SET text = '', fold = '', files = NULL${extra}, deleted = COALESCE(deleted, ?) WHERE author = ?`, now, user);
+      // calls C5: call records they started keep only how the call went.
+      db.run("UPDATE messages SET sys = json_object('outcome', json_extract(sys, '$.outcome')) WHERE author = ? AND sys IS NOT NULL AND json_valid(sys) AND json_extract(sys, '$.outcome') IS NOT NULL", user);
+      // ... and others' call records forget them too (missed, and joined/declined from before 0.14).
+      for (const r of db.all("SELECT id, sys FROM messages WHERE sys IS NOT NULL AND author != ? AND instr(sys, ?) > 0", user, JSON.stringify(user))) {
+        let rec;
+        try { rec = JSON.parse(r.sys); } catch { continue; }
+        if (!rec?.outcome) continue;
+        for (const k of ['missed', 'joined', 'declined']) if (Array.isArray(rec[k])) rec[k] = rec[k].filter((u) => u !== user);
+        db.run('UPDATE messages SET sys = ? WHERE id = ?', JSON.stringify(rec), r.id);
+      }
       for (const [table, col] of [['msg_edits', 'msg'], ['pins', 'msg'], ['polls', 'msg'], ['poll_votes', 'msg'], ['e2ee_wraps', 'msg']]) { // e2ee_wraps: the sealed keys of encrypted messages
         if (has(table)) db.run(`DELETE FROM ${table} WHERE ${col} IN (SELECT id FROM messages WHERE author = ?)`, user);
       }

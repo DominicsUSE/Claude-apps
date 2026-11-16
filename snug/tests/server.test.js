@@ -1768,7 +1768,7 @@ test('calls: ringing reaches every device; picking up on one stops the others; a
   assert.equal(rec.m.author, a.id, 'the person who started the call');
   assert.equal(rec.m.call.outcome, 'answered');
   assert.ok(rec.m.call.dur >= 1000 && rec.m.call.dur < 10_000, `lasted ${rec.m.call.dur}ms`);
-  assert.deepEqual(rec.m.call.joined.sort(), [a.id, b.id].sort());
+  assert.deepEqual(rec.m.call.missed, [], 'calls C5: only who missed it is kept');
   assert.match(rec.m.text, /^Call · \ds$/);
   await record(b2, dm, (c) => c.outcome === 'answered');
   // The record moves nobody's read marker (both took part, so it isn't news
@@ -1792,7 +1792,7 @@ test('calls: declining a one-to-one call ends it for the caller with a declined 
   assert.equal((await a.next('call.ended', (e) => e.dm === dm)).reason, 'declined');
   const rec = await record(a, dm);
   assert.equal(rec.m.call.outcome, 'declined');
-  assert.deepEqual(rec.m.call.declined, [b.id]);
+  assert.deepEqual(rec.m.call.missed, [], 'Ben declined: he didn’t miss it');
   assert.equal(rec.m.text, 'Declined call');
   // Declining from the incoming screen doesn't read the conversation: Ann's
   // message from before the call is still unread for Ben.
@@ -1821,7 +1821,7 @@ test('calls: an unanswered call times out; the missed-call record is for the per
   assert.equal(rec.m.call.outcome, 'missed');
   assert.equal(rec.m.text, 'Missed call');
   assert.equal(rec.m.author, a.id);
-  assert.deepEqual(rec.m.call.joined, [a.id]);
+  assert.deepEqual(rec.m.call.missed, [b.id]);
   assert.ok((srv.db.get('SELECT ts FROM reads WHERE user = ? AND conv = ?', b.id, dm)?.ts || 0) < rec.m.ts, 'Ben missed it: it is unread for him');
   // In the history and in the next snapshot, as a call.
   assert.equal((await b.ok('history', { conv: dm })).msgs.at(-1).call.outcome, 'missed');
@@ -1869,7 +1869,7 @@ test('calls: a group call rings the rest until each times out, goes on while any
   assert.equal((await a.next('call.ended', (e) => e.dm === group)).reason, 'ended');
   const rec = await record(a, group);
   assert.equal(rec.m.call.outcome, 'answered');
-  assert.deepEqual(rec.m.call.joined.sort(), [a.id, b.id, c.id].sort());
+  assert.deepEqual(rec.m.call.missed, []);
   await d.none('msg', (e) => e.conv === group);
   for (const p of [a, b, c, d]) p.ws.close();
 });

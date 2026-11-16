@@ -454,6 +454,50 @@ test('who can ring me: friends only stops a non-friend’s ring and its push, a 
   closeAll(a, b, c);
 });
 
+// ---------- Call records (calls C5) ----------
+test('call records: only who started it, how it went, when, how long and who missed it; no list of who took part; the expiry sweep and erasing an account cut it down', async () => {
+  const { a, b, c, d, group, dm } = await people('rec');
+  // A group call Ben answers, Cal declines, Dot isn't in (not a member).
+  const { call } = await a.ok('call.start', { dm: group });
+  await b.next('call.ring', (r) => r.dm === group);
+  await c.next('call.ring', (r) => r.dm === group);
+  await c.ok('call.decline', { dm: group, call });
+  await b.ok('call.join', { dm: group });
+  await sleep(50);
+  await b.ok('voice.leave');
+  await a.ok('voice.leave');
+  const rec = (await a.next('msg', (e) => e.conv === group && e.m.call)).m;
+  const stored = JSON.parse(srv.db.get('SELECT sys FROM messages WHERE id = ?', rec.id).sys);
+  assert.deepEqual(Object.keys(stored).sort(), ['by', 'dur', 'missed', 'outcome', 'started', 'video'], 'nothing more is kept');
+  // 0.12/0.13 clients read joined: worked out from the members who didn't miss it, not stored.
+  assert.deepEqual(rec.call.joined.sort(), [a.id, b.id, c.id].sort());
+  assert.deepEqual(rec.call.missed, [], 'Ben took part and Cal declined: nobody missed it');
+  assert.equal(rec.call.outcome, 'answered');
+  const row = srv.db.get('SELECT sys FROM messages WHERE id = ?', rec.id);
+  assert.ok(!row.sys.includes(b.id) && !row.sys.includes(c.id), 'who took part or declined is not stored');
+  // A one-to-one call nobody answers: the person who missed it is the one listed.
+  await a.ok('call.start', { dm });
+  await b.next('call.ring', (r) => r.dm === dm);
+  await a.ok('voice.leave');
+  const missed = (await b.next('msg', (e) => e.conv === dm && e.m.call)).m;
+  assert.deepEqual(missed.call.missed, [b.id]);
+  // The disappearing-messages sweep leaves only how it went.
+  srv.db.run('UPDATE messages SET expires = ? WHERE id = ?', Date.now() - 1000, missed.id);
+  srv.expiry.sweep(Date.now());
+  assert.deepEqual(JSON.parse(srv.db.get('SELECT sys FROM messages WHERE id = ?', missed.id).sys), { outcome: 'missed' });
+  // Erasing Ann's account (she started the group call) does the same to her records.
+  srv.M.eraseAuthored(a.id);
+  assert.deepEqual(JSON.parse(srv.db.get('SELECT sys FROM messages WHERE id = ?', rec.id).sys), { outcome: 'answered' });
+  // Erasing Ben takes him off the records of calls others started.
+  await a.ok('call.start', { dm });
+  await b.next('call.ring', (r) => r.dm === dm);
+  await a.ok('voice.leave');
+  const again = (await b.next('msg', (e) => e.conv === dm && e.m.call)).m;
+  srv.M.eraseAuthored(b.id);
+  assert.deepEqual(JSON.parse(srv.db.get('SELECT sys FROM messages WHERE id = ?', again.id).sys).missed, []);
+  closeAll(a, b, c, d);
+});
+
 // ---------- TURN ----------
 test('TURN: with a shared secret each person gets a credential that verifies, runs out in about an hour, can’t be linked to their account, and the static password is never sent', async () => {
   const a = await Client.make('turnann', 'Ann Turn');

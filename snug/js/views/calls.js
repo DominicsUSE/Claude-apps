@@ -171,10 +171,12 @@ function recordText(m) {
   const mine = m.author === S.me;
   const by = firstName(m.author);
   const kind = c.video ? 'Video call' : 'Call';
-  const took = (c.joined || []).includes(S.me);
+  // calls C5: records list only who missed the call (before 0.14: who joined and declined).
+  const isNew = Array.isArray(c.missed);
+  const took = isNew ? !c.missed.includes(S.me) : !c.joined && !c.declined ? true : (c.joined || []).includes(S.me);
   // I declined a group call (which went on, or rang out, for the others):
   // history, not a missed call, so not violet and not for me.
-  if (!mine && !took && (c.declined || []).includes(S.me) && c.outcome !== 'declined') {
+  if (!isNew && !mine && !took && (c.declined || []).includes(S.me) && c.outcome !== 'declined') {
     return { title: `Declined ${c.video ? 'video call' : 'call'}`, sub: `from ${by}${c.outcome === 'answered' ? ` · ${dur(c.dur)}` : ''}` };
   }
   if (c.outcome === 'answered') {
@@ -182,10 +184,11 @@ function recordText(m) {
     return { title: `${kind} · ${dur(c.dur)}`, sub: mine ? 'You started it' : `${by} started it` };
   }
   if (c.outcome === 'declined') {
-    if (mine) return { title: `${kind} declined`, sub: `${nameList((c.declined || []).map(firstName))} declined` };
+    if (mine) return { title: `${kind} declined`, sub: isNew ? (c.missed.length ? 'Nobody answered' : 'They declined') : `${nameList((c.declined || []).map(firstName))} declined` };
     return { title: `Declined ${c.video ? 'video call' : 'call'}`, sub: `from ${by}` };
   }
   if (mine) return { title: `${kind} · no answer`, sub: 'You started it' };
+  if (took) return { title: `Declined ${c.video ? 'video call' : 'call'}`, sub: `from ${by}` };
   return { title: `Missed ${c.video ? 'video call' : 'call'}`, sub: `from ${by}`, missed: true };
 }
 
