@@ -292,6 +292,12 @@ test('passkeys: sign-in challenges asked for from one /48 can’t push out anyon
     const r = await ask('/api/passkey/login', { ticket: mine.body.ticket, credential: { id: 'bm90LWEtcmVhbC1wYXNza2V5' } }, '198.51.100.7');
     assert.equal(r.status, 401);
     assert.doesNotMatch(r.body.error, /took too long/, 'the challenge was pushed out');
+    // second pass: one challenge each from 1100 different /48s of one /32 (all tied at one per /48)
+    const mine2 = await ask('/api/passkey/options', {}, '198.51.100.8');
+    for (let i = 0; i < 1100; i++) await ask('/api/passkey/options', {}, `2001:db9:${i.toString(16)}::1`);
+    const r2 = await ask('/api/passkey/login', { ticket: mine2.body.ticket, credential: { id: 'bm90LWEtcmVhbC1wYXNza2V5' } }, '198.51.100.8');
+    assert.equal(r2.status, 401);
+    assert.doesNotMatch(r2.body.error, /took too long/, 'the challenge was pushed out by a /32 spread over /48s');
   } finally {
     await s2.close();
     rmSync(d2, { recursive: true, force: true });

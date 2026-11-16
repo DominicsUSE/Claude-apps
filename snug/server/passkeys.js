@@ -22,6 +22,14 @@ const MAX_CHALLENGES = 1000;
 const PER_SOURCE = 30; // v0.12 review: outstanding challenges per IPv6 /48 (or IPv4 address), or per account
 // ipOf gives an IPv6 address as its /64 ("a:b:c:d::/64"); the sign-in limits here count its /48.
 const wideOf = (k) => (/::\/64$/.test(k) ? `${k.split(':').slice(0, 3).join(':')}::/48` : k);
+// v0.12 review, second pass: the group a source counts in when the challenge map is full: an IPv6 /32 for a
+// /48, an IPv4 /24, an account itself. One allocation spread over many /48s is still one group.
+const groupOf = (src) => {
+  if (src.startsWith('u:')) return src;
+  if (/::\/48$/.test(src)) return `${src.split(':').slice(0, 2).join(':')}::/32`;
+  const v4 = src.match(/^(\d+\.\d+\.\d+)\.\d+$/);
+  return v4 ? `${v4[1]}.0/24` : src;
+};
 
 export function migratePasskeys(db) {
   (db.raw ?? db).exec(`
@@ -77,17 +85,19 @@ export function createPasskeys({
   const tokenOf = (req) => readCookie(req.headers.cookie, COOKIE);
 
   // src: who asked (a /48 or IPv4 address, or u:<account>). A source keeps at most PER_SOURCE challenges,
-  // and when the map is full the busiest source loses its oldest one, so a flood pushes out its own first.
+  // and when the map is full the busiest group (groupOf: a /32, a /24, an account) loses its oldest one, so a
+  // flood pushes out its own first. Ties go to the group that asked last (second pass): the one flooding now.
   function newChallenge(entry, src) {
     const now = Date.now();
     for (const [k, c] of challenges) if (c.until < now) challenges.delete(k);
     const mine = [...challenges].filter(([, c]) => c.src === src);
     if (mine.length >= PER_SOURCE) challenges.delete(mine[0][0]);
     while (challenges.size >= MAX_CHALLENGES) {
-      const count = new Map();
-      for (const c of challenges.values()) count.set(c.src, (count.get(c.src) || 0) + 1);
-      const top = [...count].sort((x, y) => y[1] - x[1])[0][0];
-      for (const [k, c] of challenges) if (c.src === top) { challenges.delete(k); break; }
+      const count = new Map(); // group -> [n, insertion order of its newest]
+      let i = 0;
+      for (const c of challenges.values()) { const g = groupOf(c.src); count.set(g, [(count.get(g)?.[0] || 0) + 1, i++]); }
+      const top = [...count].sort((x, y) => y[1][0] - x[1][0] || y[1][1] - x[1][1])[0][0];
+      for (const [k, c] of challenges) if (groupOf(c.src) === top) { challenges.delete(k); break; }
     }
     const ticket = randomBytes(24).toString('base64url');
     const challenge = b64u(randomBytes(32));
