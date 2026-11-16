@@ -153,3 +153,14 @@ test('device copy (e2ee L2): what this device decrypted is never written to loca
   assert.equal(opened.text, 'the secret plan', 'the live state is untouched');
   assert.ok(!cacheJson({ msgs: { r: [{ id: 'm', text: 'x', files: [{ src: 'blob:abc' }] }] }, more: {} }).includes('blob:'), 'local previews are left out as before');
 });
+
+test('SVG sniffing: the prolog is skipped piece by piece, and hostile prologs stay fast (CodeQL js/redos)', async () => {
+  const { looksLikeSvg } = await import('../js/views/preview.js');
+  assert.equal(looksLikeSvg('﻿  <?xml version="1.0"?>\n<!-- a --><!DOCTYPE svg PUBLIC "x"><!-- b -->\n<svg>'), true);
+  assert.equal(looksLikeSvg('<svg xmlns="http://www.w3.org/2000/svg"/>'), true);
+  for (const t of ['<html><svg>', '<!-- unterminated <svg>', '<svgx>']) assert.equal(looksLikeSvg(t), false, t);
+  const t0 = performance.now();
+  looksLikeSvg('<!--'.repeat(600));
+  looksLikeSvg(`${'<!---->'.repeat(300)}x`);
+  assert.ok(performance.now() - t0 < 200);
+});

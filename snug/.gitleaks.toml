@@ -14,4 +14,10 @@ regexes = [
   '''^\s*TURN_KEY_ID\s*=''',
   # A made-up per-launch secret in a desktop test.
   '''per-launch-secret-0123456789abcdefghij''',
+  # A made-up weak password in a sign-up check test.
+  '''mantas-rocks-2024''',
+]
+# Published RFC 9180 (HPKE) test vectors: public values, not secrets.
+paths = [
+  '''snug/tests/fixtures/hpke-[^/]+\.json''',
 ]

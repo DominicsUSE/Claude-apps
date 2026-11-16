@@ -19,8 +19,11 @@ export const isPdfFile = (f) => f.kind === 'file' && !!f.id && /\.pdf$/i.test(f.
 
 // Only bytes that look like SVG markup become a picture; anything else stays a download.
 export function looksLikeSvg(text) {
-  const head = String(text).slice(0, 2048).replace(/^﻿/, '').trimStart();
-  return /^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE svg[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*<svg[\s>]/i.test(head);
+  let head = String(text).slice(0, 2048).replace(/^﻿/, '').trimStart();
+  // Skip the prolog one piece at a time (an XML declaration, comments, an SVG doctype): one anchored
+  // match per piece, so no input can make the check backtrack.
+  for (let m; (m = /^(?:<\?xml[^>]*>|<!--[\s\S]*?-->|<!DOCTYPE svg[^>]*>)\s*/i.exec(head));) head = head.slice(m[0].length);
+  return /^<svg[\s>]/i.test(head);
 }
 // The first bytes of a PDF say so.
 export const looksLikePdf = (bytes) => bytes.length > 5 && String.fromCharCode(...bytes.subarray(0, 5)) === '%PDF-';
