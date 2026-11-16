@@ -48,12 +48,6 @@ goes back to an older version on its own (README, "Install, update, go back").
   on and could be dropped from the cache; with presence for friends only and an older directory, group
   messages between people who aren't friends waited for a link to reopen.
 
-### Known limits
-
-- Friends on other PCs still can't join houses (a house lives on one PC and its people join over the LAN
-  or a link). Group calls with friends on other PCs have only been tested on one machine, not through a
-  real TURN relay.
-
 ### Private conversations
 
 - The desktop app protects the key that seals your encryption keys with the operating system's key store
@@ -68,16 +62,6 @@ goes back to an older version on its own (README, "Install, update, go back").
   device.
 - Join mode never shows one of the server's `/api` answers as the window's page. The screen-share picker
   runs no inline script.
-
-### Known limits
-
-- The desktop app's own signing and prekey private keys are still browser keys in its storage, not sealed
-  by the key store, and they open messages sent to that device while its prekey is kept (up to three
-  weeks), so a copy of the data folder still opens recent messages. Attachments added to a draft in an
-  encrypted conversation aren't kept across a reload.
-- Once 0.13 has moved a desktop app's encryption keys under the key store, 0.12 can't open them: a desktop
-  app taken back to 0.12 can't read encrypted messages until it is updated again, or until that computer is
-  removed from another device and added again.
 
 ### Calls
 
@@ -110,6 +94,19 @@ goes back to an older version on its own (README, "Install, update, go back").
   0.12 apps.
 - Registry: the optional `KEY_ACCOUNT_IDLE_DAYS` purge (still off by default) keeps accounts with a GitHub
   account linked, and now runs on its own.
+
+### Known limits
+
+- Friends on other PCs still can't join houses (a house lives on one PC and its people join over the LAN
+  or a link). Group calls with friends on other PCs have only been tested on one machine, not through a
+  real TURN relay.
+- The desktop app's own signing and prekey private keys are still browser keys in its storage, not sealed
+  by the key store, and they open messages sent to that device while its prekey is kept (up to three
+  weeks), so a copy of the data folder still opens recent messages. Attachments added to a draft in an
+  encrypted conversation aren't kept across a reload.
+- Once 0.13 has moved a desktop app's encryption keys under the key store, 0.12 can't open them: a desktop
+  app taken back to 0.12 can't read encrypted messages until it is updated again, or until that computer is
+  removed from another device and added again.
 
 ## 0.12.0
 
