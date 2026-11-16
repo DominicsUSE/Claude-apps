@@ -9,7 +9,7 @@ import { Switch } from '../ui/kit.js';
 import { Confirm } from './modals.js';
 import { E2, removeDevice, setHistory, newRecoveryKeyFlow, deviceKind, resetEncryption, keysExposed, repairMeta, forgetLockedKeys } from '../e2ee/manager.js';
 import { renewDevice, deviceKeySealed } from '../e2ee/manager.js'; // 0.14: this device's keys sealed under the OS key store
-import { COPY } from '../lib/e2ee/copy.js';
+import { COPY, storageNoteFor } from '../lib/e2ee/copy.js';
 import { SetupSheet, RecoveryKeyScreen } from './e2ee-setup.js';
 import { LinkScreen, RecoverScreen } from './e2ee-link.js';
 
@@ -203,7 +203,7 @@ function EncryptionPage({ Row }) {
         <li>${COPY.roomsNot}</li>
         ${deviceKind() === 'web' && html`<li>${COPY.browserNote}</li>`}
         ${plainHttp() && html`<li>${COPY.plainHttp}</li>`}
-        <li>${COPY.storageNote}</li>
+        <li>${storageNoteFor({ kind: deviceKind(), keyStore: E2.keyStore, sealed: deviceKeySealed() })}</li>
         <li>Compare safety numbers with the people you talk to (in a conversation’s details) to know nobody put different keys between you.</li>
       </ul>
     </div>

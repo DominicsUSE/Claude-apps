@@ -124,6 +124,8 @@ test('turning it on: the first-run sheet, the recovery key typed back, keys kept
   assert.equal(await page.locator('.e2-dev').count(), 1);
   assert.match(await page.locator('.e2-limits').textContent(), /still sees who talks to whom/);
   assert.match(await page.locator('.e2-limits').textContent(), /Snug’s code comes from this server/);
+  assert.match(await page.locator('.e2-limits').textContent(), /aren’t sealed/); // 0.14: a browser's keys aren't sealed by a key store
+  assert.doesNotMatch(await page.locator('.e2-limits').textContent(), /sealed with the system key store/);
   await robinA.keyboard.press('Escape');
 });
 
