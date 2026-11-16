@@ -209,3 +209,15 @@ test('a desktop PC searches through the registry end to end: the GIF site only e
     a.close();
   } finally { await A.close(); await registry.close(); }
 });
+
+// review-media 1: a GIF fetched and stored by the server counts against the uploader's quota.
+test('a picked GIF is refused once the person is out of room', async () => {
+  await withServer({ SNUG_GIF_PROVIDER: 'openverse', SNUG_OPENVERSE_BASE: here, SNUG_QUOTA_MB: '1' }, async ({ base, cookie, room, get, post }) => {
+    const fill = await fetch(`${base}/api/files?conv=${room}`, { method: 'POST', headers: { cookie, origin: base, 'content-type': 'application/octet-stream', 'x-file-name': 'fill.bin' }, body: Buffer.alloc(1024 * 1024 - 100) });
+    assert.equal(fill.status, 201, await fill.clone().text());
+    const r0 = (await (await get('/api/gifs?q=cat')).json()).results.find((g) => g.id === 'ov1');
+    const imp = await post('/api/gifs/import', { conv: room, url: r0.url, title: r0.title });
+    assert.equal(imp.status, 413);
+    assert.match((await imp.json()).error, /room for your files/);
+  });
+});

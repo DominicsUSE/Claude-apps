@@ -60,12 +60,16 @@ export function PrivacyOverview({ openGuide }) {
   </div>`;
 }
 
+// What "Who sees when you're online" covers, and what stays visible whatever it says (review-media 4 and 6).
+export const PRESENCE_HINT = 'Also your status, your “Recently here” and “last wrote” lines, and that you’re in a voice room, for anyone not in it with you. People still see when each message was sent, and people in a voice room with you see you there.';
+export const PRESENCE_HINT_P2P = 'With friends only, members of your groups on other PCs who aren’t your friends don’t see you online. Your PC still connects to theirs to swap group messages, so their PC can tell you’re online while it does.';
+
 // Settings > Privacy and safety: when you're online, typing, and (desktop) friends' link previews.
 export function PrivacyControls({ Row }) {
   const p = S.prefs;
   const set = (k, v) => { S.prefs[k] = v; emit(); }; // synced to the server and applied there (js/account.js)
   return html`<div class="set-head">Activity</div>
-    <${Row} label="Who sees when you’re online" hint="Also your “Recently here” and “last wrote” lines. People still see when each message was sent, and who is in a voice room." top>
+    <${Row} label="Who sees when you’re online" hint=${PRESENCE_HINT + (modeNow() === 'p2p' ? ' ' + PRESENCE_HINT_P2P : '')} top>
       <${Seg} label="Who sees when you’re online" value=${p.presenceTo || 'everyone'} options=${PRESENCE_TO} onChange=${(v) => set('presenceTo', v)} />
     <//>
     <${Row} label="Typing" hint="Show people when you’re typing, and see when they are. Off: neither, on every device. Never shown while you’re invisible.">

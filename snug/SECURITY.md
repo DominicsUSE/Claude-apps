@@ -149,7 +149,18 @@ built from `js/lib/privacy.js` and `GET /api/privacy` (`server/privacy.js`).
   with addresses truncated (1.2.3.x, /48). Failed sign-in counters last 2 days and hold an address only as an
   HMAC under the data key. Sessions store a device label, never an address. Logs never print a full address.
 - Who sees that someone is online (everyone sharing a place, friends only, nobody) and typing are applied to
-  every frame the server sends (`hub.outFilter`), not only in the browser.
+  every frame the server sends (`hub.outFilter`), not only in the browser: presence, status (words, picture and
+  end time, and no frame at all when it changes), the "last wrote" lines, house voice-room lists and a stage's
+  speakers and raised hands for people not in the room, and houses' online and in-voice counts. Message
+  times and who is in a voice room, for people in it, stay visible. A voice room with a user limit still
+  refuses someone when it is full, so a room that looks empty but says it's full shows that someone hidden
+  is in it (letting them in instead would break the limit). In P2P mode, friends only watches group
+  co-members who aren't friends "quietly" at the registry: it sends them no presence, and their PCs can signal
+  (sig, relay, TURN) to the PC only after it has contacted them in its current registry session, the same
+  answer as offline otherwise. The PC contacts each such co-member when they come online, so group messages,
+  files and calls keep connecting directly; a modified client on their side can therefore still tell when the
+  PC is online. A registry without quiet watches (no `quiet` in its `ready` frame) gets the older behaviour:
+  those co-members aren't watched, so neither side can open a link to the other.
 - In P2P mode, link previews for links friends send are off unless the PC's owner turns them on, since the
   fetch reveals the PC's address to the linked site.
 - Deleting an account can erase what the person wrote (messages, files, reactions, poll votes, sign-in and

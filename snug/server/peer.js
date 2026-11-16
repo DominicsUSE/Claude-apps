@@ -247,7 +247,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     now: () => reg.now(),
     db, outbox, stats, log,
     peerOf,
-    online: (uid) => online.has(uid) && active() && self.state === 'ok',
+    online: (uid) => (online.has(uid) || reach.has(uid)) && active() && self.state === 'ok',
     verifyHs: (uid, hs) => verifyFrom(uid, (ik) => hsVerify(hs, ik)),
     relaySend, sigSend, host,
     hsInfo: () => ({ kver: Number(self?.kver) || 1, pv: Number(identity.get('profile_ver')) || 0 }),
@@ -262,6 +262,9 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     },
     onUp: (uid, hs) => {
       retryN.delete(uid);
+      // A co-member whose presence I'm not told (friends only on their PC) linked to me: the registry lets me
+      // reach them for the rest of their session, so my messages go straight to them (review-media 4).
+      if (!online.has(uid)) reach.add(uid);
       const p = peerOf(uid);
       db.run('UPDATE peers SET last_seen = ? WHERE uid = ?', Date.now(), uid);
       // The friend has a newer profile than the one kept here: ask for it.
@@ -270,7 +273,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       fetchPending(uid);
       G.up(uid);
     },
-    onDown: (uid, why, wasUp) => { if (wasUp) blobs.peerDown(uid); if (why !== 'stopped') retrySoon(uid); },
+    onDown: (uid, why, wasUp) => { if (wasUp) blobs.peerDown(uid); else reach.delete(uid); if (why !== 'stopped') retrySoon(uid); },
     opts: { idleMs: opts.peerIdleMs, dialMs: opts.peerDialMs, maxLinks: opts.peerMaxLinks, direct: opts.peerDirect, hideIp: () => !!self?.hideIp },
   });
 
@@ -302,6 +305,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     if (lastPct.size > 100) lastPct.delete(lastPct.keys().next().value);
     toOwner('file.progress', { id, got, size });
   };
+  let lastPartSweep = 0;
   const blobs = createBlobs({
     db, filesDir, stats, log, onProgress: blobProgress,
     sendEph: (uid, t, d) => links.sendEph(uid, t, d),
@@ -592,6 +596,8 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
 
   // Watch set: friends and people I asked, minus blocked ones (section 7.1).
   let watchT = null;
+  const reach = new Set();     // uids not online to me that linked to me (they show presence to friends only)
+  let quietNow = new Set();    // co-members told at the registry not to see me (friends only)
   function watchSoon() {
     clearTimeout(watchT);
     watchT = setTimeout(sendWatch, 1000);
@@ -604,19 +610,36 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       WHERE f.user = ? AND f.state IN ('friends', 'outgoing') AND u.remote = 1
       AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.user = f.user AND b.other = f.other) OR (b.user = f.other AND b.other = f.user))
       LIMIT 500`, owner()).map((r) => uidOf(r.user)).filter(Boolean);
-    // Co-members of groups across PCs are watched too (presence is shared with them).
-    for (const uid of G.watch()) {
+    // Co-members of groups across PCs are watched too, so links to them can open. With presence for friends
+    // only, they are watched quietly (review-media 4): the registry doesn't tell them I'm online and lets them
+    // reach me only once my PC contacted theirs, which it does when they come online (checkIn). A registry
+    // without quiet watches (ready.quiet) gets the old answer: they aren't watched at all.
+    const fo = friendsOnlyNow();
+    const canQuiet = signal.ready?.quiet === true;
+    const quiet = [];
+    if (!fo || canQuiet) for (const uid of G.watch()) {
       if (uids.length >= 500) break;
-      if (isUid(uid) && uid !== myUid() && !uids.includes(uid) && remote.has(shadowId(uid)) && !blockedEither(shadowId(uid))) uids.push(uid);
+      if (isUid(uid) && uid !== myUid() && !uids.includes(uid) && remote.has(shadowId(uid)) && !blockedEither(shadowId(uid))) { uids.push(uid); if (fo) quiet.push(uid); }
     }
-    signal.send({ t: 'watch', uids });
+    signal.send({ t: 'watch', uids, ...(quiet.length ? { quiet } : {}) });
+    const before = quietNow;
+    quietNow = new Set(quiet);
+    // Newly quiet: a link that was open before went up without my contact, so start it again.
+    for (const uid of quietNow) if (!before.has(uid)) { links.close(uid, 'quiet'); checkIn(uid); }
     // Anyone no longer watched is no longer online to me.
     for (const uid of [...online]) if (!uids.includes(uid)) setOnline(uid, false);
   }
+  // A quiet co-member online: open a link (after 0-5 s), so their PC may reach mine and their queue comes over.
+  function checkIn(uid) {
+    if (!online.has(uid)) return;
+    const t = setTimeout(() => { if (quietNow.has(uid) && online.has(uid)) links.want(uid); }, Math.floor(Math.random() * 5000));
+    t.unref?.();
+  }
   function setOnline(uid, on) {
     const had = online.has(uid);
-    if (on) online.add(uid); else online.delete(uid);
+    if (on) { online.add(uid); reach.delete(uid); } else online.delete(uid);
     if (had === on) return;
+    if (on && quietNow.has(uid)) checkIn(uid);
     if (!on) {
       links.close(uid, 'offline');
       // Gone: no retry waits for them, and their next visit starts the backoff afresh.
@@ -846,11 +869,16 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
       // Invisible: the registry stops announcing me (section 7.3).
       const vis = visibleNow();
       if (vis !== lastVisible) { lastVisible = vis; signal.send({ t: 'visible', on: vis }); }
+      const fo = friendsOnlyNow();
+      if (fo !== lastFriendsOnly) { lastFriendsOnly = fo; watchSoon(); }
     }
   };
   let lastVisible = true;
+  let lastFriendsOnly = false;
   // Invisible, or "who sees that I'm online: nobody" (server/privacy.js): the directory doesn't announce me.
   const visibleNow = () => ownerRow()?.presence !== 'offline' && M.presenceToAll?.(owner()) !== false;
+  // "Who sees that I'm online: friends only" (server/privacy.js): group co-members aren't watched (sendWatch).
+  function friendsOnlyNow() { return (M.prefsOf?.(owner()) || {}).presenceTo === 'friends'; }
   const baseSnap = hub.snapshotFor;
   hub.snapshotFor = (u) => {
     const snap = baseSnap(u);
@@ -1196,6 +1224,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
   });
   signal.on('down', () => {
     registry = 'offline';
+    reach.clear(); quietNow = new Set(); // a new registry session starts both afresh
     for (const uid of [...online]) setOnline(uid, false);
     links.closeAll('registry down');
     p2pEvent();
@@ -1351,6 +1380,8 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
     housekeep() {
       const t = Date.now();
       db.run('DELETE FROM peer_seen WHERE exp < ?', t);
+      // review-media 5: leftover .part files, every half hour (it lists the files folder).
+      if (t - lastPartSweep >= 30 * 60_000) { lastPartSweep = t; try { blobs.sweepParts(t); } catch (e) { log('peer', 'part sweep', e.code || e.message); } }
       if (!myUid()) return;
       const gone = outbox.expire(t);
       for (const r of gone) {

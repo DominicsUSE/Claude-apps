@@ -422,6 +422,8 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
     if (!gate.ok) fail(gate.why);
     if (!encrypted(to)) fail('Attachments are copied this way only into encrypted conversations.');
     if (!cfg.filesDir || !existsSync(join(cfg.filesDir, src.id))) fail('That attachment isn’t there any more.');
+    const full = cfg.room?.(c.user, to, src.size); // review-media 1: the quota and the disk floor, as for uploads
+    if (full) fail(full.message);
     const id = newId('f');
     copyFileSync(join(cfg.filesDir, src.id), join(cfg.filesDir, id));
     db.run('INSERT INTO files (id, owner, conv, name, type, size, created, enc) VALUES (?, ?, ?, ?, ?, ?, ?, 1)', id, c.user, to, 'file', 'application/octet-stream', src.size, Date.now());
@@ -457,6 +459,6 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
     });
   }
 
-  const configure = ({ filesDir }) => { cfg.filesDir = filesDir; };
+  const configure = ({ filesDir, room }) => { cfg.filesDir = filesDir; cfg.room = room; };
   return { ops, configure, readyChanged, upgrade, encrypted, rootOf, members, ready, checkEnvelope, insertWraps, sweep, wrapsFor };
 }

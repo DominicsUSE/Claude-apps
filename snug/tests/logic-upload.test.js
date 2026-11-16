@@ -100,3 +100,20 @@ test('uploadBlob: over the server’s limit is refused before a byte is sent', a
   await assert.rejects(uploadBlob({ fetch: s.fetch, conv: 'r_1', blob: blobOf(100 * 1024 + 1), name: 'huge.zip', limits: { maxFile: 100 * 1024, chunk: 64 * 1024 }, wait: noWait }), /huge\.zip is 100 KB.*up to 100 KB/);
   assert.deepEqual(s.calls, []);
 });
+
+// review-media 8: a 409 that doesn't move the offset (the server still writing the last part) waits and
+// backs off instead of asking again at once, and gives up after a while.
+test('uploadBlob: a 409 that leaves the offset where it was backs off, and gives up in the end', async () => {
+  const s = fakeServer({ chunk: 64 * 1024, stale: new Set([0, 1]) });
+  const waits = [];
+  const f = await uploadBlob({ fetch: s.fetch, conv: 'r_1', blob: blobOf(100 * 1024), name: 'a.zip', limits: { maxFile: 100 * MB, chunk: 64 * 1024 }, wait: async (n) => { waits.push(n); } });
+  assert.equal(f.id, 'f_done00000001');
+  assert.deepEqual(waits, [1, 2], 'each stale reply waited longer');
+  // A server that keeps saying "still writing": no tight loop, a clear message.
+  const stuck = fakeServer({ chunk: 64 * 1024, stale: new Set(Array.from({ length: 100 }, (_, i) => i)) });
+  let n = 0;
+  await assert.rejects(uploadBlob({ fetch: stuck.fetch, conv: 'r_1', blob: blobOf(100 * 1024), name: 'b.zip', limits: { maxFile: 100 * MB, chunk: 64 * 1024 }, wait: async () => { n++; } }), /stopped uploading/);
+  assert.ok(stuck.parts.length < 20, `asked ${stuck.parts.length} times`);
+  assert.ok(n > 0);
+  assert.equal(stuck.cancelled, true);
+});

@@ -89,6 +89,40 @@ test('presence "friends only": a house-mate sees me offline with no activity lin
   for (const c of [robin, ines, bex, bex2, ines2, me]) c.ws.close();
 });
 
+// review-media 6: "friends only" also covers the status line, who is in a house's voice room (to people not in
+// it) and the house's online and in-voice counts.
+test('presence "friends only": status, voice-room lists and house counts leave me out for non-friends', async () => {
+  const robin = await person('pv-robin6'), ines = await person('pv-ines6'), bex = await person('pv-bex6');
+  const { house } = await houseOf(robin, ines, bex);
+  await befriend(robin, ines);
+  await robin.ok('me.update', { status: 'At the beach' });
+  await robin.ok('prefs.set', { prefs: { presenceTo: 'friends' } });
+  const hangout = srv.db.get("SELECT id FROM rooms WHERE house = ? AND kind = 'voice'", house).id;
+  await robin.ok('voice.join', { room: hangout });
+  const bex2 = new Client(srv, bex.cookie, bex.id); await bex2.connect();
+  const ines2 = new Client(srv, ines.cookie, ines.id); await ines2.connect();
+  assert.equal(bex2.hello.users[robin.id].status, '', 'not a friend: no status line');
+  assert.equal(ines2.hello.users[robin.id].status, 'At the beach');
+  assert.deepEqual(bex2.hello.voice[hangout]?.users || [], [], 'not a friend: robin isn’t listed in the voice room');
+  assert.deepEqual(ines2.hello.voice[hangout].users, [robin.id]);
+  // Live: ines joining sends the room's list again; bex's copy still leaves robin out.
+  bex2.events.length = 0;
+  await ines.ok('voice.join', { room: hangout });
+  const live = await bex2.next('voice', (d) => d.room === hangout);
+  assert.deepEqual(live.users, [ines.id]);
+  assert.equal(live.state[robin.id], undefined);
+  // Counts: bex's preview doesn't count robin online or in voice; ines's does.
+  const pb = await bex2.ok('house.preview', { house });
+  const pi = await ines2.ok('house.preview', { house });
+  assert.equal(pi.online - pb.online, 1, 'robin is counted online only for his friend');
+  assert.equal(pi.inVoice - pb.inVoice, 1, 'and in voice only for his friend');
+  // Someone in the voice room sees everyone in it.
+  await bex.ok('voice.join', { room: hangout });
+  const inRoom = await bex2.next('voice', (d) => d.room === hangout && d.users.includes(bex.id));
+  assert.ok(inRoom.users.includes(robin.id), 'in the room: robin is listed');
+  for (const c of [robin, ines, bex, bex2, ines2]) { c.ok && c.op('voice.leave'); c.ws.close(); }
+});
+
 test('presence "nobody": friends see me offline too, and no typing note goes out', async () => {
   const kay = await person('pv-kay'), lee = await person('pv-lee');
   const { room } = await houseOf(kay, lee);
@@ -321,4 +355,49 @@ test('desktop: a link a friend sends is not fetched by my PC unless I turn on pr
     await A.close().catch(() => {}); await B.close().catch(() => {});
     await registry.close(); site.close();
   }
+});
+
+// review-media 6 (pass 2): the status picture and its end time go with the words, and changing a status sends
+// nothing to people who can't see it (the frame itself would say when someone is active).
+test('presence "friends only": no status picture, end time or status-change frame for non-friends', async () => {
+  const robin = await person('pv-robin7'), ines = await person('pv-ines7'), bex = await person('pv-bex7');
+  await houseOf(robin, ines, bex);
+  await befriend(robin, ines);
+  await robin.ok('prefs.set', { prefs: { presenceTo: 'friends' } });
+  await robin.ok('status.set', { text: 'At the beach', emoji: '🏖️', clear: '4h' });
+  const bex2 = new Client(srv, bex.cookie, bex.id); await bex2.connect();
+  const ines2 = new Client(srv, ines.cookie, ines.id); await ines2.connect();
+  const seen = bex2.hello.users[robin.id];
+  assert.deepEqual([seen.status, seen.statusEmoji ?? null, seen.statusUntil ?? null], ['', null, null], 'not a friend: no status at all');
+  assert.equal(ines2.hello.users[robin.id].statusEmoji, '🏖️');
+  bex2.events.length = 0;
+  await robin.ok('status.set', { text: 'Back home', emoji: '🏠' });
+  await ines2.next('user', (d) => d.user?.id === robin.id && d.user.status === 'Back home');
+  assert.ok(await none(bex2, 'user', (d) => d.user?.id === robin.id), 'not a friend: no frame when the status changes');
+  for (const c of [robin, ines, bex, bex2, ines2]) c.ws.close();
+});
+
+// review-media 6 (pass 2): a stage's speakers and raised hands are people in its voice room, so someone outside
+// it isn't told about those who hide their presence from them.
+test('presence "friends only": stage speakers and hands leave me out for non-friends outside the stage', async () => {
+  const robin = await person('pv-robin8'), ines = await person('pv-ines8'), bex = await person('pv-bex8');
+  const { house } = await houseOf(robin, ines, bex);
+  await befriend(robin, ines);
+  await robin.ok('prefs.set', { prefs: { presenceTo: 'friends' } });
+  const { id: stage } = await robin.ok('room.create', { house, name: 'Town hall', kind: 'stage' });
+  await robin.ok('voice.join', { room: stage });
+  await robin.ok('stage.speak', { room: stage });
+  const bex2 = new Client(srv, bex.cookie, bex.id); await bex2.connect();
+  const ines2 = new Client(srv, ines.cookie, ines.id); await ines2.connect();
+  assert.deepEqual(bex2.hello.rooms[stage].stage.speakers, [], 'not a friend: robin isn’t listed as a speaker');
+  assert.deepEqual(ines2.hello.rooms[stage].stage.speakers, [robin.id]);
+  await robin.ok('stage.topic', { room: stage, topic: 'Budget' });
+  const live = await bex2.next('stage', (d) => d.room === stage && d.topic === 'Budget');
+  assert.deepEqual(live.speakers, []);
+  assert.deepEqual((await ines2.next('stage', (d) => d.room === stage && d.topic === 'Budget')).speakers, [robin.id]);
+  // In the stage's voice room, everyone on it is listed.
+  await bex.ok('voice.join', { room: stage });
+  await robin.ok('stage.topic', { room: stage, topic: 'Budget, again' });
+  assert.deepEqual((await bex2.next('stage', (d) => d.room === stage && d.topic === 'Budget, again')).speakers, [robin.id]);
+  for (const c of [robin, ines, bex, bex2, ines2]) { c.op('voice.leave'); c.ws.close(); }
 });

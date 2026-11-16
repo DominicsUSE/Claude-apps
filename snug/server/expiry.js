@@ -18,6 +18,14 @@
 import { UserError } from './ops.js';
 import { newId, now } from './model.js';
 
+// What is left of a message's link previews once their words go: only the ids of the pictures Snug copied
+// (null when there are none), so the file sweep (server/media.js) can still remove those files.
+const FILE_ID = /f_[a-z0-9]{8,40}/g;
+export function embedFileRefs(embeds) {
+  const ids = [...new Set(String(embeds || '').match(FILE_ID) || [])];
+  return ids.length ? JSON.stringify(ids.map((id) => ({ kind: 'gone', image: { id } }))) : null;
+}
+
 export const TTLS = [0, 3_600_000, 86_400_000, 7 * 86_400_000, 30 * 86_400_000];
 const TTL_WORDS = { 3_600_000: '1 hour', 86_400_000: '1 day', [7 * 86_400_000]: '7 days', [30 * 86_400_000]: '30 days' };
 const fail = (m) => { throw new UserError(m); };
@@ -104,7 +112,10 @@ export function createExpiry({ db, M, hub, ops, clock = Date.now }) {
   };
 
   // Wipe what has expired, in batches. `t` is the sweep's clock (tests pass their own).
-  const blank = ['embeds', 'fwd', 'sticker'].filter((c) => cols.has(c)).map((c) => `, ${c} = NULL`).join('');
+  // Link previews keep only the ids of their pictures, so the file sweep can still find and remove them
+  // (review-media 3); their words go now.
+  const blank = ['fwd', 'sticker'].filter((c) => cols.has(c)).map((c) => `, ${c} = NULL`).join('');
+  const embedsCol = cols.has('embeds');
   return {
     sweep(t = clock()) {
       const rows = db.all("SELECT id, conv, expires FROM messages WHERE expires IS NOT NULL AND expires <= ? AND (deleted IS NULL OR text != '' OR fold != '') LIMIT 1000", t);
@@ -113,6 +124,8 @@ export function createExpiry({ db, M, hub, ops, clock = Date.now }) {
         for (const r of rows) {
           // files stay named until the file sweep has removed them (it reads expires too).
           db.run(`UPDATE messages SET deleted = coalesce(deleted, ?), text = '', fold = ''${blank} WHERE id = ?`, r.expires, r.id);
+          if (embedsCol) db.run('UPDATE messages SET embeds = ? WHERE id = ?', embedFileRefs(db.get('SELECT embeds FROM messages WHERE id = ?', r.id)?.embeds), r.id);
+          if (has('forum_posts')) db.run("UPDATE forum_posts SET title = '', tags = '[]' WHERE msg = ?", r.id);
           db.run('DELETE FROM reactions WHERE msg = ?', r.id);
           for (const tbl of ['msg_edits', 'polls', 'poll_votes', 'pins']) if (has(tbl)) db.run(`DELETE FROM ${tbl} WHERE msg = ?`, r.id);
           if (has('saved')) db.run('DELETE FROM saved WHERE msg = ?', r.id);

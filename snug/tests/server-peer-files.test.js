@@ -3,7 +3,7 @@
 // and the capability flag that keeps files over 10 MB away from 0.11 PCs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, existsSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
@@ -11,6 +11,7 @@ import { createBlobs } from '../server/peerblob.js';
 import { P2P_MAX_FILE, OLD_MAX_FILE, peerMaxFile } from '../server/peer.js';
 import { startRegistry, startPc, signUp, until, mid } from './helpers/p2p.js';
 import { dmIdFor } from '../server/peercrypto.js';
+import { threePcs } from './helpers/groups.js';
 
 // Two blob stores wired to each other in memory: `sender` serves, `receiver` fetches.
 function pair({ cutAfter = Infinity } = {}) {
@@ -75,6 +76,33 @@ test('a cut transfer whose bytes turn out wrong starts over instead of keeping t
   p.done();
 });
 
+// review-media 5: .part files that will never be finished are removed.
+test('leftover .part files go: those for a file that no longer exists at once, the rest after a week; one in progress stays', async () => {
+  const p = pair({ cutAfter: 5 });
+  const data = randomBytes(400 * 1024);
+  const h = p.add('f_src0000005', data);
+  // A cut transfer for a file this PC still has a row for: kept while fresh, so it can resume.
+  const job = { h, size: data.length, id: 'f_src0000005', cap: P2P_MAX_FILE };
+  const first = p.R.fetch('s', job);
+  await new Promise((r) => setTimeout(r, 50));
+  p.R.peerDown('s');
+  assert.equal(await first, false);
+  const kept = join(p.dirR, 'f_src0000005.part');
+  assert.ok(existsSync(kept));
+  // One for a file whose row is gone (the message was deleted), and one in another name.
+  const orphan = join(p.dirR, 'f_gone0000001.part');
+  writeFileSync(orphan, randomBytes(1000));
+  assert.equal(p.R.sweepParts(), 1);
+  assert.equal(existsSync(orphan), false, 'no row: removed');
+  assert.ok(existsSync(kept), 'a fresh cut transfer stays');
+  // A week later it is given up on.
+  const old = (Date.now() - 8 * 86_400_000) / 1000;
+  utimesSync(kept, old, old);
+  assert.equal(p.R.sweepParts(), 1);
+  assert.equal(existsSync(kept), false);
+  p.done();
+});
+
 test('peerMaxFile: a PC that says nothing is a 0.11 PC and takes 10 MB; a 0.12 PC says how much it takes', () => {
   assert.equal(OLD_MAX_FILE, 10 * 1024 * 1024);
   assert.equal(P2P_MAX_FILE, 100 * 1024 * 1024);
@@ -119,5 +147,30 @@ test('between PCs: a 12 MB file goes to a friend whose Snug takes it; a friend o
     a.close(); b.close();
   } finally {
     await A.close(); await B.close(); await registry.close();
+  }
+});
+
+// review-media 8: a thread reply in a group across PCs is held to the same file-size check as the group.
+test('groups across PCs: a file over 10 MB in a thread reply is refused when a member’s PC is on 0.11', async () => {
+  const registry = await startRegistry();
+  const pcs = [];
+  try {
+    const { A, B, C, a, b, c } = await threePcs(registry, pcs, ['thrgina', 'thrhal', 'thrivy']);
+    const g = (await a.ok('dm.open', { users: [b.id, c.id] })).id;
+    const all = [a.id, b.id, c.id].sort();
+    const members = (s) => s.db.all('SELECT user FROM dm_members WHERE dm = ? ORDER BY user', g).map((r) => r.user).join();
+    await until(() => members(B) === all.join() && members(C) === all.join(), 12_000, 'group on every PC');
+    const root = mid();
+    await a.ok('msg.send', { conv: g, id: root, text: 'thread root' });
+    A.db.run("UPDATE peers SET media = '{}' WHERE uid = ?", b.id.slice(2)); // B is on 0.11
+    const big = Buffer.concat([Buffer.from('PK\u0003\u0004'), randomBytes(11 * 1024 * 1024)]);
+    const up = await (await fetch(`${A.base}/api/files?conv=t:${root}`, { method: 'POST', headers: { cookie: a.cookie, origin: A.base, 'content-type': 'application/zip', 'x-file-name': 'big.zip' }, body: big })).json();
+    assert.ok(up.id, JSON.stringify(up));
+    const err = await a.refused('msg.send', { conv: `t:${root}`, id: mid(), text: 'too big for B', files: [{ id: up.id }] });
+    assert.match(err, /takes files up to 10 MB/);
+    for (const x of [a, b, c]) x.close();
+  } finally {
+    for (const s of pcs) await s.close().catch(() => {});
+    await registry.close();
   }
 });

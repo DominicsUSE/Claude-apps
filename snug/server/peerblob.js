@@ -5,7 +5,9 @@
 // One transfer per friend and four in all; the rest wait in a short queue.
 // A transfer cut off by a dropped link keeps its .part file, and the next try
 // asks only for the rest (the hash check at the end still covers every byte).
-import { createReadStream, openSync, writeSync, closeSync, unlinkSync, renameSync, readSync, fstatSync, existsSync, statSync } from 'node:fs';
+// Leftover .part files are swept (sweepParts): at once when their file is gone,
+// otherwise after a week.
+import { createReadStream, openSync, writeSync, closeSync, unlinkSync, renameSync, readSync, fstatSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
@@ -19,6 +21,9 @@ export function hashFile(path) {
     createReadStream(path).on('data', (c) => h.update(c)).on('error', reject).on('end', () => resolve(h.digest('base64url')));
   });
 }
+
+// A cut transfer's .part is kept this long for the next try (review-media 5).
+const PART_KEEP_MS = 7 * 86_400_000;
 
 // Failures that leave the bytes so far good: the next try carries on from them.
 const RESUMABLE = new Set(['link down', 'timeout', 'closing', 'missing']);
@@ -174,8 +179,27 @@ export function createBlobs({ db, filesDir, sendEph, canServe, log = () => {}, s
     const fd = openSync(p, 'r');
     try { const size = Math.min(n, fstatSync(fd).size); const b = Buffer.alloc(size); readSync(fd, b, 0, size, 0); return b; } finally { closeSync(fd); }
   }
+  // .part files nothing will finish (review-media 5): one whose file row is gone (the message or picture was
+  // deleted) goes at once, any other after a week untouched. A transfer in progress is left alone. Returns how
+  // many went. Called by server/peer.js housekeep().
+  function sweepParts(now = Date.now()) {
+    let names = [];
+    try { names = readdirSync(filesDir); } catch { return 0; }
+    const busy = new Set([...active.values()].map((t) => t.path));
+    let removed = 0;
+    for (const name of names) {
+      if (!name.endsWith('.part')) continue;
+      const path = join(filesDir, name);
+      if (busy.has(path)) continue;
+      let old;
+      try { old = statSync(path).mtimeMs < now - PART_KEEP_MS; } catch { continue; }
+      if (!old && db.get('SELECT 1 FROM files WHERE id = ?', name.slice(0, -5))) continue;
+      try { unlinkSync(path); removed++; } catch { /* gone */ }
+    }
+    return removed;
+  }
   return {
-    hashOf, serve, fetch, onPart, onMiss, peerDown, head,
+    hashOf, serve, fetch, onPart, onMiss, peerDown, head, sweepParts,
     busy: (uid) => active.has(uid),
     close() { for (const t of [...active.values()]) end(t, false, 'closing'); queue.splice(0).forEach((q) => q.resolve(false)); },
   };

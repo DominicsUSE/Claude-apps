@@ -264,9 +264,9 @@ Real, and covered by tests with separate users:
   index (SQLite FTS5): results in order of relevance (more of the words, in
   shorter messages, gently favouring recent ones), the start of a word finds
   the whole word (`thursd` finds *Thursday*), accents fold both ways (`zasis`
-  finds *žąsis*), and when nothing matches exactly it tries indexed words one
-  or two letters away and says *Showing close matches* (that is all the
-  typo tolerance there is). Operators, permissions and filters are as
+  finds *žąsis*), and when nothing matches exactly it tries words one or two
+  letters away, taken only from messages that search could return, and says
+  *Showing close matches* (that is all the typo tolerance there is). Operators, permissions and filters are as
   before. One-letter words, emoji and symbols are matched as plain text, as
   is everything if the SQLite in your Node has no FTS5 (`SNUG_FTS=0` forces
   that). An existing database is indexed when 0.12 first opens it. Deleted
@@ -275,8 +275,8 @@ Real, and covered by tests with separate users:
   (people who may manage rooms): off, 1 hour, 1 day, 7 days or 30 days, set
   from the conversation's More menu and shown as a timer in its header. New
   messages are removed for everyone when their time is up: text, earlier
-  versions, reactions, polls, pins, saved marks and attachments, with no
-  undo. Devices hide them on time even offline. What it can't do, and the
+  versions, reactions, polls, pins, saved marks, attachments, link previews
+  and their pictures, and a forum post's title and tags, with no undo. Devices hide them on time even offline. What it can't do, and the
   dialog says so: people can copy or screenshot a message first, and the
   encrypted daily database backups keep a copy for up to a week. With
   friends on other PCs it is offered only when every friend's Snug is 0.12
@@ -372,8 +372,10 @@ Real, and covered by tests with separate users:
   already had (the last 40 or so per conversation). What you write waits and
   sends once when the connection is back; edits and reactions made offline
   wait too. Searching offline covers only what is on the device. Nothing
-  from the API (messages, files, sign-in) is kept by the worker, and the
-  page is always fetched fresh when the server can be reached. It needs
+  from the API (messages, files, sign-in) is kept by the worker, nor are
+  the help pages under `/docs/`, and the page is always fetched fresh when
+  the server can be reached. Signing out also drops read markers still
+  waiting to be sent from offline. It needs
   HTTPS (or `localhost`); on plain HTTP over a network the browser offers no
   service worker, so Snug can't open offline there. The desktop app doesn't
   use it (it has its own server).
@@ -527,7 +529,10 @@ Real, and covered by tests with separate users:
     and checks each one, allows ports 80, 443, 8080 and 8443 only, stops at
     6 seconds and at 10 MB (4 MB for a page's picture), and caches for hours.
     Pictures are stored as Snug files in the conversation, so a reader's
-    browser never loads another site. The author or a moderator removes a
+    browser never loads another site. They count against the author's and
+    the house's file quotas, and go when the previews are removed or rebuilt
+    after an edit (pictures earlier versions left behind are swept once).
+    The author or a moderator removes a
     message's previews; `<https://...>` asks for none; Settings > Appearance >
     Link previews hides them; `SNUG_LINK_PREVIEWS=0` turns fetching off. In
     the desktop app, links friends on other PCs send get no preview unless
@@ -945,10 +950,14 @@ Real, and covered by tests with separate users:
     over 8 MB goes up in 4 MB parts with a progress bar and Cancel; a dropped
     connection costs one part and the upload carries on by itself. Per-person
     and per-house quotas and a free-disk floor refuse with a message that says
-    which. Between PCs, files over 10 MB go only to friends on Snug 0.12 or
+    which. Uploads still arriving count, and so do the copies the server makes
+    when you forward a file, send a sticker or reuse or pick a GIF (a link
+    preview's picture is left out when there's no room). End-to-end encrypted
+    file copies (`e2ee.file.copy`) are not yet held to the quota. Between PCs, files over 10 MB go only to friends on Snug 0.12 or
     later (a friend on 0.11 gets a clear "takes files up to 10 MB" instead),
     wait for a direct connection rather than the relay, show progress as they
-    arrive, and a cut transfer resumes.
+    arrive, and a cut transfer resumes (its partial file is kept for a week,
+    or removed at once if the message it belongs to is gone).
   - **Previews.** SVG shows as a picture made from its own bytes in an image
     element, which runs no script and loads nothing from elsewhere. PDFs show
     their first page, and Open goes through every page (pdf.js, loaded only
@@ -1251,7 +1260,9 @@ before seeding anything that faces the internet, or better, do not seed there.
 - **Rendering**: message text becomes a token tree and then elements, never
   HTML. A strict Content-Security-Policy allows scripts only from Snug itself.
 - **Uploads**: `SNUG_MAX_FILE_MB` limit (100 MB by default), streamed to disk,
-  with quotas and a free-disk floor; fetched only by people who can read the
+  with quotas and a free-disk floor that also cover uploads still arriving
+  and the server's own copies (forwards, stickers, GIFs, link previews; not yet
+  end-to-end encrypted file copies); fetched only by people who can read the
   conversation, served with `nosniff` and a sandboxing policy. Anything that
   is not a known image type downloads instead of opening; SVG and PDF previews
   are drawn in the page from the bytes (SVG as an image, which runs no script).
@@ -1374,8 +1385,19 @@ mode you're in. The short version:
   your data-file key wrapped. Calls go straight between PCs or through a
   Cloudflare relay that can't hear them.
 - **Your choices**: who sees that you're online (everyone you share a place
-  with, friends only, nobody), which also hides your "Recently here" and
-  "last wrote" lines; typing on or off (off stops sending and showing it, and
+  with, friends only, nobody), which also hides your status (and that you
+  changed it), your "Recently here" and "last wrote" lines, that you're in a
+  voice room or on a stage (from anyone not in it with you) and you from
+  houses' online counts. A full voice room with a user limit still turns
+  people away, which can show that someone they can't see is in it. People still see when
+  each message was sent. On the desktop app, friends only also hides you from
+  members of your groups across PCs who aren't your friends: the registry
+  doesn't tell their PCs you're online. Group messages, files and calls
+  between you still connect directly, because your PC contacts theirs when
+  they come online, so their PC (not their Snug) can tell you're online while
+  that happens. With a registry that predates this, your PC doesn't connect
+  to them at all and group messages between you wait for a friend of both to
+  pass them on; typing on or off (off stops sending and showing it, and
   nothing is sent while invisible); who can message, befriend or invite you.
   Read receipts don't exist in Snug.
 - **Your data**: Settings > Your data downloads one zip (profile, settings,

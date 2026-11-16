@@ -143,6 +143,30 @@ test('search: a close match when nothing matches exactly, and the reply says so'
   assert.equal((await ada.ok('search', { q: 'xylophonic' })).hits.length, 0);
 });
 
+// review-media 2: close-match candidates are chosen among words the searcher could find, so words in
+// conversations they can't read neither crowd out their own nor show up as a missing result.
+test('search: close-match candidates come only from what the searcher can read', async () => {
+  for (const c of 'abcdefgh') await send(ada, lounge, `vorpa${c}`);
+  const own = (await cy.ok('house.create', { name: 'Cy Search', hue: 50 })).room;
+  const mine = await send(cy, own, 'my vorpaz is here');
+  const r = await cy.ok('search', { q: 'vorpaq' });
+  assert.deepEqual(r.hits.map((h) => h.m.id), [mine], 'eight unreadable close words do not hide the readable one');
+  assert.equal(r.close, true);
+});
+
+// review-media 2 (pass 2): the candidate scan has no row window, so words in conversations the searcher
+// can't read can't push a readable close word out of it (a counting oracle once padded to the edge).
+test('search: many unreadable words before a readable close word do not hide it', async () => {
+  const A = 'abcdefghijklmnopqrstuvwxyz';
+  const pad = Array.from({ length: 20500 }, (_, i) => `qa${A[Math.floor(i / 676) % 26]}${A[Math.floor(i / 26) % 26]}${A[i % 26]}${A[Math.floor(i / 17576) % 26]}`);
+  srv.db.run("INSERT INTO messages (id, conv, author, ts, text, fold) VALUES ('m_corepad000001x', ?, ?, ?, '', ?)", lounge, ada.id, Date.now(), pad.join(' '));
+  const own = (await cy.ok('house.create', { name: 'Cy Window', hue: 60 })).room;
+  const mine = await send(cy, own, 'the qzzzzz is mine');
+  const r = await cy.ok('search', { q: 'qzzzzy' });
+  assert.deepEqual(r.hits.map((h) => h.m.id), [mine], '20500 unreadable q-words do not hide the readable one');
+  assert.equal(r.close, true);
+});
+
 test('search: an existing database without the index is indexed when it opens', () => {
   const d = mkdtempSync(join(tmpdir(), 'snug-fts-'));
   try {
@@ -251,6 +275,67 @@ test('disappearing: new messages get an expiry; the sweep (fake clock) removes t
   await ada.ok('conv.ttl', { conv: dm, ttl: 0 });
   const keep = await send(ada, dm, 'this one stays');
   assert.equal(srv.db.get('SELECT expires FROM messages WHERE id = ?', keep).expires, null);
+});
+
+// review-media 3: a disappearing message's link-preview picture and its forum title and tags go too.
+test('disappearing: link-preview files and forum titles and tags go with the message', async () => {
+  const t0 = Date.now();
+  const f = await (await upload(ada.cookie, lounge, 'preview bytes', 'preview.txt')).json();
+  const id = await send(ada, lounge, 'see https://example.org/page');
+  srv.db.run('UPDATE messages SET expires = ?, embeds = ? WHERE id = ?', t0 + HOUR, JSON.stringify([{ kind: 'link', url: 'https://example.org/page', host: 'example.org', title: 'Secret title', image: { id: f.id, w: 1, h: 1 } }]), id);
+  srv.db.run("INSERT INTO forum_posts (msg, room, title, tags) VALUES (?, ?, 'Hidden forum title', '[\"private\"]')", id, lounge);
+  const later = t0 + HOUR + 60_000;
+  srv.expiry.sweep(later);
+  const row = srv.db.get('SELECT text, embeds FROM messages WHERE id = ?', id);
+  assert.equal(row.text, '');
+  assert.doesNotMatch(row.embeds || '', /Secret title|example\.org/, 'the preview’s words go at once');
+  assert.deepEqual({ ...srv.db.get('SELECT title, tags FROM forum_posts WHERE msg = ?', id) }, { title: '', tags: '[]' });
+  srv.sweepFiles(later);
+  assert.equal(srv.db.get('SELECT 1 FROM files WHERE id = ?', f.id), undefined, 'the preview’s picture is removed');
+  assert.equal(srv.db.get('SELECT embeds FROM messages WHERE id = ?', id).embeds, null);
+});
+
+test('deleted messages: a preview’s picture is still removed once the undo window has passed', async () => {
+  const f = await (await upload(ada.cookie, lounge, 'preview bytes 2', 'preview.txt')).json();
+  const id = await send(ada, lounge, 'look https://example.org/two');
+  srv.db.run('UPDATE messages SET deleted = ?, embeds = ? WHERE id = ?', Date.now() - 12 * 60_000, JSON.stringify([{ kind: 'link', url: 'https://example.org/two', host: 'example.org', title: 'Words', image: { id: f.id, w: 1, h: 1 } }]), id);
+  for (let i = 0; i < 30; i++) srv.hub.messaging.tick(); // the background tick tidies deleted messages every 30th time
+  assert.doesNotMatch(srv.db.get('SELECT embeds FROM messages WHERE id = ?', id).embeds || '', /Words|example\.org/);
+  srv.sweepFiles(Date.now());
+  assert.equal(srv.db.get('SELECT 1 FROM files WHERE id = ?', f.id), undefined, 'the preview’s picture is removed');
+});
+
+// review-media 3 (pass 2): previews removed or rebuilt on a live message don't leave their pictures behind.
+const withPreview = async (text, title) => {
+  const f = await (await upload(ada.cookie, lounge, `preview ${title}`, 'preview.txt')).json();
+  srv.db.run('UPDATE files SET meta = ? WHERE id = ?', JSON.stringify({ embed: true, w: 1, h: 1 }), f.id);
+  const id = await send(ada, lounge, text);
+  srv.db.run('UPDATE messages SET embeds = ? WHERE id = ?', JSON.stringify([{ kind: 'link', url: 'https://example.org/p', host: 'example.org', title, image: { id: f.id, w: 1, h: 1 } }]), id);
+  return { f, id };
+};
+const fileGone = (fid) => srv.db.get('SELECT 1 FROM files WHERE id = ?', fid) === undefined && !existsSync(join(dir, 'files', fid));
+test('link previews: removing them removes the preview’s picture', async () => {
+  const { f, id } = await withPreview('see https://example.org/p', 'Off');
+  await ada.ok('msg.embeds', { conv: lounge, id, on: false });
+  assert.equal(srv.db.get('SELECT embeds FROM messages WHERE id = ?', id).embeds, null);
+  assert.ok(fileGone(f.id), 'the picture is removed with the preview');
+});
+test('link previews: an edit that rebuilds them removes the old picture', async () => {
+  const { f, id } = await withPreview('see https://example.org/p', 'Edit');
+  await ada.ok('msg.edit', { conv: lounge, id, text: 'see https://example.org/p again' });
+  for (let i = 0; i < 50 && srv.db.get('SELECT embeds FROM messages WHERE id = ?', id).embeds; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(srv.db.get('SELECT embeds FROM messages WHERE id = ?', id).embeds, null, 'this server fetches no previews, so the rebuild has none');
+  assert.ok(fileGone(f.id), 'the old picture is removed');
+});
+test('link previews: pictures orphaned by older builds are swept once', async () => {
+  const f = await (await upload(ada.cookie, lounge, 'old preview', 'preview.txt')).json();
+  srv.db.run('UPDATE files SET meta = ?, created = ? WHERE id = ?', JSON.stringify({ embed: true, w: 1, h: 1 }), Date.now() - 5 * DAY, f.id);
+  const kept = await withPreview('kept https://example.org/p', 'Kept');
+  srv.db.run('UPDATE files SET created = ? WHERE id = ?', Date.now() - 5 * DAY, kept.f.id);
+  srv.db.run("DELETE FROM sweep_marks WHERE name = 'embeds'"); // as on the first start of this build
+  for (let i = 0; i < 5; i++) srv.sweepFiles(Date.now());
+  assert.ok(fileGone(f.id), 'a preview picture no message names is removed');
+  assert.ok(srv.db.get('SELECT 1 FROM files WHERE id = ?', kept.f.id), 'one a message still shows stays');
 });
 
 test('disappearing: a database from before 0.12 gains the column and keeps its messages', () => {

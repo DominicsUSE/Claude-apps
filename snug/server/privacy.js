@@ -70,13 +70,59 @@ export function createPrivacy({ db, M, hub, ops, peer = null, facts = {}, filesD
     return to === 'friends' && M.areFriends(viewer, user);
   };
   M.presenceToAll = (user) => narrow.get(user) !== 'nobody';
-  // "How many are online" in Discover doesn't count people who show to nobody.
+  // "How many are online" in Discover doesn't count people who show to nobody; given a viewer (house cards,
+  // review-media 6), nor people who show to friends only and aren't the viewer's friend.
   const baseOnline = hub.isOnline;
-  if (baseOnline) hub.isOnline = (u) => baseOnline(u) && M.presenceToAll(u);
+  if (baseOnline) hub.isOnline = (u, viewer) => baseOnline(u) && M.presenceToAll(u) && (typeof viewer !== 'string' || M.presenceVisible(viewer, u));
   const quietTyping = (u) => prefs(u).typing === false || narrow.get(u) === 'nobody' || M.userRow(u)?.presence === 'offline';
 
   // ---------- Every frame out ----------
-  const masked = (v) => ({ ...v, presence: 'offline', idle: false, hideActive: true });
+  // review-media 6: the status line goes too, as in M.hiddenView (server/model.js).
+  // Pass 2: the status picture and when it ends go with the words.
+  const masked = (v) => ({
+    ...v, presence: 'offline', idle: false, hideActive: true,
+    ...('status' in v ? { status: '' } : {}), ...('statusEmoji' in v ? { statusEmoji: null } : {}), ...('statusUntil' in v ? { statusUntil: null } : {}),
+  });
+  // Who is in a house's voice room, as someone outside that room sees it: people who hide their presence from
+  // them aren't listed (review-media 6). Everyone in the room sees everyone in it; calls in direct conversations
+  // are left as they are.
+  function maskVoice(viewer, place, v) {
+    if (!v || typeof v !== 'object' || !Array.isArray(v.users) || v.users.includes(viewer) || !M.room?.(place)) return v;
+    const hide = v.users.filter((u) => !M.presenceVisible(viewer, u));
+    if (!hide.length) return v;
+    const state = { ...(v.state || {}) };
+    for (const u of hide) delete state[u];
+    return { ...v, users: v.users.filter((u) => !hide.includes(u)), state };
+  }
+  function maskVoiceMap(viewer, map) {
+    let out = map;
+    for (const [place, v] of Object.entries(map)) {
+      const m = maskVoice(viewer, place, v);
+      if (m === v) continue;
+      if (out === map) out = { ...map };
+      out[place] = m;
+    }
+    return out;
+  }
+  // A stage's speakers and raised hands, as someone outside its voice room sees them (pass 2): the same rule.
+  function maskStage(viewer, room, st) {
+    if (!st || typeof st !== 'object' || hub.voicePlaceOf?.(viewer) === room) return st;
+    const keep = (list) => (Array.isArray(list) ? list.filter((u) => M.presenceVisible(viewer, u)) : list);
+    const speakers = keep(st.speakers), hands = keep(st.hands);
+    if (speakers?.length === st.speakers?.length && hands?.length === st.hands?.length) return st;
+    return { ...st, speakers, hands };
+  }
+  function maskRooms(viewer, rooms) {
+    let out = rooms;
+    for (const [id, r] of Object.entries(rooms)) {
+      if (!r || typeof r !== 'object' || !r.stage) continue;
+      const st = maskStage(viewer, id, r.stage);
+      if (st === r.stage) continue;
+      if (out === rooms) out = { ...rooms };
+      out[id] = { ...r, stage: st };
+    }
+    return out;
+  }
   const isView = (v) => v && typeof v === 'object' && typeof v.id === 'string' && 'presence' in v;
   // A copy of `users` with the people this viewer may not see as online shown offline (the same object when nobody is).
   function maskUsers(viewer, users) {
@@ -104,7 +150,17 @@ export function createPrivacy({ db, M, hub, ops, peer = null, facts = {}, filesD
     if (Array.isArray(d)) return maskList(viewer, d);
     if (ev === 'typing') return M.presenceVisible(viewer, d.user) ? d : null;
     if (ev === 'presence') return M.presenceVisible(viewer, d.user) ? d : { ...d, presence: 'offline', hideActive: true };
+    if (ev === 'voice') return maskVoice(viewer, d.room, d);
+    if (ev === 'stage') return maskStage(viewer, d.room, d);
     let out = d;
+    if (d.rooms && typeof d.rooms === 'object' && !Array.isArray(d.rooms)) {
+      const rm = maskRooms(viewer, d.rooms);
+      if (rm !== d.rooms) out = { ...out, rooms: rm };
+    }
+    if (d.voice && typeof d.voice === 'object' && !Array.isArray(d.voice)) {
+      const vm = maskVoiceMap(viewer, d.voice);
+      if (vm !== d.voice) out = { ...out, voice: vm };
+    }
     if (isView(d.user) && !M.presenceVisible(viewer, d.user.id)) out = { ...out, user: masked(d.user) };
     for (const [k, v] of Object.entries(d)) {
       if (k === 'users' && v && typeof v === 'object' && !Array.isArray(v)) {
@@ -121,6 +177,8 @@ export function createPrivacy({ db, M, hub, ops, peer = null, facts = {}, filesD
   hub.outFilter = (viewer, msg) => {
     if (!narrow.size || !viewer || !msg) return msg;
     if (msg.t === 'ev') {
+      // A status change sends nothing to people who can't see it: the frame itself says the person is active.
+      if (msg.ev === 'user' && statusOnly && msg.d?.user?.id === statusOnly && !M.presenceVisible(viewer, statusOnly)) return null;
       const d = maskData(viewer, msg.ev, msg.d);
       if (d === null) return null;
       return d === msg.d ? msg : { ...msg, d };
@@ -133,6 +191,14 @@ export function createPrivacy({ db, M, hub, ops, peer = null, facts = {}, filesD
   };
 
   // ---------- Ops ----------
+  // While a status-only change is sent: whose (review-media 6). Ops run synchronously, so this is that op's.
+  let statusOnly = null;
+  const onlyStatus = (name, isOnly) => {
+    const base = ops[name];
+    if (base) ops[name] = (c, d) => { if (!isOnly(d)) return base(c, d); statusOnly = c.user; try { return base(c, d); } finally { statusOnly = null; } };
+  };
+  onlyStatus('status.set', () => true);
+  onlyStatus('me.update', (d) => !!d && typeof d === 'object' && Object.keys(d).length > 0 && Object.keys(d).every((k) => k === 'status'));
   // Settings that change who sees what: everyone who could see you hears it at once.
   const basePrefs = ops['prefs.set'];
   if (basePrefs) {

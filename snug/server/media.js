@@ -191,7 +191,9 @@ export const UNDO_MS = 11 * 60_000;
 export const UNATTACHED_MS = 24 * 3600_000;
 const OWNED = /^(avatar|banner|emoji|sticker|housepic|eventcover|sound):/;
 const FID = /f_[a-z0-9]{8,40}/g;
-export function createFileSweep({ db, filesDir, log = () => {} }) {
+// Whether anything still wants a file: a message that isn't past its undo window names it, a saved GIF,
+// a house emoji or sticker. Also used when a live message's previews are removed or rebuilt (server/messaging.js).
+export function fileChecker(db) {
   const cols = new Set(db.all('PRAGMA table_info(messages)').map((c) => c.name));
   const refCols = ['files', 'embeds', 'fwd'].filter((c) => cols.has(c)); // fixed names, never input
   const refSql = refCols.map((c) => `instr(coalesce(${c}, ''), ?) > 0`).join(' OR ');
@@ -208,6 +210,13 @@ export function createFileSweep({ db, filesDir, log = () => {} }) {
     if (hasTable('house_stickers') && db.get('SELECT 1 FROM house_stickers WHERE file = ?', fid)) return true;
     return false;
   };
+  return { wanted, refCols, live };
+}
+
+export function createFileSweep({ db, filesDir, log = () => {} }) {
+  const { wanted, refCols, live } = fileChecker(db);
+  // review-media 3: where the one-time walk over older link-preview pictures has got to.
+  db.run('CREATE TABLE IF NOT EXISTS sweep_marks (name TEXT PRIMARY KEY, mark INTEGER NOT NULL, until INTEGER NOT NULL)');
   const remove = (fid) => {
     db.run('DELETE FROM files WHERE id = ?', fid);
     try { unlinkSync(join(filesDir, fid)); } catch (e) { if (e.code !== 'ENOENT') log('error', 'file sweep', e); }
@@ -241,6 +250,23 @@ export function createFileSweep({ db, filesDir, log = () => {} }) {
         remove(f.id); removed++;
       }
       mark = batch.length === 200 ? batch[199].created : until;
+    }
+    // 3. Link-preview pictures that builds before this one left behind when previews were removed or
+    // rebuilt (review-media 3): walked once, 2000 rows of the files table per pass, up to the last row
+    // there when this build first ran. A picture younger than a day is step 2's.
+    let s = db.get("SELECT mark, until FROM sweep_marks WHERE name = 'embeds'");
+    if (!s) {
+      s = { mark: 0, until: db.get('SELECT COALESCE(MAX(rowid), 0) n FROM files').n };
+      db.run("INSERT INTO sweep_marks (name, mark, until) VALUES ('embeds', 0, ?)", s.until);
+    }
+    if (s.mark < s.until) {
+      const to = Math.min(s.mark + 2000, s.until);
+      for (const f of db.all(`SELECT id, conv FROM files WHERE rowid > ? AND rowid <= ? AND created < ? AND meta LIKE '%"embed":true%'`, s.mark, to, until)) {
+        if (OWNED.test(f.conv)) continue;
+        if (wanted(f.id, [f.conv], '', cutoff, now)) continue;
+        remove(f.id); removed++;
+      }
+      db.run("UPDATE sweep_marks SET mark = ? WHERE name = 'embeds'", to);
     }
     return removed;
   };
@@ -343,7 +369,9 @@ export function createMediaOps({ db, M, hub, fail, ops = {} }) {
 
 // GIF search (server/gifs.js has the providers). Results, previews and picks
 // all go through here; only addresses a search of ours returned are fetched.
-export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, headers, env = process.env, fetch: fetchFn = globalThis.fetch, gifReg = null }) {
+export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, headers, env = process.env, fetch: fetchFn = globalThis.fetch, gifReg = null, room = () => null, hold = null }) {
+  // review-media 1: the bytes of a copy count as in flight from the check until its files row exists.
+  const reserve = hold || ((u, c, n) => { const r = room(u, c, n); return r ? { refused: r } : { release() {} }; });
   const providers = gifProviders(env, { fetch: fetchFn, reg: gifReg });
   const byId = new Map(providers.map((p) => [p.id, p]));
   const searchLimit = limiter({ capacity: 20, perSecond: 1 });
@@ -431,13 +459,17 @@ export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, he
       if (!saveLimit.take(user)) { error(res, 429, 'Too many GIFs at once. Wait a moment.'); return true; }
       const got = await byId.get(k.p).fetch(String(d.url));
       if (got.err) { error(res, 422, got.err); return true; }
+      const held = reserve(user, conv, got.data.length); // review-media 1: the quota and the disk floor, as for uploads
+      if (held.refused) { error(res, held.refused.status, held.refused.message); return true; }
       const id = newId('f');
       const name = `${stripInvisible(String(d.title || 'GIF')).replace(/[\u0000-\u001f\u007f/\\]/g, '').trim().slice(0, 80) || 'GIF'}.${got.type === 'video/mp4' ? 'mp4' : got.type.split('/')[1]}`;
       // Openly licensed GIFs keep their credit (author, licence, where from) wherever they go.
       const meta = { gif: true, source: k.p, ...(k.credit ? { credit: k.credit } : {}) };
       if (Number.isInteger(d.w) && Number.isInteger(d.h) && d.w > 0 && d.h > 0) { meta.w = Math.min(8000, d.w); meta.h = Math.min(8000, d.h); }
-      await writeFile(join(filesDir, id), got.data, { mode: 0o600 });
-      db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, user, conv, name, got.type, got.data.length, Date.now(), JSON.stringify(meta));
+      try {
+        await writeFile(join(filesDir, id), got.data, { mode: 0o600 });
+        db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, user, conv, name, got.type, got.data.length, Date.now(), JSON.stringify(meta));
+      } finally { held.release(); }
       sendJson(res, 201, view(id, { name, size: got.data.length, type: got.type }, meta));
       return true;
     }
@@ -453,11 +485,15 @@ export function createMediaHttp({ db, M, filesDir, sendJson, error, jsonBody, he
       if (!src || !readableFile(M, user, src)) { error(res, 404, 'That GIF is no longer here.'); return true; }
       if (!isGif(src)) { error(res, 400, 'That isn’t a GIF.'); return true; }
       if (!saveLimit.take(user)) { error(res, 429, 'Too many GIFs at once. Wait a moment.'); return true; }
+      const held = reserve(user, conv, src.size); // review-media 1: a copy counts like an upload, from the check on
+      if (held.refused) { error(res, held.refused.status, held.refused.message); return true; }
       const id = newId('f');
       const meta = { ...json(src.meta, {}), gif: true };
       if (Number.isInteger(d.w) && Number.isInteger(d.h) && d.w > 0 && d.h > 0) { meta.w = Math.min(8000, d.w); meta.h = Math.min(8000, d.h); }
-      await copyFile(join(filesDir, src.id), join(filesDir, id));
-      db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, user, conv, src.name, src.type, src.size, Date.now(), JSON.stringify(meta));
+      try {
+        await copyFile(join(filesDir, src.id), join(filesDir, id));
+        db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', id, user, conv, src.name, src.type, src.size, Date.now(), JSON.stringify(meta));
+      } finally { held.release(); }
       sendJson(res, 201, view(id, src, meta));
       return true;
     }

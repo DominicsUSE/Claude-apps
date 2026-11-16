@@ -380,6 +380,12 @@ test('TURN: 404 when not configured; per-call credentials when configured', asyn
     assert.ok(ok.body.iceServers[0].urls.includes('turns:turn.cloudflare.com:443?transport=tcp'));
     assert.ok(ok.body.ttl <= 7200);
     assert.equal((await turn(r2, x, 'aaaaaaaaaaaaaaaa')).status, 404);
+    // review-media 4: a peer quiet toward me answers like an offline one until it contacts me.
+    sy.send({ t: 'watch', uids: [x.uid], quiet: [x.uid] });
+    await sx.next((m) => m.t === 'presence' && m.uid === y.uid && m.on === false);
+    assert.equal((await turn(r2, x, y.uid)).status, 404, 'quiet toward me: no relay credentials');
+    sy.send({ t: 'sig', id: 'q', to: x.uid, box: 'hi' });
+    await sx.next((m) => m.t === 'sig' && m.from === y.uid);
     assert.equal((await turn(r2, x, y.uid)).status, 200);
     assert.equal((await turn(r2, x, y.uid)).status, 429);
     sx.close();

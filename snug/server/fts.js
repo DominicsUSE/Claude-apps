@@ -63,15 +63,22 @@ export function matchExpr(fts) {
 // Close matches for a word the index doesn't know: indexed words that start
 // with the same letter and are one edit away (two for longer words). Edits
 // are insertions, deletions, substitutions and swaps of neighbours.
-export function closeWords(db, word, max = 8) {
+// `ok(term)` says whether a term counts (review-media 2: only words the searcher could find, so the cap of
+// `max` is applied after the visibility filter and words in conversations they can't read leave no trace).
+// The scan has no row window: any cut-off that counts words of the whole server (a window of rows, or a
+// cap on how many candidates are checked) could be padded to its edge from another account and then
+// tell whether one more unreadable word exists. It streams the words with that first letter and length,
+// about 2 µs each, and stops once `max` words count.
+export function closeWords(db, word, max = 8, ok = () => true) {
   if (word.length < 4) return [];
   const first = word[0];
   const limit = word.length > 6 ? 2 : 1;
-  const rows = db.all('SELECT term FROM temp.messages_vocab WHERE term >= ? AND term < ? AND length(term) BETWEEN ? AND ? LIMIT 20000',
-    first, first + '\u{10FFFF}', word.length - limit, word.length + limit);
+  const sql = 'SELECT term FROM temp.messages_vocab WHERE term >= ? AND term < ? AND length(term) BETWEEN ? AND ?';
+  const args = [first, first + '\u{10FFFF}', word.length - limit, word.length + limit];
+  const rows = db.raw?.prepare ? db.raw.prepare(sql).iterate(...args) : db.all(sql, ...args);
   const out = [];
   for (const { term } of rows) {
-    if (term !== word && editDistance(word, term, limit) <= limit) out.push(term);
+    if (term !== word && editDistance(word, term, limit) <= limit && ok(term)) out.push(term);
     if (out.length >= max) break;
   }
   return out;

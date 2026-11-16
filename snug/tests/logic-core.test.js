@@ -96,3 +96,45 @@ test('offline changes: queued once each (the last one wins), and replayed onto a
   assert.equal(S.msgs.r.length, 2);
   assert.equal(S.saved[0].id, 'm2');
 });
+
+// review-media 8: the service worker keeps only the app page under '/', never another page such as a help page.
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+test('service worker: a help page opened while online is never kept as the offline app page', async () => {
+  const handlers = {};
+  const puts = [];
+  const cache = { put: async (k) => { puts.push(k); }, match: async () => undefined };
+  const html = (body) => new Response(body, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
+  const ctx = {
+    self: { addEventListener: (t, f) => { handlers[t] = f; }, location: { origin: 'https://chat.example' }, registration: {}, clients: {} },
+    caches: { open: async () => cache, match: async () => undefined, keys: async () => [] },
+    fetch: async () => Object.defineProperty(html('<p>page</p>'), 'type', { value: 'basic' }),
+    URL, Response, Promise, console,
+  };
+  vm.runInNewContext(readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), ctx);
+  const go = async (path) => {
+    const waits = [];
+    let answered = null;
+    handlers.fetch({ request: { method: 'GET', url: `https://chat.example${path}`, mode: 'navigate' }, respondWith: (p) => { answered = p; }, waitUntil: (p) => waits.push(p) });
+    if (answered) await answered;
+    await Promise.all(waits);
+    return !!answered;
+  };
+  await go('/docs/guide.html');
+  assert.deepEqual(puts, [], 'a help page is not stored');
+  await go('/join/abc');
+  assert.deepEqual(puts, ['/'], 'an app route is stored as the app page');
+});
+
+// review-media 8: read markers kept while offline belong to the person who made them, not whoever signs in next.
+test('sign-out forgets read markers waiting to be sent from offline', async () => {
+  const store = await import('../js/store.js');
+  store.setRead('k_offline_read', 12345); // the default transport is offline: the marker waits
+  await new Promise((r) => setTimeout(r, 0));
+  store.signedOut();
+  const sent = [];
+  store.useTransport({ call: async (op, d) => { sent.push([op, d]); return {}; }, resync() {}, history: async () => ({}) });
+  store.applySnapshot({ me: 'u_next', users: {}, read: {} });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(sent.filter(([op]) => op.startsWith('read.')), [], 'nothing from the last person is sent for the next one');
+});

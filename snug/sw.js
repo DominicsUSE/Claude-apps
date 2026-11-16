@@ -10,7 +10,7 @@
 //    its version come from /shell.json (server/shell.js).
 /* eslint-env serviceworker */
 
-const SHELL = 'snug-shell-v1';
+const SHELL = 'snug-shell-v2'; // v2: drops a copy of another page an older worker may have kept as the app page (review-media 8)
 const NEVER = /^\/(api|ws)(\/|$)|^\/sw\.js$|^\/shell\.json$/;
 
 async function precache() {
@@ -45,7 +45,10 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin || NEVER.test(url.pathname)) return;
-  // Pages (/, /join/..., /m/...) are all the same app page.
+  // Pages (/, /join/..., /m/..., any path with no extension) are all the same app page (server/static.js
+  // staticRel). Other pages (help pages under /docs/, anything with an extension) are left to the browser, so
+  // they are never kept as the offline copy of the app (review-media 8).
+  if (req.mode === 'navigate' && !(url.pathname === '/index.html' || (!url.pathname.startsWith('/docs/') && !/\.[^/]*$/.test(url.pathname)))) return;
   const key = req.mode === 'navigate' ? '/' : url.pathname;
   if (req.mode !== 'navigate' && !/^\/(js|css|vendor|fonts|brand)\//.test(url.pathname)) return;
   e.respondWith((async () => {

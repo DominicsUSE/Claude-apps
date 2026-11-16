@@ -31,7 +31,8 @@ import { newId, now } from './model.js';
 import { limiter, safeDecode } from './auth.js';
 import { safeFetch, readMeta, previewLinks } from './linkpreview.js';
 import { emojiImage } from './emoji.js';
-import { sniff } from './media.js';
+import { sniff, fileChecker, UNDO_MS } from './media.js';
+import { embedFileRefs } from './expiry.js'; // review-media 3
 import { stripInvisible, cleanFileName } from '../js/lib/util.js'; // sec-authz
 
 export const POLL_HOURS = [1, 4, 8, 24, 72, 168];
@@ -147,7 +148,7 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
   const readableConv = (user, conv) => (M.canRead(user, conv) ? M.where(conv) : fail('You don’t have access to this conversation.'));
   const canModerate = (user, conv, row) => row.author === user || (!!M.where(conv)?.house && M.can(user, M.where(conv).house, 'moderate'));
   const live = (conv, id) => { const r = M.liveMsg(idOf(id, 'message')); if (!r || r.conv !== conv) fail('That message was deleted.'); return r; };
-  const cfg = { filesDir: null, previews: true, allowLoopback: false, tickMs: 1000 };
+  const cfg = { filesDir: null, previews: true, allowLoopback: false, tickMs: 1000, room: () => null };
   // Rate limits for everything here that writes or reaches other people,
   // registered with the hub so tests can reset them with the others.
   const L = {
@@ -170,7 +171,7 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
   const baseView = M.msgView;
   M.msgView = (row, rx) => {
     const m = baseView(row, rx);
-    if (row.embeds && !row.noembed) { const e = json(row.embeds, null); if (e?.length) m.embeds = e; }
+    if (row.embeds && !row.noembed) { const e = json(row.embeds, null)?.filter?.((x) => x?.kind !== 'gone'); if (e?.length) m.embeds = e; }
     if (row.noembed) m.noEmbeds = true;
     const x = extras.get(row.id);
     if (row.fwd || x?.fwd) m.fwd = row.fwd ? json(row.fwd, undefined) : x.fwd;
@@ -250,8 +251,12 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
   const newMsgId = (v) => (typeof v === 'string' && MSG_ID.test(v) ? v : fail('That message id isn’t valid.'));
 
   // A copy of a file into another conversation (forwarding, stickers, previews).
+  // review-media 1: held to the same quotas and disk floor as an upload (server/uploads.js room); refused with
+  // the same message.
   function copyFileTo(src, conv, owner, meta) {
     if (!cfg.filesDir || !existsSync(join(cfg.filesDir, src.id))) return null;
+    const full = cfg.room(owner, conv, src.size);
+    if (full) fail(full.message);
     const id = newId('f');
     copyFileSync(join(cfg.filesDir, src.id), join(cfg.filesDir, id));
     db.run('INSERT INTO files (id, owner, conv, name, type, size, created, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -264,6 +269,22 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
     for (const f of files) {
       db.run('DELETE FROM files WHERE id = ?', f.id);
       if (cfg.filesDir) try { unlinkSync(join(cfg.filesDir, f.id)); } catch { /* already gone */ }
+    }
+  }
+
+  // Preview pictures a live message stopped naming (its previews removed or rebuilt): each is that
+  // message's own copy, so it goes unless something else still names it (review-media 3).
+  let checker = null;
+  const FIDS = /f_[a-z0-9]{8,40}/g;
+  function dropEmbedFiles(conv, mid, before, after = null) {
+    const keep = new Set(String(after || '').match(FIDS) || []);
+    for (const fid of new Set(String(before || '').match(FIDS) || [])) {
+      if (keep.has(fid)) continue;
+      const f = db.get('SELECT id, conv, meta FROM files WHERE id = ?', fid);
+      if (!f || !/"embed"\s*:\s*true/.test(f.meta || '')) continue;
+      checker ||= fileChecker(db);
+      if (checker.wanted(fid, [conv, f.conv], mid, Date.now() - UNDO_MS)) continue;
+      dropFiles([f]);
     }
   }
 
@@ -337,7 +358,8 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
         if (data.kind === 'link') Object.assign(e, { title: data.title || undefined, description: data.description || undefined, site: data.site || undefined, color: data.color });
         if (data.media) {
           const src = join(cfg.filesDir, `lc_${data.media.hash}`);
-          if (existsSync(src)) {
+          // review-media 1: a preview's copy is skipped when the author or the house is out of room.
+          if (existsSync(src) && !cfg.room(row.author, conv, data.media.size)) {
             const fid = newId('f');
             copyFileSync(src, join(cfg.filesDir, fid));
             const ext = data.media.type.split('/')[1];
@@ -350,12 +372,14 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
         out.push(e);
       }
     }
-    // The message may have been edited, deleted or stripped of previews meanwhile.
+    // The message may have been edited, deleted or stripped of previews meanwhile: then the pictures
+    // just copied are named by nothing (review-media 3).
     const cur = M.liveMsg(mid);
-    if (!cur || cur.noembed || cur.text !== row.text) return;
     const next = out.length ? JSON.stringify(out) : null;
+    if (!cur || cur.noembed || cur.text !== row.text) { dropEmbedFiles(conv, mid, next, cur?.embeds); return; }
     if (next === (cur.embeds || null)) return;
     db.run('UPDATE messages SET embeds = ? WHERE id = ?', next, mid);
+    dropEmbedFiles(conv, mid, cur.embeds, next); // the pictures of the previews this replaces
     broadcast(conv, mid);
   }
   function queueEmbeds(conv, mid) {
@@ -401,7 +425,14 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
     // Earlier versions go with a deleted message's content (ten minutes of undo, then gone).
     if (++ticks % 30 === 0) {
       db.run('DELETE FROM msg_edits WHERE msg IN (SELECT id FROM messages WHERE deleted IS NOT NULL AND deleted < ?)', t - 11 * 60_000);
-      db.run('UPDATE messages SET embeds = NULL, fwd = NULL, sticker = NULL WHERE deleted IS NOT NULL AND deleted < ? AND (embeds IS NOT NULL OR fwd IS NOT NULL OR sticker IS NOT NULL)', t - 11 * 60_000);
+      // A preview's picture stays named (id only) until the file sweep removes it (review-media 3).
+      for (const r of db.all("SELECT id, embeds FROM messages WHERE deleted IS NOT NULL AND deleted < ? AND embeds IS NOT NULL AND embeds NOT LIKE '[{\"kind\":\"gone\"%' LIMIT 500", t - 11 * 60_000)) {
+        db.run('UPDATE messages SET embeds = ? WHERE id = ?', embedFileRefs(r.embeds), r.id);
+      }
+      db.run('UPDATE messages SET fwd = NULL, sticker = NULL WHERE deleted IS NOT NULL AND deleted < ? AND (fwd IS NOT NULL OR sticker IS NOT NULL)', t - 11 * 60_000);
+      if (db.get("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'forum_posts'")) {
+        db.run("UPDATE forum_posts SET title = '', tags = '[]' WHERE title != '' AND msg IN (SELECT id FROM messages WHERE deleted IS NOT NULL AND deleted < ?)", t - 11 * 60_000);
+      }
     }
   }
 
@@ -470,8 +501,8 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
 
   const api = {
     // Called by server/index.js once the files folder and options are known.
-    configure({ filesDir, previews = true, allowLoopback = false, tickMs = 1000 } = {}) {
-      Object.assign(cfg, { filesDir, previews, allowLoopback, tickMs });
+    configure({ filesDir, previews = true, allowLoopback = false, tickMs = 1000, room = () => null } = {}) {
+      Object.assign(cfg, { filesDir, previews, allowLoopback, tickMs, room });
       const timer = setInterval(() => { try { tick(); } catch (e) { console.error('messaging tick', e); } }, tickMs);
       timer.unref?.();
       const baseClose = hub.close;
@@ -583,6 +614,7 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
         queueEmbeds(conv, row.id);
       } else {
         db.run('UPDATE messages SET noembed = 1, embeds = NULL WHERE id = ?', row.id);
+        dropEmbedFiles(conv, row.id, row.embeds); // review-media 3: their pictures go too
         broadcast(conv, row.id);
       }
       return {};
@@ -607,11 +639,13 @@ export function createMessagingOps({ db, M, hub, fail, ops = {} }) {
       const srcFiles = json(src.files, []);
       const gate = M.postGate(c.user, to);
       if (!gate.ok) fail(gate.why);
-      for (const f of srcFiles.slice(0, 6)) {
-        const row = f.id && db.get('SELECT * FROM files WHERE id = ?', f.id);
-        const nid = row && copyFileTo(row, to, c.user);
-        if (nid) files.push({ ...f, id: nid });
-      }
+      try {
+        for (const f of srcFiles.slice(0, 6)) {
+          const row = f.id && db.get('SELECT * FROM files WHERE id = ?', f.id);
+          const nid = row && copyFileTo(row, to, c.user);
+          if (nid) files.push({ ...f, id: nid });
+        }
+      } catch (e) { dropFiles(files); throw e; } // out of room part-way: no copies left behind
       const fwd = {
         conv, id: src.id, author: orig ? orig.author : src.author, ts: orig ? orig.ts : src.ts,
         text: orig ? orig.text : src.text,

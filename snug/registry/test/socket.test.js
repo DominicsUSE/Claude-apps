@@ -433,3 +433,40 @@ test('rebind tickets: tampered or expired gives bad_ticket', async () => {
   assert.equal((await reg.call('/v1/rebind', { ticket: t, ts, sig: k2.sign(`snug-reg-v1\nrebind\n${t}\n${ts}`) })).body.error, 'bad_ticket');
   assert.equal(reg.runtime.sql('SELECT COUNT(*) AS n FROM tickets WHERE exp<=?', reg.clock.now())[0].n, 0, 'expired tickets purged by the alarm');
 });
+
+// review-media 4 (pass 2): "quiet" uids are watched so signalling works, but get no presence; they can reach
+// me only once I contacted them this session (like an invisible sender's peers). A PC shows its presence to
+// friends only this way without cutting off group co-members.
+test('quiet watch: no presence to quiet uids; they reach me only after I contact them', async () => {
+  const a = await user('qad');
+  const b = await user('qbe');
+  const c = await user('qcy');
+  const sa = await reg.connect(a.uid, a.k);
+  const sb = await reg.connect(b.uid, b.k);
+  const sc = await reg.connect(c.uid, c.k);
+  assert.equal(sa.ready.quiet, true, 'ready says quiet watches are understood');
+  // B: friends with A, quiet toward C (a group co-member who isn't a friend).
+  sa.send({ t: 'watch', uids: [b.uid] });
+  sc.send({ t: 'watch', uids: [b.uid] });
+  sb.send({ t: 'watch', uids: [a.uid, c.uid], quiet: [c.uid] });
+  await sa.next(isPresence(b.uid, true));
+  await sb.next(isPresence(c.uid, true)); // B still sees C
+  await sc.none(isPresence(b.uid, true));
+  // C can't reach B (the same answer as offline) until B contacts C.
+  sc.send({ t: 'sig', id: 'q1', to: b.uid, box: 'x' });
+  assert.equal((await sc.next((m) => m.id === 'q1')).code, 'unavailable');
+  sb.send({ t: 'sig', id: 'q2', to: c.uid, box: 'hello' });
+  await sc.next((m) => m.t === 'sig' && m.box === 'hello');
+  sc.send({ t: 'relay', id: 'q3', to: b.uid, box: 'reply' });
+  assert.equal((await sb.next((m) => m.t === 'relay')).box, 'reply');
+  // Leaving quiet announces B; going quiet again says off.
+  sb.send({ t: 'watch', uids: [a.uid, c.uid] });
+  await sc.next(isPresence(b.uid, true));
+  sb.send({ t: 'watch', uids: [a.uid, c.uid], quiet: [c.uid] });
+  await sc.next(isPresence(b.uid, false));
+  // Closing says nothing to C (it was never told B was on).
+  sb.close();
+  await sa.next(isPresence(b.uid, false));
+  await sc.none(isPresence(b.uid, false));
+  for (const s of [sa, sc]) s.close();
+});

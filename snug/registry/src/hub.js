@@ -33,6 +33,8 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS tickets (
     h TEXT PRIMARY KEY, ghh TEXT NOT NULL, owner INTEGER NOT NULL, ik TEXT NOT NULL, xk TEXT NOT NULL, exp INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS watch (uid TEXT PRIMARY KEY, uids TEXT NOT NULL)`,
+  // review-media 4: watched uids that get no presence from this uid and reach it only once it contacted them.
+  `CREATE TABLE IF NOT EXISTS watch_quiet (uid TEXT PRIMARY KEY, uids TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS knocks (
     to_uid TEXT NOT NULL, frm TEXT NOT NULL, id TEXT NOT NULL, box TEXT NOT NULL, ts INTEGER NOT NULL,
     PRIMARY KEY (to_uid, frm, id))`,
@@ -117,6 +119,7 @@ export class Hub {
     this.win = new Windows(this.now);
     this.budgets = new Budgets(this.sql, this.now);
     this.watchCache = new Map(); // uid -> Set | null, bounded
+    this.quietCache = new Map(); // uid -> Set (quiet watched uids), bounded
     this.gone = new WeakSet();
     this.alarmAt = undefined;
     this.ownerHashes = null; // [ghh] for OWNER_GITHUB_IDS
@@ -576,7 +579,7 @@ export class Hub {
       const t = this.ticket(h);
       if (!t || (t.ghh !== acc.ghh && t.ghh !== this.linkedGhh(uid))) fail('bad_ticket'); // v0.12: or its linked GitHub
       this.tx(() => {
-        for (const q of ['accounts', 'keys', 'pending_rebind', 'watch']) this.sql.exec(`DELETE FROM ${q} WHERE uid=?`, uid);
+        for (const q of ['accounts', 'keys', 'pending_rebind', 'watch', 'watch_quiet']) this.sql.exec(`DELETE FROM ${q} WHERE uid=?`, uid);
         this.dropKeyRows(uid);
         this.sql.exec('DELETE FROM knocks WHERE to_uid=?', uid);
         this.sql.exec('DELETE FROM tickets WHERE h=?', h);
@@ -584,6 +587,7 @@ export class Hub {
       });
       this.closeSockets(uid, () => true, 4003, 'revoked');
       this.watchCache.delete(uid);
+      this.quietCache.delete(uid);
       return { ok: true };
     });
   }
@@ -637,6 +641,11 @@ export class Hub {
       // group co-members, online now): the same answer as a missing uid otherwise. And a global daily cap,
       // so free accounts can't turn the TURN service into a paid open relay.
       if (!this.watchSet(uid)?.has(peer) || !this.watchSet(peer)?.has(uid)) fail('not_found');
+      // review-media 4: a peer quiet toward me answers only once it contacted me (else it's like offline).
+      if (this.quietSet(peer).has(uid)) {
+        const w = this.normalSocket(peer);
+        if (!w || !(this.att(w).ok || []).includes(uid)) fail('not_found');
+      }
       if (!this.budgets.take(uid, 'turn', this.limitFor(me, 'turnDay'))) fail('rate_limited', { retryAfter: this.retryAfter(DAY) });
       if (!this.budgets.take('*', 'turnAll', this.L.turnGlobalDay)) fail('rate_limited', { retryAfter: this.retryAfter(DAY) });
     });
@@ -735,6 +744,19 @@ export class Hub {
     this.watchCache.set(uid, s);
     return s;
   }
+  /** The uids `uid` watches quietly: they get no presence from it and reach it only once it contacted them. */
+  quietSet(uid) {
+    if (this.quietCache.has(uid)) return this.quietCache.get(uid);
+    const r = this.row('SELECT uids FROM watch_quiet WHERE uid=?', uid);
+    const s = new Set(r ? JSON.parse(r.uids) : []);
+    if (this.quietCache.size >= 1000) this.quietCache.delete(this.quietCache.keys().next().value);
+    this.quietCache.set(uid, s);
+    return s;
+  }
+  /** Whether my socket's attachment `a` shows my presence to u. */
+  shows(a, u) {
+    return a.visible && !this.quietSet(a.uid).has(u);
+  }
   /** u's normal socket if u is online and watches me. */
   mutualOnline(me, u) {
     const w = this.normalSocket(u);
@@ -750,7 +772,7 @@ export class Hub {
     const w = this.mutualOnline(me, to);
     if (!w) return null;
     const ta = this.att(w);
-    if (!ta.visible && !(ta.ok || []).includes(me)) return null;
+    if (!this.shows(ta, me) && !(ta.ok || []).includes(me)) return null;
     return w;
   }
   /** Socket gone (closed by either side). Idempotent. Presence off + watch row delete if no other normal socket. */
@@ -762,12 +784,15 @@ export class Hub {
       const set = this.watchSet(a.uid);
       if (set && a.visible) {
         for (const u of set) {
+          if (!this.shows(a, u)) continue;
           const w = this.mutualOnline(a.uid, u);
           if (w) this.send(w, { t: 'presence', uid: a.uid, on: false });
         }
       }
       this.sql.exec('DELETE FROM watch WHERE uid=?', a.uid);
+      this.sql.exec('DELETE FROM watch_quiet WHERE uid=?', a.uid);
       this.watchCache.delete(a.uid);
+      this.quietCache.delete(a.uid);
     }
     if (a && a.authed && a.mode === 'xfer') this.xferGone(a);
     this.budgets.flush();
@@ -906,7 +931,8 @@ export class Hub {
     this.countFrame();
     const att = { uid, authed: true, mode, visible: f.visible !== false, at: this.now(), ik, ...(v ? { v } : {}) };
     ws.serializeAttachment(att);
-    const ready = { t: 'ready', mode, kver: cur.kver, ping: Number(this.env.PING_SECONDS) || 90, now: this.now() };
+    // quiet: this registry understands watch frames with quiet uids (review-media 4).
+    const ready = { t: 'ready', mode, kver: cur.kver, ping: Number(this.env.PING_SECONDS) || 90, now: this.now(), quiet: true };
     const perms = this.permsOfSync(cur);
     if (perms.length) ready.admin = perms;
     ready.notices = this.notices();
@@ -930,8 +956,8 @@ export class Hub {
   exchangePresence(ws, a, u) {
     const w = this.mutualOnline(a.uid, u);
     if (!w) return;
-    if (a.visible) this.send(w, { t: 'presence', uid: a.uid, on: true });
-    if (this.att(w).visible) this.send(ws, { t: 'presence', uid: u, on: true });
+    if (this.shows(a, u)) this.send(w, { t: 'presence', uid: a.uid, on: true });
+    if (this.shows(this.att(w), a.uid)) this.send(ws, { t: 'presence', uid: u, on: true });
   }
 
   onWatch(ws, a, f) {
@@ -944,14 +970,23 @@ export class Hub {
     this.countFrame();
     const next = new Set(f.uids.filter((u) => isUid(u) && u !== me));
     const prev = this.watchSet(me) || new Set();
+    // review-media 4: watched, but no presence from me and no reaching me until I contact them.
+    const quiet = new Set((Array.isArray(f.quiet) ? f.quiet : []).filter((u) => next.has(u)));
+    const shown = new Set([...prev].filter((u) => this.shows(a, u)));
     this.sql.exec('INSERT OR REPLACE INTO watch(uid, uids) VALUES(?,?)', me, JSON.stringify([...next]));
     this.watchCache.set(me, next);
+    if (quiet.size) this.sql.exec('INSERT OR REPLACE INTO watch_quiet(uid, uids) VALUES(?,?)', me, JSON.stringify([...quiet]));
+    else this.sql.exec('DELETE FROM watch_quiet WHERE uid=?', me);
+    this.quietCache.set(me, quiet);
     for (const u of prev) {
-      if (next.has(u) || !a.visible) continue;
-      const w = this.mutualOnline(me, u); // we were mutual; now we are not
+      if (!shown.has(u) || (next.has(u) && this.shows(a, u))) continue;
+      const w = this.mutualOnline(me, u); // they saw me on; now they don't watch me mutually or are quiet
       if (w) this.send(w, { t: 'presence', uid: me, on: false });
     }
-    for (const u of next) if (!prev.has(u)) this.exchangePresence(ws, a, u);
+    for (const u of next) {
+      if (!prev.has(u)) this.exchangePresence(ws, a, u);
+      else if (!shown.has(u) && this.shows(a, u)) { const w = this.mutualOnline(me, u); if (w) this.send(w, { t: 'presence', uid: me, on: true }); }
+    }
   }
 
   onVisible(ws, a, f) {
@@ -963,6 +998,7 @@ export class Hub {
     const mine = this.watchSet(a.uid);
     if (!mine) return;
     for (const u of mine) {
+      if (this.quietSet(a.uid).has(u)) continue;
       const w = this.mutualOnline(a.uid, u);
       if (w) this.send(w, { t: 'presence', uid: a.uid, on });
     }
@@ -987,7 +1023,7 @@ export class Hub {
     const w = this.deliverable(me, f.to);
     if (!w) return this.send(ws, { t: 'err', id, code: 'unavailable' });
     this.send(w, { t: f.t, from: me, box: f.box });
-    if (!a.visible) {
+    if (!a.visible || this.quietSet(me).has(f.to)) { // invisible, or quiet toward them: they may reply now
       const ok = a.ok || [];
       if (!ok.includes(f.to)) {
         ok.push(f.to);

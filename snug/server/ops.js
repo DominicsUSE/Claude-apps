@@ -216,7 +216,7 @@ export function createOps({ db, M, hub }) {
       : 0;
     return {
       id: h.id, name: h.name, mark: h.mark, hue: h.hue, about: h.about, topic: h.topic || null,
-      members: users.length, online: users.filter(hub.isOnline).length, inVoice: hub.inVoice(ids), talking,
+      members: users.length, online: users.filter((u) => hub.isOnline(u, viewer)).length, inVoice: hub.inVoice(ids, viewer), talking, // review-media 6
       created: h.created, rooms: rooms.map((r) => ({ name: r.name, kind: r.kind })),
       friends: db.all(`SELECT m.user FROM members m JOIN friends f ON f.user = ? AND f.other = m.user AND f.state = 'friends'
         WHERE m.house = ?`, viewer, h.id).map((r) => r.user),
@@ -872,7 +872,7 @@ export function createOps({ db, M, hub }) {
       }
       const cheap = (h) => {
         const users = memberOf[h.id] || [];
-        return [hub.inVoice(roomsOf[h.id] || []), users.filter(hub.isOnline).length, users.length];
+        return [hub.inVoice(roomsOf[h.id] || [], c.user), users.filter((u) => hub.isOnline(u, c.user)).length, users.length];
       };
       const rank = new Map(found.map((h) => [h.id, cheap(h)]));
       const byRank = (a, b) => { const x = rank.get(a.id), y = rank.get(b.id); return (y[0] - x[0]) || (y[1] - x[1]) || (y[2] - x[2]); };
