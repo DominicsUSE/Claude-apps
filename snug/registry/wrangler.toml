@@ -19,10 +19,11 @@ TURN_KEY_ID = "8d4d95f8e798e01d313f8f2374d952ba"
 RELAY_OFF_AT = "60000"
 # Signal keepalive interval sent to clients (seconds).
 PING_SECONDS = "90"
-# 0.12 GIF search for desktop PCs (src/gif.js): openverse (default), commons (no safe-search; opt-in),
-# tenor (needs the TENOR_KEY secret), comma-separated, or off. GIF_CONTACT goes into the User-Agent.
-GIF_PROVIDERS = "openverse"
-GIF_CONTACT = ""
+# GIF search for desktop PCs (src/gif.js), tried in order: tenor (only once the TENOR_KEY secret is set;
+# safe search), openverse (throttles a Worker's shared address without OPENVERSE_CLIENT_ID/SECRET), commons (no safe-search),
+# comma-separated, or off. GIF_CONTACT goes into the User-Agent, as Wikimedia asks.
+GIF_PROVIDERS = "tenor,openverse,commons"
+GIF_CONTACT = "https://github.com/DominicsUSE/Claude-apps"
 # The Durable Object instance holding every account. A new name starts an empty registry (a reset).
 # "hub-2": reset on 2026-11-14 at the owner's request (the old instance's test accounts are abandoned).
 HUB_NAME = "hub-2"
