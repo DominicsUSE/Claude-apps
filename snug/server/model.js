@@ -154,10 +154,13 @@ export function createModel(db) {
     if (row.edited) m.edited = row.edited;
     if (row.sys) m.call = json(row.sys, null); // a call record (server/hub.js)
     // calls C5: a 0.14 record stores only who missed the call; 0.12/0.13 clients read joined and
-    // declined, so they get the conversation's members who didn't miss it (worked out, not stored).
+    // declined, so they get the conversation's members who didn't miss it (worked out, not stored). A
+    // declined call: everyone but the caller who didn't miss it declined ("Ben declined" on a 0.13 client).
     if (Array.isArray(m.call?.missed) && !m.call.joined) {
-      m.call.joined = db.all('SELECT user FROM dm_members WHERE dm = ?', row.conv).map((r) => r.user).filter((u) => !m.call.missed.includes(u));
-      m.call.declined = [];
+      const others = db.all('SELECT user FROM dm_members WHERE dm = ?', row.conv).map((r) => r.user).filter((u) => !m.call.missed.includes(u));
+      const declined = m.call.outcome === 'declined';
+      m.call.joined = declined ? [m.call.by] : others;
+      m.call.declined = declined ? others.filter((u) => u !== m.call.by) : [];
     }
     if (rx && Object.keys(rx).length) m.reactions = rx;
     return m;

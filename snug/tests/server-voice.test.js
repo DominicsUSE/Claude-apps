@@ -507,6 +507,15 @@ test('call records: only who started it, how it went, when, how long and who mis
   await a.ok('voice.leave');
   const missed = (await b.next('msg', (e) => e.conv === dm && e.m.call)).m;
   assert.deepEqual(missed.call.missed, [b.id]);
+  // A one-to-one call Ben declines: 0.12/0.13 clients name who declined ("Ben declined"), worked out, not stored.
+  const { call: c2 } = await a.ok('call.start', { dm });
+  await b.next('call.ring', (r) => r.dm === dm);
+  await b.ok('call.decline', { dm, call: c2 });
+  const declined = (await a.next('msg', (e) => e.conv === dm && e.m.call?.outcome === 'declined')).m;
+  await b.next('msg', (e) => e.conv === dm && e.m.call?.outcome === 'declined');
+  assert.deepEqual(declined.call.declined, [b.id]);
+  assert.deepEqual(declined.call.joined, [a.id]);
+  assert.ok(!srv.db.get('SELECT sys FROM messages WHERE id = ?', declined.id).sys.includes(b.id), 'who declined is not stored');
   // The disappearing-messages sweep leaves only how it went.
   srv.db.run('UPDATE messages SET expires = ? WHERE id = ?', Date.now() - 1000, missed.id);
   srv.expiry.sweep(Date.now());
