@@ -514,3 +514,24 @@ test('deleting an account removes its key directory: list, devices, prekeys, bac
   assert.equal(srv.db.get('SELECT COUNT(*) n FROM e2ee_wraps WHERE target = ? OR target LIKE ?', `d:${b.dev.d}`, `a:${b.id}:%`).n, 0);
   await a.sock.close();
 });
+
+// review-media 1 (pass 2): a copied ciphertext counts against the quota and the disk floor like an upload.
+test('e2ee.file.copy is refused once the person is out of room', async () => {
+  const main = srv;
+  srv = await startServer({ port: 0, dataDir: tmp(), quiet: true, e2ee: true, uploads: { quota: 300 * 1024, diskFloor: 0 } });
+  try {
+    const { a, b, dm } = await pair('ec-cq');
+    const c = await enrolled('ec-cq-c');
+    await friends(a, c);
+    const { id: dm2 } = await a.sock.ok('dm.open', { users: [c.id] });
+    const base = web(srv).base;
+    const { ct } = await encryptFile(new Uint8Array(120 * 1024).fill(3));
+    const res = await fetch(`${base}/api/files?conv=${dm}&enc=1`, { method: 'POST', headers: { cookie: a.cookie, origin: base, 'content-type': 'application/octet-stream' }, body: ct });
+    assert.equal(res.status, 201, await res.clone().text());
+    const up = await res.json();
+    await a.sock.ok('e2ee.file.copy', { id: up.id, to: dm2 }); // 240 KB of 300 KB
+    await a.sock.refused('e2ee.file.copy', { id: up.id, to: dm2 }, /room for your files/);
+    assert.equal(srv.db.get('SELECT COUNT(*) n FROM files WHERE owner = ?', a.id).n, 2, 'no third copy stored');
+    await close(a, b, c);
+  } finally { await srv.close(); srv = main; }
+});
