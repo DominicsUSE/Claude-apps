@@ -8,7 +8,7 @@ import {
   openLightbox, markRead, setPref,
 } from '../store.js';
 import { call, on, sendMessage, uploadFile } from '../server.js';
-import { isEncrypted, copyEncryptedFile, scheduleEncrypted, SCHEDULE_MAX } from '../e2ee/conv.js'; // end-to-end encrypted conversations
+import { isEncrypted, downgraded, copyEncryptedFile, scheduleEncrypted, SCHEDULE_MAX } from '../e2ee/conv.js'; // end-to-end encrypted conversations
 import { COPY as E2COPY } from '../lib/e2ee/copy.js';
 import { can, canPost } from '../lib/perms.js';
 import { roomIds, isThread } from '../lib/attention.js';
@@ -274,6 +274,7 @@ function ForwardModal({ conv, m }) {
   const list = (q.trim() ? all.map((p) => ({ p, s: Math.max(fuzzy(q, p.title), fuzzy(q, p.hint) - 5) })).filter((x) => x.s >= 0).sort((a, b) => b.s - a.s).map((x) => x.p) : all).slice(0, 40);
   const send = () => {
     if (!to) return setError('Pick where to forward it.');
+    if (downgraded(to)) return setError(E2COPY.downgraded); // seen encrypted, now reported plain: nothing goes there readable
     setBusy(true);
     const dest = all.find((p) => p.id === to);
     if (m.e2ee || isEncrypted(conv) || isEncrypted(to)) {

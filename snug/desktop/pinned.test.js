@@ -45,13 +45,23 @@ test("bundled: the page's own files come from the app, with exactly the headers 
   const ctx = { origin: host, appDir: APP, rules };
   const get = (p, init) => P.bundled(new Request(host + p, init), ctx);
   const same = ["content-type", "content-security-policy", "content-security-policy-report-only", "cache-control", "x-frame-options", "cross-origin-resource-policy", "referrer-policy", "permissions-policy", "service-worker-allowed"];
+  const page = new Set(["/", "/join/abc123", "/m/c1/m2", "/settings"]);
   for (const p of ["/", "/join/abc123", "/m/c1/m2", "/settings", "/js/app.js", "/css/base.css", "/brand/favicon.svg", "/sw.js"]) {
     const mine = await get(p);
     const theirs = await fetch(host + p);
     assert.equal(mine.status, theirs.status, p);
-    for (const h of same) assert.equal(mine.headers.get(h), theirs.headers.get(h), `${p} ${h}`);
+    // The page's policy differs only where pinning narrows scripts and workers (review M6, second pass).
+    for (const h of same) {
+      const want = page.has(p) && h.startsWith("content-security-policy") ? P.pinnedCsp(theirs.headers.get(h), host) : theirs.headers.get(h);
+      assert.equal(mine.headers.get(h), want, `${p} ${h}`);
+    }
     assert.equal(await mine.text(), await theirs.text(), `${p} body`);
   }
+  // Pinned, scripts and workers come only from the app's own folders, never from /api at the host's origin.
+  const csp = (await get("/")).headers.get("content-security-policy");
+  assert.match(csp, new RegExp(`script-src ${host}/js/ ${host}/vendor/;`));
+  assert.match(csp, new RegExp(`worker-src ${host}/vendor/ ${host}/sw.js;`));
+  assert.doesNotMatch(csp, /script-src 'self'|worker-src 'self'/);
   // https adds upgrade-insecure-requests to the page's policy, as the server does behind https.
   const secure = await P.bundled(new Request("https://snug.example.com/"), { ...ctx, origin: "https://snug.example.com" });
   assert.match(secure.headers.get("content-security-policy"), /; upgrade-insecure-requests$/);
@@ -122,6 +132,37 @@ test("passThrough: the page's requests reach the host on the window's session, w
   assert.equal(net.made[2].aborted, true, "main never follows it itself");
 
   await assert.rejects(P.passThrough(net, ses, new Request(`${origin}/api/fail`), origin), /REFUSED/, "a network failure is a failure in the page too");
+});
+
+test("passThrough (pinned): the host's /api answers can't become a page, a script or a worker at the host's origin", async () => {
+  const origin = "http://snug.lan:47821";
+  const net = fakeNet((r) => r.emit("response", respond(200, {
+    "content-type": "text/html", "content-security-policy": "default-src *", "x-content-type-options": "bogus",
+    "service-worker-allowed": "/", "x-other": "kept",
+  }, "<script>steal()</script>")));
+  const ses = { id: "join session" };
+  // A fetch from the bundled page (Sec-Fetch-Dest: empty) gets the body, with the host's say over sniffing and policy taken away.
+  const ok = await P.passThrough(net, ses, new Request(`${origin}/api/files/f_1`, { headers: { "sec-fetch-dest": "empty" } }), origin);
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(ok.headers.get("content-security-policy"), "sandbox; default-src 'none'");
+  assert.equal(ok.headers.get("service-worker-allowed"), null);
+  assert.equal(ok.headers.get("x-other"), "kept");
+  assert.equal(await ok.text(), "<script>steal()</script>", "the body itself is the page's business");
+  const sent = net.made.length;
+  // Loaded as a document, a frame, a script or a worker: refused here, never asked of the host.
+  for (const dest of ["document", "iframe", "frame", "script", "worker", "sharedworker", "serviceworker"]) {
+    const r = await P.passThrough(net, ses, new Request(`${origin}/api/files/f_1`, { headers: { "sec-fetch-dest": dest } }), origin);
+    assert.equal(r.status, 403, dest);
+    assert.equal(r.headers.get("content-security-policy"), "sandbox; default-src 'none'", dest);
+    assert.equal(r.headers.get("x-content-type-options"), "nosniff", dest);
+  }
+  assert.equal(net.made.length, sent, "none of them reached the host");
+  // Images and media still load (the page shows pictures from /api/files).
+  for (const dest of ["image", "video", "audio"]) assert.equal((await P.passThrough(net, ses, new Request(`${origin}/api/files/f_1`, { headers: { "sec-fetch-dest": dest } }), origin)).status, 200, dest);
+  // A redirect answer carries the same headers.
+  const red = await P.passThrough(fakeNet((r) => r.emit("redirect", 302, "GET", `${origin}/x`, {})), ses, new Request(`${origin}/api/go`), origin);
+  assert.equal(red.headers.get("content-security-policy"), "sandbox; default-src 'none'");
 });
 
 test("pin: one handler for the join address's scheme, replaced when the address changes", async () => {

@@ -80,28 +80,57 @@ async function bundled(req, { origin, appDir, rules }) {
   let body;
   try { body = await fs.promises.readFile(path.join(appDir, ...rel.split("/"))); } catch { return notFound(); }
   const headers = { ...rules.base, ...rules.staticHeaders(rel, u.protocol === "https:") };
+  if (rel === "index.html") for (const k of ["Content-Security-Policy", "Content-Security-Policy-Report-Only"]) if (headers[k]) headers[k] = pinnedCsp(headers[k], origin);
   return new Response(req.method === "HEAD" ? null : body, { status: 200, headers });
+}
+// The page's policy, pinned (review M6, second pass): scripts and workers only from the app's own
+// folders at the host's address, never 'self' as a whole, so nothing the host serves under /api/
+// can run as a script or a worker in the page, whatever request headers the protocol handler sees.
+// (The page's files are served from the app here and never redirect, so the paths always apply.)
+function pinnedCsp(csp, origin) {
+  return csp
+    .replace("script-src 'self'", `script-src ${origin}/js/ ${origin}/vendor/`)
+    .replace("worker-src 'self'", `worker-src ${origin}/vendor/ ${origin}/sw.js`);
 }
 
 // Everything else, to the host through the window's session (its cookies are sent and kept there).
 // Like Electron's ses.fetch, plus two things it can't do: a redirect comes back to the page as a
 // redirect (so the page follows it itself, and the window's will-redirect guard sees where it goes),
 // and requests that change something carry Origin: <host>, which the host checks.
+//
+// The host's answers are data for the bundled page, never code at the host's origin. What stops a
+// script or worker from /api is the page's own policy (pinnedCsp: scripts and workers only from the
+// app's folders). Every answer that comes back is also marked nosniff with a sandboxing policy (so
+// even one that ends up shown as a page runs nothing), and can't widen a service worker's scope.
+// The Sec-Fetch-Dest refusal below is kept for engines that pass that header to the handler; the
+// desktop test shows Electron's protocol handler doesn't see it for scripts or workers.
 const NO_BODY = new Set([101, 204, 205, 304]);
+const NEVER_CODE = new Set(["document", "iframe", "frame", "script", "worker", "sharedworker", "serviceworker"]);
+const API_CSP = "sandbox; default-src 'none'";
+function harden(headers) {
+  headers.delete("service-worker-allowed");
+  headers.set("x-content-type-options", "nosniff");
+  headers.set("content-security-policy", API_CSP);
+  return headers;
+}
 function passThrough(net, ses, req, origin) {
+  const dest = String(req.headers.get("sec-fetch-dest") || "").toLowerCase();
+  if (NEVER_CODE.has(dest)) {
+    return Promise.resolve(new Response("Not here", { status: 403, headers: harden(new Headers({ "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" })) }));
+  }
   return new Promise((resolve, reject) => {
     const cr = net.request({ session: ses, method: req.method, url: req.url, origin, credentials: "include", redirect: "manual", bypassCustomProtocolHandlers: true });
     for (const [k, v] of req.headers) { try { cr.setHeader(k, v); } catch { /* a header the network layer sets itself */ } }
     if (req.method !== "GET" && req.method !== "HEAD") cr.setHeader("Origin", origin);
     cr.on("redirect", (status, _method, url) => {
       cr.abort();
-      resolve(new Response(null, { status, headers: { location: url, "cache-control": "no-store" } }));
+      resolve(new Response(null, { status, headers: harden(new Headers({ location: url, "cache-control": "no-store" })) }));
     });
     cr.on("response", (r) => {
       const headers = new Headers();
       for (const [name, value] of Object.entries(r.headers)) for (const v of [].concat(value)) headers.append(name, String(v));
       const body = NO_BODY.has(r.statusCode) || req.method === "HEAD" ? null : Readable.toWeb(r);
-      resolve(new Response(body, { status: r.statusCode, statusText: r.statusMessage, headers }));
+      resolve(new Response(body, { status: r.statusCode, statusText: r.statusMessage, headers: harden(headers) }));
     });
     cr.on("error", reject);
     if (req.body) req.body.pipeTo(Writable.toWeb(cr)).catch((e) => { cr.abort(); reject(e); });
@@ -141,4 +170,4 @@ function fallbackText({ state, host, server, app }) {
 const OWN_PAGE_NOTE = (host) => `The server’s own page runs code from ${host}. Encrypted conversations there depend on trusting whoever runs it.`;
 const OWN_PAGE_SUFFIX = " — server’s own page";
 
-module.exports = { PARTITION, insecureOrigin, loadRules, verdict, readVersion, checkVersion, bundled, passThrough, pin, unpin, fallbackText, OWN_PAGE_NOTE, OWN_PAGE_SUFFIX };
+module.exports = { PARTITION, insecureOrigin, loadRules, verdict, readVersion, checkVersion, bundled, pinnedCsp, passThrough, pin, unpin, fallbackText, OWN_PAGE_NOTE, OWN_PAGE_SUFFIX };

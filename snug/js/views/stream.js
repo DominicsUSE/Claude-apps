@@ -34,7 +34,7 @@ import { DmLine } from './dm-manage.js'; // a group renamed, people added or gon
 import { msgFace, colourRole, BotBadge, PostTitle, RoleIconMark } from './places.js'; // nicknames, bots, role colours and icons, forum post titles
 import { messageItems, hiddenBlocked, BlockedLine, composerGate, GateNote, SlowNote, slowLeft } from './safety.js'; // blocks, reports, moderation, slowmode
 import { MessageExtras, ownsFiles, messagingMenuItems, PlusMenu, FormatBar, formatKey, ScheduledNote, UnreadBar } from './messaging.js'; // polls, previews, forwarding, stickers, formatting, scheduling
-import { EncBody, encMenuItems, EncComposerNote, RoomComposerHint, quoteText } from './e2ee-conv.js'; // end-to-end encrypted messages
+import { EncBody, encMenuItems, EncComposerNote, RoomComposerHint, quoteText, UnsealedMark, RemovedDeviceMark, unsealed, withKeyLines, KeyLine } from './e2ee-conv.js'; // end-to-end encrypted messages
 import { PeerState, Arriving } from './p2p.js'; // a message waiting for a friend on another PC, or held after their security code changed
 import { SvgPreview, PdfPreview, isSvgFile, isPdfFile } from './preview.js'; // SVG and PDF attachments
 import { t } from '../lib/i18n.js'; // words in the chosen language (js/locales)
@@ -244,7 +244,7 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
   // A finger never stays perfectly still: only a real move cancels the hold.
   const onMove = (e) => { const p = press.current; if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) cancel(); };
 
-  const cls = `msg${grouped ? ' grouped' : ''}${toMe ? ' mention' : lit ? ' mention lit' : ''}${pending ? ' pending' : ''}${quoted ? ' has-ref' : ''}${S.ui.menu?.owner === m.id || S.ui.pop?.owner === m.id ? ' menu-open' : ''}${S.ui.reply[conv] === m.id ? ' replying' : ''}`;
+  const cls = `msg${unsealed(conv, m) ? ' e2-unsealed-msg' : ''}${grouped ? ' grouped' : ''}${toMe ? ' mention' : lit ? ' mention lit' : ''}${pending ? ' pending' : ''}${quoted ? ' has-ref' : ''}${S.ui.menu?.owner === m.id || S.ui.pop?.owner === m.id ? ' menu-open' : ''}${S.ui.reply[conv] === m.id ? ' replying' : ''}`;
   const reactions = Object.entries(m.reactions || {});
   const threadUnread = replies.length ? unreadOf(S, `t:${m.id}`).count : 0;
   const authors = [...new Set(replies.map((r) => r.author))].map((id) => person(id));
@@ -254,7 +254,7 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
     ${quoted && html`<button class="reply-ref" onClick=${() => { S.ui.jump = { conv, id: quoted.id, n: (S.ui.jump?.n || 0) + 1 }; emit(); }}>
       <${Avatar} user=${person(quoted.author)} />
       <b>${person(quoted.author).name}</b>
-      <span class="trunc">${quoteText(quoted, plain(quoted.text) || 'Attachment')}</span>
+      <span class="trunc">${quoteText(quoted, plain(quoted.text) || 'Attachment', conv)}</span>
     </button>`}
     <div class="msg-gutter">
       ${grouped
@@ -268,6 +268,8 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
         <time class="msg-time" datetime=${new Date(m.ts).toISOString()} data-tip=${fmtFull(m.ts)}>${fmtTime(m.ts)}</time>
       </div>`}
       <${PinnedMark} conv=${conv} id=${m.id} />
+      <${UnsealedMark} conv=${conv} m=${m} />
+      <${RemovedDeviceMark} m=${m} />
       <${PostTitle} m=${m} />
       ${S.ui.editing === m.id
         ? html`<${EditBox} conv=${conv} m=${m} />`
@@ -657,7 +659,7 @@ export function Stream({ conv, intro, placeholder }) {
   const all = S.msgs[conv] || [];
   const win = S.ui.win[conv] || PAGE;
   const start = Math.max(0, all.length - win);
-  const items = withPinLines(conv, buildItems(all.slice(start), { marker: S.ui.marker[conv], me: S.me }));
+  const items = withKeyLines(conv, withPinLines(conv, buildItems(all.slice(start), { marker: S.ui.marker[conv], me: S.me })));
   const scroller = useRef();
   const inner = useRef();
   const stick = useRef(true);
@@ -862,6 +864,7 @@ export function Stream({ conv, intro, placeholder }) {
               if (it.type === 'day') { lit = false; return html`<div class="day" key=${it.key}>${fmtDay(it.ts)}</div>`; }
               if (it.type === 'new') { lit = false; return html`<div class="newline" key="new" role="separator" aria-label="New messages"><span>New</span></div>`; }
               if (it.type === 'pin') return html`<${PinLine} key=${it.key} conv=${conv} pin=${it.pin} />`;
+              if (it.type === 'e2') { lit = false; return html`<${KeyLine} key=${it.key} e=${it.e} />`; }
               if (it.m.call) { lit = false; return html`<${CallLine} key=${it.key} conv=${conv} m=${it.m} />`; }
               if (it.m.join) { lit = false; return html`<${JoinLine} key=${it.key} conv=${conv} m=${it.m} />`; }
               if (it.m.dmLine) { lit = false; return html`<${DmLine} key=${it.key} conv=${conv} m=${it.m} />`; }

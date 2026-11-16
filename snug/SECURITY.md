@@ -96,32 +96,77 @@ Direct messages and groups whose members have all turned on encryption are end-t
 messages, edits, replies, thread replies, attachments, GIFs, stickers and scheduled messages. Against
 theft of the database, WAL, snapshots, files folder or disk, an operator or admin who reads stored rows,
 logs or backups, and server bugs that leak rows, the server holds only ciphertext. The server can't alter
-a message, move it to another message, conversation, thread or revision, or forge its author (AEAD
-binding, a device signature, and a device list signed by the account key). Removed devices and members
-get nothing sent after their removal. Key substitution by the server is caught when two people compare
-safety numbers.
+an encrypted message, move it to another message, conversation, thread or revision, show an older
+revision as current, or forge its author (AEAD binding with a key commitment in the signed header, a
+device signature, a device list signed by the account key, and checks of every copy a client shows,
+including the newest revision this device has opened, per copy). A message the server adds to an
+encrypted conversation without encryption, after the point where this device saw it turn encrypted, is
+shown as "Not encrypted – delivered by the server", not as the other person's, also in notifications and
+the phone's conversation list; nothing else the server sets on a message (a "still sending" state, a system
+flag, its order in a list) exempts it, and that point is lowered to the first envelope seen. Rows the server
+places before that point are shown as messages from before encryption ("Not end-to-end encrypted"), which
+the server could always write. Each device keeps, sealed under its own storage key, the newest synced
+settings, its own device list and each contact's account key, list and devices it has seen; it never
+lowers these marks (putting its own settings back after a rollback writes above the highest version it
+saw), so the server can't roll them back without the device saying so, and while they are behind no key
+change goes out. A device added with a code gets the approving device's settings, their version and the
+encrypted conversations in the sealed box; a device recovered with the recovery key gets the version and
+the conversations from the backup as of its last key change. Not covered: a device's first run after
+upgrading from 0.12.0 (and a backup last written by 0.12.0) has no such mark, so the server can still
+serve it older settings that once. Where a device saw a conversation encrypted it refuses to send there in
+plain text. Key substitution by the server is caught when two people compare safety numbers; a contact's
+new safety number and added or removed devices stay as lines in the conversation (the latest few from
+before the loaded messages are pinned above them), and a message from a device its author removed says so
+on the message.
+
+Removing a device (from another device, by itself, or by leaving it out when recovering) starts a new
+history key, and from another device a new key for the synced settings and a new recovery key (so the
+backup the removed device could open with your password is replaced), all sealed only to the devices that
+stay; the server then gives history keys only to connections of trusted devices. Switching history back on
+also starts a new history key (the server refuses one that doesn't). A removed device keeps everything it
+already had, including the account identity key: with your password, or with a malicious server's help,
+it can sign a device list that adds a device of its own, and the people you talk to would then encrypt to
+that device. Your other devices raise an alert over everything when your list gains a device they didn't
+add, and "It was lost or stolen" says to reset encryption, which is the only thing that replaces the
+account key. Messages from a removed device are accepted only if both the device's own timestamp and the
+server's arrival time are within ten minutes of the removal. "My keys may be exposed" (Settings,
+Encryption) makes a new history key, settings key and recovery key; it protects what is sent afterwards,
+not what was already opened with the old keys. A device that hasn't been online for over a month (no valid
+prekey) is left out of the weekly history key and named in Settings; a change you make yourself stops and
+offers to remove it.
 
 It does not protect against whoever serves the browser's JavaScript (an operator who changes the code
-can read messages in a browser; the desktop app runs its own built-in code, also when it joins another server, except on a server's own page, which its window title names), membership decided by the
+can read messages in a browser; the desktop app runs its own built-in code, also when it joins another server, except on a server's own page, which its window title names; when it joins another server, the server's `/api` answers reach the page only as data: the page's policy allows scripts and workers only from the app's own folders (never from `/api`), and every answer is marked nosniff with a sandboxing Content-Security-Policy and can't widen a service worker's scope. The desktop app keeps its encryption keys in the page's IndexedDB like a browser does; they aren't yet wrapped by the operating system's key store), membership decided by the
 server (ghost members), withheld or delayed messages, metadata (who, when, how much, group names,
 reactions, devices, IP addresses), compromised devices and people in the conversation, history readable
 with the history key (on by default) or the recovery key and password, messages sent before a
-conversation turned encrypted, and calls. There is no per-message forward secrecy and no deniability.
+conversation turned encrypted, and calls. There is no per-message forward secrecy, no deniability and no
+automatic recovery after a compromise: a prekey stays usable to senders for up to 30 days, a history key
+for a week, and nothing heals on its own until you remove the device, make new keys or reset. In a
+browser (not the desktop app), the server's code can also roll back what the page keeps, since it is the
+same code.
 
 **Protocol, briefly** (full design in the v0.12 e2ee spec; code in `js/lib/e2ee/`, `js/e2ee/`,
 `server/e2ee.js`, `server/e2ee-conv.js`): WebCrypto only (Ed25519, X25519, HKDF-SHA256, HMAC,
 AES-256-GCM); HPKE base mode (RFC 9180, suite X25519/HKDF-SHA256/AES-256-GCM) from the vendored
 `@hpke/core` (checked against the RFC's test vectors). Each account has an identity key (Ed25519) that
-signs its device list, and a history key (X25519) per weekly epoch. Each device has a non-extractable
+signs its device list, and a history key (X25519) per epoch (weekly, and after any device leaves; the
+server refuses a list that reuses an epoch number with another key or goes back). Each device has a non-extractable
 signing key and a weekly prekey (X25519) signed by it. A message gets a fresh 32-byte key; the body
 (padded) is sealed with AES-256-GCM with the signed header as associated data; the header names the
 conversation, place, message id, revision, author and device, recipients and declared mentions, and is
-signed by the device; the key is sealed with HPKE to every current trusted device of every member and to
-each member's current history key. The server refuses a recipient set that isn't exactly the current
+signed by the device together with a commitment to the message key (SHA-256 over a label, the key and the
+nonce; envelopes from 0.12.0 clients have none and are read as before, except from a sending device this
+device has already seen commit, which can't leave it out); the key is sealed with HPKE to every current
+trusted device of every member and to each member's current history key. The account keys moving between
+devices carry a serial and the device list version they were sealed at, and a device takes only newer
+ones that keep every history key it holds (so a 0.12.0 device's weekly key, which doesn't bump the serial,
+is still taken). Nothing decrypted is written to
+the browser's localStorage copy (encrypted messages are kept there as envelopes). The server refuses a recipient set that isn't exactly the current
 one (`e2ee_stale`), so a client fetches newer keys and seals again. Attachments are sealed whole with
 AES-256-GCM under a key carried in the message. Safety numbers follow libsignal's numeric fingerprint
 (version 0) over the account keys. A new device is added with a 12-character one-time code shown on a
-trusted device and typed on the new one (HMAC over the exact keys involved), or with the recovery key
+trusted device and typed on the new one (HMAC over the exact keys, name and kind involved), or with the recovery key
 (160 random bits; it opens an AES-256-GCM backup of the account keys). No external audit has been done;
 the protocol description should be reviewed by someone outside the implementation before any wording
 stronger than "end-to-end encrypted" is used.

@@ -37,6 +37,7 @@ const Badge = ({ ratio, need, label }) => {
 };
 let settingsLayer = null;
 export const setSettingsLayer = (C) => { settingsLayer = C; };
+export const settingsLayerOf = () => settingsLayer; // the Settings layer, for links into a page (js/views/e2ee-setup.js)
 
 // ---------- Live preview ----------
 // Two message groups drawn with the real message component, so every

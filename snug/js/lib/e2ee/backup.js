@@ -21,7 +21,40 @@ export function asbProblem(a) {
   if (!b64uOf(a.aik) || !key32(a.sync) || !key32(a.bk)) return 'asb';
   if (!a.ahk || typeof a.ahk !== 'object' || Array.isArray(a.ahk)) return 'asb';
   for (const [e, k] of Object.entries(a.ahk)) if (!/^[1-9]\d{0,8}$/.test(e) || !k || !b64uOf(k.sk) || !key32(k.pub)) return 'asb';
+  if (a.n !== undefined && (!Number.isSafeInteger(a.n) || a.n < 0)) return 'asb';
   return null;
+}
+
+// The ASB's serial (review M2): every change to the account keys (a history epoch, a new recovery
+// or settings key) makes a copy with n + 1. A device takes a box only if it is newer than what it
+// holds, so the server can't hand back an older box. No n (0.12.0) counts as 0.
+export const bumpAsb = (asb, change = {}) => ({ ...asb, ...change, n: (asb.n || 0) + 1 });
+/** got compared with what this device holds: 'newer' | 'same' | 'older' | 'fork' (same serial, other keys). */
+export function asbOrder(local, got) {
+  const a = local?.n || 0, b = got?.n || 0;
+  if (b !== a) return b > a ? 'newer' : 'older';
+  return canon(local) === canon(got) ? 'same' : 'fork';
+}
+
+/**
+ * Whether to take account keys from a box (review M2, second pass). ver: the list version the box was
+ * sealed at (signed by the sealing device, so the server can't relabel it); localVer: the list version
+ * at which this device's copy was made (0 if not known). A 0.12.0 device copies the serial it got
+ * (or has none) when it makes a new epoch, so a box with a newer list version is taken if it keeps
+ * every history key this device holds (nothing older comes back); the serial still decides on its own
+ * when it says newer. 'take' | 'same' | 'stale' (older: never taken, skipped for good) | 'refuse'
+ * (a newer list version that would drop a key: kept on the server and tried again).
+ */
+export function asbAccept(local, got, { ver = 0, localVer = 0 } = {}) {
+  const order = asbOrder(local, got);
+  if (order === 'same') return 'same';
+  if (order === 'newer') return keepsEpochs(local, got) ? 'take' : 'refuse';
+  if (!localVer || ver <= localVer) return 'stale';
+  return keepsEpochs(local, got) ? 'take' : 'refuse';
+}
+function keepsEpochs(local, got) {
+  for (const [e, k] of Object.entries(local?.ahk || {})) if (got?.ahk?.[e]?.pub !== k.pub || got.ahk[e].sk !== k.sk) return false;
+  return true;
 }
 
 /**

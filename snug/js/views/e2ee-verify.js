@@ -34,7 +34,7 @@ export function SafetyNumber({ user }) {
       <p class="e2-state" role="status">${s.verified ? html`<${Icon} name="check" size=${16} />${COPY.verified}` : html`<${Icon} name="lock" size=${16} />${COPY.notVerified}`}</p>
       <h3 class="e2-h3">${u.name}’s devices</h3>
       <ul class="e2-devs">${s.devices.map((d, i) => html`<li key=${i}><b>${d.label}</b><span class="hint">${COPY.deviceKind[d.kind]}</span></li>`)}</ul>
-      <p class="hint">Messages in this conversation aren’t end-to-end encrypted yet in this version of Snug; these are the keys they will be encrypted to.</p>`;
+      <p class="hint">Encrypted messages to ${u.name} are sealed to these devices. Snug shows a line in your conversations when they change.</p>`;
   };
   const ready = s && (s.state === 'ready' || s.state === 'changed');
   return html`<div class="e2-sheet" aria-labelledby="e2-sn-title">
@@ -42,7 +42,7 @@ export function SafetyNumber({ user }) {
     ${body()}
     <div class="modal-foot">
       <button class="btn" onClick=${closeModal}>Close</button>
-      ${ready && s.state === 'changed' && html`<button class="btn" onClick=${async () => { await acceptChange(user, s.aik, s.ver); load(); }}>I understand</button>`}
+      ${ready && s.state === 'changed' && html`<button class="btn" onClick=${async () => { await acceptChange(user, s.aik); load(); }}>I understand</button>`}
       ${ready && html`<button class="btn primary" data-autofocus onClick=${toggle}>${s.verified ? COPY.verifyUnmark : COPY.verifyMark}</button>`}
     </div>
   </div>`;

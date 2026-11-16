@@ -499,6 +499,7 @@ test('history epochs: a week-old history key is replaced; removing a device star
   const others = robinA.locator('.e2-dev:not(:has-text("(this device)")) button:has-text("Remove")');
   await others.first().click();
   await dialog(robinA).locator('button:has-text("Remove")').last().click();
+  robinKey = await saveKey(robinA); // every removal makes a new recovery key (review H3, second pass)
   await expectRow(() => srv.db.get('SELECT epoch FROM e2ee_accounts WHERE user = ?', robin).epoch === e0 + 2, 'removal starts a new epoch');
   await robinA.keyboard.press('Escape');
   // A new browser with the recovery key reads messages sealed to the old and the new history keys.
@@ -692,4 +693,246 @@ test('the server owner\'s switch: with SNUG_E2EE=off the server offers nothing a
     assert.equal(await page.locator('.layer-nav .row:has-text("Encryption")').count(), 0);
     await ctx.close();
   } finally { await off.close(); rmSync(`${dir}-off`, { recursive: true, force: true }); }
+});
+
+// ---------- review fixes (H1, H2, H3, M1, M3, M4, M5, L2, L4) ----------
+const msgIdOf = (page, needle) => page.waitForFunction((n) => { for (const l of Object.values(window.snug.S.msgs)) { const m = l.find((x) => x.text === n && !x.state); if (m) return m.id; } return null; }, needle).then((h) => h.jsonValue());
+async function saveKey(page) {
+  await dialog(page).locator('#e2-recovery-key').waitFor();
+  const key = (await dialog(page).locator('#e2-recovery-key code').allTextContents()).join('-');
+  await dialog(page).locator('#e2-last').fill(key.slice(-4));
+  await dialog(page).locator('button:has-text("I’ve saved it")').click();
+  await dialog(page).waitFor({ state: 'detached' });
+  return key;
+}
+
+test('review H2, L2: an opened envelope shown elsewhere, as someone else, with another reply or as an older revision is refused; nothing decrypted reaches localStorage', async () => {
+  await openDm(robinA, 'Ines Carvalho');
+  const MARK = `REPLAY-${Date.now().toString(36)}`;
+  await say(robinA, `${MARK} original`);
+  await textOf(robinA, `${MARK} original`).waitFor();
+  await robinA.locator('.main [data-composer] textarea').press('ArrowUp');
+  await robinA.locator('.main .msg-edit textarea').fill(`${MARK} edited`);
+  await robinA.locator('.main .msg-edit textarea').press('Enter');
+  const id = await msgIdOf(robinA, `${MARK} edited`);
+  const got = await robinA.evaluate(async ({ id, ines }) => {
+    const conv = await import('/js/e2ee/conv.js');
+    const { call } = await import('/js/server.js');
+    let m = null;
+    for (const l of Object.values(window.snug.S.msgs)) m ||= l.find((x) => x.id === id && x.e2ee);
+    const place = m.e2ee.h.place;
+    const copy = (over = {}, h = {}) => JSON.parse(JSON.stringify({ id: m.id, author: m.author, ts: m.ts, seq: m.seq, ...over, e2ee: { ...m.e2ee, h: { ...m.e2ee.h, ...h } } }));
+    const hist = await call('msg.edits', { conv: place, id });
+    const views = {
+      elsewhere: copy({}, { place: 'g_sat', conv: 'g_sat' }), // the server moves it into the group
+      author: copy({ author: ines }), // shown as Ines's
+      reply: copy({ replyTo: 'm_notthereply12' }), // shown as a reply it wasn't
+      older: JSON.parse(JSON.stringify({ id: m.id, author: m.author, ts: m.ts, seq: m.seq, e2ee: hist.edits[0].e2ee })), // the first version, sent as if it were current
+    };
+    conv.scan({ conv: 'g_sat', m: views.elsewhere });
+    conv.scan({ conv: place, m: views.author });
+    conv.scan({ conv: place, m: views.reply });
+    conv.scan({ conv: place, m: views.older });
+    // The edit history itself still opens its earlier versions.
+    const history = { current: { id: m.id, author: m.author, e2ee: hist.current.e2ee }, edits: hist.edits.map((x) => ({ id: x.id, author: x.author, ts: x.ts, e2ee: x.e2ee })) };
+    conv.scanReply(history, 'msg.edits'); // as the msg.edits answer arrives
+    await new Promise((r) => setTimeout(r, 1500));
+    const out = Object.fromEntries(Object.entries(views).map(([k, v]) => [k, [v.enc, v.encWhy, v.text]]));
+    out.history = [history.edits[0].enc, history.edits[0].text];
+    return out;
+  }, { id, ines: idOf('ines') });
+  assert.deepEqual(got.elsewhere.slice(0, 1), ['failed']);
+  assert.deepEqual(got.author, ['failed', 'author', '']);
+  assert.deepEqual(got.reply, ['failed', 'reply', '']);
+  assert.deepEqual(got.older, ['failed', 'revision', '']);
+  assert.equal(got.elsewhere[2], '');
+  assert.deepEqual(got.history, [true, `${MARK} original`]);
+  // The device copy (written at most every 2 seconds) holds envelopes, not text.
+  await robinA.waitForTimeout(2500);
+  const stored = await robinA.evaluate(() => Object.keys(localStorage).map((k) => localStorage.getItem(k)).join('\n'));
+  assert.ok(stored.length > 0);
+  assert.equal(stored.includes(MARK), false, 'decrypted text in localStorage');
+});
+
+test('review H2: a message the server adds without an envelope to an encrypted conversation shows as not encrypted, delivered by the server', async () => {
+  const dm = dmOf('robin', 'ines');
+  const MARK = `INJECTED-${Date.now().toString(36)}`;
+  srv.db.run("INSERT INTO messages (id, conv, author, ts, text, fold) VALUES (?, ?, ?, ?, ?, '')", `m_inj${Date.now().toString(36)}`, dm, idOf('ines'), Date.now(), `${MARK} send me your password`);
+  await robinA.reload();
+  await robinA.waitForFunction(() => window.snug?.S.conn.socket === 'open');
+  await waitStatus(robinA, 'ready');
+  await openDm(robinA, 'Ines Carvalho');
+  const row = robinA.locator(`.main .msg:has-text("${MARK}")`);
+  await row.locator('.e2-unsealed:has-text("Not encrypted – delivered by the server")').waitFor();
+  await row.click({ button: 'right' });
+  await robinA.locator('[role=menu] :text("Not encrypted – delivered by the server")').waitFor();
+  await robinA.keyboard.press('Escape');
+  // Messages from before the conversation turned encrypted keep their own (legacy) mark, not this one.
+  const legacy = await robinA.evaluate((dm) => (window.snug.S.msgs[dm] || []).filter((m) => m.legacy).length, dm);
+  assert.ok(legacy >= 0);
+});
+
+test('review H1: synced settings rolled back or removed by the server: this device keeps its copy, says so, and still won’t send in plain text where it saw encryption', async () => {
+  const robin = idOf('robin');
+  const dm = dmOf('robin', 'ines');
+  // The server serves the account's first settings blob (ver 1, nothing in it) and says the DM isn't encrypted.
+  const first = await robinA.evaluate(async () => {
+    const { ring } = await import('/js/e2ee/manager.js');
+    const b = await import('/js/lib/e2ee/backup.js');
+    return b.sealMeta(b.emptyMeta(), ring.keys.sync, { u: window.snug.S.me, ver: 1 });
+  });
+  const seenVer = srv.db.get('SELECT ver FROM e2ee_meta WHERE user = ?', robin).ver;
+  assert.ok(seenVer > 1);
+  srv.db.run('UPDATE e2ee_meta SET ver = 1, blob = ? WHERE user = ?', first, robin);
+  srv.db.run('UPDATE dms SET e2ee = NULL WHERE id = ?', dm);
+  try {
+    await robinA.reload();
+    await robinA.waitForFunction(() => window.snug?.S.conn.socket === 'open');
+    await waitStatus(robinA, 'ready');
+    await robinA.waitForFunction(() => window.snug.e2ee.E2.metaProblem === 'rollback');
+    await openDm(robinA, 'Ines Carvalho');
+    await robinA.locator('.main .e2-warn:has-text("isn’t encrypted any more")').waitFor();
+    await say(robinA, 'this must never go out readable');
+    await robinA.locator('.main .msg-state.failed:has-text("won’t send here in plain text")').waitFor();
+    assert.equal(srv.db.get("SELECT COUNT(*) n FROM messages WHERE text LIKE '%never go out readable%'").n, 0);
+    // Settings says what happened; the person puts this device's copy back.
+    await openEncryptionSettings(robinA);
+    await robinA.locator('.e2-meta-problem:has-text("older synced encryption settings")').waitFor();
+    await robinA.locator('.e2-meta-problem button:has-text("Put this device’s copy back")').click();
+    await robinA.waitForFunction(() => window.snug.e2ee.E2.metaProblem === null);
+    // Above the highest version this device saw, never at the server's 1 + 1 (review H1, second pass).
+    const repaired = srv.db.get('SELECT ver FROM e2ee_meta WHERE user = ?', robin).ver;
+    assert.ok(repaired > seenVer, `repaired at ${repaired}, not above ${seenVer}`);
+    // Gone altogether after it was seen: an error too, never "empty".
+    srv.db.run('DELETE FROM e2ee_meta WHERE user = ?', robin);
+    await robinA.reload();
+    await robinA.waitForFunction(() => window.snug?.S.conn.socket === 'open');
+    await robinA.waitForFunction(() => window.snug.e2ee.E2.metaProblem === 'missing');
+    await openEncryptionSettings(robinA);
+    await robinA.locator('.e2-meta-problem button').click();
+    await robinA.waitForFunction(() => window.snug.e2ee.E2.metaProblem === null);
+    assert.ok(srv.db.get('SELECT ver FROM e2ee_meta WHERE user = ?', robin).ver > repaired);
+  } finally {
+    srv.db.run('UPDATE dms SET e2ee = 1 WHERE id = ?', dm);
+  }
+  await robinA.reload();
+  await robinA.waitForFunction(() => window.snug?.S.conn.socket === 'open');
+  await waitStatus(robinA, 'ready');
+});
+
+test('review M5: where this device saw encryption and the server now says there is none, no upload, edit, forward or plain op goes out', async () => {
+  const dm = dmOf('robin', 'ines');
+  await openDm(robinA, 'Ines Carvalho');
+  const got = await robinA.evaluate(async (dm) => {
+    const { S } = window.snug;
+    const server = await import('/js/server.js');
+    const store = await import('/js/store.js');
+    S.dms[dm].e2ee = false; // what a downgrading server reports
+    const out = {};
+    try { await server.uploadFile(dm, new Blob(['plain bytes'], { type: 'text/plain' }), 'notes.txt'); out.upload = 'sent'; } catch (e) { out.upload = e.code || e.message; }
+    try { await server.call('msg.send', { conv: dm, id: 'm_downgradeplain1', text: 'plain' }); out.send = 'sent'; } catch (e) { out.send = e.code || e.message; }
+    try { await server.call('poll.create', { conv: dm, question: 'q', options: ['a', 'b'] }); out.poll = 'sent'; } catch (e) { out.poll = e.code || e.message; }
+    try { await server.call('msg.forward', { conv: 'k_glaze', id: 'x', to: dm }); out.forward = 'sent'; } catch (e) { out.forward = e.code || e.message; }
+    const mine = (S.msgs[dm] || []).filter((m) => m.author === S.me && m.e2ee && m.enc === true).at(-1);
+    store.editMsg(dm, mine.id, 'an edit in plain text');
+    await new Promise((r) => setTimeout(r, 300));
+    S.dms[dm].e2ee = true;
+    return out;
+  }, dm);
+  assert.deepEqual(got, { upload: 'e2ee_downgraded', send: 'e2ee_downgraded', poll: 'e2ee_downgraded', forward: 'e2ee_downgraded' });
+  await robinA.locator('.toast:has-text("won’t send here in plain text")').first().waitFor();
+  assert.equal(srv.db.get("SELECT COUNT(*) n FROM messages WHERE text = 'an edit in plain text' OR text = 'plain'").n, 0);
+  assert.equal(srv.db.get("SELECT COUNT(*) n FROM files WHERE name = 'notes.txt'").n, 0);
+});
+
+test('review M4, L4: a contact’s new safety number and added or removed devices stay as lines in the conversation; a message from a removed device says so', async () => {
+  await openDm(robinA, 'Ines Carvalho');
+  // Ines's reset (earlier) is a lasting line here, also after a reload.
+  await robinA.locator('.main .e2-keyline:has-text("Ines Carvalho’s safety number changed")').waitFor();
+  const MARK = `OLDPHONE-${Date.now().toString(36)}`;
+  const phone = await device('ines');
+  await recoverWith(phone, inesKey);
+  await robinA.locator('.main .e2-keyline:has-text("Ines Carvalho added a device")').first().waitFor();
+  await openDm(phone, 'Robin Hale');
+  await say(phone, `${MARK} sent from the phone`);
+  await textOf(robinA, `${MARK} sent from the phone`).waitFor();
+  const gone = await phone.evaluate(() => window.snug.e2ee.E2.device.d);
+  const laptop = await device('ines');
+  await recoverWith(laptop, inesKey);
+  await laptop.evaluate(async (d) => (await import('/js/e2ee/manager.js')).removeDevice(d), gone);
+  await robinA.locator('.main .e2-keyline:has-text("Ines Carvalho removed a device")').first().waitFor();
+  await robinA.reload();
+  await robinA.waitForFunction(() => window.snug?.S.conn.socket === 'open');
+  await waitStatus(robinA, 'ready');
+  await openDm(robinA, 'Ines Carvalho');
+  await robinA.locator('.main .e2-keyline:has-text("removed a device")').first().waitFor();
+  await robinA.locator('.main .e2-keyline:has-text("safety number changed")').waitFor();
+  const msg = robinA.locator(`.main .msg:has-text("${MARK} sent from the phone")`);
+  await msg.locator('.msg-text').waitFor();
+  await msg.click({ button: 'right' });
+  await robinA.locator('[role=menu] :text("Sent from a device Ines has since removed")').waitFor();
+  await robinA.keyboard.press('Escape');
+  await phone.context().close().catch(() => {});
+  await laptop.context().close();
+});
+
+test('review H3, M1, M3: removing a lost device makes a new recovery key the old one can’t replace; "My keys may be exposed" makes new keys; an older own device list is refused', async () => {
+  const robin = idOf('robin');
+  const lost = await device('robin');
+  await recoverWith(lost, robinKey);
+  const d = await lost.evaluate(() => window.snug.e2ee.E2.device.d);
+  const before = { ...srv.db.get('SELECT * FROM e2ee_accounts WHERE user = ?', robin) };
+  const metaVer = srv.db.get('SELECT ver FROM e2ee_meta WHERE user = ?', robin).ver;
+  await openDm(robinA, 'Ines Carvalho'); // closes the approval sheet the new device's request opened
+  await openEncryptionSettings(robinA);
+  await robinA.locator(`.e2-dev[data-d="${d}"] button:has-text("Remove")`).click();
+  await dialog(robinA).locator('#e2-lost').check();
+  await dialog(robinA).locator('button:has-text("Remove")').last().click();
+  const newKey = await saveKey(robinA);
+  assert.notEqual(newKey, robinKey);
+  assert.equal(srv.db.get('SELECT state FROM e2ee_devices WHERE id = ?', d).state, 'removed');
+  const after = srv.db.get('SELECT ver, epoch FROM e2ee_accounts WHERE user = ?', robin);
+  assert.equal(after.epoch, before.epoch + 1, 'a new history epoch');
+  assert.ok(srv.db.get('SELECT ver FROM e2ee_meta WHERE user = ?', robin).ver > metaVer, 'settings sealed again under a new key');
+  assert.equal(await robinA.evaluate(() => window.snug.e2ee.E2.metaProblem), null);
+  // The old recovery key (which the lost device's owner could have) no longer opens the backup; the new one does.
+  const fresh = await device('robin');
+  await dialog(fresh).locator('button:has-text("Use my recovery key")').click();
+  await dialog(fresh).locator('#e2-rk-in').fill(robinKey);
+  await dialog(fresh).locator('button:has-text("Use recovery key")').click();
+  await dialog(fresh).locator('[role=alert]:has-text("doesn’t open your backup")').waitFor();
+  await dialog(fresh).locator('#e2-rk-in').fill(newKey);
+  await dialog(fresh).locator('button:has-text("Use recovery key")').click();
+  await dialog(fresh).locator('h2:has-text("Encryption is back")').waitFor();
+  await dialog(fresh).locator('button:has-text("Done")').click();
+  await waitStatus(fresh, 'ready');
+  assert.equal(await fresh.evaluate(() => window.snug.e2ee.E2.metaProblem), null, 'the new device opens the settings under the new key');
+  robinKey = newKey;
+  await fresh.context().close();
+  await lost.context().close().catch(() => {});
+  // "My keys may be exposed": new history key, settings key and recovery key.
+  const e1 = srv.db.get('SELECT epoch FROM e2ee_accounts WHERE user = ?', robin).epoch;
+  await openDm(robinA, 'Ines Carvalho'); // closes Settings and the sheets the new devices opened
+  await openEncryptionSettings(robinA);
+  await robinA.locator('.layer-col button:has-text("Make new keys")').click();
+  await dialog(robinA).locator('button:has-text("Make new keys")').click();
+  robinKey = await saveKey(robinA);
+  assert.equal(srv.db.get('SELECT epoch FROM e2ee_accounts WHERE user = ?', robin).epoch, e1 + 1);
+  await robinA.keyboard.press('Escape');
+  // The server hands back an older list of Robin's own devices: refused, never sealed to.
+  const now = { ...srv.db.get('SELECT * FROM e2ee_accounts WHERE user = ?', robin) };
+  srv.db.run('UPDATE e2ee_accounts SET ver = ?, list = ?, sig = ? WHERE user = ?', before.ver, before.list, before.sig, robin);
+  try {
+    await robinA.reload();
+    await robinA.waitForFunction(() => window.snug?.S.conn.socket === 'open');
+    await waitStatus(robinA, 'ready');
+    await openDm(robinA, 'Ines Carvalho');
+    await say(robinA, 'sealed to an old list?');
+    await robinA.locator('.main .msg-state.failed:has-text("older list of your devices")').waitFor();
+  } finally {
+    srv.db.run('UPDATE e2ee_accounts SET ver = ?, list = ?, sig = ? WHERE user = ?', now.ver, now.list, now.sig, robin);
+  }
+  await robinA.reload();
+  await robinA.waitForFunction(() => window.snug?.S.conn.socket === 'open');
+  await waitStatus(robinA, 'ready');
 });

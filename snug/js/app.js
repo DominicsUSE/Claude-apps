@@ -46,7 +46,7 @@ import { orderDms } from './inbox.js'; // server unread counts, groups leaving, 
 import { newcomerSees } from './lib/onboarding.js'; // which rooms a newcomer's sidebar lists
 import './landmarks.js'; // Skip to messages, F6 between regions
 import { E2, safetyFor } from './e2ee/manager.js'; // end-to-end encryption on this device
-import { E2eeHost } from './views/e2ee-setup.js'; // opens the encryption sheets when they're needed
+import { E2eeHost, OwnAddedAlert } from './views/e2ee-setup.js'; // opens the encryption sheets when they're needed
 import './e2ee/conv.js'; // end-to-end encrypted conversations: sealing and opening messages
 import { desktopTest } from './desktop.js'; // the desktop app's badge, global voice keys, idle, snug:// links
 import { t } from './lib/i18n.js'; // words in the chosen language (js/locales)
@@ -233,6 +233,7 @@ function Overlays() {
     <${IncomingCall} />
     <${MiniCall} />
     <${E2eeHost} />
+    <${OwnAddedAlert} />
     <${Toasts} />`;
 }
 

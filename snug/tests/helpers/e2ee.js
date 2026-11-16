@@ -119,7 +119,7 @@ export async function bind(sock, dev) {
 /** The next signed list: `change(list)` returns the new devs/arc. */
 export async function nextList(acct, change) {
   const cur = acct.list;
-  const next = { u: cur.u, ver: cur.ver + 1, aik: cur.aik, devs: cur.devs, arc: cur.arc, ...change(cur) };
+  const next = { u: cur.u, ver: cur.ver + 1, aik: cur.aik, devs: cur.devs, arc: cur.arc, ...(await change(cur)) };
   acct.list = await obj.makeList(acct.keys.aik, next);
   return acct.list;
 }

@@ -126,9 +126,12 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
 
   // ---------- wraps: each socket gets its own ----------
   const historyTarget = (u) => `a:${u}:`;
-  // A socket bound to no device gets nothing (it can't prove it holds any key).
+  // A socket bound to no device gets nothing (it can't prove it holds any key), and only a trusted
+  // device gets its account's history wraps: a device still waiting to be added, or one being
+  // removed, holds no history key it should use (review H3).
+  const trustedDevice = (user, device) => { const r = device && deviceRow(device); return !!r && r.user === user && r.state === 'trusted'; };
   function wrapsFor(user, device, msg, rev) {
-    if (!device) return {};
+    if (!trustedDevice(user, device)) return {};
     const pre = historyTarget(user);
     const out = {};
     for (const w of db.all('SELECT target, wrap FROM e2ee_wraps WHERE msg = ? AND rev = ? AND (target = ? OR substr(target, 1, ?) = ?)',
@@ -138,6 +141,7 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
   const prevView = hub.socketView;
   hub.socketView = (ws, ev, d) => {
     const v = prevView ? prevView(ws, ev, d) : d;
+    if (ev === 'sched' && Array.isArray(v?.list) && ws.user) return { ...v, list: v.list.map((x) => (x?.m?.e2ee ? { ...x, m: { ...x.m, k: schedWraps(ws.user, ws.e2eeDevice, x.id) } } : x)) };
     if (ev !== 'msg' || !v?.m?.e2ee || !ws.user) return v;
     const k = wrapsFor(ws.user, ws.e2eeDevice, v.m.id, v.m.e2ee.h.rev);
     return Object.keys(k).length ? { ...v, m: { ...v.m, k } } : v;
@@ -278,25 +282,33 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
       const row = typeof d?.id === 'string' && M.liveMsg(d.id);
       if (!row?.enc) return r;
       const edits = db.all('SELECT enc, ts FROM msg_edits WHERE msg = ? AND enc IS NOT NULL ORDER BY ts DESC, rowid DESC LIMIT ?', row.id, MAX_EDITS)
-        .map((e) => ({ id: row.id, author: row.author, e2ee: encEnv(e.enc), ts: e.ts })).filter((e) => e.e2ee);
-      return { current: { id: row.id, author: row.author, e2ee: encEnv(row.enc), ts: row.edited || row.ts }, edits };
+        .map((e) => ({ id: row.id, author: row.author, e2ee: encEnv(e.enc), ts: e.ts, ...(row.reply_to ? { replyTo: row.reply_to } : {}) })).filter((e) => e.e2ee);
+      return { current: { id: row.id, author: row.author, e2ee: encEnv(row.enc), ts: row.edited || row.ts, ...(row.reply_to ? { replyTo: row.reply_to } : {}) }, edits };
     };
   }
 
   // The wraps for messages fetched any other way (history, snapshot, search, mentions, pins, saved,
   // edit history): only conversations the caller can read, only its bound device and its own history keys.
+  // Answered per revision in `revs` ("id:rev"); `wraps` (by id, the last revision asked for) stays
+  // for clients that read it. The caller's own scheduled messages (not sent yet) are answered too.
   ops['e2ee.wraps'] = (c, d) => {
     if (!Array.isArray(d?.ids) || d.ids.length > 200) fail('Ask for up to 200 messages at a time.');
-    const out = {};
+    const out = {}, revs = {};
+    let mine = null;
     for (const x of d.ids) {
       const id = typeof x === 'string' ? x : x?.id;
       if (typeof id !== 'string') continue;
       const row = M.msg(id);
-      if (!row?.enc || row.deleted || !M.canRead(c.user, row.conv)) continue;
+      if (!row) {
+        mine ||= new Map(db.all('SELECT id, enc FROM scheduled WHERE user = ? AND enc IS NOT NULL', c.user).map((r) => [parseCanon(r.enc, 256 * 1024)?.env?.h?.id, r.id]));
+        if (mine.has(id)) revs[`${id}:0`] = out[id] = { rev: 0, k: schedWraps(c.user, c.ws?.e2eeDevice || null, mine.get(id)) };
+        continue;
+      }
+      if (!row.enc || row.deleted || !M.canRead(c.user, row.conv)) continue;
       const rev = Number.isSafeInteger(x?.rev) ? x.rev : encEnv(row.enc)?.h.rev ?? 0;
-      out[id] = { rev, k: wrapsFor(c.user, c.ws?.e2eeDevice || null, id, rev) };
+      revs[`${id}:${rev}`] = out[id] = { rev, k: wrapsFor(c.user, c.ws?.e2eeDevice || null, id, rev) };
     }
-    return { wraps: out };
+    return { wraps: out, revs };
   };
 
   // ---------- features that need plaintext on the server ----------
@@ -377,15 +389,23 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
       return r;
     };
   }
-  // What the author's own list shows of one: the envelope and only their history wrap.
+  // What the author's own list shows of one: the envelope; each socket then gets only its own
+  // device's wrap and, on a trusted device, its history wraps (socketView, e2ee.wraps). A snapshot
+  // goes out before the socket proves its device, so it carries no `k` at all (an empty one made
+  // 0.12.0 clients think the wraps were there and never ask e2ee.wraps).
   function schedRow(r) {
     const v = { id: r.id, conv: r.conv, text: r.text, replyTo: r.reply_to || undefined, at: r.at, created: r.created };
     const s = r.enc ? parseCanon(r.enc, 256 * 1024) : null;
-    if (s?.env) {
-      const pre = historyTarget(r.user);
-      v.m = { id: s.env.h.id, author: r.user, ts: r.at, e2ee: s.env, k: Object.fromEntries(Object.entries(s.k).filter(([t]) => t.startsWith(pre))) };
-    }
+    if (s?.env) v.m = { id: s.env.h.id, author: r.user, ts: r.at, e2ee: s.env, ...(r.reply_to ? { replyTo: r.reply_to } : {}) };
     return v;
+  }
+  function schedWraps(user, device, schedId) {
+    if (!trustedDevice(user, device)) return {};
+    const r = db.get('SELECT enc FROM scheduled WHERE id = ? AND user = ?', schedId, user);
+    const s = r?.enc ? parseCanon(r.enc, 256 * 1024) : null;
+    if (!s?.k) return {};
+    const pre = historyTarget(user);
+    return Object.fromEntries(Object.entries(s.k).filter(([t]) => t === `d:${device}` || t.startsWith(pre)));
   }
   M.schedView = schedRow;
   M.sendScheduledEnc = (r) => {
@@ -398,9 +418,15 @@ export function createE2eeConv({ db, M, hub, fail, ops: all, on, verifyEd, accou
     if (!dev || dev.state !== 'trusted') fail('Your scheduled message wasn’t sent because the device that sealed it was removed.');
     if (M.msg(env.h.id)) fail('It was already sent.');
     // Devices removed since get nothing; devices added since have no wrap (history wraps cover them).
+    // A history key replaced since (weekly, or after a device was removed, which may hold it) gets
+    // nothing either: only each account's current history epoch is kept.
     const k = {};
     for (const [t, w] of Object.entries(s.k)) {
       if (t.startsWith('d:') && deviceRow(t.slice(2))?.state !== 'trusted') continue;
+      if (t.startsWith('a:')) {
+        const [, u, e] = t.split(':');
+        if (Number(e) !== account(u)?.epoch) continue;
+      }
       k[t] = w;
     }
     const v = { env, k, h: env.h, files: [] };

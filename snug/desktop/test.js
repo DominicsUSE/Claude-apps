@@ -1144,6 +1144,35 @@ test("join mode: a server redirect to another site never takes over the window (
   await app.close();
 });
 
+test("join mode, pinned: a script or worker the host serves under /api/ never runs in the page (review M6, second pass)", async (t) => {
+  const dests = {};
+  const join = stubSite((req, res) => {
+    if (req.url === "/api/version") { res.writeHead(200, { "content-type": "application/json" }); return res.end(JSON.stringify({ version: "0.12.0", proto: 12, minClient: 12, e2ee: 1 })); }
+    dests[req.url] = req.headers["sec-fetch-dest"] || "(none)";
+    if (req.url.startsWith("/api/evil")) { res.writeHead(200, { "content-type": "text/javascript" }); return res.end("self.pwned = 1; try { postMessage('ran'); } catch {}"); }
+    res.writeHead(200, { "content-type": "application/json" });
+    return res.end("{}");
+  });
+  const joinBase = await join.ready;
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "snug-desktop-api-js-"));
+  t.after(async () => { join.srv.close(); await removeDir(userData); });
+  const { app, page } = await launchWith(userData, { config: { mode: "join", url: joinBase } });
+  await page.waitForURL(`${joinBase}/`);
+  await page.waitForSelector('link[href="/css/tokens.css"]', { state: "attached" });
+  const got = await page.evaluate(async () => {
+    const script = await new Promise((r) => { const s = document.createElement("script"); s.src = "/api/evil.js"; s.onload = () => r("loaded"); s.onerror = () => r("blocked"); document.head.append(s); });
+    const mod = await import("/api/evil-module.js").then(() => "loaded", () => "blocked");
+    const worker = await new Promise((r) => { try { const w = new Worker("/api/evil-worker.js"); w.onmessage = () => r("ran"); w.onerror = () => r("blocked"); setTimeout(() => r("silent"), 2000); } catch { r("blocked"); } });
+    await fetch("/api/data").catch(() => {});
+    return { script, mod, worker, pwned: self.pwned === 1 };
+  });
+  assert.deepEqual(got, { script: "blocked", mod: "blocked", worker: "blocked", pwned: false });
+  for (const u of ["/api/evil.js", "/api/evil-module.js", "/api/evil-worker.js"]) assert.equal(join.hits.includes(u), false, `${u} was requested from the host`);
+  // What the protocol handler passes on as Sec-Fetch-Dest for a page fetch (reported, for the record).
+  t.diagnostic(`Sec-Fetch-Dest the host saw for fetch("/api/data"): ${dests["/api/data"]}`);
+  await app.close();
+});
+
 // ---------- Join mode, pinned (desktop/pinned.js) ----------
 // A Snug someone else runs, behind a small front that records every request and would hand out a changed
 // /js/app.js (the "host's code"). The window must run the app's own copy at the host's address instead,

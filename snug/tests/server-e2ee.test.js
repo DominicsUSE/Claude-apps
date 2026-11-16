@@ -275,7 +275,7 @@ test('recovery: the backup needs a recent sign-in (or the password), is rate lim
   const asb = await backup.openBackup(got.blob, a.acct.bk, a.id);
   const keys = await backup.loadAsb(asb);
   // Recovery drops the old (lost) device in the same step.
-  const list = await obj.makeList(keys.aik, { u: a.id, ver: a.acct.list.ver + 1, aik: keys.aikPub, devs: [deviceEntry(dev)], arc: a.acct.list.arc });
+  const list = await obj.makeList(keys.aik, { u: a.id, ver: a.acct.list.ver + 1, aik: keys.aikPub, devs: [deviceEntry(dev)], arc: await nextArc(a.acct.list) }); // a new history epoch: the dropped device holds the old key
   await b.ok('e2ee.recover', { linkId, devlist: list });
   const me = await b.ok('e2ee.state');
   assert.deepEqual(me.devices.map((x) => [x.d, x.state]), [[dev.d, 'trusted']]);
@@ -307,7 +307,7 @@ test('device removal ends that device’s sessions; meta is compare-and-swap; re
   assert.deepEqual([conflict.code, conflict.data], ['e2ee_conflict', { ver: 2 }]);
   // Remove the second device from the first: its socket closes and its session is gone.
   const closed = new Promise((r) => b.ws.on('close', r));
-  const without = await nextList(a.acct, (cur) => ({ devs: cur.devs.filter((x) => x.d !== dev.d) }));
+  const without = await nextList(a.acct, async (cur) => ({ devs: cur.devs.filter((x) => x.d !== dev.d), arc: await nextArc(cur) }));
   await a.sock.refused('e2ee.device.remove', { d: a.dev.d, devlist: without }, /without that one/);
   await a.sock.ok('e2ee.device.remove', { d: dev.d, devlist: without });
   assert.equal(await closed, 4001);
@@ -328,4 +328,115 @@ test('device removal ends that device’s sessions; meta is compare-and-swap; re
   assert.equal(srv.db.get('SELECT state FROM e2ee_devices WHERE id = ?', a.dev.d).state, 'removed');
   assert.equal(srv.db.get("SELECT COUNT(*) n FROM auth_events WHERE user = ? AND event = 'e2ee.reset'", a.id).n, 1);
   await a.sock.close();
+});
+
+// ---------- review fixes (H3, M2): removing a device, history keys, the recovery backup ----------
+const freshPub = async () => b64u(await sig.rawPublic((await sig.newDhPair(false)).publicKey));
+const nextArc = async (cur, step = 1) => ({ e: cur.arc.e + step, pub: await freshPub(), at: Date.now() });
+// A second trusted device for p, through the link flow's server steps; returns its socket.
+async function secondDevice(p) {
+  const s = await reconnect(p, await login(srv, p.handle));
+  const dev = await newDevice(p.id, { label: 'Old phone' });
+  const { linkId } = await s.ok('e2ee.link.start', { device: devicePublic(dev), prekey: dev.prekeys[1].signed });
+  await bind(s, dev);
+  await s.ok('e2ee.link.proof', { linkId, tag1: b64u(random(32)) });
+  await p.sock.ok('e2ee.link.approve', { linkId, devlist: await nextList(p.acct, (cur) => ({ devs: [...cur.devs, deviceEntry(dev)] })), box: b64u(random(120)), tag2: b64u(random(32)) });
+  return { s, dev };
+}
+
+test('history key: a list may keep the current epoch only with the same key; a new key needs a higher epoch, on every path', async () => {
+  const p = await enrolled('e2-arc');
+  const e = p.acct.list.arc.e;
+  // The same epoch number with another key: refused (a box made for the old key would still say "newest").
+  await p.sock.refused('e2ee.publish', { devlist: await obj.makeList(p.acct.keys.aik, { ...p.acct.list, ver: p.acct.list.ver + 1, arc: { e, pub: await freshPub(), at: Date.now() } }) }, /history key/);
+  // The same key at the same epoch (a label change, history switched on again): fine; a higher epoch: fine.
+  assert.equal((await p.sock.ok('e2ee.publish', { devlist: await nextList(p.acct, () => ({})) })).ver, 2);
+  assert.equal((await p.sock.ok('e2ee.publish', { devlist: await nextList(p.acct, async (cur) => ({ arc: await nextArc(cur) })) })).ver, 3);
+  // Off, then on again (review M2, second pass): never with the key it had (a device removed while
+  // history was off holds it), nor another key at that epoch; only with a new epoch.
+  const keep = p.acct.list.arc;
+  await p.sock.ok('e2ee.publish', { devlist: await nextList(p.acct, () => ({ arc: null })) });
+  await p.sock.refused('e2ee.publish', { devlist: await obj.makeList(p.acct.keys.aik, { ...p.acct.list, ver: p.acct.list.ver + 1, arc: { e: keep.e, pub: await freshPub(), at: Date.now() } }) }, /history key/);
+  await p.sock.refused('e2ee.publish', { devlist: await obj.makeList(p.acct.keys.aik, { ...p.acct.list, ver: p.acct.list.ver + 1, arc: keep }) }, /Turning history on needs a new history key/);
+  await p.sock.ok('e2ee.publish', { devlist: await nextList(p.acct, async () => ({ arc: await nextArc({ arc: keep }) })) });
+  await p.sock.close();
+});
+
+test('history off from the start, then on: epoch 1 (in every device’s keys since setup) is refused; epoch 2 is fine', async () => {
+  const p = await enrolled('e2-arc-off');
+  await p.sock.ok('e2ee.publish', { devlist: await nextList(p.acct, () => ({ arc: null })) });
+  srv.db.run('UPDATE e2ee_accounts SET epoch = NULL, epoch_pub = NULL WHERE user = ?', p.id); // as an account set up with history off
+  await p.sock.refused('e2ee.publish', { devlist: await obj.makeList(p.acct.keys.aik, { ...p.acct.list, ver: p.acct.list.ver + 1, arc: { e: 1, pub: await freshPub(), at: Date.now() } }) }, /Turning history on/);
+  await p.sock.ok('e2ee.publish', { devlist: await nextList(p.acct, async () => ({ arc: { e: 2, pub: await freshPub(), at: Date.now() } })) });
+  await p.sock.close();
+});
+
+test('synced settings: a repair may write above the server’s version (never lowering a device’s mark); an ordinary write may not skip', async () => {
+  const p = await enrolled('e2-meta-jump');
+  const cur = (await p.sock.ok('e2ee.meta.get')).ver;
+  const skip = await p.sock.refused('e2ee.meta.put', { ver: cur + 3, blob: b64u(random(60)) });
+  assert.equal(skip.code, 'e2ee_conflict');
+  await p.sock.refused('e2ee.meta.put', { ver: cur, blob: b64u(random(60)), repair: true });
+  assert.equal((await p.sock.ok('e2ee.meta.put', { ver: cur + 3, blob: b64u(random(60)), repair: true })).ver, cur + 3);
+  assert.equal(srv.db.get('SELECT ver FROM e2ee_meta WHERE user = ?', p.id).ver, cur + 3);
+  await p.sock.close();
+});
+
+test('removing a device with history on needs a new history epoch; the backup, the other devices’ keys and the synced settings change in the same step', async () => {
+  const p = await enrolled('e2-rm-epoch');
+  const { s, dev } = await secondDevice(p);
+  const third = await secondDevice(p);
+  const without = (cur) => cur.devs.filter((x) => x.d !== dev.d);
+  // The same history key after a removal: refused (the removed device holds it).
+  const same = await obj.makeList(p.acct.keys.aik, { ...p.acct.list, ver: p.acct.list.ver + 1, devs: without(p.acct.list) });
+  await p.sock.refused('e2ee.device.remove', { d: dev.d, devlist: same }, /new history key/);
+  // Synced settings that changed on another device meanwhile: refused as a whole (nothing removed).
+  const meta = await p.sock.ok('e2ee.meta.get');
+  const next = await obj.makeList(p.acct.keys.aik, { ...p.acct.list, ver: p.acct.list.ver + 1, devs: without(p.acct.list), arc: await nextArc(p.acct.list) });
+  const boxes = { [third.dev.d]: { kid: 1, blob: b64u(random(200)), by: p.dev.d, sig: b64u(random(64)) } };
+  const bk2 = random(32);
+  const backup2 = await backup.sealBackup(p.acct.asb, bk2, { ver: next.ver, aik: next.aik });
+  const conflict = await p.sock.refused('e2ee.device.remove', { d: dev.d, devlist: next, boxes, backup: backup2, meta: { ver: meta.ver + 5, blob: b64u(random(60)) } });
+  assert.equal(conflict.code, 'e2ee_conflict');
+  assert.equal(srv.db.get('SELECT state FROM e2ee_devices WHERE id = ?', dev.d).state, 'trusted', 'nothing changed');
+  const newMeta = b64u(random(60));
+  await p.sock.ok('e2ee.device.remove', { d: dev.d, devlist: next, boxes, backup: backup2, meta: { ver: meta.ver + 1, blob: newMeta } });
+  p.acct.list = next;
+  assert.equal(srv.db.get('SELECT state FROM e2ee_devices WHERE id = ?', dev.d).state, 'removed');
+  assert.deepEqual({ ...srv.db.get('SELECT ver, blob FROM e2ee_meta WHERE user = ?', p.id) }, { ver: meta.ver + 1, blob: newMeta });
+  assert.equal(JSON.parse(srv.db.get('SELECT blob FROM e2ee_backup WHERE user = ?', p.id).blob).c, backup2.c, 'the backup under the new recovery key');
+  assert.ok(srv.db.get('SELECT 1 FROM e2ee_asb_boxes WHERE device = ? AND ver = ?', third.dev.d, next.ver));
+  // A device removing itself needs a new epoch too (refused without one; the same step from another device goes through).
+  const self = await obj.makeList(p.acct.keys.aik, { ...p.acct.list, ver: p.acct.list.ver + 1, devs: p.acct.list.devs.filter((x) => x.d !== third.dev.d) });
+  await third.s.refused('e2ee.device.remove', { d: third.dev.d, devlist: self }, /new history key\. Update Snug/);
+  await p.sock.ok('e2ee.device.remove', { d: third.dev.d, devlist: await nextList(p.acct, async (cur) => ({ devs: cur.devs.filter((x) => x.d !== third.dev.d), arc: await nextArc(cur) })) });
+  await s.close().catch(() => {}); await third.s.close().catch(() => {}); await p.sock.close();
+});
+
+test('recovery that leaves devices out starts a new epoch and can bring the other devices their keys and a new backup', async () => {
+  const a = await enrolled('e2-rec-epoch');
+  const kept = await secondDevice(a);
+  const lost = await secondDevice(a);
+  const b = await reconnect(a, await login(srv, a.handle));
+  const dev = await newDevice(a.id, { label: 'New laptop' });
+  const { linkId } = await b.ok('e2ee.link.start', { device: devicePublic(dev), prekey: dev.prekeys[1].signed });
+  await bind(b, dev);
+  const devs = [...a.acct.list.devs.filter((x) => x.d !== lost.dev.d), deviceEntry(dev)];
+  const same = await obj.makeList(a.acct.keys.aik, { ...a.acct.list, ver: a.acct.list.ver + 1, devs });
+  await b.refused('e2ee.recover', { linkId, devlist: same }, /new history key/);
+  const list = await obj.makeList(a.acct.keys.aik, { ...a.acct.list, ver: a.acct.list.ver + 1, devs, arc: await nextArc(a.acct.list) });
+  const boxes = { [kept.dev.d]: { kid: 1, blob: b64u(random(200)), by: dev.d, sig: b64u(random(64)) }, [a.dev.d]: { kid: 1, blob: b64u(random(200)), by: dev.d, sig: b64u(random(64)) } };
+  const backup2 = await backup.sealBackup(a.acct.asb, random(32), { ver: list.ver, aik: list.aik });
+  await b.ok('e2ee.recover', { linkId, devlist: list, boxes, backup: backup2 });
+  assert.equal(srv.db.get('SELECT state FROM e2ee_devices WHERE id = ?', lost.dev.d).state, 'removed');
+  assert.ok(srv.db.get('SELECT 1 FROM e2ee_asb_boxes WHERE device = ? AND ver = ?', kept.dev.d, list.ver));
+  assert.equal(JSON.parse(srv.db.get('SELECT blob FROM e2ee_backup WHERE user = ?', a.id).blob).c, backup2.c);
+  for (const x of [kept.s, lost.s, b, a.sock]) await x.close().catch(() => {});
+});
+
+test('the recovery backup goes only to a socket bound to one of the account’s devices', async () => {
+  const a = await enrolled('e2-backup-bound');
+  const b = await reconnect(a, await login(srv, a.handle));
+  await b.refused('e2ee.backup.get', { password: 'a long password' }, /this device/);
+  await b.close(); await a.sock.close();
 });

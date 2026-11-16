@@ -138,3 +138,18 @@ test('sign-out forgets read markers waiting to be sent from offline', async () =
   await new Promise((r) => setTimeout(r, 0));
   assert.deepEqual(sent.filter(([op]) => op.startsWith('read.')), [], 'nothing from the last person is sent for the next one');
 });
+
+import { cacheJson } from '../js/lib/offline.js';
+test('device copy (e2ee L2): what this device decrypted is never written to localStorage, wherever it sits; envelopes are', () => {
+  const env = { h: { rev: 0 }, n: 'n', c: 'c', sig: 's' };
+  const opened = { id: 'm1', author: 'u2', e2ee: env, text: 'the secret plan', files: [{ id: 'f1', name: 'plan.pdf', encFile: true }], fwd: { text: 'fwd secret' }, sticker: { id: 's1' }, enc: true, encRev: 0, encFlags: ['mentions'] };
+  const plain = { id: 'm2', author: 'u1', text: 'a room message' };
+  const data = { msgs: { d1: [opened, plain] }, scheduled: [{ id: 's1', text: '', m: { ...opened, id: 'm3' } }], pins: { d1: [{ m: { ...opened } }] }, more: {}, cache: {} };
+  const json = cacheJson(data);
+  assert.ok(!json.includes('secret'), json);
+  assert.ok(json.includes('a room message'));
+  const back = JSON.parse(json);
+  assert.deepEqual(back.msgs.d1[0], { id: 'm1', author: 'u2', e2ee: env, text: '' }, 'kept as its envelope, opened again on load');
+  assert.equal(opened.text, 'the secret plan', 'the live state is untouched');
+  assert.ok(!cacheJson({ msgs: { r: [{ id: 'm', text: 'x', files: [{ src: 'blob:abc' }] }] }, more: {} }).includes('blob:'), 'local previews are left out as before');
+});

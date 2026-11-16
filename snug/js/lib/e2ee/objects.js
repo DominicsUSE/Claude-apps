@@ -6,9 +6,9 @@
 // And the rules a client applies before trusting either: pin an account key on
 // first sight, never accept an older list, flag a changed account key, and
 // never encrypt to a device the account key didn't sign.
-import { b64uOf, base32, random } from './bytes.js';
+import { b64u, b64uOf, base32, random, utf8 } from './bytes.js';
 import { canon } from './canon.js';
-import { signObject, verifyObject } from './sig.js';
+import { signObject, verifyObject, sha256 } from './sig.js';
 
 export const MAX_DEVICES = 10;
 export const PREKEY_MAX_AGE = 30 * 86_400_000;
@@ -93,17 +93,20 @@ export async function verifyPrekey(p, { u, d, dsk, now = Date.now() }) {
  */
 export async function acceptList(pin, l) {
   if (!(await verifyList(l))) return { ok: false, why: 'bad' };
-  if (!pin) return { ok: true, pin: { aik: l.aik, ver: l.ver, list: canon(l) }, changed: true, first: true };
+  const h = await listHash(l);
+  if (!pin) return { ok: true, pin: { aik: l.aik, ver: l.ver, h }, changed: true, first: true };
   if (l.aik !== pin.aik) return { ok: false, why: 'aik-changed' };
   if (l.ver < pin.ver) return { ok: false, why: 'rollback' };
   if (l.ver === pin.ver) {
     // The same version must be the same list; two different lists with one
     // version means someone signed a fork, or the server is replaying.
-    if (pin.list && pin.list !== canon(l)) return { ok: false, why: 'rollback' };
+    if ((pin.h && pin.h !== h) || (pin.list && pin.list !== canon(l))) return { ok: false, why: 'rollback' };
     return { ok: true, pin, changed: false };
   }
-  return { ok: true, pin: { aik: l.aik, ver: l.ver, list: canon(l) }, changed: true };
+  return { ok: true, pin: { aik: l.aik, ver: l.ver, h }, changed: true };
 }
+/** A short fingerprint of a whole signed list, kept in pins instead of the list (review M3). */
+export const listHash = async (l) => b64u(await sha256(utf8(`snug-e2ee-v1/list\n${canon(l)}`)));
 
 /** Devices to encrypt to: only those in the signed list, whatever else the server lists. */
 export function signedDevices(l, serverDevices = null) {
