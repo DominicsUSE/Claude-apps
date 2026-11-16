@@ -36,7 +36,7 @@ export const COPY = {
     storage: 'This browser won’t keep keys (private window storage is off). Use a normal window.',
     locked: 'This computer’s encryption keys are locked: the system key store that protects them can’t open them now (it changed, or Snug’s data was copied from another computer). If it doesn’t come back, remove the keys here and add this computer again with another device or your recovery key.',
   },
-  keyStoreNone: 'Your encryption keys aren’t protected by the system key store on this computer, so a copy of Snug’s data folder includes keys that open your messages.',
+  keyStoreNone: 'Your encryption keys aren’t protected by the system key store on this computer, so a copy of Snug’s data folder includes your account keys, recovery key and message keys.',
   keyStoreLockedAction: 'Remove this computer’s keys',
 
   pendingTitle: 'Approve this browser',

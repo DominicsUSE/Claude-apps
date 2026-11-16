@@ -110,7 +110,11 @@ from **Settings > Desktop app**). Every release's notes carry the same steps.
   stays on the releases page (<https://github.com/DominicsUSE/Claude-apps/releases?q=snug-v>):
   download the older file, check it, and install it over the current one (or
   replace the Mac app); the data folder is kept, and additions of the newer
-  version don't work in the older one. Because updates are required, the app
+  version don't work in the older one. One takes more: once 0.13 has put a
+  desktop app's encryption keys under the system key store, 0.12 can't open
+  them, so encrypted messages can't be read in that app until it is updated
+  again, or until that computer is removed from another device (Settings >
+  Encryption) and added again. Because updates are required, the app
   takes the newest release again at its next check, so a person can go back
   only for a while. **To stop a broken release for everyone**, the owner edits
   it on GitHub and ticks **Set as a pre-release** (or saves it as a draft): the
@@ -1392,7 +1396,11 @@ and call signalling. Push notifications say only "New message".
 - *Keys on this device.* In the desktop app, the key that seals your account keys,
   recovery key, message keys and unsent drafts is protected by the operating
   system's key store (Windows DPAPI, the macOS Keychain, a Linux keyring), so a copy
-  of Snug's data folder alone doesn't open them. Without a key store (some Linux
+  of Snug's data folder alone doesn't open those. The device's own signing and
+  prekey private keys aren't sealed this way: they are browser keys in that folder,
+  and they open messages sent to this device while its prekey is kept (a new one
+  each week, the old one kept 14 days more), so a copy still opens recent
+  messages. Without a key store (some Linux
   setups) Settings > Encryption says your keys aren't protected by it. In a browser
   they are kept like any site's data. Either way, code running as you on that
   computer can use them.
