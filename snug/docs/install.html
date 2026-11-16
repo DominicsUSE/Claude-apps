@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Install Snug on Windows or Mac</title>
+<meta name="description" content="Which file to download, the warning Windows or macOS may show, and how to check that the download is the real one.">
+<link rel="icon" href="/brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/css/tokens.css">
+<link rel="stylesheet" href="/docs/install.css">
+</head>
+<body>
+<main>
+<header>
+  <img src="/brand/lockup.svg" alt="Snug" width="128" height="37">
+  <h1>Install Snug on Windows or Mac</h1>
+  <p class="lead">Snug works in a web browser. If you want it as an app on your computer, this page says which
+  file to download, what warning you may see, and how to check that the file is the real one.
+  Downloading needs no account.</p>
+</header>
+
+<nav aria-label="On this page">
+  <ol>
+    <li><a href="#pick">Pick the file</a></li>
+    <li><a href="#check">Check the download</a></li>
+    <li><a href="#warning">The warning you may see</a></li>
+    <li><a href="#install">Install</a></li>
+    <li><a href="#updates">Updates, and going back to an older version</a></li>
+  </ol>
+</nav>
+
+<h2 id="pick">1. Pick the file</h2>
+<p>Open Snug's newest release:
+<a href="https://github.com/DominicsUSE/Claude-apps/releases/latest">github.com/DominicsUSE/Claude-apps/releases/latest</a>.
+Scroll down to <strong>Assets</strong>. The numbers in the names are the version (for example 0.12.0).</p>
+<table class="files">
+  <thead><tr><th scope="col">You have</th><th scope="col">Download</th></tr></thead>
+  <tbody>
+    <tr><th scope="row">Windows 10 or 11, and you want Snug in the Start menu</th><td><code>Snug-Setup-&lt;version&gt;.exe</code> (the installer)</td></tr>
+    <tr><th scope="row">Windows, and you don't want to install anything</th><td><code>Snug-&lt;version&gt;-portable.exe</code> (runs from wherever you put it)</td></tr>
+    <tr><th scope="row">A Mac (Apple silicon or Intel)</th><td><code>Snug-&lt;version&gt;-mac.dmg</code></td></tr>
+  </tbody>
+</table>
+<p class="muted">Also download the checksum file for your system, <code>SHA256SUMS-windows.txt</code> or
+<code>SHA256SUMS-mac.txt</code>: step 2 uses it. You don't need the <code>.sig</code> files; the app uses
+them when it updates itself. Ignore releases of other apps on that page: Snug's are named
+<em>Snug &lt;version&gt;</em>.</p>
+
+<h2 id="check">2. Check the download</h2>
+<p>A checksum is a long code calculated from every byte of a file. If even one byte is different, the code
+is completely different. Compare the code of the file you downloaded with the line for that file in the
+checksum file.</p>
+
+<h3>On Windows</h3>
+<ol>
+  <li>Open the Start menu, type <kbd>PowerShell</kbd> and open <strong>Windows PowerShell</strong>.</li>
+  <li>Go to your Downloads folder and calculate the code (use the name of the file you downloaded):
+<pre><code>cd $HOME\Downloads
+Get-FileHash .\Snug-Setup-0.12.0.exe -Algorithm SHA256</code></pre></li>
+  <li>Open <code>SHA256SUMS-windows.txt</code> in Notepad. The code under <em>Hash</em> must be the same as the
+  code at the start of the line that ends with the file's name. PowerShell writes capital letters and the file
+  small ones; that difference doesn't matter.</li>
+</ol>
+
+<h3>On a Mac</h3>
+<ol>
+  <li>Open <strong>Terminal</strong> (Applications &gt; Utilities).</li>
+  <li>Calculate the code (use the name of the file you downloaded):
+<pre><code>shasum -a 256 ~/Downloads/Snug-0.12.0-mac.dmg</code></pre></li>
+  <li>Compare it with the line for that file in <code>SHA256SUMS-mac.txt</code>. Or let the Mac compare for you:
+<pre><code>cd ~/Downloads &amp;&amp; shasum -a 256 -c SHA256SUMS-mac.txt</code></pre>
+  It prints the file's name and <samp>OK</samp> when they match.</li>
+</ol>
+
+<p><strong>If the codes are different, don't open the file.</strong> Delete it and download it again from the
+release page.</p>
+<p class="muted">What this proves: your file is exactly the file the release lists. It catches a damaged
+download, or a copy someone changed and passed on through another site or a chat. It can't catch someone who
+could change the release itself, because the checksum file comes from the same place. The next check covers
+that.</p>
+
+<h3>Optional: check where it was built</h3>
+<p>Every Snug file on the release page is built by GitHub's own machines from the project's public code, and
+GitHub records a signed statement of that (a <em>build provenance attestation</em>). With the
+<a href="https://cli.github.com">GitHub command-line tool</a> (it needs a free GitHub account and
+<code>gh auth login</code> once) you can check it:</p>
+<pre><code>gh attestation verify Snug-Setup-0.12.0.exe -R DominicsUSE/Claude-apps</code></pre>
+<p>It says <samp>Verification succeeded!</samp> and names the workflow that built the file
+(<code>build-snug-windows.yml</code> or <code>build-snug-mac.yml</code>). Anything else means the file was not
+built there.</p>
+
+<h2 id="warning">3. The warning you may see</h2>
+<h3>Windows: “Windows protected your PC”</h3>
+<p>Windows SmartScreen shows this for programs it doesn't know yet, with <em>Unknown publisher</em> when the
+file isn't code-signed. Code signing needs a certificate in the project's name, which Snug doesn't have yet,
+so for now Snug's Windows files are not signed and you will see this warning. It means Windows doesn't know who
+made the file. It doesn't mean Windows found something wrong with it.</p>
+<p>Once you have checked the file (step 2): choose <strong>More info</strong>, then <strong>Run anyway</strong>.</p>
+<p class="muted">To see whether a file is signed: right-click it, <strong>Properties</strong>. A signed file
+has a <strong>Digital Signatures</strong> tab with the signer's name; an unsigned one has no such tab. Even a
+signed file can show the warning for a while after a new version comes out, until enough people have
+downloaded it.</p>
+
+<h3>Mac: “Apple could not verify Snug is free of malware”</h3>
+<p>Apple only stops this message for apps it has checked (“notarized”), which needs a paid Apple developer
+membership. Snug isn't notarized, so macOS shows this the first time.</p>
+<ol>
+  <li>Open Snug once and choose <strong>Done</strong> (or <strong>OK</strong>) on the message.</li>
+  <li>Open <strong>System Settings &gt; Privacy &amp; Security</strong>, scroll down to the message about Snug
+  and choose <strong>Open Anyway</strong>. Confirm with your password.</li>
+</ol>
+<p class="muted">On macOS 14 and older you can also Control-click Snug in Applications and choose
+<strong>Open</strong>.</p>
+
+<h2 id="install">4. Install</h2>
+<ul>
+  <li><strong>Windows installer:</strong> double-click <code>Snug-Setup-&lt;version&gt;.exe</code>. It installs
+  for you only (no administrator needed) and adds Snug to the Start menu and the desktop.</li>
+  <li><strong>Windows portable:</strong> put <code>Snug-&lt;version&gt;-portable.exe</code> where you like and
+  double-click it.</li>
+  <li><strong>Mac:</strong> open the <code>.dmg</code> and drag Snug to Applications.</li>
+</ul>
+<p>The first time, Snug asks where it should run: on this computer, or joining a Snug that someone else runs.</p>
+
+<h2 id="updates">5. Updates, and going back to an older version</h2>
+<p>Snug updates itself. It downloads the new version from the same release page and installs it only after
+its checksum matches the release's checksum file (and, once the project switches on update signing, only if
+that file carries the project's signature). It waits for a quiet moment and never restarts during a call.</p>
+<p>Snug never goes back to an older version by itself. Every version stays on the release page:
+<a href="https://github.com/DominicsUSE/Claude-apps/releases?q=snug-v&amp;expanded=true">all Snug releases</a>.
+If a new version breaks something for you:</p>
+<ol>
+  <li>Tell the project:
+  <a href="https://github.com/DominicsUSE/Claude-apps/issues">github.com/DominicsUSE/Claude-apps/issues</a>
+  (needs a GitHub account).</li>
+  <li>To go back now: download the older version's file from its release, check it as in step 2, and install it
+  over the current one (Windows) or replace Snug in Applications (Mac). Your conversations and settings stay in
+  your data folder. Things the newer version added won't work in the older one.</li>
+</ol>
+<p class="note">Updates are required, so an older version updates itself again soon after it starts, unless
+the project has withdrawn the broken release (marked it as a pre-release). Going back is a way to keep working
+until a fixed version is out.</p>
+
+<footer>
+  <p>Snug is free and open source. The code is at
+  <a href="https://github.com/DominicsUSE/Claude-apps">github.com/DominicsUSE/Claude-apps</a>.
+  Security problems: see the project's security policy (SECURITY.md) and report them privately.</p>
+</footer>
+</main>
+</body>
+</html>

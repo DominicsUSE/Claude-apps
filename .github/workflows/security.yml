@@ -1,0 +1,331 @@
+# Security scans for Snug, all free and open source, none needing a secret:
+#   npm-audit          npm audit (high/critical fails) for snug/, snug/registry and snug/desktop, dev tools included
+#   workflow-rules     snug/desktop/workflows.test.js: least-privilege tokens, SHA-pinned actions, no kept credentials
+#   osv-scanner        Google OSV-Scanner over every lockfile in the repository (the official binary, checked
+#                      against its published sha256); high/critical in snug/ fails, the rest is reported
+#   gitleaks           secrets in the full git history (every commit, not just the files as they are now)
+#   codeql             GitHub CodeQL, security-extended queries, for Snug's JavaScript and for these workflows
+#   semgrep            Semgrep CE (container pinned by digest) with p/javascript, p/nodejs, p/owasp-top-ten, p/secrets
+#   electronegativity  Doyensec Electronegativity: Electron misconfigurations in snug/desktop
+#   zap-baseline       OWASP ZAP baseline (passive) against a seeded Snug server; High-risk alerts fail
+#   dependency-review  on pull requests: a new dependency with a high/critical advisory fails
+# Scanners report everything; .github/security/gate.mjs decides what fails (high and critical only; findings a
+# person checked are listed with the reason in .github/security/reviewed.json). SARIF goes to code scanning
+# (Security tab) from one small job that holds the only write permission and runs no scanner.
+# Every action is pinned to a full commit SHA; Dependabot (.github/dependabot.yml) proposes the updates.
+name: Security scans
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "41 3 * * 2" # Tuesdays: advisories published for packages that haven't changed
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  npm-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: [snug, snug/registry, snug/desktop]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      # Reads the lockfile only: nothing is installed and no package script runs.
+      - name: npm audit ${{ matrix.dir }}
+        working-directory: ${{ matrix.dir }}
+        run: npm audit --audit-level=high
+
+  # The workflow rules (sec-desktop D2): read-only tokens by default, actions pinned to commits, no kept
+  # credentials, release jobs gated by the `release` environment. Merged in from snug-security.yml.
+  workflow-rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Workflow rules
+        run: node --test snug/desktop/workflows.test.js
+
+  osv-scanner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      OSV_VERSION: 2.7.0
+      OSV_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install osv-scanner (checksum verified)
+        run: |
+          mkdir -p "$RUNNER_TEMP/osv"
+          curl -sSfL -o "$RUNNER_TEMP/osv/osv-scanner" "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SHA256}  $RUNNER_TEMP/osv/osv-scanner" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/osv/osv-scanner"
+      # Exit 1 means "vulnerabilities found" (the gate below judges them); anything above 1 is a scanner error.
+      - name: Scan every lockfile
+        run: |
+          mkdir -p sarif
+          for fmt in json sarif; do
+            out=osv.json; [ "$fmt" = sarif ] && out=sarif/osv.sarif
+            set +e; "$RUNNER_TEMP/osv/osv-scanner" scan source -r --format "$fmt" --output-file "$out" .; rc=$?; set -e
+            [ "$rc" -le 1 ] || { echo "osv-scanner failed ($rc)"; exit "$rc"; }
+          done
+      - name: Gate (high/critical in snug/)
+        run: node .github/security/gate.mjs osv osv.json --only snug/
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sarif-osv
+          path: sarif/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install gitleaks (checksum verified)
+        run: |
+          mkdir -p "$RUNNER_TEMP/gitleaks"
+          curl -sSfL -o "$RUNNER_TEMP/gitleaks/gl.tgz" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks/gl.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gitleaks/gl.tgz" -C "$RUNNER_TEMP/gitleaks" gitleaks
+      # --redact keeps any found secret out of the log and the report; every finding fails.
+      - name: Scan the full history
+        run: |
+          mkdir -p sarif
+          "$RUNNER_TEMP/gitleaks/gitleaks" git . --config snug/.gitleaks.toml --redact --no-banner \
+            --report-format sarif --report-path sarif/gitleaks.sarif --exit-code 0
+          node .github/security/gate.mjs sarif sarif/gitleaks.sarif --any
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sarif-gitleaks
+          path: sarif/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  codeql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write # CodeQL uploads its own results; this job installs nothing from npm
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, actions]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          queries: security-extended
+          config: |
+            paths-ignore:
+              - siteless
+              - money-charted
+              - pulse
+              - realestate-globe
+              - snug/vendor
+              - snug/desktop/snug
+              - snug/desktop/dist
+              - "**/node_modules"
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}
+          output: ${{ runner.temp }}/codeql-sarif
+      - name: Gate (high/critical, precise queries)
+        run: node .github/security/gate.mjs sarif "$RUNNER_TEMP/codeql-sarif"
+
+  semgrep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    container:
+      image: semgrep/semgrep@sha256:2e45517a85e13a9cca14a2a00df6bb48affd66b8ebfae1b0991cd57578362fb0 # 1.183.0
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # snug/.semgrepignore leaves out third-party and generated code. No login, no upload to semgrep.dev.
+      - name: Scan snug/
+        working-directory: snug
+        run: |
+          mkdir -p ../semgrep
+          semgrep scan --metrics=off --disable-version-check \
+            --config p/javascript --config p/nodejs --config p/owasp-top-ten --config p/secrets \
+            --json-output=../semgrep/semgrep.json --sarif-output=../semgrep/semgrep.sarif .
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: semgrep
+          path: semgrep/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The semgrep image has no Node, so its gate runs here, on the report it uploaded.
+  semgrep-gate:
+    needs: semgrep
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: semgrep
+          path: semgrep
+      - name: Gate (severity ERROR, security, confidence above low)
+        run: node .github/security/gate.mjs semgrep semgrep/semgrep.json --root snug
+
+  electronegativity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      npm_config_ignore_scripts: "true"
+      npm_config_audit: "false"
+      npm_config_fund: "false"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      # Reads snug/desktop's own files only (the generated snug/desktop/snug copy is not built here).
+      - name: Scan snug/desktop
+        run: |
+          mkdir -p sarif
+          npx --yes @doyensec/electronegativity@1.10.3 -i snug/desktop -r -v false -o electronegativity.csv
+          npx --yes @doyensec/electronegativity@1.10.3 -i snug/desktop -r -v false -o electronegativity.raw.sarif
+          node .github/security/gate.mjs rebase electronegativity.raw.sarif sarif/electronegativity.sarif snug/desktop/
+      - name: Gate (high/critical, firm or certain)
+        run: node .github/security/gate.mjs electronegativity electronegativity.csv
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sarif-electronegativity
+          path: sarif/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # OWASP ZAP baseline (passive) against a seeded Snug server on this runner: .github/security/zap-baseline.sh
+  # (the official image pinned by digest, no secrets). Only High-risk alerts not accepted in
+  # .github/security/zap-rules.tsv fail; the HTML/JSON/Markdown reports are kept as an artifact.
+  zap-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Install the server's packages
+        working-directory: snug
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Scan the seeded server and gate (High only)
+        env:
+          ZAP_OUT: zap
+        run: bash .github/security/zap-baseline.sh
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zap-baseline
+          path: zap/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # The only job that can write to code scanning: it downloads the reports and uploads them, nothing else.
+  upload-sarif:
+    needs: [osv-scanner, gitleaks, semgrep, electronegativity]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to code scanning; this job runs no scanner and installs nothing
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: reports
+      - if: ${{ hashFiles('reports/sarif-osv/*.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: reports/sarif-osv/osv.sarif
+          category: osv-scanner
+      - if: ${{ hashFiles('reports/sarif-gitleaks/*.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: reports/sarif-gitleaks/gitleaks.sarif
+          category: gitleaks
+      - if: ${{ hashFiles('reports/semgrep/*.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: reports/semgrep/semgrep.sarif
+          category: semgrep
+      - if: ${{ hashFiles('reports/sarif-electronegativity/*.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: reports/sarif-electronegativity/electronegativity.sarif
+          category: electronegativity
+
+  dependency-review:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
+          fail-on-severity: high

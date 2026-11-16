@@ -1,0 +1,152 @@
+/* Voice options (js/views/voiceopts.js, js/views/voiceopts-settings.js):
+   per-person volume, soundboard, the options menu, hold to talk, the floating
+   call, picture in picture, Settings > Voice and video, House settings > Voice. */
+
+/* ---------- Sliders ---------- */
+.vo-range { -webkit-appearance: none; appearance: none; width: 100%; height: var(--touch); background: transparent; margin: 0; cursor: pointer; }
+.vo-range::-webkit-slider-runnable-track { height: 4px; border-radius: var(--r-full); background: var(--bg-4); }
+.vo-range::-moz-range-track { height: 4px; border-radius: var(--r-full); background: var(--bg-4); }
+.vo-range::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -6px; border-radius: var(--r-full); background: var(--text-1); border: 0; transition: transform var(--m-fast) var(--ease-in-out); }
+.vo-range::-moz-range-thumb { width: 16px; height: 16px; border-radius: var(--r-full); background: var(--text-1); border: 0; }
+.vo-range:hover::-webkit-slider-thumb { transform: scale(1.15); }
+.vo-range:active::-webkit-slider-thumb { transform: scale(1.25); }
+.vo-range:focus-visible { outline: none; }
+.vo-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--bg, var(--bg-1)), 0 0 0 4px var(--focus); }
+.vo-range:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 2px var(--bg, var(--bg-1)), 0 0 0 4px var(--focus); }
+.vo-range:disabled { cursor: not-allowed; }
+.vo-range:disabled::-webkit-slider-thumb { background: var(--text-disabled); }
+.vo-range:disabled::-moz-range-thumb { background: var(--text-disabled); }
+.vo-range-row { display: grid; gap: 0; min-width: 0; }
+.vo-range-row.wide { width: min(320px, 100%); }
+.vo-range-row.sm { width: 112px; flex: none; }
+.vo-range-label { display: flex; justify-content: space-between; gap: var(--s-2); font-size: var(--t-12); color: var(--text-2); }
+.vo-range-label .num { color: var(--text-1); font-variant-numeric: tabular-nums; }
+
+.vo-note { margin: 0; font-size: var(--t-13); line-height: var(--lh-ui); color: var(--text-3); }
+.vo-err { margin: 0; font-size: var(--t-13); line-height: var(--lh-ui); color: var(--error); }
+
+/* ---------- One person's volume ---------- */
+.vo-pa { display: grid; gap: var(--s-3); padding: var(--s-4); width: 288px; max-width: 100%; }
+.vo-pa-head { display: flex; align-items: center; gap: var(--s-2); min-width: 0; }
+.vo-pa-head b { font-weight: var(--w-semibold); }
+.vo-pa-acts { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+
+.stage-person .vo-vol, .vt-extras .vo-vol { color: var(--text-3); opacity: 0; transition: opacity var(--m-fast) var(--ease-in-out); }
+.stage-person:hover .vo-vol, .stage-person:focus-within .vo-vol, .vt:hover .vo-vol, .vt:focus-within .vo-vol, .vo-vol.on { opacity: 1; }
+.vo-vol.on { color: var(--cyan); opacity: 1; }
+@media (hover: none) { .stage-person .vo-vol, .vt-extras .vo-vol { opacity: 1; } }
+.vt-extras { position: absolute; top: var(--s-2); right: var(--s-2); display: flex; align-items: center; gap: var(--s-1); z-index: 2; }
+.vt-extras .vo-vol { background: color-mix(in srgb, var(--bg-0) 76%, transparent); color: var(--text-1); }
+.vo-played { display: inline-flex; align-items: center; max-width: 100%; padding: 0 6px; height: 22px; border-radius: var(--r-row); background: var(--amber-soft, var(--bg-3)); color: var(--text-1); font-size: var(--t-12); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: fade-in var(--m-standard) var(--ease-out); }
+
+.vo-limit { margin-left: var(--s-1); color: var(--text-3); font-weight: var(--w-regular); }
+.vo-limit.full { color: var(--amber); font-weight: var(--w-semibold); }
+
+/* ---------- Extra stage controls ---------- */
+.stage-acts .vo-hold { height: var(--h-md); padding: 0 var(--s-3); touch-action: none; user-select: none; -webkit-user-select: none; }
+.stage-acts .vo-hold.live { background: var(--mint-soft, var(--bg-3)); color: var(--mint-ink, var(--mint)); border-color: var(--mint); }
+
+/* ---------- Soundboard ---------- */
+.vo-board { display: grid; gap: var(--s-3); padding: var(--s-3); width: 320px; max-width: 100%; }
+.vo-board-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-2); }
+.vo-board-head b { font-weight: var(--w-semibold); }
+.vo-board-head .faint { font-size: var(--t-12); }
+.vo-board-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-2); max-height: 288px; overflow: auto; }
+.vo-snd { display: flex; align-items: center; gap: var(--s-2); min-height: var(--h-36); padding: 0 var(--s-3); border-radius: var(--r-btn); background: var(--surface-hover); color: var(--text-1); border: 1px solid transparent; font: inherit; font-size: var(--t-14); text-align: left; cursor: pointer; transition: background var(--m-fast) var(--ease-in-out); }
+.vo-snd:hover { background: var(--surface-sel); }
+.vo-snd:active { background: var(--btn2-press); }
+.vo-snd:focus-visible { outline: var(--focus-w, 2px) solid var(--focus); outline-offset: 2px; }
+.vo-snd[disabled] { color: var(--text-disabled); background: var(--surface-hover); cursor: not-allowed; }
+.vo-snd-emo { flex: none; width: 20px; display: grid; place-items: center; font-size: 1.125rem; line-height: 1; }
+.vo-snd-emo.lg { width: 40px; height: 40px; font-size: 1.5rem; border-radius: var(--r-sm); background: var(--bg-3); }
+.vo-board-empty { display: grid; justify-items: center; gap: var(--s-1); padding: var(--s-4) var(--s-2); text-align: center; color: var(--text-3); font-size: var(--t-13); }
+.vo-board-empty b { color: var(--text-1); font-weight: var(--w-semibold); font-size: var(--t-14); }
+
+/* ---------- Floating call ----------
+   A small panel on the floating surface: a 32px head (grip, the room, the
+   clock, hide), faces or the shared picture, and 32px controls with leave
+   in red. */
+.vo-mini { position: fixed; right: var(--s-4); bottom: calc(var(--s-20) + var(--s-4)); z-index: 30; width: 280px; display: grid; gap: var(--s-2); padding: var(--s-2); border-radius: var(--r-modal); background: var(--surface-float); --bg: var(--surface-float); animation: rise-in var(--m-panel) var(--ease-out); }
+.vo-mini-head { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.vo-mini-grip { flex: none; width: var(--h-28); height: var(--h-sm); display: grid; place-items: center; border-radius: var(--r-btn); background: transparent; border: 0; color: var(--text-3); cursor: grab; touch-action: none; }
+.vo-mini-grip:hover { background: var(--surface-hover); color: var(--text-1); }
+.vo-mini-grip:active { cursor: grabbing; background: var(--surface-sel); }
+.vo-mini-grip:focus-visible, .vo-mini-title:focus-visible { outline: var(--focus-w, 2px) solid var(--focus); outline-offset: 1px; }
+.vo-mini-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: var(--h-sm); padding: 0 var(--s-2); border-radius: var(--r-btn); background: transparent; border: 0; color: var(--text-1); font: inherit; font-size: var(--t-body); font-weight: var(--w-semibold); cursor: pointer; text-align: left; }
+.vo-mini-title .ic { color: var(--online); flex: none; }
+.vo-mini-title:hover { background: var(--surface-hover); }
+.vo-mini-title .faint { font-weight: var(--w-regular); font-size: var(--t-meta); }
+.vo-mini-media { position: relative; border-radius: var(--r-lg); overflow: hidden; background: var(--bg-0); aspect-ratio: 16 / 9; }
+.vo-mini-video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vo-mini-media .vt-pip { position: absolute; right: var(--s-1); bottom: var(--s-1); background: color-mix(in srgb, var(--bg-0) 70%, transparent); color: var(--text-1); }
+.vo-mini-faces { display: flex; flex-wrap: wrap; gap: var(--s-2); padding: var(--s-1) var(--s-2); }
+.vo-mini-face { position: relative; display: inline-grid; }
+.vo-mini-face .avatar.speaking { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--online); }
+.vo-mini-muted { position: absolute; right: -3px; bottom: -3px; width: 16px; height: 16px; border-radius: var(--r-full); display: grid; place-items: center; background: var(--bg); color: var(--error); }
+.vo-mini-more { align-self: center; color: var(--text-3); font-size: var(--t-ui); }
+.vo-mini-acts { display: flex; align-items: center; gap: var(--s-1); }
+.vo-mini-acts .vc { width: var(--h-sm); height: var(--h-sm); background: var(--btn2); color: var(--text-1); }
+.vo-mini-acts .vc:hover { background: var(--btn2-hover); }
+.vo-mini-acts .vc.on, .vo-mini-acts .vc.on:hover { background: var(--error-soft); color: var(--error); }
+.vo-mini-acts .vc.danger { width: 44px; background: var(--error); color: var(--on-error); }
+.vo-mini-acts .vc.danger:hover { background: var(--error-hover); color: var(--on-error); }
+.vo-mini-acts .grow { flex: 1; }
+.vo-mini-acts .btn { height: var(--h-sm); }
+
+/* Picture in picture on a video tile, beside full screen. */
+.vt .vt-pip { position: absolute; right: var(--s-2); bottom: var(--s-2); background: color-mix(in srgb, var(--bg-0) 70%, transparent); color: var(--text-1); opacity: 0; transition: opacity var(--m-fast) var(--ease-in-out); z-index: 2; }
+.vt:hover .vt-pip, .vt:focus-within .vt-pip { opacity: 1; }
+@media (hover: none) { .vt .vt-pip { opacity: 1; } }
+
+/* ---------- Settings > Voice and video ---------- */
+.vo-dev { max-width: 280px; min-width: 200px; }
+.vo-test { display: grid; gap: var(--s-2); width: min(320px, 100%); }
+.vo-test-acts { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
+.vo-check { display: inline-flex; align-items: center; gap: var(--s-2); font-size: var(--t-14); min-height: var(--touch); cursor: pointer; }
+.vo-check input { width: 16px; height: 16px; accent-color: var(--text-1); }
+.vo-meter { position: relative; height: 8px; border-radius: var(--r-full); background: var(--bg-4); overflow: visible; }
+.vo-meter-fill { position: absolute; inset: 0 auto 0 0; border-radius: var(--r-full); background: var(--text-3); transition: width 60ms linear; }
+.vo-meter.open .vo-meter-fill { background: var(--mint); }
+.vo-meter-mark { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--text-1); }
+.vo-cam { display: grid; gap: var(--s-2); width: min(320px, 100%); }
+.vo-cam-video { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--r-xl); background: var(--bg-0); transform: scaleX(-1); }
+.vo-cam-empty { aspect-ratio: 16 / 9; border-radius: var(--r-xl); background: var(--bg-2); border: 1px dashed var(--line-strong); display: grid; place-content: center; justify-items: center; gap: var(--s-2); padding: var(--s-4); text-align: center; color: var(--text-3); font-size: var(--t-13); }
+.vo-key { gap: var(--s-2); }
+.vo-key kbd { font: inherit; font-family: var(--mono); font-size: var(--t-13); padding: 0 var(--s-2); min-width: 24px; border-radius: var(--r-xs); background: var(--bg-4); border: 1px solid var(--line-strong); }
+.vo-key.listening { border-color: var(--cyan); color: var(--cyan); }
+
+/* ---------- House settings > Voice ---------- */
+.vo-add { display: grid; gap: var(--s-3); margin: var(--s-2) 0 var(--s-4); }
+.vo-drop { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-4); border: 1px dashed var(--line-strong); border-radius: var(--r-md); background: var(--bg-2); color: var(--text-2); }
+.vo-drop.bad { border-color: var(--error); }
+.vo-drop-text { flex: 1; min-width: 0; display: grid; gap: 2px; font-size: var(--t-13); line-height: var(--lh-ui); }
+.vo-drop-text b { color: var(--text-1); font-weight: var(--w-semibold); font-size: var(--t-14); overflow-wrap: anywhere; }
+.vo-drop.bad .vo-drop-text span { color: var(--error); }
+.vo-file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.vo-add-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s-3); }
+.vo-field { display: grid; gap: var(--s-1); font-size: var(--t-12); color: var(--text-2); flex: 1; min-width: 160px; }
+.vo-field.sm { flex: none; width: 80px; min-width: 0; }
+.vo-add-form .vo-range-row { width: 160px; }
+.vo-add-acts { display: flex; gap: var(--s-2); margin-left: auto; }
+.vo-snd-list { list-style: none; margin: 0; padding: 0; }
+.vo-snd-row { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) 0; min-height: 56px; border-bottom: 1px solid var(--line-subtle); }
+.vo-snd-meta { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.vo-snd-meta .field { max-width: 260px; }
+.vo-snd-meta .faint { font-size: var(--t-12); }
+
+@media (max-width: 759px) {
+  .vo-mini { left: var(--s-4); right: var(--s-4); width: auto; bottom: calc(64px + var(--s-4) + env(safe-area-inset-bottom, 0px)); }
+  .vo-mini-acts .vc, .vo-mini-grip, .vo-mini-title { min-height: var(--touch); min-width: var(--touch); }
+  .vo-snd { min-height: var(--touch); }
+  .vo-snd-row { flex-wrap: wrap; }
+  .vo-snd-row .vo-range-row.sm { width: 100%; order: 3; }
+  .vo-drop { flex-wrap: wrap; }
+  .vo-add-acts { margin-left: 0; width: 100%; }
+  .vo-add-acts .btn { flex: 1; }
+  .vo-dev { min-width: 0; width: 100%; }
+}
+@media (pointer: coarse) { .vo-snd { min-height: var(--touch); } .vo-mini-acts .vc, .vo-mini-acts .btn { min-height: var(--touch); min-width: var(--touch); } }
+@media (prefers-reduced-motion: reduce) {
+  .vo-mini, .vo-played { animation: none; }
+  .vo-meter-fill { transition: none; }
+}

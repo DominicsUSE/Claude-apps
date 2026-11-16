@@ -1,0 +1,11 @@
+# Semgrep CE (LGPL-2.1, https://github.com/semgrep/semgrep) skips these when scanning snug/
+# (.github/workflows/security.yml). Third-party and generated code only: Snug's own code is always scanned.
+node_modules/
+vendor/
+data/
+desktop/snug/
+desktop/dist/
+docs/
+fonts/
+brand/
+*.min.js

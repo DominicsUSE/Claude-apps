@@ -1,0 +1,79 @@
+/* End-to-end encryption: the setup and recovery-key sheets, adding a device,
+   approving one, Settings > Encryption and safety numbers. Tokens only. */
+.e2-sheet { display: grid; gap: var(--s-3); }
+.e2-sheet h2 { margin: 0; }
+.e2-mark { width: var(--h-lg); height: var(--h-lg); border-radius: var(--r-full); display: grid; place-items: center; background: var(--brand-soft); color: var(--brand); }
+.e2-check { display: flex; gap: var(--s-3); align-items: flex-start; cursor: pointer; }
+.e2-check input { margin-top: 3px; flex: none; width: 16px; height: 16px; accent-color: var(--brand); }
+.e2-check > span { display: grid; gap: 2px; }
+.e2-check b { font-weight: var(--w-medium); }
+.e2-key-field, .e2-code-field, .e2-last { font-family: var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+.e2-last { max-width: 8em; }
+textarea.e2-key-field { resize: vertical; min-height: calc(var(--h-field) * 1.6); }
+.e2-rk { display: grid; grid-template-columns: repeat(3, auto); justify-content: start; gap: var(--s-2) var(--s-3); padding: var(--s-3) var(--s-4); background: var(--surface-input); border: 1px solid var(--line); border-radius: var(--r-md); user-select: all; }
+.e2-rk code, .e2-number code { font-family: var(--mono); font-size: var(--t-16); letter-spacing: 0.08em; color: var(--text-1); }
+:root[data-streamer] .e2-rk { filter: blur(8px); }
+.e2-choices { display: grid; gap: var(--s-2); }
+.e2-choice { display: flex; gap: var(--s-3); align-items: center; justify-content: flex-start; text-align: left; height: auto; min-height: var(--touch); padding: var(--s-3); white-space: normal; }
+.e2-choice > span { display: grid; gap: 2px; }
+.e2-choice b { font-weight: var(--w-medium); }
+.e2-steps { margin: 0; padding-left: var(--s-5); display: grid; gap: var(--s-1); color: var(--text-2); }
+.e2-code { margin: 0; font-family: var(--mono); font-size: var(--t-24); letter-spacing: 0.12em; color: var(--text-1); text-align: center; padding: var(--s-3); background: var(--surface-input); border-radius: var(--r-md); }
+.e2-number { display: grid; grid-template-columns: repeat(4, auto); justify-content: start; gap: var(--s-2) var(--s-4); padding: var(--s-3) var(--s-4); background: var(--surface-input); border-radius: var(--r-md); }
+.e2-qr-row { display: flex; gap: var(--s-4); align-items: center; flex-wrap: wrap; }
+.e2-qr-row .acc-qr { width: calc(var(--s-20) * 1.6); height: calc(var(--s-20) * 1.6); }
+.e2-qr-row .hint { flex: 1 1 12em; margin: 0; }
+.e2-state, .e2-ok { display: flex; gap: var(--s-2); align-items: center; margin: 0; color: var(--text-2); }
+.e2-ok { color: var(--mint-ink, var(--text-1)); padding: var(--s-2) 0; }
+.e2-warn { display: flex; gap: var(--s-2); align-items: flex-start; margin: 0; padding: var(--s-2) var(--s-3); border-radius: var(--r-md); background: var(--amber-soft); color: var(--text-1); }
+.e2-warn svg { color: var(--amber); flex: none; margin-top: 2px; }
+.e2-h2, .e2-h3 { font-size: var(--t-section); margin: var(--s-4) 0 var(--s-2); }
+.e2-devs { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }
+.e2-devs li { display: grid; gap: 2px; }
+.e2-dev { display: flex !important; gap: var(--s-3); align-items: center; padding: var(--s-2) 0; border-bottom: 1px solid var(--line-subtle); }
+.e2-dev .grow { display: grid; gap: 2px; min-width: 0; }
+.e2-keep { border: 0; padding: 0; margin: 0; display: grid; gap: var(--s-2); }
+.e2-limits ul { margin: 0; padding-left: var(--s-5); display: grid; gap: var(--s-2); color: var(--text-2); }
+.e2-detail-people { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-2); }
+/* Encrypted conversations: the header label, a message being opened (or not), the composer note, the line where it turned on. */
+.e2-label { display: inline-flex; align-items: center; gap: var(--s-1); height: var(--h-xs); padding: 0 var(--s-2); border: 1px solid var(--line); border-radius: var(--r-full); background: none; color: var(--text-2); font-size: var(--t-12); white-space: nowrap; cursor: pointer; flex: none; }
+.e2-label.on { color: var(--text-1); }
+.e2-label:hover { background: var(--surface-hover); }
+.e2-label:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.e2-msg { display: flex; align-items: center; gap: var(--s-2); color: var(--text-3); font-style: italic; }
+.e2-msg.failed { color: var(--text-2); }
+.e2-msg svg { flex: none; }
+.e2-file { color: var(--text-3); }
+.e2-compose-note { display: flex; align-items: center; gap: var(--s-1); margin: 0 0 var(--s-1); font-size: var(--t-12); color: var(--text-3); }
+.e2-line .joinline-text { color: var(--text-2); }
+.e2-detail h3 { display: flex; align-items: center; gap: var(--s-2); }
+.e2-detail .hint + .hint { margin-top: var(--s-2) !important; }
+@media (max-width: 759px) {
+  .e2-label span { display: none; }
+  .e2-rk { grid-template-columns: repeat(3, auto); padding: var(--s-3); }
+  .e2-number { grid-template-columns: repeat(3, auto); }
+  .e2-code { font-size: var(--t-20); }
+}
+.e2-gate { align-items: center; flex-wrap: wrap; margin-bottom: var(--s-2); }
+.e2-gate .grow { flex: 1 1 14em; }
+.e2-gif-note { margin: 0 0 var(--s-2); font-size: var(--t-12); }
+/* The offer to turn encryption on, above the direct messages (js/views/e2ee-setup.js EncInvite). */
+.e2-invite { display: flex; gap: var(--s-2); margin: var(--s-1) 0 var(--s-2); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); }
+.e2-invite-ic { flex: none; color: var(--brand); padding-top: 2px; }
+.e2-invite-body { display: grid; gap: var(--s-1); min-width: 0; }
+.e2-invite h3 { margin: 0; font-size: var(--t-ui); font-weight: var(--w-medium); color: var(--text-1); }
+.e2-invite .hint { margin: 0; }
+.e2-invite-acts { display: flex; gap: var(--s-2); flex-wrap: wrap; margin-top: var(--s-1); }
+/* A room's one-time composer hint, and the mark on server lines in encrypted conversations (js/views/e2ee-conv.js). */
+.e2-room-hint { display: flex; align-items: center; gap: var(--s-2); margin: 0 0 var(--s-1); font-size: var(--t-12); color: var(--text-3); }
+.e2-room-hint .btn { flex: none; }
+.e2-note-mark { display: inline-flex; align-items: center; color: var(--text-3); flex: none; }
+/* Review H2/M4: a message without an envelope in an encrypted conversation; key and device change lines. */
+.e2-unsealed { margin: 2px 0 var(--s-1); padding: 2px var(--s-2); font-size: var(--t-13, 13px); width: fit-content; max-width: 100%; }
+.msg.e2-unsealed-msg .msg-text { opacity: .85; }
+.e2-keyline.warn .dmline-ic svg { color: var(--amber); }
+/* A device added to this account elsewhere (review H3): over everything until answered. */
+.e2-own-added { position: fixed; z-index: 60; top: var(--s-3); left: 50%; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); align-items: center; box-shadow: var(--shadow-3, 0 8px 24px rgba(0,0,0,.25)); }
+.e2-own-added .btn { flex: none; }
+.e2-removed-dev, .e2-lost-warn { margin: var(--s-1) 0; }
+.e2-lost-warn { align-items: center; }

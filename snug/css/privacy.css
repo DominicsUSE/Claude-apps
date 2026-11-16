@@ -1,0 +1,22 @@
+/* Privacy: the "Who can see what" summary, the full privacy page (in Settings
+   and at /privacy) and the link on the sign-in screen (js/views/privacy.js). */
+.pv-sect { margin: var(--s-3) 0; }
+.pv-sect h2, .pv-sect h3, .pv-sect h4 { font-size: var(--t-ui); font-weight: var(--w-semibold); color: var(--text-1); margin: 0 0 var(--s-1); }
+.pv-sect ul { margin: 0; padding-left: var(--s-5); display: grid; gap: var(--s-1); color: var(--text-2); font-size: var(--t-ui); line-height: var(--lh-body); }
+.pv-sect li { text-wrap: pretty; }
+.pv-more { margin-top: var(--s-2); }
+.linkish { background: none; border: 0; padding: 0; color: var(--link); font: inherit; text-decoration: underline; cursor: pointer; }
+.linkish:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+.pv-doc { min-height: 100%; overflow-y: auto; }
+.pv-doc .auth-main { place-items: start center; }
+.pv-panel { max-width: 680px; width: 100%; display: grid; gap: var(--s-3); }
+.pv-panel .lead { color: var(--text-2); font-size: var(--t-ui); line-height: var(--lh-body); margin: 0; }
+.pv-panel .btn { text-decoration: none; display: inline-flex; gap: var(--s-2); align-items: center; }
+.pv-signedout-link { position: fixed; bottom: var(--s-3); left: 50%; transform: translateX(-50%); font-size: var(--t-meta); color: var(--text-2); text-decoration: underline; padding: var(--s-2); min-height: 44px; display: inline-flex; align-items: center; white-space: nowrap; }
+.pv-signedout-link:hover { color: var(--text-1); }
+.erase-choice { display: grid; gap: var(--s-2); border: 0; padding: 0; margin: 0; }
+.erase-choice legend { font-weight: var(--w-semibold); margin-bottom: var(--s-1); padding: 0; }
+.erase-choice label { display: grid; grid-template-columns: auto 1fr; gap: var(--s-2); align-items: start; padding: var(--s-2); border: 1px solid var(--line); border-radius: var(--r-input); cursor: pointer; }
+.erase-choice label span { display: grid; gap: 2px; }
+.erase-choice label small { color: var(--text-2); font-size: var(--t-meta); line-height: var(--lh-body); }
+.erase-choice input { margin-top: 3px; }

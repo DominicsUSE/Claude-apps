@@ -1,0 +1,67 @@
+# sec-desktop D1/D2/D8 and security tooling: Dependabot (free) proposes updates for Snug's npm packages, Electron
+# among them, and for the GitHub Actions the workflows pin by commit. Security updates come as soon as an
+# advisory is out (cooldown never delays them); routine updates wait a week after release, so a hijacked
+# version is usually caught and pulled before it reaches a pull request here. Updates are grouped so each
+# folder gets one routine pull request a week; a major version always comes on its own.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /snug
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+      routine:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
+  - package-ecosystem: npm
+    directory: /snug/desktop
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      electron:
+        patterns: ["electron", "electron-builder"]
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+      routine:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
+  - package-ecosystem: npm
+    directory: /snug/registry
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+      routine:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]

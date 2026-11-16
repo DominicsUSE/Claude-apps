@@ -1,0 +1,48 @@
+/* Custom emoji per house (js/views/emoji-custom.js, js/views/emoji-settings.js). */
+
+/* In text: the height of a line of message text, twice that when the message is only emoji. */
+.cemoji { display: inline-block; width: 1.5rem; height: 1.5rem; object-fit: contain; vertical-align: -0.375rem; margin: 0 1px; }
+.msg-text.jumbo .cemoji { width: 3rem; height: 3rem; vertical-align: middle; }
+/* A removed emoji, or one from a house this reader is not in: its name, at text size. */
+.cemoji-gone { color: var(--text-2); }
+.msg-text.jumbo .cemoji-gone { font-size: var(--t-msg); line-height: var(--lh); }
+.rx .cemoji { width: 1.125rem; height: 1.125rem; vertical-align: middle; margin: 0; }
+.rx .cemoji-gone { font-size: var(--t-12); }
+.ac .menu-item .emo .cemoji { width: 1.25rem; height: 1.25rem; margin: 0; vertical-align: middle; }
+
+/* The picker: a heading per house, the same grid. */
+.picker-sec { grid-column: 1 / -1; padding: var(--s-2) var(--s-1) var(--s-1); font-size: var(--t-12); font-weight: var(--w-semibold); color: var(--text-3); }
+.picker-sec:first-child { padding-top: 0; }
+.picker-grid .cemoji { width: 1.75rem; height: 1.75rem; margin: 0; vertical-align: middle; }
+
+/* House settings > Emoji */
+.emo-add { display: grid; gap: var(--s-3); margin-bottom: var(--s-2); }
+.emo-drop { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-4); border: 1px dashed var(--line-strong); border-radius: var(--r-md); background: var(--bg-2); color: var(--text-2); transition: border-color var(--m-fast) var(--ease-in-out), background var(--m-fast) var(--ease-in-out); }
+.emo-drop.over { border-color: var(--text-2); background: var(--bg-3); }
+.emo-drop.bad { border-color: var(--error); }
+.emo-drop.full { border-style: solid; color: var(--text-3); }
+.emo-drop.full b { color: var(--text-1); font-weight: var(--w-semibold); }
+.emo-drop-text { flex: 1; min-width: 0; display: grid; gap: 2px; font-size: var(--t-13); line-height: var(--lh-ui); }
+.emo-drop-text b { color: var(--text-1); font-weight: var(--w-semibold); font-size: var(--t-14); }
+.emo-prev { display: flex; align-items: flex-end; gap: var(--s-2); flex: none; }
+.emo-prev img { width: 24px; height: 24px; object-fit: contain; }
+.emo-prev img.lg { width: 48px; height: 48px; }
+.emo-name-row { display: flex; align-items: center; gap: var(--s-1); }
+.emo-name-row .field { flex: 1; max-width: 260px; }
+.emo-name-row .btn { margin-left: var(--s-2); }
+.emo-colon { color: var(--text-3); font-weight: var(--w-semibold); }
+.emo-list { list-style: none; margin: 0; padding: 0; }
+.emo-row { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) 0; min-height: 56px; border-bottom: 1px solid var(--line-subtle); }
+.emo-face { width: 40px; height: 40px; display: grid; place-items: center; flex: none; }
+.emo-face .cemoji { width: 32px; height: 32px; margin: 0; vertical-align: 0; }
+.emo-meta { display: grid; min-width: 0; }
+.emo-meta b { font-weight: var(--w-medium); overflow-wrap: anywhere; }
+.emo-meta .faint { font-size: var(--t-12); }
+.emo-rename { display: grid; gap: 2px; min-width: 0; }
+.emo-rename .field { max-width: 260px; }
+.emo-empty { padding: var(--s-6) 0; color: var(--text-3); }
+@media (max-width: 759px) {
+  .emo-drop, .emo-name-row { flex-wrap: wrap; }
+  .emo-name-row .btn { margin-left: 0; width: 100%; }
+  .emo-row .btn { padding-inline: var(--s-2); }
+}

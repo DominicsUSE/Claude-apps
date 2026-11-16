@@ -1,0 +1,43 @@
+{
+  "name": "snug",
+  "version": "0.12.0",
+  "private": true,
+  "type": "module",
+  "description": "A calm place for your people: houses, rooms, threads and voice.",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "seed": "node --disable-warning=ExperimentalWarning server/seed.js",
+    "reset-password": "node --disable-warning=ExperimentalWarning server/tools/reset-password.js",
+    "test": "node --disable-warning=ExperimentalWarning --test tests/logic*.test.js tests/server*.test.js registry/test/*.test.js",
+    "test:registry": "node --disable-warning=ExperimentalWarning --test registry/test/*.test.js",
+    "registry": "node --disable-warning=ExperimentalWarning registry/dev.js",
+    "test:e2e": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e*.test.js",
+    "test:e2e:calls": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-calls.test.js",
+    "test:e2e:video": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-video.test.js",
+    "test:e2e:emoji": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-emoji.test.js",
+    "test:e2e:notify": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-notify.test.js",
+    "test:e2e:messages": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-messages.test.js",
+    "test:e2e:safety": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-safety.test.js",
+    "test:e2e:messaging": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-messaging.test.js",
+    "test:e2e:places": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-places.test.js",
+    "test:e2e:voice-options": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-voice-options.test.js",
+    "test:e2e:account": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-account.test.js",
+    "test:e2e:passkeys": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-passkeys.test.js",
+    "test:e2e:community": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-community.test.js",
+    "test:e2e:e2ee": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-e2ee.test.js",
+    "test:e2e:integration": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/e2e-integration.test.js",
+    "audit:deps": "npm audit --audit-level=high && npm audit --prefix registry --audit-level=high && npm audit --prefix desktop --audit-level=high",
+    "audit:secrets": "gitleaks git .. --config .gitleaks.toml --redact --no-banner",
+    "audit:osv": "f=\"${TMPDIR:-/tmp}/snug-osv.json\"; rm -f \"$f\"; osv-scanner scan source -r --format json --output-file \"$f\" ..; [ $? -le 1 ] && node ../.github/security/gate.mjs osv \"$f\" --root .. --only snug/",
+    "audit:electron": "npm_config_ignore_scripts=true npx --yes @doyensec/electronegativity@1.10.3 -i desktop -r -v false -o \"${TMPDIR:-/tmp}/snug-electronegativity.csv\" && node ../.github/security/gate.mjs electronegativity \"${TMPDIR:-/tmp}/snug-electronegativity.csv\"",
+    "audit:zap": "bash ../.github/security/zap-baseline.sh",
+    "lint:security": "semgrep scan --metrics=off --disable-version-check --config p/javascript --config p/nodejs --config p/owasp-top-ten --config p/secrets --json . | node ../.github/security/gate.mjs semgrep -",
+    "audit:all": "npm run audit:deps && npm run audit:secrets && npm run audit:osv && npm run audit:electron && npm run lint:security"
+  },
+  "dependencies": {
+    "ws": "^8.22.1"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

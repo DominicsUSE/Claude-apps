@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- sec-desktop D4: what the hardened runtime lets Snug do on a Mac, and nothing more. JIT for V8; library
+     validation off because the ad-hoc signed frameworks carry no Team ID to match; the microphone and the
+     camera for calls. No allow-dyld-environment-variables: DYLD_INSERT_LIBRARIES can't load code into Snug. -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+  <key>com.apple.security.device.camera</key>
+  <true/>
+</dict>
+</plist>

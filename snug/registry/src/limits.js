@@ -1,0 +1,199 @@
+// Rate limits. Two kinds:
+//  - Windows: in-memory fixed-window counters (IP buckets, bursts). Bounded Map; may reset on hibernation.
+//  - Budgets: per-uid counters persisted in SQLite (`budget` table) so daily caps survive hibernation.
+
+export const MIN = 60_000;
+export const HOUR = 60 * MIN;
+export const DAY = 24 * HOUR;
+
+/** Every limit in one place. [count, window ms]. Tests may override via env.TEST_LIMITS (shim only). */
+export const DEFAULT_LIMITS = {
+  // per IP (memory)
+  ipAuth: [10, HOUR],
+  ipAccount: [5, HOUR], // claim, rebind, rebind/approve, rebind/cancel, release
+  ipRename: [10, HOUR],
+  ipCheck: [30, MIN],
+  ipLookup: [60, MIN],
+  ipTurn: [30, MIN],
+  ipWs: [30, MIN],
+  ipAdmin: [120, MIN],
+  ipVault: [30, HOUR],
+  ipPow: [20, HOUR], // v0.12 keypair accounts (keyacct.js): proof-of-work challenges
+  ipRegister: [3, DAY], // v0.12: keypair sign-ups per /48 (persisted)
+  // v0.12 review M6: keypair sign-ups per IPv6 /32 (persisted; IPv4: the address). Second pass: not a cap; at
+  // this count in a day the proof of work of that /32 gets harder (keyacct.js wideBits).
+  ipRegisterWide: [20, DAY],
+  ipRegTry: [30, HOUR], // v0.12 review (second pass): sign-up attempts per /48 (memory), name refusals included
+  ipMoveWait: [60, MIN], // v0.12: a new PC polling for its pairing code
+  // global (SQLite)
+  authGlobal: [300, HOUR], // tokens GitHub accepted (REG-M4)
+  authBadGlobal: [3000, HOUR], // tokens GitHub refused: only bounds our calls to GitHub (REG-M4)
+  regGlobal: [300, HOUR], // v0.12: keypair sign-ups, all addresses together (GitHub sign-up is not counted)
+  // per uid (SQLite)
+  lookupDay: [300, DAY],
+  turnDay: [10, DAY],
+  turnGlobalDay: [3000, DAY], // REG-L5: all accounts together
+  connect: [30, HOUR], // per key: the current key's normal sockets; a pending key's apart (REG-M1)
+  connectXfer: [20, HOUR], // xfer sockets, per key (REG-M1)
+  relayDay: [2000, DAY],
+  relayBytesDay: [20 * 1024 * 1024, DAY],
+  sigDay: [500, DAY],
+  watchDay: [200, DAY],
+  knockDay: [50, DAY],
+  knockPairDay: [5, DAY],
+  // v0.12: a keypair account in its first 72 hours (keyacct.js limitFor)
+  newKnockDay: [10, DAY],
+  newKnockPairDay: [2, DAY],
+  newLookupDay: [60, DAY],
+  newTurnDay: [3, DAY],
+  movePeek: [10, DAY], // v0.12: pairing codes an account may try
+  recSet: [5, DAY], // v0.12: recovery key changes
+  adminDay: [1000, DAY],
+  vaultDay: [20, DAY],
+  vaultRotDay: [5, DAY], // REG-L1
+  xferDay: [3000, DAY],
+  xferBytesDay: [64 * 1024 * 1024, DAY],
+  // per uid (memory)
+  sigMin: [60, MIN],
+  relayBurst: [50, 1000],
+  watchHour: [30, HOUR],
+  xferBurst: [60, 1000],
+  moveWait: [30, MIN], // v0.12: polls per pairing code
+  framesMin: [2400, MIN], // frames per authenticated socket mode; past it the socket closes (REG-M5)
+  xferFramesMin: [4800, MIN],
+  // sizes / counts
+  unauthPerUid: [4, 0],
+  knockBox: [100, 0],
+  knockPerSender: [3, 0],
+  watchMax: [500, 0],
+};
+
+/** Fixed-window counters in memory, at most `max` keys; clears the oldest half when full. */
+export class Windows {
+  constructor(now, max = 10_000) {
+    this.now = now;
+    this.max = max;
+    this.m = new Map();
+  }
+  /** Count one hit. Returns 0 when allowed, else seconds until the window resets. */
+  hit(key, [limit, ms]) {
+    const t = this.now();
+    let w = this.m.get(key);
+    if (!w || w.reset <= t) {
+      if (w) this.m.delete(key);
+      if (this.m.size >= this.max) {
+        let drop = this.m.size >> 1;
+        for (const k of this.m.keys()) {
+          if (drop-- <= 0) break;
+          this.m.delete(k);
+        }
+      }
+      w = { n: 0, reset: t + ms };
+      this.m.set(key, w);
+    }
+    if (w.n >= limit) return Math.max(1, Math.ceil((w.reset - t) / 1000));
+    w.n++;
+    return 0;
+  }
+}
+
+const FLUSH_EVERY = 100;
+// The global request counter moves in steps of 20 (one per HTTP request), so it is written less often.
+const FLUSH_EVERY_KIND = { req20: 20 * 100 };
+const MEM_MAX = 20_000;
+
+/**
+ * Persistent counters, read back from SQLite on first use after a wake.
+ *  - Caps (take): the stored value runs AHEAD of the count. Whenever the count passes it, a new value
+ *    of count + step - 1 is written (step = 1% of the limit, at least 1; at most 100 writes a counter a
+ *    window). A DO evicted between writes wakes with the stored value, so hibernation can only use up
+ *    allowance, never give it back: pausing until the DO sleeps does not reset anyone's budget.
+ *  - Usage counters (bump): written every 100 units (the global request counter: every 2000), and on
+ *    flush() (alarm when dirty, socket close). They are estimates; eviction loses at most one step.
+ */
+export class Budgets {
+  constructor(sql, now) {
+    this.sql = sql;
+    this.now = now;
+    this.m = new Map(); // key -> {uid, win, kind, n, saved, cap}
+    this.dirty = false;
+  }
+  _get(uid, kind, ms, win = Math.floor(this.now() / ms) * ms) {
+    const key = `${uid}|${kind}|${win}`;
+    let c = this.m.get(key);
+    if (!c) {
+      if (this.m.size >= MEM_MAX) {
+        this.flush();
+        this.m.clear();
+      }
+      const row = this.sql.exec('SELECT n FROM budget WHERE uid=? AND win=? AND kind=?', uid, win, kind).toArray()[0];
+      const n = row ? Number(row.n) : 0;
+      c = { uid, win, kind, n, saved: n };
+      this.m.set(key, c);
+    }
+    return c;
+  }
+  value(uid, kind, ms) {
+    return this._get(uid, kind, ms).n;
+  }
+  /**
+   * A sliding-window estimate (v0.12 review M6): this window's count plus the previous window's, weighted by
+   * how much of it still lies within `ms` of now. It doesn't drop to zero when a window starts.
+   */
+  sliding(uid, kind, ms) {
+    const t = this.now();
+    const win = Math.floor(t / ms) * ms;
+    return this._get(uid, kind, ms, win).n + this._get(uid, kind, ms, win - ms).n * (1 - (t - win) / ms);
+  }
+  /** Add `amount` if it fits under `limit`; returns true when allowed. */
+  take(uid, kind, [limit, ms], amount = 1) {
+    const c = this._get(uid, kind, ms);
+    if (c.n + amount > limit) return false;
+    c.n += amount;
+    c.cap = true;
+    if (c.n > c.saved) {
+      const ahead = Math.min(limit, c.n + Math.max(1, Math.floor(limit / 100)) - 1);
+      this._store(c, ahead);
+    }
+    return true;
+  }
+  /** Give one back (a refused call that should not count). The stored value stays ahead: a wake can't refund. */
+  refund(uid, kind, ms) {
+    const c = this._get(uid, kind, ms);
+    if (c.n > 0) c.n -= 1;
+  }
+  /** Count one and store it at once (rare events that must survive a wake, with no cap). */
+  count(uid, kind, ms) {
+    const c = this._get(uid, kind, ms);
+    c.n += 1;
+    this._store(c, c.n);
+  }
+  /** Add without a cap (usage counters). */
+  bump(uid, kind, ms, amount = 1) {
+    this.add(this._get(uid, kind, ms), amount);
+  }
+  add(c, amount) {
+    c.n += amount;
+    if (c.n - c.saved >= (FLUSH_EVERY_KIND[c.kind] || FLUSH_EVERY)) this._write(c);
+    else this.dirty = true;
+  }
+  _write(c) {
+    this._store(c, c.n);
+  }
+  _store(c, n) {
+    this.sql.exec(
+      'INSERT INTO budget(uid,win,kind,n) VALUES(?,?,?,?) ON CONFLICT(uid,win,kind) DO UPDATE SET n=excluded.n',
+      c.uid, c.win, c.kind, n,
+    );
+    c.saved = n;
+  }
+  flush() {
+    if (!this.dirty) return;
+    const old = this.now() - 2 * DAY;
+    for (const [k, c] of this.m) {
+      if (!c.cap && c.n !== c.saved) this._write(c); // caps are already stored ahead
+      if (c.win < old) this.m.delete(k);
+    }
+    this.dirty = false;
+  }
+}

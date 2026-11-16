@@ -1,0 +1,104 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "createdAt": "2026-11-12T14:44:57.837Z",
+        "reason": "User's redesign brief specifies the Inter stack as the preferred typeface (section 44, typography tokens)"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "snug/css/shell.css"
+        ],
+        "createdAt": "2026-11-12T14:47:59.688Z",
+        "reason": "Selected nav row indicator: a 3px coral bar on a list row, specified by the user's navigation tokens (selected accent indicator #F05A47); not a card"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "snug/css/stream.css"
+        ],
+        "createdAt": "2026-11-12T14:47:59.698Z",
+        "reason": "Reply spine and thread elbow: L-shaped connector lines linking a message to its source, drawn with border-left+border-top/bottom; not card accents"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "snug/css/social.css"
+        ],
+        "createdAt": "2026-11-12T15:45:15.584Z",
+        "reason": "Saved-note quote on a profile: 2px coral edge is the contract's single 'for you' marker shared with mentions, not a card accent"
+      },
+      {
+        "rule": "pulsing-dot",
+        "value": "*",
+        "files": [
+          "snug/css/media.css"
+        ],
+        "createdAt": "2026-11-12T20:56:58.367Z",
+        "reason": "Dot pulses only while a real in-progress state lasts (ringing, reconnecting, recording) and stops when it ends; labelled in text"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "snug/css/nav.css"
+        ],
+        "createdAt": "2026-11-12T20:56:58.376Z",
+        "reason": "Catch-up invite: 2px coral inset is the contract's single for-you marker, same as mentions; not a card"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "snug/css/views.css"
+        ],
+        "createdAt": "2026-11-12T20:56:58.385Z",
+        "reason": "News excerpt: 2px neutral quote rule before quoted message text; not a card accent"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "snug/css/messaging.css"
+        ],
+        "createdAt": "2026-11-13T13:57:47.710Z",
+        "reason": "Block-quote and forwarded-message bars: neutral 3px line marking quoted text, the standard quote affordance, not a card accent"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "snug/css/chat.css"
+        ],
+        "createdAt": "2026-11-13T13:57:47.720Z",
+        "reason": "Message-link card: neutral quote bar marks an embedded quoted message, same affordance as block quotes"
+      },
+      {
+        "rule": "pulsing-dot",
+        "value": "*",
+        "files": [
+          "snug/css/calls.css"
+        ],
+        "createdAt": "2026-11-13T13:57:47.732Z",
+        "reason": "Dot pulses only while a real in-progress state lasts (ringing, reconnecting, recording) and stops when it ends; labelled in text"
+      },
+      {
+        "rule": "pulsing-dot",
+        "value": "*",
+        "files": [
+          "snug/css/activities.css"
+        ],
+        "createdAt": "2026-11-13T13:57:47.742Z",
+        "reason": "Dot pulses only while a real in-progress state lasts (ringing, reconnecting, recording) and stops when it ends; labelled in text"
+      }
+    ]
+  }
+}

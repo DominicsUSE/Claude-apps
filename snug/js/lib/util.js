@@ -1,0 +1,149 @@
+// Small pure helpers shared by every module.
+import { t, onLocale, intlLocale } from './i18n.js';
+
+let seq = 0;
+export const uid = (prefix = 'x') => `${prefix}_${Date.now().toString(36)}${(seq++).toString(36)}`;
+
+export const MIN = 60_000;
+export const DAY = 86_400_000;
+
+export const fold = (s) => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+export function sameDay(a, b) {
+  const x = new Date(a), y = new Date(b);
+  return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
+}
+
+// Times and dates in the active language (js/lib/i18n.js); English keeps the
+// browser's own English, so en-GB still reads day-month.
+let timeFmt, dayFmt, shortFmt, fullFmt;
+// Settings > Appearance > Clock (js/account.js): 'auto' follows the language, or force 12 or 24 hours.
+let clockMode = 'auto';
+function buildFormats() {
+  const loc = intlLocale();
+  const hc = clockMode === '24' ? { hourCycle: 'h23' } : clockMode === '12' ? { hourCycle: 'h12' } : {};
+  timeFmt = new Intl.DateTimeFormat(loc, { hour: 'numeric', minute: '2-digit', ...hc });
+  dayFmt = new Intl.DateTimeFormat(loc, { weekday: 'long', day: 'numeric', month: 'long' });
+  shortFmt = new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short' });
+  fullFmt = new Intl.DateTimeFormat(loc, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit', ...hc });
+}
+buildFormats();
+onLocale(buildFormats);
+export function setClock(mode = 'auto') {
+  if (mode === clockMode) return;
+  clockMode = mode;
+  buildFormats();
+}
+
+export const fmtTime = (ts) => timeFmt.format(ts);
+export const fmtFull = (ts) => fullFmt.format(ts);
+
+export function fmtDay(ts, now = Date.now()) {
+  if (sameDay(ts, now)) return t('time.today');
+  if (sameDay(ts, now - DAY)) return t('time.yesterday');
+  return dayFmt.format(ts);
+}
+
+// Compact stamp for lists: a time today, otherwise a short date.
+export function fmtWhen(ts, now = Date.now()) {
+  if (sameDay(ts, now)) return fmtTime(ts);
+  if (sameDay(ts, now - DAY)) return t('time.yesterdayAt', { time: fmtTime(ts) });
+  return shortFmt.format(ts);
+}
+
+export function initials(name) {
+  const parts = (name || '?').trim().split(/\s+/);
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
+}
+
+export const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+export function fileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// "Ines", "Ines and Tomasz", "Ines, Tomasz and 2 others"
+export function nameList(names) {
+  if (names.length <= 1) return names[0] || '';
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  if (names.length === 3) return `${names[0]}, ${names[1]} and ${names[2]}`;
+  return `${names[0]}, ${names[1]} and ${names.length - 2} others`;
+}
+
+// Subsequence match that favours word starts. Returns a score, or -1 for no match.
+export function fuzzy(query, text) {
+  const q = fold(query), t = fold(text);
+  if (!q) return 0;
+  const at = t.indexOf(q);
+  if (at === 0) return 100 - t.length * 0.1;
+  if (at > 0) return (t[at - 1] === ' ' ? 80 : 60) - at * 0.1;
+  let score = 0, ti = 0;
+  for (const ch of q) {
+    const found = t.indexOf(ch, ti);
+    if (found < 0) return -1;
+    score += found === ti ? 2 : 1;
+    ti = found + 1;
+  }
+  return score;
+}
+
+export const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+
+// The colours people, roles and houses can choose: OKLCH hues only, named for
+// screen readers. The theme sets lightness and chroma. Kept at least 25 degrees
+// clear of the hues that carry meaning: error red (23 to 25), amber (73 to 81),
+// mint (168 to 170) and brand violet (289 to 297: the mark 293, the tokens
+// from 289 in light to 297 as dark text). Nothing sits between Blue and Clay
+// rose, so no chosen colour can pass for the brand, a warning or a presence.
+export const HUES = [[106, 'Olive'], [142, 'Green'], [200, 'Teal'], [228, 'Sky'], [255, 'Blue'], [335, 'Clay rose'], [350, 'Pink']];
+// Hues that were choosable once and may still be stored. They stay valid (a
+// role saved as Plum can be saved again) but show as the nearest choosable
+// hue (hueOf): Plum (318) sat too close to the violet brand.
+export const RETIRED_HUES = [318];
+
+// Any stored hue, shown as the nearest choosable one, so older choices never
+// read as a warning, a highlight or a presence colour.
+export function hueOf(h) {
+  if (h == null) return h;
+  let best = HUES[0][0], gap = 360;
+  for (const [v] of HUES) {
+    const d = Math.min(Math.abs(v - h), 360 - Math.abs(v - h));
+    if (d < gap) { gap = d; best = v; }
+  }
+  return best;
+}
+
+// sec-authz: characters that change how text around them reads without being
+// seen: bidi overrides, embeddings and isolates (U+202A-202E, U+2066-2069),
+// direction marks (U+061C, U+200E, U+200F), zero-width space and the BOM
+// (U+200B, U+FEFF), word joiners and invisible operators (U+2060-2064), and
+// U+180E. Zero-width joiners stay inside emoji sequences (a family, a rainbow
+// flag), and joiners and non-joiners between letters of scripts that use them
+// (Sinhala, Malayalam, Persian, Hindi; never Latin, Greek or Cyrillic);
+// anywhere else they go too. Server and client both use this.
+const INVISIBLE = /[؜᠎​‎‏‪-‮⁠-⁤⁦-⁩﻿]/g;
+const EMOJI_END = /[\p{Extended_Pictographic}\p{Emoji_Modifier}️]$/u;
+const EMOJI_START = /^\p{Extended_Pictographic}/u;
+const JOINING_LETTER = /[\p{L}\p{M}]/u;
+const NO_ZWNJ_SCRIPT = /[\p{Script=Latin}\p{Script=Greek}\p{Script=Cyrillic}]/u;
+export function stripInvisible(s) {
+  if (typeof s !== 'string') return s;
+  const t = s.replace(INVISIBLE, '');
+  if (!/[‌‍]/.test(t)) return t;
+  const cps = [...t];
+  return cps.filter((ch, i) => {
+    if (ch !== '‌' && ch !== '‍') return true;
+    const prev = cps[i - 1] || '', next = cps[i + 1] || '';
+    // sec-review: joiners also stay between letters of scripts that are written with them (the joiner in
+    // Sinhala ශ්‍රී, Malayalam chillu letters, Devanagari eyelash ra; the non-joiner in Persian, Hindi).
+    const between = JOINING_LETTER.test(prev) && JOINING_LETTER.test(next) && !NO_ZWNJ_SCRIPT.test(prev) && !NO_ZWNJ_SCRIPT.test(next);
+    if (ch === '‍') return (EMOJI_END.test(prev) && EMOJI_START.test(next)) || between;
+    return between;
+  }).join('');
+}
+// A file name as stored: no path, no control or invisible characters, at most 120 characters.
+export function cleanFileName(raw, fallback = 'file') {
+  return (stripInvisible(String(raw ?? '')).replace(/[\u0000-\u001f\u007f/\\]/g, '').trim() || fallback).slice(0, 120);
+}
