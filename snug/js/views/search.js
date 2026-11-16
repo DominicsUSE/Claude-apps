@@ -2,7 +2,7 @@
 // One field leads to both.
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import {
-  S, back, go, emit, convMeta, jumpToMsg, openConv, openMenu, startDm, closeQuick, openLayer, setPresence, setPref, openPop,
+  S, back, go, emit, convMeta, jumpToMsg, openConv, openMenu, startDm, closeQuick, openLayer, setPresence, setPref, openPop, joinByCode, toast,
 } from '../store.js';
 import { parseQuery, runSearch, setOp, isEmptyQuery } from '../lib/search.js';
 import { attention, isThread, roomIds } from '../lib/attention.js';
@@ -10,7 +10,9 @@ import { fmtWhen, plural, fuzzy } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Tile, RoomIcon, Rich, Empty } from '../ui/kit.js';
 import { Settings } from './settings.js';
-import { searchMessages } from '../server.js';
+import { searchMessages, api } from '../server.js';
+import { quickInvite, inviteWhy } from '../lib/onboarding.js'; // a pasted invitation, and why one doesn't work
+import { t } from '../lib/i18n.js';
 import { openHouse } from './nav.js';
 import { THEME_ACTIONS } from './appearance.js'; // themes by name
 import { ACCOUNT_ACTIONS } from './account.js'; // mute, mark read, themes, presence, status, streamer mode, shortcuts
@@ -266,6 +268,16 @@ function candidates(q) {
   return order.flatMap((g) => top.filter((r) => r.group === g));
 }
 
+// "Join with this invitation": the public preview first (it knows why a link
+// is dead: unknown, expired, used up or turned off), then the same join as
+// the Join dialog, which opens the house.
+function joinFromQuick(code) {
+  api(`/api/invite/${encodeURIComponent(code)}`).then(
+    () => joinByCode(code).catch((e) => toast(e.offline ? t('common.offline') : e.message)),
+    (e) => toast(e.status === 404 ? inviteWhy(e.data?.reason) : e.offline ? t('common.offline') : e.message),
+  );
+}
+
 let lastPtr = ''; // Chromium fires mousemove when the list re-renders under a still pointer: only a real move picks a row
 export function QuickJump() {
   const [q, setQ] = useState(S.ui.quick.q || '');
@@ -275,6 +287,8 @@ export function QuickJump() {
   useLayoutEffect(() => field.current.focus(), []);
   const term = q.trim();
   const rows = candidates(term);
+  const code = quickInvite(term);
+  if (code) rows.unshift({ group: 'Invitation', key: 'invite', label: 'Join with this invitation', hint: code, icon: html`<${Icon} name="link" />`, run: () => joinFromQuick(code) });
   if (term) rows.push({ group: 'Messages', key: 'search', label: `Search messages for “${term}”`, hint: 'Messages and files', icon: html`<${Icon} name="search" />`, run: () => go({ type: 'search', q: term }) });
   else rows.push({ key: 'search', label: 'Search messages', hint: '', icon: html`<${Icon} name="search" />`, run: () => go({ type: 'search', q: '' }) });
   const at = Math.min(i, rows.length - 1);

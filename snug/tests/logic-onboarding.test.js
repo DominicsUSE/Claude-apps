@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  parseInvite, inviteProblem, inviteWhy, signupProblems, signupField, newcomerSees, landingRoom,
+  parseInvite, quickInvite, inviteProblem, inviteWhy, signupProblems, signupField, newcomerSees, landingRoom,
   messageable, whyNotMessageable, localOnly, looksLikeEmail,
 } from '../js/lib/onboarding.js';
 import { byActivity } from '../js/lib/inbox.js';
@@ -135,4 +135,13 @@ test('summaryLine: Home’s summary is one sentence with a capital, whichever pa
   assert.equal(summaryLine(['something on now']), 'Something on now.');
   assert.equal(summaryLine(['2 friends around', 'something on now']), '2 friends around, something on now.');
   assert.equal(summaryLine([]), '');
+});
+
+test('quickInvite: the quick switcher offers to join only for text that looks like an invitation', () => {
+  assert.equal(quickInvite('https://snug.example.org/join/k3x9q2m7a1bz'), 'k3x9q2m7a1bz');
+  assert.equal(quickInvite('snug://join/k3x9q2m7a1bz'), 'k3x9q2m7a1bz');
+  assert.equal(quickInvite('/join/kiln'), 'kiln', 'a link names a house’s own word too');
+  assert.equal(quickInvite('  k3x9q2m7a1bz  '), 'k3x9q2m7a1bz', 'a bare code: letters and numbers, 6 or more');
+  // Words people type to find a room or a person are not invitations.
+  for (const s of ['general', 'glaze lab', 'robin', 'ab12', 'room-2', '', '   ', 'https://example.org/about']) assert.equal(quickInvite(s), null, s);
 });

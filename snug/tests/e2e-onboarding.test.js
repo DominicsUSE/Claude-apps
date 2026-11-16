@@ -221,6 +221,42 @@ test('the plus: Start a house offers the invite link at once; Join with an invit
   } finally { await close(robin); await close(priya); }
 });
 
+test('the quick switcher: paste an invitation link, press Enter, land in the house; a turned-off one says why', async () => {
+  const robin = await open({ handle: 'robin' });
+  const bex = await open({ handle: 'bex' });
+  try {
+    const { code } = await invite(robin);
+    const off = await invite(robin);
+    await robin.evaluate((c) => import('/js/server.js').then((s) => s.call('invite.revoke', { house: 'kiln', code: c })), off.code);
+    // A room's name is not an invitation: no Join row.
+    await bex.keyboard.press('Control+k');
+    await bex.locator('.quick input').fill('general');
+    assert.equal(await bex.locator('.quick .menu-item:has-text("Join with this invitation")').count(), 0);
+    // The turned-off link: the reason, and no house.
+    await bex.locator('.quick input').fill(`${url}/join/${off.code}`);
+    const row = bex.locator('.quick .menu-item').first();
+    assert.match(await row.textContent(), /Join with this invitation/);
+    assert.equal(await row.getAttribute('aria-selected'), 'true', 'first, and picked');
+    await bex.keyboard.press('Enter');
+    await bex.locator('.toast:has-text("turned it off")').waitFor();
+    assert.equal(await bex.locator('.rail-house:has-text("Kiln & Co.")').count(), 0);
+    // The working link.
+    await bex.keyboard.press('Control+k');
+    await bex.locator('.quick input').fill(`${url}/join/${code}`);
+    await bex.keyboard.press('Enter');
+    await bex.locator('.rail-house[aria-current="page"]:has-text("Kiln & Co.")').waitFor();
+    await bex.waitForFunction(() => window.snug.S.ui.view.id === 'k_floor');
+    // A bare code works the same way (Bex is in already: it opens the house).
+    const again = await invite(robin);
+    await bex.click('.rail-home');
+    await bex.keyboard.press('Control+k');
+    await bex.locator('.quick input').fill(again.code);
+    await bex.locator('.quick .menu-item.act:has-text("Join with this invitation")').waitFor();
+    await bex.keyboard.press('Enter');
+    await bex.waitForFunction(() => window.snug.S.ui.view.id === 'k_floor');
+  } finally { await close(robin); await close(bex); }
+});
+
 test('sign out from the menu under your name, after a short question; this device forgets the drafts', async () => {
   const malik = await open({ handle: 'malik' });
   try {
