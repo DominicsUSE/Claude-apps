@@ -1479,7 +1479,9 @@ poll ends goes by each sender's clock), which message a reply answers (only a th
 still names the message it hangs off), and attachment sizes (padded to 4 KiB steps up
 to 64 KiB, then steps of a quarter more, never past the server's file limit; the quota
 counts the padded size). Until then the older form keeps working, and polls or a
-private group name say which device is still on an older Snug. When a group's name is
+private group name say which device is still on an older Snug. If your device can't
+check (its keys aren't ready, or the server doesn't answer), nothing is sent in the
+older form: Snug says so and you try again. When a group's name is
 first sealed, the server also takes it out of earlier "named the group" lines. A
 padded file forwarded to a conversation where a device can't read padding is sealed
 again unpadded. Link previews are never made in encrypted conversations. Push

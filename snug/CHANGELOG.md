@@ -76,6 +76,8 @@ goes back to an older version on its own (README, "Install, update, go back").
   - Padding never takes a file past the server's file limit, and a padded file forwarded to someone on an
     older Snug is sealed again unpadded so it opens whole.
   - When a group's name is first sealed, earlier "named the group" lines lose the name too.
+  - If your device can't check what everyone's devices handle (keys not ready, or the server doesn't answer),
+    a reaction, reply, attachment or group rename isn't sent rather than going in the older form; try again.
   - Limits (README, "Limits of the 0.14 sealing"): the first time your device sees a device, the server could
     hold its features back and make yours use the older form; a new device can be shown an older revision;
     someone added sees "Encrypted group" until a member's device seals the name again; the data download

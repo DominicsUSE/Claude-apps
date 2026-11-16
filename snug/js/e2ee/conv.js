@@ -183,11 +183,24 @@ export async function lacking(users, feature) {
   }
   return out;
 }
-/** Whether every device in encrypted conversation conv handles `feature`. */
+const COPY_NOT_READY = 'Turn on end-to-end encryption on this device to send here (Settings, Encryption).';
+const COPY_CANT_CHECK = 'Snug couldn’t check what everyone’s devices here can handle, so nothing was sent. Try again in a moment.';
+/**
+ * Whether every device in encrypted conversation conv handles `feature`: false only when a device
+ * positively can't (an older Snug; the plainer form is then used) or conv isn't encrypted. When it
+ * can't be told (keys not ready here, the server didn't answer) it throws: an error is never taken
+ * as "can't", or a server could fail the check to get a reaction or reply link it can read.
+ */
 export async function convCan(conv, feature) {
   const dm = rootDm(conv);
-  if (!dm || !S.dms[dm]?.e2ee || E2.status !== 'ready') return false;
-  try { return !(await lacking(membersOf(dm), feature)).length; } catch { return false; }
+  if (!dm || !S.dms[dm]?.e2ee) return false;
+  if (E2.status !== 'ready') throw new Error(COPY_NOT_READY);
+  let lack;
+  try { lack = await lacking(membersOf(dm), feature); } catch (e) {
+    if (e?.offline) throw e; // queued, sent when back
+    throw Object.assign(new Error(COPY_CANT_CHECK), { code: 'e2ee_caps_unknown' });
+  }
+  return !lack.length;
 }
 /** "Robin’s Laptop, Ines’s Phone": devices on an older Snug, for a message that names them. */
 export const namedDevices = (list) => list.slice(0, 5).map((x) => `${S.users[x.u]?.name || 'Someone'}’s ${x.label}`).join(', ') + (list.length > 5 ? ` and ${list.length - 5} more` : '');
@@ -295,7 +308,7 @@ const revLoaded = new Set(); // message ids whose newest revision in this device
 
 async function sealAndSend(op, { conv, dm, id, kind, rev, users, body, re = null, at, extra = {} }) {
   const { dev } = ring;
-  if (E2.status !== 'ready' || !dev) throw new Error('Turn on end-to-end encryption on this device to send here (Settings, Encryption).');
+  if (E2.status !== 'ready' || !dev) throw new Error(COPY_NOT_READY);
   const gate = sendGate(users);
   if (gate.length) throw Object.assign(new Error(`${S.users[gate[0]]?.name || 'Someone'}’s safety number changed. Check it in the conversation’s details before sending.`), { code: 'e2ee_gate' });
   let fresh = false;
@@ -899,4 +912,4 @@ Object.assign(transportHooks, { scan, scanReply, isEncrypted, downgraded, sendEn
 readyHooks.push(() => { for (const [c, list] of Object.entries(S.msgs)) scan(list, c); });
 
 // For the end-to-end checks.
-export const _test = { opened, findMsg, topRev, sideState, infoState, capsSeen, parts };
+export const _test = { opened, findMsg, topRev, sideState, infoState, capsSeen, parts, bundles };

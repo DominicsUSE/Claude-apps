@@ -326,3 +326,78 @@ test('E3: a poll where someone is still on an older Snug is refused, naming the 
     srv.db.run('UPDATE e2ee_devices SET caps = ? WHERE id = ?', saved.caps, saved.id);
   }
 });
+
+test('E6: when what everyone’s devices handle can’t be checked, nothing goes out in a plainer form: no plain reaction, no plain reply link, no unpadded file', async () => {
+  const dm = dmOf('robin', 'ines');
+  await openDm(robin, 'Ines Carvalho');
+  const MARK = `CK-${Date.now().toString(36)}`;
+  await say(robin, MARK);
+  const id = await idByText(robin, MARK);
+  await robin.waitForFunction(([c, i]) => !!window.snug.S.msgs[c]?.find((m) => m.id === i)?.e2ee, [dm, id]);
+  // Robin's tab as a server would see it: every op it sends is noted, and the next request for
+  // people's keys fails (a server that wants the plainer form, or a dropped answer).
+  await robin.evaluate(() => {
+    const send = WebSocket.prototype.send;
+    window.__wsRestore = () => { WebSocket.prototype.send = send; };
+    window.__ops = [];
+    window.__failBundles = 0;
+    WebSocket.prototype.send = function (data) {
+      let f = null;
+      try { f = JSON.parse(data); } catch { /* not an op */ }
+      if (f?.t === 'op') {
+        window.__ops.push({ op: f.op, d: f.d });
+        if (f.op === 'e2ee.bundles' && window.__failBundles > 0) {
+          window.__failBundles--;
+          setTimeout(() => this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ t: 'ack', id: f.id, ok: false, error: 'Something went wrong.' }) })), 0);
+          return undefined;
+        }
+      }
+      return send.call(this, data);
+    };
+  });
+  const failNext = () => robin.evaluate(async () => { (await import('/js/e2ee/conv.js'))._test.bundles.clear(); window.__failBundles = 1; window.__ops = []; });
+  const ops = (name) => robin.evaluate((n) => window.__ops.filter((o) => o.op === n), name);
+  const CHECK = /couldn’t check/i;
+  try {
+    // A reaction: refused on this device, saying why; no plain react op goes out.
+    await failNext();
+    await robin.evaluate(async ([c, m]) => (await import('/js/store.js')).react(c, m, '🪴'), [dm, id]);
+    await robin.locator('.toast').first().waitFor();
+    assert.deepEqual(await ops('react'), [], 'no plain reaction sent');
+    await robin.locator('.toast', { hasText: CHECK }).first().waitFor();
+
+    // A reply: the message fails here (it can be sent again); no reply link in the clear.
+    await failNext();
+    await robin.evaluate(async ([c, m, t]) => (await import('/js/server.js')).sendMessage(c, t, { replyTo: m }), [dm, id, `${MARK} reply`]);
+    const state = await (await robin.waitForFunction(([c, t]) => {
+      const m = window.snug.S.msgs[c]?.find((x) => x.text === t);
+      return m && m.state !== 'sending' ? { state: m.state || 'sent', error: m.error || null } : null;
+    }, [dm, `${MARK} reply`])).jsonValue();
+    assert.deepEqual((await ops('msg.send')).filter((o) => o.d.replyTo), [], 'no plain reply link sent');
+    assert.equal(state.state, 'failed');
+    assert.match(state.error, CHECK);
+    // Sent again once the check works: sealed, the reply link inside.
+    await robin.evaluate(async ([c, t]) => { const m = window.snug.S.msgs[c].find((x) => x.text === t); (await import('/js/server.js')).retry(c, m); }, [dm, `${MARK} reply`]);
+    const rid = await idByText(robin, `${MARK} reply`);
+    const row = await until(() => srv.db.get('SELECT reply_to FROM messages WHERE id = ?', rid), 'the reply is stored');
+    assert.equal(row.reply_to, null);
+
+    // An attachment: not uploaded unpadded.
+    await failNext();
+    const up = await robin.evaluate(async (c) => {
+      try { await (await import('/js/e2ee/conv.js')).uploadEncrypted(c, new Blob([new Uint8Array(5000)]), 'check.bin'); return 'uploaded'; } catch (e) { return e.message; }
+    }, dm);
+    assert.match(up, CHECK);
+
+    // Keys not ready on this device: no answer either way, so nothing plainer is used.
+    const notReady = await robin.evaluate(async (c) => {
+      const { E2 } = window.snug.e2ee;
+      const was = E2.status;
+      E2.status = 'locked';
+      try { await (await import('/js/e2ee/conv.js')).convCan(c, 'react'); return 'answered'; } catch (e) { return e.message; } finally { E2.status = was; }
+    }, dm);
+    assert.notEqual(notReady, 'answered');
+  } finally {
+    await robin.evaluate(() => window.__wsRestore?.());
+  }
+});
