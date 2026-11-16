@@ -36,6 +36,7 @@ import {
   sessionUser, endAllSessions, readCookie, sessionCookie, COOKIE, limiter, safeDecode,
   clientIp, ipKey, secureCookies, // sec-auth
   loadDataKey, // sec-registry REG-L6: the snapshot key
+  subKey, // calls C4: the TURN username tag key
 } from './auth.js';
 import { createSeclog, redactLog, redact, sendFile } from './seclog.js'; // sec-web: security events, log redaction, safe file sends
 import { PROTO, MIN_CLIENT } from '../js/lib/proto.js'; // GET /api/version
@@ -123,7 +124,8 @@ export async function startServer({
   const log = bootLog;
 
   // STUN, and TURN with a static login or (SNUG_TURN_SECRET) short-lived credentials per person (server/voiceopts.js).
-  const ice = iceConfig(iceEnv);
+  // calls C4: TURN username tags are keyed from the data key, which the TURN server never gets.
+  const ice = iceConfig(iceEnv, { warn: bootLog, ...(dataKey ? { tagKey: subKey(dataKey, 'turn-tag') } : {}) });
 
   const authLimit = limiter({ capacity: 10, perSecond: 10 / 900 });   // 10 tries per 15 minutes
   const uploadLimit = limiter({ capacity: 20, perSecond: 0.2 });

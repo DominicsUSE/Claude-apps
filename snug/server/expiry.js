@@ -43,6 +43,11 @@ export function migrateExpiry(db) {
       WHERE seq = new.seq;
     END;
   `);
+  // calls C5, for records a 0.12/0.13 sweep already blanked (it left sys whole): they keep only how it went.
+  // Those messages are hidden already, so nothing that shows changes.
+  db.prepare(`UPDATE messages SET sys = json_object('outcome', json_extract(sys, '$.outcome'))
+    WHERE expires IS NOT NULL AND expires <= ? AND deleted IS NOT NULL AND sys IS NOT NULL AND json_valid(sys)
+      AND json_extract(sys, '$.outcome') IS NOT NULL AND sys != json_object('outcome', json_extract(sys, '$.outcome'))`).run(Date.now());
 }
 
 export function createExpiry({ db, M, hub, ops, clock = Date.now }) {
@@ -124,6 +129,8 @@ export function createExpiry({ db, M, hub, ops, clock = Date.now }) {
         for (const r of rows) {
           // files stay named until the file sweep has removed them (it reads expires too).
           db.run(`UPDATE messages SET deleted = coalesce(deleted, ?), text = '', fold = ''${blank} WHERE id = ?`, r.expires, r.id);
+          // calls C5: a call record keeps only how it went.
+          db.run("UPDATE messages SET sys = json_object('outcome', json_extract(sys, '$.outcome')) WHERE id = ? AND sys IS NOT NULL AND json_valid(sys) AND json_extract(sys, '$.outcome') IS NOT NULL", r.id);
           if (embedsCol) db.run('UPDATE messages SET embeds = ? WHERE id = ?', embedFileRefs(db.get('SELECT embeds FROM messages WHERE id = ?', r.id)?.embeds), r.id);
           if (has('forum_posts')) db.run("UPDATE forum_posts SET title = '', tags = '[]' WHERE msg = ?", r.id);
           db.run('DELETE FROM reactions WHERE msg = ?', r.id);

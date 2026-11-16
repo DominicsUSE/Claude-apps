@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import {
   sendCaps, adaptStep, hasTurn, relayWanted, relayInsisted, sdpSession, pttGlobalWait, sdpFingerprint, callCode, screenPref,
   LOW_DATA, FLOOR, MAX_LEVEL, PTT_FIRST_WAIT,
+  relayMode, relayCandidate, relayOnlySdp, candidateType, sdpFingerprints, sdpUfrag, fpStatement, readFpAttr, withFpAttr, deviceCode,
 } from '../js/lib/callnet.js';
 
 test('caps: full quality follows the room and the screen setting; more than 3 others lowers the camera', () => {
@@ -66,13 +67,22 @@ test('relay: on by default in voice rooms and with people who are not friends; A
   assert.equal(hasTurn([{ urls: 'stun:stun.example:3478' }]), false);
   assert.equal(hasTurn([{ urls: ['stun:a', 'turns:relay.example:443?transport=tcp'] }]), true);
   assert.equal(hasTurn(null), false);
-  assert.equal(relayWanted({ room: true }), true, 'voice room');
-  assert.equal(relayWanted({ friend: false }), true, 'a call with someone who is not a friend');
-  assert.equal(relayWanted({ friend: true }), false, 'a call with a friend goes direct by default');
+  // calls C3: the default since 0.14 hides my IP from everyone, friends included, whenever there is a relay.
+  assert.equal(relayWanted({ friend: true }), true, 'a call with a friend goes through the relay by default');
+  assert.equal(relayWanted({ mode: 'auto', friend: true }), true);
+  assert.equal(relayInsisted({ mode: 'auto' }), false, 'but with no relay known it connects directly (after saying so)');
+  assert.equal(relayMode({ relay: 'others' }), 'auto', 'the old default moves to the new one');
+  assert.equal(relayMode({ relay: 'others', relayV: 2 }), 'others', 'someone who picked it since keeps it');
+  assert.equal(relayMode({ relay: 'off' }), 'off');
+  assert.equal(relayMode({}), 'auto');
+  assert.equal(relayWanted({ mode: 'others', room: true }), true, 'voice room');
+  assert.equal(relayWanted({ mode: 'others', friend: false }), true, 'a call with someone who is not a friend');
+  assert.equal(relayWanted({ mode: 'others', friend: true }), false, '"Rooms and non-friends": a call with a friend goes direct');
   assert.equal(relayWanted({ mode: 'all', friend: true }), true);
   assert.equal(relayWanted({ mode: 'off', room: true }), false);
   assert.equal(relayWanted({ mode: 'off', p2pHide: true, friend: true }), true, 'Hide my IP from friends wins');
   assert.equal(relayInsisted({}), false, 'the default is not a promise to keep without a relay');
+  assert.equal(relayInsisted({ mode: 'others' }), false);
   assert.equal(relayInsisted({ mode: 'all' }), true);
   assert.equal(relayInsisted({ p2pHide: true }), true);
 });
@@ -117,6 +127,49 @@ test('security code: 6 digits, the same on both sides (order does not matter), d
   assert.notEqual(await callCode(sdpWith(FP_A.replace(/^23/, '24')), sdpWith(FP_B)), mine);
   assert.equal(await callCode(sdpWith(FP_A), 'v=0\r\n'), null, 'no code without both fingerprints');
   assert.equal(await callCode(sdpWith(FP_A), sdpWith(FP_A)), null, 'a connection to itself proves nothing');
+});
+
+test('relay only (calls C3): only relay candidates are signalled or left in an SDP; host, srflx, prflx and mDNS names never', () => {
+  const host = 'candidate:1 1 udp 2122260223 192.168.1.20 54400 typ host generation 0';
+  const mdns = 'candidate:2 1 udp 2122260223 4a5b-1234.local 54400 typ host';
+  const srflx = 'candidate:3 1 udp 1686052607 203.0.113.7 54400 typ srflx raddr 192.168.1.20 rport 54400';
+  const prflx = 'candidate:4 1 udp 1845501695 203.0.113.7 54401 typ prflx raddr 0.0.0.0 rport 0';
+  const relay = 'candidate:5 1 udp 41885439 198.51.100.9 3478 typ relay raddr 0.0.0.0 rport 0';
+  assert.deepEqual([host, mdns, srflx, prflx, relay].map(candidateType), ['host', 'host', 'srflx', 'prflx', 'relay']);
+  assert.deepEqual([host, mdns, srflx, prflx, relay].map(relayCandidate), [false, false, false, false, true]);
+  assert.equal(relayCandidate({ candidate: '' }), true, 'the end of candidates goes');
+  const sdp = `v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=${host}\r\na=${mdns}\r\na=${srflx}\r\na=${prflx}\r\na=${relay}\r\na=end-of-candidates\r\n`;
+  const out = relayOnlySdp(sdp);
+  assert.ok(!/typ (host|srflx|prflx)/.test(out) && !/192\.168|203\.0\.113|\.local/.test(out), out);
+  assert.match(out, /typ relay/);
+  assert.match(out, /a=end-of-candidates/);
+});
+
+test('fingerprint binding (calls C2): every fingerprint and ufrag must agree; the statement names both people, the call and both values; the attribute rides at the session level', () => {
+  const two = `${sdpWith(FP_A)}a=ice-ufrag:abcd\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=fingerprint:sha-256 ${FP_A}\r\na=ice-ufrag:abcd\r\n`;
+  assert.equal(sdpFingerprints(two), `sha-256 ${FP_A}`);
+  assert.equal(sdpUfrag(two), 'abcd');
+  assert.equal(sdpFingerprints(`${two}a=fingerprint:sha-256 ${FP_B}\r\n`), null, 'a second, different certificate: none trusted');
+  assert.equal(sdpUfrag(`${two}a=ice-ufrag:zzzz\r\n`), null);
+  const st = fpStatement({ place: 'd_1', fromUser: 'u_a', fromDevice: 'dv_x', toUser: 'u_b', fingerprint: `sha-256 ${FP_A}`, ufrag: 'abcd' });
+  assert.match(st, /^snug-call-fp-v1\n\{/);
+  assert.notEqual(st, fpStatement({ place: 'd_1', fromUser: 'u_a', fromDevice: 'dv_x', toUser: 'u_c', fingerprint: `sha-256 ${FP_A}`, ufrag: 'abcd' }), 'for one person only');
+  const signed = withFpAttr(two, 'v1 dv_x sig');
+  assert.equal(readFpAttr(signed), 'v1 dv_x sig');
+  assert.ok(signed.indexOf('a=x-snug-fp:') < signed.indexOf('m=audio'), 'before the first media section');
+  assert.equal(readFpAttr(withFpAttr(signed, 'v1 dv_y sig2')), 'v1 dv_y sig2', 'replaced, never two');
+  assert.equal(readFpAttr(withFpAttr(signed, null)), null);
+});
+
+test('longer security code (calls C2): 12 digits from both device keys and both fingerprints, the same on both sides, different when any part changes', async () => {
+  const k1 = new Uint8Array(32).fill(1), k2 = new Uint8Array(32).fill(2);
+  const a = { key: k1, fp: `sha-256 ${FP_A}` }, b = { key: k2, fp: `sha-256 ${FP_B}` };
+  const code = await deviceCode(a, b);
+  assert.match(code, /^\d{4} \d{4} \d{4}$/);
+  assert.equal(await deviceCode(b, a), code);
+  assert.notEqual(await deviceCode({ ...a, key: new Uint8Array(32).fill(3) }, b), code, 'another device');
+  assert.notEqual(await deviceCode(a, { ...b, fp: `sha-256 ${FP_B.replace(/^A1/, 'A2')}` }), code, 'another certificate');
+  assert.equal(await deviceCode(a, { fp: b.fp }), null);
 });
 
 test('screen share choice: text keeps the resolution, motion keeps the frame rate', () => {

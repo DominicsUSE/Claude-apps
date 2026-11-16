@@ -70,18 +70,38 @@ export function adaptStep(state = {}, q = {}) {
 export const hasTurn = (ice) => (ice || []).some((s) => [].concat(s?.urls || []).some((u) => typeof u === 'string' && /^turns?:/i.test(u)));
 
 // Should the connection to one person go only through the relay?
-//   mode: the "Hide my IP address" setting: 'others' (default: voice rooms and
-//   people who aren't friends), 'all', or 'off'; p2pHide: the PC-to-PC "Hide
-//   my IP from friends" switch; room: a house voice room (not a call);
-//   friend: that person is my friend.
-export function relayWanted({ mode = 'others', p2pHide = false, room = false, friend = false } = {}) {
-  if (p2pHide || mode === 'all') return true;
+//   mode: the "Hide my IP address" setting: 'auto' (the default since 0.14:
+//   everyone, whenever there is a relay), 'others' (voice rooms and people who
+//   aren't friends), 'all' (even with no relay known: then no connection), or
+//   'off'; p2pHide: the PC-to-PC "Hide my IP from friends" switch; room: a
+//   house voice room (not a call); friend: that person is my friend.
+export const RELAY_DEFAULT = 'auto';
+export function relayWanted({ mode = RELAY_DEFAULT, p2pHide = false, room = false, friend = false } = {}) {
+  if (p2pHide || mode === 'all' || mode === 'auto') return true;
   if (mode === 'off') return false;
   return room || !friend;
 }
 // Whether the person asked for it outright (rather than by the default):
 // then connecting directly when no relay is known would break a promise.
-export const relayInsisted = ({ mode = 'others', p2pHide = false } = {}) => !!p2pHide || mode === 'all';
+export const relayInsisted = ({ mode = RELAY_DEFAULT, p2pHide = false } = {}) => !!p2pHide || mode === 'all';
+
+// calls C3: when a connection is relay-only, nothing but relay candidates
+// leaves this device, in trickled candidates or in the offer and answer
+// themselves (the browser gathers only relay candidates then; this is
+// defence in depth). A relay candidate's address is the relay's, not mine.
+export const candidateType = (c) => / typ ([a-z]+)/i.exec(typeof c === 'string' ? c : c?.candidate || '')?.[1]?.toLowerCase() || null;
+export function relayCandidate(c) {
+  const text = typeof c === 'string' ? c : c?.candidate || '';
+  if (!text) return true; // the end of candidates
+  return candidateType(text) === 'relay' && !/\.local\b/i.test(text);
+}
+export function relayOnlySdp(sdp) {
+  if (typeof sdp !== 'string') return sdp;
+  return sdp.split(/\r?\n/).filter((l) => !/^a=candidate:/i.test(l) || relayCandidate(l.slice(2))).join('\r\n');
+}
+// Someone's settings from before 0.14 kept the old default ('others') without choosing it:
+// they move to 'auto'. A choice made since (relayV 2) stays.
+export const relayMode = (v = {}) => (v.relay === 'others' && v.relayV !== 2 ? RELAY_DEFAULT : v.relay || RELAY_DEFAULT);
 
 // The session id on an SDP's o= line. A new connection makes a new one; a
 // renegotiation (a camera added, an ICE restart) keeps it.
@@ -119,6 +139,49 @@ export function sdpFingerprint(sdp) {
   const m = /^a=fingerprint:(\S+) ([0-9A-Fa-f:]+)\s*$/m.exec(typeof sdp === 'string' ? sdp : sdp?.sdp || '');
   return m ? `${m[1].toLowerCase()} ${m[2].toUpperCase()}` : null;
 }
+// Every a=fingerprint (and a=ice-ufrag) of an SDP: one value each, or null
+// when there is none or they disagree (which nothing honest sends).
+const allOf = (sdp, re) => [...(typeof sdp === 'string' ? sdp : sdp?.sdp || '').matchAll(re)].map((m) => m[1]);
+export function sdpFingerprints(sdp) {
+  const all = allOf(sdp, /^a=fingerprint:(\S+ [0-9A-Fa-f:]+)\s*$/gm).map((f) => { const [h, v] = f.split(' '); return `${h.toLowerCase()} ${v.toUpperCase()}`; });
+  return all.length && all.every((f) => f === all[0]) ? all[0] : null;
+}
+export function sdpUfrag(sdp) {
+  const all = allOf(sdp, /^a=ice-ufrag:(\S+)\s*$/gm);
+  return all.length && all.every((f) => f === all[0]) ? all[0] : null;
+}
+
+// ---------- calls C2: the connection's certificate, signed by the device ----------
+// What a device signs for each offer and answer it sends: whose it is, for
+// whom, in which call, and the certificate fingerprint and ICE username in it.
+// Carried as a=x-snug-fp at the session level, so servers and P2P relays from
+// before 0.14 pass it on inside the SDP, and browsers ignore it.
+export const FP_ATTR = 'x-snug-fp';
+export function fpStatement({ place, fromUser, fromDevice, toUser, fingerprint, ufrag }) {
+  return `snug-call-fp-v1\n${JSON.stringify({ place, fromUser, fromDevice, toUser, fingerprint, ufrag })}`;
+}
+export function readFpAttr(sdp) {
+  const m = /^a=x-snug-fp:(.+?)\s*$/m.exec(typeof sdp === 'string' ? sdp : sdp?.sdp || '');
+  return m ? m[1] : null;
+}
+export function withFpAttr(sdp, value) {
+  const clean = String(sdp).split(/\r?\n/).filter((l) => !/^a=x-snug-fp:/.test(l)).join('\r\n');
+  if (!value) return clean;
+  const at = clean.search(/^m=/m);
+  const line = `a=${FP_ATTR}:${value}\r\n`;
+  return at < 0 ? `${clean.replace(/\r\n$/, '')}\r\n${line}` : clean.slice(0, at) + line + clean.slice(at);
+}
+// The longer code once both devices signed: both identity keys and both
+// fingerprints, sorted so both sides hash the same, as 12 digits in three
+// groups of four.
+export async function deviceCode(a, b) {
+  if (!a?.key || !b?.key || !a.fp || !b.fp || !globalThis.crypto?.subtle) return null;
+  const hex = (k) => [...k].map((x) => x.toString(16).padStart(2, '0')).join('');
+  const sides = [`${hex(a.key)} ${a.fp}`, `${hex(b.key)} ${b.fp}`].sort();
+  const h = new DataView(await crypto.subtle.digest('SHA-512', new TextEncoder().encode(`snug-call-code-v2\n${sides.join('\n')}`)));
+  return [0, 4, 8].map((i) => String(h.getUint32(i) % 10_000).padStart(4, '0')).join(' ');
+}
+
 export async function callCode(localSdp, remoteSdp) {
   const a = sdpFingerprint(localSdp), b = sdpFingerprint(remoteSdp);
   if (!a || !b || a === b || !globalThis.crypto?.subtle) return null;

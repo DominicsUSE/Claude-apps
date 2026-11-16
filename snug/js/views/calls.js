@@ -8,6 +8,7 @@ import { S, person, convMeta, isOnline } from '../store.js';
 import { fmtTime, fmtFull, nameList } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Stack } from '../ui/kit.js';
+import { connectsDirectly } from '../voice.js'; // calls C3
 import { ServerNoteMark } from './e2ee-conv.js'; // call records in an encrypted conversation aren't encrypted
 import { startCall, acceptCall, joinCall, declineCall, incoming, dismissCallEnd, callTitle, callBody } from '../calls.js';
 
@@ -99,6 +100,7 @@ function IncomingCard({ r }) {
   const meta = convMeta(r.dm);
   const caller = person(r.from);
   const busy = busyNote(S.call && S.call.room !== r.dm ? S.call : null);
+  const direct = connectsDirectly(); // calls C3: no relay here, so they'd see my IP address
   useEffect(() => {
     const before = document.activeElement;
     // A loud ring takes the focus, so Enter picks up; a quiet one waits to be
@@ -140,9 +142,10 @@ function IncomingCard({ r }) {
         </p>
       </div>
     </div>
-    ${(r.quiet || busy) && html`<div class="inc-notes">
+    ${(r.quiet || busy || direct) && html`<div class="inc-notes">
       ${r.quiet && html`<p class="inc-note">No ringtone: ${meta?.kind === 'group' ? 'this group' : 'this conversation'} is muted${S.users[S.me]?.presence === 'focus' ? ', or you’re Focused' : ''}.</p>`}
       ${busy && html`<p class="inc-note">${busy}</p>`}
+      ${direct && html`<p class="inc-note inc-direct">This connects directly: ${r.group ? 'people in the call' : caller.name.split(' ')[0]} can see your IP address.</p>`}
     </div>`}
     <div class="inc-acts">
       <button class="btn danger solid inc-decline" onClick=${() => declineCall(r.dm)} aria-keyshortcuts="Escape"><${Icon} name="phone-off" size=${18} />Decline</button>
@@ -171,10 +174,12 @@ function recordText(m) {
   const mine = m.author === S.me;
   const by = firstName(m.author);
   const kind = c.video ? 'Video call' : 'Call';
-  const took = (c.joined || []).includes(S.me);
+  // calls C5: records list only who missed the call (before 0.14: who joined and declined).
+  const isNew = Array.isArray(c.missed);
+  const took = isNew ? !c.missed.includes(S.me) : !c.joined && !c.declined ? true : (c.joined || []).includes(S.me);
   // I declined a group call (which went on, or rang out, for the others):
   // history, not a missed call, so not violet and not for me.
-  if (!mine && !took && (c.declined || []).includes(S.me) && c.outcome !== 'declined') {
+  if (!isNew && !mine && !took && (c.declined || []).includes(S.me) && c.outcome !== 'declined') {
     return { title: `Declined ${c.video ? 'video call' : 'call'}`, sub: `from ${by}${c.outcome === 'answered' ? ` · ${dur(c.dur)}` : ''}` };
   }
   if (c.outcome === 'answered') {
@@ -182,10 +187,11 @@ function recordText(m) {
     return { title: `${kind} · ${dur(c.dur)}`, sub: mine ? 'You started it' : `${by} started it` };
   }
   if (c.outcome === 'declined') {
-    if (mine) return { title: `${kind} declined`, sub: `${nameList((c.declined || []).map(firstName))} declined` };
+    if (mine) return { title: `${kind} declined`, sub: isNew ? (c.missed.length ? 'Nobody answered' : 'They declined') : `${nameList((c.declined || []).map(firstName))} declined` };
     return { title: `Declined ${c.video ? 'video call' : 'call'}`, sub: `from ${by}` };
   }
   if (mine) return { title: `${kind} · no answer`, sub: 'You started it' };
+  if (took) return { title: `Declined ${c.video ? 'video call' : 'call'}`, sub: `from ${by}` };
   return { title: `Missed ${c.video ? 'video call' : 'call'}`, sub: `from ${by}`, missed: true };
 }
 

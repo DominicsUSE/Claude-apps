@@ -27,7 +27,7 @@ import { CallButtons, CallStrip, CallEndNote } from './calls.js'; // calls in di
 import { PersonExtras, RoomLimit, VoiceExtras, PopOut } from './voiceopts.js'; // per-person volume, room limit, soundboard and options, picture in picture
 // Activities, reactions, the muted note, the call clock, connection quality, ringing again (voice and calls track).
 import { ActivityButtons, ActivityTile, ReactionFloat, ActivityAnnouncer, MutedBanner, CallTimer, ConnHeader, RingAgain, Bars, qualityOf, QLABEL } from './activities.js';
-import { videoBlocked, cameraPaused, showCamera, lineOf } from '../voice.js'; // data saver's paused cameras, how each line goes (relay or not)
+import { videoBlocked, cameraPaused, showCamera, lineOf, connectsDirectly } from '../voice.js'; // data saver's paused cameras, how each line goes (relay or not)
 import { notifyMenu, openDrawer, roomMenu, dmMenu } from './nav.js'; // the header's bell, the phone's drawer (shell track)
 import { openMenu } from '../store.js';
 import { togglePeople } from './people.js'; // the member list toggle, remembered (shell track)
@@ -298,6 +298,7 @@ function Stage({ roomId, dm }) {
         </div>`
       : html`<p class="stage-empty">${starting ? 'Starting your microphone\u2026' : 'Nobody\u2019s in here yet. Join, and the room shows as live to everyone.'}</p>`}
     ${dm && html`<${RingAgain} room=${roomId} />`}
+    ${!inCall && !dm && connectsDirectly() && html`<p class="stage-direct" role="note">This connects directly: people in ${S.rooms[roomId]?.name || 'this room'} can see your IP address. This Snug server has no relay to hide it.</p>`}
     <div class="stage-acts">
       ${inCall && !starting
         ? html`<${VoiceControls} />`

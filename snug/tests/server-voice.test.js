@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { createHmac } from 'node:crypto';
 import WebSocket from 'ws';
 import { startServer } from '../server/index.js';
+import { openDb } from '../server/db.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'snug-voice-'));
 const GRACE = 600;
@@ -208,6 +209,31 @@ test('data saver: { want: { camera } } is a signal with one true or false, rebui
   await b.ok('voice.join', { room: hangout });
   await b.ok('rtc', { to: a.id, data: { want: { camera: false } } });
   assert.deepEqual((await a.next('rtc', (r) => r.from === b.id)).data, { want: { camera: false } });
+  closeAll(a, b);
+});
+
+test('call keys (calls C1): { ck } carries a sealed key, an acknowledgement or why not, rebuilt from known fields with a size cap; the hello says the server passes it on', async () => {
+  const { rtcSignal } = await import('../server/ops.js');
+  const box = 'A'.repeat(108);
+  const key = { v: 1, t: 'key', place: 'd_x', from: 'u_a', d: 'dv_abcdefghijklmnopqrst', to: 'u_b', id: 7, ts: 1_700_000_000_000, w: [['dv_bcdefghijklmnopqrstu', 3, box]], sig: 'S'.repeat(86) };
+  assert.deepEqual(rtcSignal({ ck: key }), { ck: key });
+  assert.deepEqual(rtcSignal({ ck: { v: 1, t: 'ack', id: 255 } }), { ck: { v: 1, t: 'ack', id: 255 } });
+  assert.deepEqual(rtcSignal({ ck: { v: 1, t: 'no', why: 'browser' } }), { ck: { v: 1, t: 'no', why: 'browser' } });
+  assert.throws(() => rtcSignal({ ck: { ...key, extra: 'x' } }), 'unknown fields');
+  assert.throws(() => rtcSignal({ ck: { ...key, id: 256 } }));
+  assert.throws(() => rtcSignal({ ck: { ...key, w: Array.from({ length: 13 }, () => key.w[0]) } }), 'at most 12 devices');
+  assert.throws(() => rtcSignal({ ck: { ...key, w: [['dv_x', 1, 'B'.repeat(5000)]] } }), 'size cap');
+  assert.throws(() => rtcSignal({ ck: { v: 1, t: 'no', why: '<script>' } }));
+  assert.throws(() => rtcSignal({ ck: { v: 2, t: 'ack', id: 1 } }));
+  // The fingerprint statement rides inside the SDP string, as before.
+  const sdp = 'v=0\r\na=x-snug-fp:v1 dv_abcdefghijklmnopqrst sig\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n';
+  assert.equal(rtcSignal({ sdp: { type: 'offer', sdp } }).sdp.sdp, sdp);
+  const { a, b, hangout } = await people('ck');
+  assert.equal(a.hello.callE2ee, 1, 'clients send { ck } only to a server that says it passes it on');
+  await a.ok('voice.join', { room: hangout });
+  await b.ok('voice.join', { room: hangout });
+  await b.ok('rtc', { to: a.id, data: { ck: { v: 1, t: 'ack', id: 3 } } });
+  assert.deepEqual((await a.next('rtc', (r) => r.from === b.id)).data, { ck: { v: 1, t: 'ack', id: 3 } });
   closeAll(a, b);
 });
 
@@ -454,31 +480,135 @@ test('who can ring me: friends only stops a non-friend’s ring and its push, a 
   closeAll(a, b, c);
 });
 
+// ---------- Call records (calls C5) ----------
+test('call records: only who started it, how it went, when, how long and who missed it; no list of who took part; the expiry sweep and erasing an account cut it down', async () => {
+  const { a, b, c, d, group, dm } = await people('rec');
+  // A group call Ben answers, Cal declines, Dot isn't in (not a member).
+  const { call } = await a.ok('call.start', { dm: group });
+  await b.next('call.ring', (r) => r.dm === group);
+  await c.next('call.ring', (r) => r.dm === group);
+  await c.ok('call.decline', { dm: group, call });
+  await b.ok('call.join', { dm: group });
+  await sleep(50);
+  await b.ok('voice.leave');
+  await a.ok('voice.leave');
+  const rec = (await a.next('msg', (e) => e.conv === group && e.m.call)).m;
+  const stored = JSON.parse(srv.db.get('SELECT sys FROM messages WHERE id = ?', rec.id).sys);
+  assert.deepEqual(Object.keys(stored).sort(), ['by', 'dur', 'missed', 'outcome', 'started', 'video'], 'nothing more is kept');
+  // 0.12/0.13 clients read joined: worked out from the members who didn't miss it, not stored.
+  assert.deepEqual(rec.call.joined.sort(), [a.id, b.id, c.id].sort());
+  assert.deepEqual(rec.call.missed, [], 'Ben took part and Cal declined: nobody missed it');
+  assert.equal(rec.call.outcome, 'answered');
+  const row = srv.db.get('SELECT sys FROM messages WHERE id = ?', rec.id);
+  assert.ok(!row.sys.includes(b.id) && !row.sys.includes(c.id), 'who took part or declined is not stored');
+  // A one-to-one call nobody answers: the person who missed it is the one listed.
+  await a.ok('call.start', { dm });
+  await b.next('call.ring', (r) => r.dm === dm);
+  await a.ok('voice.leave');
+  const missed = (await b.next('msg', (e) => e.conv === dm && e.m.call)).m;
+  assert.deepEqual(missed.call.missed, [b.id]);
+  // A one-to-one call Ben declines: 0.12/0.13 clients name who declined ("Ben declined"), worked out, not stored.
+  const { call: c2 } = await a.ok('call.start', { dm });
+  await b.next('call.ring', (r) => r.dm === dm);
+  await b.ok('call.decline', { dm, call: c2 });
+  const declined = (await a.next('msg', (e) => e.conv === dm && e.m.call?.outcome === 'declined')).m;
+  await b.next('msg', (e) => e.conv === dm && e.m.call?.outcome === 'declined');
+  assert.deepEqual(declined.call.declined, [b.id]);
+  assert.deepEqual(declined.call.joined, [a.id]);
+  assert.ok(!srv.db.get('SELECT sys FROM messages WHERE id = ?', declined.id).sys.includes(b.id), 'who declined is not stored');
+  // The disappearing-messages sweep leaves only how it went.
+  srv.db.run('UPDATE messages SET expires = ? WHERE id = ?', Date.now() - 1000, missed.id);
+  srv.expiry.sweep(Date.now());
+  assert.deepEqual(JSON.parse(srv.db.get('SELECT sys FROM messages WHERE id = ?', missed.id).sys), { outcome: 'missed' });
+  // Erasing Ann's account (she started the group call) does the same to her records.
+  srv.M.eraseAuthored(a.id);
+  assert.deepEqual(JSON.parse(srv.db.get('SELECT sys FROM messages WHERE id = ?', rec.id).sys), { outcome: 'answered' });
+  // Erasing Ben takes him off the records of calls others started.
+  await a.ok('call.start', { dm });
+  await b.next('call.ring', (r) => r.dm === dm);
+  await a.ok('voice.leave');
+  const again = (await b.next('msg', (e) => e.conv === dm && e.m.call)).m;
+  srv.M.eraseAuthored(b.id);
+  assert.deepEqual(JSON.parse(srv.db.get('SELECT sys FROM messages WHERE id = ?', again.id).sys).missed, []);
+  closeAll(a, b, c, d);
+});
+
+test('call records a 0.12/0.13 sweep already blanked keep only how it went once the database is opened; records still showing are left alone', () => {
+  const path = join(dir, 'old-records.db');
+  const t = Date.now() - 100_000;
+  const full = (id) => JSON.stringify({ id, by: 'u_old', video: false, outcome: 'answered', joined: ['u_old', 'u_two'], declined: ['u_three'], started: t, dur: 5000 });
+  let db = openDb(path);
+  db.run("INSERT INTO users (id, handle, name, pass, created) VALUES ('u_old', 'oldrec', 'Old Rec', 'x', ?)", t);
+  const put = (id, expires, deleted) => db.run("INSERT INTO messages (id, conv, author, ts, text, fold, sys, expires, deleted) VALUES (?, 'd_old', 'u_old', ?, '', '', ?, ?, ?)", id, t, full(id), expires, deleted);
+  put('m_swept', t + 1000, t + 1000); // what the 0.12/0.13 sweep left: deleted, words gone, sys untouched
+  put('m_later', Date.now() + 86_400_000, null); // not expired yet
+  put('m_kept', null, null); // no timer
+  db.close();
+  db = openDb(path);
+  const sys = (id) => JSON.parse(db.get('SELECT sys FROM messages WHERE id = ?', id).sys);
+  assert.deepEqual(sys('m_swept'), { outcome: 'answered' });
+  assert.deepEqual(sys('m_later').joined, ['u_old', 'u_two'], 'a record still showing is untouched');
+  assert.deepEqual(sys('m_kept').declined, ['u_three']);
+  db.close();
+});
+
 // ---------- TURN ----------
-test('TURN: with a shared secret each person gets a credential that verifies, runs out in about 12 hours, and the static password is never sent', async () => {
+test('TURN: with a shared secret each person gets a credential that verifies, runs out in about an hour, can’t be linked to their account, and the static password is never sent', async () => {
   const a = await Client.make('turnann', 'Ann Turn');
-  const check = (ice) => {
+  const check = (ice, iceExp) => {
     assert.deepEqual(ice[0], { urls: ['stun:stun.example.org:3478'] });
     const turn = ice[1];
     assert.deepEqual(turn.urls, ['turn:turn.example.org:3478']);
-    const [expiry, user] = turn.username.split(':');
-    assert.equal(user, a.id);
+    const [expiry, tag] = turn.username.split(':');
+    // calls C4: the TURN operator sees an opaque tag, never the account id.
+    assert.notEqual(tag, a.id);
+    assert.ok(!turn.username.includes(a.id), 'no account id in the TURN username');
+    assert.match(tag, /^[A-Za-z0-9_-]{16}$/);
+    // Not even with the shared secret the TURN server holds: the tag is keyed with a key only Snug's server has.
+    const day = Math.floor(Date.now() / 86_400_000);
+    for (const d of [day - 1, day, day + 1]) assert.notEqual(tag, createHmac('sha256', SECRET).update(`${a.id}|${d}`).digest('base64url').slice(0, 16), 'the TURN secret alone gives the tag away');
     const left = Number(expiry) - Date.now() / 1000;
-    assert.ok(left > 11 * 3600 && left <= 12 * 3600 + 5, `expires in about 12 hours: ${left}`);
+    assert.ok(left > 55 * 60 && left <= 3600 + 5, `expires in about an hour: ${left}`);
+    // Still the coturn use-auth-secret scheme: the credential is HMAC-SHA1 of the username.
     assert.equal(turn.credential, createHmac('sha1', SECRET).update(turn.username).digest('base64'));
     assert.ok(!JSON.stringify(ice).includes('static'), 'no static login');
+    // When it runs out, so the client refreshes before making a connection (js/voice.js).
+    assert.equal(iceExp, Number(expiry) * 1000 - 5 * 60_000);
   };
-  check(a.hello.ice);
-  check((await a.ok('ice.refresh')).ice);
+  check(a.hello.ice, a.hello.iceExp);
+  const r = await a.ok('ice.refresh');
+  check(r.ice, r.iceExp);
   const me = await (await fetch(`${base}/api/me`, { headers: { cookie: a.cookie } })).json();
-  check(me.ice);
+  check(me.ice, Number(me.ice[1].username.split(':')[0]) * 1000 - 5 * 60_000);
   // Refreshing is rate limited.
   for (let i = 0; i < 3; i++) await a.op('ice.refresh');
   assert.match(await a.refused('ice.refresh'), /Wait/);
   const { iceConfig } = await import('../server/voiceopts.js');
-  assert.deepEqual(iceConfig({ SNUG_TURN_URL: 'turn:t.example', SNUG_TURN_USER: 'u', SNUG_TURN_PASS: 'p' })[1], { urls: ['turn:t.example'], username: 'u', credential: 'p' }, 'without a secret the static login is the fallback');
+  const warned = [];
+  assert.deepEqual(iceConfig({ SNUG_TURN_URL: 'turn:t.example', SNUG_TURN_USER: 'u', SNUG_TURN_PASS: 'p' }, { warn: (m) => warned.push(m) }).at(-1), { urls: ['turn:t.example'], username: 'u', credential: 'p' }, 'without a secret the static login is the fallback');
+  assert.match(warned.join(' '), /static TURN login/i, 'a static login is warned about at startup');
   assert.equal(iceConfig({}).length, 1, 'no TURN configured: STUN only');
   a.ws.close();
+});
+
+test('TURN credentials (calls C4): the same tag all day for one person, different people get different tags, expiry follows the clock', async () => {
+  const { turnCredential, TURN_TTL_S, iceExpOf } = await import('../server/voiceopts.js');
+  assert.equal(TURN_TTL_S, 3600);
+  const t = Date.UTC(2026, 10, 16, 9, 0, 0);
+  const KEY = Buffer.alloc(32, 7);
+  const a1 = turnCredential(SECRET, KEY, 'u_ann', t), a2 = turnCredential(SECRET, KEY, 'u_ann', t + 3 * 3600_000);
+  const b1 = turnCredential(SECRET, KEY, 'u_bob', t);
+  const tag = (c) => c.username.split(':')[1];
+  assert.equal(tag(a1), tag(a2), 'stable within a day (one relay allocation per person per day can be told apart, no more)');
+  assert.notEqual(tag(a1), tag(b1));
+  assert.notEqual(tag(turnCredential(SECRET, KEY, 'u_ann', t + 86_400_000)), tag(a1), 'a new tag each day');
+  assert.notEqual(tag(turnCredential(SECRET, Buffer.alloc(32, 8), 'u_ann', t)), tag(a1), 'the tag needs the server’s own key');
+  assert.equal(tag(turnCredential('another-secret', KEY, 'u_ann', t)), tag(a1), 'the TURN secret plays no part in it');
+  assert.equal(a1.credential, createHmac('sha1', SECRET).update(a1.username).digest('base64'), 'the credential is still the coturn one');
+  assert.equal(Number(a1.username.split(':')[0]), t / 1000 + 3600);
+  assert.equal(iceExpOf([{ urls: ['turn:x'], ...a1 }]), (t / 1000 + 3600) * 1000 - 5 * 60_000);
+  assert.equal(iceExpOf([{ urls: ['stun:x'] }]), null);
+  assert.equal(iceExpOf([{ urls: ['turn:x'], username: 'u', credential: 'p' }]), null, 'a static login has no expiry');
 });
 
 test('STUN: SNUG_STUN=none leaves the STUN server out (it sees callers’ IP addresses); unset uses the public default', async () => {
@@ -486,6 +616,8 @@ test('STUN: SNUG_STUN=none leaves the STUN server out (it sees callers’ IP add
   assert.deepEqual(iceConfig({ SNUG_STUN: 'none' }), []);
   assert.deepEqual(iceConfig({ SNUG_STUN: ' NONE ', SNUG_TURN_URL: 'turn:t.example', SNUG_TURN_USER: 'u', SNUG_TURN_PASS: 'p' }), [{ urls: ['turn:t.example'], username: 'u', credential: 'p' }]);
   assert.match(iceConfig({})[0].urls[0], /^stun:/);
+  // calls C3: with TURN configured and SNUG_STUN unset, no outside STUN server (the TURN server answers STUN).
+  assert.deepEqual(iceConfig({ SNUG_TURN_URL: 'turn:t.example', SNUG_TURN_SECRET: 's' })('u_x').map((s) => s.urls), [['turn:t.example']]);
 });
 
 test('grace: SNUG_VOICE_GRACE_MS only shortens the grace under the test runner', async () => {

@@ -33,8 +33,12 @@ export function levelOf(S, conv) {
 // A call record (written by the server) that I missed: someone else started
 // it and I neither took part nor declined. Those need me; other call records
 // are history, not news.
+// calls C5: a record lists who missed it; one from before 0.14 lists who
+// joined and declined instead; one cut down by the expiry sweep, neither.
 export function missedCall(S, m) {
   if (!m.call || m.author === S.me) return false;
+  if (Array.isArray(m.call.missed)) return m.call.missed.includes(S.me);
+  if (!m.call.joined && !m.call.declined) return false;
   return !(m.call.joined || []).includes(S.me) && !(m.call.declined || []).includes(S.me);
 }
 

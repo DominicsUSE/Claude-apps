@@ -57,6 +57,8 @@ test.afterEach(async () => { for (const c of contexts.splice(0)) await c.close()
 async function person(handle, { init = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, permissions: ['microphone', 'camera'] });
   contexts.push(ctx);
+  // calls C3: this machine's server has no relay; the one-time "connects directly" sheet is tested on its own.
+  await ctx.addInitScript(() => { try { localStorage.setItem('snug.directOk', '1'); } catch { /* none */ } });
   if (init) await ctx.addInitScript(init);
   const page = await ctx.newPage();
   page.setDefaultTimeout(15000);
@@ -209,7 +211,7 @@ test('security code: two people in a call see the same 6-digit code for each oth
     // It says what a match shows, and that 6 digits are no guarantee (a server can try certificates until codes match).
     const note = await page.locator('.act-qpop').textContent();
     assert.match(note, /A match makes it much harder for anyone, the server included, to sit in the middle/);
-    assert.match(note, /only 6 digits, so it isn’t a guarantee/);
+    assert.match(note, /A 6-digit code means a device didn’t sign its side .*so it isn’t a guarantee/);
     assert.doesNotMatch(note, /nobody is in the middle/);
     await page.keyboard.press('Escape');
     return text;
@@ -279,4 +281,120 @@ test('screen share: a browser that refuses the text/motion preference still gets
     return s?.caps?.screen?.maxBitrate === screenBitrate(false) || (s?.level > 0 && s?.caps?.screen?.maxBitrate > 0);
   }, null, { timeout: 15000 });
   assert.equal((await robin.evaluate(async () => (await window.snug.voiceStats()).ines)).screenPref, null);
+});
+
+// ---------- 6. End-to-end encrypted media (calls C1, C2) ----------
+// Turns encryption on from the invitation and confirms the recovery key (as tests/e2e-e2ee.test.js).
+async function turnOnEncryption(page) {
+  const dialog = page.locator('.modal[role=dialog]');
+  await page.click('.rail-btn:has(.sr:text-matches("^Messages"))');
+  await page.locator('.e2-invite button:has-text("Turn on")').click();
+  await dialog.locator('h2:has-text("Turn on end-to-end encryption")').waitFor();
+  await dialog.locator('button:has-text("Turn on")').click();
+  await dialog.locator('#e2-recovery-key').waitFor();
+  const key = (await dialog.locator('#e2-recovery-key code').allTextContents()).join('-');
+  await dialog.locator('#e2-last').fill(key.slice(-4).toLowerCase());
+  await dialog.locator('button:has-text("I’ve saved it")').click();
+  await dialog.waitFor({ state: 'detached' });
+  await page.waitForFunction(() => window.snug.e2ee.E2.status === 'ready');
+}
+// Every connection end-to-end encrypted, with frames really opening on this side.
+const allE2ee = (page, n, frames = 20) => waitAsync(page, async ([want, min]) => {
+  const peers = Object.values(await window.snug.voiceStats());
+  return peers.length === want && peers.every((p) => p.e2ee && p.frames?.dec > min && p.frames?.enc > min);
+}, [n, frames], { timeout: 60000, polling: 300 }); // a busy machine can hold a page up for a while
+const cryptKey = (page) => page.evaluate(() => window.snug.voiceTest.crypt().key);
+
+test('end-to-end encrypted media: sealed frames both ways, the label says so, a damaged frame is dropped, keys change on every join and leave, and the device-signed code is longer', async () => {
+  const tomasz = await person('tomasz'), priya = await person('priya');
+  await turnOnEncryption(tomasz);
+  await turnOnEncryption(priya);
+  await joinWheel(tomasz);
+  await joinWheel(priya);
+  await connected(tomasz, 1);
+  await allE2ee(tomasz, 1);
+  await allE2ee(priya, 1);
+  // Audio really plays from opened frames (the voice keeps arriving and decoding).
+  await waitAsync(priya, async () => (await window.snug.voiceStats()).tomasz?.energy > 0);
+  await tomasz.locator('.stage .act-conn .act-e2ee.on:has-text("End-to-end encrypted")').waitFor();
+  await tomasz.click('.stage .act-conn');
+  await tomasz.locator('.act-qpop .act-e2ee-note:has-text("keys go only to the devices of the people listed here")').waitFor();
+  // Both devices signed their certificates: "Verified device" and a 12-digit code, the same on both sides.
+  const codeRow = (page, name) => page.locator(`.act-qpop .act-code-row:has-text("${name}")`);
+  await codeRow(tomasz, 'Priya').locator('.act-verified:has-text("Verified device")').waitFor();
+  const a = (await codeRow(tomasz, 'Priya').locator('.act-code').textContent()).trim();
+  await tomasz.keyboard.press('Escape');
+  await priya.click('.stage .act-conn');
+  const b = (await codeRow(priya, 'Tomasz').locator('.act-code').textContent()).trim();
+  await priya.keyboard.press('Escape');
+  assert.match(a, /^\d{4} \d{4} \d{4}$/);
+  assert.equal(a, b);
+  // A damaged frame never plays: Priya drops what Tomasz damages on the way out.
+  const before = (await priya.evaluate(async () => (await window.snug.voiceStats()).tomasz.frames));
+  await tomasz.evaluate((u) => window.snug.voiceTest.tamper(u, true), 'priya');
+  await waitAsync(priya, async (d0) => (await window.snug.voiceStats()).tomasz.frames.drop > d0 + 20, before.drop, { timeout: 30000 });
+  // While damaged, frames keep coming and none of them opens.
+  const framesNow = () => priya.evaluate(async () => (await window.snug.voiceStats()).tomasz.frames);
+  const t1 = await framesNow();
+  await priya.waitForTimeout(1000);
+  const mid = await framesNow();
+  await tomasz.evaluate((u) => window.snug.voiceTest.tamper(u, false), 'priya');
+  assert.ok(mid.drop > t1.drop, 'still dropping');
+  assert.ok(mid.dec - t1.dec <= 3, `damaged frames weren’t opened (${t1.dec} -> ${mid.dec})`);
+  await waitAsync(priya, async (d) => (await window.snug.voiceStats()).tomasz.frames.dec > d + 20, mid.dec, { timeout: 30000 });
+  // Malik joins: everyone makes a new key; all three pairs are end-to-end encrypted.
+  const k1 = await cryptKey(tomasz);
+  const malik = await person('malik');
+  await turnOnEncryption(malik);
+  await joinWheel(malik);
+  await connected(malik, 2);
+  await waitAsync(tomasz, async (k) => window.snug.voiceTest.crypt().key !== k, k1, { timeout: 30000 });
+  for (const p of [tomasz, priya, malik]) await allE2ee(p, 2, 5);
+  // Malik leaves: a new key again, and after a moment Priya holds only Tomasz's newest key.
+  const k2 = await cryptKey(tomasz);
+  await malik.click('.stage [aria-label="Leave voice"]');
+  await waitAsync(tomasz, async (k) => window.snug.voiceTest.crypt().key !== k, k2, { timeout: 30000 });
+  const k3 = await cryptKey(tomasz);
+  await waitAsync(priya, async (k) => {
+    const f = (await window.snug.voiceStats()).tomasz?.frames;
+    return f && f.recvKeys.length === 1 && f.recvKeys[0] === k;
+  }, k3, { timeout: 20000 });
+  await allE2ee(priya, 1, 5);
+});
+
+test('end-to-end encryption fallback: a browser without encoded transforms connects as before, and both sides say "Encrypted in transit only" and why', async () => {
+  const sunniva = await person('sunniva');
+  await turnOnEncryption(sunniva);
+  const dara = await person('dara', { init: () => { delete window.RTCRtpScriptTransform; delete RTCRtpSender.prototype.createEncodedStreams; delete RTCRtpReceiver.prototype.createEncodedStreams; } });
+  await joinWheel(sunniva);
+  await joinWheel(dara);
+  await connected(sunniva, 1);
+  await connected(dara, 1);
+  await waitAsync(sunniva, async () => (await window.snug.voiceStats()).dara?.e2eeWhy === 'their-browser');
+  assert.equal((await dara.evaluate(async () => (await window.snug.voiceStats()).sunniva)).e2ee, false);
+  await dara.locator('.stage .act-conn .act-e2ee.off:has-text("Encrypted in transit only")').waitFor();
+  await dara.click('.stage .act-conn');
+  await dara.locator('.act-qpop .act-e2ee-note:has-text("this browser can’t encrypt calls end to end")').waitFor();
+  await dara.keyboard.press('Escape');
+  await sunniva.click('.stage .act-conn');
+  await sunniva.locator('.act-qpop .act-e2ee-note:has-text("Dara’s browser or app can’t encrypt calls end to end")').waitFor();
+});
+
+test('someone on an older Snug (0.13 and before never send a call key nor say why not): the label names their app after a few seconds, not "still setting it up"', async () => {
+  const robin = await person('robin');
+  await turnOnEncryption(robin);
+  const ines = await person('ines');
+  await turnOnEncryption(ines); // 0.13 had encryption keys too: Robin seals his key to her device and hears nothing back
+  const inesId = srv.db.get("SELECT id FROM users WHERE handle = 'ines'").id;
+  // Ines's app stands in for a 0.13 one: nothing of hers about call keys reaches anyone.
+  const real = srv.hub.rtcRelay;
+  srv.hub.rtcRelay = (from, to, data) => (from === inesId && data?.ck ? true : real(from, to, data));
+  try {
+    await joinWheel(robin);
+    await joinWheel(ines);
+    await connected(robin, 1);
+    await waitAsync(robin, async () => (await window.snug.voiceStats()).ines?.e2eeWhy === 'their-app', null, { timeout: 30000 });
+    await robin.click('.stage .act-conn');
+    await robin.locator('.act-qpop .act-e2ee-note:has-text("Ines’s Snug is too old to encrypt calls end to end")').waitFor();
+  } finally { srv.hub.rtcRelay = real; }
 });

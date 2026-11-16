@@ -379,7 +379,11 @@ Real, and covered by tests with separate users:
   takes you back to it. With Snug closed, the callee's devices get a push,
   "Name is calling", that opens the conversation and stays on screen until
   the ring stops; then it is replaced by a quiet note (*Missed call*, *You
-  answered on another device*) and the missed call record, if any. Up to 12 people in a call (a group holds at most
+  answered on another device*) and the missed call record, if any. **What a call leaves behind (0.14):**
+  nothing is ever recorded (no audio, video or screen is kept anywhere), and the record in the conversation
+  keeps only who started the call, voice or video, how it went, when, how long, and who missed it, not who
+  took part or declined. When a disappearing-messages timer removes the record, or its author's account is
+  erased, only how it went stays. Live call state is in the server's memory only. Up to 12 people in a call (a group holds at most
   10). Starting calls is limited to four at once, then one every 15
   seconds. Tested with real sockets (`npm test`) and in Chromium with its
   fake microphone and camera (`npm run test:e2e:calls`, with the ring
@@ -1080,16 +1084,53 @@ Real, and covered by tests with separate users:
     video and screen halved within floors, fewer pixels from the second step);
     five good polls step back up (`js/lib/callnet.js`).
   - **Hide my IP address** (Settings > Voice and video, offered only when the
-    server has a TURN relay): connections go only through the relay
-    (`iceTransportPolicy: 'relay'`) in voice rooms and with people who aren't
-    your friends by default, *Always* or *Off*. It can add a little delay;
-    the relay's operator (the server's owner, or Cloudflare for PC-to-PC
-    calls) sees who connected, from where and when, not what is said. Asked
-    outright (*Always*, or PC to PC *Hide my IP from friends*) with no relay
-    known, Snug does not connect rather than going direct. The connection
-    shows *Direct* or *Relayed*, and its details say that calls are encrypted
-    between the people in them (DTLS-SRTP), which is transport encryption,
-    not the end-to-end encryption of private messages.
+    server has a TURN relay): **on by default since 0.14** for every call and
+    voice room, friends included (`iceTransportPolicy: 'relay'`); *Rooms and
+    non-friends* or *Off* if you prefer. Settings from before 0.14 that still
+    had the old default move to the new one; a choice made since stays. In
+    relay mode only relay candidates leave the device: host, srflx, prflx and
+    mDNS candidates are dropped from trickled candidates and from the offer and
+    answer too. It can add a little delay; the relay's operator (the server's
+    owner, or Cloudflare for PC-to-PC calls) sees who connected, from where
+    and when, and how much, not what is said. Asked outright (PC to PC *Hide
+    my IP from friends*) with no relay known, Snug does not connect rather
+    than going direct. **With no relay** on the server, a voice room says
+    "This connects directly: people in … can see your IP address" above *Join
+    voice*, an incoming call says it on the card, and starting a call asks
+    once on each device (*Join* or *Cancel*). PC-to-PC calls get the
+    registry's relay only when the call starts, so they don't say this
+    beforehand: with no relay from the registry they go direct unless *Hide my
+    IP from friends* is on. The connection shows *Direct* or
+    *Relayed*; its details never show anyone's IP address.
+  - **End-to-end encrypted calls (0.14):** when everyone in a call has turned
+    on end-to-end encryption and their browser has encoded transforms
+    (`RTCRtpScriptTransform`, or Chromium's `createEncodedStreams`; tested
+    in Chromium only), every encoded frame of the microphone, camera,
+    screen and screen sound is sealed on the sending device with AES-256-GCM
+    (WebCrypto) on top of WebRTC's DTLS-SRTP (`js/lib/callcrypt.js`, in a
+    worker). Each person's device makes its own call key and sends it to each
+    other person sealed to their devices from their signed device list (HPKE,
+    the same keys as private messages) and signed with its device key
+    (`js/e2ee/callkeys.js`); the server passes the sealed key on and can't
+    open it. Keys change whenever someone joins or leaves (the old one is kept
+    about 2 seconds, then wiped) and are wiped when the call ends; a receiver
+    drops any frame that doesn't open once a sender has started encrypting to
+    it. Video prefers VP8, whose header is left readable for the packetiser.
+    The call says **End-to-end encrypted** only when every connection is;
+    otherwise **Encrypted in transit only (DTLS-SRTP)** and why (this browser
+    can't, *name* hasn't turned on encryption, *name*'s Snug is too old, or a
+    new key someone hasn't acknowledged within 5 seconds). In a house's
+    voice room, keys go only to the devices of the people listed in it. The
+    server still sees who is in which call, when, and for how long; P2P
+    calls with friends on other PCs stay *in transit only*.
+  - **Connections signed by the device (0.14):** every offer and answer
+    carries `a=x-snug-fp`, the device's Ed25519 signature over the call, both
+    people, the DTLS certificate fingerprint and the ICE username. The other
+    side checks it against the sender's signed device list before using it;
+    one that doesn't match (a server swapping certificates to sit in the
+    middle) ends that connection with a warning and is never retried in that
+    call. A device that sends signed keys must sign its offers too, so
+    stripping the signature is caught as well. Older Snugs ignore the line.
   - **Devices in the call.** The call's options menu lists microphones,
     speakers and cameras and switches at once. A chosen microphone that is
     unplugged falls back to the default with a toast; a new system default is
@@ -1133,15 +1174,13 @@ Real, and covered by tests with separate users:
     button, the desktop's media controls, where the browser offers them)
     mute, turn the camera on and off and hang up. Without either API the
     call works as before.
-  - **Security code (0.13):** the connection details show a 6-digit code per
-    person, made from both sides' DTLS certificate fingerprints. Read it out
-    loud: if both of you see the same code, it is much harder for anyone (the
-    server included) to sit in the middle of your connection. It is not a
-    guarantee: the code is only 6 digits and neither side commits to its
-    certificate first, so someone who controls the signalling and has enough
-    computing power could keep making certificates until the codes match. It
-    checks that one connection, not who the person is, and Snug doesn't
-    remember codes between calls.
+  - **Security code:** when both devices signed their side (above), the
+    connection details show **Verified device** and a 12-digit code made from
+    both devices' identity keys and both certificate fingerprints (0.14).
+    Otherwise (encryption off, or an older Snug) they show the 0.13 6-digit
+    code made from both fingerprints, which a server with enough computing
+    power could make match. Read it out loud: the other person should see the
+    same code. Snug doesn't remember codes between calls.
   Tested by `tests/logic-voice.test.js` (5), `tests/server-voice.test.js`
   (13), `tests/e2e-voice-extra.test.js` (8), `tests/e2e-voice-mesh.test.js`
   (6, with five browsers for a voice room growing past 3 others; the wake
@@ -1215,7 +1254,7 @@ Not built yet, on purpose, because each needs outside infrastructure:
 - **A TURN relay for voice.** Voice connects directly between people. People
   behind strict company or mobile networks need a relay; set the `SNUG_TURN_*`
   variables below once you run one (coturn is the usual choice). With
-  `SNUG_TURN_SECRET` each person gets their own 12-hour credential; the
+  `SNUG_TURN_SECRET` each person gets their own 1-hour credential; the
   credential itself is tested, but only direct connections have been tested,
   never a call through a real relay.
 - **More than one server process.** Presence, voice membership and rate
@@ -1256,10 +1295,10 @@ behind a reverse proxy that terminates TLS and passes WebSocket upgrades on
 | `SNUG_ORIGINS` | Extra allowed page origins, comma separated | none |
 | `SNUG_RP_ID` | The domain passkeys belong to (for example `example.org` to share them across `snug.example.org` and `chat.example.org`). Without it: the one `SNUG_HOSTS` name, or `localhost` on a server that only listens on this machine. Changing it later stops existing passkeys from working (passwords keep working) | the `SNUG_HOSTS` name |
 | `SNUG_HOSTS` | Host names this server answers to, comma separated (for example `snug.example.org`). Any other `Host` gets 421, which stops DNS-rebinding pages. A server bound to loopback always checks (localhost, IP addresses and `SNUG_ORIGINS` hosts pass). A server bound to a public address checks once this is set, and logs a warning until then | none |
-| `SNUG_STUN` | STUN servers for voice, comma separated; `none` asks no STUN server at all (a STUN server sees each caller's IP address) | Google's public server |
+| `SNUG_STUN` | STUN servers for voice, comma separated; `none` asks no STUN server at all (a STUN server sees each caller's IP address) | none when TURN is set (a TURN server answers STUN too); otherwise Google's public server |
 | `SNUG_LOG_DAYS` | Days sign-in history and security events are kept (1 to 365) | `30` |
 | `SNUG_TURN_URL`, `SNUG_TURN_USER`, `SNUG_TURN_PASS` | TURN relay for voice | none |
-| `SNUG_TURN_SECRET` | Shared secret of the TURN server's REST API (coturn `use-auth-secret`): each person gets their own credential, `<expiry>:<user id>` with a base64 HMAC-SHA1, valid 12 hours and refreshed by the `ice.refresh` op. When set, `SNUG_TURN_USER`/`SNUG_TURN_PASS` are never sent | none |
+| `SNUG_TURN_SECRET` | Shared secret of the TURN server's REST API (coturn `use-auth-secret`): each person gets their own credential, `<expiry>:<tag>` with a base64 HMAC-SHA1, valid 1 hour (0.14) and refreshed before it runs out. The tag is a keyed hash of the person and the day under a key only Snug's server holds (from its data key, not this secret), so the TURN server's operator can't tell which Snug account it is unless they also run the Snug server; they can still see that one person's relay use on one day belongs together. When set, `SNUG_TURN_USER`/`SNUG_TURN_PASS` are never sent; without it the static login goes to every client and the server warns at startup | none |
 | `SNUG_PUSH_CONTACT` | Contact the push services see in each VAPID token (`mailto:` or `https:`); Apple's requires a real one | `mailto:snug@example.invalid` |
 | `SNUG_E2EE=off` | Stop offering end-to-end encryption for direct messages and groups (conversations already encrypted stay encrypted) | on |
 | `SNUG_DEMO_PASSWORD` | Password for the sample accounts when seeding | `snug-demo-1` |
@@ -1452,11 +1491,12 @@ and call signalling. Push notifications say only "New message".
 - *Messages from before.* Messages sent before a conversation turned encrypted stay
   stored readable on the server (each says so in its menu), and database snapshots
   taken before keep them until they age out.
-- *Calls* are not end-to-end encrypted by this feature (they use WebRTC's own
-  encryption, but signalling passes the server). Since 0.13 the connection
-  details show a security code per person: matching codes, read out loud,
-  make it much harder to swap the connection's keys on the way, but with only
-  6 digits a server with enough computing power could still make them match.
+- *Calls* (0.14) are end-to-end encrypted when everyone in them has turned
+  encryption on and their browser can encrypt frames; the call's label says
+  whether this one is, and why not. Call keys go only to the devices in each
+  person's signed list. The server still sees who called whom, when, and for
+  how long; call records in an encrypted conversation are written by the
+  server and aren't encrypted.
 
 **Not encrypted, by design.** Rooms in houses (their pages say so), reactions,
 group names and pictures. Polls and `/roll` are off in encrypted conversations

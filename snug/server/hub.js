@@ -430,12 +430,15 @@ export function createHub({ db, M, server, origins, ice = [], log = () => {}, ri
   // marker moves: it is one pointer per conversation, and moving it would mark
   // every message before the record read too (a message sent just before the
   // call, or during it). The record itself needs only the people who missed
-  // the call (js/lib/attention.js missedCall, push.js needs).
+  // the call (js/lib/attention.js missedCall, push.js needs); records from
+  // before 0.14 list joined and declined instead, and readers still take those.
   function writeRecord(call, reason, members) {
     if (!members.includes(call.by)) return;
     const t = now();
     const outcome = call.answered ? 'answered' : reason === 'declined' ? 'declined' : 'missed';
-    const rec = { id: call.id, by: call.by, video: call.video, outcome, joined: [...call.joined], declined: [...call.declined], started: call.started };
+    // calls C5: no list of who took part or declined, only who missed it (what "Missed call" needs).
+    const missed = members.filter((u) => !call.joined.has(u) && !call.declined.has(u));
+    const rec = { by: call.by, video: call.video, outcome, started: call.started, missed };
     if (call.answered) rec.dur = t - call.answered;
     const text = outcome === 'answered' ? `Call · ${callLength(rec.dur)}` : outcome === 'declined' ? 'Declined call' : 'Missed call';
     // p2p: with a friend on another PC both sides write the record, under the same id, once.

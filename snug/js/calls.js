@@ -8,7 +8,7 @@
 // it, and play a ringtone made with WebAudio (no sound files).
 import { S, emit, subscribe, convMeta, openConv, toast, person, openModal } from './store.js';
 import { call, on } from './server.js';
-import { joinVoice } from './voice.js';
+import { joinVoice, connectsDirectly, directAcknowledged, acknowledgeDirect } from './voice.js';
 import { vp } from './voiceopts.js'; // ringtone, its volume and output device (voice and calls track)
 import { Confirm } from './views/modals.js';
 
@@ -43,8 +43,24 @@ export function leavingCall(target, go) {
   return undefined;
 }
 
+// calls C3: no relay here, so the call would go straight to their device and
+// show them my IP address: asked once on this device, before the first call.
+export function directWho(dm) {
+  const meta = convMeta(dm);
+  return meta?.kind === 'group' ? `People in ${meta.title}` : meta?.user?.name?.split(' ')[0] || meta?.title || 'The other person';
+}
 export function startCall(dm, { video = false } = {}) {
   if (S.conn.socket !== 'open') { toast('You’re offline, so you can’t call right now.'); return; }
+  if (connectsDirectly() && !directAcknowledged()) {
+    const who = directWho(dm);
+    openModal(Confirm, {
+      title: `This connects directly: ${who} can see your IP address`,
+      text: `This Snug server has no relay, so your call goes straight to ${who === 'The other person' ? 'their' : `${who}’s`} device${/^People in/.test(who) ? 's' : ''}. Your IP address shows roughly where you are and who your internet provider is. Snug asks only once on this device; Settings, Voice and video says more.`,
+      action: 'Join',
+      onConfirm: () => { acknowledgeDirect(); startCall(dm, { video }); },
+    });
+    return;
+  }
   leavingCall(dm, () => {
     openConv(dm);
     joinVoice(dm, { start: true, video });

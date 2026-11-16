@@ -42,6 +42,12 @@
 .act-code-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-1); font-size: var(--t-13); }
 .act-code-row { display: flex; justify-content: space-between; gap: var(--s-3); min-width: 0; }
 .act-code { font-variant-numeric: tabular-nums; font-weight: var(--w-medium); letter-spacing: 0.06em; white-space: nowrap; }
+/* calls C1/C2: the encryption label, "Verified device", and a connection stopped for not matching its signature */
+.act-e2ee { margin-left: var(--s-2); padding-left: var(--s-2); border-left: 1px solid var(--line); font-weight: var(--w-regular, 400); color: var(--text-2); }
+.act-e2ee.on { color: var(--mint-ink); }
+.act-e2ee-note.on { color: var(--text-2); }
+.act-verified { color: var(--mint-ink); font-size: var(--t-12); white-space: nowrap; }
+.act-alarm { margin: 0 0 var(--s-2); padding: var(--s-2) var(--s-3); border-radius: var(--r-md); background: var(--rose-soft); color: var(--text-1); border: 1px solid var(--rose); font-size: var(--t-13); }
 .act-hint { margin: 0; padding: var(--s-2) var(--s-3); border-radius: var(--r-md); background: var(--amber-soft); color: var(--amber-ink); font-size: var(--t-13); }
 
 /* ---------- "You're muted" ---------- */
@@ -214,3 +220,7 @@
 
 /* More controls than fit across a phone: they wrap onto a second row, never off screen. */
 @media (max-width: 759px) { .stage-acts { flex-wrap: wrap; row-gap: var(--s-2); } }
+
+/* calls C3: before joining with no relay, who will see your IP address */
+.stage-direct { margin: 0; justify-self: center; max-width: 46ch; text-align: center; color: var(--amber-ink); font-size: var(--t-13); }
+.inc-direct { color: var(--amber-ink); }

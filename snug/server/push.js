@@ -159,7 +159,9 @@ export function createPush({ db, M, hub, origins, log = () => {}, allowLocal = f
   function missedBy(row, user) {
     let rec = null;
     try { rec = JSON.parse(row.sys); } catch { /* not a call */ }
-    return !!rec && !!rec.outcome && row.author !== user && !rec.joined?.includes(user) && !rec.declined?.includes(user); // outcome: a call, not a join line (server/community.js)
+    if (!rec?.outcome || row.author === user) return false; // outcome: a call, not a join line (server/community.js)
+    if (Array.isArray(rec.missed)) return rec.missed.includes(user); // calls C5; before 0.14, joined and declined
+    return (!!rec.joined || !!rec.declined) && !rec.joined?.includes(user) && !rec.declined?.includes(user);
   }
 
   function noteFor(user, conv, w, row) {

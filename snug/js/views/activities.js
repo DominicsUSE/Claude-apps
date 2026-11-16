@@ -10,7 +10,7 @@ import { call } from '../server.js';
 import { Icon, addIcons } from '../ui/icons.js';
 import { Avatar } from '../ui/kit.js';
 import { can } from '../lib/perms.js';
-import { toggleMute, dismissMutedWarn, codeOf } from '../voice.js';
+import { toggleMute, dismissMutedWarn, codeOf, verifiedDevice, callSecurity } from '../voice.js';
 import { act, startActivity, stopActivity, react } from '../activities.js';
 import { BOARD_COLOURS, BOARD_WIDTHS, BOARD_LIMITS, VOICE_REACTIONS, GAMES } from '../lib/games.js';
 import { QUALITY_LABEL, callClock, callClockWords } from '../lib/netquality.js';
@@ -152,6 +152,7 @@ function QualityPop({ room }) {
       : html`<p class="act-note">Nobody else is here yet, so there’s nothing to measure.</p>`}
     ${ids.length > 0 && html`<p class="act-note">${S.call?.listen ? 'You’re listening without a microphone.' : html`You’re sending <span class="num">${mine.sendKbps == null ? '…' : `${mine.sendKbps} kbit/s`}</span>.`}${vp().lowData ? ' Data saver is on.' : ''}</p>`}
     <${RouteNote} ids=${ids} />
+    <${E2eeNote} room=${room} />
     <${CallCodes} ids=${ids} />
     ${mine.uplinkPoor && html`<p class="act-hint" role="note">Your connection is struggling, so others may hear you break up. Turning your camera off, or moving closer to your router, can help.</p>`}
   </div>`;
@@ -163,21 +164,49 @@ function RouteNote({ ids }) {
   const relayed = routes.some(Boolean);
   return html`<p class="act-note act-route">${relayed
     ? 'Relayed: your audio goes through a relay server, so people in the call don’t see your IP address. The relay’s operator sees that you connected and when, not what you say.'
-    : 'Direct: your audio goes straight to each person, so they can see your IP address.'}
-    Calls are encrypted between the people in them (DTLS-SRTP). That is transport encryption, not the end-to-end encryption of private messages.</p>`;
+    : 'Direct: your audio goes straight to each person, so they can see your IP address.'}</p>`;
+}
+// calls C1: whether the media is end-to-end encrypted, said plainly, and why not.
+const WHY = {
+  browser: () => 'this browser can’t encrypt calls end to end',
+  off: () => 'this Snug server doesn’t offer end-to-end encryption',
+  keys: () => 'you haven’t turned on end-to-end encryption (Settings, Encryption)',
+  server: () => 'this Snug server is too old to pass call keys on',
+  'their-keys': (who) => `${who} hasn’t turned on end-to-end encryption`,
+  'their-browser': (who) => `${who}’s browser or app can’t encrypt calls end to end`,
+  'their-app': (who) => `${who}’s Snug is too old to encrypt calls end to end`,
+  waiting: (who) => `still setting it up with ${who}`,
+  p2p: (who) => `calls with ${who} on another PC aren’t end-to-end encrypted yet`,
+};
+export function e2eeWords(sec) {
+  if (!sec) return null;
+  if (sec.on) return { short: 'End-to-end encrypted', long: null };
+  const who = sec.who ? person(sec.who).name.split(' ')[0] : 'someone';
+  return { short: 'Encrypted in transit only', long: `Encrypted in transit only (DTLS-SRTP): ${(WHY[sec.why] || WHY.waiting)(who)}.` };
+}
+function E2eeNote({ room }) {
+  const w = e2eeWords(callSecurity());
+  if (!w) return null;
+  const houseRoom = !!S.rooms[room];
+  return html`<p class=${`act-note act-e2ee-note${w.long ? '' : ' on'}`}>${w.long
+    ? `${w.long} WebRTC encrypts each connection, but the keys come from the browsers’ own connection, not the end-to-end encryption of private messages.`
+    : `End-to-end encrypted: your voice, camera and screen are sealed on your device with keys only the devices of the people in this call get, so the server and any relay can’t hear or see them.${houseRoom ? ' In a voice room, keys go only to the devices of the people listed here.' : ''} They still see who is in the call, when and for how long.`}</p>`;
 }
 // A short code per person to read out loud (js/lib/callnet.js callCode): the
 // same on both sides unless something sits in the middle of the connection.
 // Only 6 digits and nobody commits to a fingerprint first, so a server that
 // tries enough certificates could make the codes match: the note says so.
 function CallCodes({ ids }) {
-  const rows = ids.map((id) => [id, codeOf(id)]).filter(([, code]) => code);
+  const rows = ids.map((id) => [id, codeOf(id), verifiedDevice(id)]).filter(([, code]) => code);
   if (!rows.length) return null;
+  const allVerified = rows.every(([, , v]) => v);
   return html`<div class="act-codes">
     <b class="act-qpop-title">Security codes</b>
-    <ul class="act-code-list">${rows.map(([id, code]) => html`<li key=${id} class="act-code-row"><span class="trunc">${first(id)}</span>
-      <span class="act-code num" aria-label=${`${first(id)}: ${code.split('').join(' ')}`}>${code.slice(0, 3)} ${code.slice(3)}</span></li>`)}</ul>
-    <p class="act-note">Calls are encrypted between the people in them. Read your code out loud: the other person should see the same one for you. A match makes it much harder for anyone, the server included, to sit in the middle, but it’s only 6 digits, so it isn’t a guarantee.</p>
+    <ul class="act-code-list">${rows.map(([id, code, v]) => html`<li key=${id} class="act-code-row"><span class="trunc">${first(id)}${v ? html` <span class="act-verified">Verified device</span>` : ''}</span>
+      <span class="act-code num" aria-label=${`${first(id)}: ${code.replace(/ /g, '').split('').join(' ')}`}>${v ? code : `${code.slice(0, 3)} ${code.slice(3)}`}</span></li>`)}</ul>
+    <p class="act-note">${allVerified
+      ? 'Each person’s device signed its side of the connection, and Snug checked the signatures against their devices. Read your code out loud: the other person should see the same one. A match also confirms you both trust the same devices.'
+      : 'Read your code out loud: the other person should see the same one for you. A match makes it much harder for anyone, the server included, to sit in the middle. A 6-digit code means a device didn’t sign its side (encryption off, or an older Snug), so it isn’t a guarantee.'}</p>
   </div>`;
 }
 // "Voice connected", with the worst connection's bars; click for everyone's numbers.
@@ -189,10 +218,15 @@ export function ConnHeader({ room }) {
   // Direct or Relayed, as measured: Mixed when some lines go each way.
   const rs = ids.map((id) => S.netq?.[id]?.relay).filter((r) => r != null);
   const route = !rs.length ? null : rs.every(Boolean) ? 'Relayed' : rs.some(Boolean) ? 'Mixed' : 'Direct';
-  const label = `Voice connected${worst ? `. ${QUALITY_LABEL[worst]}` : ''}${route ? `. ${route}` : ''}. Show connection details`;
-  return html`<button class=${`stage-conn ok act-conn${worst ? ` q-${worst}` : ''}`} aria-haspopup="dialog" aria-label=${label}
+  const sec = e2eeWords(callSecurity());
+  const label = `Voice connected${worst ? `. ${QUALITY_LABEL[worst]}` : ''}${route ? `. ${route}` : ''}${sec ? `. ${sec.long || sec.short}` : ''}. Show connection details`;
+  const alarm = S.callAlarm?.room === room ? S.callAlarm : null;
+  return html`${alarm && html`<div class="act-alarm" role="alert">
+      <b>Snug stopped the connection to ${person(alarm.user).name}.</b> The security details that arrived for them don’t match what their device signed, so someone may be trying to listen in. Don’t continue this call; check with them another way.
+    </div>`}<button class=${`stage-conn ok act-conn${worst ? ` q-${worst}` : ''}`} aria-haspopup="dialog" aria-label=${label}
     onClick=${(e) => openPop({ anchor: rectOf(e), label: 'Connection', C: QualityPop, props: { room } })}>
     <i aria-hidden="true"></i>Voice connected${worst && html`<${Bars} q=${worst} />`}${route && html`<span class="act-routeword">${route}</span>`}
+    ${sec && html`<span class=${`act-e2ee${sec.long ? ' off' : ' on'}`} data-tip=${sec.long || sec.short}>${sec.short}</span>`}
     ${poorMe && html`<span class="act-uplink">Your connection is weak</span>`}
   </button>`;
 }
