@@ -31,7 +31,7 @@ import { createRecovery } from './recovery.js'; // v0.12: "Forgot your password?
 import { createKeyAuth } from './keyauth.js'; // v0.12: desktop accounts that need no GitHub account
 import { createNotices } from './notices.js'; // v0.10 A: registry notices, bans and admin
 import { createVault } from './vault.js'; // v0.10 C: the account's data file
-import { restoreIfDamaged, scheduleSnapshots, KEEP as KEEP_SNAPSHOTS } from './dbbackup.js'; // sec-registry REG-L6: database snapshots
+import { restoreIfDamaged, cleanupDataDir, scheduleSnapshots, KEEP as KEEP_SNAPSHOTS } from './dbbackup.js'; // sec-registry REG-L6: database snapshots
 import {
   sessionUser, endAllSessions, readCookie, sessionCookie, COOKIE, limiter, safeDecode,
   clientIp, ipKey, secureCookies, // sec-auth
@@ -115,6 +115,8 @@ export async function startServer({
   const dataKey = dataDir === ':memory:' ? null : loadDataKey({ dataDir, keyStore, log: bootLog });
   const dbKey = dataKey && !dataKey.unusable ? dataKey : null;
   if (dbKey) restoreIfDamaged({ dataDir, dataKey: dbKey, log: bootLog });
+  // 0.14: no plaintext database copy stays beside the live one (damaged copies sealed, temp files removed).
+  if (dataDir !== ':memory:') cleanupDataDir({ dataDir, dataKey: dbKey, log: bootLog });
   const db = openDb(dataDir === ':memory:' ? ':memory:' : join(dataDir, 'snug.db'));
   const filesDir = join(dataDir === ':memory:' ? join(ROOT, 'data', 'test-files') : dataDir, 'files');
   await mkdir(filesDir, { recursive: true, mode: 0o700 });
