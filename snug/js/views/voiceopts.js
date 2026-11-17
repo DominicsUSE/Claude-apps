@@ -194,8 +194,8 @@ export function VoiceExtras({ compact, only }) {
     ${ptt && want('hold') && html`<button class=${`btn vo-hold${held ? ' live' : ''}`} aria-pressed=${String(held)} aria-label=${`Hold to talk, or hold ${v.pttLabel}`} ...${holdHandlers()}>
       <${Icon} name="vo-talk" size=${16} />${held ? 'Talking' : 'Hold to talk'}</button>`}
     ${house && want('board') && html`<button class="ib vc vo-board-btn" aria-label="Soundboard" data-tip="Soundboard" aria-haspopup="dialog"
-      onClick=${(e) => openPop({ anchor: rectOf(e), label: 'Soundboard', C: Soundboard, props: { house } })}><${Icon} name="vo-board" size=${20} /></button>`}
-    ${want('opts') && html`<button class="ib vc vo-opts" aria-label="Voice options" data-tip="Voice options" aria-haspopup="menu" onClick=${optionsMenu}><${Icon} name="gear" size=${20} /></button>`}`;
+      onClick=${(e) => openPop({ anchor: rectOf(e), label: 'Soundboard', C: Soundboard, props: { house } })}><${Icon} name="vo-board" size=${20} /><span class="vc-word" aria-hidden="true">Sounds</span></button>`}
+    ${want('opts') && html`<button class="ib vc vo-opts" aria-label="Voice options" data-tip="Voice options" aria-haspopup="menu" onClick=${optionsMenu}><${Icon} name="gear" size=${20} /><span class="vc-word" aria-hidden="true">Options</span></button>`}`;
 }
 
 // ---------- Picture in picture for a shared screen or a camera ----------

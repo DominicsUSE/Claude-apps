@@ -61,9 +61,9 @@ export function ActivityButtons({ compact }) {
   if (!c || c.status !== 'live' || compact) return null;
   const a = S.activity[c.room];
   return html`
-    <button class=${`ib vc act-btn${a ? ' running' : ''}`} aria-label=${a ? `Activities: ${ACT_NAME[a.kind]} is running` : 'Activities'} data-tip="Activities" aria-haspopup="menu" onClick=${activitiesMenu}><${Icon} name="act-play" size=${20} /></button>
+    <button class=${`ib vc act-btn${a ? ' running' : ''}`} aria-label=${a ? `Activities: ${ACT_NAME[a.kind]} is running` : 'Activities'} data-tip="Activities" aria-haspopup="menu" onClick=${activitiesMenu}><${Icon} name="act-play" size=${20} /><span class="vc-word" aria-hidden="true">Activities</span></button>
     <button class="ib vc act-react-open" aria-label="React" data-tip="React" aria-haspopup="dialog"
-      onClick=${(e) => openPop({ anchor: rectOf(e), label: 'React', C: ReactPicker, props: { room: c.room } })}><${Icon} name="smile" size=${20} /></button>`;
+      onClick=${(e) => openPop({ anchor: rectOf(e), label: 'React', C: ReactPicker, props: { room: c.room } })}><${Icon} name="smile" size=${20} /><span class="vc-word" aria-hidden="true">React</span></button>`;
 }
 
 // ---------- Reactions floating up ----------

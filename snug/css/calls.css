@@ -146,7 +146,7 @@
 /* ---------- The status line ----------
    Who is here, the connection, encryption, push to talk; the clock and the
    fold button at the end. It wraps on narrow screens rather than overlap. */
-.stage-top { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-3); min-height: var(--h-sm); min-width: 0; font-size: var(--t-meta); color: var(--text-3); }
+.stage-top { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-3); min-height: var(--h-sm); min-width: 0; font-size: var(--t-meta); color: var(--text-3); }
 .stage-count { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: var(--t-ui); font-weight: var(--w-semibold); color: var(--text-2); white-space: nowrap; }
 .stage-count .ic { color: var(--text-3); }
 .stage.in .stage-count .ic { color: var(--online); }
@@ -329,7 +329,7 @@
    stage's own size (container query units), capped so one person is not a wall. */
 @media (min-width: 760px) {
 .conv.voice-live > .stage.in:not(.media):not(.folded):not([data-size="40"]) { flex: none; height: min(52%, 400px); max-height: none; min-height: 240px; container-type: size; grid-template-rows: auto minmax(0, 1fr) auto; align-content: stretch; }
-.conv.voice-live > .stage.in:not(.media):not(.folded):not([data-size="40"]) > .stage-body { align-content: center; }
+.conv.voice-live > .stage.in:not(.media):not(.folded):not([data-size="40"]) > .stage-body { align-content: safe center; }
 .conv.voice-live > .stage.in:not(.media):not(.folded):not([data-size="40"]):has(.stage-people:is([data-n="5"], [data-n="6"], [data-n="7"], [data-n="8"], [data-n="9"])) { height: 52%; }
 .conv.voice-live:has(> .stage.in:not(.media):not(.folded):not([data-size="40"])) > .stream { flex: 1 1 0; }
 .stage.in:not(.media):not(.folded):not([data-size="40"]) .stage-people {
@@ -339,7 +339,7 @@
     min(calc((var(--W) - (var(--c2) - 1) * var(--g)) / var(--c2)), calc((var(--H) - (var(--r2) - 1) * var(--g)) / var(--r2) * 16 / 9)),
     min(calc((var(--W) - (var(--c3) - 1) * var(--g)) / var(--c3)), calc((var(--H) - (var(--r3) - 1) * var(--g)) / var(--r3) * 16 / 9))
   ) - 1px, 360px);
-  display: flex; flex-wrap: wrap; justify-content: center; align-content: center;
+  display: flex; flex-wrap: wrap; justify-content: center; align-content: safe center;
 }
 .stage.in:not(.media):not(.folded):not([data-size="40"]) .stage-person { flex: none; width: var(--tile-w); }
 }
@@ -379,7 +379,7 @@
    a strip beside it (wide) or under it. */
 .stage.media { max-height: 74%; }
 .vt-grid {
-  display: grid; gap: var(--s-2); width: 100%; justify-self: center; align-content: center;
+  display: grid; gap: var(--s-2); width: 100%; justify-self: center; align-content: safe center;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
 }
 .vt-grid[data-n="1"] { max-width: 720px; grid-template-columns: minmax(0, 1fr); }
@@ -459,7 +459,7 @@
     height: min(72%, 860px); min-height: 320px; max-height: none; overflow: hidden; padding-bottom: var(--s-2);
   }
   .conv.voice-live:has(> .stage.in.media:not(.folded)) > .stream { flex: 1 1 0; }
-  .stage.in.media:not(.folded) .stage-body { flex: 1 1 auto; overflow-y: auto; scrollbar-width: thin; align-content: center; }
+  .stage.in.media:not(.folded) .stage-body { flex: 1 1 auto; overflow-y: auto; scrollbar-width: thin; align-content: safe center; }
   .stage.in.media:not(.folded) .stage-body:has(> .vt-focus) { overflow: hidden; grid-template-rows: minmax(0, 1fr); }
   .stage.in.media .vt-focus { height: 100%; grid-template-rows: minmax(0, 1fr) auto; }
   .stage.in.media .vt-main { container-type: size; height: 100%; }
@@ -502,7 +502,7 @@
   .stage-acts.compact .vc.leave { width: 52px; }
   .stage.folded { padding: var(--s-2) var(--s-3); }
   .stage.folded .stage-top { flex-basis: 100%; }
-  .stage.folded .stage-acts { margin-left: 0; width: 100%; justify-content: space-between; }
+  .stage.folded .stage-acts { margin-left: auto; gap: var(--s-1); }
 
   /* In the call: the stage fills the screen; the chat waits behind "Chat". */
   .conv.voice-live > .stage.in:not(.folded) {
@@ -511,7 +511,7 @@
     container-type: inline-size;
   }
   .conv.voice-live:has(> .stage.in:not(.folded)) > .stream { display: none; }
-  .stage.in:not(.folded) > .stage-body { flex: 1 1 auto; overflow-y: auto; align-content: center; padding-bottom: var(--s-2); }
+  .stage.in:not(.folded) > .stage-body { flex: 1 1 auto; overflow-y: auto; align-content: safe center; padding-bottom: var(--s-2); }
   .stage.in:not(.folded) > .stage-acts {
     flex: none; display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--s-1) 0;
     margin: 0 calc(var(--s-3) * -1); padding: var(--s-2) var(--s-2) calc(var(--s-2) + env(safe-area-inset-bottom, 0px));
@@ -520,7 +520,7 @@
   .stage.in:not(.folded) > .stage-acts > .vc { flex: 1 1 0; max-width: 72px; }
   .stage.in:not(.folded) > .stage-acts > .vc.leave { max-width: 80px; }
   /* Tiles: one column for two people, two for more; faces a little larger. */
-  .stage.in:not(.media) .stage-people { grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: center; }
+  .stage.in:not(.media) .stage-people { grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: safe center; }
   .stage.in:not(.media) .stage-people:is([data-n="1"], [data-n="2"]) { grid-template-columns: minmax(0, 1fr); }
   .stage.in:not(.media) .stage-people:is([data-n="1"], [data-n="2"]) .stage-person { min-height: 168px; }
   /* Video: one column for two, then two columns; a shared screen full width with the rest in a strip under it. */
