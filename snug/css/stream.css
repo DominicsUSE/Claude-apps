@@ -206,7 +206,7 @@ mark.hit { background: none; color: inherit; font-weight: var(--w-bold); text-de
 .composer-banner b { font-weight: var(--w-semibold); color: var(--text-1); }
 .composer-banner .reply-text { color: var(--text-3); }
 /* Editing a message above: this box steps back and says so. */
-.composer.waiting .composer-row { opacity: 0.6; }
+.composer.waiting .composer-row .ib { opacity: 0.6; } /* the buttons step back; the placeholder keeps its contrast */
 .composer-banner.editing-note > .ic { color: var(--text-2); }
 /* The room's storage note: one quiet line above the box, outside it, so the
    box stays the same height and the messages above stay in view. */

@@ -83,7 +83,7 @@
 
 /* Reply mention toggle, length, long paste. */
 .reply-ping { flex: none; height: 24px; padding: 0 var(--s-2); border-radius: var(--r-btn); font-size: var(--t-12); font-weight: var(--w-semibold); color: var(--text-2); background: var(--bg-3); transition: background var(--m-fast) var(--ease-in-out), color var(--m-fast) var(--ease-in-out); }
-.reply-ping.on { color: var(--info-ink); background: var(--info-soft); }
+.reply-ping.on { color: color-mix(in srgb, var(--info-ink) 75%, var(--text-1)); background: var(--info-soft); } /* nudged toward the text colour: 4.5:1 on the soft fill in light and dark */
 .reply-ping:hover { background: var(--bg-4); }
 .reply-ping:focus-visible { outline: var(--focus-w) solid var(--focus); outline-offset: 1px; }
 .len-note { display: flex; gap: var(--s-2); align-items: center; padding: var(--s-1) var(--s-3) 0; font-size: var(--t-12); color: var(--amber-ink); }
