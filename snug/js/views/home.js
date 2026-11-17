@@ -3,20 +3,21 @@
 // and a few places you might like. Everything comes from real state; nothing
 // is filler. Rows, not cards: hierarchy comes from type and spacing.
 import { html, useEffect, useState } from '../../vendor/preact-htm.js';
-import { S, me, go, back, openConv, convMeta, isOnline, voiceRoomOf, discover, person } from '../store.js';
+import { S, me, go, back, openConv, openModal, convMeta, isOnline, voiceRoomOf, discover, person } from '../store.js';
 import { attention, houseAttention } from '../lib/attention.js';
 import { friendsOnline, friendsList, friendRequests, activeConversations, liveVoice, upcomingEvents, eventState, greeting, wroteLately, summaryLine } from '../lib/social.js';
 import { gather } from './catchup.js';
 import { plural } from '../lib/util.js';
 import { plain } from '../lib/format.js';
 import { Icon } from '../ui/icons.js';
-import { Nook } from '../ui/brand.js';
-import { Avatar, Stack, Tile, RoomIcon, PRESENCE } from '../ui/kit.js';
+import { Avatar, Stack, Tile, RoomIcon, PRESENCE, LoadingState } from '../ui/kit.js';
 import { EventRow } from './events.js';
 import { joinVoice } from '../voice.js';
 import { leavingCall } from '../calls.js';
 import { openHouse, onlineIn, OnlineCount } from './nav.js';
 import { RecoveryReminder } from './recover.js'; // v0.12: a password account with no recovery key yet
+import { Welcome, Steps, guideWanted } from './start.js'; // 0.15: getting started
+import { JoinPreview } from './modals.js';
 import { t } from '../lib/i18n.js'; // words in the chosen language (js/locales)
 
 const first = (name) => (name || '').split(' ')[0];
@@ -206,7 +207,7 @@ function Picks() {
   if (p.data && !rows.length) return null;
   return html`<${Sect} id="home-picks" title="Recommended for you" action=${{ label: 'Discover', run: () => go({ type: 'discover' }) }}>
     ${!p.data
-      ? html`<div class="home-list" aria-busy="true">${[70, 54, 62].map((w) => html`<div class="home-row home-skel"><span class="skel home-skel-ic"></span><span class="home-row-text"><span class="skel" style=${`width:${w}%;height:12px`}></span><span class="skel" style="width:40%;height:10px"></span></span></div>`)}</div>`
+      ? html`<${LoadingState} kind="list" rows=${3} label="Loading suggestions" />`
       : html`<ul class="home-list" role="list">
         ${rows.map(({ h, x }) => (h
           ? html`<li key=${h.id}><button class="home-row home-pick" onClick=${() => go({ type: 'house', id: h.id })}>
@@ -228,16 +229,26 @@ function Picks() {
   <//>`;
 }
 
-function Welcome() {
-  return html`<div class="home-start">
-    <${Nook} size=${48} />
-    <h3>${t('home.welcomeTitle')}</h3>
-    <p>${t('home.welcomeText')}</p>
-    <div class="home-start-acts">
-      <button class="btn primary" onClick=${() => go({ type: 'discover' })}><${Icon} name="compass" size=${16} />${t('home.findCommunity')}</button>
-      <button class="btn" onClick=${() => go({ type: 'friends', tab: 'add' })}><${Icon} name="people" size=${16} />${t('home.addFriend')}</button>
-    </div>
-  </div>`;
+// Invitations waiting for you: each house, who sent it, and a look before joining.
+function Invitations() {
+  const list = S.invites.filter((inv) => S.houses[inv.house]);
+  if (!list.length) return null;
+  return html`<${Sect} id="home-invites" title=${t('home.invites')} count=${list.length}>
+    <ul class="home-list" role="list">
+      ${list.map((inv) => {
+        const h = S.houses[inv.house];
+        const from = first(S.users[inv.from]?.name) || t('addHouse.someone');
+        return html`<li key=${inv.house}><div class="home-row home-invite">
+          <span class="home-row-ic"><${Tile} house=${h} /></span>
+          <span class="home-row-text">
+            <span class="home-row-title"><span class="trunc">${h.name}</span></span>
+            <span class="home-row-sub trunc">${t('home.invitedBy', { name: from })}</span>
+          </span>
+          <button class="btn primary sm" onClick=${() => openModal(JoinPreview, { house: inv.house })} aria-label=${t('home.lookAt', { house: h.name })}>${t('home.look')}</button>
+        </div></li>`;
+      })}
+    </ul>
+  <//>`;
 }
 
 export function Home() {
@@ -277,15 +288,17 @@ export function Home() {
     <div class="view-body">
       <div class="home-col">
         <${RecoveryReminder} />
-        <div class="home-hello">
+        ${!fresh && html`<div class="home-hello">
           <h2 class="home-greet">${greeting(now)}, ${first(u.name) || 'you'}</h2>
           ${(summary.length > 0 || forYou > 0 || requests.length > 0) && html`<p class="home-summary">
             ${summaryLine(summary)}
             ${forYou > 0 && html`<button class="home-foryou" onClick=${() => go({ type: 'catchup' })}><span class="badge">${forYou}</span>for you in Catch up</button>`}
             ${requests.length > 0 && html`<button class="home-foryou" onClick=${() => go({ type: 'friends', tab: 'requests' })}><span class="badge">${requests.length}</span>${requests.length === 1 ? `${first(person(requests[0]).name)} wants to be friends` : 'friend requests'}</button>`}
           </p>`}
-        </div>
+        </div>`}
 
+        <${Invitations} />
+        ${!fresh && guideWanted() && html`<${Steps} />`}
         ${fresh
           ? html`<${Welcome} />`
           : html`<div class="home-grid">
@@ -307,7 +320,7 @@ export function Home() {
               ${!phone && !quiet && !active.length && html`<p class="home-empty home-quiet">${t('home.quietSide')}</p>`}
             </div>
 
-            <aside class="home-side" aria-label=${phone || !S.houseOrder.length ? 'Who’s around, your communities and suggestions' : 'Who’s around and suggestions'}>
+            <section class="home-side" aria-label=${phone || !S.houseOrder.length ? 'Who’s around, your houses and suggestions' : 'Who’s around and suggestions'}>
               ${online.length > 0 && html`<${Sect} id="home-friends" title=${t('home.onlineNow')} count=${online.length} action=${{ label: t('home.allFriends'), run: () => go({ type: 'friends' }) }}>
                 <${FriendsStrip} ids=${online} />
               <//>`}
@@ -324,7 +337,7 @@ export function Home() {
                   : html`<p class="home-empty">${t('home.noHousesBefore')} <button class="home-link" onClick=${() => go({ type: 'discover', section: 'communities' })}>${t('home.noHousesLink')}</button>.</p>`}
               <//>`}
               <${Picks} />
-            </aside>
+            </section>
           </div>`}
         ${fresh && html`<div class="home-fresh-picks"><${Picks} /></div>`}
       </div>

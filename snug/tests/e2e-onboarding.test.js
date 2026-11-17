@@ -221,6 +221,43 @@ test('the plus: Start a house offers the invite link at once; Join with an invit
   } finally { await close(robin); await close(priya); }
 });
 
+test('a new account’s Home says what Snug is, offers Start a house and Join with an invite, and ticks off five steps as you go', async () => {
+  const guest = await open();
+  try {
+    await guest.click('.auth-swap .auth-link');
+    await guest.fill('#auth-handle', 'first_timer');
+    await guest.fill('#auth-name', 'Ada First');
+    await guest.fill('#auth-pass', 'quiet green kettle');
+    await guest.click('.auth-form button[type=submit]');
+    await guest.waitForSelector('.nav');
+    const main = guest.locator('#main');
+    await main.locator('h2:text-is("Welcome to Snug, Ada")').waitFor();
+    await main.locator('.onb-lead:text-is("Create a house or join one with an invite.")').waitFor();
+    await main.locator('.onb-explain:has-text("Houses") >> text=are where a group of people meet').waitFor();
+    const steps = main.locator('.onb-steps');
+    await steps.locator('.onb-count:text-is("2 of 5 done")').waitFor();
+    assert.equal(await steps.locator('.onb-step').count(), 5);
+    assert.equal(await steps.locator('.onb-step.is-next .onb-title').textContent(), 'Start a house or join one');
+    await steps.locator('a:text-is("How Snug handles your data")').waitFor();
+    // Join with an invite opens the paste field.
+    await main.locator('.onb-hero-acts button:has-text("Join with an invite")').click();
+    await guest.locator('.modal #join-invite').waitFor();
+    await guest.keyboard.press('Escape');
+    // Start a house: the step is done and the next one is inviting people.
+    await main.locator('.onb-hero-acts button:has-text("Start a house")').click();
+    await guest.fill('#house-name', 'Ada’s place');
+    await guest.click('.modal button[type=submit]');
+    await guest.locator('.modal h2:text-is("Ada’s place is ready")').waitFor();
+    await guest.click('.modal button:text-is("Later")');
+    await guest.click('.rail-home');
+    await steps.locator('.onb-count:text-is("3 of 5 done")').waitFor();
+    assert.equal(await steps.locator('.onb-step.is-next .onb-title').textContent(), 'Invite your friends');
+    // Put away, and it stays away.
+    await steps.locator('button:text-is("Hide")').click();
+    await steps.waitFor({ state: 'detached' });
+  } finally { await close(guest); }
+});
+
 test('the quick switcher: paste an invitation link, press Enter, land in the house; a turned-off one says why', async () => {
   const robin = await open({ handle: 'robin' });
   const bex = await open({ handle: 'bex' });
