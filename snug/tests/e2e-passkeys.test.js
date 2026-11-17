@@ -56,8 +56,8 @@ async function signOut(p) {
 }
 async function accountSettings(p) {
   await p.click('.me-row [aria-label="Settings"]');
-  await p.click('.layer-nav .row:has-text("Account")');
-  await p.locator('.layer-body h1:has-text("Account and security")').waitFor();
+  await p.click('.layer-nav .row:has-text("Security")'); // 0.15: passkeys, password and recovery are on Security
+  await p.locator('.layer-body h1:has-text("Security")').waitFor();
 }
 async function authenticator(p) {
   const cdp = await p.context().newCDPSession(p);

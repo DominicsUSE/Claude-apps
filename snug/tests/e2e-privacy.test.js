@@ -62,13 +62,14 @@ async function settings(page, label) {
 const text = (page, sel) => page.locator(sel).innerText();
 
 // ---------- The words, for each mode ----------
-test('server mode: Settings > Privacy and safety says this Snug at its address stores everything and its owner can read rooms', async () => {
+test('server mode: Settings > Privacy and safety says this Snug stores everything and its owner can read rooms, without showing its address', async () => {
   const robin = await person('robin');
   await settings(robin, 'Privacy and safety');
   const box = robin.locator('#pv-overview');
   assert.equal(await box.getAttribute('data-mode'), 'host');
   const t = await box.innerText();
-  assert.match(t, new RegExp(`stored on the server this Snug at 127\\.0\\.0\\.1:${srv.port} runs on`));
+  assert.match(t, /stored on the server this Snug runs on/);
+  assert.doesNotMatch(t, /127\.0\.0\.1/, 'no server address on screen (0.15)');
   assert.match(t, /Whoever runs it can read houses and rooms/);
   assert.match(t, /Direct messages and groups marked “End-to-end encrypted” can be read only on the devices of the people in them/); // offered by default since 0.12
   assert.match(t, /plain connection \(http\)/, 'a plain-http Snug says so');
@@ -84,7 +85,8 @@ test('server mode: Settings > Privacy and safety says this Snug at its address s
   for (const re of [/Call records/, /joins or leaves a house: 90 days/, /Link previews: .*24 hours/, /push address/, /Reactions, where you’ve read up to/,
     /last used: the day only/, /declined or taken back: 24 hours/, /GIF searches/, /who is mentioned/]) assert.match(kept, re);
   assert.doesNotMatch(kept, /GitHub/, 'no update checks in a browser');
-  assert.match(g, /Google .*SNUG_STUN=none/, 'the STUN server is named as a third party');
+  assert.match(g, /Google server \(STUN\)/, 'the STUN server is named as a third party');
+  assert.doesNotMatch(g, /SNUG_|127\.0\.0\.1/, 'no server setting names or addresses for members (0.15)');
   // Settings > Account: when each other device was last used, to the day, with no time.
   const other = await fetch(`${url}/api/login`, { method: 'POST', headers: { origin: url, 'content-type': 'application/json' }, body: JSON.stringify({ handle: 'robin', password: PASSWORD }) });
   assert.equal(other.status, 200);

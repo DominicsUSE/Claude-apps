@@ -179,10 +179,10 @@ test('one key: a device removed in Settings > Encryption; its new recovery key, 
   const e2Key = await A.evaluate(() => window.snug.e2ee.E2.rk.text);
   await A.keyboard.press('Escape');
   await A.keyboard.press('Escape');
-  // Settings > Account and security offers it for the password too
+  // Settings > Security offers it for the password too
   await A.click('.me-row [aria-label="Settings"], .me-panel [aria-label="Settings"]').catch(() => {});
-  await A.click('.layer-nav .row:has-text("Account")');
-  await A.locator('.layer-body h1:has-text("Account and security")').waitFor();
+  await A.click('.layer-nav .row:has-text("Security")');
+  await A.locator('.layer-body h1:has-text("Security")').waitFor();
   await A.locator('#rk-e2-use-settings').click();
   await A.fill('#rk-e2-pw', 'not my password');
   await A.click('#rk-e2-go');

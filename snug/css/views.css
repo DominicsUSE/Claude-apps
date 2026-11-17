@@ -126,7 +126,7 @@ button.op:hover { background: var(--surface-hover); }
 .layer-nav .field { margin-bottom: var(--s-2); height: var(--h-sm); font-size: var(--t-ui); background: var(--surface-rail); border-color: transparent; border-radius: var(--r-input); }
 .layer-nav .row .row-ic .ic { width: 16px; height: 16px; }
 .layer-sec { padding: var(--s-4) var(--s-2) var(--s-1); font-size: var(--t-meta); font-weight: var(--w-semibold); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.02em; }
-.layer-nav .field + .layer-group > .layer-sec { padding-top: var(--s-1); }
+.layer-find + .layer-group > .layer-sec { padding-top: var(--s-1); }
 .layer-group { display: flex; flex-direction: column; gap: 1px; }
 .layer-foot { margin-top: auto; padding: var(--s-4) var(--s-2) 0; font-size: var(--t-meta); color: var(--text-3); display: flex; align-items: center; gap: var(--s-2); }
 .layer-body { overflow-y: auto; padding: var(--s-6) var(--s-10) var(--s-8); min-width: 0; }
@@ -242,7 +242,7 @@ select.field { width: auto; padding-right: var(--s-6); }
   .layer-nav h2, .layer-foot { display: none; }
   .layer-nav-title { display: flex; align-items: center; min-height: var(--touch); margin-right: calc(var(--touch) + var(--s-2)); font-size: var(--t-16); font-weight: var(--w-semibold); color: var(--text-1); }
   .layer-nav .field { flex: none; width: 100%; height: var(--touch); margin: var(--s-2) 0 var(--s-2); background: var(--surface-2); }
-  .layer-sec, .layer-nav .field + .layer-group > .layer-sec { padding: var(--s-4) var(--s-1) var(--s-1); }
+  .layer-sec, .layer-find + .layer-group > .layer-sec { padding: var(--s-4) var(--s-1) var(--s-1); }
   .layer-nav .row { height: var(--touch); padding: 0 var(--s-2); font-size: var(--t-body); }
   .layer-nav .row.sel { background: transparent; color: var(--text-2); }
   .layer-nav .row.sel::before { display: none; }
@@ -278,3 +278,41 @@ select.field { width: auto; padding-right: var(--s-6); }
 .f-nothere { margin-top: var(--s-3); padding: var(--s-3); border-radius: var(--r-menu); background: var(--surface-hover); }
 .f-nothere p { margin: 0 0 var(--s-2); }
 .f-nothere-acts { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+
+/* ---------- Settings: search, "Saved", page anatomy (js/views/settings.js) ---------- */
+.layer-find { position: relative; flex: none; }
+.layer-find > .ic { position: absolute; left: var(--s-2); top: calc(50% - var(--s-1)); transform: translateY(-50%); color: var(--text-3); pointer-events: none; }
+.layer-nav .layer-find .field { width: 100%; padding-left: calc(var(--s-2) + 16px + var(--s-2)); }
+.layer-none { padding: var(--s-1) var(--s-2); font-size: var(--t-ui); }
+/* A setting found by the search, under its page: indented, quieter than a page. */
+.set-hit {
+  display: flex; align-items: center; min-height: var(--h-28); width: 100%; min-width: 0; text-align: left;
+  padding: 0 var(--s-2) 0 calc(var(--s-2) + 18px + var(--s-2)); border-radius: var(--r-row);
+  font-size: var(--t-ui); color: var(--color-text-secondary); transition: background var(--m-hover) var(--ease-in-out);
+}
+.set-hit:hover { background: var(--color-hover); color: var(--color-text); }
+.set-hit:focus-visible { outline: var(--focus-w, 2px) solid var(--color-focus); outline-offset: -2px; }
+/* On the open page: settings matching the search get a quiet edge; one picked from the results, a brief tint. */
+.layer-col [data-match] { box-shadow: inset 2px 0 0 var(--color-primary); padding-left: var(--s-3); border-radius: var(--r-row); }
+.layer-col [data-hit] { background: var(--color-active); }
+@media (prefers-reduced-motion: no-preference) { .layer-col .set-row { transition: background var(--m-slow) var(--ease-in-out); } }
+/* "Saved": next to the setting's name for a moment after it changes. Screen
+   readers hear it from the layer's status line, so the mark is drawn only. */
+.set-row[data-saved] > .set-label > b::after {
+  content: "Saved" / ""; margin-left: var(--s-2); padding: 0 var(--s-2); border-radius: var(--r-full);
+  font-size: var(--t-meta); font-weight: var(--w-medium); line-height: 18px; vertical-align: 1px;
+  color: var(--success-ink); background: var(--success-soft); animation: fade-in var(--m-standard) var(--ease-out);
+}
+.set-note { margin: 0 0 var(--s-2); max-width: 64ch; }
+.set-sub-head { margin-top: var(--s-3); font-size: var(--t-ui); font-weight: var(--w-semibold); color: var(--color-text-secondary); }
+/* Every control sits in one column of the page, not at the far edge of a wide screen (audit E-7). */
+.layer-col .set-row { max-width: 720px; }
+/* The scrolling page takes focus for keyboard scrolling; its ring shows only then. */
+.layer-body:focus-visible { outline: var(--focus-w, 2px) solid var(--color-focus); outline-offset: -4px; }
+@media (max-width: 759px) {
+  /* A page reached from the list has Back; the list has Close (audit E-5). */
+  .layer.phone-page.listed .layer-close { display: none; }
+  .layer.phone-page.listed .layer-top { padding-right: var(--s-4); }
+  .layer-find > .ic { top: 50%; }
+  .set-hit { min-height: var(--tap-min); padding-left: calc(var(--s-2) + 18px + var(--s-3)); font-size: var(--t-body); }
+}

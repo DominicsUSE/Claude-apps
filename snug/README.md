@@ -186,7 +186,7 @@ has it can start moving your account (your old PC is told and can stop it).
 
 - **New PC, old one at hand:** on the new PC choose **I already have an
   account > My other PC is here**; type the code it shows in Settings >
-  Account and security > **Move to a new PC** on the old one. It moves at
+  Account > **Move to a new PC** on the old one. It moves at
   once, and your saved chats are copied over.
 - **Old PC lost:** **I lost my other PC**, then the recovery key. The move
   finishes after 72 hours, or sooner if the old PC says yes.
@@ -461,15 +461,18 @@ Real, and covered by tests with separate users:
   settings page has not been driven on a phone (only looked at, at 390px).
 
 - **Settings in one structure** (`js/views/settings.js`): personal settings
-  in two sections (You: Profile, Account and security, Privacy and safety,
-  Your data; App: Notifications, Voice and video, Appearance, Text and
-  messages, Accessibility, Streamer mode, Keyboard, and Desktop app inside
-  the desktop app) and house settings in four (House; Rooms and newcomers;
+  in four sections (You: Profile, Account; Privacy and security: Privacy and
+  safety, Security, Encryption, Your data; App: Notifications, Voice and
+  video, Appearance, Text and messages, Accessibility, Keyboard; More:
+  Streamer mode, Desktop app, Connection, Privacy guide) and house settings in four (House; Rooms and newcomers;
   Moderation; Owners). Each house page shows only to people with its
   permission; "Find a setting" matches the words on each page (the whole
   phrase, or every word as the start of one of the page's words; loose
-  letter-by-letter matching only on page names) and stays first in the row
-  of tabs on a phone. The integration test searches for an option from each
+  letter-by-letter matching only on page names), and the names of the
+  settings on each page (`js/views/settings-index.js`, plus any a page draws
+  once opened): matching settings are listed under their page, and picking
+  one opens the page at that setting. It stays first in the row of tabs on a
+  phone. Each change shows a brief "Saved" beside its setting. The integration test searches for an option from each
   track (ringtone, theme builder, skin tone, decoration, rebind) and expects
   exactly the page it lives on. Each room's slowmode, user limit and
   bitrate sit with its Access button on Rooms and access. Covered by `npm run
@@ -911,7 +914,7 @@ Real, and covered by tests with separate users:
     **devices** list shows each session's browser and system and when it was
     last used; sign one out, or every other one, and their sockets close at once.
   - **Recovery key** (v0.12, password accounts on a server): no email needed. Home
-    reminds you to make one; Settings > Account and security makes a new one (the
+    reminds you to make one; Settings > Security makes a new one (the
     password, and a code when two-factor is on; only a first key, within ten minutes
     of signing up or of using the old key, is saved without it). It is 36 letters and numbers in 9 groups of 4 (`js/lib/recovery.js`),
     shown once: save it as a file, print it or copy it, then type the last group back.
@@ -935,7 +938,7 @@ Real, and covered by tests with separate users:
     ask you to make a new one, which is tied to this server's address.
   - **Passkeys** (v0.12, password accounts on a server): **Sign in with a passkey**
     on the sign-in screen, and the username field offers your passkeys too. Add,
-    rename and remove them in Settings > Account and security (adding or removing
+    rename and remove them in Settings > Security (adding or removing
     needs the password, and a code when two-factor is on; up to 10). A passkey
     sign-in needs no code: the device already checked your PIN, fingerprint or face.
     Since 0.13 a passkey also stands in for the password (and code) when you change

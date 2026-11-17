@@ -251,7 +251,7 @@ test('themes: named cards, quick switcher actions, and the live preview follows 
   const text = a.locator('.ap-preview .msg-text').first();
   const before = parseFloat(await css(text, 'fontSize'));
   await a.locator('#acc-font').fill('19');
-  await a.waitForFunction(() => document.documentElement.style.fontSize === '19px');
+  await a.waitForFunction(() => document.documentElement.style.getPropertyValue('--text-scale') === '1.188');
   assert.ok(parseFloat(await css(text, 'fontSize')) > before, 'preview text grows with the text size');
   const btn = a.locator('.ap-preview .btn.primary');
   const violet = await css(btn, 'backgroundColor');
@@ -455,7 +455,7 @@ test('this device only: one browser keeps its own theme and text size; the other
   await a.click('.ap-card[data-theme-id="moss"]');
   await a.waitForFunction(() => document.documentElement.getAttribute('data-theme') === 'moss');
   await a.locator('#acc-font').fill('18');
-  await a.waitForFunction(() => document.documentElement.style.fontSize === '18px');
+  await a.waitForFunction(() => document.documentElement.style.getPropertyValue('--text-scale') === '1.125'); // text size: the root's --text-scale (0.15)
   await a.waitForTimeout(600);
   const p = prefsOf('robin');
   assert.notEqual(p.theme, 'moss', 'not synced');
@@ -473,7 +473,7 @@ test('this device only: one browser keeps its own theme and text size; the other
   // Off again: the synced values return.
   await settings(a, 'Appearance');
   await a.click('[aria-label="Use these settings on this device only"]');
-  await a.waitForFunction(() => document.documentElement.getAttribute('data-theme') !== 'moss' && !document.documentElement.style.fontSize);
+  await a.waitForFunction(() => document.documentElement.getAttribute('data-theme') !== 'moss' && !document.documentElement.style.getPropertyValue('--text-scale'));
   await b.click('.seg[aria-label="Line height"] button:has-text("Normal")');
   await close(a); await close(b);
 });

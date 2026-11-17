@@ -73,7 +73,8 @@ test('appearance: theme, compact display, text size and font apply at once and f
   await a.click('.seg[aria-label="Message display"] button:has-text("Compact")');
   assert.equal(await attr(a, 'data-display'), 'compact');
   await a.locator('#acc-font').fill('18');
-  await a.waitForFunction(() => document.documentElement.style.fontSize === '18px');
+  // Text size is the root's --text-scale (18 / 16), so the browser's own default size stays the base.
+  await a.waitForFunction(() => document.documentElement.style.getPropertyValue('--text-scale') === '1.125' && getComputedStyle(document.documentElement).fontSize === '18px');
   await a.click('.seg[aria-label="Clock"] button:has-text("24-hour")');
   await a.click('.seg[aria-label="Font"] button:has-text("Atkinson Hyperlegible")'); // fonts are on Appearance
   assert.equal(await attr(a, 'data-font'), 'hyperlegible');
@@ -90,7 +91,8 @@ test('appearance: theme, compact display, text size and font apply at once and f
   await b.waitForFunction(() => document.documentElement.getAttribute('data-theme') === 'midnight');
   assert.equal(await attr(b, 'data-display'), 'compact');
   assert.equal(await attr(b, 'data-font'), 'hyperlegible');
-  assert.equal(await b.evaluate(() => document.documentElement.style.fontSize), '18px');
+  assert.equal(await b.evaluate(() => document.documentElement.style.getPropertyValue('--text-scale')), '1.125');
+  assert.equal(await b.evaluate(() => getComputedStyle(document.documentElement).fontSize), '18px');
   // Compact messages: no picture beside them, name on the line.
   await b.click('.rail-house:has-text("Kiln & Co.")');
   await b.click('.nav .row:has-text("Glaze lab")');
@@ -105,7 +107,7 @@ test('appearance: theme, compact display, text size and font apply at once and f
   await b.click('.seg[aria-label="Message display"] button:has-text("Cozy")');
   await b.click('.ap-card[data-theme-id="system"]');
   await b.locator('#acc-font').fill('16');
-  await a.waitForFunction(() => !document.documentElement.getAttribute('data-display') && !document.documentElement.style.fontSize);
+  await a.waitForFunction(() => !document.documentElement.getAttribute('data-display') && !document.documentElement.style.getPropertyValue('--text-scale') && getComputedStyle(document.documentElement).fontSize === '16px');
   await close(a); await close(b);
 });
 
@@ -207,7 +209,7 @@ test('status: a custom status with an emoji, invisible and auto-idle, as a frien
 
 test('two-factor: set up from a QR code made on the device; sign-in then needs a code, and a backup code works once', async () => {
   const bex = await person('bex');
-  await settings(bex, 'Account and security');
+  await settings(bex, 'Security'); // 0.15: password, two-factor, passkeys and recovery have their own page
   await bex.click('button:has-text("Set up")');
   await bex.locator('.modal svg.acc-qr').waitFor();
   assert.ok((await bex.locator('.modal svg.acc-qr path').getAttribute('d')).length > 500, 'a drawn QR code');
@@ -258,7 +260,7 @@ test('two-factor: set up from a QR code made on the device; sign-in then needs a
 test('devices: every signed-in browser is listed, and one can be signed out from another', async () => {
   const a = await person('priya');
   const other = await person('priya');
-  await settings(a, 'Account and security');
+  await settings(a, 'Account'); // 0.15: devices and sessions are on Account
   await a.locator('.acc-session').nth(1).waitFor();
   assert.equal(await a.locator('.acc-session').count(), 2);
   assert.equal(await a.locator('.acc-session .acc-tag:has-text("This device")').count(), 1);
@@ -309,7 +311,7 @@ test('settings on a shared device: the next person never inherits the last oneâ€
   for (let i = 0; i < 50 && !prefsOf('jonas').keywords; i++) await p.waitForTimeout(100);
   assert.deepEqual(prefsOf('jonas').keywords, ['jonas-secret']);
   // Jonas signs out; Priya signs in on the same browser for the first time.
-  await settings(p, 'Account and security');
+  await settings(p, 'Account');
   await p.click('.set-row:has-text("Sign out on this device") button:text-is("Sign out")');
   await p.waitForSelector('.auth-form');
   assert.deepEqual(await p.evaluate(() => window.snug.S.prefs.keywords), [], 'signing out forgets them here');

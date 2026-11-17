@@ -15,7 +15,9 @@ import { Confirm } from './modals.js';
 import { safety, unblockUser, liftTimeout, moderate, mayAct } from './safety.js';
 import { copyText } from '../ui/kit.js';
 import { JoinSafety, SpamRules, describeCommunity } from './community-settings.js'; // verification, pausing, spam rules, their log lines
-import { PrivacyOverview, PrivacyControls } from './privacy.js'; // who can see what; online, typing and link-preview choices
+import { PrivacyOverview, PrivacyControls, PrivacyAdvanced, encryptionWords, encryptionDevices } from './privacy.js'; // who can see what; online, typing and link-preview choices; the dashboard's words
+import { keepsCopy } from '../store.js'; // 0.14: whether this device keeps a copy of messages
+import { plural } from '../lib/util.js';
 
 const err = (e) => (e.offline ? 'You’re offline. Try again once you’re back.' : e.message);
 function Row({ label, hint, children, top }) {
@@ -48,7 +50,46 @@ const Who = ({ id, sub }) => {
 };
 
 // ---------- Privacy and safety (personal settings) ----------
-export function PrivacyPage({ openGuide } = {}) {
+// A dashboard first: four plain answers (your messages, your devices, this
+// device, your data), each with a way to act. Then the choices, who can see
+// what, and the technical details last, closed.
+function DashCard({ icon, title, tone, text, children }) {
+  const id = `pv-card-${icon}`;
+  return html`<section class="pv-card" data-tone=${tone || undefined} aria-labelledby=${id}>
+    <h2 class="pv-card-title" id=${id}><span class="pv-card-ic" aria-hidden="true"><${Icon} name=${icon} size=${16} /></span>${title}</h2>
+    <p class="pv-card-text">${text}</p>
+    ${children && html`<div class="pv-card-acts">${children}</div>`}
+  </section>`;
+}
+const COPY_WORDS = {
+  plain: 'A copy of your recent messages is kept in this browser, so Snug opens faster and works offline. Browser storage isn’t protected.',
+  sealed: 'A copy of your recent messages is kept on this computer, encrypted with a key its system protects.',
+  memory: 'Nothing is kept in this browser once you close the tab.',
+};
+function Dashboard({ go }) {
+  const [sessions] = useLoad('sessions.list');
+  const enc = encryptionWords();
+  const trusted = encryptionDevices();
+  const n = sessions.data?.sessions?.length;
+  const copy = COPY_WORDS[keepsCopy()];
+  return html`<div class="pv-dash">
+    <${DashCard} icon="lock" title="Your messages" tone=${enc.tone} text=${enc.text}>
+      ${enc.page && go && html`<button class=${`btn sm${enc.act ? ' primary' : ''}`} onClick=${() => go('e2ee')}>${enc.act || 'Encryption'}</button>`}
+    <//>
+    <${DashCard} icon="screen" title="Your devices"
+      text=${sessions.loading ? 'Checking where you’re signed in…' : n ? `Signed in on ${plural(n, 'device')}${trusted ? `; ${trusted} can read your encrypted messages` : ''}. Sign out any you don’t recognise.` : 'Where you’re signed in, and when each was last used.'}>
+      ${go && html`<button class="btn sm" onClick=${() => go('account')}>Review devices</button>`}
+    <//>
+    ${copy && html`<${DashCard} icon="file" title="On this device" text=${copy}>
+      ${go && keepsCopy() !== 'sealed' && html`<button class="btn sm" onClick=${() => go('data')}>Change</button>`}
+    <//>`}
+    <${DashCard} icon="tray" title="Your data" text="Download everything that’s yours as one file, or delete your account and choose what happens to your messages.">
+      ${go && html`<button class="btn sm" onClick=${() => go('data')}>Download or delete</button>`}
+    <//>
+  </div>`;
+}
+
+export function PrivacyPage({ openGuide, go } = {}) {
   const st = safety();
   const p = st.privacy;
   const set = (patch) => {
@@ -58,8 +99,8 @@ export function PrivacyPage({ openGuide } = {}) {
   };
   return html`
     <h1>Privacy and safety</h1>
-    <p class="lead">Who can see what, who can reach you, and who you’ve blocked. Snug applies these on the server, for every device.</p>
-    <${PrivacyOverview} openGuide=${openGuide} />
+    <p class="lead">What people and this server can see, who can reach you, and what you can do about it. Snug applies these choices on the server, for every device.</p>
+    <${Dashboard} go=${go} />
     <${PrivacyControls} Row=${Row} />
     <div class="set-head">Who can reach you</div>
     <${Row} label="Who can message you" hint="Starting a new conversation with you. Conversations you already have carry on." top>
@@ -82,7 +123,9 @@ export function PrivacyPage({ openGuide } = {}) {
           <${Who} id=${id} />
           <button class="btn" onClick=${() => unblockUser(id)} aria-label=${`Unblock ${person(id).name}`}>Unblock</button>
         </li>`)}</ul>`
-      : html`<p class="hint safe-empty">Nobody. Block someone from their profile or a message’s menu: they can’t message, call or befriend you, and their messages fold away.</p>`}`;
+      : html`<p class="hint safe-empty">Nobody. Block someone from their profile or a message’s menu: they can’t message, call or befriend you, and their messages fold away.</p>`}
+    <${PrivacyOverview} openGuide=${openGuide} />
+    <${PrivacyAdvanced} />`;
 }
 
 // ---------- House: reports ----------

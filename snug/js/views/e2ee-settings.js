@@ -14,7 +14,7 @@ import { COPY, storageNoteFor } from '../lib/e2ee/copy.js';
 import { SetupSheet, RecoveryKeyScreen } from './e2ee-setup.js';
 import { LinkScreen, RecoverScreen } from './e2ee-link.js';
 
-const PAGE = { id: 'e2ee', label: 'Encryption', icon: 'lock', section: 'You', words: 'end-to-end encryption e2ee encrypted keys devices recovery key safety number verify history new device approve browser lock' };
+const PAGE = { id: 'e2ee', label: 'Encryption', icon: 'lock', section: 'Privacy and security', words: 'end-to-end encryption e2ee encrypted keys devices recovery key safety number verify history new device approve browser lock' };
 const when = (t) => (t ? new Date(t).toLocaleDateString(undefined, { dateStyle: 'medium' }) : '');
 const failText = (e) => (e?.offline ? 'You’re offline. Try again once you’re back.' : e?.message || 'That didn’t work. Try again.');
 
@@ -200,8 +200,8 @@ function EncryptionPage({ Row }) {
     ${(ready || E2.status === 'pending' || E2.status === 'new-device') && html`<${Row} label=${COPY.resetTitle} hint=${COPY.resetBody} top>
       <button class="btn danger" onClick=${() => openModal(ResetSheet, {})}>${COPY.resetAction}</button>
     <//>`}
-    <div class="detail e2-limits">
-      <h2 class="e2-h2">What it does and doesn’t do</h2>
+    <details class="e2-limits pv-adv">
+      <summary><${Icon} name="chev-r" size=${16} /><span>What it protects, and what the server can still see</span></summary>
       <ul>
         <li>${COPY.serverSees} <${ServerSees} /></li>
         <li>${COPY.roomsNot}</li>
@@ -210,7 +210,7 @@ function EncryptionPage({ Row }) {
         <li>${storageNoteFor({ kind: deviceKind(), keyStore: E2.keyStore, sealed: E2.device ? deviceKeySealed() : null })}</li>
         <li>Compare safety numbers with the people you talk to (in a conversation’s details) to know nobody put different keys between you.</li>
       </ul>
-    </div>
+    </details>
   </div>`;
 }
 
@@ -243,7 +243,7 @@ export function registerE2eePage({ PAGES, VIEWS, Row }) {
   const sync = () => {
     const want = E2.status !== 'off';
     const i = PAGES.findIndex((p) => p.id === 'e2ee');
-    if (want && i < 0) PAGES.splice(PAGES.findIndex((p) => p.id === 'privacy') + 1, 0, { ...PAGE });
+    if (want && i < 0) PAGES.splice((PAGES.findIndex((p) => p.id === 'security') + 1) || (PAGES.findIndex((p) => p.id === 'privacy') + 1), 0, { ...PAGE });
     else if (!want && i >= 0) PAGES.splice(i, 1);
   };
   subscribe(sync);

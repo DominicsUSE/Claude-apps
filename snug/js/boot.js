@@ -8,7 +8,7 @@ try {
   if (p.text && p.text !== 'm') r.setAttribute('data-text', p.text);
   if (p.contrast && p.contrast !== 'system') r.setAttribute('data-contrast', p.contrast);
   // Account appearance settings (js/account.js), so the first paint is already right.
-  if (p.fontScale && p.fontScale !== 16) r.style.fontSize = p.fontScale + 'px';
+  if (p.fontScale && p.fontScale !== 16) r.style.setProperty('--text-scale', String(p.fontScale / 16)); // css/tokens.css
   if (p.zoom && p.zoom !== 100) r.style.zoom = p.zoom + '%';
   if (p.display === 'compact') r.setAttribute('data-display', 'compact');
   if (p.font === 'hyperlegible') r.setAttribute('data-font', 'hyperlegible');
@@ -23,7 +23,7 @@ try {
   if (paint && paint.attrs) {
     for (var a in paint.attrs) if (/^data-[a-z-]+$/.test(a) && /^[\w-]{0,32}$/.test(paint.attrs[a])) r.setAttribute(a, paint.attrs[a]);
     for (var k in paint.props || {}) if (/^--[a-z0-9-]+$/.test(k) && /^(#[0-9a-fA-F]{3,8}|rgb\([0-9 .\/]+\))$/.test(paint.props[k])) r.style.setProperty(k, paint.props[k]);
-    if (/^\d{1,2}px$/.test(paint.fontSize || '')) r.style.fontSize = paint.fontSize;
+    if (/^\d(\.\d{1,4})?$/.test(paint.textScale || '')) r.style.setProperty('--text-scale', paint.textScale);
     if (/^\d{2,3}%$/.test(paint.zoom || '')) r.style.zoom = paint.zoom;
   }
 } catch (e) { /* storage blocked: defaults apply */ }

@@ -233,7 +233,7 @@ export function RecoveryReminder() {
   </div>`;
 }
 
-// Settings > Account and security > Recovery key.
+// Settings > Security > Recovery key (for a password account; a desktop key account's is on Account).
 export function RecoveryRows({ Row }) {
   const r = S.account?.recovery;
   if (!S.account?.passwordAccount || !r) return null;
