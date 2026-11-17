@@ -315,7 +315,7 @@ function ActiveNow() {
   const ids = friendsOnline(S).filter((id) => S.users[id]);
   const live = ids.filter((id) => doingOf(S.users[id]).live);
   const said = ids.filter((id) => !live.includes(id) && doingOf(S.users[id]).status);
-  return html`<aside class="f-active" aria-label="Active now">
+  return html`<section class="f-active" aria-label="Active now">
     <h2 class="f-active-h">Active now</h2>
     ${!live.length && !said.length
       ? html`<p class="f-active-empty">It’s quiet for now. When a friend joins a voice room or sets a status, it shows here.</p>`
@@ -330,7 +330,7 @@ function ActiveNow() {
             ${d.live && S.call?.room !== d.live && html`<button class="btn f-active-join" aria-label=${`Join ${S.rooms[d.live].name}`} onClick=${() => { openConv(d.live); leavingCall(d.live, () => joinVoice(d.live)); }}>Join</button>`}
           </li>`;
         })}</ul>`}
-  </aside>`;
+  </section>`;
 }
 
 // ---------- The page ----------
@@ -364,7 +364,7 @@ export function Friends() {
       aria-controls="f-panel" tabindex=${tab === t.id ? '0' : '-1'} onClick=${() => pick(t.id)}
       aria-label=${t.badge ? `Pending: ${plural(incoming, 'waiting on you', 'waiting on you')}, ${outgoing} sent` : undefined}>
       ${t.icon && html`<${Icon} name=${t.icon} size=${16} />`}<span class="f-tab-label">${t.label}</span>
-      ${t.badge ? (t.count > 0 && html`<span class="badge">${t.count}</span>`) : t.count != null && html`<span class="f-tab-count num">${t.count}</span>`}
+      ${t.badge ? (t.count > 0 && html`<span class="badge">${t.count}</span>`) : t.count > 0 && html`<span class="f-tab-count num">${t.count}</span>`}
     </button>`)}
   </div>`;
   const Body = { online: OnlineTab, all: AllTab, requests: RequestsTab, blocked: BlockedTab, add: AddTab }[tab];

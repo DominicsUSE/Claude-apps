@@ -80,6 +80,14 @@
 .ev-keen { font-size: var(--t-12); }
 .ev-keen-btn { gap: var(--s-1); padding: 0 var(--s-3) 0 var(--s-2); }
 .ev-row.compact .ev-keen-btn { height: 28px; font-size: var(--t-13); }
+/* In a narrow column (a house page beside the sidebar at 1024px) a full
+   event row keeps its title on one line and puts its buttons under it,
+   instead of squeezing the title down to a letter. */
+.pl-main, .ev-list { container-type: inline-size; }
+@container (max-width: 480px) {
+  .ev-row:not(.compact) { grid-template-columns: auto minmax(0, 1fr); align-items: start; }
+  .ev-row:not(.compact) .ev-side { grid-column: 2; flex-wrap: wrap; }
+}
 .ev-keen-btn.on { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, var(--line)); }
 .ev-cover-edit { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
 .ev-cover-edit img { width: 160px; height: 72px; border-radius: var(--r-menu); }

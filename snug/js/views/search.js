@@ -2,7 +2,7 @@
 // One field leads to both.
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import {
-  S, back, go, emit, convMeta, jumpToMsg, openConv, openMenu, startDm, closeQuick, openLayer, setPresence, setPref, openPop, joinByCode, toast,
+  S, back, go, emit, convMeta, jumpToMsg, openConv, openMenu, startDm, closeQuick, openLayer, setPresence, setPref, openPop, joinByCode, toast, openModal,
 } from '../store.js';
 import { parseQuery, runSearch, setOp, isEmptyQuery } from '../lib/search.js';
 import { attention, isThread, roomIds } from '../lib/attention.js';
@@ -14,6 +14,7 @@ import { searchMessages, api } from '../server.js';
 import { quickInvite, inviteWhy } from '../lib/onboarding.js'; // a pasted invitation, and why one doesn't work
 import { t } from '../lib/i18n.js';
 import { openHouse } from './nav.js';
+import { AddHouse } from './modals.js'; // the switcher's "Start a house or join one"
 import { THEME_ACTIONS } from './appearance.js'; // themes by name
 import { ACCOUNT_ACTIONS } from './account.js'; // mute, mark read, themes, presence, status, streamer mode, shortcuts
 import { withRecent } from '../account.js'; // recent places come first
@@ -122,6 +123,7 @@ export function Search() {
   const filtered = p.from.length || p.in.length || p.has.length || p.saved || p.mentions?.length || p.before || p.after || p.during || p.pinned;
 
   return html`<section class="main view" aria-label="Search">
+    <h1 class="sr">Search</h1>
     <div class="search-bar">
       <div class="search-input">
         ${S.ui.phone ? html`<button class="ib" style="position:static;margin-left:-8px" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>` : html`<${Icon} name="search" />`}
@@ -217,7 +219,8 @@ const DEEP = 2000;
 const ACTIONS = [
   { label: 'Home', icon: 'house', words: 'home start overview happening', run: () => go({ type: 'home' }) },
   { label: 'Friends', icon: 'people', words: 'friends requests add people', run: () => go({ type: 'friends' }) },
-  { label: 'Discover communities', icon: 'compass', words: 'discover explore find communities houses public', run: () => go({ type: 'discover' }) },
+  { label: 'Discover houses', icon: 'compass', words: 'discover explore find communities houses public', run: () => go({ type: 'discover' }) },
+  { label: 'Start a house or join one', icon: 'plus', words: 'start create new house join invite invitation', run: () => openModal(AddHouse, {}) },
   { label: 'Catch up', icon: 'tray', words: 'catch up inbox unread', run: () => go({ type: 'catchup' }) },
   { label: 'Saved messages', icon: 'save', words: 'saved bookmarks kept', run: () => go({ type: 'saved' }) },
   { label: 'Settings', icon: 'sliders', words: 'settings preferences options', run: () => openLayer({ C: Settings, props: {} }) },
@@ -238,14 +241,14 @@ function candidates(q) {
     for (const id of roomIds(S, h)) {
       const r = S.rooms[id];
       const a = attention(S, id);
-      add(withRecent(fuzzy(q, r.name), id, q) + (a.needs ? 5 : 0), { group: 'Rooms', key: id, label: r.name, hint: S.houses[h].name, icon: html`<${RoomIcon} kind=${r.kind} />`, run: () => openConv(id) });
+      add(withRecent(fuzzy(q, r.name), id, q) + (a.needs ? 5 : 0), { group: 'Rooms', key: id, label: r.name, hint: S.houses[h].name, needs: a.needs, icon: html`<${RoomIcon} kind=${r.kind} />`, run: () => openConv(id) });
     }
   }
   for (const d of S.dmOrder) {
     const meta = convMeta(d);
     const a = attention(S, d);
     add(withRecent(fuzzy(q, meta.title), d, q) + (a.needs ? 5 : 0) + 1, {
-      group: meta.user ? 'People' : 'Conversations', key: d, label: meta.title, hint: meta.user ? 'Direct' : 'Group',
+      group: meta.user ? 'People' : 'Conversations', key: d, label: meta.title, hint: meta.user ? 'Direct' : 'Group', needs: a.needs,
       icon: meta.user ? html`<${Avatar} user=${meta.user} presence />` : html`<${Icon} name="people" />`, run: () => openConv(d),
     });
   }
@@ -255,12 +258,13 @@ function candidates(q) {
       if (u.id === S.me || direct.has(u.id)) continue;
       add(Math.max(fuzzy(q, u.name), fuzzy(q, u.handle)) - 1, { group: 'People', key: `u${u.id}`, label: u.name, hint: 'Start a conversation', icon: html`<${Avatar} user=${u} presence />`, run: () => startDm([u.id]) });
     }
-    for (const h of S.houseOrder) add(withRecent(fuzzy(q, S.houses[h].name), `h:${h}`, q) - 2, { group: 'Communities', key: `h${h}`, label: S.houses[h].name, hint: 'Community', icon: html`<${Tile} house=${S.houses[h]} />`, run: () => openHouse(h) });
+    for (const h of S.houseOrder) add(withRecent(fuzzy(q, S.houses[h].name), `h:${h}`, q) - 2, { group: 'Houses', key: `h${h}`, label: S.houses[h].name, hint: 'House', icon: html`<${Tile} house=${S.houses[h]} />`, run: () => openHouse(h) });
     for (const a of ACTIONS) add(Math.max(fuzzy(q, a.label), ...a.words.split(' ').map((w) => (w.startsWith(q.toLowerCase()) ? 50 : -1))) - 3, { group: 'Actions', key: a.label, label: a.label, hint: 'Action', icon: html`<${Icon} name=${a.icon} />`, run: a.run });
   }
   out.sort((a, b) => b.score - a.score);
   const top = out.slice(0, q ? 9 : 8);
-  if (!q) return top;
+  // Nothing typed: the recent places, then your houses in rail order.
+  if (!q) return [...top.map((r) => ({ ...r, group: 'Recent' })), ...S.houseOrder.map((h) => ({ group: 'Houses', key: `h${h}`, label: S.houses[h].name, hint: 'House', icon: html`<${Tile} house=${S.houses[h]} />`, run: () => openHouse(h) }))];
   // Typed: the best matches, grouped by kind. Groups keep the order of their
   // best match, so the best match overall stays first (and selected).
   const order = [];
@@ -305,16 +309,16 @@ export function QuickJump() {
     <div class="quick float" role="dialog" aria-label="Jump to or search">
       <div class="quick-in">
         <${Icon} name="search" />
-        <input placeholder="Jump to a room or person, or search messages" aria-label="Jump to or search" value=${q} ref=${field}
-          onInput=${(e) => { setQ(e.target.value); setI(0); }} onKeyDown=${onKey} role="combobox" aria-expanded="true" aria-controls="quick-list" />
+        <input placeholder="Jump to a room, house or person, or search messages" aria-label="Jump to or search" value=${q} ref=${field}
+          onInput=${(e) => { setQ(e.target.value); setI(0); }} onKeyDown=${onKey} role="combobox" aria-expanded="true" aria-controls="quick-list"
+          aria-autocomplete="list" aria-activedescendant=${rows.length ? `quick-opt-${at}` : undefined} />
       </div>
-      <div class="quick-list" id="quick-list" role="listbox" ref=${list}>
-        ${!term && html`<div class="menu-label">Go to</div>`}
+      <div class="quick-list" id="quick-list" role="listbox" aria-label="Places" ref=${list}>
         ${rows.flatMap((row, n) => [
-          term && row.group && row.group !== rows[n - 1]?.group && html`<div class="menu-label quick-group" role="presentation" key=${`g-${row.group}`}>${row.group}</div>`,
-          html`<button key=${row.key} role="option" aria-selected=${String(n === at)} class=${`menu-item${n === at ? ' act' : ''}`}
+          row.group && row.group !== rows[n - 1]?.group && html`<div class="menu-label quick-group" role="presentation" key=${`g-${row.group}`}>${row.group}</div>`,
+          html`<button key=${row.key} id=${`quick-opt-${n}`} role="option" tabindex="-1" aria-selected=${String(n === at)} class=${`menu-item${n === at ? ' act' : ''}`}
             onMouseMove=${(e) => { const p = e.screenX + ',' + e.screenY; if (p === lastPtr) return; lastPtr = p; if (n !== at) setI(n); }} onClick=${() => run(row)}>
-            ${row.icon}<span class="grow trunc">${row.label}</span><span class="end">${row.hint}</span>
+            ${row.icon}<span class="grow trunc">${row.label}</span>${row.needs > 0 && html`<span class="badge" aria-label=${`${row.needs} for you`}>${row.needs > 99 ? '99+' : row.needs}</span>`}<span class="end">${row.hint}</span>
           </button>`,
         ].filter(Boolean))}
       </div>
@@ -322,6 +326,7 @@ export function QuickJump() {
         <span><span class="kbd">↑</span><span class="kbd">↓</span> to move</span>
         <span><span class="kbd">Enter</span> to open</span>
         <span><span class="kbd">Esc</span> to close</span>
+        <span class="quick-foot-tip">${inv ? '' : 'Paste an invite link to join a house'}</span>
       </div>
     </div>
   </div>`;

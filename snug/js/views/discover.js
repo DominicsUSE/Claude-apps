@@ -203,7 +203,7 @@ export function PeopleYouMightKnow({ people, limit = 6, title = 'People you migh
 // ---------- The page ----------
 
 // Section ids match the route (no section means For you), as the nav column uses them.
-const SECTIONS = [['for-you', 'For you'], ['communities', 'Communities'], ['people', 'People'], ['events', 'Events']];
+const SECTIONS = [['for-you', 'For you'], ['communities', 'Houses'], ['people', 'People'], ['events', 'Events']];
 // The last answer per search, so switching topic or section never flashes empty.
 const results = new Map();
 const eventsFor = new Map();
@@ -280,14 +280,14 @@ export function Discover() {
       <button class="btn" onClick=${() => { force.current = true; setTries((t) => t + 1); }}>Try again</button>
     </div>`;
   } else if (!houses.length && !data.people.length) {
-    body = html`<${Empty} icon="compass" title=${searching ? `Nothing matches “${query}”` : topic ? `No ${topic} communities yet` : 'Nothing new to find right now'}
-      text=${searching ? 'Try a shorter word, or pick a topic.' : 'Public communities you haven’t joined show up here. Start one and make it public, and it might be the next one people find.'}>
+    body = html`<${Empty} icon="compass" title=${searching ? `Nothing matches “${query}”` : topic ? `No ${topic} houses yet` : 'Nothing new to find right now'}
+      text=${searching ? 'Try a shorter word, or pick a topic.' : 'Public houses you haven’t joined show up here. Start one and make it public, and it might be the next one people find.'}>
       ${(searching || topic) && html`<button class="btn" onClick=${() => { setQ(''); setQuery(''); if (topic) route(section, null); }}>Show everything</button>`}
     <//>`;
   } else if (searching) {
     body = html`
       ${houses.length > 0 && html`<section class="d-sect" aria-labelledby="d-res">
-        <h2 class="d-head" id="d-res">Communities <span class="count num">${houses.length}</span></h2>
+        <h2 class="d-head" id="d-res">Houses <span class="count num">${houses.length}</span></h2>
         <ul class="d-houses">${houses.map((h) => html`<${HouseRow} key=${h.id} h=${h} />`)}</ul>
       </section>`}
       <${PeopleYouMightKnow} people=${data.people} limit=${12} title="People" />`;
@@ -296,14 +296,14 @@ export function Discover() {
       ${!data.people.length && html`<${Empty} icon="people" title="No one to suggest yet" text="Join a house or add a friend, and people you’re connected to will show up here." />`}`;
   } else if (section === 'events') {
     body = html`<${Happening} houses=${houses} events=${events} />
-      ${!houses.some((h) => h.inVoice || h.talking) && !events.length && html`<${Empty} icon="calendar" title="It’s quiet out there" text="Live voice rooms and events in public communities show up here." />`}`;
+      ${!houses.some((h) => h.inVoice || h.talking) && !events.length && html`<${Empty} icon="calendar" title="It’s quiet out there" text="Live voice rooms and events in public houses show up here." />`}`;
   } else if (section === 'communities') {
     // Cards for the communities (brief 22), with what is live and who you
     // might know beside them.
     body = html`<div class="d-cols">
       <div class="d-col-main">
         <section class="d-sect" aria-labelledby="d-all">
-          <h2 class="d-head" id="d-all">${topic || 'All communities'} <span class="count num">${houses.length}</span></h2>
+          <h2 class="d-head" id="d-all">${topic || 'All houses'} <span class="count num">${houses.length}</span></h2>
           <ul class="d-houses d-cards">${houses.map((h) => html`<${HouseRow} key=${h.id} h=${h} card />`)}</ul>
         </section>
       </div>
@@ -319,7 +319,7 @@ export function Discover() {
         <div class="d-col-main">
           <${Happening} houses=${rest} events=${events} limit=${5} />
           ${newest.length > 0 && html`<section class="d-sect" aria-labelledby="d-new">
-            <h2 class="d-head" id="d-new">${topic ? `More in ${topic}` : 'New communities'}</h2>
+            <h2 class="d-head" id="d-new">${topic ? `More in ${topic}` : 'New houses'}</h2>
             <ul class="d-houses">${newest.slice(0, 6).map((h) => html`<${HouseRow} key=${h.id} h=${h} />`)}</ul>
           </section>`}
         </div>
@@ -340,7 +340,7 @@ export function Discover() {
         <div class="d-top">
           <label class="d-search">
             <${Icon} name="search" size=${18} />
-            <input type="search" placeholder="Search communities, people, interests" aria-label="Search communities and people" value=${q}
+            <input type="search" placeholder="Search houses, people, interests" aria-label="Search houses and people" value=${q}
               maxlength="80" onInput=${(e) => setQ(e.target.value)} onKeyDown=${(e) => { if (e.key === 'Escape' && q) { e.stopPropagation(); setQ(''); } }} />
           </label>
           ${S.ui.phone && html`<div class="d-chips" role="group" aria-label="Topics">
@@ -377,7 +377,7 @@ export function HousePreview({ house }) {
   if (st.status === 'loading') return html`<div class="hp-state"><${Loading} label="Opening the door" /></div>`;
   if (st.status === 'error') {
     return html`<div class="hp-state" role="alert">
-      <h2>Couldn’t open this community</h2>
+      <h2>Couldn’t open this house</h2>
       <p class="modal-lead">${st.err}</p>
       <div class="modal-foot"><button class="btn" onClick=${closeModal}>Close</button><button class="btn primary" data-autofocus onClick=${() => setTries((t) => t + 1)}>Try again</button></div>
     </div>`;

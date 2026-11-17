@@ -428,7 +428,7 @@ test('the rail and the context column switch places, and Alt+Down walks the colu
   assert.equal(await robin.locator('.main .composer textarea').count(), 1, 'Messages opens the latest conversation');
 
   await robin.click('.rail-btn:has-text("Discover")');
-  await robin.locator('.nav .ctx[aria-label="Discover"] .row:has-text("Communities")').waitFor();
+  await robin.locator('.nav .ctx[aria-label="Discover"] .row:has-text("Houses")').waitFor();
   await robin.locator('.nav .ctx .row:has-text("Music")').waitFor();
 
   await robin.click('.rail-house:has-text("Ridgeline Riders")');
@@ -506,7 +506,7 @@ test('a friend request reaches the other person live, and accepting makes both f
 
 test('discover lists a public community; preview, join, and its page opens', async () => {
   await robin.click('.rail-btn:has-text("Discover")');
-  await robin.click('.nav .ctx .row:has-text("Communities")');
+  await robin.click('.nav .ctx .row:has-text("Houses")');
   const card = robin.locator('.d-house:has-text("The Listening Room")');
   await card.waitFor();
   assert.equal(await robin.locator('.d-house:has-text("Kiln & Co.")').count(), 0, 'communities you are in are not suggested');

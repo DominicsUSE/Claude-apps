@@ -31,6 +31,43 @@ goes back to an older version on its own (README, "Install, update, go back").
 - **Text size** is one multiplier (`--text-scale`) on the page's font size, ready for more steps.
 - The local-address warning in the invite dialog reads in light themes (it failed contrast).
 
+### Shell, navigation, Home and getting started
+
+- **A new account's Home explains Snug.** "Welcome to Snug: create a house or join one with an invite", with
+  both buttons, a sentence each on houses, rooms and direct messages, and five steps that tick themselves off
+  as you do them: your account, your username, a house, inviting friends, a first message. The steps can be
+  hidden, and link to how Snug handles your data.
+- **Home shows your invitations** to houses, with who sent each one and a look before joining.
+- **The sidebar folds into the rail** with the arrow at the rail's foot, and stays as you left it on this
+  device. Below 1024px wide it starts folded, so a tablet gets the whole width for the conversation. Folded, a
+  house picked in the rail shows its rooms over the content until you go somewhere (Esc or a click outside puts
+  them away), and the rail's foot carries you, your settings and the call you are in.
+- **Where am I:** the house's header shows who is online and how many members, with Invite people and House
+  settings beside the name for those allowed. Rooms can be added to **Favourites** (room menu), which sit at the
+  top of the house's list; private rooms show a lock and muted rooms a crossed bell. A room with a count no
+  longer also shows the unread pip.
+- **Back on a phone goes to the list you came from.** A swipe in from the left edge now goes back (as the
+  header's arrow and the phone's own back do) instead of opening the drawer, and a screen opened from another
+  (a profile from a room, a room from a house) returns there, never straight to the tabs.
+- **Quick switcher:** with nothing typed it lists your recent places and then your houses; rows show their
+  unread count; the footer says an invitation link can be pasted; "Start a house or join one" is an action.
+  The list is announced as you move through it.
+- **Invitations in plain words.** The invite dialog spells out the code and keeps the end of the link in view;
+  a link that doesn't work says why, then offers "Paste another link". The local-address warning no longer
+  prints the address.
+- **One word for Snug's spaces: house.** Home, Discover and the switcher said "community" in places.
+- **Signed out:** "How Snug handles your data" sits below the form instead of over it, and Forgot your password
+  lines up with the labels.
+- **Loading:** while your places load after signing in, the frame's shape shows instead of a blank screen.
+- **Empty places:** the phone's empty Messages tab has the same empty state and New message button as the
+  desktop; a new account's Catch up offers to start or join a house instead of "Jump to a room".
+- Friends' tabs hide zero counts, and Add a friend is an outlined button rather than a violet square. Discover's
+  featured house drops the flat colour block behind its tile. Event rows in a narrow column put their buttons
+  under the title instead of squeezing it.
+- Accessibility: Search has a heading, Home, house and profile side columns are sections rather than nested
+  complementary landmarks, the phone has one main landmark per screen, and the skip link says "Skip to content"
+  where there is no composer.
+
 ## 0.14.0
 
 ### Calls: private by default

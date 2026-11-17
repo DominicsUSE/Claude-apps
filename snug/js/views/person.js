@@ -148,7 +148,7 @@ export function PersonPage({ id }) {
               <div class="ev-rows">${going.map((e) => html`<${EventRow} key=${e.id} ev=${e} compact />`)}</div>
             </section>`}
           </div>
-          <aside class="pp-side">
+          <section class="pp-side" aria-label="Details">
             <section class="pp-sect" aria-labelledby="pp-common">
               <h3 id="pp-common">${mine ? 'Your places' : 'Places you share'} <span class="count num">${common.length || ''}</span></h3>
               ${common.length
@@ -157,7 +157,7 @@ export function PersonPage({ id }) {
               ${!mine && !u.deleted && html`<${MutualFriends} id=${id} fallback=${mutual} />`}
             </section>
 
-          </aside>
+          </section>
         </div>
       </article>
     </div>
