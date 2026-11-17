@@ -328,9 +328,10 @@ button.avatar { cursor: pointer; }
 .modal-foot .btn { height: var(--h-36); padding: 0 var(--s-4); }
 
 /* Toasts confirm an action and offer the way back. On a wide screen they rise
-   in the bottom-left corner, over the account panel, never on the messages
-   being read; on a phone they drop in under the header. */
-.toasts { position: fixed; bottom: var(--s-4); left: var(--s-4); z-index: var(--z-toast); display: grid; gap: var(--s-2); justify-items: start; pointer-events: none; width: max-content; max-width: min(400px, calc(100% - 32px)); }
+   in the bottom-left corner, just above the account panel (its mic and
+   headphone buttons stay free), never on the messages being read; on a phone
+   they drop in under the header. */
+.toasts { position: fixed; bottom: var(--s-16); left: var(--s-4); z-index: var(--z-toast); display: grid; gap: var(--s-2); justify-items: start; pointer-events: none; width: max-content; max-width: min(400px, calc(100% - 32px)); }
 .toasts > .toast { min-width: min(240px, 100%); animation-name: rise-in; animation-duration: var(--m-standard); }
 .toast {
   pointer-events: auto; min-height: var(--h-md); padding: var(--s-1) var(--s-1) var(--s-1) var(--s-3);

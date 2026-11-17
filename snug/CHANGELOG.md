@@ -50,7 +50,7 @@ goes back to an older version on its own (README, "Install, update, go back").
 - **Phones.** The composer says just "Message" when the room name would be cut off, the voice-message button
   steps aside once Send shows, attachments being sent get a row each with 44px buttons, reactions are 36px
   chips with a 44px touch area, and the latest message stays in view when the keyboard opens.
-- **Toasts** rise in the bottom-left corner on wide screens, over the account panel, never on the messages.
+- **Toasts** rise in the bottom-left corner on wide screens, just above the account panel, never on the messages.
 - **Code blocks** that scroll sideways can be reached with the keyboard, and their colours pass contrast in
   light themes. Message controls taken out of the tab order are still walked with the arrow keys.
 - **Double tap to react** no longer opens the picker or takes your reaction off when the tap lands near the
