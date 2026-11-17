@@ -14,7 +14,7 @@ import { can, canPost } from '../lib/perms.js';
 import { fmtTime, fmtDay, fmtFull, fmtWhen, plural, fileSize, fuzzy, nameList, hueOf } from '../lib/util.js';
 import { plain, isJumbo } from '../lib/format.js';
 import { Icon } from '../ui/icons.js';
-import { Avatar, Rich, Stack, PRESENCE, copyText } from '../ui/kit.js';
+import { Avatar, Rich, Stack, PRESENCE, copyText, LoadingState } from '../ui/kit.js';
 import { nameAttrs } from '../ui/kit.js'; // people's name styles (css/appearance.css)
 import { showProfile } from './people.js';
 import { EmojiPicker, QUICK, toned, countUse } from './emoji.js';
@@ -42,6 +42,10 @@ import { t } from '../lib/i18n.js'; // words in the chosen language (js/locales)
 const rectOf = (e) => e.currentTarget.getBoundingClientRect();
 const atBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 48;
 const coarse = () => matchMedia('(pointer: coarse)').matches;
+// A quote or reply excerpt is one line: code and line breaks fold into spaces.
+const oneLine = (v) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : v);
+// What kind of file, in a word, from its name: "PDF", "ZIP". Empty when unclear.
+const typeOf = (name = '') => { const m = /\.([a-z0-9]{1,5})$/i.exec(name); return m ? m[1].toUpperCase() : ''; };
 
 // Holding Shift over a message shows the extra actions in its hover toolbar.
 if (typeof document !== 'undefined') {
@@ -158,7 +162,7 @@ function FileItem({ f, i, conv, m }) {
   }
   if (isTextFile(f) && url && !f.spoiler) return html`<${TextPreview} f=${f} url=${url} CodeBlock=${CodeBlock} />`;
   const body = html`<${Icon} name=${f.kind === 'image' ? 'image' : 'file'} />
-    <span class="trunc"><span class="file-name trunc" style="display:block">${f.spoiler && !shown ? 'Spoiler file' : f.name}</span><span class="file-size">${fileSize(f.size || 0)}${url ? ', download' : ''}</span><${Arriving} f=${f} /></span>`;
+    <span class="trunc"><span class="file-name trunc" style="display:block">${f.spoiler && !shown ? 'Spoiler file' : f.name}</span><span class="file-size">${typeOf(f.name) && !(f.spoiler && !shown) ? `${typeOf(f.name)} · ` : ''}${fileSize(f.size || 0)}${url ? ', download' : ''}</span><${Arriving} f=${f} /></span>`;
   const chip = url
     ? html`<a class="file" href=${url} download=${f.name}>${body}</a>`
     : html`<div class="file">${body}</div>`;
@@ -169,8 +173,12 @@ function FileItem({ f, i, conv, m }) {
   return chip;
 }
 
+// Two or more plain pictures sit in a tidy grid (square tiles, the viewer shows
+// each whole); one picture keeps its own shape.
+const gridable = (f) => f.kind === 'image' && !f.gif && !f.spoiler && !f.alt && f.w && f.h;
 function Files({ files, conv, m }) {
-  return html`<div class="files">
+  const grid = files.length > 1 && files.every(gridable);
+  return html`<div class=${`files${grid ? ` grid n${Math.min(files.length, 4)}` : ''}`}>
     ${files.map((f, i) => html`<${FileItem} key=${f.id || i} f=${f} i=${i} conv=${conv} m=${m} />`)}
   </div>`;
 }
@@ -270,7 +278,7 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
   // A finger never stays perfectly still: only a real move cancels the hold.
   const onMove = (e) => { const p = press.current; if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) cancel(); };
 
-  const cls = `msg${unsealed(conv, m) ? ' e2-unsealed-msg' : ''}${grouped ? ' grouped' : ''}${toMe ? ' mention' : lit ? ' mention lit' : ''}${pending ? ' pending' : ''}${quoted ? ' has-ref' : ''}${S.ui.menu?.owner === m.id || S.ui.pop?.owner === m.id ? ' menu-open' : ''}${S.ui.reply[conv] === m.id ? ' replying' : ''}`;
+  const cls = `msg${unsealed(conv, m) ? ' e2-unsealed-msg' : ''}${grouped ? ' grouped' : ''}${toMe ? ' mention' : lit ? ' mention lit' : ''}${pending ? ' pending' : ''}${m.state === 'failed' ? ' failed' : ''}${S.ui.editing === m.id ? ' editing' : ''}${quoted ? ' has-ref' : ''}${S.ui.menu?.owner === m.id || S.ui.pop?.owner === m.id ? ' menu-open' : ''}${S.ui.reply[conv] === m.id ? ' replying' : ''}`;
   const reactions = Object.entries(m.reactions || {});
   const threadUnread = replies.length ? unreadOf(S, `t:${m.id}`).count : 0;
   const authors = [...new Set(replies.map((r) => r.author))].map((id) => person(id));
@@ -280,11 +288,11 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
     ${quoted && html`<button class="reply-ref" onClick=${() => { S.ui.jump = { conv, id: quoted.id, n: (S.ui.jump?.n || 0) + 1 }; emit(); }}>
       <${Avatar} user=${person(quoted.author)} />
       <b>${person(quoted.author).name}</b>
-      <span class="trunc">${quoteText(quoted, plain(quoted.text) || 'Attachment', conv)}</span>
+      <span class="trunc reply-text">${oneLine(quoteText(quoted, plain(quoted.text) || 'Attachment', conv))}</span>
     </button>`}
     <div class="msg-gutter">
       ${grouped
-        ? html`<time class="time" datetime=${new Date(m.ts).toISOString()}>${fmtTime(m.ts)}</time>`
+        ? html`<time class="time" datetime=${new Date(m.ts).toISOString()} data-tip=${fmtFull(m.ts)}>${fmtTime(m.ts)}</time>`
         : html`<${Avatar} user=${u} onClick=${profile(u)} />`}
     </div>
     <div class="msg-body">
@@ -325,9 +333,11 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
       </button></div>`}
       ${m.state === 'queued' && html`<div class="msg-state"><${Icon} name="offline" size=${14} />Waiting for a connection. It will send by itself.</div>`}
       ${m.state === 'failed' && html`<div class="msg-state failed" role="alert">
-        <${Icon} name="alert" size=${14} />Not sent. ${m.error || ''}
-        <button onClick=${() => retry(conv, m)}>Try again</button>
-        <button onClick=${() => deleteMsg(conv, m.id)}>Delete</button>
+        <${Icon} name="alert" size=${14} />Not sent. ${m.error || 'Only you can see it.'}
+        <span class="msg-state-acts">
+          <button class="btn sm" onClick=${() => retry(conv, m)}>Try again</button>
+          <button class="btn sm ghost" onClick=${() => deleteMsg(conv, m.id)}>Delete</button>
+        </span>
       </div>`}
       ${mine && S.p2p && html`<${PeerState} conv=${conv} m=${m} />`}
     </div>
@@ -383,7 +393,7 @@ function readVideo(file) {
   });
 }
 
-export function Composer({ conv, placeholder }) {
+export function Composer({ conv, placeholder, short }) {
   const [text, setText] = useState(S.drafts[conv] || '');
   // Attachments already uploaded for this draft come back after a reload (0.12); a picture shows from the server's copy.
   const [files, setFiles] = useState(() => (S.draftFiles[conv] || []).map((f) => ({ ...f, status: 'ready', ...(f.kind === 'image' ? { src: `/api/files/${f.id}` } : {}) })));
@@ -597,7 +607,12 @@ export function Composer({ conv, placeholder }) {
   const over = tooLong(text.trim());
   const canSend = !uploading && !over && (text.trim() || files.some((f) => f.status === 'ready'));
   const replyWho = replyTo ? person(replyTo.author).name.split(' ')[0] : '';
-  return html`<div class="composer" data-composer=${conv} ref=${box}>
+  // A message above is open for editing: this box waits, and says so.
+  const editingHere = S.ui.editing && findMsg(conv, S.ui.editing) ? S.ui.editing : null;
+  // On a narrow screen the room's name would be cut off mid-word: just "Message".
+  const narrow = typeof matchMedia === 'function' && matchMedia('(max-width: 479px)').matches;
+  const hint = narrow && short ? short : placeholder;
+  return html`<div class=${`composer${editingHere ? ' waiting' : ''}`} data-composer=${conv} ref=${box}>
     ${drop && html`<div class="drop-over" style=${`left:${drop.x}px;top:${drop.y}px;width:${drop.w}px;height:${drop.h}px`} aria-hidden="true">
       <div class="drop-card"><${Icon} name="clip" size=${24} /><b>Drop to attach</b><span>Up to 6 files, ${limitText(maxFile)} each</span></div>
     </div>`}
@@ -610,10 +625,16 @@ export function Composer({ conv, placeholder }) {
           : html`<${SuggestRow} ac=${ac} it=${it} />`}
       </button>`)}
     </div>`}
+    <${RoomComposerHint} conv=${conv} />
     <div class="composer-box">
+      ${editingHere && html`<div class="composer-banner editing-note" role="status">
+        <${Icon} name="edit" size=${16} />
+        <span class="trunc grow">Editing a message above. Enter saves, Esc cancels.</span>
+        <button class="ib sm" aria-label="Cancel editing" data-tip="Cancel editing" data-key="Esc" onClick=${() => { setEditing(null); focusComposer(conv); }}><${Icon} name="x" size=${16} /></button>
+      </div>`}
       ${replyTo && html`<div class="composer-banner">
         <${Icon} name="reply" size=${16} />
-        <span class="trunc grow">Replying to <b>${person(replyTo.author).name}</b> ${plain(replyTo.text)}</span>
+        <span class="trunc grow">Replying to <b>${person(replyTo.author).name}</b> <span class="reply-text">${oneLine(quoteText(replyTo, plain(replyTo.text) || 'Attachment', conv))}</span></span>
         ${replyTo.author !== S.me && html`<${ReplyPing} who=${replyWho} />`}
         <button class="ib sm" aria-label="Cancel reply" data-tip="Cancel reply" data-key="Esc" onClick=${() => setReply(conv, null)}><${Icon} name="x" size=${16} /></button>
       </div>`}
@@ -639,12 +660,11 @@ export function Composer({ conv, placeholder }) {
       <${WaitNote} conv=${conv} />
       <${ScheduledNote} conv=${conv} />
       <${EncComposerNote} conv=${conv} />
-      <${RoomComposerHint} conv=${conv} />
       <${LengthNote} n=${text.trim().length} />
       <${FormatBar} ta=${ta} text=${text} update=${update} />
       <div class="composer-row">
         <${PlusMenu} conv=${conv} text=${text} update=${update} insert=${insert} replyTo=${replyTo?.id} onAttach=${() => fileIn.current.click()} />
-        <textarea ref=${ta} rows="1" placeholder=${placeholder} aria-label=${placeholder} value=${text}
+        <textarea ref=${ta} rows="1" placeholder=${hint} aria-label=${placeholder} value=${text}
           onInput=${onInput} onKeyDown=${onKey} onPaste=${onPaste} onBlur=${() => setAc(null)}></textarea>
         <${GifButton} conv=${conv} />
         <button class="ib" aria-label=${t('composer.emoji')} data-tip=${t('composer.emojiTip')}
@@ -664,9 +684,9 @@ function Foot({ conv }) {
   </div>`;
 }
 
-const Skeleton = ({ rows }) => html`<div class="older" aria-hidden="true">
-  ${rows.map((w, i) => html`<div class="older-row" key=${i}><div class="skel"></div><div class="skel" style=${`width:${w}%`}></div></div>`)}
-</div>`;
+// Placeholder rows in the shape of messages (avatar, name, a line), so the
+// list doesn't jump when the real ones arrive.
+const Skeleton = ({ rows }) => html`<${LoadingState} kind="messages" rows=${rows.length} label="Loading earlier messages" cls="older" />`;
 
 // What can take focus inside a message. Out of the tab order (one stop per
 // stream); a message's Right and Left arrows walk them, the toolbar first.
@@ -681,7 +701,7 @@ function msgZone(el) {
 // lets the older ones go (js/store.js releaseOld). Scrolling up loads them again.
 const MAX_RENDER = 300;
 
-export function Stream({ conv, intro, placeholder }) {
+export function Stream({ conv, intro, placeholder, short }) {
   const all = S.msgs[conv] || [];
   const win = S.ui.win[conv] || PAGE;
   const start = Math.max(0, all.length - win);
@@ -759,7 +779,12 @@ export function Stream({ conv, intro, placeholder }) {
     });
     ro.observe(inner.current);
     ro.observe(scroller.current);
-    return () => ro.disconnect();
+    // The on-screen keyboard: where the page doesn't shrink for it (Safari on
+    // iPhone ignores interactive-widget), keep the latest message in view anyway.
+    const vv = window.visualViewport;
+    const kb = () => { const el = scroller.current; if (el && stick.current) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; }); };
+    vv?.addEventListener('resize', kb);
+    return () => { ro.disconnect(); vv?.removeEventListener('resize', kb); };
   }, [ready]);
 
   // Coming back to the window counts as reading what is on screen.
@@ -888,7 +913,7 @@ export function Stream({ conv, intro, placeholder }) {
             let lit = false;
             return items.map((it) => {
               if (it.type === 'day') { lit = false; return html`<div class="day" key=${it.key}>${fmtDay(it.ts)}</div>`; }
-              if (it.type === 'new') { lit = false; return html`<div class="newline" key="new" role="separator" aria-label="New messages"><span>New</span></div>`; }
+              if (it.type === 'new') { lit = false; return html`<div class="newline" key="new" role="separator" aria-label="New messages"><span aria-hidden="true">New</span></div>`; }
               if (it.type === 'pin') return html`<${PinLine} key=${it.key} conv=${conv} pin=${it.pin} />`;
               if (it.type === 'e2') { lit = false; return html`<${KeyLine} key=${it.key} e=${it.e} />`; }
               if (it.m.call) { lit = false; return html`<${CallLine} key=${it.key} conv=${conv} m=${it.m} />`; }
@@ -908,7 +933,7 @@ export function Stream({ conv, intro, placeholder }) {
         <button class="jump" onClick=${toBottom}>Jump to present<${Icon} name="down" size=${16} /></button>
       </div>`}
     </div>
-    <${Composer} conv=${conv} placeholder=${placeholder} />
+    <${Composer} conv=${conv} placeholder=${placeholder} short=${short} />
     <${Foot} conv=${conv} />
   </div>`;
 }

@@ -82,8 +82,8 @@
 .att-edit-foot .faint { margin-right: auto; font-size: var(--t-12); }
 
 /* Reply mention toggle, length, long paste. */
-.reply-ping { flex: none; height: 24px; padding: 0 var(--s-2); border-radius: var(--r-btn); font-size: var(--t-12); font-weight: var(--w-semibold); color: var(--text-3); background: var(--bg-3); transition: background var(--m-fast) var(--ease-in-out), color var(--m-fast) var(--ease-in-out); }
-.reply-ping.on { color: var(--cyan); background: var(--cyan-soft); }
+.reply-ping { flex: none; height: 24px; padding: 0 var(--s-2); border-radius: var(--r-btn); font-size: var(--t-12); font-weight: var(--w-semibold); color: var(--text-2); background: var(--bg-3); transition: background var(--m-fast) var(--ease-in-out), color var(--m-fast) var(--ease-in-out); }
+.reply-ping.on { color: var(--info-ink); background: var(--info-soft); }
 .reply-ping:hover { background: var(--bg-4); }
 .reply-ping:focus-visible { outline: var(--focus-w) solid var(--focus); outline-offset: 1px; }
 .len-note { display: flex; gap: var(--s-2); align-items: center; padding: var(--s-1) var(--s-3) 0; font-size: var(--t-12); color: var(--amber-ink); }
@@ -146,7 +146,7 @@ button.pfile-view:focus-visible { outline: 2px solid var(--focus, var(--accent))
 .pdf-count { color: var(--text-2); font-size: var(--t-13); }
 
 /* ---------- The media viewer ---------- */
-.viewer { position: fixed; inset: 0; z-index: var(--z-viewer); display: grid; grid-template-rows: auto 1fr auto; background: var(--media-scrim); color: var(--on-media); animation: fade-in var(--m-smooth) var(--ease-out); }
+.viewer { position: fixed; inset: 0; z-index: var(--z-viewer); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--media-scrim); color: var(--on-media); animation: fade-in var(--m-smooth) var(--ease-out); }
 .viewer .ib { color: var(--on-media); }
 .viewer .ib:hover { background: rgb(255 255 255 / 0.12); }
 .viewer .ib:active { background: rgb(255 255 255 / 0.2); }
@@ -158,8 +158,9 @@ button.pfile-view:focus-visible { outline: 2px solid var(--focus, var(--accent))
 .vw-who time { color: rgb(244 241 237 / 0.7); font-size: var(--t-12); }
 .vw-count { margin-left: var(--s-2); font-size: var(--t-12); padding: 0 var(--s-2); border-radius: var(--r-row); background: rgb(255 255 255 / 0.12); }
 .vw-tools { display: flex; gap: 2px; }
-.vw-stage { position: relative; display: grid; place-items: center; overflow: hidden; padding: var(--s-2) var(--s-12); touch-action: none; }
-.vw-media { max-width: 100%; max-height: 100%; border-radius: var(--r-menu); user-select: none; transition: transform var(--m-standard) var(--ease-out); cursor: zoom-in; animation: vw-in var(--m-smooth) var(--ease-out); }
+.vw-stage { position: relative; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center; min-height: 0; overflow: hidden; padding: var(--s-2) var(--s-12); touch-action: none; }
+/* The whole picture fits the stage: never cropped, never stretched. */
+.vw-media { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--r-menu); user-select: none; transition: transform var(--m-standard) var(--ease-out); cursor: zoom-in; animation: vw-in var(--m-smooth) var(--ease-out); }
 .vw-media.zoomed { cursor: grab; transition: none; }
 video.vw-media { cursor: auto; }
 @keyframes vw-in { from { transform: scale(0.96); opacity: 0; } }

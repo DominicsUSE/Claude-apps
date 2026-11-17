@@ -196,6 +196,12 @@ button.poll-a:active { background: var(--bg-4); }
   .unread-jump, .unread-done { min-height: var(--touch); }
   .composer-row:has(textarea:not(:placeholder-shown)) .plus-btn { display: none; }
   .sticker { width: 128px; height: 128px; }
+  /* Search filters: one row that scrolls sideways, the ones in use first,
+     instead of four rows of chips above the first result. */
+  .search-bar .filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 calc(var(--s-3) * -1); padding: 0 var(--s-3) var(--s-1); scroll-padding: 0 var(--s-3); }
+  .search-bar .filters::-webkit-scrollbar { display: none; }
+  .search-bar .filters .chip { flex: none; }
+  .search-bar .filters .chip.on { order: -1; }
 }
 @media (prefers-reduced-motion: reduce) { :root:not([data-motion="full"]) .poll-bar { transition: none; } }
 :root[data-motion="off"] .poll-bar { transition: none; }

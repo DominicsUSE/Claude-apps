@@ -236,11 +236,11 @@ test('gifs: a GIF saved on one device is in "Your GIFs" on another, and sends fr
   await robin2.context().close();
 });
 
-test('gifs: "Recent in your places" shows a GIF someone else posted; reduced motion pauses GIFs until Play', async () => {
+test('gifs: "Recent" shows a GIF someone else posted; reduced motion pauses GIFs until Play', async () => {
   await go(robin, 'Show & tell');
   await robin.click('.main .composer .gif-btn');
   const picker = robin.locator('.gif-picker');
-  await picker.locator('[role=tab]:has-text("Recent in your places")').click();
+  await picker.locator('[role=tab]:has-text("Recent")').click();
   const tile = picker.locator('.gif-tile[aria-label="Send kiln-wave.gif"]');
   await tile.waitFor();
   assert.equal(await picker.locator('.gif-tile[aria-label="Send kiln-wave.gif"]').count(), 1, 'the same GIF shows once, though it was sent twice');

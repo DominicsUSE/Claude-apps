@@ -783,7 +783,7 @@ export function GifPicker({ conv, query = '' }) {
   const loading = html`<div class="gif-grid" aria-hidden="true">${[1, 2, 3, 4, 5, 6].map((i) => html`<span key=${i} class="skel gif-skel"></span>`)}</div>`;
 
   // Search always has its tab, so a server without it says so instead of leaving people guessing.
-  const tabs = [['mine', 'Your GIFs'], ['recent', 'Recent in your places'], ['search', 'Search']];
+  const tabs = [['mine', 'Your GIFs'], ['recent', 'Recent'], ['search', 'Search']];
   return html`<div class="gif-picker">
     <div class="gif-tabs" role="tablist" aria-label="GIFs">
       ${tabs.map(([id, label]) => html`<button key=${id} role="tab" aria-selected=${String(tab === id)} class=${tab === id ? 'on' : ''} onClick=${() => setTab(id)}>${label}</button>`)}
@@ -794,7 +794,7 @@ export function GifPicker({ conv, query = '' }) {
       ${tab === 'mine' && (favs.length ? (named(favs).length ? grid(named(favs), true) : html`<p class="gif-none">None of your GIFs is called “${q.trim()}”.</p>`) : html`<p class="gif-none">Star a GIF in any conversation to keep it here. Your GIFs follow you to every device.</p>`)}
       ${tab === 'recent' && (recent === null ? loading
         : recent === 'error' ? html`<p class="gif-none">Recent GIFs didn’t load. <button class="btn quiet" onClick=${() => { setRecent(null); call('gif.recent').then((r) => setRecent(r.gifs), () => setRecent('error')); }}>Try again</button></p>`
-        : recent.length ? (named(recent).length ? grid(named(recent), true) : html`<p class="gif-none">No recent GIF is called “${q.trim()}”.</p>`) : html`<p class="gif-none">No GIFs in your places yet. When someone posts one, it shows up here.</p>`)}
+        : recent.length ? (named(recent).length ? grid(named(recent), true) : html`<p class="gif-none">No recent GIF is called “${q.trim()}”.</p>`) : html`<p class="gif-none">No GIFs in your houses yet. When someone posts one, it shows up here.</p>`)}
       ${tab === 'search' && cfg === null && loading}
       ${tab === 'search' && cfg && !search && html`<p class="gif-none" role="status">${cfg.offline
         ? 'You’re offline, so GIF search can’t reach Snug. Your GIFs and recent ones still work once they’ve loaded.'

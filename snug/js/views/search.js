@@ -8,7 +8,7 @@ import { parseQuery, runSearch, setOp, isEmptyQuery } from '../lib/search.js';
 import { attention, isThread, roomIds } from '../lib/attention.js';
 import { fmtWhen, plural, fuzzy } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
-import { Avatar, Tile, RoomIcon, Rich, Empty } from '../ui/kit.js';
+import { Avatar, Tile, RoomIcon, Rich, Empty, LoadingState } from '../ui/kit.js';
 import { Settings } from './settings.js';
 import { searchMessages, api } from '../server.js';
 import { quickInvite, inviteWhy } from '../lib/onboarding.js'; // a pasted invitation, and why one doesn't work
@@ -157,7 +157,7 @@ export function Search() {
             ${examples().map(([ex, what]) => html`<button class="op" key=${ex} onClick=${() => { set(ex); input.current.focus(); }}><code>${ex}</code><span>${what}</span></button>`)}
           </div>`
         : loading && !hits.length
-          ? html`<div class="col" aria-busy="true"><div class="older">${[64, 48, 72].map((w) => html`<div class="older-row"><div class="skel"></div><div class="skel" style=${`width:${w}%`}></div></div>`)}</div></div>`
+          ? html`<div class="col"><${LoadingState} kind="messages" rows=${3} label="Searching" cls="older" /></div>`
         : res.error
           ? html`<${Empty} icon="alert" title="Search didn\u2019t work" text=${res.error} />`
         : !hits.length

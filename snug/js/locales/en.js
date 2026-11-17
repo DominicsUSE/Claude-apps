@@ -189,6 +189,7 @@ export default {
 
   // ---------- The composer (js/views/stream.js, conversation.js, messaging.js) ----------
   'composer.messageTo': 'Message {name}',
+  'composer.messageShort': 'Message',
   'composer.replyThread': 'Reply in thread',
   'composer.send': 'Send message',
   'composer.sendTip': 'Send',
