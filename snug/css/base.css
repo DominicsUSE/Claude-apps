@@ -287,9 +287,9 @@ button.avatar { cursor: pointer; }
 /* ---------- Floating layers (brief 19, 20) ----------
    Menus, popovers and cards that float: the float surface, a 1px line, a
    small shadow, radius 6. Dialogs: radius 8, padding 24, no decoration. */
-.float { background: var(--surface-float); --bg: var(--surface-float); border: 1px solid var(--line); border-radius: var(--r-menu); box-shadow: var(--shadow-md); }
+.float { background: var(--surface-float); --bg: var(--surface-float); border: 1px solid var(--line); border-radius: var(--r-menu); box-shadow: var(--elev-2); }
 
-.menu { position: fixed; min-width: 200px; max-width: 320px; padding: 6px; z-index: 60; animation: pop-in var(--m-control) var(--ease-out); max-height: calc(100% - 16px); overflow: auto; }
+.menu { position: fixed; min-width: 200px; max-width: 320px; padding: 6px; z-index: var(--z-menu); animation: pop-in var(--m-control) var(--ease-out); max-height: calc(100% - 16px); overflow: auto; }
 .menu-item {
   width: 100%; min-height: var(--h-sm); padding: 0 var(--s-2);
   display: flex; align-items: center; gap: var(--s-2);
@@ -314,12 +314,13 @@ button.avatar { cursor: pointer; }
 .menu-label { padding: var(--s-2) var(--s-2) var(--s-1); font-size: var(--t-meta); font-weight: var(--w-semibold); color: var(--text-3); }
 .menu-quick { display: flex; gap: 2px; padding: 0 0 2px; }
 .menu-quick button { flex: 1; height: var(--h-36); border-radius: var(--r-row); font-size: var(--t-20); display: grid; place-items: center; background: var(--bg-3); transition: background var(--m-fast) var(--ease-in-out), transform var(--m-fast) var(--ease-out); }
-.menu-quick button:hover { background: var(--bg-4); }
+.menu-quick button:hover, .menu-quick button.act { background: var(--bg-4); }
+.menu-quick button.act { box-shadow: inset 0 0 0 var(--focus-w) var(--focus); }
 .menu-quick button:active { transform: scale(0.92); }
 
-.pop { position: fixed; z-index: 55; animation: pop-in var(--m-control) var(--ease-out); max-width: calc(100% - 16px); }
-.scrim { position: fixed; inset: 0; background: var(--scrim); z-index: 50; animation: fade-in var(--m-panel) var(--ease-out); display: grid; place-items: center; padding: var(--s-4); }
-.modal { width: min(440px, 100%); max-height: 100%; overflow: auto; padding: var(--s-6); border-radius: var(--r-modal); box-shadow: var(--shadow-lg); animation: rise-in var(--m-panel) var(--ease-out); }
+.pop { position: fixed; z-index: var(--z-pop); animation: pop-in var(--m-control) var(--ease-out); max-width: calc(100% - 16px); }
+.scrim { position: fixed; inset: 0; background: var(--scrim); z-index: var(--z-scrim); animation: fade-in var(--m-panel) var(--ease-out); display: grid; place-items: center; padding: var(--s-4); }
+.modal { width: min(440px, 100%); max-height: 100%; overflow: auto; padding: var(--s-6); border-radius: var(--r-modal); box-shadow: var(--elev-3); animation: rise-in var(--m-panel) var(--ease-out); }
 .modal.wide { width: min(560px, 100%); }
 .modal h2 { font-size: var(--t-heading); margin-bottom: var(--s-2); }
 .modal-lead { color: var(--text-2); margin-bottom: var(--s-4); font-size: var(--t-body); line-height: var(--lh-body); }
@@ -327,11 +328,11 @@ button.avatar { cursor: pointer; }
 .modal-foot .btn { height: var(--h-36); padding: 0 var(--s-4); }
 
 /* Toasts confirm an action and offer the way back. */
-.toasts { position: fixed; top: calc(var(--bar-h) + var(--s-2)); left: 50%; transform: translateX(-50%); z-index: 70; display: grid; gap: var(--s-2); justify-items: center; pointer-events: none; width: max-content; max-width: calc(100% - 32px); }
+.toasts { position: fixed; top: calc(var(--bar-h) + var(--s-2)); left: 50%; transform: translateX(-50%); z-index: var(--z-toast); display: grid; gap: var(--s-2); justify-items: center; pointer-events: none; width: max-content; max-width: calc(100% - 32px); }
 .toast {
   pointer-events: auto; min-height: var(--h-md); padding: var(--s-1) var(--s-1) var(--s-1) var(--s-3);
   display: flex; align-items: center; gap: var(--s-3);
-  background: var(--bg-4); color: var(--text-1); border: 1px solid var(--line-strong); border-radius: var(--r-menu); box-shadow: var(--shadow-md);
+  background: var(--bg-4); color: var(--text-1); border: 1px solid var(--line-strong); border-radius: var(--r-menu); box-shadow: var(--elev-2);
   font-size: var(--t-body); animation: drop-in var(--m-panel) var(--ease-out); max-width: 100%;
   --bg: var(--bg-4);
 }
@@ -346,15 +347,15 @@ button.avatar { cursor: pointer; }
 
 /* Tooltip: dark in both themes reads as "a label", not as content. */
 .tip {
-  position: fixed; z-index: 80; pointer-events: none;
+  position: fixed; z-index: var(--z-tip); pointer-events: none;
   padding: 6px var(--s-2); border-radius: var(--r-menu);
-  background: var(--tip-bg, #0B0C0D); color: var(--tip-ink, #F4F1ED); box-shadow: var(--shadow-sm);
+  background: var(--tip-bg); color: var(--tip-ink); box-shadow: var(--elev-1);
   font-size: var(--t-ui); font-weight: var(--w-medium); line-height: var(--lh-ui);
   display: flex; gap: var(--s-2); align-items: center; white-space: nowrap;
   animation: tip-in var(--m-fast) var(--ease-out);
 }
-.tip kbd { font: inherit; color: #A9A5A0; }
-:root[data-theme="contrast"] .tip { border: 1px solid #8A8A8A; }
+.tip kbd { font: inherit; color: var(--tip-muted); }
+:root[data-theme="contrast"] .tip { border: 1px solid var(--line-strong); }
 
 /* ---------- States ---------- */
 /* Empty: one sentence, one way forward. Left-aligned when it sits in a list. */
@@ -392,17 +393,17 @@ button.avatar { cursor: pointer; }
 
 /* Phones: menus and dialogs come up from the bottom, where thumbs are. */
 @media (max-width: 759px) {
-  .menu { left: 0 !important; right: 0; top: auto !important; bottom: 0; max-width: none; border-radius: var(--r-modal) var(--r-modal) 0 0; border-width: 1px 0 0; padding: var(--s-2) var(--s-2) calc(var(--s-2) + env(safe-area-inset-bottom, 0px)); animation: sheet-in var(--m-panel) var(--ease-out); max-height: 80%; box-shadow: var(--shadow-lg); }
+  .menu { left: 0 !important; right: 0; top: auto !important; bottom: 0; max-width: none; border-radius: var(--r-modal) var(--r-modal) 0 0; border-width: 1px 0 0; padding: var(--s-2) var(--s-2) calc(var(--s-2) + env(safe-area-inset-bottom, 0px)); animation: sheet-in var(--m-panel) var(--ease-out); max-height: 80%; box-shadow: var(--elev-3); }
   .menu-item { min-height: var(--touch); padding: 0 var(--s-3); font-size: var(--t-16); border-radius: var(--r-btn); }
   .key-hint { display: none; }
-  .menu-scrim { position: fixed; inset: 0; background: var(--scrim); z-index: 59; animation: fade-in var(--m-panel); }
+  .menu-scrim { position: fixed; inset: 0; background: var(--scrim); z-index: var(--z-menu-scrim); animation: fade-in var(--m-panel); }
   .scrim { place-items: end center; padding: 0; }
   .modal { width: 100%; border-radius: var(--r-modal) var(--r-modal) 0 0; border-width: 1px 0 0; padding: var(--s-6) var(--s-4) calc(var(--s-6) + env(safe-area-inset-bottom, 0px)); animation: sheet-in var(--m-panel) var(--ease-out); max-height: 90%; overflow-x: hidden; }
   .pop { left: 8px !important; right: 8px; top: auto !important; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); animation: sheet-in var(--m-panel) var(--ease-out); }
   .pop > * { width: 100% !important; }
   .btn, .btn.sm, .btn.md, .btn.lg, .field, .field.sm, .field.lg, .modal-foot .btn { height: var(--touch); }
   textarea.field { height: auto; }
-  .field { font-size: 16px; }
+  .field { font-size: var(--t-input-touch); }
   .ib, .ib.compact { width: var(--touch); height: var(--touch); }
   .ib.sm { width: var(--h-sm); height: var(--h-sm); }
   .seg button { height: var(--h-md); }

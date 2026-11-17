@@ -5,18 +5,18 @@
   margin: 0 0 var(--s-3); font-size: var(--t-13); color: var(--text-1);
 }
 .vault-status > .ic, .vault-wait > .ic { color: var(--text-2); flex: none; }
-.vault-wait { padding: var(--s-2) var(--s-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-hover); }
+.vault-wait { padding: var(--s-2) var(--s-3); border: 1px solid var(--line); border-radius: var(--r-menu); background: var(--surface-hover); }
 .vault-wait > span { flex: 1; min-width: 12ch; }
 .vault-xfer { display: grid; gap: var(--s-1); margin: 0 0 var(--s-3); font-size: var(--t-13); color: var(--text-1); }
 .vault-bar { height: 4px; border-radius: 2px; background: var(--surface-hover); overflow: hidden; }
 .vault-bar > i { display: block; height: 100%; background: var(--cyan); transition: width 0.2s ease; }
 .vault-small { margin-top: var(--s-1); font-size: var(--t-12); color: var(--text-2); }
 .vault-notice {
-  position: fixed; z-index: 39; right: var(--s-4); bottom: var(--s-4);
+  position: fixed; z-index: var(--z-banner); right: var(--s-4); bottom: var(--s-4);
   width: min(320px, calc(100vw - 2 * var(--s-4)));
   display: grid; grid-template-columns: auto 1fr; gap: var(--s-1) var(--s-2); align-items: center;
   padding: var(--s-2) var(--s-3); background: var(--surface-float); border: 1px solid var(--line);
-  border-radius: var(--r-md); box-shadow: var(--shadow-md); font-size: var(--t-13); color: var(--text-1);
+  border-radius: var(--r-menu); box-shadow: var(--elev-2); font-size: var(--t-13); color: var(--text-1);
 }
 .vault-notice > .ic { color: var(--cyan); }
 .vault-notice > .vault-bar { grid-column: 1 / -1; }

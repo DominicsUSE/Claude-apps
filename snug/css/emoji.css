@@ -17,7 +17,7 @@
 
 /* House settings > Emoji */
 .emo-add { display: grid; gap: var(--s-3); margin-bottom: var(--s-2); }
-.emo-drop { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-4); border: 1px dashed var(--line-strong); border-radius: var(--r-md); background: var(--bg-2); color: var(--text-2); transition: border-color var(--m-fast) var(--ease-in-out), background var(--m-fast) var(--ease-in-out); }
+.emo-drop { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-4); border: 1px dashed var(--line-strong); border-radius: var(--r-menu); background: var(--bg-2); color: var(--text-2); transition: border-color var(--m-fast) var(--ease-in-out), background var(--m-fast) var(--ease-in-out); }
 .emo-drop.over { border-color: var(--text-2); background: var(--bg-3); }
 .emo-drop.bad { border-color: var(--error); }
 .emo-drop.full { border-style: solid; color: var(--text-3); }

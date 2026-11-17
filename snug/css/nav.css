@@ -118,7 +118,8 @@
   transition: background var(--m-hover) var(--ease-in-out), color var(--m-hover) var(--ease-in-out);
 }
 .vroom-person:hover { background: var(--surface-hover); --bg: var(--surface-hover); color: var(--text-1); }
-.vroom-person .avatar { --sz: 20px; font-size: 8px; }
+.vroom-person .avatar { --sz: 20px; font-size: var(--t-micro); }
+.vroom-person .ini2 { display: none; }  /* one letter: two stop being readable at 20px */
 .vroom-person.talking { color: var(--text-1); }
 .vroom-person .avatar.speaking { box-shadow: 0 0 0 1.5px var(--bg), 0 0 0 3px var(--mint); }
 .vroom-name { flex: 1; min-width: 0; }
@@ -259,7 +260,7 @@ button.home-row:hover .home-row-ic:not(:has(> .avatar, > .tile)) { background: v
 .phone .home-row { min-height: var(--touch); }
 .phone .home .bar-end .btn { padding: 0 var(--s-2); }
 .phone .tab { min-width: 0; }
-.you-card { width: 100%; padding: var(--s-2); margin: calc(var(--s-2) * -1); width: calc(100% + var(--s-4)); border-radius: var(--r-md); text-align: left; transition: background var(--m-fast) var(--ease-in-out); }
+.you-card { width: 100%; padding: var(--s-2); margin: calc(var(--s-2) * -1); width: calc(100% + var(--s-4)); border-radius: var(--r-menu); text-align: left; transition: background var(--m-fast) var(--ease-in-out); }
 .you-card:hover { background: var(--surface-hover); --bg: var(--bg-2); }
 .you-card:active { background: var(--bg-3); --bg: var(--bg-3); }
 .you-card > .ic { color: var(--text-3); }

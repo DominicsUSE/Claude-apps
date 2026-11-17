@@ -20,7 +20,7 @@
 /* Medium widths: the pane lies over the conversation instead of squeezing it. */
 @media (max-width: 1179px) {
   .app.has-pane { grid-template-columns: var(--nav-w) minmax(0, 1fr); }
-  .app .pane { position: absolute; right: 0; top: 0; bottom: 0; width: min(var(--pane-w), calc(100% - var(--nav-w))); box-shadow: var(--shadow-lg); border-left: 1px solid var(--line); z-index: 5; }
+  .app .pane { position: absolute; right: 0; top: 0; bottom: 0; width: min(var(--pane-w), calc(100% - var(--nav-w))); box-shadow: var(--elev-3); border-left: 1px solid var(--line); z-index: var(--z-pane); }
 }
 
 /* Top bar of any view (foundation block; brief 15): 48px. Where you are
@@ -228,11 +228,11 @@
    drawer navigation). Sheet: the member list rises from the bottom over the
    room, which stays visible above it. Both close on the scrim, Esc or Back. */
 .drawer-scrim, .sheet-scrim { position: absolute; inset: 0; background: var(--scrim); animation: fade-in var(--m-panel) var(--ease-out); }
-.drawer-scrim { z-index: 30; }
+.drawer-scrim { z-index: var(--z-dock); }
 .sheet-scrim { z-index: 1; } /* above the room screen (.screen.push), under the sheet that follows it */
 .drawer {
-  position: absolute; top: 0; bottom: 0; left: 0; z-index: 31; width: min(calc(100% - 48px), 360px);
-  display: flex; background: var(--surface-rail); --bg: var(--surface-rail); box-shadow: var(--shadow-lg);
+  position: absolute; top: 0; bottom: 0; left: 0; z-index: var(--z-drawer); width: min(calc(100% - 48px), 360px);
+  display: flex; background: var(--surface-rail); --bg: var(--surface-rail); box-shadow: var(--elev-3);
   --rail-w: 68px; --rail-ic: 44px;
   padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
   animation: drawer-in var(--m-panel) var(--ease-out);
@@ -244,7 +244,7 @@
 .phone .vroom-people { padding-left: 36px; }
 
 .phone .screen.push.sheet {
-  top: 12%; border-radius: var(--r-media) var(--r-media) 0 0; overflow: hidden; box-shadow: var(--shadow-lg);
+  top: 12%; border-radius: var(--r-media) var(--r-media) 0 0; overflow: hidden; box-shadow: var(--elev-3);
   animation: sheet-in var(--m-panel) var(--ease-out);
 }
 .phone .screen.push.sheet::before { content: ""; position: absolute; top: 6px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--line-strong); z-index: 1; }

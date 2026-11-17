@@ -4,6 +4,33 @@ Snug's releases, newest first. Every version's files stay on the releases page
 (<https://github.com/DominicsUSE/Claude-apps/releases?q=snug-v>); the desktop app updates itself and never
 goes back to an older version on its own (README, "Install, update, go back").
 
+## 0.15.0
+
+### Design system
+
+- **One set of tokens.** `css/tokens.css` now names semantic colours (`--color-bg`, `--color-primary`,
+  `--color-danger`, …), status pairs (`--success-soft`/`-ink` and the rest), an elevation scale, a layer
+  (z-index) scale, a 44px touch size, emoji sizes and the breakpoints. The duplicate radius names are gone from
+  the stylesheets (same values), and four tokens that were used but never defined now are.
+- **New shared components** in `js/ui/controls.js`, imported from `js/ui/kit.js` like the rest: `Button`
+  (primary, secondary, ghost, danger; sizes; loading; icon-only needs a label), text, search and multi-line
+  fields with a label, hint and error, `Tabs`, `Dropdown`, `contextMenu`, `Modal`, `ConfirmDialog`, `Tooltip`,
+  toasts with a kind, `EmptyState`, `LoadingState` with skeletons, and `ErrorState`. `DESIGN.md` says when
+  to use which.
+- **Every dialog has a name** for screen readers (its heading). The message menu's reaction row is a proper
+  group, so screen readers no longer meet buttons that aren't menu items; the left and right arrow keys now
+  reach the reactions, and the highlighted item is announced.
+- **Fix: keyboard focus in menus and dialogs.** A menu or popover now takes focus when it opens (it was still
+  hidden at that moment, so focus stayed behind and the arrow keys did nothing), and closing a dialog puts
+  focus back on the button that opened it instead of the top of the page.
+- **Tooltips** follow the theme (a raised grey in dark, near-black in light; they used to vanish on the dark
+  background), never appear on touch, and go away when their button disappears or a dialog opens over it.
+- **Toasts** can say success, error or info with an icon and a word, not colour alone; errors stay longer.
+- **Nothing moves for longer than 200ms**, reduced motion also stops plain transitions, and text is never
+  smaller than 11px (voice-room initials and the compact event month were 8-9px).
+- **Text size** is one multiplier (`--text-scale`) on the page's font size, ready for more steps.
+- The local-address warning in the invite dialog reads in light themes (it failed contrast).
+
 ## 0.14.0
 
 ### Calls: private by default

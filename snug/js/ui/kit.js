@@ -114,20 +114,17 @@ export function Empty({ icon, title, text, children, inline }) {
   </div>`;
 }
 
-// An icon-only button: 32x32 (compact 28, sm 24), its name as the aria-label
-// and the tooltip (with an optional shortcut). pressed: a toggle (aria-pressed).
-export function IconButton({ icon, label, onClick, size, iconSize, cls = '', pressed, tip = true, tipKey, tipSide, danger, disabled, busy, ...rest }) {
-  const sz = iconSize || (size === 'sm' ? 16 : size === 'compact' ? 18 : 20);
-  const c = `ib${size === 'sm' ? ' sm' : size === 'compact' ? ' compact' : ''}${danger ? ' danger' : ''}${cls ? ` ${cls}` : ''}`;
-  return html`<button type="button" class=${c} aria-label=${label} data-tip=${tip ? label : undefined} data-key=${tipKey} data-tip-side=${tipSide}
-    aria-pressed=${pressed === undefined ? undefined : String(!!pressed)} aria-busy=${busy ? 'true' : undefined} disabled=${disabled} onClick=${onClick} ...${rest}><${Icon} name=${icon} size=${sz} /></button>`;
-}
+// Buttons, fields, tabs, menus, dialogs, toasts and states live in
+// js/ui/controls.js (IconButton moved there in 0.15); kit re-exports them so
+// every view keeps one import path.
+export * from './controls.js';
 
 // A count: violet when it needs you (mentions, requests), neutral (quiet) when it doesn't.
 export const Badge = ({ n, quiet, alert, label }) => (n > 0
   ? html`<span class=${`badge${quiet ? ' quiet' : ''}${alert ? ' alert' : ''}`} aria-label=${label}>${n > 99 ? '99+' : n}</span>` : null);
 
-export const Spinner = ({ label = 'Loading' }) => html`<span class="spinner" role="status" aria-label=${label}></span>`;
+// A spinner on its own: a list still loading, a pending send. size: sm (12) | md (16, default) | lg (24).
+export const Spinner = ({ label = 'Loading', size }) => html`<span class=${`spinner${size === 'sm' || size === 'lg' ? ` ${size}` : ''}`} role="status" aria-label=${label}></span>`;
 
 // Message text
 function marked(text, terms) {

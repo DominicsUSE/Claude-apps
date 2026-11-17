@@ -973,7 +973,7 @@ export function toast(text, opts = {}) {
   const id = uid('toast');
   S.ui.toasts = [...S.ui.toasts.slice(-2), { id, text, ...opts }];
   emit();
-  setTimeout(() => dismissToast(id), opts.undo || opts.note ? 7000 : 4500);
+  setTimeout(() => dismissToast(id), opts.undo || opts.note || opts.kind === 'error' ? 7000 : 4500); // kind: success | error | info (js/ui/overlays.js)
   return id;
 }
 export function dismissToast(id) {

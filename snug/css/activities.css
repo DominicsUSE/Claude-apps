@@ -47,8 +47,8 @@
 .act-e2ee.on { color: var(--mint-ink); }
 .act-e2ee-note.on { color: var(--text-2); }
 .act-verified { color: var(--mint-ink); font-size: var(--t-12); white-space: nowrap; }
-.act-alarm { margin: 0 0 var(--s-2); padding: var(--s-2) var(--s-3); border-radius: var(--r-md); background: var(--rose-soft); color: var(--text-1); border: 1px solid var(--rose); font-size: var(--t-13); }
-.act-hint { margin: 0; padding: var(--s-2) var(--s-3); border-radius: var(--r-md); background: var(--amber-soft); color: var(--amber-ink); font-size: var(--t-13); }
+.act-alarm { margin: 0 0 var(--s-2); padding: var(--s-2) var(--s-3); border-radius: var(--r-menu); background: var(--rose-soft); color: var(--text-1); border: 1px solid var(--rose); font-size: var(--t-13); }
+.act-hint { margin: 0; padding: var(--s-2) var(--s-3); border-radius: var(--r-menu); background: var(--amber-soft); color: var(--amber-ink); font-size: var(--t-13); }
 
 /* ---------- "You're muted" ---------- */
 .act-muted-live:empty { display: none; }
@@ -71,7 +71,7 @@
 .stage-person, .vt { position: relative; }
 .act-floats { position: absolute; inset: auto 0 40% 0; height: 0; pointer-events: none; display: flex; justify-content: center; z-index: 2; }
 .act-float {
-  position: absolute; bottom: 0; font-size: 28px; line-height: 1;
+  position: absolute; bottom: 0; font-size: var(--t-emoji-l); line-height: 1;
   left: calc(50% - 14px + (var(--i) - 1.5) * 14px);
   animation: act-rise 2.4s var(--ease-out) forwards;
   filter: drop-shadow(0 1px 2px color-mix(in srgb, var(--bg-0) 60%, transparent));
@@ -92,7 +92,7 @@
 /* The reaction picker. */
 .act-react { display: grid; gap: var(--s-2); padding: var(--s-1); }
 .act-react-grid { display: grid; grid-template-columns: repeat(4, 40px); gap: var(--s-1); }
-.act-react-btn { width: 40px; height: 40px; display: grid; place-items: center; font-size: 22px; border: 0; border-radius: var(--r-btn); background: none; cursor: pointer; transition: background var(--m-hover) var(--ease-in-out), transform var(--m-hover) var(--ease-in-out); }
+.act-react-btn { width: 40px; height: 40px; display: grid; place-items: center; font-size: var(--t-emoji); border: 0; border-radius: var(--r-btn); background: none; cursor: pointer; transition: background var(--m-hover) var(--ease-in-out), transform var(--m-hover) var(--ease-in-out); }
 .act-react-btn:hover { background: var(--surface-hover); transform: scale(1.08); }
 .act-react-btn:active { background: var(--surface-sel); transform: scale(0.96); }
 .act-react-btn:focus-visible { outline: var(--focus-w) solid var(--focus); outline-offset: 1px; }
@@ -108,7 +108,7 @@
 /* A panel on the secondary surface, like a large tile: no border, 8px. */
 .act-tile {
   display: grid; gap: var(--s-2); padding: var(--s-2) var(--s-3) var(--s-3);
-  border-radius: var(--r-lg); background: var(--surface-2); --bg: var(--surface-2);
+  border-radius: var(--r-modal); background: var(--surface-2); --bg: var(--surface-2);
   width: 100%; max-width: 880px; justify-self: center; min-width: 0;
 }
 .act-head { display: flex; align-items: center; gap: var(--s-2); min-width: 0; min-height: var(--h-sm); font-size: var(--t-body); }

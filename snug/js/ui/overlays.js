@@ -8,6 +8,7 @@ import { Avatar } from './kit.js';
 import { Viewer } from '../views/viewer.js'; // the media viewer
 
 const EDGE = 8;
+const touchFirst = () => matchMedia('(hover: none), (max-width: 759px)').matches;
 
 function place(el, anchor, { x, y, align, side } = {}) {
   // Layout size, not the box on screen: the opening animation scales it.
@@ -45,12 +46,40 @@ function useOutside(ref, close) {
   }, []);
 }
 
-// Focus goes into the layer when it opens and back to where it was when it closes.
+// Focus goes into the layer when it opens and back to where it was when it
+// closes. The opener is read during the first render (by the time effects
+// run, the layer has moved focus into itself) and carries data-opener
+// meanwhile, so a control that only shows on hover or focus (a message's
+// toolbar) stays on screen to take focus back (css/components.css).
 function useReturnFocus() {
-  useEffect(() => {
-    const prev = document.activeElement;
-    return () => { if (prev && prev.isConnected && prev !== document.body) prev.focus({ preventScroll: true }); };
+  const opener = useRef(undefined);
+  if (opener.current === undefined) {
+    opener.current = document.activeElement;
+    if (opener.current && opener.current !== document.body) opener.current.setAttribute('data-opener', '');
+  }
+  useEffect(() => () => {
+    const prev = opener.current;
+    if (!prev || prev === document.body) return;
+    const back = () => { if (prev.isConnected) prev.focus({ preventScroll: true }); };
+    back();
+    // Still covered while the layer leaves the page (a toolbar hidden while a
+    // popover is open): once more after this render, unless something else
+    // (a dialog the menu opened) has taken focus meanwhile.
+    queueMicrotask(() => {
+      const a = document.activeElement;
+      if (a !== prev && (!a || a === document.body || !a.isConnected)) back();
+      prev.removeAttribute('data-opener');
+    });
   }, []);
+}
+
+// A layer is hidden until it is placed, and a hidden element can't take
+// focus, so focus moves in once it has a position.
+function useFocusWhenPlaced(ref, pos, pick = (el) => el) {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (pos && el && !el.contains(document.activeElement)) pick(el).focus({ preventScroll: true });
+  }, [pos]);
 }
 
 // A phone's sheet stops below what it was opened from (`avoid`, a long-pressed
@@ -61,6 +90,7 @@ export function Menu({ menu }) {
   const ref = useRef();
   const [pos, setPos] = useState(null);
   const [act, setAct] = useState(-1);
+  const [qa, setQa] = useState(-1); // the active quick reaction, when the row has the keyboard
   // A separator before the first destructive item (brief 19), none at either
   // end, and never two in a row.
   const given = menu.items.filter(Boolean);
@@ -70,38 +100,47 @@ export function Menu({ menu }) {
 
   useReturnFocus();
   useOutside(ref, closeMenu);
-  useLayoutEffect(() => {
-    setPos(place(ref.current, menu.anchor, menu));
-    ref.current.focus({ preventScroll: true });
-  }, []);
+  useLayoutEffect(() => { setPos(place(ref.current, menu.anchor, menu)); }, []);
+  useFocusWhenPlaced(ref, pos);
 
   const run = (it) => { closeMenu(); it.onSelect?.(); };
+  const quick = menu.quick?.emoji || [];
+  const pickQuick = (e) => { closeMenu(); menu.quick.onPick(e); };
+  const move = (i) => { setQa(-1); setAct(i); };
   const onKey = (e) => {
     const at = live.indexOf(act);
-    if (e.key === 'ArrowDown') { e.preventDefault(); setAct(live[(at + 1) % live.length]); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setAct(live[(at - 1 + live.length) % live.length]); }
-    else if (e.key === 'Home') { e.preventDefault(); setAct(live[0]); }
-    else if (e.key === 'End') { e.preventDefault(); setAct(live[live.length - 1]); }
+    // The reaction row is a row: left and right walk it, down leaves it.
+    if (quick.length && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+      e.preventDefault(); setAct(-1);
+      setQa(qa < 0 ? (e.key === 'ArrowRight' ? 0 : quick.length - 1) : (qa + (e.key === 'ArrowRight' ? 1 : -1) + quick.length) % quick.length);
+    } else if (e.key === 'ArrowDown') { e.preventDefault(); move(live[qa >= 0 ? 0 : (at + 1) % live.length]); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (quick.length && at === 0) { setAct(-1); setQa(0); } else move(live[(at - 1 + live.length) % live.length]); }
+    else if (e.key === 'Home') { e.preventDefault(); move(live[0]); }
+    else if (e.key === 'End') { e.preventDefault(); move(live[live.length - 1]); }
+    else if ((e.key === 'Enter' || e.key === ' ') && qa >= 0) { e.preventDefault(); pickQuick(quick[qa]); }
     else if ((e.key === 'Enter' || e.key === ' ') && act >= 0) { e.preventDefault(); run(items[act]); }
     else if (e.key === 'Tab') { e.preventDefault(); closeMenu(); }
   };
+  const activeId = qa >= 0 ? `${menu.k}-q${qa}` : act >= 0 ? `${menu.k}-i${act}` : undefined;
 
   // One icon column: rows without an icon keep its space when others have one.
   const anyIcon = items.some((x) => x && x.icon);
   return html`
     <div class="menu-scrim" onClick=${closeMenu}></div>
-    <div class="menu float" role="menu" tabindex="-1" ref=${ref} onKeyDown=${onKey}
+    <div class="menu float" role="menu" aria-label=${menu.label || (menu.quick ? 'Message actions' : 'Menu')} aria-activedescendant=${activeId}
+      tabindex="0" ref=${ref} onKeyDown=${onKey}
       style=${pos ? `left:${pos.left}px;top:${pos.top}px${sheetCap(menu.avoid)}` : 'visibility:hidden'}>
-      ${menu.quick && html`<div class="menu-quick">
-        ${menu.quick.emoji.map((e) => html`<button key=${e} aria-label=${`React with ${e}`} onClick=${() => { closeMenu(); menu.quick.onPick(e); }}>${e}</button>`)}
-      </div><div class="menu-sep"></div>`}
+      ${menu.quick && html`<div class="menu-quick" role="group" aria-label="React">
+        ${quick.map((e, i) => html`<button key=${e} id=${`${menu.k}-q${i}`} role="menuitem" tabindex="-1" class=${qa === i ? 'act' : undefined}
+          aria-label=${`React with ${e}`} onClick=${() => pickQuick(e)}>${e}</button>`)}
+      </div><div class="menu-sep" role="separator"></div>`}
       ${items.map((it, i) => {
-        if (it.sep) return html`<div class="menu-sep" key=${i}></div>`;
-        if (it.heading) return html`<div class="menu-label" key=${i}>${it.heading}</div>`;
+        if (it.sep) return html`<div class="menu-sep" role="separator" key=${i}></div>`;
+        if (it.heading) return html`<div class="menu-label" role="presentation" key=${i}>${it.heading}</div>`;
         const radio = it.checked !== undefined;
-        return html`<button key=${i} class=${`menu-item${it.danger ? ' danger' : ''}${act === i ? ' act' : ''}`}
+        return html`<button key=${i} id=${`${menu.k}-i${i}`} class=${`menu-item${it.danger ? ' danger' : ''}${act === i ? ' act' : ''}`}
           role=${radio ? 'menuitemradio' : 'menuitem'} aria-checked=${radio ? String(it.checked) : undefined}
-          disabled=${it.disabled} tabindex="-1" onMouseMove=${() => act !== i && setAct(i)} onClick=${() => run(it)}>
+          disabled=${it.disabled} tabindex="-1" onMouseMove=${() => act !== i && move(i)} onClick=${() => run(it)}>
           ${it.icon ? html`<${Icon} name=${it.icon} size=${18} />` : anyIcon && html`<span class="mi-pad" aria-hidden="true"></span>`}
           <span class="grow trunc">${it.label}</span>
           ${(it.checked || it.hint) && html`<span class="end">${it.hint && html`<span class="key-hint">${it.hint}</span>`}${it.checked && html`<${Icon} name="check" size=${16} />`}</span>`}
@@ -117,8 +156,6 @@ export function Pop({ pop }) {
   useOutside(ref, closePop);
   useLayoutEffect(() => {
     setPos(place(ref.current, pop.anchor, pop));
-    const target = ref.current.querySelector('[data-autofocus]') || ref.current;
-    target.focus({ preventScroll: true });
     // A card that grows once its details arrive (a banner, a bio) is placed
     // again, so it keeps its 8px from the window's edge.
     if (typeof ResizeObserver !== 'function') return undefined;
@@ -133,6 +170,9 @@ export function Pop({ pop }) {
     ro.observe(ref.current);
     return () => ro.disconnect();
   }, []);
+  // On a touch screen a popover doesn't put the caret in its search field:
+  // the on-screen keyboard would cover the sheet it opens in.
+  useFocusWhenPlaced(ref, pos, (el) => (touchFirst() ? el : el.querySelector('[data-autofocus]') || el));
   return html`<div class="pop float" ref=${ref} tabindex="-1" role="dialog" aria-label=${pop.label}
     style=${pos ? `left:${pos.left}px;top:${pos.top}px` : 'visibility:hidden'}>
     <${pop.C} ...${pop.props} />
@@ -149,6 +189,17 @@ export function ModalFrame({ modal }) {
     const el = ref.current;
     (el.querySelector('[data-autofocus]') || el.querySelector(FOCUSABLE) || el).focus();
   }, []);
+  // The dialog is named after its first heading (every dialog opens with
+  // one), or props.label when it has none. Checked on every render: a
+  // dialog with steps changes its heading.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || modal.props.label) return;
+    const h = el.querySelector('h1, h2, h3');
+    if (!h) { el.removeAttribute('aria-labelledby'); return; }
+    if (!h.id) h.id = `${modal.k}-title`;
+    el.setAttribute('aria-labelledby', h.id);
+  });
   const trap = (e) => {
     if (e.key !== 'Tab') return;
     const list = [...ref.current.querySelectorAll(FOCUSABLE)];
@@ -158,11 +209,14 @@ export function ModalFrame({ modal }) {
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   };
   return html`<div class="scrim" onPointerDown=${(e) => e.target === e.currentTarget && closeModal()}>
-    <div class=${`modal float${modal.props.wide ? ' wide' : ''}`} role="dialog" aria-modal="true" tabindex="-1" ref=${ref} onKeyDown=${trap}>
+    <div class=${`modal float${modal.props.wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-label=${modal.props.label} tabindex="-1" ref=${ref} onKeyDown=${trap}>
       <${modal.C} ...${modal.props} />
     </div>
   </div>`;
 }
+
+// A toast's kind is an icon and a word, so it never rests on colour alone.
+const TOAST_KIND = { success: { icon: 'check', word: 'Done' }, error: { icon: 'alert', word: 'Error' }, info: { icon: 'info', word: 'Note' } };
 
 export function Toasts() {
   if (!S.ui.toasts.length) return null;
@@ -178,8 +232,10 @@ export function Toasts() {
           </span>
         </button>`;
       }
-      return html`<div key=${t.id} class="toast">
-        <span class="toast-text">${t.text}</span>
+      const kind = TOAST_KIND[t.kind];
+      return html`<div key=${t.id} class=${`toast${kind ? ` ${t.kind}` : ''}`}>
+        ${kind && html`<${Icon} name=${kind.icon} size=${18} />`}
+        <span class="toast-text">${kind && html`<span class="sr">${kind.word}: </span>`}${t.text}</span>
         ${t.undo && html`<button class="btn" onClick=${() => { dismissToast(t.id); t.undo(); }}><${Icon} name="undo" size=${16} />Undo</button>`}
       </div>`;
     })}
@@ -193,14 +249,26 @@ export function Lightbox() {
   return html`<${Viewer} key=${`${lb.src}|${lb.mid || ''}|${lb.fileId || ''}`} lb=${lb} />`;
 }
 
-// Tooltips: one element, shown after a short rest on anything with data-tip.
+// Tooltips: one element, shown after a short rest under a mouse, or at once on
+// keyboard focus. Never on touch (a tap would leave it stuck). It goes away
+// when its owner leaves the page or is hidden, when a dialog, menu or layer
+// opens over it, and when the window is hidden.
 export function initTooltips() {
-  let tip = null, timer = null, owner = null;
-  const hide = () => { clearTimeout(timer); tip?.remove(); tip = null; owner = null; };
+  let tip = null, timer = null, owner = null, watch = 0, lastKey = 0;
+  const noHover = matchMedia('(hover: none)');
+  const hide = () => { clearTimeout(timer); cancelAnimationFrame(watch); tip?.remove(); tip = null; owner = null; };
+  // A layer that opened after the tip and doesn't hold its owner covers it.
+  const covered = (el) => [...document.querySelectorAll('.scrim, .menu, .layer, .quick-scrim, .viewer, .lightbox')].some((l) => !l.contains(el));
+  const check = () => {
+    if (!owner) return;
+    if (!owner.isConnected || !owner.getClientRects().length || covered(owner)) { hide(); return; }
+    watch = requestAnimationFrame(check);
+  };
   const show = (el) => {
     hide();
-    if (!el.isConnected) return;
+    if (!el.isConnected || !el.dataset.tip || covered(el)) return;
     owner = el;
+    watch = requestAnimationFrame(check);
     tip = document.createElement('div');
     tip.className = 'tip';
     tip.setAttribute('role', 'tooltip');
@@ -220,15 +288,19 @@ export function initTooltips() {
     tip.style.top = `${top}px`;
   };
   document.addEventListener('pointerover', (e) => {
-    if (e.pointerType !== 'mouse') return;
+    if (e.pointerType !== 'mouse' || noHover.matches) return;
     const el = e.target.closest?.('[data-tip]');
     if (el === owner) return;
     hide();
     if (el) timer = setTimeout(() => show(el), 350);
   });
+  // Only focus that the keyboard moved shows a tip: a tap focuses too, and
+  // phones match :focus-visible after programmatic focus.
+  document.addEventListener('keydown', () => { lastKey = Date.now(); }, true);
   document.addEventListener('focusin', (e) => {
     const el = e.target.closest?.('[data-tip]');
-    if (el && el.matches(':focus-visible')) show(el);
+    if (el && el.matches(':focus-visible') && Date.now() - lastKey < 1000) show(el);
   });
   for (const ev of ['pointerdown', 'keydown', 'focusout', 'wheel']) document.addEventListener(ev, hide, true);
+  document.addEventListener('visibilitychange', hide);
 }
