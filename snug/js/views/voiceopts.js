@@ -35,7 +35,7 @@ const houseOfCall = () => (S.call && S.rooms[S.call.room]?.house) || null;
 
 // ---------- Each person: volume and a mute only I hear ----------
 
-function PersonAudio({ id }) {
+export function PersonAudio({ id }) {
   const v = volumeOf(id);
   const m = mutedForMe(id);
   const name = person(id).name;
@@ -267,7 +267,7 @@ export function MiniCall() {
 
   const w = ref.current?.offsetWidth || 288, h = ref.current?.offsetHeight || 160;
   const p = pos ? clampPos(pos.x, pos.y, w, h) : null;
-  const style = p ? `left:${p.x}px;top:${p.y}px;right:auto;bottom:auto` : '';
+  const style = p && !S.ui.phone ? `left:${p.x}px;top:${p.y}px;right:auto;bottom:auto` : ''; // a phone docks it above the tabs
   const save = (np) => { setPos(np); setVoice({ mini: np }); };
   const onDown = (e) => {
     if (e.button !== 0) return;

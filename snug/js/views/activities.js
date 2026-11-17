@@ -227,8 +227,8 @@ export function ConnHeader({ room }) {
         : 'The security details that arrived for them don’t match what their device signed'}, so someone may be trying to listen in. Don’t continue this call; check with them another way.
     </div>`}<button class=${`stage-conn ok act-conn${worst ? ` q-${worst}` : ''}`} aria-haspopup="dialog" aria-label=${label}
     onClick=${(e) => openPop({ anchor: rectOf(e), label: 'Connection', C: QualityPop, props: { room } })}>
-    <i aria-hidden="true"></i>Voice connected${worst && html`<${Bars} q=${worst} />`}${route && html`<span class="act-routeword">${route}</span>`}
-    ${sec && html`<span class=${`act-e2ee${sec.long ? ' off' : ' on'}`} data-tip=${sec.long || sec.short}>${sec.short}</span>`}
+    <span class="act-conn-main"><i class="act-dot" aria-hidden="true"></i>Voice connected${worst && html`<${Bars} q=${worst} />`}</span>${route && html`<span class="act-routeword">${route}</span>`}
+    ${sec && html`<span class=${`act-e2ee${sec.long ? ' off' : ' on'}`} data-tip=${sec.long || sec.short}><${Icon} name=${sec.long ? 'unlock' : 'lock'} size=${12} />${sec.short}</span>`}
     ${poorMe && html`<span class="act-uplink">Your connection is weak</span>`}
   </button>`;
 }

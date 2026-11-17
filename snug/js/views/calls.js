@@ -64,6 +64,7 @@ const END_TEXT = {
   'no-answer': ['No answer', (o) => `${o} didn’t pick up.`],
   ended: ['Call ended', () => 'The other side hung up.'],
   cancelled: ['Call ended', () => 'The call ended before anyone joined.'],
+  dropped: ['Call dropped', () => 'Your connection dropped, so the call did too.'],
 };
 
 // How my last call here ended, for a few seconds: "Declined", "No answer".

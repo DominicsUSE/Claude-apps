@@ -42,7 +42,7 @@
 .call-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--online); flex: none; }
 .call-strip .stack .avatar { --sz: var(--av-xs); }
 .call-ic { display: inline-grid; place-items: center; width: var(--h-sm); height: var(--h-sm); border-radius: var(--r-full); background: var(--bg-3); color: var(--text-2); flex: none; }
-.call-strip.declined .call-ic, .call-strip.no-answer .call-ic { background: var(--amber-soft); color: var(--amber-ink); }
+.call-strip.declined .call-ic, .call-strip.no-answer .call-ic, .call-strip.dropped .call-ic { background: var(--amber-soft); color: var(--amber-ink); }
 
 /* While ringing out: a waiting status, and the people being rung as dim tiles. */
 .stage-conn.ring { color: var(--text-2); font-weight: var(--w-medium); }
@@ -124,14 +124,14 @@
   .callline-ic { width: var(--avatar); margin-right: var(--s-1); }
 }
 
-/* ======== The voice stage (moved from css/places.css in 0.15; voice and calls track) ======== */
-/* ---------- Voice stage (voice track) ----------
-   A voice room or a call is a room you are in: a grid of tiles on the
-   conversation surface (one per person: the face in the middle, the name
-   and their mic bottom left), a thin status line above, and one compact bar
-   of icon buttons below. Speaking is a 2px ring in the online colour on the
-   tile, never a glow. Tiles are rectangles (8px; video 8px, the large one
-   12px), people are circles, controls are 6px rectangles. */
+/* ======== The voice stage (js/views/stage.js; voice and calls track) ========
+   A voice room or a call is a room you are in: a status line, the tiles on
+   the conversation surface (one per person: the face in the middle, the
+   name, mic and connection bottom left), and the control bar in groups.
+   Speaking is a 2px ring in the online colour on the tile and the face,
+   never a glow. Tiles are 12px rectangles, people are circles, controls are
+   6px rectangles. Mint means live (camera on, talking, connected); red means
+   your sound is off, and Leave. Moved here from css/places.css in 0.15. */
 .stage {
   flex: none; display: grid; gap: var(--s-3); align-content: start;
   grid-template-columns: minmax(0, 1fr);
@@ -139,19 +139,44 @@
   background: var(--surface-chat); --bg: var(--surface-chat);
   border-bottom: 1px solid var(--line-subtle);
   max-height: 62%; overflow-y: auto; scrollbar-width: thin;
+  container: stage / inline-size;
 }
-/* The status line: how many are here, the connection, the clock. */
-.stage-top { display: flex; align-items: center; gap: var(--s-3); min-height: 28px; min-width: 0; font-size: var(--t-meta); color: var(--text-3); }
-.stage-count { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: var(--t-ui); font-weight: var(--w-semibold); color: var(--text-2); }
+.stage-body { display: grid; gap: var(--s-3); min-width: 0; min-height: 0; grid-template-columns: minmax(0, 1fr); }
+
+/* ---------- The status line ----------
+   Who is here, the connection, encryption, push to talk; the clock and the
+   fold button at the end. It wraps on narrow screens rather than overlap. */
+.stage-top { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-3); min-height: var(--h-sm); min-width: 0; font-size: var(--t-meta); color: var(--text-3); }
+.stage-count { display: inline-flex; align-items: center; gap: 6px; flex: none; font-size: var(--t-ui); font-weight: var(--w-semibold); color: var(--text-2); white-space: nowrap; }
 .stage-count .ic { color: var(--text-3); }
 .stage.in .stage-count .ic { color: var(--online); }
 .stage-conn { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--t-meta); color: var(--text-3); }
+.stage-conn.wait, .stage-conn.ring, .stage-conn.act-reconn { white-space: nowrap; }
 .stage-conn.ok { color: var(--mint-ink); font-weight: var(--w-medium); }
-.stage-conn.ok i { width: 8px; height: 8px; border-radius: 50%; background: var(--online); flex: none; }
-.stage-top .act-timer::before { content: "\00B7"; margin-right: var(--s-3); color: var(--text-3); }
+.stage-conn .act-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--online); flex: none; }
+.stage-top-end { display: inline-flex; align-items: center; gap: var(--s-2); margin-left: auto; flex: none; }
+.stage-spin { display: inline-grid; place-items: center; }
+.stage-fold { color: var(--text-2); }
+.stage-fold.wordy { display: inline-flex; flex-direction: row; align-items: center; width: auto; height: var(--h-sm); gap: 6px; padding: 0 var(--s-3); font-size: var(--t-ui); font-weight: var(--w-medium); background: var(--btn2); color: var(--text-1); }
+.stage-fold.wordy:hover { background: var(--btn2-hover); }
 
-/* The tiles: wide when it is two of you, narrower as the room fills; they
-   always fit side by side before they wrap. */
+/* Push to talk: the key, and whether the microphone is open right now. */
+.stage-ptt {
+  display: inline-flex; align-items: center; gap: 6px; height: var(--h-xs); padding: 0 var(--s-2);
+  border-radius: var(--r-full); background: var(--surface-2); color: var(--text-2);
+  font-size: var(--t-meta); font-weight: var(--w-medium); white-space: nowrap;
+}
+.stage-ptt kbd { font: inherit; font-family: var(--mono); padding: 0 var(--s-1); min-width: 18px; text-align: center; border-radius: var(--r-row); border: 1px solid var(--line-strong); color: var(--text-1); }
+.stage-ptt.live { background: var(--success-soft); color: var(--success-ink); }
+.stage-ptt.muted { color: color-mix(in srgb, var(--danger) 72%, var(--text-1)); background: var(--danger-soft); }
+/* Sharing my screen, with Stop beside it. */
+.stage-sharing { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--success-ink); font-weight: var(--w-medium); }
+.stage-sharing .ic { flex: none; }
+.stage-sharing-stop { flex: none; }
+
+/* ---------- Tiles ----------
+   Wide when it is two of you, narrower as the room fills; they always fit
+   side by side before they wrap. */
 .stage-people {
   --tile-w: 360px; --tile-min: 176px;
   display: grid; gap: var(--s-2); justify-content: center;
@@ -170,10 +195,11 @@
   content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
   box-shadow: inset 0 0 0 2px transparent; transition: box-shadow var(--m-control) var(--ease-in-out);
 }
-/* Speaking: the ring appears at once and fades out over 150ms. */
-/* The face carries the 2px ring (base.css .avatar.speaking); the tile only
-   picks up a faint 1px edge, so a room of talkers never reads as a glow. */
-.stage-person.talking::after { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--online) 35%, transparent); transition: none; }
+/* Speaking: the ring appears at once and fades out over 150ms. Both the
+   face (base.css .avatar.speaking) and the tile carry it, so the speaker is
+   plain at a glance in a full room; the name turns mint too. */
+.stage-person.talking::after { box-shadow: inset 0 0 0 2px var(--online); transition: none; }
+.stage-person.talking .stage-name .trunc { color: var(--mint-ink); }
 .stage-face { position: relative; display: block; }
 .stage-person .avatar { font-size: calc(var(--sz) * 0.38); }
 .stage-person .avatar .ini, .stage-person .avatar .ini2 { font-size: inherit; color: inherit; }
@@ -181,72 +207,133 @@
 /* Labels sit on a flat scrim chip, so they read on any tile or picture. */
 .stage .stage-name, .stage-note {
   position: absolute; display: inline-flex; align-items: center; gap: var(--s-1);
-  min-width: 0; max-width: calc(100% - var(--s-4)); height: 22px; padding: 0 6px;
+  min-width: 0; max-width: calc(100% - var(--s-4)); height: var(--h-xs); padding: 0 var(--s-2);
   border-radius: var(--r-row);
-  background: color-mix(in srgb, var(--bg-0) 76%, transparent); color: var(--text-1);
+  background: var(--media-scrim); color: var(--on-media);
   font-size: var(--t-ui); font-weight: var(--w-medium); line-height: 1; white-space: nowrap;
 }
 .stage .stage-name { left: var(--s-2); bottom: var(--s-2); }
-.stage-note { left: var(--s-2); top: var(--s-2); max-width: calc(100% - var(--s-4) - 56px); color: var(--text-2); font-size: var(--t-meta); font-weight: var(--w-regular, 400); }
-.stage .stage-person.ringing .stage-name { color: var(--text-2); }
+/* On a face tile (no picture behind) the name needs no scrim: plain text on the tile. */
+.stage .stage-person .stage-name { background: none; color: var(--text-1); padding: 0 var(--s-1); }
+.stage .stage-person .stage-note { background: var(--surface-float); color: var(--text-2); }
+.stage-note { left: var(--s-2); top: var(--s-2); max-width: calc(100% - var(--s-4) - 72px); font-size: var(--t-meta); font-weight: var(--w-regular, 400); overflow: hidden; text-overflow: ellipsis; }
+.stage .stage-person.ringing .stage-name { opacity: .85; }
 .stage .muted-ic { display: inline-grid; place-items: center; flex: none; color: var(--error); }
 .stage[data-size="40"] .stage-name, .stage[data-size="40"] .stage-note { left: var(--s-1); max-width: calc(100% - var(--s-2)); }
 .stage[data-size="40"] .stage-name { bottom: var(--s-1); height: 20px; font-size: var(--t-meta); }
 .stage[data-size="40"] .stage-note { display: none; }
 /* Volume and moderation, top right: shown on hover or focus, or while set. */
-.stage-tools { position: absolute; top: var(--s-2); right: var(--s-2); display: flex; align-items: center; gap: var(--s-1); z-index: 2; max-width: calc(100% - var(--s-4)); }
+.stage-tools { position: absolute; top: var(--s-1); right: var(--s-1); display: flex; align-items: center; gap: 2px; z-index: 2; max-width: calc(100% - var(--s-2)); }
 .stage-tools:empty { display: none; }
-.stage-tools .ib { background: color-mix(in srgb, var(--bg-0) 76%, transparent); color: var(--text-1); }
-.stage-tools .ib:hover { background: var(--bg-0); }
+.stage-tools .ib { background: transparent; color: var(--text-2); }
+.stage-tools .ib:hover { background: var(--surface-hover); color: var(--text-1); }
 .stage-tools .stage-mod { opacity: 0; transition: opacity var(--m-hover) var(--ease-in-out); }
 .stage-person:hover .stage-mod, .stage-person:focus-within .stage-mod, .stage-tools .stage-mod.on { opacity: 1; }
 @media (hover: none) { .stage-tools .stage-mod { opacity: 1; } }
-.stage-empty { margin: 0; padding: var(--s-2) 0; justify-self: center; max-width: 46ch; text-align: center; color: var(--text-2); font-size: var(--t-body); line-height: var(--lh-body); }
 
-/* Connection quality: three small bars, filled by how the line is doing. */
-.stage-q { display: inline-flex; align-items: flex-end; gap: 1px; height: 10px; flex: none; }
-.stage-q i { width: 2px; border-radius: 1px; background: var(--line-strong); }
+/* Nobody here yet: the shared empty state, compact, inside the stage's frame. */
+.stage .stage-empty-state { padding: var(--s-4) var(--s-2) var(--s-2); }
+.stage .stage-empty-state h2 { font-size: var(--t-body); }
+.stage-empty { display: inline-flex; align-items: center; gap: var(--s-2); margin: 0; padding: var(--s-4) 0; justify-self: center; color: var(--text-2); font-size: var(--t-body); }
+
+/* ---------- Connection quality ----------
+   Three bars, filled by how the line is doing: good mint, fair amber (two
+   bars), poor rose (one bar), connecting empty. The tooltip says it in words. */
+.stage-q { display: inline-flex; align-items: flex-end; gap: 1px; height: 12px; flex: none; }
+.stage-q i { display: block; width: 3px; border-radius: 1px; background: var(--line-strong); }
 .stage-q i:nth-child(1) { height: 4px; }
-.stage-q i:nth-child(2) { height: 7px; }
-.stage-q i:nth-child(3) { height: 10px; }
+.stage-q i:nth-child(2) { height: 8px; }
+.stage-q i:nth-child(3) { height: 12px; }
 .stage-q.good i { background: var(--online); }
-.stage-q.weak i:nth-child(-n+2) { background: var(--amber); }
-.stage-q.bad i:nth-child(1) { background: var(--error); }
+.stage-q.fair i:nth-child(-n+2) { background: var(--amber); }
+.stage-q.poor i:nth-child(1) { background: var(--rose); }
 
-/* The control bar: one row of quiet 40px icon buttons in groups, states in
-   colour (muted red, camera live mint), leave in red at the end. */
-.stage-acts { display: flex; align-items: center; justify-content: center; gap: 2px; }
-.stage-acts .btn.primary { height: var(--h-36); padding: 0 var(--s-4); }
-.stage-acts .btn.live { height: var(--h-36); padding: 0 var(--s-4); }
+/* ---------- Before joining, and a dropped call ---------- */
+/* No relay: who will see your IP address, said once, calmly, above Join. */
+.stage-direct {
+  display: flex; align-items: flex-start; gap: var(--s-2); margin: 0; justify-self: center; max-width: 60ch;
+  padding: var(--s-2) var(--s-3); border-radius: var(--r-modal); background: var(--surface-2);
+  color: var(--text-2); font-size: var(--t-ui); line-height: var(--lh-ui);
+}
+.stage-direct .ic { flex: none; margin-top: 1px; color: var(--info-ink); }
+.stage-dropped {
+  display: flex; align-items: center; gap: var(--s-2); justify-self: center; width: 100%; max-width: 640px;
+  padding: var(--s-1) var(--s-1) var(--s-1) var(--s-3); min-height: var(--h-md); border-radius: var(--r-btn);
+  background: var(--warning-soft); color: var(--text-1); font-size: var(--t-ui); line-height: var(--lh-ui);
+}
+.stage-dropped > .ic { flex: none; color: var(--warning-ink); }
+
+/* ---------- The control bar ----------
+   Groups: your sound, camera and screen, together, people and options, and
+   Leave in red at the end. Each main control carries its word under the icon
+   once the stage is wide enough; the rest are icons with tooltips. */
+.stage-acts { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--s-1); }
+.stage-acts .btn.primary, .stage-acts .btn.live { height: var(--h-36); padding: 0 var(--s-4); }
+.stage-acts .btn.stage-listen { height: var(--h-36); padding: 0 var(--s-3); }
+.vc-group { display: inline-flex; align-items: center; gap: 2px; padding: 0 var(--s-1); }
+.vc-group:empty { display: none; }
+.vc-group + .vc-group { border-left: 1px solid var(--line-subtle); }
 .stage-acts .vc {
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   width: var(--h-md); height: var(--h-md); border-radius: var(--r-btn);
   background: transparent; color: var(--text-2);
-  transition: background var(--m-hover) var(--ease-in-out), color var(--m-hover) var(--ease-in-out), transform var(--m-hover) var(--ease-in-out);
+  transition: background var(--m-hover) var(--ease-in-out), color var(--m-hover) var(--ease-in-out);
 }
 .stage-acts .vc:hover { background: var(--btn2-hover); color: var(--text-1); }
-.stage-acts .vc:active { background: var(--btn2-press); transform: translateY(1px); }
-/* Muted, deafened: the state you need to notice. */
-.stage-acts .vc.on, .stage-acts .vc.on:hover { background: var(--error-soft); color: var(--error); }
-.stage-acts .vc.on:hover { background: color-mix(in srgb, var(--error) 24%, var(--surface-chat)); }
-.stage-acts .vc.leave { width: 48px; margin-left: var(--s-1); background: var(--error); color: var(--on-error); }
-.stage-acts .vc.leave:hover { background: var(--error-hover); color: var(--on-error); }
-.stage-acts .vc.leave:active { background: color-mix(in srgb, var(--error) 80%, var(--bg-0)); color: var(--on-error); }
-.vc-sep { width: 1px; height: var(--s-6); margin: 0 var(--s-1); background: var(--line); flex: none; }
+.stage-acts .vc:active { background: var(--btn2-press); }
+.vc-word { display: none; }
+@container stage (min-width: 600px) {
+  .stage-acts .vc.main { width: 60px; height: 52px; }
+  .stage-acts .vc.main .vc-word { display: block; font-size: var(--t-micro); line-height: 1; white-space: nowrap; }
+}
+/* Muted, deafened: the state you need to notice, as a filled control. */
+.stage-acts .vc.on, .stage-acts .vc.on:hover { background: var(--danger-soft); color: color-mix(in srgb, var(--danger) 72%, var(--text-1)); }
+.stage-acts .vc.on:hover { background: color-mix(in srgb, var(--danger) 24%, var(--surface-chat)); }
+.stage-acts .vc.listen .ic { color: var(--text-2); }
+/* Camera or screen on: mint, filled. */
+.stage-acts .vc.live { background: var(--success-soft); color: var(--success-ink); }
+.stage-acts .vc.live:hover { background: color-mix(in srgb, var(--mint) 24%, var(--surface-chat)); }
+.stage-acts .vc.unavailable, .stage-acts .vc.unavailable:hover { color: var(--text-disabled); background: transparent; cursor: not-allowed; }
+.stage-acts .vc[aria-busy="true"] { opacity: .6; }
+.stage-acts .vc.vc-more.open { background: var(--btn2-hover); color: var(--text-1); }
+.stage-acts .vc.leave { width: 56px; margin-left: var(--s-2); background: var(--danger); color: var(--on-danger); }
+.stage-acts .vc.leave:hover { background: var(--error-hover); color: var(--on-danger); }
+.stage-acts .vc.leave:active { background: color-mix(in srgb, var(--danger) 80%, var(--bg-0)); color: var(--on-danger); }
+@container stage (min-width: 600px) { .stage-acts .vc.leave.main { width: 64px; } }
 .stage-acts .vo-hold { height: var(--h-md); }
-/* In the dock the same controls stay small and quiet. */
+/* A folded stage, and the shell's dock: the same controls, small and quiet. */
+.stage-acts.compact { flex-wrap: nowrap; gap: 2px; }
+.stage-acts.compact .vc { width: var(--h-sm); height: var(--h-sm); }
+.stage-acts.compact .vc.leave { width: 44px; margin-left: var(--s-1); }
 .dock .vc.on { color: var(--error); }
+.dock .vc.live { color: var(--mint-ink); }
 
-/* In the call (a voice room or a direct call, no camera, no activity): the
-   stage takes up to half the column, the room's chat keeps the rest, and the
-   tiles grow to fill the stage, centred (capped at 360px). The tile width
-   is the largest that fits the stage for the best of three column counts
-   (--c1..--c3 for the number of people, set below), from the stage's own size
-   (container query units), capped so one person is not a wall. */
-.conv.voice-live > .stage.in:not(.media):not([data-size="40"]) { flex: none; height: min(50%, 380px); max-height: none; min-height: 220px; container-type: size; align-content: center; }
-.conv.voice-live > .stage.in:not(.media):not([data-size="40"]):has(.stage-people:is([data-n="5"], [data-n="6"], [data-n="7"], [data-n="8"], [data-n="9"])) { height: 50%; }
-.conv.voice-live:has(> .stage.in:not(.media):not([data-size="40"])) > .stream { flex: 1 1 0; }
-.stage.in:not(.media):not([data-size="40"]) .stage-people {
-  --g: var(--s-2); --W: 100cqw; --H: calc(100cqh - 100px);
+/* People in the call: the popover from the bar's People button. */
+.stage-plist { display: grid; gap: var(--s-2); width: min(360px, calc(100vw - var(--s-8))); padding: var(--s-1); }
+.stage-plist-title { font-size: var(--t-body); font-weight: var(--w-semibold); padding: 0 var(--s-1); }
+.stage-plist-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; max-height: min(60vh, 420px); overflow-y: auto; }
+.stage-prow { display: flex; align-items: center; gap: var(--s-2); min-height: var(--h-lg); padding: var(--s-1); border-radius: var(--r-btn); }
+.stage-prow-name { flex: 1; min-width: 0; display: grid; gap: 2px; font-size: var(--t-body); }
+.stage-prow-state { color: var(--text-3); font-size: var(--t-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stage-prow.talking .stage-prow-state { color: var(--mint-ink); }
+.stage-prow-ic { display: inline-grid; place-items: center; flex: none; color: var(--error); }
+.stage-prow-vol { flex: none; gap: var(--s-1); font-variant-numeric: tabular-nums; }
+.stage-prow-vol.on { color: var(--info-ink); }
+.stage-plist-note { margin: 0; padding: 0 var(--s-1); color: var(--text-3); font-size: var(--t-meta); }
+
+/* ---------- In the call, desktop and tablet ----------
+   No camera, no activity: the stage takes up to half the column, the room's
+   chat keeps the rest, and the tiles grow to fill the stage, centred (capped
+   at 360px). The tile width is the largest that fits the stage for the best
+   of three column counts (--c1..--c3 for the number of people), from the
+   stage's own size (container query units), capped so one person is not a wall. */
+@media (min-width: 760px) {
+.conv.voice-live > .stage.in:not(.media):not(.folded):not([data-size="40"]) { flex: none; height: min(52%, 400px); max-height: none; min-height: 240px; container-type: size; grid-template-rows: auto minmax(0, 1fr) auto; align-content: stretch; }
+.conv.voice-live > .stage.in:not(.media):not(.folded):not([data-size="40"]) > .stage-body { align-content: center; }
+.conv.voice-live > .stage.in:not(.media):not(.folded):not([data-size="40"]):has(.stage-people:is([data-n="5"], [data-n="6"], [data-n="7"], [data-n="8"], [data-n="9"])) { height: 52%; }
+.conv.voice-live:has(> .stage.in:not(.media):not(.folded):not([data-size="40"])) > .stream { flex: 1 1 0; }
+.stage.in:not(.media):not(.folded):not([data-size="40"]) .stage-people {
+  --g: var(--s-2); --W: 100cqw; --H: calc(100cqh - 136px);
   --tile-w: clamp(132px, max(
     min(calc((var(--W) - (var(--c1) - 1) * var(--g)) / var(--c1)), calc((var(--H) - (var(--r1) - 1) * var(--g)) / var(--r1) * 16 / 9)),
     min(calc((var(--W) - (var(--c2) - 1) * var(--g)) / var(--c2)), calc((var(--H) - (var(--r2) - 1) * var(--g)) / var(--r2) * 16 / 9)),
@@ -254,7 +341,8 @@
   ) - 1px, 360px);
   display: flex; flex-wrap: wrap; justify-content: center; align-content: center;
 }
-.stage.in:not(.media):not([data-size="40"]) .stage-person { flex: none; width: var(--tile-w); }
+.stage.in:not(.media):not(.folded):not([data-size="40"]) .stage-person { flex: none; width: var(--tile-w); }
+}
 .stage-people { --c1: 1; --r1: 1; --c2: 1; --r2: 1; --c3: 1; --r3: 1; }
 .stage-people[data-n="2"] { --c1: 2; --r1: 1; --c2: 1; --r2: 2; --c3: 2; --r3: 1; }
 .stage-people[data-n="3"] { --c1: 3; --r1: 1; --c2: 2; --r2: 2; --c3: 1; --r3: 3; }
@@ -264,48 +352,42 @@
 .stage-people[data-n="7"], .stage-people[data-n="8"] { --c1: 4; --r1: 2; --c2: 3; --r2: 3; --c3: 2; --r3: 4; }
 .stage-people[data-n="9"] { --c1: 3; --r1: 3; --c2: 5; --r2: 2; --c3: 2; --r3: 5; }
 /* Faces grow with their tiles. */
-.stage.in:not(.media):not([data-size="40"]) .stage-person .avatar { --sz: clamp(48px, calc(var(--tile-w) * 0.22), 80px) !important; }
+@media (min-width: 760px) { .stage.in:not(.media):not(.folded):not([data-size="40"]) .stage-person .avatar { --sz: clamp(48px, calc(var(--tile-w) * 0.22), 80px) !important; } }
 
-/* Phone: More opens the rest of the controls in a row under the main one. */
-.vc-more-row { flex-basis: 100%; display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; padding-top: var(--s-1); }
-.stage-acts .vc.vc-more.open { background: var(--btn2-hover); color: var(--text-1); }
+/* Folded: one line, the status and the small controls, and the chat below. */
+.stage.folded { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3); padding: var(--s-2) var(--s-4); max-height: none; overflow: visible; min-height: 56px; }
+.stage.folded .stage-top { flex: 1 1 320px; }
+.stage.folded .stage-acts { flex: none; margin-left: auto; }
+
+/* Phone: More opens the rest of the controls in a row above the main one,
+   and hold to talk is a wide button over the bar. */
+.vc-more-row, .vc-hold-row { flex-basis: 100%; display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; }
+.vc-more-row { order: -1; padding-bottom: var(--s-1); border-bottom: 1px solid var(--line-subtle); margin-bottom: var(--s-1); }
+.vc-hold-row { order: -2; padding-bottom: var(--s-2); }
+.stage-acts .vc-hold-row .vo-hold { width: 100%; max-width: 420px; height: 56px; justify-content: center; font-size: var(--t-body); }
 
 /* Before you join: the same tiles, smaller and quieter, and Join. */
 .stage:not(.in) .stage-people { --tile-w: 220px; --tile-min: 152px; }
 .stage:not(.in) .stage-person { background: var(--surface-chat-hover); --bg: var(--surface-chat-hover); }
-/* Nobody here. The stage keeps its frame: base.css's generic .empty state
-   (centred, 400px, 32px padding) must not apply to it. */
-.stage.empty { margin: 0; max-width: none; text-align: initial; justify-items: stretch; gap: var(--s-2); padding: var(--s-3) var(--s-4) var(--s-4); }
-.stage.empty .stage-top { justify-content: center; }
-.stage.empty .ic { margin-bottom: 0; }
-.stage.empty .stage-acts .ic { color: inherit; margin: 0 -2px; }
-.stage.empty .btn { margin-top: 0; }
+.stage.nobody { gap: var(--s-2); }
+.stage.nobody .stage-top { justify-content: center; }
+.stage-acts .btn .ic { margin: 0 -2px; }
 
 /* ---------- Camera and screen sharing (voice track) ----------
-   The same tiles as the faces: 8px rectangles on the secondary surface (the
-   large, focused one 12px), a person without a camera keeps their circle in
-   the middle, the name on a flat scrim chip bottom left, and the same 2px
-   online ring while they speak. A camera or a screen that is on is live, so
-   its control is mint. A screen share is one large tile with everyone else
-   in a strip under it. */
-.stage-acts .vc.live { background: var(--mint-soft); color: var(--mint-ink); }
-.stage-acts .vc.live:hover { background: color-mix(in srgb, var(--mint) 24%, var(--surface-chat)); }
-.stage-acts .vc.unavailable, .stage-acts .vc.unavailable:hover { color: var(--text-disabled); background: var(--btn2); cursor: not-allowed; transform: none; }
-.stage-acts .vc[aria-busy="true"] { opacity: .6; }
-.dock .vc.live { color: var(--mint-ink); }
-.stage-media { display: inline-grid; place-items: center; color: var(--mint-ink); flex: none; }
-
+   Once anyone in the call shows a camera or a screen, the tiles become
+   video: a grid, or one tile large (a screen share first) with the others in
+   a strip beside it (wide) or under it. */
 .stage.media { max-height: 74%; }
 .vt-grid {
-  display: grid; gap: var(--s-2); width: 100%; justify-self: center;
+  display: grid; gap: var(--s-2); width: 100%; justify-self: center; align-content: center;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
 }
 .vt-grid[data-n="1"] { max-width: 720px; grid-template-columns: minmax(0, 1fr); }
 .vt-grid[data-n="2"] { max-width: 1120px; }
-.vt-focus { display: grid; gap: var(--s-2); min-width: 0; }
-.vt-main { display: grid; justify-items: center; min-width: 0; }
+.vt-focus { display: grid; gap: var(--s-2); min-width: 0; min-height: 0; grid-template-columns: minmax(0, 1fr); }
+.vt-main { display: grid; justify-items: center; align-items: center; min-width: 0; min-height: 0; }
 .vt-main .vt { width: min(100%, calc(50vh * 16 / 9)); border-radius: var(--r-media); }
-.vt-strip { display: flex; gap: var(--s-2); overflow-x: auto; justify-content: safe center; padding-bottom: 2px; scrollbar-width: thin; }
+.vt-strip { display: flex; gap: var(--s-2); overflow-x: auto; justify-content: safe center; padding-bottom: 2px; scrollbar-width: thin; min-width: 0; }
 .vt-strip .vt { flex: none; width: 168px; }
 
 .vt {
@@ -318,7 +400,7 @@
   content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 1;
   box-shadow: inset 0 0 0 2px transparent; transition: box-shadow var(--m-control) var(--ease-in-out);
 }
-.vt.talking::after { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--online) 45%, transparent); transition: none; }
+.vt.talking::after { box-shadow: inset 0 0 0 2px var(--online); transition: none; }
 .vt-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: var(--bg-0); }
 .vt-video.contain { object-fit: contain; }
 .vt-video.mirror { transform: scaleX(-1); }
@@ -333,81 +415,133 @@
 
 .vt-label, .vt-note {
   position: absolute; z-index: 2; display: inline-flex; align-items: center; gap: var(--s-1);
-  min-width: 0; max-width: calc(100% - var(--s-4) - 40px); height: 22px; padding: 0 6px;
+  min-width: 0; max-width: calc(100% - var(--s-4) - 40px); height: var(--h-xs); padding: 0 var(--s-2);
   border-radius: var(--r-row);
-  background: color-mix(in srgb, var(--bg-0) 76%, transparent); color: var(--text-1);
+  background: var(--media-scrim); color: var(--on-media);
   font-size: var(--t-ui); font-weight: var(--w-medium); line-height: 1; white-space: nowrap;
   pointer-events: none;
 }
 .vt-label { left: var(--s-2); bottom: var(--s-2); }
 .vt-label .ic { flex: none; }
 .vt-muted { display: inline-grid; place-items: center; color: var(--error); }
-.vt-note { left: var(--s-2); top: var(--s-2); color: var(--text-2); font-size: var(--t-meta); font-weight: var(--w-regular, 400); }
+.vt-note { left: var(--s-2); top: var(--s-2); font-size: var(--t-meta); font-weight: var(--w-regular, 400); }
 .vt.small .vt-label { left: var(--s-1); bottom: var(--s-1); height: 20px; max-width: calc(100% - var(--s-2)); font-size: var(--t-meta); }
 .vt.small .vt-note { display: none; }
 .vt-full {
   position: absolute; z-index: 2; right: var(--s-2); bottom: var(--s-2); width: var(--h-sm); height: var(--h-sm);
-  background: color-mix(in srgb, var(--bg-0) 76%, transparent); color: var(--text-1);
+  background: var(--media-scrim); color: var(--on-media);
 }
 .vt-full:hover { background: var(--bg-0); color: var(--text-1); }
 .vt:fullscreen { border-radius: 0; aspect-ratio: auto; width: 100vw; height: 100vh; background: var(--bg-0); }
 .vt:fullscreen .vt-hit { cursor: default; }
+/* A screen share's tile has both full screen and picture in picture: side by side, never one over the other. */
+.vt .vt-full ~ .vt-pip { right: calc(var(--s-2) + var(--h-sm) + var(--s-1)); }
+.vt-listen { display: inline-grid; place-items: center; flex: none; }
+.vt-paused {
+  position: absolute; left: 50%; bottom: var(--s-8); transform: translateX(-50%); z-index: 2;
+  display: inline-flex; align-items: center; gap: var(--s-2); max-width: calc(100% - var(--s-4));
+  padding: var(--s-1) var(--s-1) var(--s-1) var(--s-3); border-radius: var(--r-btn);
+  background: var(--media-scrim); color: var(--on-media); font-size: var(--t-meta);
+}
+.vt-paused span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stage-media { display: inline-grid; place-items: center; color: var(--mint); flex: none; }
+.stage-media.listen { display: inline-flex; gap: 3px; color: inherit; font-size: var(--t-meta); }
+.stage[data-size="48"] .listen-word, .stage[data-size="40"] .listen-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
-/* Phone: tiles in two columns (video in one), the controls stay at the
-   bottom of the stage as 44px targets and wrap rather than run off. */
+/* Desktop and tablet, with video: the stage has a fixed share of the column,
+   the large tile fits it, the strip sits beside it once there is room, and
+   the bar floats over the bottom of the picture. After a few still seconds
+   it fades (js/views/stage.js useIdleBar); any movement, tap or key brings it
+   back, and it stays while it has the focus. */
+@media (min-width: 760px) {
+  .conv.voice-live > .stage.in.media:not(.folded) {
+    position: relative; display: flex; flex-direction: column; gap: var(--s-2);
+    height: min(72%, 860px); min-height: 320px; max-height: none; overflow: hidden; padding-bottom: var(--s-2);
+  }
+  .conv.voice-live:has(> .stage.in.media:not(.folded)) > .stream { flex: 1 1 0; }
+  .stage.in.media:not(.folded) .stage-body { flex: 1 1 auto; overflow-y: auto; scrollbar-width: thin; align-content: center; }
+  .stage.in.media:not(.folded) .stage-body:has(> .vt-focus) { overflow: hidden; grid-template-rows: minmax(0, 1fr); }
+  .stage.in.media .vt-focus { height: 100%; grid-template-rows: minmax(0, 1fr) auto; }
+  .stage.in.media .vt-main { container-type: size; height: 100%; }
+  .stage.in.media .vt-main .vt { width: min(100cqw, 100cqh * 16 / 9); }
+  .stage.in.media:not(.folded) > .stage-acts {
+    position: absolute; left: 50%; bottom: var(--s-3); transform: translateX(-50%); z-index: 4;
+    flex-wrap: nowrap; max-width: calc(100% - var(--s-4)); padding: var(--s-1);
+    border-radius: var(--r-modal); background: var(--surface-float); --bg: var(--surface-float);
+    border: 1px solid var(--line-subtle); box-shadow: var(--elev-2);
+    transition: opacity var(--m-standard) var(--ease-in-out);
+  }
+  .stage.in.media[data-idle="1"] > .stage-acts:not(:focus-within):not(:hover) { opacity: 0; }
+}
+@container stage (min-width: 900px) {
+  .stage.in.media .vt-focus:not(.alone) { grid-template-columns: minmax(0, 1fr) 184px; grid-template-rows: minmax(0, 1fr); }
+  .stage.in.media .vt-strip { flex-direction: column; overflow-x: hidden; overflow-y: auto; justify-content: safe center; padding: 0 2px 0 0; }
+  .stage.in.media .vt-strip .vt { width: 100%; }
+}
+
+/* ---------- Phone ----------
+   In a call the stage is the screen: the tiles in the middle, the bar at the
+   bottom within thumb reach (56px targets with their words), More opening
+   above it. "Chat" folds the stage to a strip over the room's messages. */
 @media (max-width: 759px) {
   .stage { padding: var(--s-2) var(--s-3) var(--s-3); }
   .stage:not(.in) .stage-people, .stage.media .stage-people, .stage[data-size="40"] .stage-people { --tile-min: 136px; --tile-w: 1fr; grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--tile-min)), 1fr)); }
   .stage-people[data-n="1"] { grid-template-columns: minmax(0, 240px); }
   .stage .stage-name { font-size: var(--t-meta); }
-  .stage-acts { flex-wrap: wrap; row-gap: var(--s-1); }
-  .stage-acts .vc { width: var(--touch); height: var(--touch); }
-  .stage-acts .vc.leave { width: 52px; }
-  .vc-sep { display: none; }
+  /* Tiles leave the top row to the volume and moderation buttons (44px to
+     the touch), so the face never sits under them. */
+  .stage-person { aspect-ratio: auto; min-height: 132px; padding-top: var(--s-5); }
+  .stage-tools .ib.sm { width: var(--touch); height: var(--touch); }
   .stage-acts .btn.primary, .stage-acts .btn.live { height: var(--touch); flex: 1; max-width: 320px; }
-  .stage.media { max-height: 78%; }
-  .vt-grid, .vt-grid[data-n="2"] { grid-template-columns: minmax(0, 1fr); max-width: none; }
-  .vt-main .vt { width: 100%; }
-  .vt-strip .vt { width: 144px; }
-  .stage.in .stage-acts { position: sticky; bottom: calc(var(--s-3) * -1); z-index: 3; margin: 0 calc(var(--s-3) * -1) calc(var(--s-3) * -1); padding: var(--s-2) var(--s-3) var(--s-3); background: var(--surface-chat); border-top: 1px solid var(--line-subtle); }
-  .vt-full { width: var(--touch); height: var(--touch); }
-  .stage-tools .ib.sm { width: var(--h-sm); height: var(--h-sm); }
-}
-/* Fingers on any screen size: the call's controls stay 44px. */
-@media (pointer: coarse) {
-  .stage-acts .vc { width: var(--touch); height: var(--touch); }
-  .stage-acts .vc.leave { width: 52px; }
-  .stage-tools .ib.sm { width: var(--h-sm); height: var(--h-sm); }
-}
-@media (prefers-reduced-motion: reduce) { .vt::after, .stage-person::after { transition: none; } }
-/* ---------- end camera and screen sharing ---------- */
-
-/* ---------- v12 voice track ----------
-   Listening without a microphone, data saver's paused cameras, the route
-   (Direct or Relayed), the words under the call's buttons on a phone, and a
-   live voice room's empty chat that no longer shows a half-hidden icon. */
-.vc-word { display: none; }
-.stage-acts .btn.stage-listen { height: var(--h-36); padding: 0 var(--s-3); margin-left: var(--s-2); }
-.stage-acts .vc.listen .ic { color: var(--text-2); }
-.stage-media.listen { display: inline-flex; gap: 3px; color: var(--text-2); font-size: var(--t-meta); }
-.stage[data-size="48"] .listen-word, .stage[data-size="40"] .listen-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-.vt-listen { display: inline-grid; place-items: center; flex: none; color: var(--text-2); }
-.vt-paused {
-  position: absolute; left: 50%; bottom: var(--s-6); transform: translateX(-50%); z-index: 2;
-  display: inline-flex; align-items: center; gap: var(--s-2); max-width: calc(100% - var(--s-4));
-  padding: var(--s-1) var(--s-1) var(--s-1) var(--s-3); border-radius: var(--r-btn);
-  background: color-mix(in srgb, var(--bg-0) 82%, transparent); color: var(--text-2); font-size: var(--t-meta);
-}
-.vt-paused span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.act-routeword { margin-left: var(--s-2); padding-left: var(--s-2); border-left: 1px solid var(--line); color: var(--text-2); font-weight: var(--w-regular, 400); }
-.act-route { max-width: 44ch; }
-.conv.voice-live.chat-empty .start-mark { display: none; }
-/* A screen share's tile has both full screen and picture in picture: side by side, never one over the other. */
-.vt .vt-full ~ .vt-pip { right: calc(var(--s-2) + var(--h-sm) + var(--s-1)); }
-@media (max-width: 759px) {
-  .vt .vt-full ~ .vt-pip { right: calc(var(--s-2) + var(--touch) + var(--s-1)); }
-  .stage-acts .vc, .stage-acts .vc.leave { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 56px; height: 54px; margin-left: 0; }
+  .stage-acts .btn.stage-listen { height: var(--touch); flex: 1; max-width: 320px; }
+  .stage-acts:has(.stage-listen) { gap: var(--s-2); }
+  .stage-acts .vc, .stage-acts .vc.leave { width: 56px; height: 56px; margin-left: 0; }
   .stage-acts .vc .vc-word { display: block; font-size: var(--t-micro); line-height: 1; white-space: nowrap; }
-  .stage-acts .btn.stage-listen { height: var(--touch); flex: 1; max-width: 320px; margin-left: 0; }
-  .stage-acts:has(.stage-listen) { flex-wrap: wrap; gap: var(--s-2); }
+  .stage-acts.compact .vc { width: var(--touch); height: var(--touch); }
+  .stage-acts.compact .vc .vc-word { display: none; }
+  .stage-acts.compact .vc.leave { width: 52px; }
+  .stage.folded { padding: var(--s-2) var(--s-3); }
+  .stage.folded .stage-top { flex-basis: 100%; }
+  .stage.folded .stage-acts { margin-left: 0; width: 100%; justify-content: space-between; }
+
+  /* In the call: the stage fills the screen; the chat waits behind "Chat". */
+  .conv.voice-live > .stage.in:not(.folded) {
+    flex: 1 1 auto; height: auto; min-height: 0; max-height: none; overflow: hidden;
+    display: flex; flex-direction: column; gap: var(--s-2); padding-bottom: 0; border-bottom: 0;
+    container-type: inline-size;
+  }
+  .conv.voice-live:has(> .stage.in:not(.folded)) > .stream { display: none; }
+  .stage.in:not(.folded) > .stage-body { flex: 1 1 auto; overflow-y: auto; align-content: center; padding-bottom: var(--s-2); }
+  .stage.in:not(.folded) > .stage-acts {
+    flex: none; display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--s-1) 0;
+    margin: 0 calc(var(--s-3) * -1); padding: var(--s-2) var(--s-2) calc(var(--s-2) + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--line-subtle); background: var(--surface-chat);
+  }
+  .stage.in:not(.folded) > .stage-acts > .vc { flex: 1 1 0; max-width: 72px; }
+  .stage.in:not(.folded) > .stage-acts > .vc.leave { max-width: 80px; }
+  /* Tiles: one column for two people, two for more; faces a little larger. */
+  .stage.in:not(.media) .stage-people { grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: center; }
+  .stage.in:not(.media) .stage-people:is([data-n="1"], [data-n="2"]) { grid-template-columns: minmax(0, 1fr); }
+  .stage.in:not(.media) .stage-people:is([data-n="1"], [data-n="2"]) .stage-person { min-height: 168px; }
+  /* Video: one column for two, then two columns; a shared screen full width with the rest in a strip under it. */
+  .vt-grid, .vt-grid[data-n="2"] { grid-template-columns: minmax(0, 1fr); max-width: none; }
+  .vt-grid:is([data-n="3"], [data-n="4"]) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vt-grid:is([data-n="3"], [data-n="4"]) .vt { aspect-ratio: 3 / 4; }
+  .vt-main .vt { width: 100%; }
+  .vt-strip { justify-content: flex-start; }
+  .vt-strip .vt { width: 136px; }
+  .vt-full { width: var(--touch); height: var(--touch); }
+  .vt .vt-full ~ .vt-pip { right: calc(var(--s-2) + var(--touch) + var(--s-1)); }
+  .vt.small .vt-extras { display: none; }
+  /* The status line: the count, the clock and Chat on top; the connection and encryption under them. */
+  .stage-top .stage-top-end { order: 2; }
+  .stage-top > .stage-conn, .stage-top > .act-alarm { order: 3; flex-basis: 100%; justify-content: flex-start; }
+  .stage-top > .stage-ptt, .stage-top > .stage-sharing { order: 4; }
 }
+/* Fingers on any screen size: the call's controls stay 44px or more. */
+@media (pointer: coarse) {
+  .stage-acts .vc { min-width: var(--touch); min-height: var(--touch); }
+  .stage-acts .vc.leave { min-width: 52px; }
+}
+@media (prefers-reduced-motion: reduce) { .vt::after, .stage-person::after, .stage.in.media > .stage-acts { transition: none; } }
+.conv.voice-live.chat-empty .start-mark { display: none; }

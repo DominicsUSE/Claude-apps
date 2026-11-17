@@ -839,13 +839,19 @@ on('call.ended', ({ dm, reason }) => {
 export const RECONNECT_MS = 20_000;
 let reconnectTimer = null;
 const droppedText = (dm) => (dm ? 'The call dropped because the connection did. Call again when you’re back.' : 'Voice disconnected because the connection dropped. Join again when you’re back.');
+// For the screen only: the stage (js/views/stage.js) and the call strip
+// (js/views/calls.js) keep saying what happened, with the way back in.
+function noteDrop(c, text) {
+  if (c.dm) S.callEnd = { dm: c.room, reason: 'dropped', at: Date.now() };
+  else S.voiceDrop = { room: c.room, text, at: Date.now() };
+}
 on('close', () => {
   if (!S.call) return;
   const c = S.call;
-  if (c.status !== 'live' && c.status !== 'reconnecting') { stop(); toast(droppedText(c.dm)); return; }
+  if (c.status !== 'live' && c.status !== 'reconnecting') { stop(); noteDrop(c, droppedText(c.dm)); toast(droppedText(c.dm)); return; }
   c.status = 'reconnecting';
   clearTimeout(reconnectTimer);
-  reconnectTimer = setTimeout(() => { if (S.call === c && c.status === 'reconnecting') { stop(); toast(droppedText(c.dm)); } }, RECONNECT_MS);
+  reconnectTimer = setTimeout(() => { if (S.call === c && c.status === 'reconnecting') { stop(); noteDrop(c, droppedText(c.dm)); toast(droppedText(c.dm)); emit(); } }, RECONNECT_MS);
   emit();
 });
 on('open', async () => {
@@ -872,7 +878,9 @@ on('open', async () => {
     clearTimeout(reconnectTimer);
     const dm = c.dm;
     stop();
+    noteDrop(c, `Couldn’t get back into voice. ${e.message}`);
     toast(dm ? `Couldn’t get back into the call. ${e.message}` : `Couldn’t get back into voice. ${e.message}`);
+    emit();
   }
 });
 
@@ -926,6 +934,7 @@ export async function joinVoice(room, { start = false, video = false, listen = f
   const what = dm ? 'call' : 'join voice';
   if (S.conn.socket !== 'open') { toast(`You’re offline, so you can’t ${what} right now.`); return 'offline'; }
   if (S.callEnd?.dm === room) S.callEnd = null;
+  if (S.voiceDrop?.room === room) S.voiceDrop = null; // the stage's "Join again" note (js/views/stage.js)
   if (iceSoon()) await refreshIce();
   const c = { room, dm, muted: false, deaf: false, camera: false, screen: false, status: 'mic', video: !!video, listen: false };
   S.call = c;
