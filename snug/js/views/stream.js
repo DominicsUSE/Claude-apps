@@ -690,7 +690,7 @@ const Skeleton = ({ rows }) => html`<${LoadingState} kind="messages" rows=${rows
 
 // What can take focus inside a message. Out of the tab order (one stop per
 // stream); a message's Right and Left arrows walk them, the toolbar first.
-const MSG_CONTROLS = '.msg a[href], .msg button, .msg [tabindex="0"]:not(.msg), .msg video[controls], .msg audio[controls], .msg summary';
+const MSG_CONTROLS = '.msg a[href], .msg button, .msg [tabindex="0"]:not(.msg), .msg [data-tamed], .msg video[controls], .msg audio[controls], .msg summary';
 function msgZone(el) {
   const all = [...el.querySelectorAll(MSG_CONTROLS)].filter((c) => c.closest('.msg') === el && !c.disabled && c.getClientRects().length);
   const bar = all.filter((c) => c.closest('.msg-actions'));
@@ -835,8 +835,10 @@ export function Stream({ conv, intro, placeholder, short }) {
     const root = inner.current;
     if (!root) return undefined;
     const tame = () => root.querySelectorAll(MSG_CONTROLS).forEach((el) => {
-      if (el.closest('.msg-edit') || el.getAttribute('tabindex') === '-1') return;
+      // A code block that scrolls sideways keeps its tab stop: a keyboard has to reach it to scroll it.
+      if (el.closest('.msg-edit') || el.matches('.codeblock pre') || el.getAttribute('tabindex') === '-1') return;
       el.setAttribute('tabindex', '-1');
+      el.setAttribute('data-tamed', ''); // still reached with the arrow keys (msgZone)
     });
     tame();
     const mo = new MutationObserver(tame);

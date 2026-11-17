@@ -26,7 +26,7 @@ export function CodeBlock({ lang, v }) {
         <${Icon} name=${copied ? 'check' : 'copy'} size=${14} />${copied ? 'Copied' : 'Copy'}
       </button>
     </div>
-    <pre><code>${highlight(v, lang).map((t, i) => (t.t === 'text' ? t.v : html`<span key=${i} class=${`hl-${t.t}`}>${t.v}</span>`))}</code></pre>
+    <pre tabindex="0" role="group" aria-label=${`${label} code`}><code>${highlight(v, lang).map((t, i) => (t.t === 'text' ? t.v : html`<span key=${i} class=${`hl-${t.t}`}>${t.v}</span>`))}</code></pre>
   </div>`;
 }
 
