@@ -286,6 +286,12 @@
   .stage-acts .vc.main { width: 60px; height: 52px; }
   .stage-acts .vc.main .vc-word { display: block; font-size: var(--t-micro); line-height: 1; white-space: nowrap; }
 }
+/* A narrow stage (tablet, a thin window): smaller icons, so Leave stays on the row. */
+@container stage (max-width: 599px) {
+  .vc-group { padding: 0 2px; }
+  .stage-acts .vc { width: var(--h-36); height: var(--h-36); }
+  .stage-acts .vc.leave { width: 48px; margin-left: var(--s-1); }
+}
 /* Muted, deafened: the state you need to notice, as a filled control. */
 .stage-acts .vc.on, .stage-acts .vc.on:hover { background: var(--danger-soft); color: color-mix(in srgb, var(--danger) 72%, var(--text-1)); }
 .stage-acts .vc.on:hover { background: color-mix(in srgb, var(--danger) 24%, var(--surface-chat)); }
@@ -472,9 +478,13 @@
     transition: opacity var(--m-standard) var(--ease-in-out);
   }
   .stage.in.media[data-idle="1"] > .stage-acts:not(:focus-within):not(:hover) { opacity: 0; }
+  /* A narrow stage keeps the strip under the large tile: leave room for the bar under it. */
+  @container stage (max-width: 639px) { .stage.in.media:not(.folded) > .stage-body { padding-bottom: 68px; } }
 }
-@container stage (min-width: 900px) {
-  .stage.in.media .vt-focus:not(.alone) { grid-template-columns: minmax(0, 1fr) 184px; grid-template-rows: minmax(0, 1fr); }
+@container stage (min-width: 640px) {
+  .stage.in.media:not(.folded) .stage-body:has(> .vt-focus) { container-type: size; }
+  /* The large tile and the strip as one centred pair: the tile as wide as the height allows. */
+  .stage.in.media .vt-focus:not(.alone) { grid-template-columns: min(calc(100cqw - 192px), calc(100cqh * 16 / 9)) 184px; grid-template-rows: minmax(0, 1fr); justify-content: center; }
   .stage.in.media .vt-strip { flex-direction: column; overflow-x: hidden; overflow-y: auto; justify-content: safe center; padding: 0 2px 0 0; }
   .stage.in.media .vt-strip .vt { width: 100%; }
 }
@@ -532,7 +542,7 @@
   .vt-strip .vt { width: 136px; }
   .vt-full { width: var(--touch); height: var(--touch); }
   .vt .vt-full ~ .vt-pip { right: calc(var(--s-2) + var(--touch) + var(--s-1)); }
-  .vt.small .vt-extras { display: none; }
+  .vt.small .vt-extras, .vt.small .vt-pip { display: none; }
   /* The status line: the count, the clock and Chat on top; the connection and encryption under them. */
   .stage-top .stage-top-end { order: 2; }
   .stage-top > .stage-conn, .stage-top > .act-alarm { order: 3; flex-basis: 100%; justify-content: flex-start; }
