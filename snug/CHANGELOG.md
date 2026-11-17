@@ -35,8 +35,9 @@ goes back to an older version on its own (README, "Install, update, go back").
 
 - **The room storage note moved out of the composer.** "Room messages are stored on this server and can be read
   by whoever runs it and by moderators" now sits as one quiet line above the box, so the box keeps its height
-  and the last message stays in view. Narrow phones show a short form ("Not end-to-end encrypted. The server's
-  host and moderators can read room messages."); screen readers still hear the whole sentence.
+  and the last message stays in view. Below desktop width it shows a short form ("Not end-to-end encrypted:
+  this server and moderators can read it."); screen readers still hear the whole sentence, and the room's
+  Details keep it too.
 - **Newest is easier to find.** The unread divider puts "New" first, where you start reading; day dividers are
   quieter; reading older messages shows a floating pill with the count of new ones and "Jump to present".
 - **Replies and edits are clearer.** Quotes fold to one line (code no longer stretches across the bar), and
@@ -52,6 +53,8 @@ goes back to an older version on its own (README, "Install, update, go back").
 - **Toasts** rise in the bottom-left corner on wide screens, over the account panel, never on the messages.
 - **Code blocks** that scroll sideways can be reached with the keyboard, and their colours pass contrast in
   light themes. Message controls taken out of the tab order are still walked with the arrow keys.
+- **Double tap to react** no longer opens the picker or takes your reaction off when the tap lands near the
+  reaction row: the message text answers the tap instead of the phone snapping it to the nearest button.
 - **Search**: the filters are one sideways-scrolling row on phones (the ones in use first) instead of four
   rows; results open their message from one covering button, so links in the text are no longer nested in it.
 - **GIF picker** tabs read "Your GIFs", "Recent" and "Search" (the middle one was cut off), and its empty
