@@ -31,6 +31,34 @@ goes back to an older version on its own (README, "Install, update, go back").
 - **Text size** is one multiplier (`--text-scale`) on the page's font size, ready for more steps.
 - The local-address warning in the invite dialog reads in light themes (it failed contrast).
 
+### Chat
+
+- **The room storage note moved out of the composer.** "Room messages are stored on this server and can be read
+  by whoever runs it and by moderators" now sits as one quiet line above the box, so the box keeps its height
+  and the last message stays in view. Narrow phones show a short form ("Not end-to-end encrypted. The server's
+  host and moderators can read room messages."); screen readers still hear the whole sentence.
+- **Newest is easier to find.** The unread divider puts "New" first, where you start reading; day dividers are
+  quieter; reading older messages shows a floating pill with the count of new ones and "Jump to present".
+- **Replies and edits are clearer.** Quotes fold to one line (code no longer stretches across the bar), and
+  editing a message shows "Editing a message above" in the composer, with a cancel button.
+- **A message that didn't send** gets a red edge, says only you can see it, and offers Try again and Delete as
+  real buttons.
+- **Pictures and files.** Two to four pictures in one message sit in a tidy grid of square tiles; file cards
+  show the type (PDF, ZIP) beside the size; the viewer fits the whole picture to the screen instead of cropping
+  it.
+- **Phones.** The composer says just "Message" when the room name would be cut off, the voice-message button
+  steps aside once Send shows, attachments being sent get a row each with 44px buttons, reactions are 36px
+  chips with a 44px touch area, and the latest message stays in view when the keyboard opens.
+- **Toasts** rise in the bottom-left corner on wide screens, over the account panel, never on the messages.
+- **Code blocks** that scroll sideways can be reached with the keyboard, and their colours pass contrast in
+  light themes. Message controls taken out of the tab order are still walked with the arrow keys.
+- **Search**: the filters are one sideways-scrolling row on phones (the ones in use first) instead of four
+  rows; results open their message from one covering button, so links in the text are no longer nested in it.
+- **GIF picker** tabs read "Your GIFs", "Recent" and "Search" (the middle one was cut off), and its empty
+  state says houses, not places.
+- **Empty rooms and conversations** say how to begin: "Start the conversation below" / "Say hello to start the
+  conversation."
+
 ## 0.14.0
 
 ### Calls: private by default

@@ -92,7 +92,7 @@ export const COPY = {
   selfRemoved: (label) => `A device was removed: ${label}.`,
   serverSees: 'The server can’t read encrypted messages, reactions, polls, or (once everyone is on Snug 0.14 or later) group names and icons. It still sees:',
   roomsNot: 'Room messages are stored on this server and can be read by whoever runs it and by moderators. They aren’t end-to-end encrypted.',
-  roomsNotShort: 'Not end-to-end encrypted. The server’s host and moderators can read room messages.',
+  roomsNotShort: 'Not end-to-end encrypted: this server and moderators can read it.',
 
   resetTitle: 'Reset end-to-end encryption',
   resetBody: 'For when you’ve lost every device and your recovery key, or a device was stolen. You get new keys and a new recovery key. Messages encrypted before can’t be read any more, on any device. Everyone you talk to sees that your safety number changed.',

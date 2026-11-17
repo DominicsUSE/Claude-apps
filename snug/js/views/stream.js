@@ -275,6 +275,10 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
       if (emoji && !m.state && !(m.reactions?.[emoji] || []).includes(S.me)) react(conv, m.id, emoji);
     } else lastTap.current = { at: Date.now(), x: p.x, y: p.y };
   };
+  // A tap on the text belongs to the message. Without a click listener here, a
+  // phone's touch adjustment moves a tap near the reaction row onto the nearest
+  // button (Add a reaction, or your own reaction, which then comes off).
+  const onTapHere = () => {};
   // A finger never stays perfectly still: only a real move cancels the hold.
   const onMove = (e) => { const p = press.current; if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) cancel(); };
 
@@ -309,7 +313,7 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
         ? html`<${EditBox} conv=${conv} m=${m} />`
         : m.cmd?.roll ? html`<${RollLine} m=${m} />` // a dice roll the server wrote (js/views/chat.js)
         : m.e2ee && m.enc !== true ? html`<${EncBody} m=${m} />` // being decrypted, or couldn't be (js/views/e2ee-conv.js)
-        : m.text && !m.poll && html`<div class=${`msg-text${isJumbo(m.text) ? ' jumbo' : ''}`}>
+        : m.text && !m.poll && html`<div class=${`msg-text${isJumbo(m.text) ? ' jumbo' : ''}`} onClick=${onTapHere}>
             <${Rich} m=${m} onMention=${(who, e) => showProfile(who, e.target.getBoundingClientRect(), meta?.house)} />
             ${m.edited && html`<span class="edited" data-tip=${`Edited ${fmtFull(m.edited)}`}>(edited)</span>`}
             ${m.silent && html`<span class="silent-mark" role="img" aria-label="Sent silently" data-tip="Sent silently: no sound, no notification"><${Icon} name="bell-off" size=${14} /></span>`}

@@ -185,9 +185,8 @@ button.poll-a:active { background: var(--bg-4); }
 .date-pop-acts { display: flex; justify-content: flex-end; gap: var(--s-2); }
 
 /* ---------- Search results: the whole row opens the message ---------- */
-.hit-main { position: relative; }
-.hit-open { position: absolute; inset: calc(var(--s-1) * -1); z-index: 1; border-radius: var(--r-btn); }
-.hit-open:hover { background: color-mix(in srgb, var(--text-1) 4%, transparent); }
+.hit-main { position: relative; cursor: pointer; }
+.hit-open { position: absolute; inset: calc(var(--s-1) * -1); border-radius: var(--r-btn); pointer-events: none; }
 .hit-open:focus-visible { outline: var(--focus-w) solid var(--focus); outline-offset: 0; }
 
 /* ---------- Search suggestions ---------- */
