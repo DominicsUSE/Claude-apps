@@ -28,6 +28,40 @@ goes back to an older version on its own (README, "Install, update, go back").
 - **Toasts** can say success, error or info with an icon and a word, not colour alone; errors stay longer.
 - **Nothing moves for longer than 200ms**, reduced motion also stops plain transitions, and text is never
   smaller than 11px (voice-room initials and the compact event month were 8-9px).
+
+### Voice rooms and calls
+
+- **On a phone, a call is the screen.** The stage fills it, with the controls in a bar at the bottom where a
+  thumb reaches: Mute, Sound, Camera, Screen, More and Leave, each 56px with its word. More opens the rest
+  above the bar. "Chat" folds the call into a strip over the room's messages, and "Call" brings it back.
+- **Labelled, grouped controls everywhere.** On a computer the bar is in groups (your sound, camera and
+  screen, doing things together, people and options, Leave), and the main controls show their word under
+  the icon once there is room. Muted and deafened are filled red, a camera or screen that is on is filled
+  mint. The muted word now has enough contrast in the light themes.
+- **Over a camera or a shared screen** the bar floats on the picture and fades after a few still seconds on a
+  computer. Moving the mouse, a tap or any key brings it back, and it never fades while it has the focus.
+- **A shared screen is large, everyone else in a strip** beside it on a wide window and under it otherwise.
+  Phone cameras use two columns once there are three or more people, so nobody is cut off.
+- **Who is speaking is plain:** a 2px ring on their tile as well as their face, and their name turns mint.
+  Each tile says to screen readers who it is, whether they're speaking, muted or listening only, and how
+  their connection is.
+- **Connection quality** shows as three clear bars (they were drawn as dots), amber when fair and rose when
+  poor, with the words in the tooltip.
+- **People in the call:** a new button lists everyone with what they're doing, their connection, and their
+  volume, which only you hear. Volume is also on each tile, as before.
+- **Push to talk is visible:** "Hold ` to talk" sits in the status line (with your key), and turns into
+  "Talking" while the microphone is open. On a phone, Hold to talk is a wide button over the bar.
+- **The status line wraps instead of overlapping** on narrow screens; the encryption label stays in full
+  ("Encrypted in transit only" or "End-to-end encrypted") with a lock icon, and your own screen share says so
+  with a Stop button.
+- **Fold the stage on a computer** to a single line with the small controls, so the room's messages get the
+  space. Snug remembers it per room on this device.
+- **Plain states:** an empty voice room says "Nobody is here yet"; joining shows a spinner and what Snug is
+  waiting for; a reconnecting call says your place is kept; a dropped voice room keeps a "Join again" note,
+  and a dropped call says "Call dropped" with "Call again". A line that fails says Snug is trying again.
+- **The "connects directly" note** before joining a voice room is a calm card, not amber small print.
+- **The floating call** is a 56px strip above the tab bar on a phone instead of a card over the list.
+- **Settings › Voice and video:** sliders are wider, with the value at the right.
 - **Text size** is one multiplier (`--text-scale`) on the page's font size, ready for more steps.
 - The local-address warning in the invite dialog reads in light themes (it failed contrast).
 
