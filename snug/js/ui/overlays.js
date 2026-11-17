@@ -194,11 +194,18 @@ export function ModalFrame({ modal }) {
   // dialog with steps changes its heading.
   useLayoutEffect(() => {
     const el = ref.current;
-    if (!el || modal.props.label) return;
-    const h = el.querySelector('h1, h2, h3');
-    if (!h) { el.removeAttribute('aria-labelledby'); return; }
-    if (!h.id) h.id = `${modal.k}-title`;
-    el.setAttribute('aria-labelledby', h.id);
+    if (!el || modal.props.label) return undefined;
+    const name = () => {
+      const h = el.querySelector('h1, h2, h3');
+      if (!h) { el.removeAttribute('aria-labelledby'); return; }
+      if (!h.id) h.id = `${modal.k}-title`;
+      if (el.getAttribute('aria-labelledby') !== h.id) el.setAttribute('aria-labelledby', h.id);
+    };
+    name();
+    // A dialog whose content loads after it opens (an invitation being looked up) gets its heading late.
+    const watch = new MutationObserver(name);
+    watch.observe(el, { childList: true, subtree: true });
+    return () => watch.disconnect();
   });
   const trap = (e) => {
     if (e.key !== 'Tab') return;

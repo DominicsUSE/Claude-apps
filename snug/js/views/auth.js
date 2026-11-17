@@ -46,7 +46,7 @@ export function Auth() {
     api('/api/id/config').then((c) => live && setId(c), () => live && setId({ enabled: false }));
     return () => { live = false; };
   }, []);
-  if (!gh || !id) return html`<div class="auth"><main class="auth-main"><div class="auth-panel"><div class="auth-brand"><${Lockup} size=${24} /></div></div></main></div>`;
+  if (!gh || !id) return html`<div class="auth"><main id="main" class="auth-main"><div class="auth-panel"><div class="auth-brand"><${Lockup} size=${24} /></div></div></main></div>`;
   const m = mode || (id.enabled ? 'key' : gh.enabled ? 'github' : 'password');
   const first = id.enabled ? 'key' : gh.enabled ? 'github' : null;
   if (m === 'key') return html`<${KeyAuth} cfg=${id} entered=${entered} onPassword=${() => setMode('password')} onGitHub=${() => setMode('github')} />`;
@@ -141,7 +141,7 @@ function GitHubAuth({ gh, onPassword, onBack }) {
       ${onBack && html`<p class="auth-swap"><button type="button" class="auth-link" id="auth-github-back" onClick=${onBack}>Back</button></p>`}`;
   }
   return html`<div class="auth">
-    <main class="auth-main">
+    <main id="main" class="auth-main">
       <div class="auth-panel" aria-labelledby="auth-title">
         <div class="auth-brand"><${Lockup} size=${24} /></div>
         ${body}
@@ -355,13 +355,13 @@ function PasswordAuth({ onGitHub }) {
   const described = (field, hint) => [bad(field) && `auth-${field}-err`, hint && `auth-${field}-hint`].filter(Boolean).join(' ') || undefined;
 
   if (forgot) {
-    return html`<div class="auth"><main class="auth-main"><div class="auth-panel" aria-labelledby="auth-title">
+    return html`<div class="auth"><main id="main" class="auth-main"><div class="auth-panel" aria-labelledby="auth-title">
       <div class="auth-brand"><${Lockup} size=${24} /></div>
       <${ForgotPassword} onDone=${entered} onBack=${() => setForgot(false)} />
     </div></main></div>`;
   }
   return html`<div class="auth">
-    <main class="auth-main">
+    <main id="main" class="auth-main">
       <div class="auth-panel">
         <div class="auth-brand"><${Lockup} size=${24} /></div>
         ${invite && html`<div class="auth-invite">

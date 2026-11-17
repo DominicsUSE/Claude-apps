@@ -362,9 +362,9 @@ button.avatar { cursor: pointer; }
 .empty { margin: auto; padding: var(--s-8) var(--s-6); max-width: 400px; text-align: center; display: grid; gap: var(--s-2); justify-items: center; }
 .empty h2 { font-size: var(--t-section); font-weight: var(--w-semibold); }
 .empty p { color: var(--text-2); line-height: var(--lh-body); font-size: var(--t-body); }
-.empty .ic { color: var(--text-3); margin-bottom: var(--s-1); }
+.empty > .ic { color: var(--text-3); margin-bottom: var(--s-1); } /* the state's own icon, not one inside its button */
 .empty .btn { margin-top: var(--s-2); }
-.empty.error .ic { color: var(--error); }
+.empty.error > .ic { color: var(--error); }
 .empty.inline { margin: 0; padding: var(--s-4) var(--s-2); max-width: none; text-align: left; justify-items: start; }
 
 /* Loading: quiet blocks in the shape of what is coming. Still under reduced motion. */

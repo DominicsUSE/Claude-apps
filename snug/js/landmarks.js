@@ -81,6 +81,11 @@ function mountSkip() {
   a.href = '#main';
   a.textContent = 'Skip to messages';
   a.addEventListener('click', skip);
+  // It says where it goes: the composer in a conversation, the page's content elsewhere (Home, Discover).
+  a.addEventListener('focus', () => {
+    const main = document.getElementById('main') || document.querySelector('main');
+    a.textContent = main?.querySelector('.composer textarea:not([disabled])') ? 'Skip to messages' : 'Skip to content';
+  });
   document.body.prepend(a);
 }
 if (document.body) mountSkip(); else addEventListener('DOMContentLoaded', mountSkip);

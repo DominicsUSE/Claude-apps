@@ -205,7 +205,7 @@ export function KeyAuth({ cfg, onPassword, onGitHub, entered }) {
       </p>`;
   }
   return html`<div class="auth">
-    <main class="auth-main">
+    <main id="main" class="auth-main">
       <div class="auth-panel" aria-labelledby="auth-title">
         <div class="auth-brand"><${Lockup} size=${24} /></div>
         ${body}

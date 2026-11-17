@@ -158,7 +158,7 @@
    column; who is around, your communities and suggestions beside it.
    Section labels are small caps with a count (brief 16); rows are dense and
    hover on a surface step; no borders between sections. */
-.home-col { width: 100%; max-width: 70rem; padding: var(--s-4) var(--s-6) var(--s-8); container-type: inline-size; }
+.home-col { width: 100%; max-width: 70rem; margin-inline: auto; padding: var(--s-4) var(--s-6) var(--s-8); container-type: inline-size; }
 .home-hello { margin-bottom: var(--gap-major); }
 .home-greet { font-size: var(--t-section); font-weight: var(--w-semibold); line-height: var(--lh-heading); letter-spacing: -0.01em; }
 .home-summary { margin-top: var(--s-1); display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-3); color: var(--text-2); font-size: var(--t-ui); line-height: var(--lh-ui); }
@@ -247,12 +247,47 @@ button.home-row:hover .home-row-ic:not(:has(> .avatar, > .tile)) { background: v
 .home-link { color: var(--text-1); font-weight: var(--w-medium); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; border-radius: var(--r-row); }
 .home-link:hover { text-decoration-color: currentColor; }
 
-/* A brand-new account: one warm sentence, two ways in. */
-.home-start { padding: var(--s-4) 0 var(--s-8); display: grid; gap: var(--s-2); justify-items: start; max-width: 34rem; }
-.home-start h3 { font-size: var(--t-section); font-weight: var(--w-semibold); line-height: var(--lh-heading); margin-top: var(--s-2); }
-.home-start p { color: var(--text-2); font-size: var(--t-body); line-height: var(--lh-body); }
-.home-start-acts { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-2); }
-.home-fresh-picks { max-width: 34rem; }
+/* A brand-new account (js/views/start.js): what Snug is in a sentence, the
+   two ways in, three words explained, then five steps ticked off as you go. */
+.onb { display: grid; gap: var(--gap-major); max-width: 40rem; padding-top: var(--s-2); }
+.onb-hero { display: grid; gap: var(--s-3); justify-items: start; }
+.onb-title-main { font-size: var(--t-heading); font-weight: var(--w-semibold); line-height: var(--lh-heading); letter-spacing: -0.01em; margin-top: var(--s-2); text-wrap: balance; }
+.onb-lead { color: var(--text-2); font-size: var(--t-section); line-height: var(--lh-body); }
+.onb-hero-acts { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-1); }
+.onb-explain { list-style: none; margin: var(--s-2) 0 0; padding: 0; display: grid; gap: var(--s-2); color: var(--text-2); font-size: var(--t-ui); line-height: var(--lh-body); }
+.onb-explain li { display: flex; gap: var(--s-3); align-items: flex-start; }
+.onb-explain b { color: var(--text-1); font-weight: var(--w-semibold); }
+.onb-explain-ic { width: var(--h-sm); height: var(--h-sm); flex: none; display: grid; place-items: center; border-radius: var(--r-btn); background: var(--surface-2); color: var(--text-2); }
+.onb-or { color: var(--text-3); font-size: var(--t-ui); }
+
+.onb-steps { padding: var(--s-4); border: 1px solid var(--line-subtle); border-radius: var(--r-modal); background: var(--surface-2); --bg: var(--surface-2); display: grid; gap: var(--s-3); max-width: 40rem; margin-bottom: var(--gap-major); }
+.onb .onb-steps { margin-bottom: 0; }
+.onb-steps-head { display: flex; align-items: center; gap: var(--s-3); }
+.onb-steps-head h3 { font-size: var(--t-body); font-weight: var(--w-semibold); }
+.onb-count { color: var(--text-3); font-size: var(--t-meta); }
+.onb-hide { margin-left: auto; }
+.onb-bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.onb-bar span { display: block; height: 100%; background: var(--color-primary); border-radius: 2px; transition: width var(--m-slow) var(--ease-out); }
+.onb-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-1); }
+.onb-step { display: flex; gap: var(--s-3); align-items: flex-start; padding: var(--s-2) 0; }
+.onb-mark { width: var(--h-xs); height: var(--h-xs); flex: none; display: grid; place-items: center; border-radius: 50%; border: 1.5px solid var(--line-strong); color: var(--text-3); font-size: var(--t-meta); font-weight: var(--w-semibold); }
+.onb-step.is-done .onb-mark { background: var(--success-soft); border-color: transparent; color: var(--success-ink); }
+.onb-step.is-next .onb-mark { border-color: var(--color-primary); color: var(--text-1); }
+.onb-body { display: grid; gap: var(--s-1); min-width: 0; padding-top: 2px; }
+.onb-title { font-size: var(--t-body); font-weight: var(--w-medium); color: var(--text-1); }
+.onb-step.is-done .onb-title { color: var(--text-2); }
+.onb-step.is-next .onb-title { font-weight: var(--w-semibold); }
+.onb-text { color: var(--text-2); font-size: var(--t-ui); line-height: var(--lh-body); }
+.onb-acts { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-1); }
+.onb-privacy { font-size: var(--t-ui); padding-top: var(--s-1); border-top: 1px solid var(--line-subtle); }
+.onb-privacy .linkish { color: var(--text-2); }
+.onb-privacy .linkish:hover { color: var(--text-1); }
+.home-fresh-picks { max-width: 40rem; margin-top: var(--gap-major); }
+/* A new account's Home is one column: the reminder above it lines up with it. */
+.home-col:has(> .onb) { max-width: calc(40rem + var(--s-6) * 2); }
+.home-invite .btn { flex: none; }
+.home-sect[aria-labelledby="home-invites"] { margin-bottom: var(--gap-major); }
+.home-invite { cursor: default; }
 
 /* ---------- Phone ---------- */
 .phone .home-col { padding: var(--s-4) var(--s-4) var(--s-8); }
@@ -277,3 +312,43 @@ button.home-row:hover .home-row-ic:not(:has(> .avatar, > .tile)) { background: v
 .catchup .view-sect.for-you .badge { margin-left: 0; }
 /* No rule between rows: spacing and the hover step separate them (brief 2). */
 .catchup .invite { box-shadow: inset 2px 0 0 var(--brand); }
+
+/* ---------- Folding the sidebar (0.15) ----------
+   Folded, the frame is the rail and the content; the rail's foot carries you,
+   your settings and the call you are in. A place chosen in the rail peeks its
+   column over the content until you go somewhere. */
+.rail-foot { flex: none; display: flex; flex-direction: column; align-items: center; gap: var(--s-1); padding: var(--s-2) 0 var(--s-3); border-top: 1px solid var(--line-subtle); }
+.rail-foot .ib { color: var(--text-3); }
+.rail-foot .ib:hover { color: var(--text-1); }
+.rail-foot .rail-call { color: var(--mint); }
+.rail-me { width: var(--h-md); height: var(--h-md); display: grid; place-items: center; border-radius: 50%; transition: background var(--m-hover) var(--ease-in-out); }
+.rail-me:hover { background: var(--surface-hover); --bg: var(--surface-hover); }
+.rail-me .avatar { --sz: 32px; }
+.app.ctx-shut { --nav-w: var(--rail-w); }
+.ctx.ctx-peek { position: absolute; top: 0; bottom: 0; left: var(--rail-w); width: min(var(--ctx-w), calc(100% - var(--rail-w) - var(--s-12))); z-index: var(--z-drawer); box-shadow: var(--elev-3); animation: peek-in var(--m-panel) var(--ease-out); }
+@keyframes peek-in { from { opacity: 0; transform: translateX(-8px); } }
+.ctx-scrim { position: absolute; top: 0; bottom: 0; right: 0; left: var(--rail-w); z-index: var(--z-dock); background: var(--scrim); animation: fade-in var(--m-panel) var(--ease-out); }
+
+/* ---------- House header: name and menu, then invite and settings ---------- */
+.ctx-house-head { gap: 0; }
+.ctx-house-head .ctx-house { flex: 1; min-width: 0; }
+.ctx-house-acts { display: flex; align-items: center; gap: 2px; padding: 0 var(--s-2) 0 var(--s-1); flex: none; }
+.ctx-house-acts .ib { color: var(--text-3); }
+.ctx-house-acts .ib:hover { color: var(--text-1); }
+/* One line under the name: who is online, then members; the count ellipsises rather than wraps. */
+.ctx-house-head .ctx-meta { white-space: nowrap; overflow: hidden; min-width: 0; }
+.ctx-house-head .ctx-meta > .ctx-online { flex: none; }
+.ctx-house-head .ctx-meta > .num { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Room marks: private, muted, favourites ---------- */
+.row-mark { display: inline-grid; place-items: center; color: var(--text-3); }
+.row.sel .row-mark { color: var(--text-2); }
+.sect-label { display: inline-flex; align-items: center; gap: var(--s-1); }
+.nav-favs .sect-label .ic { color: var(--text-3); }
+/* A category's options and its plus sit together at the end of its label. */
+.sect .ib + .ib { margin-left: 0; }
+@media (pointer: coarse) {
+  .sect { height: var(--tap-min); }
+  .sect button.sect-name { height: var(--tap-min); padding-right: var(--s-3); }
+  .sect .ib.sm { width: var(--tap-min); height: var(--tap-min); }
+}

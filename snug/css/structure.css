@@ -175,3 +175,15 @@
   .room-set { order: 3; width: 100%; justify-content: flex-start; padding-left: var(--s-8); }
   .room-set .field, .room-set-row .btn { height: var(--touch); }
 }
+
+/* ---------- While your places load (0.15) ---------- */
+.shell-skel { height: 100%; display: grid; grid-template-columns: var(--rail-w, 72px) var(--ctx-w) minmax(0, 1fr); background: var(--surface-rail); }
+.shell-skel-rail { display: flex; flex-direction: column; align-items: center; gap: var(--s-2); padding: var(--s-3) 0; }
+.shell-skel-ctx { background: var(--surface-nav); display: flex; flex-direction: column; gap: var(--s-2); }
+.shell-skel-main { background: var(--surface-chat); display: flex; flex-direction: column; gap: var(--s-4); min-width: 0; }
+.shell-skel-bar { height: var(--bar-h); flex: none; display: flex; align-items: center; padding: 0 var(--s-4); border-bottom: 1px solid var(--line-subtle); }
+.shell-skel .ui-loading { padding: 0 var(--s-3); }
+.shell-skel.phone-skel { display: flex; flex-direction: column; background: var(--bg-1); }
+.phone-skel .ui-loading { flex: 1; padding-top: var(--s-2); }
+.shell-skel-tabs { height: var(--tabs-h, 56px); flex: none; display: flex; justify-content: space-around; align-items: center; border-top: 1px solid var(--line-subtle); }
+@media (max-width: 1023px) { .shell-skel:not(.phone-skel) { grid-template-columns: var(--rail-w, 72px) minmax(0, 1fr); } .shell-skel:not(.phone-skel) .shell-skel-ctx { display: none; } }

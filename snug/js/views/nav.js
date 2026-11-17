@@ -19,7 +19,7 @@ import { plain } from '../lib/format.js';
 import { TOPICS, friendRequests, upcomingEvents, eventState } from '../lib/social.js';
 import { Icon } from '../ui/icons.js';
 import { Nook } from '../ui/brand.js';
-import { Avatar, Stack, RoomIcon, PRESENCE, presenceLabel } from '../ui/kit.js';
+import { Avatar, Stack, RoomIcon, PRESENCE, presenceLabel, Skeleton, LoadingState } from '../ui/kit.js';
 import { StatusEmoji, SidebarGrip } from './account.js'; // custom status emoji; dragging the column wider
 import { MePop, showProfile, lastActive, ago } from './people.js'; // presence menu, profile card, last seen
 import { RoomForm, Confirm, Invite, AddHouse, NewMessage, RoomBrowser } from './modals.js';
@@ -156,7 +156,7 @@ function Marker({ attn }) {
 
 // `line`: a second line under the name (what a person is doing, when they
 // were last around); the row grows to 42px for it (css/nav.css .two-line).
-function Row({ icon, label, hint, line, lineLive, sel, held, attn, muted, sub, live, end, onClick, onMenu, place }) {
+function Row({ icon, label, hint, line, lineLive, sel, held, attn, muted, sub, live, end, onClick, onMenu, place, lock }) {
   // held: the room whose thread is open beside it. Bright text, no background:
   // only the thread row is selected.
   const cls = `row${sel ? ' sel' : ''}${held ? ' sel-parent' : ''}${attn?.soft || attn?.needs ? ' unread' : ''}${muted ? ' muted' : ''}${sub ? ' nested' : ''}${live ? ' live' : ''}${line ? ' two-line' : ''}${place ? ' row-place' : ''}`;
@@ -166,8 +166,20 @@ function Row({ icon, label, hint, line, lineLive, sel, held, attn, muted, sub, l
     ${line
       ? html`<span class="grow row-text"><span class="trunc">${label}${hint && html`<span class="row-hint">${hint}</span>`}</span><span class=${`row-line trunc${lineLive ? ' is-live' : ''}`}>${line}</span></span>`
       : html`<span class="trunc grow">${label}${hint && html`<span class="row-hint">${hint}</span>`}</span>`}
-    <span class="row-end">${end}<${Marker} attn=${attn} /></span>
+    <span class="row-end">${end}${lock && html`<span class="row-mark" role="img" aria-label="Private"><${Icon} name="lock" size=${12} /></span>`}${muted && !attn?.needs && html`<span class="row-mark" role="img" aria-label="Muted"><${Icon} name="bell-off" size=${12} /></span>`}<${Marker} attn=${attn} /></span>
   </button>`;
+}
+
+// ---------- Favourite rooms ----------
+// Starred rooms sit in their own group at the top of the house's list, on
+// this device (prefs are local). The room menu adds and removes them.
+const favs = () => S.prefs.favRooms || {};
+export const isFav = (id) => !!favs()[id];
+export function toggleFav(id) {
+  const next = { ...favs() };
+  if (next[id]) delete next[id]; else next[id] = Date.now();
+  S.prefs.favRooms = next;
+  emit();
 }
 
 const current = () => (S.ui.view.type === 'conv' ? S.ui.view.id : null);
@@ -201,6 +213,7 @@ export function roomMenu(id, pos, extra = []) {
     items: [
       ...extra,
       { label: t('nav.markRead'), icon: 'check', disabled: !a.soft && !a.needs, onSelect: () => markConvRead(id) },
+      { label: isFav(id) ? t('nav.unfavourite') : t('nav.favourite'), icon: isFav(id) ? 'starred' : 'star', onSelect: () => toggleFav(id) },
       ...notifyItems('room', id, levelOf(S, id), pos),
       manage && { sep: true },
       manage && { label: t('nav.editRoom'), icon: 'edit', onSelect: () => openModal(RoomForm, { room: id }) },
@@ -309,7 +322,7 @@ function onRailKey(e) {
 
 // `sp` and `pick`: the phone's drawer shows the rail for the place it is
 // browsing, which is not always where you are (js/app.js PhoneDrawer).
-export function Rail({ sp = S.ui.space, pick = openSpace } = {}) {
+export function Rail({ sp = S.ui.space, pick = openSpace, foot = null } = {}) {
   return html`<nav class="rail" aria-label=${t('nav.places')} onKeyDown=${onRailKey}>
     <div class="rail-scroll">
       <${RailItem} label=${t('nav.home')} cls="rail-home" sel=${sp === 'home'} attn=${{ needs: 0, soft: homeNeeds() > 0 }} onClick=${() => pick('home')}>
@@ -327,7 +340,47 @@ export function Rail({ sp = S.ui.space, pick = openSpace } = {}) {
         <${Icon} name="plus" size=${20} />
       <//>
     </div>
+    ${foot}
   </nav>`;
+}
+
+// ---------- The sidebar, folded away (desktop) ----------
+// The context column can fold into the rail, and stays as you left it on this
+// device. Until you choose, it is folded below 1024px wide (a tablet), where
+// the conversation needs the room. Folded, a place chosen in the rail opens
+// its column over the content for a moment ("peek"); going anywhere, Esc or a
+// click outside puts it away.
+const wideQuery = typeof matchMedia === 'function' ? matchMedia('(min-width: 1024px)') : null;
+wideQuery?.addEventListener?.('change', () => emit());
+export const ctxShut = () => !S.ui.phone && (typeof S.prefs.ctxShut === 'boolean' ? S.prefs.ctxShut : !(wideQuery ? wideQuery.matches : true));
+export function toggleCtx() {
+  S.prefs.ctxShut = !ctxShut();
+  S.ui.ctxPeek = null;
+  emit();
+}
+export function closePeek() { if (S.ui.ctxPeek) { S.ui.ctxPeek = null; emit(); return true; } return false; }
+function pickPeek(sp) {
+  openSpace(sp);
+  S.ui.ctxPeek = { at: S.ui.view };
+  emit();
+}
+
+// The rail's foot: the fold button, and while folded what the column's
+// bottom panel holds (you, your settings, and the call you are in).
+function RailFoot({ shut }) {
+  const u = isOnline() ? me() : { ...me(), presence: 'offline' };
+  const c = S.call;
+  const muted = c ? !!c.muted : !!(pre.muted || pre.deaf);
+  return html`<div class="rail-foot">
+    ${shut && c && html`<button class="ib rail-call" aria-label=${t('nav.backToCall')} data-tip=${t('nav.backToCall')} data-tip-side="right" onClick=${() => openConv(c.room)}><${Icon} name="voice" /></button>
+      <button class=${`ib${muted ? ' alert' : ''}`} aria-pressed=${String(muted)} aria-label=${t('nav.muteMic')} data-tip=${muted ? t('nav.unmute') : t('nav.mute')} data-tip-side="right" onClick=${panelMic}><${Icon} name=${muted ? 'mic-off' : 'mic'} /></button>`}
+    ${shut && html`<button class="rail-me" aria-label=${`${u.name}, ${presenceLabel(u)}. Change presence and status`} data-tip=${u.name} data-tip-side="right"
+        onClick=${(e) => openPop({ anchor: rectOf(e), label: 'Presence and status', C: MePop, props: {} })}><${Avatar} user=${u} presence size=${32} /></button>
+      <button class="ib" aria-label=${t('nav.settings')} data-tip=${t('nav.settings')} data-tip-side="right" onClick=${() => openLayer({ C: Settings, props: {} })}><${Icon} name="gear" /></button>`}
+    <button class="ib rail-fold" aria-expanded=${String(!shut)} aria-label=${t('nav.sidebar')} data-tip=${shut ? t('nav.showSidebar') : t('nav.hideSidebar')} data-tip-side="right" onClick=${toggleCtx}>
+      <${Icon} name=${shut ? 'chev-r' : 'chev-l'} />
+    </button>
+  </div>`;
 }
 
 // ---------- Context column: one per place ----------
@@ -428,7 +481,8 @@ function dmLine(id, meta) {
   return { text: u.status || PRESENCE[u.presence]?.label || '' };
 }
 
-export function NavDirect({ drawer } = {}) {
+// `empty`: the phone's Messages tab with nothing in it shows its own empty state below.
+export function NavDirect({ drawer, empty } = {}) {
   const cur = current();
   return html`<div class="nav-group">
     <${EncInvite} />
@@ -444,7 +498,7 @@ export function NavDirect({ drawer } = {}) {
         end=${callLive(id) ? html`<${CallMark} />` : null}
         onClick=${() => openConv(id)} onMenu=${(pos) => dmMenu(id, pos)} />`;
     })}
-    ${!S.dmOrder.length && html`<p class="ctx-note">${t('nav.noConvs')}</p>`}
+    ${!S.dmOrder.length && !empty && html`<p class="ctx-note">${t('nav.noConvs')}</p>`}
     ${(S.safety?.requests || []).some((r) => S.dms[r.dm]) && html`
       <div class="sect"><span>${t('nav.requests')}</span></div>
       ${S.safety.requests.filter((r) => S.dms[r.dm]).map((r) => html`<${Row} key=${r.dm} icon=${convIcon(r.dm)} label=${convMeta(r.dm).title}
@@ -477,7 +531,7 @@ function DmRow({ id }) {
 function MessagesCtx() {
   return html`
     <${CtxHead}><${JumpButton} label=${t('nav.findConv')} /><//>
-    <div class="nav-scroll"><${NavDirect} /></div>`;
+    <div class="nav-scroll"><${NavDirect} empty=${S.ui.view.type === 'messages'} /></div>`;
 }
 
 // Discover's sections. The section names are the route's `section` values.
@@ -526,7 +580,7 @@ function VoicePerson({ u, room }) {
   </button>`;
 }
 
-function RoomRow({ id, hint }) {
+function RoomRow({ id, hint, fav }) {
   const room = S.rooms[id];
   const cur = current();
   const voice = room.kind === 'voice' || room.kind === 'stage'; // stage: js/views/places.js
@@ -537,7 +591,7 @@ function RoomRow({ id, hint }) {
   const threads = threadsOf(S, id).filter((t) => (S.followed[t] && unreadOf(S, t).count > 0) || t === pane);
   const threadSel = cur === id && !!pane && threads.includes(pane);
   const row = html`<${Row} icon=${html`<${RoomIcon} kind=${room.kind} size=${16} />`} label=${room.name} hint=${hint} sel=${cur === id && !threadSel} held=${threadSel}
-    attn=${attention(S, id)} muted=${levelOf(S, id) === 'muted'} live=${inside.length > 0} end=${end}
+    attn=${attention(S, id)} muted=${levelOf(S, id) === 'muted'} live=${inside.length > 0} end=${end} lock=${!!room.private}
     onClick=${() => openConv(id)} onMenu=${(pos) => roomMenu(id, pos)} />`;
   return html`
     ${voice && S.call?.room !== id
@@ -566,6 +620,7 @@ export function HouseRooms({ id }) {
   const events = upcomingEvents(S, now, { house: id });
   const live = events.some((e) => eventState(e, now) === 'now');
   const front = S.ui.view.type === 'house' && S.ui.view.id === id;
+  const starred = roomIds(S, id).filter((r) => isFav(r) && sees(r)).sort((a, b) => favs()[a] - favs()[b]);
   return html`
     <div class="nav-group">
       <${Row} icon=${html`<${Icon} name="info" />`} label=${t('nav.about')} sel=${front && !S.ui.view.events} onClick=${() => go({ type: 'house', id, about: true })} />
@@ -573,9 +628,13 @@ export function HouseRooms({ id }) {
         end=${events.length ? html`${live && html`<span class="ev-live">${t('nav.now')}</span>`}<span class="num faint">${events.length}</span>` : null}
         onClick=${() => go({ type: 'house', id, about: true, events: true })} />
     </div>
+    ${starred.length > 0 && html`<div class="nav-group nav-favs">
+      <div class="sect"><span class="sect-label"><${Icon} name="starred" size=${12} />${t('nav.favourites')}</span></div>
+      ${starred.map((r) => html`<${RoomRow} key=${r} id=${r} />`)}
+    </div>`}
     ${h.groups.map((g) => {
       const gShut = !!S.prefs.groupShut[g.id];
-      let rooms = g.rooms.filter(sees);
+      let rooms = g.rooms.filter((r) => sees(r) && !isFav(r));
       if (!rooms.length && !mayAdd) return null;
       const empty = !rooms.length;
       // A collapsed group still shows the room you are in and anything that needs you.
@@ -607,16 +666,29 @@ function HouseHead({ id }) {
     onContextMenu=${(e) => { e.preventDefault(); houseMenu(id, { x: e.clientX, y: e.clientY }); }}>
     <span class="grow" style="min-width:0">
       <span class="ctx-name trunc">${h.name}</span>
-      <span class="ctx-meta"><span class="num">${t('house.members', { count: members })}</span><${OnlineCount} n=${online} cls="ctx-online" /></span>
+      <span class="ctx-meta"><${OnlineCount} n=${online} cls="ctx-online" /><span class="num">${t('house.members', { count: members })}</span></span>
     </span>
     <${Icon} name="chev-d" size=${16} />
   </button>`;
 }
 
+// Beside the house's name: inviting people and, for those who run it, its
+// settings, one click away instead of inside the menu.
+function HouseActs({ id }) {
+  const settings = can(S, id, 'roles') || can(S, id, 'house');
+  const invite = can(S, id, 'invite');
+  if (!settings && !invite) return null;
+  const name = S.houses[id].name;
+  return html`<div class="ctx-house-acts">
+    ${invite && html`<button class="ib compact" aria-label=${t('nav.inviteTo', { house: name })} data-tip=${t('nav.invitePeople')} onClick=${() => openModal(Invite, { house: id })}><${Icon} name="user-plus" size=${16} /></button>`}
+    ${settings && html`<button class="ib compact" aria-label=${t('nav.settingsOf', { house: name })} data-tip=${t('nav.houseSettings')} onClick=${() => openLayer({ C: HouseSettings, props: { house: id } })}><${Icon} name="gear" size=${16} /></button>`}
+  </div>`;
+}
+
 function HouseCtx({ id }) {
   return html`
     <${HouseBanner} house=${id} />
-    <${CtxHead} cls="ctx-house-head"><${HouseHead} id=${id} /><//>
+    <${CtxHead} cls="ctx-house-head"><${HouseHead} id=${id} /><${HouseActs} id=${id} /><//>
     <div class="nav-scroll"><${HouseRooms} id=${id} /></div>`;
 }
 
@@ -725,7 +797,7 @@ export function contextPlaces() {
   return [
     view({ type: 'house', id: sp, about: true }, front && !v.events),
     view({ type: 'house', id: sp, about: true, events: true }, front && !!v.events),
-    ...roomIds(S, sp).filter(roomVisible).map(conv),
+    ...(() => { const list = roomIds(S, sp).filter(roomVisible); return [...list.filter(isFav), ...list.filter((r) => !isFav(r))]; })().map(conv),
   ];
 }
 
@@ -741,14 +813,18 @@ const ctxLabel = (sp) => (sp === 'messages' ? t('nav.messages') : sp === 'discov
 
 export function Nav() {
   const sp = S.ui.space;
+  const shut = ctxShut();
+  const peek = shut && !!S.ui.ctxPeek && S.ui.ctxPeek.at === S.ui.view;
+  if (S.ui.ctxPeek && !peek) S.ui.ctxPeek = null; // went somewhere: it goes away
   return html`<div class="nav">
-    <${Rail} />
-    <nav class="ctx" aria-label=${ctxLabel(sp)}>
+    <${Rail} pick=${shut ? pickPeek : openSpace} foot=${html`<${RailFoot} shut=${shut} />`} />
+    ${(!shut || peek) && html`<nav class=${`ctx${peek ? ' ctx-peek' : ''}`} aria-label=${ctxLabel(sp)}>
       ${ctxFor(sp)}
       ${!isOnline() && S.ui.view.type !== 'conv' && html`<div class="conn" role="status"><${Icon} name="offline" size=${16} />${t('nav.cantReach')}</div>`}
       <${SelfPanel} />
-      <${SidebarGrip} />
-    </nav>
+      ${!peek && html`<${SidebarGrip} />`}
+    </nav>`}
+    ${peek && html`<div class="ctx-scrim" onClick=${closePeek}></div>`}
   </div>`;
 }
 
@@ -778,4 +854,22 @@ export function PhoneDrawer() {
       <${Rail} sp=${d.sp} pick=${pick} />
       <nav class="ctx" aria-label=${ctxLabel(d.sp)}>${ctx}</nav>
     </div>`;
+}
+
+// ---------- While your places load (signed in, nothing to show yet) ----------
+// The frame's shape instead of a blank screen: the rail's circles and the
+// sidebar's rows on desktop, a header, rows and the tabs on a phone.
+export function ShellSkeleton({ phone }) {
+  if (phone) {
+    return html`<div class="shell-skel phone-skel" aria-busy="true">
+      <div class="shell-skel-bar"><${Skeleton} line w=${120} /></div>
+      <${LoadingState} kind="list" rows=${7} label=${t('auth.opening')} />
+      <div class="shell-skel-tabs" aria-hidden="true">${[0, 1, 2, 3, 4].map((i) => html`<${Skeleton} key=${i} circle w=${24} h=${24} />`)}</div>
+    </div>`;
+  }
+  return html`<div class="shell-skel" aria-busy="true">
+    <div class="shell-skel-rail" aria-hidden="true">${[0, 1, 2, 3, 4].map((i) => html`<${Skeleton} key=${i} circle w=${48} h=${48} />`)}</div>
+    <div class="shell-skel-ctx"><div class="shell-skel-bar"><${Skeleton} line w=${140} /></div><${LoadingState} kind="list" rows=${9} label=${t('auth.opening')} /></div>
+    <div class="shell-skel-main" aria-hidden="true"><div class="shell-skel-bar"><${Skeleton} line w=${160} /></div><${LoadingState} kind="messages" rows=${5} /></div>
+  </div>`;
 }

@@ -493,17 +493,23 @@ function leave() {
   S.ui.editing = null;
 }
 
-// Phone: opening one of a house's rooms from its page keeps the page under
-// it, so Back goes to the house's room list, not all the way Home.
+// Phone: a screen opened from another pushed screen keeps that one under it
+// (a house's room list under its room, a room under a profile opened from it),
+// so Back and the back gesture return to the list you came from, never
+// straight to the tabs. Five deep at most.
 function keepTrail(next) {
   const cur = S.ui.view;
-  if (!S.ui.phone || S.ui.depth < 1 || cur.type !== 'house' || cur.events) return;
-  if (next.type === 'conv' && S.rooms[next.id]?.house === cur.id) S.ui.trail = [...(S.ui.trail || []), cur].slice(-5);
+  if (!S.ui.phone) { S.ui.trail = []; return; }
+  if (S.ui.depth < 1 || !cur || cur.type === 'home') { S.ui.trail = []; return; }
+  if (cur.type === next.type && cur.id === next.id) return;
+  // Hopping from one room to another (the drawer, the switcher) replaces it: rooms are not lists.
+  if (cur.type === 'conv' && next.type === 'conv') return;
+  S.ui.trail = [...(S.ui.trail || []), cur].slice(-5);
 }
 
 export function go(view) {
   leave();
-  if (view.type !== 'conv') S.ui.trail = [];
+  if (view.type === 'home') S.ui.trail = []; else keepTrail(view);
   S.ui.view = view;
   // On a phone Home is a tab, never a screen pushed on top with a Back arrow.
   // A thread, the people sheet and the drawer belonged to the place left behind.

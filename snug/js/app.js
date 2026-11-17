@@ -20,7 +20,7 @@ import { friendRequests } from './lib/social.js';
 import { Icon } from './ui/icons.js';
 import { Avatar, Pres, Tile, Empty, presenceLabel } from './ui/kit.js';
 import { Menu, Pop, ModalFrame, Toasts, Lightbox, initTooltips } from './ui/overlays.js';
-import { Nav, NavDirect, HouseRooms, LiveDock, houseMenu, syncSpace, goBack, contextPlaces, dmAttention, homeNeeds, PhoneDrawer, openDrawer, closeDrawer } from './views/nav.js';
+import { Nav, NavDirect, HouseRooms, LiveDock, houseMenu, syncSpace, goBack, contextPlaces, dmAttention, homeNeeds, PhoneDrawer, closeDrawer, ctxShut, closePeek, ShellSkeleton } from './views/nav.js';
 import { Conversation, ThreadPane, DetailsPane } from './views/conversation.js';
 import { PinsPane } from './views/media.js'; // pinned messages
 import { PeoplePane, MePop, peopleWanted } from './views/people.js';
@@ -126,7 +126,7 @@ function Desktop() {
   if (S.ui.drawer) S.ui.drawer = null; // the phone's drawer, left open while the window grew
   restorePeople();
   const pane = PaneView();
-  return html`<div class=${`app${pane ? ` has-pane pane-${S.ui.pane.type}` : ''}`}>
+  return html`<div class=${`app${pane ? ` has-pane pane-${S.ui.pane.type}` : ''}${ctxShut() ? ' ctx-shut' : ''}`}>
     <${Nav} />
     <main id="main" class="main-land" aria-label="Main"><${MainView} /></main>
     ${pane}
@@ -185,21 +185,29 @@ function Phone() {
     body = html`<${TabHead} title=${t('nav.messages')}>
       <button class="ib" aria-label="Jump to or search" onClick=${() => openQuick()}><${Icon} name="search" /></button>
       <button class="ib" aria-label="New message" onClick=${() => openModal(NewMessage)}><${Icon} name="compose" /></button>
-    <//><div class="nav-scroll"><${NavDirect} /></div>`;
+    <//>${S.dmOrder.length || (S.safety?.requests || []).length
+      ? html`<div class="nav-scroll"><${NavDirect} /></div>`
+      : html`<div class="nav-scroll"><${NavDirect} empty /><${Empty} icon="room" title=${t('messages.emptyTitle')} text=${t('messages.emptyText')}>
+          <button class="btn primary" onClick=${() => openModal(NewMessage)}><${Icon} name="compose" size=${16} />${t('nav.newMessage')}</button>
+        <//></div>`}`;
   } else if (tab === 'discover') body = html`<${Discover} />`;
   else if (tab === 'catchup') body = html`<${CatchUp} />`;
   else body = html`<${TabHead} title=${t('tab.you')} /><${YouTab} />`;
 
   return html`<div class="phone" onTouchStart=${edgeStart} onTouchEnd=${edgeEnd}>
     <div class="screen root" aria-hidden=${S.ui.depth > 0 ? 'true' : undefined}>
-      <div class="tab-body">${body}</div>
+      ${S.ui.depth > 0
+        ? html`<div class="tab-body">${body}</div>`
+        : html`<main id="main" class="tab-body" aria-label=${tabLabel(TABS.find((x) => x.id === tab))}>${body}</main>`}
       ${!isOnline() && html`<div class="conn" role="status"><${Icon} name="offline" size=${16} />${t('phone.cantReach')}</div>`}
       ${tab !== 'you' && html`<${LiveDock} />`}
-      <nav class="tabs" role="tablist" aria-label="Sections">
-        ${TABS.map((t) => html`<button key=${t.id} class="tab" role="tab" aria-selected=${String(tab === t.id)} onClick=${() => setTab(t.id)}>
-          <${Icon} name=${t.icon} size=${24} />${tabLabel(t)}
-          ${counts[t.id] > 0 && html`<span class="badge" aria-label=${`${counts[t.id]} for you`}>${counts[t.id] > 99 ? '99+' : counts[t.id]}</span>`}
-        </button>`)}
+      <nav class="tabs" aria-label="Sections">
+        <div class="tabs-list" role="tablist" aria-label="Sections">
+          ${TABS.map((t) => html`<button key=${t.id} class="tab" role="tab" aria-selected=${String(tab === t.id)} onClick=${() => setTab(t.id)}>
+            <${Icon} name=${t.icon} size=${24} />${tabLabel(t)}
+            ${counts[t.id] > 0 && html`<span class="badge" aria-label=${`${counts[t.id]} for you`}>${counts[t.id] > 99 ? '99+' : counts[t.id]}</span>`}
+          </button>`)}
+        </div>
       </nav>
     </div>
     ${S.ui.depth > 0 && html`<div class="screen push" key=${v.type === 'conv' || v.type === 'house' || v.type === 'person' ? `${v.type}${v.id}` : v.type}><main id="main" class="main-land" aria-label="Main"><${MainView} /></main></div>`}
@@ -209,16 +217,17 @@ function Phone() {
   </div>`;
 }
 
-// A swipe in from the left edge of a room opens the drawer (the button in
-// the room's header does the same).
+// A swipe in from the left edge goes back, as the header's Back arrow and the
+// phone's own back do: to the list you came from (a house's rooms, Messages),
+// never further. The drawer of rooms opens from the room's header.
 let edge = null;
 function edgeStart(e) {
   const t = e.touches[0];
-  edge = t && t.clientX < 24 && S.ui.depth > 0 && S.ui.view.type === 'conv' && !S.ui.pane ? { x: t.clientX, y: t.clientY } : null;
+  edge = t && t.clientX < 24 && (S.ui.depth > 0 || S.ui.drawer) ? { x: t.clientX, y: t.clientY } : null;
 }
 function edgeEnd(e) {
   const t = e.changedTouches[0];
-  if (edge && t && t.clientX - edge.x > 60 && Math.abs(t.clientY - edge.y) < 60) openDrawer();
+  if (edge && t && t.clientX - edge.x > 60 && Math.abs(t.clientY - edge.y) < 60) closeTop();
   edge = null;
 }
 
@@ -286,7 +295,9 @@ function App() {
   if (S.ui.guide) { document.title = 'Privacy at Snug'; return html`<${PrivacyDoc} /><${Toasts} />`; }
   if (!inside) {
     document.title = 'Snug';
-    if (S.auth === 'out') return html`<${Auth} /><${PrivacyLink} /><${Toasts} />`;
+    if (S.auth === 'out') return html`<div class="signedout"><${Auth} /><footer class="signedout-foot"><${PrivacyLink} /></footer></div><${Toasts} />`;
+    // Signed in, places still on their way: the frame's shape rather than a blank splash.
+    if (S.auth === 'in') return html`<${ShellSkeleton} phone=${S.ui.phone} />`;
     return html`<${Splash} unreachable=${S.auth === 'unreachable'} onRetry=${boot} />`;
   }
   syncSpace();
@@ -337,6 +348,7 @@ function closeTop() {
   if (u.modal) return closeModal();
   if (u.layer) return closeLayer();
   if (u.drawer) return closeDrawer();
+  if (u.ctxPeek && !u.phone) return closePeek();
   if (u.pane) return closePane();
   if (u.phone && u.depth > 0) return back();
   return false;
