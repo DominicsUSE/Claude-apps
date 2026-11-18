@@ -283,14 +283,13 @@
 .stage-acts .vc:active { background: var(--btn2-press); }
 .vc-word { display: none; }
 @container stage (min-width: 600px) {
-  .stage-acts .vc.main { width: 60px; height: 52px; }
-  .stage-acts .vc.main .vc-word { display: block; font-size: var(--t-micro); line-height: 1; white-space: nowrap; }
+  .stage-acts:not(.compact) .vc.main { width: 60px; height: 52px; }
+  .stage-acts:not(.compact) .vc.main .vc-word { display: block; font-size: var(--t-micro); line-height: 1; white-space: nowrap; }
 }
-/* A narrow stage (tablet, a thin window): smaller icons, so Leave stays on the row. */
-@container stage (max-width: 599px) {
-  .vc-group { padding: 0 2px; }
-  .stage-acts .vc { width: var(--h-36); height: var(--h-36); }
-  .stage-acts .vc.leave { width: 48px; margin-left: var(--s-1); }
+/* A wide stage has room for every word: the together and people controls carry theirs too. */
+@container stage (min-width: 900px) {
+  .stage-acts:not(.compact) .vc { width: 60px; height: 52px; }
+  .stage-acts:not(.compact) .vc .vc-word { display: block; font-size: var(--t-micro); line-height: 1; white-space: nowrap; }
 }
 /* Muted, deafened: the state you need to notice, as a filled control. */
 .stage-acts .vc.on, .stage-acts .vc.on:hover { background: var(--danger-soft); color: color-mix(in srgb, var(--danger) 72%, var(--text-1)); }
@@ -306,11 +305,21 @@
 .stage-acts .vc.leave:hover { background: var(--error-hover); color: var(--on-danger); }
 .stage-acts .vc.leave:active { background: color-mix(in srgb, var(--danger) 80%, var(--bg-0)); color: var(--on-danger); }
 @container stage (min-width: 600px) { .stage-acts .vc.leave.main { width: 64px; } }
+/* A narrow stage (tablet, a thin window): smaller icons and tighter gaps, so
+   Leave stays on the row. After the Leave rule above, so its width wins. */
+@container stage (max-width: 599px) {
+  .stage-acts { gap: 2px; }
+  .vc-group { padding: 0 2px; }
+  .stage-acts .vc { width: var(--h-36); height: var(--h-36); }
+  .stage-acts .vc.leave { width: 48px; margin-left: var(--s-1); }
+}
 .stage-acts .vo-hold { height: var(--h-md); }
 /* A folded stage, and the shell's dock: the same controls, small and quiet. */
 .stage-acts.compact { flex-wrap: nowrap; gap: 2px; }
 .stage-acts.compact .vc { width: var(--h-sm); height: var(--h-sm); }
 .stage-acts.compact .vc.leave { width: 44px; margin-left: var(--s-1); }
+/* Small controls carry no words, whatever the stage's width (the tooltips and labels say them). */
+.stage-acts.compact .vc .vc-word { display: none; }
 .dock .vc.on { color: var(--error); }
 .dock .vc.live { color: var(--mint-ink); }
 
@@ -335,11 +344,13 @@
    stage's own size (container query units), capped so one person is not a wall. */
 @media (min-width: 760px) {
 .conv.voice-live > .stage.in:not(.media):not(.folded):not([data-size="40"]) { flex: none; height: min(52%, 400px); max-height: none; min-height: 240px; container-type: size; grid-template-rows: auto minmax(0, 1fr) auto; align-content: stretch; }
-.conv.voice-live > .stage.in:not(.media):not(.folded):not([data-size="40"]) > .stage-body { align-content: safe center; }
+/* The tiles are sized from the body's own box, so a bar that wraps (push to
+   talk adds a button) shrinks them instead of letting them paint over it. */
+.conv.voice-live > .stage.in:not(.media):not(.folded):not([data-size="40"]) > .stage-body { align-content: safe center; min-height: 0; overflow-y: auto; scrollbar-width: thin; container-type: size; }
 .conv.voice-live > .stage.in:not(.media):not(.folded):not([data-size="40"]):has(.stage-people:is([data-n="5"], [data-n="6"], [data-n="7"], [data-n="8"], [data-n="9"])) { height: 52%; }
 .conv.voice-live:has(> .stage.in:not(.media):not(.folded):not([data-size="40"])) > .stream { flex: 1 1 0; }
 .stage.in:not(.media):not(.folded):not([data-size="40"]) .stage-people {
-  --g: var(--s-2); --W: 100cqw; --H: calc(100cqh - 136px);
+  --g: var(--s-2); --W: 100cqw; --H: calc(100cqh - 4px);
   --tile-w: clamp(132px, max(
     min(calc((var(--W) - (var(--c1) - 1) * var(--g)) / var(--c1)), calc((var(--H) - (var(--r1) - 1) * var(--g)) / var(--r1) * 16 / 9)),
     min(calc((var(--W) - (var(--c2) - 1) * var(--g)) / var(--c2)), calc((var(--H) - (var(--r2) - 1) * var(--g)) / var(--r2) * 16 / 9)),
@@ -349,14 +360,14 @@
 }
 .stage.in:not(.media):not(.folded):not([data-size="40"]) .stage-person { flex: none; width: var(--tile-w); }
 }
-.stage-people { --c1: 1; --r1: 1; --c2: 1; --r2: 1; --c3: 1; --r3: 1; }
-.stage-people[data-n="2"] { --c1: 2; --r1: 1; --c2: 1; --r2: 2; --c3: 2; --r3: 1; }
-.stage-people[data-n="3"] { --c1: 3; --r1: 1; --c2: 2; --r2: 2; --c3: 1; --r3: 3; }
-.stage-people[data-n="4"] { --c1: 4; --r1: 1; --c2: 2; --r2: 2; --c3: 1; --r3: 4; }
-.stage-people[data-n="5"] { --c1: 5; --r1: 1; --c2: 3; --r2: 2; --c3: 2; --r3: 3; }
-.stage-people[data-n="6"] { --c1: 6; --r1: 1; --c2: 3; --r2: 2; --c3: 2; --r3: 3; }
-.stage-people[data-n="7"], .stage-people[data-n="8"] { --c1: 4; --r1: 2; --c2: 3; --r2: 3; --c3: 2; --r3: 4; }
-.stage-people[data-n="9"] { --c1: 3; --r1: 3; --c2: 5; --r2: 2; --c3: 2; --r3: 5; }
+.stage-people, .vt-grid { --c1: 1; --r1: 1; --c2: 1; --r2: 1; --c3: 1; --r3: 1; }
+.stage-people[data-n="2"], .vt-grid[data-count="2"] { --c1: 2; --r1: 1; --c2: 1; --r2: 2; --c3: 2; --r3: 1; }
+.stage-people[data-n="3"], .vt-grid[data-count="3"] { --c1: 3; --r1: 1; --c2: 2; --r2: 2; --c3: 1; --r3: 3; }
+.stage-people[data-n="4"], .vt-grid[data-count="4"] { --c1: 4; --r1: 1; --c2: 2; --r2: 2; --c3: 1; --r3: 4; }
+.stage-people[data-n="5"], .vt-grid[data-count="5"] { --c1: 5; --r1: 1; --c2: 3; --r2: 2; --c3: 2; --r3: 3; }
+.stage-people[data-n="6"], .vt-grid[data-count="6"] { --c1: 6; --r1: 1; --c2: 3; --r2: 2; --c3: 2; --r3: 3; }
+.stage-people[data-n="7"], .stage-people[data-n="8"], .vt-grid:is([data-count="7"], [data-count="8"]) { --c1: 4; --r1: 2; --c2: 3; --r2: 3; --c3: 2; --r3: 4; }
+.stage-people[data-n="9"], .vt-grid[data-count="9"] { --c1: 3; --r1: 3; --c2: 5; --r2: 2; --c3: 2; --r3: 5; }
 /* Faces grow with their tiles. */
 @media (min-width: 760px) { .stage.in:not(.media):not(.folded):not([data-size="40"]) .stage-person .avatar { --sz: clamp(48px, calc(var(--tile-w) * 0.22), 80px) !important; } }
 
@@ -375,6 +386,7 @@
 /* Before you join: the same tiles, smaller and quieter, and Join. */
 .stage:not(.in) .stage-people { --tile-w: 220px; --tile-min: 152px; }
 .stage:not(.in) .stage-person { background: var(--surface-chat-hover); --bg: var(--surface-chat-hover); }
+@media (min-width: 760px) { .stage:not(.in) .stage-face { margin-bottom: var(--s-4); } } /* the face a little high, clear of the name */
 .stage.nobody { gap: var(--s-2); }
 .stage.nobody .stage-top { justify-content: center; }
 .stage-acts .btn .ic { margin: 0 -2px; }
@@ -413,6 +425,8 @@
 .vt-video.contain { object-fit: contain; }
 .vt-video.mirror { transform: scaleX(-1); }
 .vt-face .avatar { font-size: calc(var(--sz) * 0.38); }
+/* A small tile in the strip: the face sits a little high, clear of the name chip under it. */
+.vt.small .vt-face { margin-bottom: var(--s-4); }
 .vt-face .avatar .ini, .vt-face .avatar .ini2 { font-size: inherit; color: inherit; }
 
 /* The whole tile is one button: click or Enter to make it large. */
@@ -472,6 +486,20 @@
   .stage.in.media .vt-focus { height: 100%; grid-template-rows: minmax(0, 1fr) auto; }
   .stage.in.media .vt-main { container-type: size; height: 100%; }
   .stage.in.media .vt-main .vt { width: min(100cqw, 100cqh * 16 / 9); }
+  /* Cameras with nobody large: the tiles as big as the stage's height and
+     width allow, for the best of three column counts, the same fit as the
+     faces without cameras. */
+  .stage.in.media:not(.folded) .stage-body:has(> .vt-grid) { container-type: size; }
+  .stage.in.media:not(.folded) .stage-body > .vt-grid {
+    --g: var(--s-2); --W: 100cqw; --H: calc(100cqh - 2px);
+    --tile-w: max(160px, min(100cqw, max(
+      min(calc((var(--W) - (var(--c1) - 1) * var(--g)) / var(--c1)), calc((var(--H) - (var(--r1) - 1) * var(--g)) / var(--r1) * 16 / 9)),
+      min(calc((var(--W) - (var(--c2) - 1) * var(--g)) / var(--c2)), calc((var(--H) - (var(--r2) - 1) * var(--g)) / var(--r2) * 16 / 9)),
+      min(calc((var(--W) - (var(--c3) - 1) * var(--g)) / var(--c3)), calc((var(--H) - (var(--r3) - 1) * var(--g)) / var(--r3) * 16 / 9))
+    ) - 1px));
+    display: flex; flex-wrap: wrap; justify-content: center; align-content: safe center; max-width: none; min-height: 100%;
+  }
+  .stage.in.media:not(.folded) .stage-body > .vt-grid > .vt { flex: none; width: var(--tile-w); }
   .stage.in.media:not(.folded) > .stage-acts {
     position: absolute; left: 50%; bottom: var(--s-3); transform: translateX(-50%); z-index: 4;
     flex-wrap: nowrap; max-width: calc(100% - var(--s-4)); padding: var(--s-1);
@@ -503,6 +531,9 @@
   /* Tiles leave the top row to the volume and moderation buttons (44px to
      the touch), so the face never sits under them. */
   .stage-person { aspect-ratio: auto; min-height: 132px; padding-top: var(--s-5); }
+  /* The face and the name in one column, so a speaking ring never meets the name. */
+  .stage .stage-person { grid-template-rows: minmax(0, 1fr) auto; gap: var(--s-1); padding-bottom: var(--s-2); }
+  .stage .stage-person .stage-name { position: static; justify-self: center; max-width: calc(100% - var(--s-2)); }
   .stage-tools .ib.sm { width: var(--touch); height: var(--touch); }
   .stage-acts .btn.primary, .stage-acts .btn.live { height: var(--touch); flex: 1; max-width: 320px; }
   .stage-acts .btn.stage-listen { height: var(--touch); flex: 1; max-width: 320px; }

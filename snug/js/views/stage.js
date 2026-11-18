@@ -262,7 +262,7 @@ function MediaTile({ t, roomId, focused, small }) {
   return html`<div class=${`vt vt-${t.kind}${talking ? ' talking' : ''}${focused ? ' focused' : ''}${small ? ' small' : ''}`} data-tile=${t.key} data-user=${t.id} role="group" aria-label=${screenTile ? what : personWords(t.id, roomId, true, note)}>
     ${t.stream
       ? html`<${Video} stream=${t.stream} mirror=${mine && t.kind === 'camera' && vp().mirror} contain=${screenTile} label=${videoLabel} />`
-      : html`<span class="vt-face"><${Avatar} user=${u} size=${small ? 40 : 64} speaking=${talking} dim=${!!note} /></span>`}
+      : html`<span class="vt-face"><${Avatar} user=${u} size=${small ? 32 : 64} speaking=${talking} dim=${!!note} /></span>`}
     <button class="vt-hit" aria-pressed=${String(!!focused)} aria-label=${focused ? `Show everyone again` : `Make ${what} large`} onClick=${() => setFocus(t.key, focused)}></button>
     <span class="vt-label">
       ${!screenTile && quiet && html`<span class="vt-muted" role="img" aria-label=${deaf ? 'Not listening' : 'Muted'}><${Icon} name=${deaf ? 'headphones-off' : 'mic-off'} size=${14} /></span>`}
@@ -284,7 +284,7 @@ function MediaStage({ tiles, roomId }) {
   if (!watchingFullscreen) { watchingFullscreen = true; document.addEventListener('fullscreenchange', () => emit()); }
   const fk = focusOf(tiles);
   if (!fk) {
-    return html`<div class="vt-grid" data-n=${Math.min(tiles.length, 4)}>
+    return html`<div class="vt-grid" data-n=${Math.min(tiles.length, 4)} data-count=${Math.min(tiles.length, 9)}>
       ${tiles.map((t) => html`<${MediaTile} key=${t.key} t=${t} roomId=${roomId} />`)}
     </div>`;
   }
@@ -337,10 +337,12 @@ function useIdleBar(ref, active) {
       el.dataset.idle = '1';
     };
     const wake = () => { delete el.dataset.idle; clearTimeout(t); t = setTimeout(sleep, IDLE_MS); };
-    const evs = ['pointermove', 'pointerdown', 'keydown', 'focusin', 'wheel'];
+    const evs = ['pointermove', 'pointerdown', 'focusin', 'wheel'];
     evs.forEach((n) => el.addEventListener(n, wake, { passive: true }));
+    // A key pressed anywhere (typing in the room's chat, Tab from the header) brings it back too.
+    document.addEventListener('keydown', wake, { passive: true });
     wake();
-    return () => { clearTimeout(t); evs.forEach((n) => el.removeEventListener(n, wake)); delete el.dataset.idle; };
+    return () => { clearTimeout(t); evs.forEach((n) => el.removeEventListener(n, wake)); document.removeEventListener('keydown', wake); delete el.dataset.idle; };
   }, [active]);
 }
 
@@ -362,7 +364,8 @@ export function Stage({ roomId, dm }) {
   // Faces make room for an activity (the whiteboard or a game) when one is running.
   const size = inCall && S.activity?.[roomId] ? 40 : faceSize(ids.length + ringingIds.length);
   // A phone's tiles are half its width: the face stays inside them.
-  const face = S.ui.phone ? Math.min(size, 56) : size;
+  // Before joining, the tiles are smaller and quieter: the face too, so it never meets the name.
+  const face = S.ui.phone ? Math.min(size, 56) : inCall ? size : Math.min(size, 64);
   const ringNames = nameList(ringingIds.map((id) => S.users[id].name.split(' ')[0]));
   const status = !inCall ? null : starting
     ? html`<span class="stage-conn wait" role="status"><span class="stage-spin" aria-hidden="true"><${Spinner} size="sm" label="" /></span>${S.call.status === 'mic' ? 'Waiting for your microphone…' : dm ? 'Calling…' : 'Joining…'}</span>`
@@ -438,7 +441,7 @@ export function Stage({ roomId, dm }) {
             ? html`<${VoiceControls} />`
             : dm
               ? html`<button class="btn live" disabled aria-busy="true"><${Icon} name="phone" size=${16} />${S.call?.status === 'mic' ? 'Starting your microphone…' : 'Calling…'}</button>`
-              : html`<button class="btn primary" disabled=${starting} aria-busy=${String(!!starting)} onClick=${() => leavingCall(roomId, () => joinVoice(roomId))}><${Icon} name="speaker" size=${16} />${starting ? 'Joining…' : 'Join voice'}</button>
+              : html`<button class="btn primary" disabled=${starting} aria-busy=${String(!!starting)} onClick=${() => leavingCall(roomId, () => joinVoice(roomId))}><${Icon} name="speaker" size=${16} />${starting ? 'Joining…' : droppedHere(roomId, dm, inCall) ? 'Join again' : 'Join voice'}</button>
                 ${!starting && html`<button class="btn quiet stage-listen" onClick=${() => leavingCall(roomId, () => joinVoice(roomId, { listen: true }))} data-tip="Join without your microphone: you hear everyone, nobody hears you"><${Icon} name="headphones" size=${16} />Listen only</button>`}`}
         </div>`}
   </div>`;
@@ -446,13 +449,13 @@ export function Stage({ roomId, dm }) {
 
 // The last call here dropped (the connection went, or the server let me go):
 // say so on the stage, in plain words, with the way back.
+// The way back is the stage's own Join button, which then says "Join again".
+const droppedHere = (room, dm, inCall) => { const d = S.voiceDrop; return !inCall && !dm && d?.room === room && Date.now() - d.at <= 10 * 60_000; };
 function DroppedNote({ room, dm, inCall }) {
-  const d = S.voiceDrop;
-  if (inCall || dm || !d || d.room !== room || Date.now() - d.at > 10 * 60_000) return null;
+  if (!droppedHere(room, dm, inCall)) return null;
   return html`<div class="stage-dropped" role="status">
     <${Icon} name="offline" size=${16} />
-    <span class="grow">${d.text}</span>
-    <button class="btn sm" disabled=${S.conn.socket !== 'open'} onClick=${() => { S.voiceDrop = null; leavingCall(room, () => joinVoice(room)); }}>Join again</button>
+    <span class="grow">${S.voiceDrop.text}</span>
     <button class="ib sm" aria-label="Dismiss" data-tip="Dismiss" onClick=${() => { S.voiceDrop = null; emit(); }}><${Icon} name="x" size=${16} /></button>
   </div>`;
 }

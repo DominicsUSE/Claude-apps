@@ -57,12 +57,24 @@ goes back to an older version on its own (README, "Install, update, go back").
 - **Fold the stage on a computer** to a single line with the small controls, so the room's messages get the
   space. Snug remembers it per room on this device.
 - **Plain states:** an empty voice room says "Nobody is here yet"; joining shows a spinner and what Snug is
-  waiting for; a reconnecting call says your place is kept; a dropped voice room keeps a "Join again" note,
-  and a dropped call says "Call dropped" with "Call again". A line that fails says Snug is trying again.
+  waiting for; a reconnecting call says your place is kept; a dropped voice room says why and its Join
+  button reads "Join again", and a dropped call says "Call dropped" with "Call again". A line that fails says Snug is trying again.
 - **The "connects directly" note** before joining a voice room is a calm card, not amber small print, and the incoming call card says it the same calm way.
 - **Three or four cameras on a narrow stage** (a tablet, a narrow window) sit in two columns instead of one
   tall column that pushed people out of view.
-- **The floating call** is a 56px strip above the tab bar on a phone instead of a card over the list.
+- **The floating call** is a 56px strip above the tab bar on a phone instead of a card over the list. While
+  it shows, the "Voice connected" panel above the tabs steps aside (it repeated the same controls under the
+  strip), and over another conversation the strip sits at the bottom with the composer above it.
+- **Fix: tiles no longer cover the controls on a tablet.** At 768px with four people the bar wrapped and the
+  tiles painted over half of it. The narrow bar now fits on one row, and the tiles are sized from the space
+  actually left, so a bar that does wrap (hold to talk) shrinks them instead.
+- **Fix: the folded stage's small controls** no longer show squashed words on a wide window.
+- **Fix: per-person volume is visible on light tiles again** (it was near-white on a light phone tile).
+- **Faces never touch names:** on a phone the face and the name sit in one column; the strip under a shared
+  screen and the tiles before you join use a smaller, slightly raised face.
+- **Cameras fill the stage on a computer:** the camera grid sizes its tiles from the stage's height as well as
+  its width, without the empty bands above and below.
+- **A wide stage labels every control** (Activities, React, Sounds, People, Options), not only the main four.
 - **Settings › Voice and video:** sliders are wider, with the value at the right.
 - **Text size** is one multiplier (`--text-scale`) on the page's font size, ready for more steps.
 - The local-address warning in the invite dialog reads in light themes (it failed contrast).

@@ -33,7 +33,7 @@
 .vo-pa-head b { font-weight: var(--w-semibold); }
 .vo-pa-acts { display: flex; gap: var(--s-2); flex-wrap: wrap; }
 
-.stage-person .vo-vol, .vt-extras .vo-vol { color: var(--on-media); opacity: 0; transition: opacity var(--m-fast) var(--ease-in-out); }
+.stage-person .vo-vol, .vt-extras .vo-vol { color: var(--text-2); opacity: 0; transition: opacity var(--m-fast) var(--ease-in-out); }
 .stage-person:hover .vo-vol, .stage-person:focus-within .vo-vol, .vt:hover .vo-vol, .vt:focus-within .vo-vol, .vo-vol.on { opacity: 1; }
 .vo-vol.on { color: var(--cyan); opacity: 1; }
 @media (hover: none) { .stage-person .vo-vol, .vt-extras .vo-vol { opacity: 1; } }
@@ -145,6 +145,16 @@
     border-radius: 0; border-top: 1px solid var(--line-subtle); box-shadow: none; animation: none;
   }
   .vo-mini-head { flex: 1; min-width: 0; }
+  /* The strip is the call while you look elsewhere: the shell's "Voice
+     connected" dock would repeat it under the strip, so it steps aside, and
+     the list keeps its last rows clear of the strip. */
+  body:has(.vo-mini) .phone .screen.root .dock { display: none; }
+  body:has(.vo-mini) .phone .screen.root > .tab-body { margin-bottom: 57px; }
+  /* Over a pushed screen (another conversation, a profile) there are no tabs:
+     the strip sits at the very bottom and the screen ends above it, so its
+     composer is never under the strip. */
+  body:has(.phone .screen.push:not(.sheet)) .vo-mini { bottom: 0; padding-bottom: calc(var(--s-1) + env(safe-area-inset-bottom, 0px)); }
+  body:has(.vo-mini) .phone .screen.push:not(.sheet) { bottom: calc(57px + env(safe-area-inset-bottom, 0px)); }
   .vo-mini-grip, .vo-mini-head > .ib.sm, .vo-mini-faces, .vo-mini-media, .vo-mini-acts .btn.grow, .vo-mini .act-muted-live { display: none; }
   .vo-mini-title { min-height: var(--touch); }
   .vo-mini-acts { flex: none; }
