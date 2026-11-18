@@ -40,16 +40,19 @@ goes back to an older version on its own (README, "Install, update, go back").
   sentence with your trusted devices, and recent sign-ins. **Account** keeps who you are, your devices and
   sessions, and signing out.
 - **The search finds settings, not just pages.** Type "camera" and Camera quality is listed under Voice and
-  video; pick it (or press Enter, or the arrow keys) and the page opens at that setting, marked. Settings that
-  match are marked on the open page as you type.
+  video; pick it (or press Enter, or the arrow keys) and the page opens at that setting, marked. Enter opens a
+  page whose name you typed, and otherwise the first setting found. Settings that match are marked on the open
+  page as you type, without moving sideways.
 - **"Saved"** appears beside a setting for a moment when you change it, and is announced to screen readers.
 - **Privacy and safety starts with a dashboard** in plain words: whether your messages are end-to-end
   encrypted, where you're signed in, what this device keeps, and how to download or delete your data, each
   with one button. Who can see what follows; the technical part (calls and your network, what the server still
-  sees of encrypted chats, safety numbers) is under **Advanced security information**, closed until opened.
+  sees of encrypted chats, safety numbers) is under **Advanced security information**, closed until opened,
+  which points to the full privacy page for the rest instead of repeating it. Two cards to a row on a tablet.
 - **No server addresses or server setting names** on the privacy pages: they say "this Snug" (the address
   could be an internal one, and `SNUG_STUN` meant nothing to members). A plain-http server still says so first.
-- **Encryption** leads with its status and the button; what it protects and what the server can still see is a
+- **Encryption** no longer says "this server stores them encrypted" while encryption is off: its first line
+  says what is true now. It leads with its status and the button; what it protects and what the server can still see is a
   disclosure under the controls.
 - **Accessibility actually covers it**: text size (it now scales from your browser's own size, through
   `--text-scale`, instead of replacing it), contrast, font, underline links, motion, the focus ring, the keys
@@ -59,6 +62,9 @@ goes back to an older version on its own (README, "Install, update, go back").
 - On a phone, a settings page has Back and no second Close; the scrolling page can be scrolled from the
   keyboard; an unknown page opens Profile instead of nothing; Text and messages has a title; controls line up in
   one column on wide screens; the password button says why it’s greyed out; the chosen sound pack is marked; sound packs and accents line up under their label instead of drifting to the right on a phone.
+- On a phone, the back button or back gesture on a settings page returns to the list of pages instead of
+  closing Settings; the list no longer opens with a row shaded by a leftover touch; Contrast's three choices
+  stay on one row at 320px.
 
 ## 0.14.0
 

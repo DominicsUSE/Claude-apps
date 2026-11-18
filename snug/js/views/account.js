@@ -159,7 +159,7 @@ export function A11yPage() {
       <${LookSlider} id="a11y-font" k="fontScale" label="Text size" min=${12} max=${20} unit="px" />
     <//>
     <${Row} label="Contrast" hint="High makes secondary text, times and outlines darker and the focus ring thicker. Match device follows the system’s own setting.">
-      <${Seg} label="Contrast" value=${p.contrast || 'system'} options=${[['system', 'Match device'], ['standard', 'Standard'], ['high', 'High']]} onChange=${(v) => setPref('contrast', v)} />
+      <${Seg} cls="seg-3" label="Contrast" value=${p.contrast || 'system'} options=${[['system', 'Match device'], ['standard', 'Standard'], ['high', 'High']]} onChange=${(v) => setPref('contrast', v)} />
     <//>
     <${Row} label="Font" hint="Atkinson Hyperlegible was drawn for low vision: letters that are easy to tell apart (I, l and 1; O and 0). Fonts are on the Appearance page.">
       <button class="btn" onClick=${() => (goTo ? goTo('look') : SettingsC && openLayer({ C: SettingsC, props: { page: 'look' } }))}>Choose a font</button>

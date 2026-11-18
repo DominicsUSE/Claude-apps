@@ -158,7 +158,18 @@ test('settings on a phone: the search and every section stay reachable, with 44p
   await robin.keyboard.press('Enter');
   await robin.locator('.layer.phone-list').waitFor();
   assert.equal(await focused(), 'row:Rooms and access', 'Back returns focus to the row');
-  await robin.keyboard.press('Escape');
+  // The browser's back button (or back gesture) does the same: page, then list, then closed.
+  await robin.keyboard.press('Enter');
+  await robin.locator('select[aria-label="Slowmode in Glaze lab"]').waitFor();
+  await robin.goBack();
+  await robin.locator('.layer.phone-list').waitFor();
+  assert.equal(await robin.evaluate(() => !!window.snug.S.ui.layer), true, 'history back on a page goes back to the list, not out');
+  // The on-screen Back leaves no stale history entry: one history back from the list closes.
+  await robin.locator('.layer-nav .row:has-text("Rooms and access")').click();
+  await robin.locator('select[aria-label="Slowmode in Glaze lab"]').waitFor();
+  await back.click();
+  await robin.locator('.layer.phone-list').waitFor();
+  await robin.goBack();
   await robin.waitForFunction(() => !window.snug.S.ui.layer);
   await robin.context().close();
 });

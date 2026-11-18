@@ -962,8 +962,8 @@ export function openPop(pop) { S.ui.pop = { ...pop, k: uid('k') }; S.ui.menu = n
 export function closePop() { if (S.ui.pop) { S.ui.pop = null; emit(); } }
 export function openModal(C, props = {}) { S.ui.modal = { C, props, k: uid('k') }; S.ui.menu = null; S.ui.pop = null; S.ui.quick = null; emit(); }
 export function closeModal() { S.ui.modal = null; emit(); }
-export function openLayer(layer) { S.ui.layer = layer; S.ui.menu = null; S.ui.pop = null; S.ui.quick = null; emit(); }
-export function closeLayer() { S.ui.layer = null; emit(); }
+export function openLayer(layer) { S.ui.layer = layer; S.ui.layerBack = null; S.ui.menu = null; S.ui.pop = null; S.ui.quick = null; emit(); }
+export function closeLayer() { S.ui.layer = null; S.ui.layerBack = null; emit(); }
 export function openQuick(q = '') { S.ui.quick = { q }; S.ui.menu = null; S.ui.pop = null; emit(); }
 export function closeQuick() { S.ui.quick = null; emit(); }
 export function openLightbox(src, alt) { S.ui.lightbox = { src, alt }; emit(); }

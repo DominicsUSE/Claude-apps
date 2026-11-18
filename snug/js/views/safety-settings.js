@@ -55,11 +55,12 @@ const Who = ({ id, sub }) => {
 // what, and the technical details last, closed.
 function DashCard({ icon, title, tone, text, children }) {
   const id = `pv-card-${icon}`;
-  return html`<section class="pv-card" data-tone=${tone || undefined} aria-labelledby=${id}>
+  // A plain group, not a <section>: four named landmarks on one page were noise.
+  return html`<div class="pv-card" role="group" data-tone=${tone || undefined} aria-labelledby=${id}>
     <h2 class="pv-card-title" id=${id}><span class="pv-card-ic" aria-hidden="true"><${Icon} name=${icon} size=${16} /></span>${title}</h2>
     <p class="pv-card-text">${text}</p>
     ${children && html`<div class="pv-card-acts">${children}</div>`}
-  </section>`;
+  </div>`;
 }
 const COPY_WORDS = {
   plain: 'A copy of your recent messages is kept in this browser, so Snug opens faster and works offline. Browser storage isn’t protected.',
@@ -125,7 +126,7 @@ export function PrivacyPage({ openGuide, go } = {}) {
         </li>`)}</ul>`
       : html`<p class="hint safe-empty">Nobody. Block someone from their profile or a message’s menu: they can’t message, call or befriend you, and their messages fold away.</p>`}
     <${PrivacyOverview} openGuide=${openGuide} />
-    <${PrivacyAdvanced} />`;
+    <${PrivacyAdvanced} openGuide=${openGuide} />`;
 }
 
 // ---------- House: reports ----------

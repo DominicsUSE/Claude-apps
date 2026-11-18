@@ -18,6 +18,16 @@ const PAGE = { id: 'e2ee', label: 'Encryption', icon: 'lock', section: 'Privacy 
 const when = (t) => (t ? new Date(t).toLocaleDateString(undefined, { dateStyle: 'medium' }) : '');
 const failText = (e) => (e?.offline ? 'You’re offline. Try again once you’re back.' : e?.message || 'That didn’t work. Try again.');
 
+// The page's opening line ends with what is true now, never a promise the
+// state below contradicts (on: stored encrypted; not on: readable by the host).
+function leadState() {
+  const st = E2.status;
+  if (st === 'off' || (st === 'none' && !E2.on)) return ' This server doesn’t offer it, so whoever runs it could read your direct messages.';
+  if (st === 'none') return ' It isn’t on yet: until it is, your direct messages are stored on this server where whoever runs it could read them.';
+  if (st === 'unsupported') return '';
+  return ' Once they are, this server stores them encrypted.';
+}
+
 function Status({ Row }) {
   const st = E2.status;
   if (st === 'unsupported' && E2.support?.reason === 'locked') {
@@ -30,7 +40,7 @@ function Status({ Row }) {
   }
   if (st === 'unsupported') return html`<p class="e2-warn" role="status"><${Icon} name="alert" size=${16} /><span>${COPY.unsupported[E2.support?.reason] || COPY.unsupported.old}</span></p>`;
   if (st === 'none') {
-    return html`<${Row} label="End-to-end encryption" hint=${E2.on ? COPY.setupBody : 'This server hasn’t turned on end-to-end encryption.'}>
+    return html`<${Row} label="End-to-end encryption" hint=${E2.on ? 'Turn it on for this device to encrypt your direct messages and groups with people who have it on too.' : 'This server hasn’t turned on end-to-end encryption.'}>
       ${E2.on && html`<button class="btn primary" onClick=${() => openModal(SetupSheet, {})}>Turn on</button>`}
     <//>`;
   }
@@ -172,7 +182,7 @@ function EncryptionPage({ Row }) {
   });
   return html`<div class="e2-page">
     <h1>Encryption</h1>
-    <p class="lead">Direct messages and groups can be end-to-end encrypted: encrypted on your device and readable only on the devices of the people in them. This server stores them encrypted.</p>
+    <p class="lead">Direct messages and groups can be end-to-end encrypted: encrypted on your device and readable only on the devices of the people in them.${leadState()}</p>
     <${Status} Row=${Row} />
     ${deviceKind() === 'app' && E2.keyStore === 'none' && html`<p class="e2-warn e2-keystore" role="status"><${Icon} name="alert" size=${16} /><span>${COPY.keyStoreNone}</span></p>`}
     ${ready && html`<${MetaProblem} />`}

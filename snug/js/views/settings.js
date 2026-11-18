@@ -2,7 +2,7 @@
 // house's settings in another. Every change applies at once; nothing to save.
 import { html, useState, useRef, useEffect, useLayoutEffect } from '../../vendor/preact-htm.js';
 import {
-  S, me, closeLayer, setPref, updateMe, setNotify, openModal, updateHouse,
+  S, me, emit, closeLayer, setPref, updateMe, setNotify, openModal, updateHouse,
   setMemberRole, leaveHouse, removeMember, signedOut, toast, openMenu,
 } from '../store.js';
 import { api, stopTransport } from '../server.js';
@@ -127,6 +127,17 @@ function Layer({ title, icon, pages, page, setPage, children, foot, startOpen, i
     const t = inPage ? el.querySelector('.layer-back') : (el.querySelector('.layer-nav .row.sel') || el.querySelector('.layer-nav .row'));
     t?.focus();
   }, [inPage]);
+  // On a phone a page is one step above the list, for the back button and
+  // the back gesture too: app.js counts S.ui.layerBack as a history entry and
+  // calls it on popstate.
+  const back = phone && inPage && listed;
+  useLayoutEffect(() => {
+    const f = back ? toList : null;
+    if (!!S.ui.layerBack === !!f) { if (f) S.ui.layerBack = f; return; }
+    S.ui.layerBack = f;
+    emit();
+  }, [back]);
+  useEffect(() => () => { if (S.ui.layerBack) { S.ui.layerBack = null; emit(); } }, []);
   // After every draw: on a phone page the top bar already names the page, so a
   // heading that only repeats it is kept for screen readers but not drawn twice
   // (a house's Overview keeps its heading: that one is the house's name). Then
@@ -178,8 +189,17 @@ function Layer({ title, icon, pages, page, setPage, children, foot, startOpen, i
   const onBodyChange = (e) => { if (saves && e.target.matches?.(FIELDS) && !e.target.disabled) saved(e.target); };
   const results = () => [...ref.current.querySelectorAll('.layer-nav .row, .layer-nav .set-hit')].filter((x) => x.getClientRects().length);
   const onFind = (e) => {
-    if (e.key === 'ArrowDown') { e.preventDefault(); results()[0]?.focus(); }
-    if (e.key === 'Enter' && q) { e.preventDefault(); results()[0]?.click(); }
+    // The nav's own arrow keys would move on again from the first result.
+    if (e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); results()[0]?.focus(); }
+    // Enter opens a page named like the search, or else goes to the first
+    // setting found ("text size" lands on Text size, not Appearance's top).
+    if (e.key === 'Enter' && q) {
+      e.preventDefault();
+      const list = results();
+      const fq = fold(q).trim();
+      const page = list.find((x) => x.classList.contains('row') && fold(x.textContent).includes(fq));
+      (page || list.find((x) => x.classList.contains('set-hit')) || list[0])?.click();
+    }
   };
   // Up and down move through the sections and settings found.
   const onNavKey = (e) => {

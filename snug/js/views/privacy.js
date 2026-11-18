@@ -100,7 +100,7 @@ export function PrivacyOverview({ openGuide }) {
 }
 
 // Settings > Privacy and safety, at the end: the technical part, closed until opened.
-export function PrivacyAdvanced() {
+export function PrivacyAdvanced({ openGuide } = {}) {
   const about = useAbout();
   const f = factsNow(about);
   const net = whoSeesWhat(f).find((s) => s.id === 'network');
@@ -118,8 +118,8 @@ export function PrivacyAdvanced() {
           <li>Safety numbers: in an encrypted conversation, open its details and compare the safety number with the other person, in person or on a call. If the numbers match, nobody has put different keys between you.</li>
           <li>Each of your devices has its own keys. A device you remove gets no new messages, but keeps what it already had.</li>
         </ul></section>`}
-      <section class="pv-sect" aria-labelledby="pv-adv-never"><h3 id="pv-adv-never">What Snug never does</h3>
-        <ul>${(whoSeesWhat(f).find((s) => s.id === 'never')?.items || []).map((t, i) => html`<li key=${i}>${t}</li>`)}</ul></section>
+      <p class="hint pv-more">What Snug stores and for how long, what it never does, and the rest of the detail are on the full privacy page.
+        ${openGuide && html` <button type="button" class="linkish" onClick=${openGuide}>Read the full privacy page</button>`}</p>
     </div>
   </details>`;
 }
