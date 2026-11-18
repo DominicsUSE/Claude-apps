@@ -19,7 +19,7 @@
 //   so the words there come from the server's real settings.
 // - Erasing what you wrote, when you delete your account and choose to:
 //   eraseAuthored() below.
-import { unlinkSync } from 'node:fs';
+import { removeStored } from './filecrypt.js';
 import { join } from 'node:path';
 import { idleMs, SESSION_DAYS } from './auth.js';
 import { MEMBER_LOG_DAYS, LINK_CACHE_HOURS, FRIEND_COOLDOWN_MS } from './retention.js'; // 0.14: what the server purges on its own
@@ -268,9 +268,7 @@ export function createPrivacy({ db, M, hub, ops, peer = null, facts = {}, filesD
       if (has('security_events')) db.run('DELETE FROM security_events WHERE user = ?', user);
     });
     if (filesDir) {
-      for (const f of files) {
-        try { unlinkSync(join(filesDir, f.id)); } catch (e) { if (e.code !== 'ENOENT') log('error', 'erase file', e.code); }
-      }
+      for (const f of files) removeStored(join(filesDir, f.id), { log }); // retried while Windows has it busy
     }
     // Everyone reading those conversations drops the messages now, not at their next reload.
     for (const m of mine) {

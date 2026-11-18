@@ -320,4 +320,18 @@ export async function reencryptDir(dir, { limit = 200, keep = () => true, log = 
   }
   return out;
 }
+/**
+ * Removes a stored file for good. Windows refuses to delete a file something has open for a moment (a virus
+ * scanner looking at a file just written, a reader finishing), so a busy file is tried again for a few
+ * seconds instead of being left behind. Resolves true once it is gone.
+ */
+export async function removeStored(path, { log = () => {}, tries = 25, wait = 200 } = {}) {
+  for (let i = 0; ; i++) {
+    try { unlinkSync(path); return true; } catch (e) {
+      if (e.code === 'ENOENT') return true;
+      if (!['EBUSY', 'EPERM', 'EACCES'].includes(e.code) || i >= tries) { log('error', 'remove file', e.code); return false; }
+    }
+    await new Promise((r) => setTimeout(r, wait));
+  }
+}
 export const _test = { HEAD, sealedLength };

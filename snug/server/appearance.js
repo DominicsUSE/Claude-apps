@@ -11,7 +11,6 @@
 //   js/lib/colour.js). me.update is wrapped; changes are rate limited.
 // - Settings: a "custom:<id>" theme has to name one of the person's saved
 //   themes; every other rule is in cleanPrefs (js/lib/account.js).
-import { unlink } from 'node:fs/promises';
 import { sendFile } from './seclog.js'; // sec-web W1
 import { join } from 'node:path';
 import { newId } from './model.js';
@@ -19,7 +18,7 @@ import { limiter } from './auth.js';
 import { imageInfo } from './messaging.js';
 import { cleanPrefs, mergePrefs } from '../js/lib/account.js';
 import { DECORATION_IDS, HUE_IDS, cleanNameStyle, cleanProfileColors, customId } from '../js/lib/theme.js';
-import { writeStored } from './filecrypt.js'; // 0.14: files encrypted at rest
+import { writeStored, removeStored } from './filecrypt.js'; // 0.14: files encrypted at rest
 
 export const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 export const AVATAR_PX = [64, 2048];
@@ -171,7 +170,7 @@ export function createAppearanceHttp({ db, M, hub, filesDir, sendJson, error, bo
     const rows = db.all('SELECT id FROM files WHERE conv = ? AND id IS NOT ?', `avatar:${user}`, keep ?? null);
     for (const r of rows) {
       db.run('DELETE FROM files WHERE id = ?', r.id);
-      unlink(join(filesDir, r.id)).catch(() => {});
+      removeStored(join(filesDir, r.id));
     }
   };
   return async function appearanceHttp(req, res, path, url, user) {

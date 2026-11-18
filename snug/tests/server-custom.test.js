@@ -161,6 +161,8 @@ test('profile pictures: clearing removes img for everyone; export includes it; d
   assert.equal(row.avatar, null);
   assert.equal(row.decoration, null);
   assert.equal(srv.db.get('SELECT 1 x FROM files WHERE id = ?', f.id), undefined);
+  // Gone from disk too (on Windows a just-written file can be busy for a moment, so the delete is retried).
+  for (let i = 0; i < 50 && existsSync(join(dir, 'files', f.id)); i++) await new Promise((r) => setTimeout(r, 100));
   assert.equal(existsSync(join(dir, 'files', f.id)), false);
 });
 

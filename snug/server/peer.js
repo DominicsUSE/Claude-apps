@@ -11,6 +11,7 @@
 //
 // Without a registry configured (tests, LAN servers, plain `npm start`) the
 // module does nothing at all: no wrappers, no tables touched beyond migrations.
+import { removeStored } from './filecrypt.js';
 import { unlinkSync, statfsSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -470,7 +471,7 @@ export function createPeer({ db, M, hub, ops, filesDir, log = () => {}, opts = {
   }
   function dropFile(id) {
     db.run('DELETE FROM files WHERE id = ?', id);
-    try { unlinkSync(join(filesDir, id)); } catch { /* none */ }
+    removeStored(join(filesDir, id)); // retried while Windows has it busy
   }
   function setPicture(p, kind, fileId) {
     const c = { user: p.user, ws: null, peer: true };
