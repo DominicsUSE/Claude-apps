@@ -58,7 +58,7 @@ goes back to an older version on its own (README, "Install, update, go back").
   rooms (with a way to the ring settings), quiet times.
 - On a phone, a settings page has Back and no second Close; the scrolling page can be scrolled from the
   keyboard; an unknown page opens Profile instead of nothing; Text and messages has a title; controls line up in
-  one column on wide screens; the password button says why it's greyed out; the chosen sound pack is marked.
+  one column on wide screens; the password button says why it’s greyed out; the chosen sound pack is marked; sound packs and accents line up under their label instead of drifting to the right on a phone.
 
 ## 0.14.0
 

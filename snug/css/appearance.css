@@ -199,7 +199,7 @@
 .ap-swatch i { display: block; height: 4px; border-radius: 2px; width: 70%; }
 .ap-swatch i + i { width: 45%; opacity: 0.6; }
 .ap-swatch b { display: block; width: var(--s-3); height: var(--s-3); border-radius: var(--r-row); margin: auto; }
-.ap-accents { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: flex-end; }
+.ap-accents { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: flex-start; }
 .ap-accent { display: inline-flex; align-items: center; gap: var(--s-2); height: var(--h-sm); padding: 0 var(--s-3); border-radius: var(--r-btn); background: var(--bg-3); color: var(--text-2); font-size: var(--t-13); }
 .ap-accent:hover { background: var(--bg-4); color: var(--text-1); }
 .ap-accent:active { background: var(--btn2-press); }
