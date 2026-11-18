@@ -289,6 +289,16 @@ export function QuickJump() {
   const list = useRef();
   const field = useRef();
   useLayoutEffect(() => field.current.focus(), []);
+  // Closed without going anywhere (Esc, a click outside): focus goes back to
+  // where it was, not to the top of the page.
+  const opener = useRef(undefined);
+  const ran = useRef(false);
+  if (opener.current === undefined) opener.current = document.activeElement;
+  useEffect(() => () => {
+    const prev = opener.current;
+    if (ran.current || !prev || prev === document.body) return;
+    queueMicrotask(() => { const a = document.activeElement; if (prev.isConnected && (!a || a === document.body || !a.isConnected)) prev.focus({ preventScroll: true }); });
+  }, []);
   const term = q.trim();
   const rows = candidates(term);
   const inv = quickInvite(term);
@@ -296,7 +306,7 @@ export function QuickJump() {
   if (term) rows.push({ group: 'Messages', key: 'search', label: `Search messages for “${term}”`, hint: 'Messages and files', icon: html`<${Icon} name="search" />`, run: () => go({ type: 'search', q: term }) });
   else rows.push({ key: 'search', label: 'Search messages', hint: '', icon: html`<${Icon} name="search" />`, run: () => go({ type: 'search', q: '' }) });
   const at = Math.min(i, rows.length - 1);
-  const run = (row) => { closeQuick(); row.run(); };
+  const run = (row) => { ran.current = true; closeQuick(); row.run(); };
 
   useEffect(() => { list.current?.querySelector('.act')?.scrollIntoView({ block: 'nearest' }); }, [at]);
   const onKey = (e) => {

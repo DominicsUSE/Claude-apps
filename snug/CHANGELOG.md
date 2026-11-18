@@ -52,7 +52,7 @@ goes back to an older version on its own (README, "Install, update, go back").
   (a profile from a room, a room from a house) returns there, never straight to the tabs.
 - **Quick switcher:** with nothing typed it lists your recent places and then your houses; rows show their
   unread count; the footer says an invitation link can be pasted; "Start a house or join one" is an action.
-  The list is announced as you move through it.
+  The list is announced as you move through it, and closing it with Esc puts keyboard focus back where it was.
 - **Invitations in plain words.** The invite dialog spells out the code and keeps the end of the link in view;
   a link that doesn't work says why, then offers "Paste another link". The local-address warning no longer
   prints the address.
