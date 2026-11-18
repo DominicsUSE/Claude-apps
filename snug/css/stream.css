@@ -22,6 +22,8 @@
 }
 .msg.grouped { margin-top: 0; padding-top: calc(var(--line-gap) + 3px); padding-bottom: calc(var(--line-gap) + 3px); }
 .msg:hover, .msg:focus-within { background: var(--surface-chat-hover); --bg: var(--surface-chat-hover); }
+/* A touch screen has no pointer resting on a row: the tint left by the last tap would stick to it. */
+@media (hover: none) { .msg:hover:not(:focus-within):not(.menu-open):not(.sel):not(.replying):not(.mention) { background: transparent; --bg: inherit; } }
 .msg:focus-visible { outline-offset: -2px; border-radius: 0; }
 .msg.mention { background: var(--mention-bg); --bg: var(--mention-bg); box-shadow: inset 2px 0 0 var(--mention-edge); }
 .msg.mention:hover, .msg.mention:focus-within { background: color-mix(in srgb, var(--mention-bg) 95%, var(--text-1)); --bg: color-mix(in srgb, var(--mention-bg) 95%, var(--text-1)); }
@@ -113,6 +115,8 @@ mark.hit { background: none; color: inherit; font-weight: var(--w-bold); text-de
 .stub::before { content: ""; position: absolute; right: calc(100% + var(--s-2)); bottom: 50%; width: calc(var(--avatar) / 2 + var(--s-2) - 2px); height: 20px; border-left: 2px solid var(--line-strong); border-bottom: 2px solid var(--line-strong); border-bottom-left-radius: var(--r-btn); pointer-events: none; }
 .stub:hover { background: var(--surface-hover); color: var(--text-1); }
 .stub .avatar { --sz: var(--av-20); }
+.stub b { flex: none; white-space: nowrap; } /* the count and its unread dot never wrap; the time gives way */
+.stub .faint { min-width: 0; }
 .stub b { font-weight: var(--w-semibold); color: color-mix(in srgb, var(--link) 88%, var(--text-1)); } /* nudged toward the text colour: AA on a hovered or highlighted message too */
 .stub.unread b::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--unread); margin-left: var(--s-2); vertical-align: middle; }
 

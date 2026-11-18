@@ -61,6 +61,10 @@ goes back to an older version on its own (README, "Install, update, go back").
   state says houses, not places.
 - **Empty rooms and conversations** say how to begin: "Start the conversation below" / "Say hello to start the
   conversation."
+- **Thread links** keep "4 replies" and its unread dot on one line on narrow phones (the dot used to drop to a
+  line of its own); the time of the latest reply gives way instead, without the stray "Last".
+- **Touch screens** no longer leave a grey tint on the message you last tapped.
+- **Polls on phones** put the vote count on its own line with the buttons together below it.
 
 ## 0.14.0
 

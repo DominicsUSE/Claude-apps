@@ -333,7 +333,7 @@ export function Message({ conv, m, grouped, inThread, tab, lit }) {
       ${replies.length > 0 && !inThread && html`<div><button class=${`stub${threadUnread ? ' unread' : ''}`} onClick=${() => openThread(conv, m.id)}>
         <${Stack} users=${authors} />
         <b>${plural(replies.length, 'reply', 'replies')}</b>
-        <span class="faint trunc">Last ${fmtWhen(replies[replies.length - 1].ts)}</span>
+        <span class="faint trunc" title="Latest reply">${fmtWhen(replies[replies.length - 1].ts)}</span>
       </button></div>`}
       ${m.state === 'queued' && html`<div class="msg-state"><${Icon} name="offline" size=${14} />Waiting for a connection. It will send by itself.</div>`}
       ${m.state === 'failed' && html`<div class="msg-state failed" role="alert">

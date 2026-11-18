@@ -197,6 +197,8 @@ button.poll-a:active { background: var(--bg-4); }
   .fmt-bar { left: var(--s-2); right: var(--s-2); overflow-x: auto; }
   .fmt-bar .ib.sm, .poll-foot .btn, .sched-item .btn { min-width: var(--touch); height: var(--touch); }
   .poll-a { min-height: var(--touch); }
+  .poll-foot .poll-meta { flex-basis: 100%; } /* the count on its own line, the buttons together below it */
+  .poll-foot .grow { display: none; }
   .cb-copy { height: var(--touch); }
   .unread-bar { left: var(--s-2); right: var(--s-2); }
   .unread-jump, .unread-done { min-height: var(--touch); }
