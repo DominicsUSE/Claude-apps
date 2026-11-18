@@ -96,7 +96,7 @@ export function Steps({ hold = [] }) {
       <button class="btn ghost sm onb-hide" onClick=${hideGuide}>${t('start.hide')}</button>
     </div>
     <div class="onb-bar" role="progressbar" aria-label=${t('start.stepsTitle')} aria-valuemin="0" aria-valuemax=${list.length} aria-valuenow=${done}>
-      <span style=${`width:${(done / list.length) * 100}%`}></span>
+      <span style=${`transform:scaleX(${done / list.length})`}></span>
     </div>
     <ol class="onb-list">
       ${list.map((s, i) => {

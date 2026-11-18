@@ -268,7 +268,7 @@ button.home-row:hover .home-row-ic:not(:has(> .avatar, > .tile)) { background: v
 .onb-count { color: var(--text-3); font-size: var(--t-meta); }
 .onb-hide { margin-left: auto; }
 .onb-bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
-.onb-bar span { display: block; height: 100%; background: var(--color-primary); border-radius: 2px; transition: width var(--m-slow) var(--ease-out); }
+.onb-bar span { display: block; width: 100%; height: 100%; background: var(--color-primary); transform-origin: left center; transition: transform var(--m-slow) var(--ease-out); }
 .onb-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-1); }
 .onb-step { display: flex; gap: var(--s-3); align-items: flex-start; padding: var(--s-2) 0; }
 .onb-mark { width: var(--h-xs); height: var(--h-xs); flex: none; display: grid; place-items: center; border-radius: 50%; border: 1.5px solid var(--line-strong); color: var(--text-3); font-size: var(--t-meta); font-weight: var(--w-semibold); }
