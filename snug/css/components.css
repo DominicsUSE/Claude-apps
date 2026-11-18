@@ -1,0 +1,116 @@
+/* Components added in 0.15 (js/ui/controls.js), plus the global states every
+   control shares. The older primitives (.btn, .ib, .field, .menu, .modal,
+   .toast, .tip, .empty, .skel) stay in css/base.css. DESIGN.md is the guide.
+   Only tokens here: no raw colours, sizes off the scale, or z-index numbers. */
+
+/* ---------- Global states ----------
+   Hover is one quiet step, press one more (and a 1px nudge on buttons), focus
+   one ring in the text colour (base.css :focus-visible). Disabled is
+   text-disabled, never opacity on text. */
+[tabindex="0"]:focus-visible, summary:focus-visible { outline: var(--focus-w) solid var(--focus); outline-offset: 2px; }
+.item-note input:focus-visible { border-bottom-style: solid; border-bottom-color: var(--accent); }
+
+/* A hover-revealed control that opened a menu, popover or dialog stays shown
+   until it has focus back (js/ui/overlays.js useReturnFocus). */
+@media (hover: hover) {
+  .msg:has([data-opener]) .msg-actions, .row:has([data-opener]) .row-acts, .row-wrap:has([data-opener]) > .row-acts, .item:has([data-opener]) .item-acts { display: flex; }
+}
+
+/* Touch screens of any width: what a finger presses is at least 44px. */
+@media (pointer: coarse) {
+  .btn, .btn.sm, .menu-item { min-height: var(--tap-min); }
+  .ib, .ib.compact { min-width: var(--tap-min); min-height: var(--tap-min); }
+}
+.tap-target { min-width: var(--tap-min); min-height: var(--tap-min); }
+
+/* Reduced motion: the tokens are already 0ms (tokens.css); this also stops
+   literal transitions and smooth scrolling. Loops that carry meaning (a
+   spinner, a breathing dot) are stilled where they are defined. */
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) *, :root:not([data-motion="full"]) *::before, :root:not([data-motion="full"]) *::after { transition-duration: 0s !important; scroll-behavior: auto !important; }
+}
+:root[data-motion="off"] *, :root[data-motion="off"] *::before, :root[data-motion="off"] *::after { transition-duration: 0s !important; scroll-behavior: auto !important; }
+
+/* ---------- Icon button: always-touch size ---------- */
+.ib.touch { width: var(--tap-min); height: var(--tap-min); }
+
+/* ---------- Spinner sizes ---------- */
+.spinner.sm { width: 12px; height: 12px; }
+.spinner.lg { width: var(--ic-lg); height: var(--ic-lg); border-width: 3px; }
+
+/* ---------- Field: label, control, hint or error ---------- */
+.ui-field { display: grid; min-width: 0; }
+.ui-field .label { margin-bottom: 6px; }
+.ui-optional { font-weight: var(--w-regular); color: var(--text-3); }
+.ui-field .err .ic { flex: none; }
+
+/* ---------- Search input ---------- */
+.ui-search {
+  height: var(--h-field); padding: 0 var(--s-1) 0 var(--s-3); min-width: 0;
+  display: flex; align-items: center; gap: var(--s-2);
+  background: var(--surface-input); color: var(--text-3);
+  border: 1px solid var(--line); border-radius: var(--r-input);
+  transition: border-color var(--m-hover) var(--ease-in-out), box-shadow var(--m-hover) var(--ease-in-out);
+}
+.ui-search.sm { height: var(--h-sm); }
+.ui-search.lg { height: var(--h-md); }
+.ui-search:hover { border-color: var(--line-strong); }
+.ui-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.ui-search-in { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: none; color: var(--text-1); font-size: var(--t-body); }
+.ui-search-in::placeholder { color: var(--text-3); }
+.ui-search:not(:has(.ib)) { padding-right: var(--s-3); }
+
+/* ---------- Tabs ---------- */
+.ui-tabs { display: flex; align-items: center; gap: var(--s-1); min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.ui-tabs::-webkit-scrollbar { display: none; }
+.ui-tab {
+  height: var(--h-sm); padding: 0 var(--s-3); flex: none;
+  display: inline-flex; align-items: center; gap: var(--s-1);
+  border-radius: var(--r-btn); color: var(--text-2); font-size: var(--t-body); font-weight: var(--w-medium); white-space: nowrap;
+  transition: background var(--m-hover) var(--ease-in-out), color var(--m-hover) var(--ease-in-out);
+}
+.ui-tab:hover { background: var(--surface-hover); color: var(--text-1); }
+.ui-tab:active { background: var(--surface-sel); }
+.ui-tab[aria-selected="true"] { background: var(--surface-sel); color: var(--text-1); font-weight: var(--w-semibold); }
+.ui-tab:focus-visible { outline-offset: -2px; }
+.ui-tab-count { color: var(--text-3); font-size: var(--t-meta); font-weight: var(--w-regular); }
+.ui-tab[aria-selected="true"] .ui-tab-count { color: var(--text-2); }
+.ui-tabpanel:focus-visible { outline-offset: -2px; }
+
+/* ---------- Tooltip host (non-interactive content with a tooltip) ---------- */
+.ui-tip-host { display: inline-flex; align-items: center; border-radius: var(--r-row); }
+
+/* ---------- Toast kinds: an icon (and a word for screen readers) ---------- */
+.toast > .ic { margin-left: calc(var(--s-1) * -1); }
+.toast.success > .ic { color: var(--success-ink); }
+.toast.error > .ic { color: var(--error); }
+.toast.info > .ic { color: var(--info-ink); }
+.toast.error { border-color: color-mix(in srgb, var(--error) 50%, var(--line-strong)); }
+
+/* ---------- Loading ---------- */
+.ui-loading { display: grid; gap: var(--s-2); padding: var(--s-2) 0; }
+.ui-loading .skel.line { display: block; }
+.ui-loading.k-lines { padding: var(--s-2) var(--s-4); }
+.ui-loading.k-messages { gap: var(--s-4); padding: var(--s-4); }
+.ui-loading.k-cards { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: var(--s-3); padding: var(--s-4); }
+.ui-skel-msg { display: flex; gap: var(--s-3); align-items: flex-start; }
+.ui-skel-msg-body { flex: 1; display: grid; gap: var(--s-2); padding-top: var(--s-1); }
+.ui-skel-card { display: block; height: 96px; border-radius: var(--r-media); }
+
+/* ---------- Error ---------- */
+.ui-error h2 { color: var(--text-1); }
+
+/* ---------- The design system sheet (js/ui/gallery.js, not linked in the app) ---------- */
+.layer.ui-gal { display: block; overflow-y: auto; }
+.ui-gal-sect { padding: var(--s-4) 0; border-bottom: 1px solid var(--line-subtle); }
+.ui-gal-sect h2 { margin-bottom: var(--s-3); }
+.ui-gal-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); }
+.ui-gal-col { display: grid; gap: var(--s-4); width: min(100%, 420px); }
+.ui-gal-ctx { padding: var(--s-2) var(--s-3); border: 1px dashed var(--line-strong); border-radius: var(--r-btn); color: var(--text-2); font-size: var(--t-ui); }
+
+/* Phones: fields and search are touch height with 16px text (no zoom on focus). */
+@media (max-width: 759px) {
+  .ui-search, .ui-search.sm, .ui-search.lg { height: var(--tap-min); }
+  .ui-search-in { font-size: var(--t-input-touch); }
+  .ui-tab { height: var(--tap-min); }
+}

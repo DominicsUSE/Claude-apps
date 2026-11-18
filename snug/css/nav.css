@@ -1,0 +1,369 @@
+/* Navigation: rail -> context column -> content, your panel at the bottom of
+   the column, the Home view, and the nav agent's touches to Catch up and
+   Search. Tokens only (1px lines excepted).
+   Communities and people are circles; controls are 6px rectangles; nav rows
+   are 4px. Neutral first: violet only marks where you are (--indicator) and
+   what needs you (--attention). */
+
+/* ---------- Frame (shell track) ----------
+   The navigation column of shell.css becomes rail + context column. Every
+   shell rule that measures --nav-w (pane overlay at medium widths) follows.
+   The rail is a 72px strip of 48px circles (brief 5). */
+.app { --rail-w: 72px; --rail-ic: 48px; --nav-w: calc(var(--rail-w) + var(--ctx-w)); }
+.app > .nav { flex-direction: row; background: var(--surface-rail); --bg: var(--surface-rail); }
+
+/* ---------- Rail ---------- */
+.rail { width: var(--rail-w); flex: none; min-height: 0; display: flex; flex-direction: column; background: var(--surface-rail); --bg: var(--surface-rail); }
+.rail-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; padding: var(--s-3) 0 var(--s-4); display: flex; flex-direction: column; align-items: center; gap: var(--s-2); }
+.rail-scroll::-webkit-scrollbar { display: none; }
+.rail-item { position: relative; width: 100%; display: flex; justify-content: center; flex: none; }
+
+/* The left edge says what an item is to you: a violet bar where you are, a
+   short light pip where something is new, a hint of it on hover. */
+.rail-item::before {
+  /* Full height once, scaled per state: transform animates without layout work. */
+  content: ""; position: absolute; left: 0; top: 50%; width: 4px; height: 40px; margin-top: -20px;
+  border-radius: 0 4px 4px 0; background: var(--text-1);
+  transform: scaleY(0); transform-origin: left center;
+  transition: transform var(--m-control) var(--ease-out), background var(--m-control) var(--ease-in-out);
+}
+.rail-item.unread::before { transform: scaleY(0.2); }
+.rail-item:hover::before { transform: scaleY(0.5); background: var(--text-2); }
+.rail-item.unread:hover::before { background: var(--text-1); }
+.rail-item.sel::before { transform: scaleY(1); background: var(--indicator); }
+
+.rail-btn {
+  position: relative; width: var(--rail-ic); height: var(--rail-ic);
+  display: grid; place-items: center; border-radius: 50%; color: var(--text-2);
+  transition: transform var(--m-hover) var(--ease-in-out);
+}
+.rail-btn:active { transform: translateY(1px); }
+.rail-btn:focus-visible { outline-offset: 3px; }
+.rail-face { width: 100%; height: 100%; display: grid; place-items: center; border-radius: 50%; transition: background var(--m-hover) var(--ease-in-out), color var(--m-hover) var(--ease-in-out); }
+
+/* Home, Messages, Discover, Create or join: neutral circles on a quiet step. */
+.rail-item:not(:has(.rail-house)) .rail-face { background: var(--surface-2); color: var(--text-2); }
+.rail-item:not(:has(.rail-house)) .rail-btn:hover .rail-face { background: var(--surface-sel); color: var(--text-1); }
+.rail-item:not(:has(.rail-house)) .rail-btn:active .rail-face { background: var(--surface-hover); }
+.rail-item.sel:not(:has(.rail-house)) .rail-face { background: var(--surface-sel); color: var(--text-1); }
+.rail-add .rail-face { color: var(--text-2) !important; }
+.rail-add:hover .rail-face { color: var(--text-1) !important; }
+
+/* Home is the Nook itself, on its circle. */
+.rail-home .nook { transition: transform var(--m-control) var(--ease-out); }
+.rail-home:hover .nook { transform: translateY(-1px); }
+
+/* Communities are circles at full strength; hover lifts them a touch. */
+.rail .tile { --sz: var(--rail-ic); font-size: var(--t-16); font-weight: var(--w-semibold); }
+.rail-house .rail-face { transition: filter var(--m-hover) var(--ease-in-out); }
+.rail-house:hover .rail-face { filter: brightness(1.08); }
+
+/* Mentions and requests: a violet count at the bottom right, cut out of the rail. */
+.rail-badge { position: absolute; right: -4px; bottom: -4px; top: auto; box-shadow: 0 0 0 3px var(--surface-rail); pointer-events: none; }
+.rail-sep { width: 32px; height: 2px; flex: none; border-radius: 1px; background: var(--line); margin: 0; }
+
+/* ---------- Context column (brief 6, 7) ---------- */
+.ctx { width: var(--ctx-w); flex: none; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; background: var(--surface-nav); --bg: var(--surface-nav); }
+.ctx-head { height: var(--bar-h); flex: none; display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-2) 0 var(--s-3); border-bottom: 1px solid var(--line-subtle); }
+.ctx-head .jump-btn { height: var(--h-28); background: var(--surface-rail); border-color: transparent; border-radius: var(--r-row); }
+.ctx-head .jump-btn:hover { color: var(--text-2); border-color: transparent; }
+.ctx-head .jump-btn .kbd { white-space: nowrap; flex: none; }
+.ctx-title { padding: 0 var(--s-4); }
+.ctx-title .ctx-name { font-size: var(--t-section); font-weight: var(--w-semibold); letter-spacing: -0.005em; }
+/* A house: its name across the top is the house menu (brief 6). */
+.ctx-house-head { padding: 0; }
+.ctx-house { width: 100%; height: 100%; padding: 0 var(--s-3) 0 var(--s-4); display: flex; align-items: center; gap: var(--s-2); border-radius: 0; text-align: left; transition: background var(--m-hover) var(--ease-in-out); }
+.ctx-house:hover { background: var(--surface-hover); --bg: var(--surface-hover); }
+.ctx-house:active, .ctx-house[aria-expanded="true"] { background: var(--surface-sel); --bg: var(--surface-sel); }
+.ctx-house > .ic { color: var(--text-2); }
+.ctx-house .ctx-name { display: block; font-size: var(--t-body); font-weight: var(--w-semibold); line-height: 18px; color: var(--text-1); }
+.ctx-meta { display: flex; gap: var(--s-2); font-size: var(--t-meta); font-weight: var(--w-regular); color: var(--text-3); line-height: 16px; }
+.ctx-online { display: inline-flex; align-items: center; gap: var(--s-1); }
+.ctx-online .pres, .home-online .pres { width: 6px; height: 6px; }
+.ctx .nav-scroll { padding: var(--s-2) var(--s-2) var(--s-4); }
+.ctx .nav-group { margin-top: var(--s-2); }
+.ctx .nav-group:first-child { margin-top: 0; }
+/* Category labels: small uppercase, the chevron says open or shut; the
+   category's own buttons stay quiet until you point at it. */
+.ctx .sect { text-transform: uppercase; letter-spacing: 0.04em; font-size: var(--t-micro); padding-left: var(--s-1); margin-top: var(--s-3); }
+.ctx .nav-group:first-child > .sect:first-child { margin-top: var(--s-1); }
+.ctx .sect .sect-name { text-transform: inherit; letter-spacing: inherit; font-size: inherit; }
+.ctx .sect .ib { color: var(--text-3); }
+.ctx .sect .ib:hover { color: var(--text-1); }
+.row-hint { margin-left: var(--s-2); font-size: var(--t-meta); font-weight: var(--w-regular); color: var(--text-3); }
+.row.sel .row-hint { color: var(--text-2); }
+.topic-mark { font-size: var(--t-body); font-weight: var(--w-semibold); color: var(--text-3); line-height: 1; }
+.ctx-note { padding: var(--s-1) var(--s-2); font-size: var(--t-ui); color: var(--text-3); line-height: var(--lh-body); }
+.ev-live { font-size: var(--t-micro); font-weight: var(--w-semibold); color: var(--brand-ink); }
+
+/* Two-line rows (direct messages): a 32px face with its presence, the name,
+   then what they are doing or when they were last around (brief 16, 17). */
+.row.two-line { height: 42px; }
+.row.two-line .row-ic { width: 32px; }
+.row.two-line .row-ic .avatar { --sz: 32px; }
+.row.two-line .row-ic .pres { width: 10px; height: 10px; right: -2px; bottom: -2px; }
+.row-text { display: grid; min-width: 0; line-height: 18px; text-align: left; }
+.row-line { display: block; font-size: var(--t-meta); font-weight: var(--w-regular); color: var(--text-3); line-height: 16px; }
+.row-line.is-live { color: var(--mint-ink); }
+.row.sel .row-line, .row:hover .row-line { color: var(--text-2); }
+.row.sel .row-line.is-live, .row:hover .row-line.is-live { color: var(--mint-ink); }
+
+/* Voice rooms are rooms: who is inside sits under the row, one line each,
+   with a thin mint ring while they talk and their mic/ear state (brief 18).
+   Not .row: tests and the keyboard treat rows as places. */
+.vroom-people { display: grid; padding: 0 0 var(--s-1) 28px; }
+.vroom-person {
+  width: 100%; height: 28px; padding: 0 var(--s-2) 0 var(--s-1); display: flex; align-items: center; gap: var(--s-2);
+  border-radius: var(--r-row); color: var(--text-3); font-size: var(--t-ui); font-weight: var(--w-medium); text-align: left;
+  transition: background var(--m-hover) var(--ease-in-out), color var(--m-hover) var(--ease-in-out);
+}
+.vroom-person:hover { background: var(--surface-hover); --bg: var(--surface-hover); color: var(--text-1); }
+.vroom-person .avatar { --sz: 20px; font-size: var(--t-micro); }
+.vroom-person .ini2 { display: none; }  /* one letter: two stop being readable at 20px */
+.vroom-person.talking { color: var(--text-1); }
+.vroom-person .avatar.speaking { box-shadow: 0 0 0 1.5px var(--bg), 0 0 0 3px var(--mint); }
+.vroom-name { flex: 1; min-width: 0; }
+.vroom-marks { display: flex; align-items: center; gap: 2px; color: var(--text-3); flex: none; }
+.vroom-marks .is-off { color: var(--error); }
+.vroom-count { font-variant-numeric: tabular-nums; }
+
+/* ---------- Your panel (brief 4): who you are, mic, ear, settings ---------- */
+.me-panel { flex: none; background: var(--surface-rail); --bg: var(--surface-rail); }
+.me-row { display: flex; align-items: center; gap: 0; height: var(--panel-h); padding: 0 var(--s-1) 0 var(--s-2); }
+.me-row .self { flex: 1; min-width: 0; width: auto; height: 40px; padding: 0 var(--s-1) 0 2px; margin-right: 2px; border-radius: var(--r-row); }
+.me-row .self:hover { background: var(--surface-hover); --bg: var(--surface-hover); }
+.me-row .self:active { background: var(--surface-sel); --bg: var(--surface-sel); }
+.me-row .ib { flex: none; }
+.self-text { display: grid; text-align: left; }
+.self-text .self-name, .self-text .self-status { display: block; }
+
+/* The voice strip above your panel while you are in a room or a call:
+   where you are, how the line is, and a way out. Mic and ear live in your
+   panel, so the strip does not repeat them. */
+.me-panel .dock { margin: 0; padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3); background: transparent; --bg: var(--surface-rail); border: 0; border-bottom: 1px solid var(--line-subtle); border-radius: 0; gap: var(--s-1); animation: none; }
+.dock-state { display: flex; align-items: center; gap: var(--s-1); font-size: var(--t-ui); font-weight: var(--w-semibold); color: var(--mint-ink); line-height: 18px; }
+.dock-state.wait { color: var(--amber-ink); }
+.dock-state .ic { color: currentColor !important; }
+.me-panel .dock-head { gap: var(--s-1); padding: 0; border-radius: var(--r-row); font-size: var(--t-meta); color: var(--text-3); text-align: left; }
+.me-panel .dock-head:hover .dock-name { text-decoration: underline; }
+.me-panel .dock-head .dock-name { color: var(--text-2); font-weight: var(--w-medium); }
+.me-panel .dock-head > .ic { display: none; }
+.me-panel .dock-row { gap: 2px; }
+.me-panel .dock-row .ib { width: var(--h-sm); height: var(--h-sm); }
+.me-panel .dock .vc[aria-label="Mute"], .me-panel .dock .vc[aria-label="Unmute"],
+.me-panel .dock .vc[aria-label="Stop hearing the room"], .me-panel .dock .vc[aria-label="Hear the room again"] { display: none; }
+
+/* ---------- Home ----------
+   What is happening, as lists: voice rooms and conversations in the main
+   column; who is around, your communities and suggestions beside it.
+   Section labels are small caps with a count (brief 16); rows are dense and
+   hover on a surface step; no borders between sections. */
+.home-col { width: 100%; max-width: 70rem; margin-inline: auto; padding: var(--s-4) var(--s-6) var(--s-8); container-type: inline-size; }
+.home-hello { margin-bottom: var(--gap-major); }
+.home-greet { font-size: var(--t-section); font-weight: var(--w-semibold); line-height: var(--lh-heading); letter-spacing: -0.01em; }
+.home-summary { margin-top: var(--s-1); display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-1) var(--s-3); color: var(--text-2); font-size: var(--t-ui); line-height: var(--lh-ui); }
+.home-foryou { display: inline-flex; align-items: center; gap: var(--s-2); height: var(--h-xs); padding: 0 var(--s-2) 0 var(--s-1); margin-left: calc(var(--s-1) * -1); border-radius: var(--r-btn); color: var(--text-1); font-weight: var(--w-medium); transition: background var(--m-hover) var(--ease-in-out); }
+.home-foryou:hover { background: var(--surface-hover); }
+.home-foryou:active { background: var(--surface-sel); }
+
+.home-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap-major); align-items: start; }
+@container (min-width: 820px) {
+  .home-grid { grid-template-columns: minmax(0, 1fr) var(--people-w); gap: var(--s-8); }
+}
+.home-main, .home-side { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap-major); align-content: start; }
+.home-sect { min-width: 0; }
+/* One column: who is online now comes first, then the rest in reading order
+   (Recently here stays after the conversations going, so they are not pushed below the fold). */
+@container (max-width: 819px) {
+  .home-main, .home-side { display: contents; }
+  .home-sect[aria-labelledby="home-friends"] { order: -1; }
+}
+
+.home-h { display: flex; align-items: center; gap: var(--s-2); height: var(--h-xs); margin-bottom: var(--s-1); }
+.home-h h3 { font-size: var(--t-meta); font-weight: var(--w-semibold); text-transform: uppercase; letter-spacing: 0.02em; color: var(--text-3); }
+.home-count { font-weight: var(--w-semibold); color: var(--text-3); }
+.home-more { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; height: var(--h-xs); font-size: var(--t-meta); color: var(--text-3); border-radius: var(--r-row); padding: 0 var(--s-1); transition: color var(--m-hover) var(--ease-in-out), background var(--m-hover) var(--ease-in-out); }
+.home-more:hover { color: var(--text-1); background: var(--surface-hover); }
+.home-more:active { background: var(--surface-sel); }
+
+/* Online now: one dense line per person, saying what they are doing. */
+.home-friends { list-style: none; margin: 0 calc(var(--s-2) * -1); padding: 0; display: grid; gap: 1px; }
+.home-friend {
+  width: 100%; min-height: 42px; padding: 0 var(--s-2); display: flex; align-items: center; gap: var(--s-3);
+  border-radius: var(--r-row); text-align: left; transition: background var(--m-hover) var(--ease-in-out);
+}
+.home-friend:hover { background: var(--surface-hover); --bg: var(--surface-hover); }
+.home-friend:active { background: var(--surface-sel); --bg: var(--surface-sel); }
+.home-friend-text { min-width: 0; flex: 1; display: grid; line-height: 18px; }
+.home-friend-name { font-size: var(--t-body); font-weight: var(--w-medium); color: var(--text-1); }
+.home-friend-doing { display: flex; align-items: center; gap: var(--s-1); font-size: var(--t-meta); color: var(--text-3); line-height: 16px; }
+.home-friend-doing .ic { flex: none; }
+.home-friend:hover .home-friend-doing:not(.is-live) { color: var(--text-2); }
+
+.is-live { color: var(--mint-ink); }
+.is-typing { font-style: italic; color: var(--text-2); }
+
+/* Rows: icon, what and where, how alive, who. */
+.home-list { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.home-row {
+  width: calc(100% + var(--s-4)); margin: 0 calc(var(--s-2) * -1); padding: var(--s-1) var(--s-2); min-height: 44px;
+  display: flex; align-items: center; gap: var(--s-3); text-align: left; border-radius: var(--r-row);
+  transition: background var(--m-hover) var(--ease-in-out);
+}
+button.home-row:hover, .home-voice:hover { background: var(--surface-hover); --bg: var(--surface-hover); }
+button.home-row:active { background: var(--surface-sel); --bg: var(--surface-sel); }
+.home-row-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--s-3); text-align: left; border-radius: var(--r-row); }
+.home-row-ic { width: var(--av-sm); height: var(--av-sm); flex: none; display: grid; place-items: center; border-radius: var(--r-btn); background: var(--surface-2); color: var(--text-2); }
+.home-row-ic:has(> .avatar, > .tile) { background: none; }
+button.home-row:hover .home-row-ic:not(:has(> .avatar, > .tile)) { background: var(--surface-sel); }
+.home-row-ic.is-live { background: var(--surface-2); color: var(--mint-ink); }
+.home-row-ic .tile { --sz: var(--av-sm); }
+.home-row-text { flex: 1; min-width: 0; display: grid; gap: 0; }
+.home-row-title { display: flex; align-items: baseline; gap: var(--s-2); min-width: 0; font-size: var(--t-body); font-weight: var(--w-semibold); color: var(--text-1); line-height: 20px; }
+.home-row-title > .trunc:first-child { flex: 0 0 auto; max-width: 100%; }
+.home-row-where { flex: 0 1 auto; min-width: 0; max-width: 50%; font-size: var(--t-meta); font-weight: var(--w-regular); color: var(--text-3); }
+.home-row-sub { display: flex; align-items: center; gap: var(--s-1); font-size: var(--t-meta); font-weight: var(--w-regular); color: var(--text-3); line-height: 18px; }
+/* One line of inline bits so a long one ends in an ellipsis, never mid-word. */
+.home-row-bits { flex: 0 100 auto; min-width: 0; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: inherit; }
+.home-row-bits > span { display: inline; }
+.home-row-bits > .sep { margin: 0 var(--s-1); }
+/* A phone keeps the live bits (typing, in voice) and drops the head count. */
+@media (max-width: 759px) { .home-row-bits > .talking, .home-row-bits > .sep:has(+ .talking) { display: none; } }
+@media (max-width: 759px) { .home-friend { min-height: var(--touch); } }
+.home-row-sub .sep { color: var(--text-3); }
+.home-row-quote { font-size: var(--t-ui); color: var(--text-2); line-height: 18px; }
+.home-row-quote b { font-weight: var(--w-medium); color: var(--text-1); }
+.home-row-end { flex: none; display: flex; align-items: center; gap: var(--s-2); }
+.home-new { font-size: var(--t-meta); font-weight: var(--w-semibold); color: var(--text-1); }
+.home-online { display: inline-flex; align-items: center; gap: var(--s-1); }
+.home-voice { padding-right: var(--s-2); }
+.home-voice .btn { flex: none; }
+.home-pick-about { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.home-skel-ic { width: var(--av-sm); height: var(--av-sm); flex: none; border-radius: var(--r-btn); }
+.home-skel .home-row-text { gap: var(--s-2); }
+.home-events .ev-row { margin: 0 calc(var(--s-2) * -1); }
+
+.home-empty { color: var(--text-2); font-size: var(--t-ui); line-height: var(--lh-body); padding: var(--s-1) 0; }
+.home-quiet { color: var(--text-3); }
+.home-link { color: var(--text-1); font-weight: var(--w-medium); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; border-radius: var(--r-row); }
+.home-link:hover { text-decoration-color: currentColor; }
+
+/* A brand-new account (js/views/start.js): what Snug is in a sentence, the
+   two ways in, three words explained, then five steps ticked off as you go. */
+.onb { display: grid; gap: var(--gap-major); max-width: 40rem; padding-top: var(--s-2); }
+.onb-hero { display: grid; gap: var(--s-3); justify-items: start; }
+.onb-title-main { font-size: var(--t-heading); font-weight: var(--w-semibold); line-height: var(--lh-heading); letter-spacing: -0.01em; margin-top: var(--s-2); text-wrap: balance; }
+.onb-lead { color: var(--text-2); font-size: var(--t-section); line-height: var(--lh-body); }
+.onb-hero-acts { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-1); }
+.onb-explain { list-style: none; margin: var(--s-2) 0 0; padding: 0; display: grid; gap: var(--s-2); color: var(--text-2); font-size: var(--t-ui); line-height: var(--lh-body); }
+.onb-explain li { display: flex; gap: var(--s-3); align-items: flex-start; }
+.onb-explain b { color: var(--text-1); font-weight: var(--w-semibold); }
+.onb-explain-ic { width: var(--h-sm); height: var(--h-sm); flex: none; display: grid; place-items: center; border-radius: var(--r-btn); background: var(--surface-2); color: var(--text-2); }
+.onb-or { color: var(--text-3); font-size: var(--t-ui); }
+
+.onb-steps { padding: var(--s-4); border: 1px solid var(--line-subtle); border-radius: var(--r-modal); background: var(--surface-2); --bg: var(--surface-2); display: grid; gap: var(--s-3); max-width: 40rem; margin-bottom: var(--gap-major); }
+.onb .onb-steps { margin-bottom: 0; }
+.onb-steps-head { display: flex; align-items: center; gap: var(--s-3); }
+.onb-steps-head h3 { font-size: var(--t-body); font-weight: var(--w-semibold); }
+.onb-count { color: var(--text-3); font-size: var(--t-meta); }
+.onb-hide { margin-left: auto; }
+.onb-bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.onb-bar span { display: block; width: 100%; height: 100%; background: var(--color-primary); transform-origin: left center; transition: transform var(--m-slow) var(--ease-out); }
+.onb-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-1); }
+.onb-step { display: flex; gap: var(--s-3); align-items: flex-start; padding: var(--s-2) 0; }
+.onb-mark { width: var(--h-xs); height: var(--h-xs); flex: none; display: grid; place-items: center; border-radius: 50%; border: 1.5px solid var(--line-strong); color: var(--text-3); font-size: var(--t-meta); font-weight: var(--w-semibold); }
+.onb-step.is-done .onb-mark { background: var(--success-soft); border-color: transparent; color: var(--success-ink); }
+.onb-step.is-next .onb-mark { border-color: var(--color-primary); color: var(--text-1); }
+.onb-body { display: grid; gap: var(--s-1); min-width: 0; padding-top: 2px; }
+.onb-title { font-size: var(--t-body); font-weight: var(--w-medium); color: var(--text-1); }
+.onb-step.is-done .onb-title { color: var(--text-2); }
+.onb-step.is-next .onb-title { font-weight: var(--w-semibold); }
+.onb-text { color: var(--text-2); font-size: var(--t-ui); line-height: var(--lh-body); }
+.onb-acts { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-1); }
+.onb-privacy { font-size: var(--t-ui); padding-top: var(--s-1); border-top: 1px solid var(--line-subtle); }
+.onb-privacy .linkish { color: var(--text-2); }
+.onb-privacy .linkish:hover { color: var(--text-1); }
+.home-fresh-picks { max-width: 40rem; margin-top: var(--gap-major); }
+/* A new account's Home is one column: the reminder above it lines up with it. */
+.home-col:has(> .onb) { max-width: calc(40rem + var(--s-6) * 2); }
+.home-invite .btn { flex: none; }
+.home-sect[aria-labelledby="home-invites"] { margin-bottom: var(--gap-major); }
+.home-invite { cursor: default; }
+
+/* ---------- Phone ---------- */
+.phone .home-col { padding: var(--s-4) var(--s-4) var(--s-8); }
+.phone .home-greet { font-size: var(--t-section); }
+.phone .home-row { min-height: var(--touch); }
+/* The summary's "6 for you" links and the in-text links: a 44px hit area
+   for a finger without making the line taller. */
+@media (pointer: coarse) {
+  .home-foryou, .home-link, .onb-or .linkish { position: relative; }
+  .home-foryou::after, .home-link::after, .onb-or .linkish::after {
+    content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: max(100%, var(--tap-min)); height: max(100%, var(--tap-min));
+  }
+}
+.phone .home .bar-end .btn { padding: 0 var(--s-2); }
+.phone .tab { min-width: 0; }
+.you-card { width: 100%; padding: var(--s-2); margin: calc(var(--s-2) * -1); width: calc(100% + var(--s-4)); border-radius: var(--r-menu); text-align: left; transition: background var(--m-fast) var(--ease-in-out); }
+.you-card:hover { background: var(--surface-hover); --bg: var(--bg-2); }
+.you-card:active { background: var(--bg-3); --bg: var(--bg-3); }
+.you-card > .ic { color: var(--text-3); }
+.you-status { justify-content: flex-start; }
+.you-tab .dock { margin: 0; }
+.phone-house .bar-title .tile { --sz: 28px; }
+.phone-house .nav-scroll { padding-top: var(--s-2); }
+.ph-house-t { display: flex; flex-direction: column; min-width: 0; line-height: 22px; }
+.ph-house-meta { white-space: nowrap; overflow: hidden; min-width: 0; letter-spacing: 0; }
+.ph-house-meta > .num { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Catch up and Search (views owned by the nav agent) ----------
+   Rows separated by spacing and hover, not rules; violet marks what is for you. */
+.catchup .view-sect, .saved .view-sect { gap: var(--s-2); }
+.catchup .col > div + div > .view-sect, .catchup .col > .view-sect:not(:first-child) { margin-top: var(--s-3); }
+.catchup .view-sect .tile { --sz: 20px; }
+.catchup .view-sect.for-you .badge { margin-left: 0; }
+/* No rule between rows: spacing and the hover step separate them (brief 2). */
+.catchup .invite { box-shadow: inset 2px 0 0 var(--brand); }
+
+/* ---------- Folding the sidebar (0.15) ----------
+   Folded, the frame is the rail and the content; the rail's foot carries you,
+   your settings and the call you are in. A place chosen in the rail peeks its
+   column over the content until you go somewhere. */
+.rail-foot { flex: none; display: flex; flex-direction: column; align-items: center; gap: var(--s-1); padding: var(--s-2) 0 var(--s-3); border-top: 1px solid var(--line-subtle); }
+.rail-foot .ib { color: var(--text-3); }
+.rail-foot .ib:hover { color: var(--text-1); }
+.rail-foot .rail-call { color: var(--mint); }
+.rail-me { width: var(--h-md); height: var(--h-md); display: grid; place-items: center; border-radius: 50%; transition: background var(--m-hover) var(--ease-in-out); }
+.rail-me:hover { background: var(--surface-hover); --bg: var(--surface-hover); }
+.rail-me .avatar { --sz: 32px; }
+.app.ctx-shut { --nav-w: var(--rail-w); }
+.ctx.ctx-peek { position: absolute; top: 0; bottom: 0; left: var(--rail-w); width: min(var(--ctx-w), calc(100% - var(--rail-w) - var(--s-12))); z-index: var(--z-drawer); box-shadow: var(--elev-3); animation: peek-in var(--m-panel) var(--ease-out); }
+@keyframes peek-in { from { opacity: 0; transform: translateX(-8px); } }
+.ctx-scrim { position: absolute; top: 0; bottom: 0; right: 0; left: var(--rail-w); z-index: var(--z-dock); background: var(--scrim); animation: fade-in var(--m-panel) var(--ease-out); }
+
+/* ---------- House header: name and menu, then invite and settings ---------- */
+.ctx-house-head { gap: 0; }
+.ctx-house-head .ctx-house { flex: 1; min-width: 0; }
+.ctx-house-acts { display: flex; align-items: center; gap: 2px; padding: 0 var(--s-2) 0 var(--s-1); flex: none; }
+.ctx-house-acts .ib { color: var(--text-3); }
+.ctx-house-acts .ib:hover { color: var(--text-1); }
+/* One line under the name: who is online, then members; the count ellipsises rather than wraps. */
+.ctx-house-head .ctx-meta { white-space: nowrap; overflow: hidden; min-width: 0; }
+.ctx-house-head .ctx-meta > .ctx-online { flex: none; }
+.ctx-house-head .ctx-meta > .num { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ctx-meta.has-online { gap: var(--s-1); }
+.ctx-online .pres.inline { margin-right: 4px; }
+
+/* ---------- Room marks: private, muted, favourites ---------- */
+.row-mark { display: inline-grid; place-items: center; color: var(--text-3); }
+.row.sel .row-mark { color: var(--text-2); }
+.sect-label { display: inline-flex; align-items: center; gap: var(--s-1); }
+.nav-favs .sect-label .ic { color: var(--text-3); }
+/* A category's options and its plus sit together at the end of its label. */
+.sect .ib + .ib { margin-left: 0; }
+@media (pointer: coarse) {
+  .sect { height: var(--tap-min); }
+  .sect button.sect-name { height: var(--tap-min); padding-right: var(--s-3); }
+  .sect .ib.sm { width: var(--tap-min); height: var(--tap-min); }
+}

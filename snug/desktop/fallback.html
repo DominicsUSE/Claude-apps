@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:">
+<meta name="color-scheme" content="light dark">
+<title>Snug</title>
+<link rel="stylesheet" href="snug/css/tokens.css">
+<link rel="stylesheet" href="snug/css/base.css">
+<link rel="stylesheet" href="snug/css/views.css">
+<link rel="stylesheet" href="snug/css/brand.css"><!-- .auth, .auth-panel: the sign-in layout this page reuses -->
+</head>
+<body>
+<!-- Join mode (desktop/main.js, desktop/pinned.js): the server's version doesn't fit the app's own built-in
+     client, so the app says so instead of quietly running the server's code. This page's only bridge is window.snugFallback. -->
+<div class="auth">
+  <main class="auth-main">
+    <div class="auth-panel" id="fallback" aria-labelledby="title">
+      <div class="auth-brand logo">
+        <svg class="ic" width="24" height="24" viewBox="0 0 16 16" aria-hidden="true">
+          <path fill="var(--brand)" fill-rule="evenodd" d="M2 14V8a6 6 0 0 1 12 0v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1ZM4 11a2 2 0 1 0 4 0a2 2 0 1 0-4 0ZM9 11.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0Z"/>
+        </svg>
+        <span>Snug</span>
+      </div>
+      <div class="auth-head">
+        <h1 id="title">This Snug runs another version</h1>
+        <p class="auth-sub" id="lead"></p>
+      </div>
+      <div class="form auth-form">
+        <button class="btn primary auth-submit" type="button" id="update">Check for an app update</button>
+        <div class="hint" id="status" role="status" aria-live="polite"></div>
+        <button class="btn" type="button" id="own">Open the server’s own page</button>
+        <p class="hint" id="own-note"></p>
+        <button class="btn ghost" type="button" id="change">Change where Snug runs</button>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="fallback.js"></script>
+</body>
+</html>

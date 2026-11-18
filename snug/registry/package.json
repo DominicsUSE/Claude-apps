@@ -1,0 +1,20 @@
+{
+  "name": "snug-registry",
+  "private": true,
+  "type": "module",
+  "description": "Snug username registry and signaling (Cloudflare Worker + SQLite Durable Object).",
+  "scripts": {
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\"",
+    "dev": "node --disable-warning=ExperimentalWarning dev.js",
+    "dev:workerd": "npx wrangler dev --local",
+    "check": "npx wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    "deploy": "npx wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.154.0",
+    "ws": "^8.18.3"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

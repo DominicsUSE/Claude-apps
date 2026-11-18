@@ -1,0 +1,533 @@
+# Changelog
+
+Snug's releases, newest first. Every version's files stay on the releases page
+(<https://github.com/DominicsUSE/Claude-apps/releases?q=snug-v>); the desktop app updates itself and never
+goes back to an older version on its own (README, "Install, update, go back").
+
+## 0.15.0
+
+### Design system
+
+- **One set of tokens.** `css/tokens.css` now names semantic colours (`--color-bg`, `--color-primary`,
+  `--color-danger`, …), status pairs (`--success-soft`/`-ink` and the rest), an elevation scale, a layer
+  (z-index) scale, a 44px touch size, emoji sizes and the breakpoints. The duplicate radius names are gone from
+  the stylesheets (same values), and four tokens that were used but never defined now are.
+- **New shared components** in `js/ui/controls.js`, imported from `js/ui/kit.js` like the rest: `Button`
+  (primary, secondary, ghost, danger; sizes; loading; icon-only needs a label), text, search and multi-line
+  fields with a label, hint and error, `Tabs`, `Dropdown`, `contextMenu`, `Modal`, `ConfirmDialog`, `Tooltip`,
+  toasts with a kind, `EmptyState`, `LoadingState` with skeletons, and `ErrorState`. `DESIGN.md` says when
+  to use which.
+- **Every dialog has a name** for screen readers (its heading). The message menu's reaction row is a proper
+  group, so screen readers no longer meet buttons that aren't menu items; the left and right arrow keys now
+  reach the reactions, and the highlighted item is announced.
+- **Fix: keyboard focus in menus and dialogs.** A menu or popover now takes focus when it opens (it was still
+  hidden at that moment, so focus stayed behind and the arrow keys did nothing), and closing a dialog puts
+  focus back on the button that opened it instead of the top of the page.
+- **Tooltips** follow the theme (a raised grey in dark, near-black in light; they used to vanish on the dark
+  background), never appear on touch, and go away when their button disappears or a dialog opens over it.
+- **Toasts** can say success, error or info with an icon and a word, not colour alone; errors stay longer.
+- **Nothing moves for longer than 200ms**, reduced motion also stops plain transitions, and text is never
+  smaller than 11px (voice-room initials and the compact event month were 8-9px).
+
+### Voice rooms and calls
+
+- **On a phone, a call is the screen.** The stage fills it, with the controls in a bar at the bottom where a
+  thumb reaches: Mute, Sound, Camera, Screen, More and Leave, each 56px with its word. More opens the rest
+  above the bar. "Chat" folds the call into a strip over the room's messages, and "Call" brings it back.
+- **Labelled, grouped controls everywhere.** On a computer the bar is in groups (your sound, camera and
+  screen, doing things together, people and options, Leave), and the main controls show their word under
+  the icon once there is room. Muted and deafened are filled red, a camera or screen that is on is filled
+  mint. The muted word now has enough contrast in the light themes.
+- **Over a camera or a shared screen** the bar floats on the picture and fades after a few still seconds on a
+  computer. Moving the mouse, a tap or any key brings it back, and it never fades while it has the focus.
+- **A shared screen is large, everyone else in a strip** beside it on a wide window and under it otherwise.
+  Phone cameras use two columns once there are three or more people, so nobody is cut off.
+- **Who is speaking is plain:** a 2px ring on their tile as well as their face, and their name turns mint.
+  Each tile says to screen readers who it is, whether they're speaking, muted or listening only, and how
+  their connection is.
+- **Connection quality** shows as three clear bars (they were drawn as dots), amber when fair and rose when
+  poor, with the words in the tooltip.
+- **People in the call:** a new button lists everyone with what they're doing, their connection, and their
+  volume, which only you hear. Volume is also on each tile, as before.
+- **Push to talk is visible:** "Hold ` to talk" sits in the status line (with your key), and turns into
+  "Talking" while the microphone is open. On a phone, Hold to talk is a wide button over the bar.
+- **The status line wraps instead of overlapping** on narrow screens; the encryption label stays in full
+  ("Encrypted in transit only" or "End-to-end encrypted") with a lock icon, and your own screen share says so
+  with a Stop button.
+- **Fold the stage on a computer** to a single line with the small controls, so the room's messages get the
+  space. Snug remembers it per room on this device.
+- **Plain states:** an empty voice room says "Nobody is here yet"; joining shows a spinner and what Snug is
+  waiting for; a reconnecting call says your place is kept; a dropped voice room says why and its Join
+  button reads "Join again", and a dropped call says "Call dropped" with "Call again". A line that fails says Snug is trying again.
+- **The "connects directly" note** before joining a voice room is a calm card, not amber small print, and the incoming call card says it the same calm way.
+- **Three or four cameras on a narrow stage** (a tablet, a narrow window) sit in two columns instead of one
+  tall column that pushed people out of view.
+- **The floating call** is a 56px strip above the tab bar on a phone instead of a card over the list. While
+  it shows, the "Voice connected" panel above the tabs steps aside (it repeated the same controls under the
+  strip), and over another conversation the strip sits at the bottom with the composer above it.
+- **Fix: tiles no longer cover the controls on a tablet.** At 768px with four people the bar wrapped and the
+  tiles painted over half of it. The narrow bar now fits on one row, and the tiles are sized from the space
+  actually left, so a bar that does wrap (hold to talk) shrinks them instead.
+- **Fix: the folded stage's small controls** no longer show squashed words on a wide window.
+- **Fix: per-person volume is visible on light tiles again** (it was near-white on a light phone tile).
+- **Faces never touch names:** on a phone the face and the name sit in one column; the strip under a shared
+  screen and the tiles before you join use a smaller, slightly raised face.
+- **Cameras fill the stage on a computer:** the camera grid sizes its tiles from the stage's height as well as
+  its width, without the empty bands above and below.
+- **A wide stage labels every control** (Activities, React, Sounds, People, Options), not only the main four.
+- **Settings › Voice and video:** sliders are wider, with the value at the right.
+- **Text size** is one multiplier (`--text-scale`) on the page's font size, ready for more steps.
+- The local-address warning in the invite dialog reads in light themes (it failed contrast).
+
+### Shell, navigation, Home and getting started
+
+- **A new account's Home explains Snug.** "Welcome to Snug: create a house or join one with an invite", with
+  both buttons, a sentence each on houses, rooms and direct messages, and five steps that tick themselves off
+  as you do them: your account, your username, a house, inviting friends, a first message. The steps can be
+  hidden, and link to how Snug handles your data.
+- **Home shows your invitations** to houses, with who sent each one and a look before joining.
+- **The sidebar folds into the rail** with the arrow at the rail's foot, and stays as you left it on this
+  device. Below 880px wide it starts folded, so an upright tablet gets the whole width for the conversation. Folded, a
+  house picked in the rail shows its rooms over the content until you go somewhere (Esc or a click outside puts
+  them away), and the rail's foot carries you, your settings and the call you are in.
+- **Where am I:** the house's header shows who is online and how many members ("● 2 online · 10", the full
+  wording on hover), with Invite people and House settings (a sliders icon, so it isn't mistaken for your own
+  Settings) beside the name for those allowed; when nobody else is around it just gives the member count. On a
+  phone the house's screen shows the same line under the name, and has Invite people too. Rooms can be added to
+  **Favourites** (room menu), which sit at the top of the house's list on this device (favourites are not
+  synced between your devices yet); private rooms show a lock and muted rooms a crossed bell. A room with a
+  count no longer also shows the unread pip.
+- The house's About page keeps Invite people and Settings as buttons on the page, not again as icons in its top
+  bar. With the sidebar folded and peeking open, the rail's foot no longer repeats you and Settings under the
+  panel's own.
+- **Back on a phone goes to the list you came from.** A swipe in from the left edge now goes back (as the
+  header's arrow and the phone's own back do) instead of opening the drawer, and a screen opened from another
+  (a profile from a room, a room from a house) returns there, never straight to the tabs.
+- **Quick switcher:** with nothing typed it lists your recent places and then your houses; rows show their
+  unread count; the footer says an invitation link can be pasted; "Start a house or join one" is an action.
+  The list is announced as you move through it, and closing it with Esc puts keyboard focus back where it was.
+  A dead invitation pasted there opens the same "That invitation doesn't work" dialog, with Paste another link,
+  as opening the link does. Phone Home has a search button that opens it.
+- **Invitations in plain words.** The invite dialog spells out the code and keeps the end of the link in view;
+  a link that doesn't work says why, then offers "Paste another link". On an address only this computer or
+  network can open, neither the warning nor the link field shows that address: the field shows `/join/<code>`
+  and Copy link still copies the whole link.
+- **One word for Snug's spaces: house.** Home, Discover and the switcher said "community" in places.
+- **Signed out:** "How Snug handles your data" sits below the form instead of over it, and Forgot your password
+  lines up with the labels.
+- **Loading:** while your places load after signing in, the frame's shape shows instead of a blank screen.
+- On a phone's Home, people online now come first; "Recently here" sits after the conversations going, so they
+  are no longer pushed below the fold.
+- **Empty places:** the phone's empty Messages tab has the same empty state and New message button as the
+  desktop; a new account's Catch up offers to start or join a house instead of "Jump to a room".
+- Friends' tabs hide zero counts and scroll sideways at 320px with Add a friend pinned at the end, and Add a friend is an outlined button rather than a violet square. Discover's
+  featured house drops the flat colour block behind its tile. Event rows in a narrow column put their buttons
+  under the title instead of squeezing it.
+- **Fix: a double tap on the last line of a message opened the emoji picker** on phones, when the message had reactions: the
+  reactions' finger-sized hit area reached up over the text. It now grows downwards only.
+- Accessibility: Search has a heading, Home, house and profile side columns are sections rather than nested
+  complementary landmarks, the phone has one main landmark per screen, and the skip link says "Skip to content"
+  where there is no composer.
+
+### Chat
+
+- **The room storage note moved out of the composer.** "Room messages are stored on this server and can be read
+  by whoever runs it and by moderators" now sits as one quiet line above the box, so the box keeps its height
+  and the last message stays in view. Below desktop width it shows a short form ("Not end-to-end encrypted:
+  this server and moderators can read it."); screen readers still hear the whole sentence, and the room's
+  Details keep it too.
+- **Newest is easier to find.** The unread divider puts "New" first, where you start reading; day dividers are
+  quieter; reading older messages shows a floating pill with the count of new ones and "Jump to present".
+- **Replies and edits are clearer.** Quotes fold to one line (code no longer stretches across the bar), and
+  editing a message shows "Editing a message above" in the composer, with a cancel button.
+- **A message that didn't send** gets a red edge, says only you can see it, and offers Try again and Delete as
+  real buttons.
+- **Pictures and files.** Two to four pictures in one message sit in a tidy grid of square tiles; file cards
+  show the type (PDF, ZIP) beside the size; the viewer fits the whole picture to the screen instead of cropping
+  it.
+- **Phones.** The composer says just "Message" when the room name would be cut off, the voice-message button
+  steps aside once Send shows, attachments being sent get a row each with 44px buttons, reactions are 36px
+  chips with a 44px touch area, and the latest message stays in view when the keyboard opens.
+- **Toasts** rise in the bottom-left corner on wide screens, just above the account panel, never on the messages.
+- **Code blocks** that scroll sideways can be reached with the keyboard, and their colours pass contrast in
+  light themes. Message controls taken out of the tab order are still walked with the arrow keys.
+- **Double tap to react** no longer opens the picker or takes your reaction off when the tap lands near the
+  reaction row: the message text answers the tap instead of the phone snapping it to the nearest button.
+- **Search**: the filters are one sideways-scrolling row on phones (the ones in use first) instead of four
+  rows; results open their message from one covering button, so links in the text are no longer nested in it.
+- **GIF picker** tabs read "Your GIFs", "Recent" and "Search" (the middle one was cut off), and its empty
+  state says houses, not places.
+- **Empty rooms and conversations** say how to begin: "Start the conversation below" / "Say hello to start the
+  conversation."
+- **Thread links** keep "4 replies" and its unread dot on one line on narrow phones (the dot used to drop to a
+  line of its own); the time of the latest reply gives way instead, without the stray "Last".
+- **Touch screens** no longer leave a grey tint on the message you last tapped.
+- **Polls on phones** put the vote count on its own line with the buttons together below it.
+- **The picture viewer on phones** puts its tools on the top row and the sender and date on a row of their own,
+  so a long date no longer runs under the zoom buttons.
+- **Touch targets.** Reactions keep their 36px chips with a 44px touch area on every phone width, and the "4
+  replies" thread link gets a 44px touch area too.
+- **The composer on phones** stops growing at 160px (and shrinks with the keyboard), attachments waiting to
+  send take two short rows at most and then scroll, so the messages keep most of the screen.
+- **Threads on narrow phones** say "Reply" in the composer instead of a cut-off "Reply in threa".
+- **Editing on phones** shows "Editing above" with its cancel button (screen readers hear the whole
+  instruction), and the message being edited scrolls fully into view.
+- **Code blocks** that fit their width are no longer a Tab stop; only ones that scroll sideways are.
+- **Loading** a conversation for the first time is announced as "Loading messages", not "Loading earlier
+  messages".
+- **The room storage note** turns "Got it" into a close button on narrower windows (still named "Got it"),
+  leaving the note more room.
+
+### Settings, privacy and accessibility
+
+- **Settings in clear groups.** You (Profile, Account), Privacy and security (Privacy and safety, Security,
+  Encryption, Your data), App (Notifications, Voice and video, Appearance, Text and messages, Accessibility,
+  Keyboard) and More (Streamer mode, Desktop app, Connection, Privacy guide). Every setting is still there.
+- **Security has its own page**: password, two-factor sign-in, passkeys, the recovery key, encryption in one
+  sentence with your trusted devices, and recent sign-ins. **Account** keeps who you are, your devices and
+  sessions, and signing out.
+- **The search finds settings, not just pages.** Type "camera" and Camera quality is listed under Voice and
+  video; pick it (or press Enter, or the arrow keys) and the page opens at that setting, marked. Enter opens a
+  page whose name you typed, and otherwise the first setting found. Settings that match are marked on the open
+  page as you type, without moving sideways.
+- **"Saved"** appears beside a setting for a moment when you change it, and is announced to screen readers.
+- **Privacy and safety starts with a dashboard** in plain words: whether your messages are end-to-end
+  encrypted, where you're signed in, what this device keeps, and how to download or delete your data, each
+  with one button. Who can see what follows; the technical part (calls and your network, what the server still
+  sees of encrypted chats, safety numbers) is under **Advanced security information**, closed until opened,
+  which points to the full privacy page for the rest instead of repeating it. Two cards to a row on a tablet.
+- **No server addresses or server setting names** on the privacy pages: they say "this Snug" (the address
+  could be an internal one, and `SNUG_STUN` meant nothing to members). A plain-http server still says so first.
+- **Encryption** no longer says "this server stores them encrypted" while encryption is off: its first line
+  says what is true now. It leads with its status and the button; what it protects and what the server can still see is a
+  disclosure under the controls.
+- **Accessibility actually covers it**: text size (it now scales from your browser's own size, through
+  `--text-scale`, instead of replacing it), contrast, font, underline links, motion, the focus ring, the keys
+  worth knowing with the full shortcut list, and read-aloud with its example under the description.
+- **Notifications in the order people think of them**: how you're told, messages, mentions, calls and voice
+  rooms (with a way to the ring settings), quiet times.
+- On a phone, a settings page has Back and no second Close; the scrolling page can be scrolled from the
+  keyboard; an unknown page opens Profile instead of nothing; Text and messages has a title; controls line up in
+  one column on wide screens; the password button says why it’s greyed out; the chosen sound pack is marked; sound packs and accents line up under their label instead of drifting to the right on a phone.
+- On a phone, the back button or back gesture on a settings page returns to the list of pages instead of
+  closing Settings; the list no longer opens with a row shaded by a leftover touch; Contrast's three choices
+  stay on one row at 320px.
+
+## 0.14.0
+
+### Calls: private by default
+
+- **End-to-end encrypted calls.** When everyone in a call has turned on end-to-end encryption and their browser
+  can encrypt frames, voice, camera, screen and screen sound are sealed on each device with keys only the
+  devices of the people in the call get (sealed to their devices, new on every join and leave, wiped when the
+  call ends). The call says *End-to-end encrypted*, or *Encrypted in transit only* and why. DM calls, group
+  calls and house voice rooms; P2P calls with friends on other PCs stay *in transit only*.
+- **Connections signed by the device.** Each side signs its certificate fingerprint; a connection whose
+  fingerprint doesn't match is stopped with a warning. Both signed: a 12-digit code and *Verified device*.
+- **No quiet downgrade to unsigned.** A device remembers who signed calls with it; a later unsigned call from
+  them is stopped with the same warning while that signing device is still in their list.
+- **Hide my IP address is on by default** whenever the server has a relay (the old default moves to it); only
+  relay candidates leave the device. With no relay, Snug says before you join who will see your IP address.
+- **TURN credentials last an hour** and no longer name your account; fetched again before they run out. With
+  TURN set, the relay answers STUN, not an outside server. A static TURN login gets a startup warning.
+- **Smaller call records:** who started it, how it went, when, how long, and who missed it, no longer who took
+  part. The disappearing-messages sweep and account erasure cut it down further. Older records still read.
+- **Fix: group calls across PCs.** Two people who joined moments apart weren't connected to each other (each
+  PC's copy of the call didn't have the other yet, so neither started the connection). Now, after a short wait
+  with no connection, one of them starts it.
+
+### Fixes
+
+- **GIF search in the desktop app gave only an error.** Most likely cause: Openverse limits anonymous calls per
+  address, and every Cloudflare Worker reaches it from one shared address, so it turns the registry away. The
+  registry can now ask Openverse with its own credentials (`OPENVERSE_CLIENT_ID`/`OPENVERSE_CLIENT_SECRET`),
+  passes a search to the next GIF site in `GIF_PROVIDERS` when one refuses, and the error names the site that
+  refused instead of blaming your PC. This takes effect only once the registry is redeployed **and** given
+  Openverse credentials or a second source (e.g. `GIF_PROVIDERS = "openverse,commons"`); until then searches
+  are still refused. Search still goes through the registry, so GIF sites never see your address.
+
+### Privacy: less tracking, shorter retention
+
+- **What Snug stores and for how long**: the privacy page and README list everything the server keeps, with
+  the real windows from `GET /api/privacy`: call records, the house join log, link previews, push addresses,
+  reactions and read positions, what end-to-end encrypted conversations still reveal, GIF searches, the STUN
+  and TURN operators, the directory, and desktop update checks.
+- The server forgets on its own, hourly: house join and leave rows after 90 days (insights count the same),
+  the link-preview cache after 24 hours, declined friend requests after a day.
+- Sign-in history and security events: 14 days by default (was 30). Security events keep the kind of device
+  ("Chrome on Windows"), not the browser's full string.
+- When a device, encryption key or friend's PC was last used is stored to the day, written at most daily.
+  Settings > Account says *Active today* or *Last active 2 Nov 2026*.
+- Calls: with a TURN relay set (`SNUG_TURN_URL`) and no `SNUG_STUN`, the relay answers STUN instead of Google
+  (whoever runs the relay sees addresses; the privacy page doesn't claim who that is). The
+  desktop app drops Google's STUN once it has Cloudflare relay details. Without a relay, Google is named on the
+  privacy page, with `SNUG_STUN=none`.
+- Desktop app: update checks at start and then about once a day with jitter (were hourly). **Settings >
+  Desktop app > Updates**: *Automatically*, *Tell me* or *Only when I ask*.
+- **Fix: pressing the update button seemed to do nothing.** After *Install now* (Settings > Desktop app), and
+  in join mode after the fallback page's *Check for an app update* (0.13 too), the update downloaded and then
+  waited for a quiet moment (Snug hidden or unfocused, or a minute without touching the computer), so while you
+  kept using Snug nothing happened, and Settings showed no progress. Pressing the button now installs as soon as
+  the download is verified (never during a call or a data file transfer); Settings shows the progress, and a
+  failed download says why, with *Try again* (the automatic retry waits for a quiet moment again).
+
+### Stored data encrypted
+
+- **Attachment files are encrypted on disk** (AES-256-GCM in 64 KiB segments under a key from
+  `data/secret.key`). Range requests still work; a damaged segment is refused, never sent. Older files stay
+  readable and are sealed in the background (`SNUG_FILES_REENCRYPT=off` to skip). This protects a copied
+  files folder or disk backup without `secret.key`, not a running server.
+- **No plaintext database copies left behind**: a damaged database put aside at a restore is sealed with the
+  backup key (and deleted after 7 days); 0.13's plaintext `snug.db.damaged-*` and crash temp files are
+  sealed or removed at start.
+- **Desktop app: this device's copy of messages is sealed** under the storage key the OS key store protects
+  (cache, drafts, reply targets, draft attachments, changes waiting to send), even with encryption off. 0.13's
+  plaintext copy is moved over and deleted. New device signing keys and prekeys are sealed too; Settings >
+  Encryption offers *Renew this computer's key* for one made before.
+- **Browsers: Settings > Your data > Keep a copy of messages on this device** (on by default), saying that
+  browser storage isn't protected against someone copying the profile. Off keeps the copy in this tab only.
+- Tests check that saving, using and adopting a recovery key never sends the key, its text or its backup
+  key, and that what the server keeps can't open the encryption backup.
+- **Going back to 0.13 or older**: files 0.14 stored or sealed can't be opened there (attachments, avatars,
+  stickers, emoji, sounds, link-preview pictures), and the desktop app's copy of messages, drafts and changes
+  waiting to send don't carry back. Returning to 0.14 makes them readable again.
+
+### Encrypted chats: less metadata
+
+- **Less for the server to see in end-to-end encrypted DMs and groups**, once everyone's devices are on 0.14
+  (each device signs what it can handle; until then the older form keeps working):
+  - Reactions are encrypted; each device counts them. An older Snug that tries a plain reaction there is told to update.
+  - A group's name and icon are encrypted to its members. The server keeps no name (older Snug shows
+    "Encrypted group"), lines say who renamed the group but not to what, and someone added gets the name too.
+  - Polls work in encrypted conversations again, encrypted with their votes; each device counts. "Hide results"
+    isn't offered there (nobody could enforce it). If someone is still on an older Snug, it names their device.
+  - The message a reply answers is inside the encrypted message; its author is notified by a mention.
+  - Encrypted attachments are padded to size steps, so the server sees roughly how big a file is.
+  - Padding never takes a file past the server's file limit, and a padded file forwarded to someone on an
+    older Snug is sealed again unpadded so it opens whole.
+  - When a group's name is first sealed, earlier "named the group" lines lose the name too.
+  - If your device can't check what everyone's devices handle (keys not ready, or the server doesn't answer),
+    a reaction, reply or group rename isn't sent rather than going in the older form; try again. An attachment
+    goes up padded and is checked again when the message is sent.
+  - Limits (README, "Limits of the 0.14 sealing"): the first time your device sees a device, the server could
+    hold its features back and make yours use the older form; a new device can be shown an older revision;
+    someone added sees "Encrypted group" until a member's device seals the name again; the data download
+    leaves out sealed reactions, votes and group names.
+- Push notifications for encrypted conversations name only the sender, never the group or who else is in it.
+  New: **Hide names in notifications** (Settings > Encryption): no sender or place in any pushed
+  notification, and the note that replaces a ring names no caller. Message text in unencrypted
+  conversations still follows *Show message text*.
+- One list of what the server still sees of encrypted conversations, in the README, Settings > Encryption
+  and `GET /api/privacy`.
+
+## 0.13.0
+
+
+### Changed
+
+- **English only**: the Lithuanian translation and Settings > Appearance > Language are gone. A device, an
+  account or a 0.12.0 client that still says Lithuanian gets English, with no error. The clock's first choice
+  reads *Match my browser*.
+
+### New
+
+- Paste an invitation link (or a code) into the quick switcher (`Ctrl`/`⌘ K`): *Join with this invitation*
+  joins and opens the house, or says why the link doesn't work. A link's row comes first; a bare code's comes after
+  any room or person the text matches, so Enter still opens a room called "glazebatch24".
+- House settings > Overview: **Show every room to newcomers**. On for new Friends and Gaming houses.
+- *Mute for…* confirms with "Muted until 22:40" (or "Muted") and **Undo**.
+- Phones: **double-tap a message to react** (❤️, or your pick in Settings > Text and messages, or off).
+- The privacy page lists disappearing messages, with what they can't do.
+- Desktop first-run page: a **Privacy** link, a layout its own CSP allows, and a pasted invitation link
+  (`https://host/join/<code>`) opens that invitation once you're in.
+- PDF previews show text in fonts a file doesn't carry (pdf.js's character maps and standard fonts, fetched
+  from your Snug when needed). Message pictures load as they come into view.
+- An automated accessibility check (axe-core, tests only) on the main screens; it fixed the font choices'
+  ARIA.
+
+### Friends on other PCs
+
+- **Polls** work in direct conversations and groups with friends on other PCs: the poll, everyone's votes
+  (only each person's latest counts) and its end reach every PC, so all show the same counts. If someone's
+  Snug is older, or a group member's PC hasn't been in touch yet so Snug can't tell, the poll is refused and
+  the message names them.
+- **Group calls** in groups with friends on other PCs, up to the 12 people a call holds. Audio and video go
+  between the people's browsers as in any call; the PCs only pass the connection messages.
+- **Forwarding** a message to friends on other PCs brings the whole message: the forwarded card with who
+  wrote it, its pictures and files, and a sticker. Older PCs show it as quoted text with the files.
+- The **data file** keeps the disappearing-messages timer and when each message disappears, so a move to a
+  new PC keeps them; messages whose time has passed aren't brought back. 0.11 and 0.12 still read the file.
+- **Erasing your account** now asks friends' PCs that are online to delete their copies of your most recent
+  messages (up to 5,000 with each friend and 2,000 in each group). PCs that are offline at that moment, or
+  that run a changed copy of Snug, keep theirs, and so do older messages; the dialog says which friends' PCs
+  are offline.
+- Fixes: a forward with no note didn't reach a friend's PC; a copy of a friend's file couldn't be passed
+  on and could be dropped from the cache; with presence for friends only and an older directory, group
+  messages between people who aren't friends waited for a link to reopen.
+
+### Private conversations
+
+- The desktop app protects the key that seals your encryption keys with the operating system's key store
+  (safeStorage). A 0.12 profile is moved over the first time, without losing keys or messages. Without a
+  key store (some Linux setups), Settings > Encryption says so.
+- If the key store can't open the keys any more (it was reset, or the data folder was copied to another
+  computer), Settings > Encryption offers to remove this computer's keys; the computer is then added again
+  with another device or the recovery key, and its new keys are protected by the key store.
+- Drafts and messages waiting to send in encrypted conversations are no longer kept as text in the
+  browser's storage; they are sealed on the device and come back after a reload.
+- Messages from someone who has left a group can still be checked and opened after a reload or on a new
+  device.
+- Join mode never shows one of the server's `/api` answers as the window's page. The screen-share picker
+  runs no inline script.
+
+### Calls
+
+- The screen stays on while you are in a call or voice (where the browser allows it), and the system's call
+  controls (lock screen, headset button, desktop media controls, where offered) mute, turn the camera on and
+  off, and hang up.
+- A security code per person in the connection details: matching codes, read out loud, make it much harder for
+  anyone, the server included, to sit in the middle of the connection. It is only 6 digits, so it is not a
+  guarantee (see SECURITY.md).
+- Screen share: choose **Text and slides** or **Motion and games**; resolution, frame rate and data saver
+  now change a share that is already running.
+- New test: send limits drop when a voice room grows past 3 other people and come back when it shrinks
+  (five browsers).
+
+### Accounts
+
+- One recovery key for both: a password recovery key you save also becomes your end-to-end encryption
+  recovery key on a device with encryption on, and a new encryption recovery key is offered as your
+  password recovery key too. A key saved by 0.12.0 keeps working; Home and Settings ask you to replace it.
+  After "Forgot your password?" on a browser where encryption isn't unlocked within two minutes, Home and
+  Settings say your encrypted history still opens with the previous key, and offer a new key that does
+  both once encryption is unlocked.
+- A passkey can stand in for your password (and code) when you change the password, remove a passkey,
+  replace a recovery key, turn two-factor sign-in on or off, make new backup codes, or deactivate or delete
+  your account. Changing your name or username tells your passkey provider, where supported.
+- Desktop: a GitHub link still waiting, or a GitHub account's first recovery key, can be cancelled from the
+  same PC or with GitHub (registry: `/v1/recovery/drop`, and `/v1/recovery/cancel` takes the waiting link's
+  GitHub account, and stops every link waiting for it). Cancelling a waiting link with GitHub needs that
+  updated registry; until then Snug says so and you cancel from the same PC. Nothing changes for 0.11 and
+  0.12 apps.
+- Registry: the optional `KEY_ACCOUNT_IDLE_DAYS` purge (still off by default) keeps accounts with a GitHub
+  account linked, and now runs on its own.
+
+### Known limits
+
+- Friends on other PCs still can't join houses (a house lives on one PC and its people join over the LAN
+  or a link). Group calls with friends on other PCs have only been tested on one machine, not through a
+  real TURN relay.
+- The desktop app's own signing and prekey private keys are still browser keys in its storage, not sealed
+  by the key store, and they open messages sent to that device while its prekey is kept (up to three
+  weeks), so a copy of the data folder still opens recent messages. Attachments added to a draft in an
+  encrypted conversation aren't kept across a reload.
+- Once 0.13 has moved a desktop app's encryption keys under the key store, 0.12 can't open them: a desktop
+  app taken back to 0.12 can't read encrypted messages until it is updated again, or until that computer is
+  removed from another device and added again.
+
+## 0.12.0
+
+### Private conversations
+
+- Direct messages and groups can be **end-to-end encrypted** (on by default; `SNUG_E2EE=off` stops offering
+  it). Text, edits, replies, files, pictures, GIFs, stickers, polls, scheduled messages and forwards are sealed
+  on your devices (HPKE and Ed25519, in the browser's own crypto) and only the devices of the people in the
+  conversation can open them. The server stores and relays envelopes it can't read. Conversations from before
+  0.12 stay as they were until someone switches them on, and every screen says which kind you are in.
+- Each person's devices hold their keys; a recovery key (shown once at sign-up or in Settings > Encryption)
+  brings history back on a new device. Linking a new device needs a code from one you already have.
+- Safety numbers per contact, and lasting lines in the conversation when a contact's key or devices change.
+  A message the server adds without encryption is marked "Not encrypted – delivered by the server"; an older
+  copy of your synced settings, device list or a message revision is refused instead of shown.
+- Removing a device (or "It was lost or stolen") starts new history, settings and recovery keys, so it can't
+  read what is sent afterwards. "My keys may be exposed" does the same by hand. Nothing heals on its own:
+  a device that was copied while unlocked can read what it already had.
+- Search over encrypted conversations runs only on your device; the server's index never sees their text.
+- The desktop app's join mode keeps the app's code pinned to the version you installed, so a server can't
+  change the page that does the encryption.
+- **Not encrypted:** rooms in houses, reactions, who talks to whom and when, profile pictures and names,
+  voice and video beyond WebRTC's own link encryption, and conversations with friends on other PCs (which
+  travel encrypted between PCs and are stored readable on each PC). SECURITY.md describes the protocol and
+  its limits; it has not had an outside review yet.
+
+### Accounts
+
+- The desktop app no longer needs a GitHub account: a new account can be just a key made on your PC
+  (with a small proof-of-work against floods), with a recovery key to move it to another PC. GitHub sign-in
+  still works, and a key account can be linked to GitHub later. Adding a second way in, or moving an account,
+  waits 7 days and can be stopped from any PC you still have.
+- Passkeys on host servers (Settings > Account), and a recovery key that resets a forgotten password, since
+  Snug asks for no email. Server owners can reset a password with `node tools/reset-password.js`.
+
+### Privacy
+
+- Settings > Privacy and safety opens with **Who can see what** for the mode you are in; the full guide is at
+  `/privacy`, signed in or out.
+- Who sees when you're online (everyone, friends, nobody) is enforced by the server, including status, last
+  seen, typing and voice rooms. The typing switch stops both sending and showing typing.
+- Deleting your account asks whether to keep your messages as "Deleted user" or erase them, files included.
+- **Download my data**: one zip with your data as JSON, a readable messages.txt and your uploaded files.
+- Sign-in history and security events are kept 30 days (`SNUG_LOG_DAYS`); failed sign-ins store a keyed
+  hash, not your address. Snug sends no diagnostics. `SNUG_STUN=none` stops Google's STUN server from seeing
+  callers.
+- In the desktop app, links friends send aren't fetched for previews unless you turn that on.
+- **Disappearing messages** per conversation or room: off, 1 hour, 1 day, 7 days or 30 days.
+
+### New
+
+- **Files up to 100 MB** by default (`SNUG_MAX_FILE_MB`), uploaded in resumable pieces with progress and a
+  cancel button, with per-person and per-house storage limits (`SNUG_QUOTA_MB`, `SNUG_HOUSE_QUOTA_MB`).
+  Previews for PDF (pdf.js), SVG (as a picture, never as a page) and text files.
+- **GIF search with no paid key**: Openverse by default, Wikimedia Commons if the server turns it on, Tenor
+  if the owner has a key, and in the desktop app through the directory so your address isn't sent to them.
+- **Voice**: join to listen only, automatic reconnection, quality that adapts to the connection, calls through
+  a relay by default where the server has one ("Hide my IP address"), and a phone layout with words under the
+  buttons. Voice rooms show in the room list straight away.
+- **Phones and browsers**: the web app installs as an app (PWA) and opens offline, messages wait in a queue
+  while offline and send when the connection is back, and Settings > Connection says what is going on.
+- **Languages**: English and Lithuanian (Settings > Appearance > Language). The Lithuanian covers the main
+  screens and still needs a native speaker's review; the rest of the app is in English for now.
+- Full-text search (SQLite FTS5) ranked by relevance, finding word starts, folding accents and offering close
+  matches. Quiet hours per weekday. Threads and pins with friends on other PCs.
+- First steps: a "Start or join a house" dialog that accepts any kind of invite link, invites that say why they
+  don't work (expired, used up, revoked), every sign-up problem shown at once, and new houses opening their
+  invite dialog.
+
+### Fixed
+
+- The tester panel's findings, among them: the last message hidden under the composer on phones, phone Back
+  leaving the house, invite links pasted in the wrong place failing silently, and the Messages list not being
+  ordered by the latest activity.
+- From the 0.12 security review: storage limits that copying a file could get round, a close-match search
+  that hinted at messages you can't read, leftovers after messages disappeared, presence and stage details
+  shown to people who shouldn't see them, and several account-recovery races (all with tests).
+
+### Installing and security
+
+- An install page (`docs/install.html`, at `/docs/install.html` on any Snug server, linked from
+  Settings > Desktop app in a browser) and the same steps in every release's notes: which file to pick, the
+  Windows and Mac warnings, checking a download's SHA-256 against `SHA256SUMS-*.txt`, and
+  `gh attestation verify`.
+- Windows code signing is wired up and switches on as soon as the project has a SignPath Foundation account or
+  a certificate; every signature is checked in CI. Until then the files are unsigned and Windows warns, and the
+  page says so.
+- A weekly and per-push OWASP ZAP baseline scan of a seeded server joins the security checks; High-risk alerts
+  fail the build.
+- Help pages are served with their own strict Content-Security-Policy (no script at all).
+
+### Known limits
+
+- Files are not signed yet, so Windows and macOS warn when you install (see the install page).
+- No outside security review of the encryption protocol yet. Desktop keys are not yet wrapped by the
+  operating system's key store.
+- Polls don't work with friends on other PCs (they are refused rather
+  than half-working). Calls through a real TURN relay have only been tested against a simulated one.
+- Devices on 0.12 builds from before the release can't link to 0.12.0 devices (the link code changed).
+
+## 0.11.1
+
+- Updates install themselves, with the review's fixes.
+
+## 0.11.0
+
+- Security hardening across the server, the registry, the desktop app and CI.

@@ -1,0 +1,2 @@
+# The ZAP rules file is tab-separated and read line by line: LF on every OS.
+.github/security/*.tsv text eol=lf

@@ -1,0 +1,125 @@
+{
+  "name": "snug-desktop",
+  "productName": "Snug",
+  "version": "0.15.0",
+  "description": "A calm place for your people",
+  "author": "Snug",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "node build.js --files-only && electron .",
+    "dist": "node build.js",
+    "test": "node build.js --files-only && node --test test.js"
+  },
+  "dependencies": {
+    "ws": "8.23.0"
+  },
+  "devDependencies": {
+    "electron": "45.3.2",
+    "electron-builder": "26.18.0",
+    "playwright": "1.63.0"
+  },
+  "build": {
+    "appId": "com.snug.app",
+    "productName": "Snug",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "asar": true,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "grantFileProtocolExtraPrivileges": true,
+      "resetAdHocDarwinSignature": true
+    },
+    "protocols": [
+      {
+        "name": "Snug link",
+        "schemes": [
+          "snug"
+        ]
+      }
+    ],
+    "files": [
+      "main.js",
+      "preload.js",
+      "setup.html",
+      "setup.js",
+      "setup.css",
+      "vaultexport.js",
+      "updater.js",
+      "update.html",
+      "update-page.js",
+      "pinned.js",
+      "fallback.html",
+      "fallback.js",
+      "picker.html",
+      "picker.js",
+      "picker.css",
+      "snug/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Snug",
+      "include": "build/installer.nsh",
+      "artifactName": "Snug-Setup-${version}.exe"
+    },
+    "portable": {
+      "artifactName": "Snug-${version}-portable.exe"
+    },
+    "linux": {
+      "target": "dir",
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "category": "public.app-category.social-networking",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "identity": "-",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "darkModeSupport": true,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Snug uses the microphone for voice calls and voice rooms.",
+        "NSCameraUsageDescription": "Snug uses the camera for video calls."
+      }
+    },
+    "dmg": {
+      "artifactName": "Snug-${version}-mac.dmg"
+    }
+  }
+}

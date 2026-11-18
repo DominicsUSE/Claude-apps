@@ -1,0 +1,3 @@
+# Files whose bytes are checked (SHA256SUMS, tab-separated rules) keep LF on every OS.
+vendor/** -text
+tests/fixtures/** -text

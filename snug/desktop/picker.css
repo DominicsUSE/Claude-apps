@@ -1,0 +1,12 @@
+:root { color-scheme: dark; --bg: #141516; --bg2: #212324; --line: #393B3D; --text: #F4F1ED; --text2: #B8B4AE; }
+@media (prefers-color-scheme: light) { :root { color-scheme: light; --bg: #FBFAF8; --bg2: #ECE9E4; --line: #CFCAC3; --text: #1A1817; --text2: #57534E; } }
+* { box-sizing: border-box; } body { margin: 0; padding: 20px 24px; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, sans-serif; }
+h1 { font-size: 20px; margin: 0 0 4px; } h2 { font-size: 13px; color: var(--text2); font-weight: 600; margin: 20px 0 8px; } p { margin: 0; color: var(--text2); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+button[data-i] { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--text); text-align: left; font: inherit; cursor: pointer; }
+button[data-i]:hover { background: var(--bg2); }
+button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+img { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: var(--bg2); border-radius: 6px; }
+span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.foot { display: flex; justify-content: flex-end; margin-top: 20px; }
+.cancel { height: 40px; padding: 0 16px; border-radius: 6px; border: 0; background: var(--bg2); color: var(--text); font: inherit; cursor: pointer; }

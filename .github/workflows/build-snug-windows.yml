@@ -1,0 +1,330 @@
+# Builds the Snug Windows app on a real Windows machine: an installer and a portable exe.
+# It runs Snug's own tests on Windows, builds, uploads the files, then drives the packaged
+# app (first run, account, message, reopen) before publishing a release. Every build attaches both files to the run
+# (Actions > Snug Windows app > Artifacts). On pushes to the default branch or claude/stoic-newton-6zup7j
+# it also publishes them, with their checksums, as the release the app updates itself from.
+#
+# Security (sec-desktop D2): the token is read-only everywhere except the release job, which runs in the
+# `release` environment (Settings > Environments > release: limit it to the release branches, and add
+# reviewers if you want a person to approve each release). Every action is pinned to a commit; Dependabot
+# (.github/dependabot.yml) proposes updates. Checkouts don't keep the token. Install scripts don't run,
+# except Electron's own download.
+#
+# Code signing (Authenticode) switches on with the repository variable SNUG_WINDOWS_SIGNING (Settings >
+# Secrets and variables > Actions > Variables), once a credential exists; unset, builds stay unsigned as today:
+#   signpath  SignPath Foundation (free for qualifying open-source projects): secret SIGNPATH_API_TOKEN in the
+#             `release` environment; variables SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG,
+#             SIGNPATH_POLICY_SLUG; artifact configurations `snug-app` and `snug-installers`
+#             (snug/desktop/signpath/*.xml)
+#   pfx       a code-signing certificate you bought: secrets WIN_CSC_LINK (the .pfx, base64) and
+#             WIN_CSC_KEY_PASSWORD in the `release` environment
+# (Azure Trusted Signing is paid and not wired up.) Signing runs only for releases: sign-app signs Snug.exe in
+# the unpacked app, package-signed wraps it into the installer and portable exe without touching it
+# (`build.js --prepackaged`), sign-installers signs those two; each signature is checked with
+# Get-AuthenticodeSignature (desktop/sign-windows.ps1). Signing jobs install nothing from npm and are the only
+# jobs besides the release that see a secret. The owner's steps: SECURITY.md, "Code signing".
+name: Snug Windows app
+
+on:
+  push:
+    paths:
+      - "snug/**"
+      - ".github/workflows/build-snug-windows.yml"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      unpacked-id: ${{ steps.unpacked.outputs.artifact-id }}
+    steps:
+      # A misspelt value would skip signing and, with it, the release: fail loudly instead.
+      - name: Check the code-signing setting
+        shell: bash
+        env:
+          SIGNING: ${{ vars.SNUG_WINDOWS_SIGNING }}
+        run: |
+          case "$SIGNING" in ""|signpath|pfx) echo "code signing: ${SIGNING:-off}" ;; *) echo "SNUG_WINDOWS_SIGNING must be signpath, pfx or unset, not '$SIGNING'"; exit 1 ;; esac
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Test Snug (rules and server) on Windows
+        working-directory: snug
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm test
+
+      - name: Build the installer and the portable app
+        working-directory: snug/desktop
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node node_modules/electron/install.js
+          node build.js
+
+      - name: Check the Electron fuses of the built app
+        working-directory: snug/desktop
+        run: node fuses.js check dist/win-unpacked/Snug.exe
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Snug-Windows-Installer
+          path: snug/desktop/dist/Snug-Setup-*.exe
+          compression-level: 0
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Snug-Windows-Portable
+          path: snug/desktop/dist/Snug-*-portable.exe
+          compression-level: 0
+          if-no-files-found: error
+
+      # For code signing (sign-app): the unpacked app exactly as built, before the test below makes its copy.
+      - id: unpacked
+        if: vars.SNUG_WINDOWS_SIGNING == 'signpath' || vars.SNUG_WINDOWS_SIGNING == 'pfx'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Snug-Windows-Unpacked
+          path: snug/desktop/dist/win-unpacked/
+          if-no-files-found: error
+          retention-days: 3
+
+      # After the upload, so a problem here never hides the files. A failure still fails the run.
+      # Playwright always passes --inspect, which the release build's fuses refuse: the test drives a copy
+      # with only that fuse turned back on (never uploaded); everything else is the shipped build.
+      - name: Test the packaged app
+        working-directory: snug/desktop
+        timeout-minutes: 6
+        env:
+          SNUG_BIN: dist/test-unpacked/Snug.exe
+        run: |
+          node fuses.js test-copy dist/win-unpacked/Snug.exe dist/test-unpacked
+          node --test --test-timeout=400000 --test-force-exit test.js # on this runner the limit also covers the whole file
+
+  # ---- Code signing (only with SNUG_WINDOWS_SIGNING set, only for releases) ----
+  # Signs Snug.exe inside the unpacked app, so the program Windows runs is signed, not only its installer.
+  sign-app:
+    needs: windows
+    if: github.event_name == 'push' && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.ref == 'refs/heads/claude/stoic-newton-6zup7j') && (vars.SNUG_WINDOWS_SIGNING == 'signpath' || vars.SNUG_WINDOWS_SIGNING == 'pfx')
+    runs-on: windows-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+      actions: read # SignPath downloads this run's artifact with the job token
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - if: vars.SNUG_WINDOWS_SIGNING == 'pfx'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Snug-Windows-Unpacked
+          path: unpacked
+
+      - name: Sign Snug.exe (PFX certificate)
+        if: vars.SNUG_WINDOWS_SIGNING == 'pfx'
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: ./snug/desktop/sign-windows.ps1 sign unpacked/Snug.exe
+
+      - name: Sign Snug.exe (SignPath)
+        if: vars.SNUG_WINDOWS_SIGNING == 'signpath'
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          artifact-configuration-slug: snug-app
+          github-artifact-id: ${{ needs.windows.outputs.unpacked-id }}
+          wait-for-completion: true
+          output-artifact-directory: unpacked
+
+      - name: Check the signature
+        shell: pwsh
+        run: ./snug/desktop/sign-windows.ps1 verify unpacked/Snug.exe
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Snug-Windows-Unpacked-Signed
+          path: unpacked/
+          if-no-files-found: error
+          retention-days: 3
+
+  # Wraps the signed app into the installer and the portable exe. No secrets here: this job installs packages.
+  package-signed:
+    needs: sign-app
+    if: github.event_name == 'push' && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.ref == 'refs/heads/claude/stoic-newton-6zup7j') && (vars.SNUG_WINDOWS_SIGNING == 'signpath' || vars.SNUG_WINDOWS_SIGNING == 'pfx')
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      wrapped-id: ${{ steps.wrapped.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Snug-Windows-Unpacked-Signed
+          path: snug/desktop/dist/win-unpacked
+
+      # --prepackaged: electron-builder builds the two installers around the folder and changes nothing in it,
+      # so the fuses and the signature are checked again on the result.
+      - name: Build the installer and the portable app around the signed app
+        working-directory: snug/desktop
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node build.js --prepackaged dist/win-unpacked
+          node fuses.js check dist/win-unpacked/Snug.exe
+
+      - name: Check the app's signature after packaging
+        working-directory: snug/desktop
+        shell: pwsh
+        run: ./sign-windows.ps1 verify dist/win-unpacked/Snug.exe
+
+      - id: wrapped
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Snug-Windows-Wrapped
+          path: |
+            snug/desktop/dist/Snug-Setup-*.exe
+            snug/desktop/dist/Snug-*-portable.exe
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
+  # Signs the installer and the portable exe: the files people download and SmartScreen looks at.
+  sign-installers:
+    needs: package-signed
+    if: github.event_name == 'push' && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.ref == 'refs/heads/claude/stoic-newton-6zup7j') && (vars.SNUG_WINDOWS_SIGNING == 'signpath' || vars.SNUG_WINDOWS_SIGNING == 'pfx')
+    runs-on: windows-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+      actions: read # SignPath downloads this run's artifact with the job token
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - if: vars.SNUG_WINDOWS_SIGNING == 'pfx'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Snug-Windows-Wrapped
+          path: signed
+
+      - name: Sign the installer and the portable exe (PFX certificate)
+        if: vars.SNUG_WINDOWS_SIGNING == 'pfx'
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: ./snug/desktop/sign-windows.ps1 sign (Get-ChildItem signed -Filter *.exe).FullName
+
+      - name: Sign the installer and the portable exe (SignPath)
+        if: vars.SNUG_WINDOWS_SIGNING == 'signpath'
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          artifact-configuration-slug: snug-installers
+          github-artifact-id: ${{ needs.package-signed.outputs.wrapped-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Check both signatures
+        shell: pwsh
+        run: |
+          $files = (Get-ChildItem signed -Filter *.exe).FullName
+          if ($files.Count -ne 2) { throw "expected the installer and the portable exe, found $($files.Count) files" }
+          ./snug/desktop/sign-windows.ps1 verify $files
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Snug-Windows-Signed
+          path: signed/*.exe
+          compression-level: 0
+          if-no-files-found: error
+
+  # ---- Release ----
+  # Publishes snug-v<version> with both files, SHA256SUMS-windows.txt and (with the signing key) its signature
+  # (desktop/release.sh): only files the release doesn't have yet, then marks it latest. The app's mandatory
+  # updater reads this release.
+  # With signing on, only the signed files are published (a signing failure stops the release); without it,
+  # the unsigned files from the build, as before.
+  release:
+    needs: [windows, sign-installers]
+    if: >-
+      !cancelled() && needs.windows.result == 'success' && github.event_name == 'push' && (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.ref == 'refs/heads/claude/stoic-newton-6zup7j') &&
+      (needs.sign-installers.result == 'success' || (vars.SNUG_WINDOWS_SIGNING == '' && needs.sign-installers.result == 'skipped'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    concurrency:
+      group: snug-release-windows
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - if: needs.sign-installers.result == 'success'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Snug-Windows-Signed
+          path: dist
+
+      - if: needs.sign-installers.result != 'success'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Snug-Windows-Installer
+          path: dist
+
+      - if: needs.sign-installers.result != 'success'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Snug-Windows-Portable
+          path: dist
+
+      # Build provenance (free for public repositories): `gh attestation verify <file> -R DominicsUSE/Claude-apps`.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        continue-on-error: true # provenance is extra proof; a hiccup there must not hold back a release
+        with:
+          subject-path: dist/Snug-*.exe
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SNUG_UPDATE_SIGNING_KEY: ${{ secrets.SNUG_UPDATE_SIGNING_KEY }}
+        run: |
+          v=$(node -p "require('./snug/desktop/package.json').version")
+          bash snug/desktop/release.sh windows "dist/Snug-Setup-$v.exe" "dist/Snug-$v-portable.exe"

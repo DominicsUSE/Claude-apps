@@ -1,0 +1,525 @@
+// The transport. Everything that crosses the network goes through here:
+// one WebSocket to the Snug server for live changes and actions, plus plain
+// HTTP for signing in and uploading files.
+//
+// Connection rules:
+// - Reconnect with backoff (1s, 2s, 4s ... up to 15s, with jitter), and at once
+//   when the network or the tab comes back.
+// - Every connect starts with a full snapshot ("hello"), so nothing missed
+//   while away is lost; messages still waiting to send are kept and resent.
+// - Messages carry a client-made id; the server ignores a second copy of the
+//   same id, so a resend after a dropped connection never duplicates.
+// - A heartbeat (0.12): a ping every 10 seconds. A connection that has said
+//   nothing for 25 seconds is treated as dead (a phone changing networks can
+//   leave one looking open for minutes), dropped, and opened again.
+import {
+  S, emit, toast, applySnapshot, useTransport, convMeta, jumpToMsg, signedOut, checkView, findMsg, localRing,
+  markLocal, isLocalMsg, localPending, stripState,
+} from './store.js';
+import { COPY as E2COPY } from './lib/e2ee/copy.js';
+import { needsMe, levelOf, isThread, roomIds } from './lib/attention.js';
+import { plain } from './lib/format.js';
+import { uploadBlob, needsChunks, fetchLimits } from './lib/upload.js'; // big files in resumable parts
+
+const offline = () => Object.assign(new Error('offline'), { offline: true });
+let ws = null;
+let seq = 0;
+let attempt = 0;
+let timer = null;
+let opened = false;
+const waiting = new Map();
+const handlers = new Map();
+// Set by js/e2ee/conv.js (end-to-end encrypted conversations): scan() opens
+// every message view that arrives, sendEncrypted/uploadEncrypted seal what
+// goes out, whenOpen holds a notification until its message is open.
+// unsealed: a message without an envelope where there should be one; encryptedSince: where an
+// encrypted conversation began (null: not encrypted). scanReply: an op's answer (the edit history's
+// earlier versions are opened as such, review H2-rev).
+export const transportHooks = { scan: null, scanReply: null, isEncrypted: null, downgraded: null, sendEncrypted: null, uploadEncrypted: null, whenOpen: null, unsealed: null, encryptedSince: null };
+const scanIn = (d, op) => { try { if (op && transportHooks.scanReply) transportHooks.scanReply(d, op); else transportHooks.scan?.(d); } catch (e) { console.warn('e2ee scan', e); } };
+// The heartbeat (0.12). Tests may shorten these through window.snug.heartbeat.
+export const HEARTBEAT = { every: 10_000, dead: 25_000 };
+let lastRx = 0, beatTimer = null;
+const noteProblem = (text) => { S.conn.lastError = { text, at: Date.now() }; };
+
+// Other modules (voice) listen for their own events here.
+export function on(ev, fn) { if (!handlers.has(ev)) handlers.set(ev, new Set()); handlers.get(ev).add(fn); }
+const fire = (ev, d) => handlers.get(ev)?.forEach((fn) => fn(d));
+
+// Ops that put readable content into a conversation (and where it is named). In a conversation
+// this account has seen encrypted that the server now reports as plain, none goes out (review M5).
+const CONTENT_OPS = { 'msg.send': 'conv', 'msg.edit': 'conv', 'sched.create': 'conv', 'poll.create': 'conv', 'cmd.roll': 'conv', 'sticker.send': 'conv', 'msg.forward': 'to' };
+const DOWNGRADED = 'This server says this conversation isn’t encrypted any more. Snug won’t send here in plain text.';
+export function call(op, d = {}) {
+  if (CONTENT_OPS[op] && !d?.e2ee && transportHooks.downgraded?.(d?.[CONTENT_OPS[op]])) return Promise.reject(Object.assign(new Error(DOWNGRADED), { code: 'e2ee_downgraded' }));
+  if (!ws || ws.readyState !== 1 || S.conn.socket !== 'open') return Promise.reject(offline());
+  const id = ++seq;
+  ws.send(JSON.stringify({ t: 'op', id, op, d }));
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => { waiting.delete(id); reject(new Error('The server didn’t answer in time. Try again.')); }, 15000);
+    waiting.set(id, { resolve, reject, t, op });
+  });
+}
+
+// p2p: fire and forget, no id, no ack, no timer (the link host's frames, js/peer.js, F7).
+export function sendOp(op, d = {}) {
+  if (!ws || ws.readyState !== 1 || S.conn.socket !== 'open') return false;
+  ws.send(JSON.stringify({ t: 'op', op, d }));
+  return true;
+}
+
+// Plain HTTP, for accounts and files.
+export async function api(path, body) {
+  let res;
+  try {
+    res = await fetch(path, body === undefined ? { credentials: 'same-origin' } : {
+      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+  } catch { throw new Error('Can’t reach Snug. Check your connection and try again.'); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.error || 'Something went wrong. Try again.'), { status: res.status, code: data.code, data }); // data: e.g. why an invitation fails
+  return data;
+}
+
+function connect() {
+  clearTimeout(timer);
+  if (ws && ws.readyState <= 1) return;
+  if (Date.now() < holdUntil) { timer = setTimeout(connect, holdUntil - Date.now()); return; }
+  opened = false;
+  S.conn.socket = attempt ? 'reconnecting' : 'connecting';
+  emit();
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  ws.onopen = () => { opened = true; lastRx = Date.now(); };
+  ws.onmessage = (e) => {
+    lastRx = Date.now();
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    if (msg.t === 'hello') {
+      attempt = 0;
+      S.conn.socket = 'open';
+      scanIn(msg.d);
+      S.conn.since = Date.now();
+      startBeat();
+      applySnapshot(msg.d);
+      fire('hello', msg.d); // js/e2ee/manager.js binds this device to the new socket
+      fire('open');
+      flushQueue();
+    } else if (msg.t === 'ack') {
+      const w = waiting.get(msg.id);
+      if (!w) return;
+      waiting.delete(msg.id);
+      clearTimeout(w.t);
+      // A refusal's code and data (e.g. e2ee_stale with the users whose keys changed) ride on the error.
+      if (msg.ok) { scanIn(msg.d, w.op); w.resolve(msg.d); } else w.reject(Object.assign(new Error(msg.error), msg.code ? { code: msg.code, data: msg.data } : {}));
+    } else if (msg.t === 'ev') {
+      scanIn(msg.d);
+      try { ((typeof msg.ev === 'string' && Object.hasOwn(EVENTS, msg.ev) && EVENTS[msg.ev]) || ((d) => fire(msg.ev, d)))(msg.d); } catch (err) { console.error(msg.ev, err); } // sec-integrate: own keys only
+      emit();
+    }
+  };
+  ws.onclose = closed;
+}
+
+// The heartbeat: ping, time the answer, and drop a connection that went quiet.
+function startBeat() {
+  clearInterval(beatTimer);
+  beatTimer = setInterval(beat, HEARTBEAT.every);
+  beat();
+}
+function beat() {
+  if (!ws || S.conn.socket !== 'open') return;
+  if (Date.now() - lastRx > HEARTBEAT.dead) {
+    noteProblem('The server stopped answering.');
+    const dead = ws;
+    dead.onclose = null; dead.onmessage = null;
+    try { dead.close(4000, 'no answer'); } catch { /* already gone */ }
+    ws = null;
+    closed({ code: 4000 });
+    return;
+  }
+  const t0 = performance.now();
+  call('ping').then((r) => {
+    S.conn.rtt = Math.round(performance.now() - t0);
+    S.conn.version = r.version;
+    S.conn.pingAt = Date.now();
+    emit();
+  }, () => { /* the next beat decides */ });
+}
+export const pingNow = () => beat(); // Settings > Connection: "Test again"
+
+async function closed(e) {
+  clearInterval(beatTimer);
+  for (const w of waiting.values()) { clearTimeout(w.t); w.reject(offline()); }
+  waiting.clear();
+  for (const list of Object.values(S.msgs)) for (const m of list) if (m.state === 'sending') m.state = 'queued';
+  S.conn.socket = 'closed';
+  S.typing = {};
+  fire('close');
+  emit();
+  // 4001: this session was ended (signed out elsewhere, or the password changed).
+  if (e.code === 4001) { signedOut(); return; }
+  // 4008 (sec-authz): too many tabs and devices open at once, and this was the
+  // oldest. Don't reconnect on a timer (the tabs would push each other out in
+  // turn); come back when someone uses this tab again.
+  if (e.code === 4008) { bumped = true; return; }
+  // A refused upgrade looks like any other failure; ask whether the session is still valid.
+  if (!opened) {
+    try {
+      const r = await fetch('/api/me', { credentials: 'same-origin' });
+      if (r.status === 401) { signedOut(); return; }
+    } catch { /* still offline */ }
+  }
+  if (opened && e.code !== 4000) noteProblem('The connection dropped.');
+  else if (!opened) noteProblem('Snug couldn’t reach the server.');
+  const delay = Math.min(15000, 1000 * 2 ** attempt) * (0.7 + Math.random() * 0.6);
+  attempt++;
+  S.conn.attempts = (S.conn.attempts || 0) + 1;
+  S.conn.retryAt = Date.now() + delay;
+  timer = setTimeout(connect, delay);
+}
+
+// For the end-to-end checks: the connection dropping without a goodbye (4000 is
+// not a clean close, so the server holds a voice place as it would for a real drop).
+// holdMs keeps it down that long, as a longer outage would.
+let holdUntil = 0;
+export function dropSocket(holdMs = 0) { holdUntil = Date.now() + holdMs; if (ws && ws.readyState === 1) ws.close(4000, 'dropped'); }
+
+export function startTransport() {
+  attempt = 0;
+  connect();
+}
+export function stopTransport() {
+  clearTimeout(timer);
+  clearInterval(beatTimer);
+  if (ws) { ws.onclose = null; ws.close(); ws = null; }
+  S.conn.socket = 'idle';
+}
+addEventListener('online', () => { if (S.auth === 'in') { attempt = 0; connect(); } });
+let bumped = false; // sec-authz: closed as the oldest of too many connections (4008)
+const comeBack = () => { if (bumped && S.auth === 'in' && document.visibilityState === 'visible') { bumped = false; attempt = 0; connect(); } };
+addEventListener('focus', comeBack);
+document.addEventListener('visibilitychange', comeBack);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && S.auth === 'in' && S.conn.socket === 'closed') { attempt = 0; connect(); }
+});
+
+// Messages
+const ALPHA = 'abcdefghijklmnopqrstuvwxyz0123456789';
+function msgId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return `m_${[...bytes].map((b) => ALPHA[b % 36]).join('')}`;
+}
+
+// Put a message where the server's order says it belongs. Messages still
+// waiting for the server stay at the end.
+function place(conv, m) {
+  stripState(m); // a message view from the server is never "still sending" (review H2)
+  const list = (S.msgs[conv] ||= []);
+  const old = list.findIndex((x) => x.id === m.id);
+  if (old >= 0) list.splice(old, 1);
+  let i = list.length;
+  while (i > 0 && (list[i - 1].seq == null || list[i - 1].seq > m.seq)) i--;
+  list.splice(i, 0, m);
+  delete S.cache[m.id];
+}
+
+export function sendMessage(conv, text, { replyTo, files, silent, replyPing, sticker, fwd } = {}) {
+  const m = markLocal({ id: msgId(), author: S.me, ts: Date.now(), text, state: 'sending' });
+  if (sticker) m.sticker = sticker; // encrypted conversations: a sticker or a forward travels in the sealed body (js/e2ee/conv.js)
+  if (fwd) m.fwd = fwd;
+  if (replyTo) m.replyTo = replyTo;
+  if (silent) m.silent = true; // no sound, no push (server/chat.js)
+  if (replyTo && replyPing === false) m.replyPing = false; // a reply that doesn't notify its author
+  if (files?.length) m.files = files;
+  (S.msgs[conv] ||= []).push(m);
+  delete S.ui.hold[conv];
+  S.ui.marker[conv] = null;
+  delete S.drafts[conv];
+  delete S.ui.reply[conv];
+  delete typingAt[conv];
+  send(conv, m);
+  return m;
+}
+
+function send(conv, m) {
+  if (S.conn.socket !== 'open') { m.state = 'queued'; emit(); return; }
+  m.state = 'sending';
+  delete m.error;
+  emit();
+  // Voice messages also carry their length and waveform.
+  // Recorded voice messages say so; any attachment may be a spoiler and have a description (server/chat.js).
+  const files = (m.files || []).map((f) => ({ id: f.id, w: f.w, h: f.h, duration: f.duration, peaks: f.peaks, voice: f.voice || undefined, spoiler: f.spoiler || undefined, alt: f.alt || undefined }));
+  // A conversation this account knows as encrypted, now reported as plain: never sent in the clear.
+  if (transportHooks.downgraded?.(conv)) { m.state = 'failed'; m.error = DOWNGRADED; emit(); return; }
+  // An end-to-end encrypted conversation: sealed on this device first (js/e2ee/conv.js).
+  const sent = transportHooks.isEncrypted?.(conv) ? transportHooks.sendEncrypted(conv, m)
+    : call('msg.send', { conv, id: m.id, text: m.text, replyTo: m.replyTo, files, silent: m.silent || undefined, replyPing: m.replyPing });
+  sent.then((r) => {
+    place(conv, { ...r.m, files: r.m.files });
+    if (isThread(conv)) S.followed[conv] = true;
+    emit();
+    // The server's copy plays and shows from /api/files now; free the local
+    // copies (a voice message's recording, a photo's preview) once it has drawn.
+    const local = (m.files || []).map((f) => f.src).filter((u) => typeof u === 'string' && u.startsWith('blob:'));
+    if (local.length) setTimeout(() => local.forEach((u) => URL.revokeObjectURL(u)), 1000);
+  }, (e) => {
+    if (e.offline) m.state = 'queued';
+    else { m.state = 'failed'; m.error = e.message; }
+    emit();
+  });
+}
+
+export const retry = (conv, m) => send(conv, m);
+
+function flushQueue() {
+  for (const conv of Object.keys(S.msgs)) for (const m of S.msgs[conv]) if (m.state === 'queued' && m.author === S.me && isLocalMsg(m)) send(conv, m);
+}
+
+const typingAt = {};
+export function sendTyping(conv) {
+  if (S.prefs.typing === false) return; // privacy: typing off (the server drops it too, server/privacy.js)
+  if (Date.now() - (typingAt[conv] || 0) < 3000) return;
+  typingAt[conv] = Date.now();
+  call('typing', { conv }).catch(() => {});
+}
+
+// Files go up over HTTP first; the message then refers to them by id. A big
+// file goes up in resumable parts with progress (js/lib/upload.js); Cancel
+// aborts `signal`. In an end-to-end encrypted conversation the file is
+// encrypted here first (js/e2ee/conv.js) and only the ciphertext goes up.
+let limitsP = null;
+export const uploadLimits = () => (limitsP ||= fetchLimits(fetch).then((l) => { if (!l) limitsP = null; return l; }));
+export async function uploadFile(conv, blob, name, { onProgress, signal } = {}) {
+  if (transportHooks.downgraded?.(conv)) throw Object.assign(new Error(DOWNGRADED), { code: 'e2ee_downgraded' }); // never uploaded readable there
+  if (transportHooks.isEncrypted?.(conv)) return transportHooks.uploadEncrypted(conv, blob, name, { onProgress, signal });
+  if (needsChunks(blob.size)) {
+    return uploadBlob({ fetch: (...a) => fetch(...a), conv, blob, name, onProgress, signal, limits: await uploadLimits() });
+  }
+  let res;
+  try {
+    res = await fetch(`/api/files?conv=${encodeURIComponent(conv)}`, {
+      method: 'POST', credentials: 'same-origin', body: blob, signal,
+      headers: { 'Content-Type': blob.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(name) },
+    });
+  } catch (e) {
+    if (e.name === 'AbortError') throw e;
+    throw new Error(`Couldn’t upload ${name}. Check your connection and try again.`);
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Couldn’t upload ${name}.`);
+  onProgress?.(1);
+  return data;
+}
+
+export async function loadHistory(conv, { before, fromId } = {}) {
+  const r = await call('history', { conv, before, fromId });
+  Object.assign(S.users, r.users);
+  const list = (S.msgs[conv] ||= []);
+  const have = new Set(list.map((m) => m.id));
+  list.unshift(...stripState(r.msgs).filter((m) => !have.has(m.id)));
+  for (const m of r.msgs) delete S.cache[m.id];
+  if (r.more) S.more[conv] = true; else delete S.more[conv];
+  emit();
+  return r;
+}
+
+export async function searchMessages(q) {
+  const r = await call('search', { q, tz: new Date().getTimezoneOffset() }); // tz: before:/after:/during: mean your days
+  Object.assign(S.users, r.users);
+  Object.assign(S.threads, r.threads);
+  for (const h of r.hits) if (!(S.msgs[h.conv] || []).some((m) => m.id === h.m.id)) S.cache[h.m.id] = h.m;
+  r.hits.close = !!r.close; // 0.12: nothing matched exactly, these are words one or two letters away
+  return r.hits;
+}
+
+export function resyncNow() {
+  return call('sync').then((d) => applySnapshot(d), () => {});
+}
+
+useTransport({ call, resync: resyncNow, history: loadHistory });
+
+// Notifications for things that need you, when you are looking elsewhere.
+// The desktop app's window can be hidden in the tray while the page still
+// reports itself visible (seen on Linux), so it also asks the app (snugApp.hidden).
+const shown = () => document.visibilityState === 'visible' && !window.snugApp?.hidden?.();
+function looking(conv) {
+  if (!shown()) return false;
+  const v = S.ui.view;
+  return (v.type === 'conv' && v.id === conv) || S.ui.pane?.id === conv;
+}
+// Account settings (js/account.js) add quiet hours and sounds here: a filter returning false keeps it quiet.
+export const notifyFilters = [];
+function notify(conv, m) {
+  if (m.author === S.me || m.silent || looking(conv) || levelOf(S, conv) === 'muted' || !needsMe(S, conv, m)) return; // silent: counted, never heard
+  if (S.users[S.me]?.presence === 'focus') return;
+  const meta = convMeta(conv);
+  if (!meta) return;
+  if (notifyFilters.some((f) => f(conv, m) === false)) return;
+  const who = S.users[m.author]?.name || 'Someone';
+  const where = meta.kind === 'dm' ? '' : meta.kind === 'thread' ? `in a thread in ${meta.where}` : `in ${meta.title}`;
+  // Previews off, or streamer mode: say that something came, not what (js/account.js).
+  // A message without an envelope in an encrypted conversation (review H2): its text is the server's, never shown as theirs.
+  const text = S.prefs.preview === false || S.prefs.streamer ? 'New message' : transportHooks.unsealed?.(conv, m) ? E2COPY.unsealed : plain(m.text) || 'Sent an attachment';
+  if (shown()) {
+    if (S.prefs.toasts) toast(text, { note: { user: m.author, where }, run: () => jumpToMsg(conv, m.id) });
+  } else if (S.prefs.desktop && 'Notification' in window && Notification.permission === 'granted') {
+    const n = new Notification(where ? `${who} ${where}` : who, { body: text.slice(0, 180), tag: m.id, silent: false });
+    // In the desktop app the window may be hidden in the tray: snugApp.show() brings it back.
+    n.onclick = () => { window.snugApp?.show?.(); window.focus(); jumpToMsg(conv, m.id); n.close(); };
+  }
+}
+
+const typingTimers = {};
+function stopTyping(conv, user) {
+  S.typing[conv] = (S.typing[conv] || []).filter((u) => u !== user);
+}
+
+function dropHouse(id) {
+  for (const r of roomIds(S, id)) {
+    delete S.rooms[r];
+    delete S.msgs[r];
+    for (const t of Object.keys(S.threads)) if (S.threads[t].conv === r) { delete S.threads[t]; delete S.msgs[t]; }
+  }
+  for (const e of Object.keys(S.events)) if (S.events[e].house === id) delete S.events[e];
+  delete S.houses[id];
+  S.houseOrder = S.houseOrder.filter((h) => h !== id);
+  checkView();
+}
+
+// Live changes from the server. Each applier is idempotent: getting the same
+// event twice (or an event for your own action) leaves the same result.
+const EVENTS = {
+  msg({ conv, m, user, thread }) {
+    if (user) S.users[user.id] = { ...S.users[user.id], ...user };
+    if (thread) S.threads[thread.id] = { conv: thread.conv, root: thread.root };
+    const isNew = !findMsg(conv, m.id);
+    const pending = (S.msgs[conv] || []).find((x) => x.id === m.id && x.state);
+    place(conv, m);
+    if (pending && isThread(conv)) S.followed[conv] = true;
+    if (isNew && !pending) {
+      stopTyping(conv, m.author);
+      // An encrypted message notifies once it is open (with its text), never if it can't be.
+      if (m.e2ee && m.enc !== true && transportHooks.whenOpen) transportHooks.whenOpen(m, (ok) => { if (ok) { notify(conv, m); emit(); } });
+      else notify(conv, m);
+    }
+  },
+  'msg.del'({ conv, id }) {
+    if (S.msgs[conv]) S.msgs[conv] = S.msgs[conv].filter((m) => m.id !== id);
+    delete S.cache[id];
+  },
+  react({ conv, id, reactions, emoji }) {
+    const m = findMsg(conv, id);
+    if (m) m.reactions = reactions;
+    if (m && emoji) m.emoji = { ...m.emoji, ...emoji }; // custom emoji used in reactions (js/views/emoji-custom.js)
+  },
+  typing({ conv, user }) {
+    if (S.prefs.typing === false) return; // privacy: typing off means not seeing other people's either
+    S.typing[conv] = [...new Set([...(S.typing[conv] || []), user])];
+    clearTimeout(typingTimers[`${conv}|${user}`]);
+    typingTimers[`${conv}|${user}`] = setTimeout(() => { stopTyping(conv, user); emit(); }, 6000);
+  },
+  presence({ user, presence, hideActive }) {
+    if (S.users[user]) { S.users[user].presence = presence; if (!hideActive) delete S.users[user].hideActive; }
+  },
+  user({ user }) {
+    S.users[user.id] = { ...S.users[user.id], ...user };
+    if (!user.hideActive) delete S.users[user.id].hideActive; // privacy: they show their activity to you again (server/privacy.js)
+  },
+  house({ house, rooms, users }) {
+    const before = S.houses[house.id];
+    Object.assign(S.users, users);
+    for (const r of Object.keys(S.rooms)) if (S.rooms[r].house === house.id && !rooms[r]) { delete S.rooms[r]; delete S.msgs[r]; }
+    Object.assign(S.rooms, rooms);
+    S.houses[house.id] = house;
+    if (house.joined && !S.houseOrder.includes(house.id)) S.houseOrder.push(house.id);
+    if (before?.joined && before.newcomer && !house.newcomer && !before.showAllRooms) { // with every room shown, nothing new opens
+      toast(`You’re in. All ${roomIds(S, house.id).length} rooms in ${house.name} are open to you now.`);
+    }
+    checkView();
+  },
+  'house.gone'({ id, deleted }) {
+    const name = S.houses[id]?.name;
+    const v = S.ui.view;
+    const onPage = v.type === 'house' && v.id === id;
+    const wasViewing = onPage || (v.type === 'conv' && S.rooms[v.id]?.house === id);
+    dropHouse(id);
+    // A house page would fall back to the visitor preview, which a private
+    // house refuses; go home instead of showing an error.
+    if (onPage) S.ui.view = { type: 'home' };
+    if (deleted && name) toast(`${name} was deleted by its owner.`); // server/community.js
+    else if (wasViewing && name) toast(`You’re no longer in ${name}.`);
+  },
+  content({ msgs, more, read, threads, users, voice, events }) {
+    Object.assign(S.events, events || {});
+    Object.assign(S.users, users);
+    Object.assign(S.threads, threads);
+    for (const [conv, list] of Object.entries(msgs)) {
+      const pending = localPending(S.msgs[conv]);
+      stripState(list);
+      // In an encrypted conversation, rows go in the server's own order (seq), not the order it
+      // listed them, so a row given an old seq can't be shown as the newest (review H2).
+      const sorted = transportHooks.encryptedSince?.(conv) != null ? [...list].sort((a, b) => (a.seq ?? Infinity) - (b.seq ?? Infinity) || 0) : list;
+      S.msgs[conv] = [...sorted, ...pending];
+    }
+    for (const conv of Object.keys(msgs)) if (more[conv]) S.more[conv] = true; else delete S.more[conv];
+    Object.assign(S.read, read);
+    for (const [room, v] of Object.entries(voice || {})) { S.voice[room] = v.users; S.voiceState[room] = v.state; }
+  },
+  dm({ dm, users, msgs }) {
+    Object.assign(S.users, users);
+    S.dms[dm.id] = dm;
+    if (!S.dmOrder.includes(dm.id)) S.dmOrder.unshift(dm.id);
+    if (!S.msgs[dm.id]) S.msgs[dm.id] = stripState(msgs || []);
+  },
+  self(d) {
+    if (d.users) Object.assign(S.users, d.users);
+    if (d.read) Object.assign(S.read, d.read);
+    if (d.follow) for (const [t, on] of Object.entries(d.follow)) { if (on) S.followed[t] = true; else delete S.followed[t]; }
+    if (d.cache) Object.assign(S.cache, d.cache);
+    if (d.saved) S.saved = d.saved;
+    if (d.invites) {
+      for (const i of d.invites) if (!S.invites.some((x) => x.house === i.house) && S.houses[i.house]) {
+        toast(`${S.users[i.from]?.name || 'Someone'} invited you to ${S.houses[i.house].name}. It’s in Catch up.`);
+      }
+      S.invites = d.invites;
+    }
+  },
+  // A friendship, a request either way, or (friend: null) the end of one.
+  friend({ id, user, friend }) {
+    if (user) S.users[id] = { ...S.users[id], ...user };
+    const before = S.friends[id]?.state;
+    if (friend) S.friends[id] = friend; else delete S.friends[id];
+    const name = S.users[id]?.name || 'Someone';
+    // Only the other person's actions are news; your own devices already know.
+    if (S.prefs.toasts && friend?.state === 'incoming' && before !== 'incoming') toast(`${name} sent you a friend request`);
+    if (S.prefs.toasts && friend?.state === 'friends' && before === 'outgoing') toast(`${name} accepted your friend request`);
+  },
+  event({ event }) {
+    S.events[event.id] = event;
+  },
+  'event.gone'({ id }) {
+    delete S.events[id];
+  },
+  voice({ room, users, state, call }) {
+    if (users.length) { S.voice[room] = users; S.voiceState[room] = state; } else { delete S.voice[room]; delete S.voiceState[room]; }
+    // A call in a direct conversation carries its details (who started it, who is being rung).
+    if (call) S.calls[room] = call; else if (call === null) delete S.calls[room];
+    fire('voice', { room, users, state });
+  },
+  // Calls (js/calls.js): someone is calling me, that ring stopped, a call ended.
+  'call.ring'(d) {
+    if (d.users) Object.assign(S.users, d.users);
+    S.ringing[d.dm] = localRing(d);
+    fire('call.ring', d);
+  },
+  'call.ring.stop'(d) {
+    const r = S.ringing[d.dm];
+    if (r && r.call === d.call) delete S.ringing[d.dm];
+    fire('call.ring.stop', d);
+  },
+  'call.ended'(d) {
+    if (S.ringing[d.dm]?.call === d.call) delete S.ringing[d.dm];
+    delete S.calls[d.dm];
+    fire('call.ended', d);
+  },
+};
