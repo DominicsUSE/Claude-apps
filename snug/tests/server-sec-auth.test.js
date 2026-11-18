@@ -172,17 +172,22 @@ test('AUTH-4 new hashes are v2 with OWASP-level scrypt cost, and a legacy hash i
 
 test('AUTH-4 password checks do not block the event loop', async () => {
   await register('loop-check');
-  let last = Date.now(), worst = 0;
-  const t = setInterval(() => { const now = Date.now(); worst = Math.max(worst, now - last); last = now; }, 1);
-  await Promise.all(Array.from({ length: 5 }, (_, i) => login('loop-check', i % 2 ? PW : 'not it at all')));
-  clearInterval(t);
-  // One hash on the main thread would hold the loop for its whole run; slow runners get that as the yardstick.
-  const t0 = Date.now();
-  scryptSync('x', 'salt', 64, { N: 2 ** 15, r: 8, p: 3, maxmem: 64 * 1024 * 1024 });
-  const one = Date.now() - t0;
-  // A hash on the main thread stalls the loop for about a whole hash; under 90% of one still proves it ran off
-  // the loop, with room for a slow runner's scheduling jitter (a Windows runner paused 291 ms of a 360 ms hash).
-  assert.ok(worst < Math.max(25, one * 0.9), `longest pause ${worst} ms (one hash: ${one} ms)`);
+  // A hash on the main thread stalls the loop for about a whole hash on every try; a shared CI runner can stall
+  // now and then for its own reasons (a Windows runner once paused 729 ms against a 495 ms hash), so up to three
+  // tries, and one clean one proves the checks run off the loop.
+  const tries = [];
+  for (let i = 0; i < 3; i++) {
+    let last = Date.now(), worst = 0;
+    const t = setInterval(() => { const now = Date.now(); worst = Math.max(worst, now - last); last = now; }, 1);
+    await Promise.all(Array.from({ length: 5 }, (_, k) => login('loop-check', k % 2 ? PW : 'not it at all')));
+    clearInterval(t);
+    const t0 = Date.now();
+    scryptSync('x', 'salt', 64, { N: 2 ** 15, r: 8, p: 3, maxmem: 64 * 1024 * 1024 });
+    const one = Date.now() - t0;
+    tries.push(`${worst} ms (one hash: ${one} ms)`);
+    if (worst < Math.max(25, one * 0.9)) return;
+  }
+  assert.fail(`longest pauses ${tries.join(', ')}`);
 });
 
 // ---------- AUTH-5: common passwords ----------
