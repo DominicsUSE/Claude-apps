@@ -59,7 +59,9 @@ goes back to an older version on its own (README, "Install, update, go back").
 - **Plain states:** an empty voice room says "Nobody is here yet"; joining shows a spinner and what Snug is
   waiting for; a reconnecting call says your place is kept; a dropped voice room keeps a "Join again" note,
   and a dropped call says "Call dropped" with "Call again". A line that fails says Snug is trying again.
-- **The "connects directly" note** before joining a voice room is a calm card, not amber small print.
+- **The "connects directly" note** before joining a voice room is a calm card, not amber small print, and the incoming call card says it the same calm way.
+- **Three or four cameras on a narrow stage** (a tablet, a narrow window) sit in two columns instead of one
+  tall column that pushed people out of view.
 - **The floating call** is a 56px strip above the tab bar on a phone instead of a card over the list.
 - **Settings › Voice and video:** sliders are wider, with the value at the right.
 - **Text size** is one multiplier (`--text-scale`) on the page's font size, ready for more steps.

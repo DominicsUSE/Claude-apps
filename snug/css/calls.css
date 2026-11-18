@@ -390,6 +390,8 @@
 }
 .vt-grid[data-n="1"] { max-width: 720px; grid-template-columns: minmax(0, 1fr); }
 .vt-grid[data-n="2"] { max-width: 1120px; }
+/* Three or four on a narrow stage (a tablet, a narrow window): two columns, so nobody is pushed out of view. */
+@container stage (min-width: 400px) and (max-width: 719px) { .vt-grid:is([data-n="3"], [data-n="4"]) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .vt-focus { display: grid; gap: var(--s-2); min-width: 0; min-height: 0; grid-template-columns: minmax(0, 1fr); }
 .vt-main { display: grid; justify-items: center; align-items: center; min-width: 0; min-height: 0; }
 .vt-main .vt { width: min(100%, calc(50vh * 16 / 9)); border-radius: var(--r-media); }

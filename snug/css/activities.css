@@ -224,4 +224,5 @@
 @media (max-width: 759px) { .stage-acts { flex-wrap: wrap; row-gap: var(--s-2); } }
 
 /* calls C3: who will see your IP address (the stage's note: css/calls.css .stage-direct) */
-.inc-direct { color: var(--amber-ink); }
+.inc-direct { display: flex; align-items: flex-start; gap: 6px; color: var(--text-2); }
+.inc-direct .ic { flex: none; margin-top: 2px; color: var(--info-ink); }
