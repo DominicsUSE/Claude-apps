@@ -27,7 +27,8 @@ import { PeoplePane, MePop, peopleWanted } from './views/people.js';
 import { CatchUp, Saved } from './views/catchup.js';
 import { Search, QuickJump } from './views/search.js';
 import { Settings, confirmSignOut } from './views/settings.js'; // confirmSignOut: the You tab's Sign out
-import { NewMessage, JoinByLink } from './views/modals.js';
+import { NewMessage, JoinByLink, Invite } from './views/modals.js';
+import { can } from './lib/perms.js';
 import { Auth, Splash } from './views/auth.js';
 import { PrivacyDoc, PrivacyLink } from './views/privacy.js'; // the privacy page at /privacy, and its link on the sign-in screen
 import { Home } from './views/home.js';
@@ -76,6 +77,7 @@ function PhoneHouse({ id }) {
       <button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>
       <h1 class="bar-title"><${Tile} house=${h} /><span class="trunc">${h.name}</span></h1>
       <div class="bar-end">
+        ${can(S, id, 'invite') && html`<button class="ib" aria-label=${t('nav.inviteTo', { house: h.name })} onClick=${() => openModal(Invite, { house: id })}><${Icon} name="user-plus" /></button>`}
         <button class="ib" aria-label=${`${h.name} menu`} onClick=${(e) => houseMenu(id, { anchor: rectOf(e) })}><${Icon} name="more" /></button>
       </div>
     </header>

@@ -43,7 +43,8 @@ goes back to an older version on its own (README, "Install, update, go back").
   house picked in the rail shows its rooms over the content until you go somewhere (Esc or a click outside puts
   them away), and the rail's foot carries you, your settings and the call you are in.
 - **Where am I:** the house's header shows who is online and how many members, with Invite people and House
-  settings beside the name for those allowed. Rooms can be added to **Favourites** (room menu), which sit at the
+  settings beside the name for those allowed (when nobody else is around it just gives the member count). On a
+  phone the house's header has Invite people too. Rooms can be added to **Favourites** (room menu), which sit at the
   top of the house's list; private rooms show a lock and muted rooms a crossed bell. A room with a count no
   longer also shows the unread pip.
 - **Back on a phone goes to the list you came from.** A swipe in from the left edge now goes back (as the

@@ -661,12 +661,13 @@ function HouseHead({ id }) {
   const h = S.houses[id];
   const members = Object.keys(h.members || {}).length;
   const online = onlineIn(h);
+  // Nobody else around: the member count alone ("Just you" crowded the buttons beside it).
   return html`<button class="house-row ctx-house" aria-label=${`${h.name}, house menu`} aria-haspopup="menu"
     onClick=${(e) => houseMenu(id, { anchor: rectOf(e) })}
     onContextMenu=${(e) => { e.preventDefault(); houseMenu(id, { x: e.clientX, y: e.clientY }); }}>
     <span class="grow" style="min-width:0">
       <span class="ctx-name trunc">${h.name}</span>
-      <span class="ctx-meta"><${OnlineCount} n=${online} cls="ctx-online" /><span class="num">${t('house.members', { count: members })}</span></span>
+      <span class="ctx-meta">${online > 0 && html`<${OnlineCount} n=${online} cls="ctx-online" />`}<span class="num">${t('house.members', { count: members })}</span></span>
     </span>
     <${Icon} name="chev-d" size=${16} />
   </button>`;
