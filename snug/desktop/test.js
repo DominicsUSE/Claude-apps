@@ -1455,6 +1455,7 @@ test("join mode, pinned: the app's own client runs at a plain-http LAN address, 
   await page.click('.me-row [aria-label="Settings"], .me-panel [aria-label="Settings"]');
   await page.click('.layer-nav .row:has-text("Encryption")');
   await page.locator('.layer-col :text("Snug app (built-in code)")').first().waitFor();
+  await page.evaluate(() => document.querySelectorAll(".e2-limits").forEach((d) => { d.open = true; })); // 0.15: the details sit in a fold
   await page.locator('.layer-col :text("isn’t https")').first().waitFor(); // plain http: what crosses the network unencrypted is said
   // 0.14: "sealed with the system key store" only where it is true: a working key store (this device was made under it just now).
   const sealedHere = await page.evaluate(() => window.snug.e2ee.E2.keyStore === "os");
@@ -1832,6 +1833,7 @@ test("S4: in the app, new device signing and prekey private keys are sealed unde
   assert.deepEqual(rec.dsk, { priv: false, sealed: true }, "the signing key is kept sealed, never as a CryptoKey");
   assert.deepEqual(rec.prekeys, { 1: { priv: false, sealed: true } });
   await encryptionPage(page);
+  await page.evaluate(() => document.querySelectorAll(".e2-limits").forEach((d) => { d.open = true; })); // 0.15: in a fold
   await page.locator('.e2-limits :text("sealed with the system key store")').waitFor();
   await page.keyboard.press("Escape");
   // Fay writes to Dana in an encrypted DM.

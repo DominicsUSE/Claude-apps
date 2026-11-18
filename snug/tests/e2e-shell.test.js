@@ -440,7 +440,7 @@ test('the sidebar folds into the rail and stays folded; a house picked from the 
   await peek.waitFor({ state: 'detached' });
   await page.locator('.main .bar-title:has-text("The floor")').waitFor();
   // Kept on this device.
-  await page.waitForFunction(() => JSON.parse(localStorage.getItem('snug.prefs')).ctxShut === true);
+  await page.waitForFunction(() => (JSON.parse(localStorage.getItem('snug.prefs')) || {}).ctxShut === true);
   await page.reload();
   await page.waitForFunction(() => window.snug.S.conn.socket === 'open');
   await page.locator('.app.ctx-shut').waitFor();
