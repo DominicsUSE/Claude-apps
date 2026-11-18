@@ -55,11 +55,11 @@
    on a phone) with the caller, the kind of call and three controls. No
    decoration: a steady online ring round the face says it is ringing. */
 .incoming {
-  position: fixed; z-index: 65; top: var(--s-4); left: 50%; transform: translateX(-50%);
+  position: fixed; z-index: var(--z-viewer); top: var(--s-4); left: 50%; transform: translateX(-50%);
   width: min(360px, calc(100% - var(--s-8)));
   padding: var(--s-4); display: grid; gap: var(--s-3);
   background: var(--surface-float); --bg: var(--surface-float); color: var(--text-1);
-  border: 1px solid var(--line); border-radius: var(--r-modal); box-shadow: var(--shadow-lg);
+  border: 1px solid var(--line); border-radius: var(--r-modal); box-shadow: var(--elev-3);
   animation: drop-in var(--m-panel) var(--ease-out);
 }
 .inc-who { display: flex; align-items: center; gap: var(--s-3); min-width: 0; }
@@ -81,7 +81,7 @@
 .inc-acts .btn { height: var(--h-36); justify-content: center; gap: var(--s-2); padding: 0 var(--s-3); }
 .inc-acts .inc-video { width: var(--h-36); padding: 0; }
 .inc-keys { margin: 0; font-size: var(--t-meta); display: flex; gap: var(--s-2); align-items: center; justify-content: center; }
-.inc-keys kbd { font: inherit; font-weight: var(--w-semibold); padding: 0 var(--s-1); border: 1px solid var(--line-strong); border-radius: var(--r-xs); color: var(--text-2); }
+.inc-keys kbd { font: inherit; font-weight: var(--w-semibold); padding: 0 var(--s-1); border: 1px solid var(--line-strong); border-radius: var(--r-row); color: var(--text-2); }
 
 /* ---------- Call records: system lines in the conversation ----------
    The shared system-line pattern (also .joinline, .dmline, .pinline): the

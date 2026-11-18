@@ -10,7 +10,7 @@
 .e2-key-field, .e2-code-field, .e2-last { font-family: var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
 .e2-last { max-width: 8em; }
 textarea.e2-key-field { resize: vertical; min-height: calc(var(--h-field) * 1.6); }
-.e2-rk { display: grid; grid-template-columns: repeat(3, auto); justify-content: start; gap: var(--s-2) var(--s-3); padding: var(--s-3) var(--s-4); background: var(--surface-input); border: 1px solid var(--line); border-radius: var(--r-md); user-select: all; }
+.e2-rk { display: grid; grid-template-columns: repeat(3, auto); justify-content: start; gap: var(--s-2) var(--s-3); padding: var(--s-3) var(--s-4); background: var(--surface-input); border: 1px solid var(--line); border-radius: var(--r-menu); user-select: all; }
 .e2-rk code, .e2-number code { font-family: var(--mono); font-size: var(--t-16); letter-spacing: 0.08em; color: var(--text-1); }
 :root[data-streamer] .e2-rk { filter: blur(8px); }
 .e2-choices { display: grid; gap: var(--s-2); }
@@ -18,14 +18,14 @@ textarea.e2-key-field { resize: vertical; min-height: calc(var(--h-field) * 1.6)
 .e2-choice > span { display: grid; gap: 2px; }
 .e2-choice b { font-weight: var(--w-medium); }
 .e2-steps { margin: 0; padding-left: var(--s-5); display: grid; gap: var(--s-1); color: var(--text-2); }
-.e2-code { margin: 0; font-family: var(--mono); font-size: var(--t-24); letter-spacing: 0.12em; color: var(--text-1); text-align: center; padding: var(--s-3); background: var(--surface-input); border-radius: var(--r-md); }
-.e2-number { display: grid; grid-template-columns: repeat(4, auto); justify-content: start; gap: var(--s-2) var(--s-4); padding: var(--s-3) var(--s-4); background: var(--surface-input); border-radius: var(--r-md); }
+.e2-code { margin: 0; font-family: var(--mono); font-size: var(--t-24); letter-spacing: 0.12em; color: var(--text-1); text-align: center; padding: var(--s-3); background: var(--surface-input); border-radius: var(--r-menu); }
+.e2-number { display: grid; grid-template-columns: repeat(4, auto); justify-content: start; gap: var(--s-2) var(--s-4); padding: var(--s-3) var(--s-4); background: var(--surface-input); border-radius: var(--r-menu); }
 .e2-qr-row { display: flex; gap: var(--s-4); align-items: center; flex-wrap: wrap; }
 .e2-qr-row .acc-qr { width: calc(var(--s-20) * 1.6); height: calc(var(--s-20) * 1.6); }
 .e2-qr-row .hint { flex: 1 1 12em; margin: 0; }
 .e2-state, .e2-ok { display: flex; gap: var(--s-2); align-items: center; margin: 0; color: var(--text-2); }
 .e2-ok { color: var(--mint-ink, var(--text-1)); padding: var(--s-2) 0; }
-.e2-warn { display: flex; gap: var(--s-2); align-items: flex-start; margin: 0; padding: var(--s-2) var(--s-3); border-radius: var(--r-md); background: var(--amber-soft); color: var(--text-1); }
+.e2-warn { display: flex; gap: var(--s-2); align-items: flex-start; margin: 0; padding: var(--s-2) var(--s-3); border-radius: var(--r-menu); background: var(--amber-soft); color: var(--text-1); }
 .e2-warn svg { color: var(--amber); flex: none; margin-top: 2px; }
 .e2-h2, .e2-h3 { font-size: var(--t-section); margin: var(--s-4) 0 var(--s-2); }
 .e2-devs { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); }
@@ -58,7 +58,7 @@ textarea.e2-key-field { resize: vertical; min-height: calc(var(--h-field) * 1.6)
 .e2-gate .grow { flex: 1 1 14em; }
 .e2-gif-note { margin: 0 0 var(--s-2); font-size: var(--t-12); }
 /* The offer to turn encryption on, above the direct messages (js/views/e2ee-setup.js EncInvite). */
-.e2-invite { display: flex; gap: var(--s-2); margin: var(--s-1) 0 var(--s-2); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); }
+.e2-invite { display: flex; gap: var(--s-2); margin: var(--s-1) 0 var(--s-2); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-menu); background: var(--surface-2); }
 .e2-invite-ic { flex: none; color: var(--brand); padding-top: 2px; }
 .e2-invite-body { display: grid; gap: var(--s-1); min-width: 0; }
 .e2-invite h3 { margin: 0; font-size: var(--t-ui); font-weight: var(--w-medium); color: var(--text-1); }
@@ -73,7 +73,7 @@ textarea.e2-key-field { resize: vertical; min-height: calc(var(--h-field) * 1.6)
 .msg.e2-unsealed-msg .msg-text { opacity: .85; }
 .e2-keyline.warn .dmline-ic svg { color: var(--amber); }
 /* A device added to this account elsewhere (review H3): over everything until answered. */
-.e2-own-added { position: fixed; z-index: 60; top: var(--s-3); left: 50%; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); align-items: center; box-shadow: var(--shadow-3, 0 8px 24px rgba(0,0,0,.25)); }
+.e2-own-added { position: fixed; z-index: var(--z-menu); top: var(--s-3); left: 50%; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); align-items: center; box-shadow: var(--elev-3); }
 .e2-own-added .btn { flex: none; }
 .e2-removed-dev, .e2-lost-warn { margin: var(--s-1) 0; }
 .e2-lost-warn { align-items: center; }

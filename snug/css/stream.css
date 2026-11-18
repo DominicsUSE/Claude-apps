@@ -75,7 +75,7 @@ mark.hit { background: none; color: inherit; font-weight: var(--w-bold); text-de
 /* Hover toolbar: a small floating bar on the message's top-right edge. React,
    reply, thread and more; on your own message also edit and delete. Hold
    Shift to see Save as well. */
-.msg-actions { position: absolute; right: var(--s-4); top: -18px; display: none; align-items: center; padding: 2px; gap: 0; z-index: 2; border-color: var(--line-subtle); box-shadow: var(--shadow-sm); }
+.msg-actions { position: absolute; right: var(--s-4); top: -18px; display: none; align-items: center; padding: 2px; gap: 0; z-index: 2; border-color: var(--line-subtle); box-shadow: var(--elev-1); }
 .msg:hover .msg-actions, .msg:focus-within .msg-actions, .msg.menu-open .msg-actions { display: flex; }
 .msg-actions .ib { width: var(--h-sm); height: var(--h-sm); border-radius: var(--r-row); }
 .msg-actions .ib:hover { background: var(--surface-hover); }
@@ -108,7 +108,7 @@ mark.hit { background: none; color: inherit; font-weight: var(--w-bold); text-de
 .files { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-1); }
 .img { display: block; max-width: min(100%, 420px); max-height: 420px; border-radius: var(--r-media); overflow: hidden; background: var(--surface-hover); cursor: zoom-in; }
 .img img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.file { height: var(--h-lg); padding: 0 var(--s-3) 0 var(--s-2); display: inline-flex; align-items: center; gap: var(--s-2); background: var(--surface-2); border: 1px solid var(--line-subtle); border-radius: var(--r-lg); max-width: min(100%, 420px); text-align: left; transition: border-color var(--m-hover) var(--ease-in-out); }
+.file { height: var(--h-lg); padding: 0 var(--s-3) 0 var(--s-2); display: inline-flex; align-items: center; gap: var(--s-2); background: var(--surface-2); border: 1px solid var(--line-subtle); border-radius: var(--r-modal); max-width: min(100%, 420px); text-align: left; transition: border-color var(--m-hover) var(--ease-in-out); }
 .file .ic { color: var(--text-2); }
 .file-name { font-weight: var(--w-medium); font-size: var(--t-body); line-height: var(--lh-heading); }
 .file-size { font-size: var(--t-meta); color: var(--text-3); line-height: var(--lh-ui); }
@@ -181,7 +181,7 @@ mark.hit { background: none; color: inherit; font-weight: var(--w-bold); text-de
 .composer-banner > .ic { color: var(--text-3); flex: none; }
 .composer-banner b { font-weight: var(--w-semibold); color: var(--text-1); }
 .composer-files { display: flex; gap: var(--s-2); padding: var(--s-2) var(--s-2) 0; flex-wrap: wrap; }
-.pending-file { position: relative; height: 56px; background: var(--surface-chat); border: 1px solid var(--line); border-radius: var(--r-lg); display: flex; align-items: center; gap: var(--s-2); padding-right: var(--s-6); overflow: hidden; max-width: 220px; }
+.pending-file { position: relative; height: 56px; background: var(--surface-chat); border: 1px solid var(--line); border-radius: var(--r-modal); display: flex; align-items: center; gap: var(--s-2); padding-right: var(--s-6); overflow: hidden; max-width: 220px; }
 .pending-file img { height: 56px; width: 56px; object-fit: cover; }
 .pending-file .ic { margin-left: var(--s-2); color: var(--text-2); }
 .pending-file .ib { position: absolute; right: 2px; top: 2px; }
@@ -193,8 +193,8 @@ a.file { text-decoration: none; color: inherit; }
 a.file:hover { border-color: var(--line-strong); }
 .composer-locked { border: 1px dashed var(--line-strong); border-radius: var(--r-input); padding: var(--s-3); color: var(--text-2); font-size: var(--t-body); display: flex; gap: var(--s-2); align-items: center; }
 /* Dragging files over the conversation. */
-.drop-over { position: fixed; z-index: 40; display: grid; place-items: center; padding: var(--s-4); background: color-mix(in srgb, var(--surface-chat) 82%, transparent); pointer-events: none; animation: fade-in var(--m-control) var(--ease-out); }
-.drop-card { display: grid; justify-items: center; gap: var(--s-1); padding: var(--s-6) var(--s-8); border: 2px dashed var(--line-strong); border-radius: var(--r-modal); background: var(--surface-float); color: var(--text-2); font-size: var(--t-ui); text-align: center; box-shadow: var(--shadow-md); }
+.drop-over { position: fixed; z-index: var(--z-banner); display: grid; place-items: center; padding: var(--s-4); background: color-mix(in srgb, var(--surface-chat) 82%, transparent); pointer-events: none; animation: fade-in var(--m-control) var(--ease-out); }
+.drop-card { display: grid; justify-items: center; gap: var(--s-1); padding: var(--s-6) var(--s-8); border: 2px dashed var(--line-strong); border-radius: var(--r-modal); background: var(--surface-float); color: var(--text-2); font-size: var(--t-ui); text-align: center; box-shadow: var(--elev-2); }
 .drop-card .ic { color: var(--text-1); margin-bottom: var(--s-1); }
 .drop-card b { font-size: var(--t-section); font-weight: var(--w-semibold); color: var(--text-1); }
 /* Typing: three dots that breathe, then who. Compact, under the composer. */
@@ -235,8 +235,8 @@ a.file:hover { border-color: var(--line-strong); }
 .welcome-room span { color: var(--text-2); }
 .welcome-acts { display: flex; gap: var(--s-2); flex-wrap: wrap; }
 
-.lightbox { position: fixed; inset: 0; z-index: 65; background: var(--scrim); display: grid; place-items: center; padding: var(--s-8); cursor: zoom-out; animation: fade-in var(--m-smooth); }
-.lightbox img { max-width: 100%; max-height: 100%; border-radius: var(--r-media); background: var(--surface-chat); box-shadow: var(--shadow-lg); }
+.lightbox { position: fixed; inset: 0; z-index: var(--z-viewer); background: var(--scrim); display: grid; place-items: center; padding: var(--s-8); cursor: zoom-out; animation: fade-in var(--m-smooth); }
+.lightbox img { max-width: 100%; max-height: 100%; border-radius: var(--r-media); background: var(--surface-chat); box-shadow: var(--elev-3); }
 
 @media (max-width: 759px) {
   .msg { padding-left: var(--s-3); padding-right: var(--s-3); column-gap: var(--s-3); --indent: calc(var(--avatar) + var(--s-3)); }
@@ -246,7 +246,7 @@ a.file:hover { border-color: var(--line-strong); }
   .jump-bar { left: var(--s-2); right: var(--s-2); height: var(--touch); }
   .jump { height: 36px; }
   .composer { padding: 0 var(--s-2); }
-  .composer textarea { font-size: 16px; }
+  .composer textarea { font-size: var(--t-input-touch); }
   .foot { padding: 0 var(--s-3); padding-bottom: env(safe-area-inset-bottom, 0px); height: calc(24px + env(safe-area-inset-bottom, 0px)); }
   .day, .newline { padding: 0 var(--s-3); }
   .ac { left: var(--s-2); right: var(--s-2); max-width: none; }

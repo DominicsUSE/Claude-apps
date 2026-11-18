@@ -57,8 +57,8 @@
 .vo-snd:active { background: var(--btn2-press); }
 .vo-snd:focus-visible { outline: var(--focus-w, 2px) solid var(--focus); outline-offset: 2px; }
 .vo-snd[disabled] { color: var(--text-disabled); background: var(--surface-hover); cursor: not-allowed; }
-.vo-snd-emo { flex: none; width: 20px; display: grid; place-items: center; font-size: 1.125rem; line-height: 1; }
-.vo-snd-emo.lg { width: 40px; height: 40px; font-size: 1.5rem; border-radius: var(--r-sm); background: var(--bg-3); }
+.vo-snd-emo { flex: none; width: 20px; display: grid; place-items: center; font-size: var(--t-16); line-height: 1; }
+.vo-snd-emo.lg { width: 40px; height: 40px; font-size: var(--t-24); border-radius: var(--r-btn); background: var(--bg-3); }
 .vo-board-empty { display: grid; justify-items: center; gap: var(--s-1); padding: var(--s-4) var(--s-2); text-align: center; color: var(--text-3); font-size: var(--t-13); }
 .vo-board-empty b { color: var(--text-1); font-weight: var(--w-semibold); font-size: var(--t-14); }
 
@@ -66,7 +66,7 @@
    A small panel on the floating surface: a 32px head (grip, the room, the
    clock, hide), faces or the shared picture, and 32px controls with leave
    in red. */
-.vo-mini { position: fixed; right: var(--s-4); bottom: calc(var(--s-20) + var(--s-4)); z-index: 30; width: 280px; display: grid; gap: var(--s-2); padding: var(--s-2); border-radius: var(--r-modal); background: var(--surface-float); --bg: var(--surface-float); animation: rise-in var(--m-panel) var(--ease-out); }
+.vo-mini { position: fixed; right: var(--s-4); bottom: calc(var(--s-20) + var(--s-4)); z-index: var(--z-dock); width: 280px; display: grid; gap: var(--s-2); padding: var(--s-2); border-radius: var(--r-modal); background: var(--surface-float); --bg: var(--surface-float); animation: rise-in var(--m-panel) var(--ease-out); }
 .vo-mini-head { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .vo-mini-grip { flex: none; width: var(--h-28); height: var(--h-sm); display: grid; place-items: center; border-radius: var(--r-btn); background: transparent; border: 0; color: var(--text-3); cursor: grab; touch-action: none; }
 .vo-mini-grip:hover { background: var(--surface-hover); color: var(--text-1); }
@@ -76,7 +76,7 @@
 .vo-mini-title .ic { color: var(--online); flex: none; }
 .vo-mini-title:hover { background: var(--surface-hover); }
 .vo-mini-title .faint { font-weight: var(--w-regular); font-size: var(--t-meta); }
-.vo-mini-media { position: relative; border-radius: var(--r-lg); overflow: hidden; background: var(--bg-0); aspect-ratio: 16 / 9; }
+.vo-mini-media { position: relative; border-radius: var(--r-modal); overflow: hidden; background: var(--bg-0); aspect-ratio: 16 / 9; }
 .vo-mini-video { width: 100%; height: 100%; object-fit: contain; display: block; }
 .vo-mini-media .vt-pip { position: absolute; right: var(--s-1); bottom: var(--s-1); background: color-mix(in srgb, var(--bg-0) 70%, transparent); color: var(--text-1); }
 .vo-mini-faces { display: flex; flex-wrap: wrap; gap: var(--s-2); padding: var(--s-1) var(--s-2); }
@@ -109,15 +109,15 @@
 .vo-meter.open .vo-meter-fill { background: var(--mint); }
 .vo-meter-mark { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--text-1); }
 .vo-cam { display: grid; gap: var(--s-2); width: min(320px, 100%); }
-.vo-cam-video { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--r-xl); background: var(--bg-0); transform: scaleX(-1); }
-.vo-cam-empty { aspect-ratio: 16 / 9; border-radius: var(--r-xl); background: var(--bg-2); border: 1px dashed var(--line-strong); display: grid; place-content: center; justify-items: center; gap: var(--s-2); padding: var(--s-4); text-align: center; color: var(--text-3); font-size: var(--t-13); }
+.vo-cam-video { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--r-media); background: var(--bg-0); transform: scaleX(-1); }
+.vo-cam-empty { aspect-ratio: 16 / 9; border-radius: var(--r-media); background: var(--bg-2); border: 1px dashed var(--line-strong); display: grid; place-content: center; justify-items: center; gap: var(--s-2); padding: var(--s-4); text-align: center; color: var(--text-3); font-size: var(--t-13); }
 .vo-key { gap: var(--s-2); }
-.vo-key kbd { font: inherit; font-family: var(--mono); font-size: var(--t-13); padding: 0 var(--s-2); min-width: 24px; border-radius: var(--r-xs); background: var(--bg-4); border: 1px solid var(--line-strong); }
+.vo-key kbd { font: inherit; font-family: var(--mono); font-size: var(--t-13); padding: 0 var(--s-2); min-width: 24px; border-radius: var(--r-row); background: var(--bg-4); border: 1px solid var(--line-strong); }
 .vo-key.listening { border-color: var(--cyan); color: var(--cyan); }
 
 /* ---------- House settings > Voice ---------- */
 .vo-add { display: grid; gap: var(--s-3); margin: var(--s-2) 0 var(--s-4); }
-.vo-drop { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-4); border: 1px dashed var(--line-strong); border-radius: var(--r-md); background: var(--bg-2); color: var(--text-2); }
+.vo-drop { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-4); border: 1px dashed var(--line-strong); border-radius: var(--r-menu); background: var(--bg-2); color: var(--text-2); }
 .vo-drop.bad { border-color: var(--error); }
 .vo-drop-text { flex: 1; min-width: 0; display: grid; gap: 2px; font-size: var(--t-13); line-height: var(--lh-ui); }
 .vo-drop-text b { color: var(--text-1); font-weight: var(--w-semibold); font-size: var(--t-14); overflow-wrap: anywhere; }

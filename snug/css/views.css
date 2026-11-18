@@ -25,13 +25,13 @@
 .swipe .item.swiping { transition: none; background: var(--bg-1); }
 .item[data-triage]:focus-visible { outline-offset: -2px; border-radius: 0; }
 .triage-hint { padding-top: var(--s-2); display: flex; gap: var(--s-1); align-items: center; flex-wrap: wrap; }
-.item-main { min-width: 0; display: grid; gap: 2px; border-radius: var(--r-sm); text-align: left; }
+.item-main { min-width: 0; display: grid; gap: 2px; border-radius: var(--r-btn); text-align: left; }
 .item-meta { font-size: var(--t-12); color: var(--text-3); display: flex; gap: var(--s-2); flex-wrap: wrap; align-items: baseline; }
 .item-meta b { font-size: var(--t-14); font-weight: var(--w-semibold); color: var(--text-1); }
 .item-meta .where { color: var(--text-2); }
 .item-text { font-size: var(--t-msg); line-height: var(--lh); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .item-more { display: block; font-size: var(--t-12); color: var(--text-3); margin-top: var(--s-1); }
-.item-acts { position: absolute; right: var(--s-4); top: var(--s-1); display: none; padding: 2px; box-shadow: var(--shadow-sm); }
+.item-acts { position: absolute; right: var(--s-4); top: var(--s-1); display: none; padding: 2px; box-shadow: var(--elev-1); }
 .item:hover .item-acts, .item:focus-within .item-acts { display: flex; }
 .item-acts .ib { width: 28px; height: 28px; }
 .item-note { margin-top: var(--s-1); font-size: var(--t-14); color: var(--text-2); display: flex; gap: var(--s-2); align-items: center; }
@@ -44,7 +44,7 @@
 .news { display: grid; grid-template-columns: var(--avatar) minmax(0, 1fr) auto; column-gap: var(--s-3); align-items: start; padding: var(--s-1) var(--s-4); width: 100%; text-align: left; position: relative; transition: background var(--m-fast) var(--ease-in-out); }
 .news:hover, .news:focus-within { background: var(--surface-hover); --bg: var(--surface-hover); }
 .news-ic { height: 24px; display: grid; place-items: center; color: var(--text-3); }
-.news-main { min-width: 0; display: grid; gap: 2px; text-align: left; border-radius: var(--r-sm); }
+.news-main { min-width: 0; display: grid; gap: 2px; text-align: left; border-radius: var(--r-btn); }
 .news-name { font-size: var(--t-body); font-weight: var(--w-semibold); display: flex; gap: var(--s-2); align-items: baseline; line-height: 24px; }
 .news-name span { font-size: var(--t-12); font-weight: var(--w-regular); color: var(--text-3); }
 .news-sum { color: var(--text-3); font-size: var(--t-ui); line-height: var(--lh-ui); }
@@ -86,14 +86,14 @@
 .chip.on .ic, .chip[aria-pressed="true"] .ic { color: var(--text-1); }
 .ops { padding: var(--s-4); display: grid; gap: var(--s-2); max-width: 46rem; }
 .ops h3 { color: var(--text-3); font-size: var(--t-meta); font-weight: var(--w-semibold); text-transform: uppercase; letter-spacing: 0.02em; margin-top: var(--s-4); }
-.op { display: grid; grid-template-columns: 140px 1fr; gap: var(--s-3); align-items: baseline; text-align: left; padding: var(--s-1) var(--s-2); margin: 0 calc(var(--s-2) * -1); border-radius: var(--r-sm); }
+.op { display: grid; grid-template-columns: 140px 1fr; gap: var(--s-3); align-items: baseline; text-align: left; padding: var(--s-1) var(--s-2); margin: 0 calc(var(--s-2) * -1); border-radius: var(--r-btn); }
 button.op:hover { background: var(--surface-hover); }
 .op code { font: 400 var(--t-14)/1.4 var(--mono); color: var(--text-1); }
 .op span { color: var(--text-2); }
 
 /* Quick jump: one field for going somewhere or finding something. */
-.quick-scrim { position: fixed; inset: 0; z-index: 58; background: var(--scrim); animation: fade-in var(--m-fast); display: flex; justify-content: center; align-items: flex-start; padding: 12vh var(--s-4) var(--s-4); }
-.quick { width: min(560px, 100%); max-height: 100%; display: flex; flex-direction: column; overflow: hidden; border-radius: var(--r-modal); box-shadow: var(--shadow-lg); animation: pop-in var(--m-fast) var(--ease-out); }
+.quick-scrim { position: fixed; inset: 0; z-index: var(--z-quick); background: var(--scrim); animation: fade-in var(--m-fast); display: flex; justify-content: center; align-items: flex-start; padding: 12vh var(--s-4) var(--s-4); }
+.quick { width: min(560px, 100%); max-height: 100%; display: flex; flex-direction: column; overflow: hidden; border-radius: var(--r-modal); box-shadow: var(--elev-3); animation: pop-in var(--m-fast) var(--ease-out); }
 .quick-in { display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-3); border-bottom: 1px solid var(--line); flex: none; }
 .quick-in .ic { color: var(--text-3); }
 .quick-in input { flex: 1; height: var(--h-lg); color: var(--text-1); border: 0; border-radius: var(--r-input); background: none; outline: none; font-size: var(--t-section); min-width: 0; }
@@ -113,7 +113,7 @@ button.op:hover { background: var(--surface-hover); }
    conversation surface, label + control rows divided by hairlines, never a
    card per option. Page title 20, section headings 16. */
 .layer {
-  position: fixed; inset: 0; z-index: 45; background: var(--surface-chat); --bg: var(--surface-chat);
+  position: fixed; inset: 0; z-index: var(--z-layer); background: var(--surface-chat); --bg: var(--surface-chat);
   display: grid; grid-template-columns: minmax(232px, 1fr) minmax(0, 2.4fr); animation: fade-in var(--m-panel);
 }
 .layer:focus { outline: none; } /* it takes focus on opening; the ring belongs to its controls */
@@ -133,7 +133,7 @@ button.op:hover { background: var(--surface-hover); }
 .layer-col { max-width: 720px; }
 .layer-col h1 { margin-bottom: var(--s-1); font-size: var(--t-heading); }
 .layer-col .lead { color: var(--text-2); margin-bottom: var(--s-3); font-size: var(--t-ui); line-height: var(--lh-body); max-width: none; text-wrap: pretty; }
-.layer-close { position: fixed; right: var(--s-4); top: var(--s-4); z-index: 46; }
+.layer-close { position: fixed; right: var(--s-4); top: var(--s-4); z-index: var(--z-layer-close); }
 /* A setting: the label, its hint under it, then the control under that
    (brief 2: no rule under every row; 16px between rows, 24px between groups).
    A switch alone stays on the label's line, at its end. */
@@ -153,7 +153,7 @@ button.op:hover { background: var(--surface-hover); }
    the bottom of the page while there are changes, quiet otherwise. */
 .set-savebar { position: sticky; bottom: 0; z-index: 2; margin-top: var(--s-6); display: flex; align-items: center; gap: var(--s-2); padding: var(--s-2) var(--s-2) var(--s-2) var(--s-4); border-radius: var(--r-modal); background: var(--surface-chat); }
 .set-savebar-note { flex: 1; min-width: 0; font-size: var(--t-ui); color: var(--text-3); }
-.set-savebar.dirty { background: var(--surface-float); box-shadow: var(--shadow-md); bottom: var(--s-4); }
+.set-savebar.dirty { background: var(--surface-float); box-shadow: var(--elev-2); bottom: var(--s-4); }
 .set-savebar.dirty .set-savebar-note { color: var(--text-1); }
 .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
 .swatch { width: 28px; height: 28px; border-radius: 50%; background: oklch(var(--tile-l) var(--tile-c) var(--hue)); border: 1px solid oklch(var(--tile-ink-l) var(--tile-ink-c) var(--hue) / 0.3); }
@@ -179,7 +179,7 @@ select.field { width: auto; padding-right: var(--s-6); }
 .copy-row .btn { height: var(--h-md); }
 
 /* Profile card: learn about a person without leaving the chat. */
-.pop:has(> .profile) { border-radius: var(--r-lg); }
+.pop:has(> .profile) { border-radius: var(--r-modal); }
 .profile { width: 304px; padding: var(--s-4); display: grid; gap: var(--s-3); }
 .profile-name { font-size: var(--t-heading); font-weight: var(--w-semibold); line-height: var(--lh-heading); letter-spacing: -0.01em; }
 .profile-roles { display: flex; gap: var(--s-2); flex-wrap: wrap; }
@@ -195,7 +195,7 @@ select.field { width: auto; padding-right: var(--s-6); }
 
 .picker { width: 328px; padding: var(--s-2); display: grid; gap: var(--s-2); }
 .picker-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; max-height: 240px; overflow-y: auto; }
-.picker-grid button { aspect-ratio: 1; border-radius: var(--r-sm); transition: background var(--m-fast) var(--ease-in-out); font-size: var(--t-20); display: grid; place-items: center; }
+.picker-grid button { aspect-ratio: 1; border-radius: var(--r-btn); transition: background var(--m-fast) var(--ease-in-out); font-size: var(--t-20); display: grid; place-items: center; }
 .picker-grid button:hover, .picker-grid button:focus-visible { background: var(--surface-hover); }
 .picker-none { grid-column: 1 / -1; padding: var(--s-4); text-align: center; color: var(--text-3); }
 /* New message: people you can't message yet, with what would change it. */
@@ -206,7 +206,7 @@ select.field { width: auto; padding-right: var(--s-6); }
 .add-house { display: grid; gap: var(--s-4); }
 .add-house h2 { margin: 0; }
 .add-house .seg { justify-self: start; }
-.local-address { display: flex; gap: var(--s-2); align-items: flex-start; margin: var(--s-2) 0 0; color: var(--warning); }
+.local-address { display: flex; gap: var(--s-2); align-items: flex-start; margin: var(--s-2) 0 0; color: var(--warning-ink); }
 .local-address svg { flex: none; margin-top: 2px; }
 .start-invite-note { margin: var(--s-2) 0 0; }
 .join-bad h2 { margin-top: 0; }
@@ -275,6 +275,6 @@ select.field { width: auto; padding-right: var(--s-6); }
 @media (max-width: 759px) { .set-row .set-ctl { width: 100%; } }
 
 /* Add a friend: someone not here yet gets a way in, not a dead end. */
-.f-nothere { margin-top: var(--s-3); padding: var(--s-3); border-radius: var(--r-md); background: var(--surface-hover); }
+.f-nothere { margin-top: var(--s-3); padding: var(--s-3); border-radius: var(--r-menu); background: var(--surface-hover); }
 .f-nothere p { margin: 0 0 var(--s-2); }
 .f-nothere-acts { display: flex; flex-wrap: wrap; gap: var(--s-2); }

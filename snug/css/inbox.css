@@ -7,10 +7,10 @@
 
 /* ---------- Skip to messages: the first Tab stop, seen only when focused ---------- */
 .skip-link {
-  position: fixed; left: var(--s-2); top: var(--s-2); z-index: 1000;
+  position: fixed; left: var(--s-2); top: var(--s-2); z-index: var(--z-skip);
   min-height: 44px; padding: 0 var(--s-4); display: inline-flex; align-items: center;
-  background: var(--bg-3); color: var(--text-1); border: 1px solid var(--line-strong); border-radius: var(--r-md);
-  font-weight: var(--w-semibold); text-decoration: none; box-shadow: var(--shadow-md);
+  background: var(--bg-3); color: var(--text-1); border: 1px solid var(--line-strong); border-radius: var(--r-menu);
+  font-weight: var(--w-semibold); text-decoration: none; box-shadow: var(--elev-2);
   transform: translateY(-200%);
 }
 .skip-link:focus, .skip-link:focus-visible { transform: none; outline: var(--focus-w) solid var(--focus); outline-offset: 2px; }
@@ -36,8 +36,8 @@
 .dm-icon-preview { display: flex; justify-content: center; padding: var(--s-2) 0 var(--s-4); }
 .dm-icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: var(--s-1); margin: var(--s-2) 0 var(--s-4); }
 .dm-icon-opt {
-  height: 44px; display: inline-flex; align-items: center; justify-content: center; font-size: 22px;
-  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg-2); color: var(--text-2);
+  height: 44px; display: inline-flex; align-items: center; justify-content: center; font-size: var(--t-emoji);
+  border: 1px solid var(--line); border-radius: var(--r-menu); background: var(--bg-2); color: var(--text-2);
 }
 .dm-icon-opt:hover { background: var(--hover); border-color: var(--line-strong); }
 .dm-icon-opt.on { border-color: var(--text-1); background: var(--surface-sel); color: var(--text-1); }
@@ -55,9 +55,9 @@
 .dm-members-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); padding: 0 var(--s-2); }
 .dm-members-list { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; }
 .dm-member { display: flex; align-items: center; gap: var(--s-1); }
-.dm-member-main { flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-2); border-radius: var(--r-sm); text-align: left; color: var(--text-1); }
+.dm-member-main { flex: 1; min-width: 0; min-height: 44px; display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-2); border-radius: var(--r-btn); text-align: left; color: var(--text-1); }
 .dm-member-main:hover { background: var(--hover); }
-.dm-member .tag { font-size: var(--t-12); color: var(--text-2); border: 1px solid var(--line); border-radius: var(--r-xs); padding: 0 var(--s-1); }
+.dm-member .tag { font-size: var(--t-12); color: var(--text-2); border: 1px solid var(--line); border-radius: var(--r-row); padding: 0 var(--s-1); }
 .dmline-ic { color: var(--text-3); display: inline-flex; justify-content: center; width: var(--avatar); margin-right: var(--s-2); flex: none; }
 @media (max-width: 759px) { .dmline-ic { margin-right: var(--s-1); } }
 
@@ -74,12 +74,12 @@
 .f-filter-ic { position: absolute; left: var(--s-3); top: 50%; transform: translateY(-50%); color: var(--text-3); display: inline-flex; pointer-events: none; }
 .f-filter .field { width: 100%; height: var(--h-sm); padding-left: calc(var(--s-3) + 20px); }
 .pp-mutual { display: grid; gap: var(--s-2); }
-.pp-mutual-toggle { display: inline-flex; align-items: center; gap: var(--s-2); min-height: 32px; border-radius: var(--r-sm); color: var(--text-2); }
+.pp-mutual-toggle { display: inline-flex; align-items: center; gap: var(--s-2); min-height: 32px; border-radius: var(--r-btn); color: var(--text-2); }
 .pp-mutual-toggle:hover { color: var(--text-1); }
 .pp-mutual-chev { display: inline-flex; transition: transform var(--m-fast) var(--ease-in-out); }
 .pp-mutual-chev.open { transform: rotate(180deg); }
 .pp-mutual-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-1); }
-.pp-mutual-person { width: 100%; min-height: 44px; display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-2); border-radius: var(--r-sm); text-align: left; color: var(--text-1); }
+.pp-mutual-person { width: 100%; min-height: 44px; display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-2); border-radius: var(--r-btn); text-align: left; color: var(--text-1); }
 .pp-mutual-person:hover { background: var(--hover); }
 
 /* ---------- Settings: Desktop app, Username ---------- */

@@ -102,6 +102,12 @@
   --t-micro: var(--t-12);          /* badges and the smallest labels: 12 is the floor (brief 29) */
   --t-msg: var(--t-15);            /* message text; 14px in Compact */
   --t-name: var(--t-14);           /* author names in the stream (600) */
+  /* Emoji drawn as pictures (reaction pickers, soundboard, jumbo emoji). */
+  --t-emoji: 1.375rem;             /* 22 */
+  --t-emoji-l: 1.75rem;            /* 28 */
+  --t-emoji-xl: 2.75rem;           /* 44: jumbo emoji at the large emoji size */
+  /* A text field on a phone: under 16px, iOS zooms the page on focus. */
+  --t-input-touch: max(16px, 1rem);
   --w-regular: 400; --w-medium: 500; --w-semibold: 600; --w-bold: 700;
   --lh-display: 1.15; --lh-heading: 1.25; --lh-body: 1.45; --lh-ui: 1.3;
 
@@ -140,12 +146,44 @@
   --pres: 10px;                    /* presence dot on a 32-40px avatar (scales with the avatar) */
 
   /* ---------- Motion (brief 32) ---------- */
-  --m-fast: 100ms; --m-standard: 150ms; --m-smooth: 220ms; --m-slow: 320ms;
+  /* Nothing moves for longer than 200ms. Reduced motion (the device setting
+     or Settings > Accessibility) zeroes all four, see the end of this file. */
+  --m-fast: 100ms; --m-standard: 150ms; --m-smooth: 180ms; --m-slow: 200ms;
   --m-hover: var(--m-fast);        /* hover colour */
   --m-control: var(--m-standard);  /* buttons, switches, menus, tooltips */
-  --m-panel: var(--m-smooth);      /* panes and sheets */
+  --m-panel: var(--m-smooth);      /* panes, sheets, dialogs, scrims */
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);       /* things entering */
   --ease-in-out: cubic-bezier(0.45, 0, 0.25, 1);    /* state changes */
+
+  /* ---------- Layers (z-index) ----------
+     Global stacking only; small numbers (1-8) inside one component stay
+     literal. Higher wins. A tooltip may sit inside a dialog, so it is above
+     the scrim; js/ui/overlays.js hides it when a layer opens over its owner. */
+  --z-pane: 5;                     /* an overlaid side pane in a narrow window */
+  --z-dock: 30;                    /* floating call dock, phone drawer scrim */
+  --z-drawer: 31;                  /* the phone drawer itself */
+  --z-banner: 40;                  /* a floating notice, the drop target */
+  --z-layer: 45;                   /* full-window layers: settings, house settings */
+  --z-layer-close: 46;
+  --z-scrim: 50;                   /* dialog scrim and the dialog on it */
+  --z-pop: 55;                     /* popovers: profile card, pickers */
+  --z-quick: 58;                   /* the quick switcher */
+  --z-menu-scrim: 59;
+  --z-menu: 60;                    /* menus and context menus */
+  --z-viewer: 65;                  /* media viewer, incoming call */
+  --z-toast: 70;
+  --z-tip: 80;
+  --z-skip: 1000;                  /* the skip link, above everything when focused */
+
+  /* ---------- Touch ----------
+     44px is the smallest thing a finger is asked to hit (pointer: coarse and
+     phone widths). Desktop controls may be 24-32px. */
+  --tap-min: 44px;
+
+  /* ---------- Breakpoints (media queries can't read variables) ----------
+     phone < 760px, tablet 760-1179px, desktop >= 1180px, wide >= 1440px.
+     Write them as (max-width: 759px), (min-width: 760px) and (max-width:
+     1179px), (min-width: 1180px), (min-width: 1440px). */
 
   /* ---------- Frame ---------- */
   --rail-w: 64px; --rail-ic: 40px; --ctx-w: 240px;  /* rail (40px circles) + context column (css/nav.css) */
@@ -212,6 +250,15 @@
   --tile-l: 0.40; --tile-c: 0.065; --tile-ink-l: 0.93; --tile-ink-c: 0.045;
   --house-l: 0.64; --house-c: 0.10; --house-ink: #111211;
 
+  /* Tooltip: a label, not content. A raised grey in dark themes (near-black
+     would vanish on bg-0), near-black ink-on-paper in light ones. */
+  --tip-bg: #35383A; --tip-ink: #F4F1ED; --tip-muted: #BEB9B3;
+
+  /* Text over photos and video (the media viewer, the video player): fixed,
+     because the picture behind it is dark whatever the theme. */
+  --on-media: #F4F1ED;
+  --media-scrim: rgb(10 11 12 / 0.94);
+
   --focus-w: 2px;
   --focus: var(--text-1);
 }
@@ -242,6 +289,42 @@
   --rx-bg: var(--bg-2);            /* a reaction */
   --rx-mine-bg: var(--brand-soft); /* a reaction you added (was rose) */
   --rx-mine-edge: color-mix(in srgb, var(--brand) 55%, transparent);
+
+  /* Status pairs: a soft background and the colour readable as text on it. */
+  --success-soft: var(--mint-soft);  --success-ink: var(--mint-ink);
+  --warning-soft: var(--amber-soft); --warning-ink: var(--amber-ink);
+  --info-soft: var(--cyan-soft);     --info-ink: var(--link);
+  --danger: var(--error); --danger-soft: var(--error-soft); --on-danger: var(--on-error);
+
+  /* ---------- Semantic colour (DESIGN.md) ----------
+     The names new components use. Each points at a role above, so every
+     theme (dark, light, paper, sepia, contrast, custom) follows for free. */
+  --color-bg: var(--surface-chat);          /* the page behind content */
+  --color-surface: var(--surface-2);        /* cards, panes, inputs */
+  --color-elevated: var(--surface-float);   /* menus, popovers, dialogs */
+  --color-hover: var(--surface-hover);
+  --color-active: var(--surface-sel);       /* selected, pressed */
+  --color-border: var(--line);
+  --color-border-strong: var(--line-strong);
+  --color-primary: var(--accent);   --color-primary-hover: var(--accent-hover); --color-on-primary: var(--on-accent);
+  --color-secondary: var(--btn2);   --color-secondary-hover: var(--btn2-hover); --color-on-secondary: var(--text-1);
+  --color-success: var(--success);  --color-warning: var(--warning);
+  --color-danger: var(--error);     --color-info: var(--info);
+  --color-text: var(--text-1);
+  --color-text-secondary: var(--text-2);
+  --color-muted: var(--text-3);
+  --color-disabled: var(--text-disabled);
+  --color-focus: var(--focus);
+
+  /* ---------- Elevation ----------
+     0 flat (depth comes from surface steps), 1 a raised control, 2 menus,
+     popovers and toasts, 3 dialogs and sheets. Rings: focus and selection. */
+  --elev-0: none;
+  --elev-1: var(--shadow-sm);
+  --elev-2: var(--shadow-md);
+  --elev-3: var(--shadow-lg);
+  --ring-focus: 0 0 0 var(--focus-w) var(--focus);
+  --ring-sel: 0 0 0 2px var(--accent);
 }
 
 /* ---------- Light: warm paper, same roles ---------- */
@@ -270,6 +353,7 @@
     --name-l: 0.47; --name-c: 0.12;
     --tile-l: 0.88; --tile-c: 0.05; --tile-ink-l: 0.34; --tile-ink-c: 0.08;
     --house-l: 0.52; --house-c: 0.11; --house-ink: #FBFAF8;
+    --tip-bg: #2A2725; --tip-ink: #FBFAF8; --tip-muted: #C9C4BD;
   }
 }
 :root[data-theme="light"] {
@@ -280,7 +364,7 @@
   --brand: #763FF4; --brand-hover: #6C31F4; --brand-press: #6222F3; --brand-soft: #EBE4F8; --brand-ink: #6D28D9; --on-brand: #FFFFFF;
   --mint: #1F8F6E; --mint-soft: color-mix(in srgb, #1F8F6E 12%, #FBFAF8);
   --amber: #A86F0D; --amber-soft: color-mix(in srgb, #A86F0D 12%, #FBFAF8);
-    --mint-ink: #156E54; --amber-ink: #8C5C08;
+  --mint-ink: #156E54; --amber-ink: #8C5C08;
   --cyan: #1F7EA3; --cyan-soft: color-mix(in srgb, #1F7EA3 12%, #FBFAF8);
   --rose: #B24E66; --rose-soft: color-mix(in srgb, #B24E66 12%, #FBFAF8);
   --error: #C93838; --error-soft: color-mix(in srgb, #C93838 12%, #FBFAF8);
@@ -296,6 +380,7 @@
   --name-l: 0.47; --name-c: 0.12;
   --tile-l: 0.88; --tile-c: 0.05; --tile-ink-l: 0.34; --tile-ink-c: 0.08;
   --house-l: 0.52; --house-c: 0.11; --house-ink: #FBFAF8;
+  --tip-bg: #2A2725; --tip-ink: #FBFAF8; --tip-muted: #C9C4BD;
 }
 /* Light surface roles: the conversation is the brightest surface, navigation
    one step down, menus and dialogs white with a small shadow. Paper and sepia
@@ -304,7 +389,7 @@
   :root:not([data-theme]) {
     --surface-chat: var(--bg-1); --surface-chat-hover: var(--bg-2); --surface-nav: var(--bg-2);
     --surface-2: var(--bg-2); --surface-float: var(--bg-1); --surface-input: var(--bg-1); --row-hover: var(--bg-3);
-  --on-error: #FFFFFF; --error-hover: color-mix(in srgb, var(--error) 88%, #000000);
+    --on-error: #FFFFFF; --error-hover: color-mix(in srgb, var(--error) 88%, #000000);
   }
 }
 :root[data-theme="light"], :root[data-theme="paper"], :root[data-theme="sepia"] {
@@ -346,9 +431,14 @@
 :root[data-density="snug"] { --avatar: var(--av-sm); --group-gap: 6px; --msg-py: 2px; --line-gap: 0px; --lh: 1.35; --t-msg: var(--t-14); --row-h: 30px; }
 :root[data-density="roomy"] { --avatar: var(--av-md); --group-gap: 16px; --msg-py: 6px; --line-gap: 3px; --lh: 1.5; --t-msg: var(--t-16); }
 
-/* Text size scales every rem-based size without touching the layout grid. */
-:root[data-text="s"] { font-size: 14px; }
-:root[data-text="l"] { font-size: 18px; }
+/* Text size: one multiplier on the root font size, so every rem-based size
+   (all of --t-*) scales and the px layout grid stays put. 100% keeps the
+   browser's own default size. Settings sets data-text; anything else may set
+   --text-scale directly. */
+:root { --text-scale: 1; font-size: calc(100% * var(--text-scale)); }
+:root[data-text="s"] { --text-scale: 0.875; }
+:root[data-text="l"] { --text-scale: 1.125; }
+:root[data-text="xl"] { --text-scale: 1.25; }
 
 /* ---------- Reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {

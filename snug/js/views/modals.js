@@ -6,7 +6,7 @@ import {
 import { roomIds } from '../lib/attention.js';
 import { fuzzy, plural, HUES, hueOf } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
-import { Avatar, Tile, RoomIcon, Seg, copyText } from '../ui/kit.js';
+import { Avatar, Tile, RoomIcon, Seg, copyText, ConfirmDialog } from '../ui/kit.js';
 import { TOPICS } from '../lib/social.js';
 import { call, api } from '../server.js';
 import { TemplatePick, startArgs } from './places-start.js'; // start a house from a template or another house
@@ -14,15 +14,8 @@ import { LocalNote, p2pOwner } from './p2p.js'; // houses stay on this PC; group
 import { parseInvite, inviteWhy, messageable, whyNotMessageable, localOnly } from '../lib/onboarding.js'; // pasted invitations, who can be messaged
 import { t } from '../lib/i18n.js'; // words in the chosen language (js/locales)
 
-export function Confirm({ title, text, action, danger, onConfirm }) {
-  return html`
-    <h2>${title}</h2>
-    <p class="modal-lead">${text}</p>
-    <div class="modal-foot">
-      <button class="btn" data-autofocus onClick=${closeModal}>${t('common.cancel')}</button>
-      <button class=${`btn ${danger ? 'danger solid' : 'primary'}`} onClick=${() => { closeModal(); onConfirm(); }}>${action}</button>
-    </div>`;
-}
+// The confirm dialog is ConfirmDialog (js/ui/controls.js); the old name stays.
+export const Confirm = ConfirmDialog;
 
 const KINDS = [['text', 'Conversation'], ['voice', 'Voice'], ['news', 'Notices'], ['forum', 'Forum'], ['stage', 'Stage']]; // forum, stage: js/views/places.js
 const KIND_HINT = {
