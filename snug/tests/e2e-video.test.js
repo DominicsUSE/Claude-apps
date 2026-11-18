@@ -260,7 +260,7 @@ test('screen share from a late joiner reaches people already in the room, and th
   await priya.context().close();
 });
 
-test('phone: tiles in one column, the controls stay in reach at the bottom of the stage', async () => {
+test('phone: three or more tiles in two equal columns, the controls stay in reach at the bottom of the stage', async () => {
   const phone = await person('malik', { viewport: { width: 390, height: 844 } });
   await phone.click('.home-house:has-text("Kiln & Co.")');
   await phone.click('.screen.push .row:has-text("Wheel room")');
@@ -269,7 +269,9 @@ test('phone: tiles in one column, the controls stay in reach at the bottom of th
   await playing(phone, 'robin:camera');
   const boxes = await phone.$$eval('.stage .vt-grid .vt', (els) => els.map((e) => { const r = e.getBoundingClientRect(); return { x: Math.round(r.x), w: Math.round(r.width) }; }));
   assert.ok(boxes.length >= 3);
-  assert.ok(boxes.every((b) => b.x === boxes[0].x && b.w === boxes[0].w), `one column: ${JSON.stringify(boxes)}`);
+  // Two columns once there are three or more (0.15: one column cut the fourth person off).
+  const cols = [...new Set(boxes.map((b) => b.x))];
+  assert.ok(cols.length === 2 && boxes.every((b) => b.w === boxes[0].w && b.x >= 0 && b.x + b.w <= 390), `two equal columns: ${JSON.stringify(boxes)}`);
   // Scrolled to the top of a tall stage, the controls are still on screen.
   const acts = await phone.$eval('.stage .stage-acts', (el) => { el.closest('.stage').scrollTop = 0; const r = el.getBoundingClientRect(); return { bottom: r.bottom, top: r.top }; });
   assert.ok(acts.top >= 0 && acts.bottom <= 844, `controls in view: ${JSON.stringify(acts)}`);

@@ -61,9 +61,9 @@ export function ActivityButtons({ compact }) {
   if (!c || c.status !== 'live' || compact) return null;
   const a = S.activity[c.room];
   return html`
-    <button class=${`ib vc act-btn${a ? ' running' : ''}`} aria-label=${a ? `Activities: ${ACT_NAME[a.kind]} is running` : 'Activities'} data-tip="Activities" aria-haspopup="menu" onClick=${activitiesMenu}><${Icon} name="act-play" size=${20} /></button>
+    <button class=${`ib vc act-btn${a ? ' running' : ''}`} aria-label=${a ? `Activities: ${ACT_NAME[a.kind]} is running` : 'Activities'} data-tip="Activities" aria-haspopup="menu" onClick=${activitiesMenu}><${Icon} name="act-play" size=${20} /><span class="vc-word" aria-hidden="true">Activities</span></button>
     <button class="ib vc act-react-open" aria-label="React" data-tip="React" aria-haspopup="dialog"
-      onClick=${(e) => openPop({ anchor: rectOf(e), label: 'React', C: ReactPicker, props: { room: c.room } })}><${Icon} name="smile" size=${20} /></button>`;
+      onClick=${(e) => openPop({ anchor: rectOf(e), label: 'React', C: ReactPicker, props: { room: c.room } })}><${Icon} name="smile" size=${20} /><span class="vc-word" aria-hidden="true">React</span></button>`;
 }
 
 // ---------- Reactions floating up ----------
@@ -227,8 +227,8 @@ export function ConnHeader({ room }) {
         : 'The security details that arrived for them don’t match what their device signed'}, so someone may be trying to listen in. Don’t continue this call; check with them another way.
     </div>`}<button class=${`stage-conn ok act-conn${worst ? ` q-${worst}` : ''}`} aria-haspopup="dialog" aria-label=${label}
     onClick=${(e) => openPop({ anchor: rectOf(e), label: 'Connection', C: QualityPop, props: { room } })}>
-    <i aria-hidden="true"></i>Voice connected${worst && html`<${Bars} q=${worst} />`}${route && html`<span class="act-routeword">${route}</span>`}
-    ${sec && html`<span class=${`act-e2ee${sec.long ? ' off' : ' on'}`} data-tip=${sec.long || sec.short}>${sec.short}</span>`}
+    <span class="act-conn-main"><i class="act-dot" aria-hidden="true"></i>Voice connected${worst && html`<${Bars} q=${worst} />`}</span>${route && html`<span class="act-routeword">${route}</span>`}
+    ${sec && html`<span class=${`act-e2ee${sec.long ? ' off' : ' on'}`} data-tip=${sec.long || sec.short}><${Icon} name=${sec.long ? 'unlock' : 'lock'} size=${12} />${sec.short}</span>`}
     ${poorMe && html`<span class="act-uplink">Your connection is weak</span>`}
   </button>`;
 }

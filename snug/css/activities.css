@@ -9,6 +9,7 @@
 
 /* ---------- Header: connection, clock, reconnecting ---------- */
 .act-conn {
+  flex-wrap: wrap; row-gap: 2px; text-align: left;
   border: 0; background: none; padding: var(--s-1) var(--s-2); margin: calc(-1 * var(--s-1)) 0;
   border-radius: var(--r-row); cursor: pointer; font: inherit; font-size: var(--t-meta); font-weight: var(--w-medium);
   transition: background var(--m-hover) var(--ease-in-out);
@@ -17,6 +18,9 @@
 .act-conn:active { background: var(--surface-sel); }
 .act-conn:focus-visible { outline: var(--focus-w) solid var(--focus); outline-offset: 2px; }
 .act-conn .act-q { margin-left: var(--s-1); }
+.act-conn-main { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.act-routeword { margin-left: var(--s-2); padding-left: var(--s-2); border-left: 1px solid var(--line); color: var(--text-2); font-weight: var(--w-regular, 400); white-space: nowrap; }
+.act-route { max-width: 44ch; }
 .act-uplink { color: var(--amber-ink); font-weight: var(--w-medium); margin-left: var(--s-2); }
 .act-timer { font-size: var(--t-meta); color: var(--text-3); font-variant-numeric: tabular-nums; }
 .dock-head .act-timer, .vo-mini-title .act-timer { margin-left: auto; padding-left: var(--s-2); flex: none; }
@@ -24,9 +28,6 @@
 .act-reconn i { width: var(--pres); height: var(--pres); border-radius: 50%; background: var(--amber); animation: breathe 1.4s var(--ease-in-out) infinite; }
 .act-reconn-sm { color: var(--amber-ink); font-weight: var(--w-medium); font-size: var(--t-12); }
 
-/* Quality bars: good mint, fair amber (two bars), poor rose (one bar). */
-.stage-q.fair i:nth-child(-n+2) { background: var(--amber); }
-.stage-q.poor i:nth-child(1) { background: var(--rose); }
 
 /* ---------- The connection popover ---------- */
 .act-qpop { display: grid; gap: var(--s-3); min-width: 280px; max-width: min(420px, calc(100vw - 32px)); padding: var(--s-1); }
@@ -43,7 +44,8 @@
 .act-code-row { display: flex; justify-content: space-between; gap: var(--s-3); min-width: 0; }
 .act-code { font-variant-numeric: tabular-nums; font-weight: var(--w-medium); letter-spacing: 0.06em; white-space: nowrap; }
 /* calls C1/C2: the encryption label, "Verified device", and a connection stopped for not matching its signature */
-.act-e2ee { margin-left: var(--s-2); padding-left: var(--s-2); border-left: 1px solid var(--line); font-weight: var(--w-regular, 400); color: var(--text-2); }
+.act-e2ee { display: inline-flex; align-items: center; gap: var(--s-1); margin-left: var(--s-2); padding-left: var(--s-2); border-left: 1px solid var(--line); font-weight: var(--w-regular, 400); color: var(--text-2); white-space: nowrap; }
+.act-e2ee .ic { flex: none; }
 .act-e2ee.on { color: var(--mint-ink); }
 .act-e2ee-note.on { color: var(--text-2); }
 .act-verified { color: var(--mint-ink); font-size: var(--t-12); white-space: nowrap; }
@@ -221,6 +223,6 @@
 /* More controls than fit across a phone: they wrap onto a second row, never off screen. */
 @media (max-width: 759px) { .stage-acts { flex-wrap: wrap; row-gap: var(--s-2); } }
 
-/* calls C3: before joining with no relay, who will see your IP address */
-.stage-direct { margin: 0; justify-self: center; max-width: 46ch; text-align: center; color: var(--amber-ink); font-size: var(--t-13); }
-.inc-direct { color: var(--amber-ink); }
+/* calls C3: who will see your IP address (the stage's note: css/calls.css .stage-direct) */
+.inc-direct { display: flex; align-items: flex-start; gap: 6px; color: var(--text-2); }
+.inc-direct .ic { flex: none; margin-top: 2px; color: var(--info-ink); }

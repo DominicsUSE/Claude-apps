@@ -64,6 +64,7 @@ const END_TEXT = {
   'no-answer': ['No answer', (o) => `${o} didn’t pick up.`],
   ended: ['Call ended', () => 'The other side hung up.'],
   cancelled: ['Call ended', () => 'The call ended before anyone joined.'],
+  dropped: ['Call dropped', () => 'Your connection dropped, so the call did too.'],
 };
 
 // How my last call here ended, for a few seconds: "Declined", "No answer".
@@ -145,7 +146,7 @@ function IncomingCard({ r }) {
     ${(r.quiet || busy || direct) && html`<div class="inc-notes">
       ${r.quiet && html`<p class="inc-note">No ringtone: ${meta?.kind === 'group' ? 'this group' : 'this conversation'} is muted${S.users[S.me]?.presence === 'focus' ? ', or you’re Focused' : ''}.</p>`}
       ${busy && html`<p class="inc-note">${busy}</p>`}
-      ${direct && html`<p class="inc-note inc-direct">This connects directly: ${r.group ? 'people in the call' : caller.name.split(' ')[0]} can see your IP address.</p>`}
+      ${direct && html`<p class="inc-note inc-direct"><${Icon} name="info" size=${14} /><span>This connects directly: ${r.group ? 'people in the call' : caller.name.split(' ')[0]} can see your IP address.</span></p>`}
     </div>`}
     <div class="inc-acts">
       <button class="btn danger solid inc-decline" onClick=${() => declineCall(r.dm)} aria-keyshortcuts="Escape"><${Icon} name="phone-off" size=${18} />Decline</button>

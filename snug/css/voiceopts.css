@@ -17,7 +17,9 @@
 .vo-range:disabled::-webkit-slider-thumb { background: var(--text-disabled); }
 .vo-range:disabled::-moz-range-thumb { background: var(--text-disabled); }
 .vo-range-row { display: grid; gap: 0; min-width: 0; }
-.vo-range-row.wide { width: min(320px, 100%); }
+/* Settings' sliders: full width up to 360px, the value at the right where the thumb ends. */
+.vo-range-row.wide { width: 360px; max-width: 100%; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: var(--s-3); }
+.vo-range-row.wide .vo-range-label { order: 2; min-width: 6ch; justify-content: flex-end; font-size: var(--t-ui); white-space: nowrap; }
 .vo-range-row.sm { width: 112px; flex: none; }
 .vo-range-label { display: flex; justify-content: space-between; gap: var(--s-2); font-size: var(--t-12); color: var(--text-2); }
 .vo-range-label .num { color: var(--text-1); font-variant-numeric: tabular-nums; }
@@ -31,7 +33,7 @@
 .vo-pa-head b { font-weight: var(--w-semibold); }
 .vo-pa-acts { display: flex; gap: var(--s-2); flex-wrap: wrap; }
 
-.stage-person .vo-vol, .vt-extras .vo-vol { color: var(--text-3); opacity: 0; transition: opacity var(--m-fast) var(--ease-in-out); }
+.stage-person .vo-vol, .vt-extras .vo-vol { color: var(--text-2); opacity: 0; transition: opacity var(--m-fast) var(--ease-in-out); }
 .stage-person:hover .vo-vol, .stage-person:focus-within .vo-vol, .vt:hover .vo-vol, .vt:focus-within .vo-vol, .vo-vol.on { opacity: 1; }
 .vo-vol.on { color: var(--cyan); opacity: 1; }
 @media (hover: none) { .stage-person .vo-vol, .vt-extras .vo-vol { opacity: 1; } }
@@ -135,8 +137,28 @@
 .vo-snd-meta .faint { font-size: var(--t-12); }
 
 @media (max-width: 759px) {
-  .vo-mini { left: var(--s-4); right: var(--s-4); width: auto; bottom: calc(64px + var(--s-4) + env(safe-area-inset-bottom, 0px)); }
-  .vo-mini-acts .vc, .vo-mini-grip, .vo-mini-title { min-height: var(--touch); min-width: var(--touch); }
+  /* Phone: a 56px strip docked above the tab bar, not a card over the list:
+     back to the call, the clock, mute, sound and leave, all in thumb reach. */
+  .vo-mini, .vo-mini.float {
+    left: 0; right: 0; width: auto; bottom: calc(56px + 1px + env(safe-area-inset-bottom, 0px));
+    display: flex; align-items: center; gap: var(--s-1); min-height: 56px; padding: var(--s-1) var(--s-2);
+    border-radius: 0; border-top: 1px solid var(--line-subtle); box-shadow: none; animation: none;
+  }
+  .vo-mini-head { flex: 1; min-width: 0; }
+  /* The strip is the call while you look elsewhere: the shell's "Voice
+     connected" dock would repeat it under the strip, so it steps aside, and
+     the list keeps its last rows clear of the strip. */
+  body:has(.vo-mini) .phone .screen.root .dock { display: none; }
+  body:has(.vo-mini) .phone .screen.root > .tab-body { margin-bottom: 57px; }
+  /* Over a pushed screen (another conversation, a profile) there are no tabs:
+     the strip sits at the very bottom and the screen ends above it, so its
+     composer is never under the strip. */
+  body:has(.phone .screen.push:not(.sheet)) .vo-mini { bottom: 0; padding-bottom: calc(var(--s-1) + env(safe-area-inset-bottom, 0px)); }
+  body:has(.vo-mini) .phone .screen.push:not(.sheet) { bottom: calc(57px + env(safe-area-inset-bottom, 0px)); }
+  .vo-mini-grip, .vo-mini-head > .ib.sm, .vo-mini-faces, .vo-mini-media, .vo-mini-acts .btn.grow, .vo-mini .act-muted-live { display: none; }
+  .vo-mini-title { min-height: var(--touch); }
+  .vo-mini-acts { flex: none; }
+  .vo-mini-acts .vc { min-height: var(--touch); min-width: var(--touch); }
   .vo-snd { min-height: var(--touch); }
   .vo-snd-row { flex-wrap: wrap; }
   .vo-snd-row .vo-range-row.sm { width: 100%; order: 3; }
