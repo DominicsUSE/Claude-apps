@@ -61,13 +61,14 @@ const navText = (page) => page.locator('.layer-nav').evaluate((n) => [...n.query
 
 test('settings: one structure in sections with a search; each room’s pace and size on Rooms and access; changes from every track reach the house log', async () => {
   const robin = await person('robin');
-  // Personal settings: two sections, every page in one of them.
+  // Personal settings: sections, every page in one of them (0.15: Security split from Account).
   await robin.click('.me-row [aria-label="Settings"]');
   await robin.locator('.layer-body h1').waitFor();
   assert.deepEqual(await navText(robin), [
-    '# You', 'Profile', 'Account and security', 'Privacy and safety', 'Encryption', 'Your data', // Encryption: offered by default since 0.12
-    '# App', 'Notifications', 'Voice and video', 'Appearance', 'Text and messages', 'Accessibility', 'Streamer mode', 'Keyboard',
-    'Desktop app', 'Connection', 'Privacy guide', // 0.12: install help, connection status, the full privacy page
+    '# You', 'Profile', 'Account',
+    '# Privacy and security', 'Privacy and safety', 'Security', 'Encryption', 'Your data', // Encryption: offered by default since 0.12
+    '# App', 'Notifications', 'Voice and video', 'Appearance', 'Text and messages', 'Accessibility', 'Keyboard',
+    '# More', 'Streamer mode', 'Desktop app', 'Connection', 'Privacy guide', // 0.12: install help, connection status, the full privacy page
   ]);
   // Contrast and motion have one home, on Accessibility.
   await robin.click('.layer-nav .row:has-text("Appearance")');
@@ -77,7 +78,11 @@ test('settings: one structure in sections with a search; each room’s pace and 
   await robin.locator('.layer-body .seg[aria-label="Motion"]').waitFor();
   // The search finds pages by what is on them, and keeps their section.
   await robin.fill('.layer-nav input[type=search]', 'two factor');
-  assert.deepEqual(await navText(robin), ['# You', 'Account and security']);
+  assert.deepEqual(await navText(robin), ['# Privacy and security', 'Security']);
+  // 0.15: the settings themselves are found too, under their page, and open there.
+  await robin.locator('.layer-nav .set-hit:has-text("Two-factor sign-in")').click();
+  await robin.locator('.layer-body h1:has-text("Security")').waitFor();
+  await robin.locator('.layer-col [data-hit]:has-text("Two-factor sign-in")').waitFor();
   // Options every track added are found where they live.
   for (const [q, want] of [['ringtone', ['# App', 'Voice and video']], ['theme builder', ['# App', 'Appearance']], ['skin tone', ['# App', 'Text and messages']], ['decoration', ['# You', 'Profile']], ['rebind', ['# App', 'Keyboard']]]) {
     await robin.fill('.layer-nav input[type=search]', q);
@@ -153,7 +158,18 @@ test('settings on a phone: the search and every section stay reachable, with 44p
   await robin.keyboard.press('Enter');
   await robin.locator('.layer.phone-list').waitFor();
   assert.equal(await focused(), 'row:Rooms and access', 'Back returns focus to the row');
-  await robin.keyboard.press('Escape');
+  // The browser's back button (or back gesture) does the same: page, then list, then closed.
+  await robin.keyboard.press('Enter');
+  await robin.locator('select[aria-label="Slowmode in Glaze lab"]').waitFor();
+  await robin.goBack();
+  await robin.locator('.layer.phone-list').waitFor();
+  assert.equal(await robin.evaluate(() => !!window.snug.S.ui.layer), true, 'history back on a page goes back to the list, not out');
+  // The on-screen Back leaves no stale history entry: one history back from the list closes.
+  await robin.locator('.layer-nav .row:has-text("Rooms and access")').click();
+  await robin.locator('select[aria-label="Slowmode in Glaze lab"]').waitFor();
+  await back.click();
+  await robin.locator('.layer.phone-list').waitFor();
+  await robin.goBack();
   await robin.waitForFunction(() => !window.snug.S.ui.layer);
   await robin.context().close();
 });

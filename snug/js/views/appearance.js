@@ -66,7 +66,7 @@ export function AppearancePreview() {
     <div class="ap-preview-body" aria-hidden="true" inert>
       ${list.map((m, i) => html`<${Message} key=${m.id} conv=${PV} m=${m} grouped=${i > 0 && list[i - 1].author === m.author && m.id !== 'pv3'} />`)}
     </div>
-    <div class="ap-preview-foot" aria-hidden="true"><span class="ap-sample-label">Controls</span><span class="btn primary">Send</span><span class="btn">Cancel</span><button class="switch" role="switch" aria-checked="true" tabindex="-1"></button></div>
+    <div class="ap-preview-foot" aria-hidden="true"><span class="ap-sample-label">Buttons and switches</span><span class="btn primary">Send</span><span class="btn">Cancel</span><button class="switch" role="switch" aria-checked="true" tabindex="-1"></button></div>
   </section>`;
 }
 
@@ -351,7 +351,7 @@ export function AppearancePage() {
     <//>`;
 }
 
-function LookSlider({ id, k, label, min, max, step = 1, unit = '' }) {
+export function LookSlider({ id, k, label, min, max, step = 1, unit = '' }) {
   const value = effectivePrefs()[k];
   const [v, setV] = useState(value);
   useEffect(() => setV(value), [value]);

@@ -371,7 +371,7 @@ test('profile: a new name and picture reach Bob once, and the picture is served 
   const file = pcs.B.db.get('SELECT * FROM files WHERE id = ?', shadow.avatar);
   assert.ok(file, 'a local files row for the picture');
   // Settings > Account: the Snug username, security code and key protection.
-  await alice.click('.layer-nav button.row:has-text("Account and security")');
+  await alice.click('.layer-nav button.row:has-text("Account")');
   await alice.locator('#p2p-username:has-text("@a")').waitFor();
   await alice.locator('text=Signed in with GitHub').waitFor();
   await alice.locator('#p2p-fingerprint').waitFor();
@@ -523,7 +523,7 @@ test('no GitHub: Kay creates an account, saves her recovery key, adds Alice and 
   assert.equal(await kay.evaluate(() => window.snug.S.p2p.recovery?.saved), true);
   // Settings > Account says how this account signs in, and offers GitHub only as an option.
   await kay.click('.nav button[aria-label="Settings"]');
-  await kay.click('.layer-nav button.row:has-text("Account and security")');
+  await kay.click('.layer-nav button.row:has-text("Account")');
   await kay.locator('#p2p-key-saved:has-text("Recovery key saved")').waitFor();
   await kay.locator('#p2p-gh-link').waitFor();
   await kay.locator('#p2p-move-new').waitFor();
@@ -624,9 +624,9 @@ test('no GitHub: Kay moves again, to a third PC, with a pairing code typed on th
   const code = (await kay3.locator('#auth-move-code').textContent()).trim();
   assert.match(code, /^[0-9A-HJKMNP-TV-Z]{5}-[0-9A-HJKMNP-TV-Z]{5}$/);
   await shot(kay3, '27-key-pairing-code');
-  // On the second PC: Settings > Account and security > Move to a new PC.
+  // On the second PC: Settings > Account > Move to a new PC.
   await kay2.click('.nav button[aria-label="Settings"]');
-  await kay2.click('.layer-nav button.row:has-text("Account and security")');
+  await kay2.click('.layer-nav button.row:has-text("Account")');
   await kay2.click('#p2p-move-new');
   await kay2.fill('#mv-code', 'ZZZZZ-ZZZZZ');
   await kay2.click('#mv-check');
@@ -799,11 +799,11 @@ test('erase on delete: with Erin’s PC off the dialog says it keeps its copy; w
   await until(() => mine.every((id) => rowsOf(pcs.E, id)[0]?.deleted), 30000, 'Dana’s messages deleted on Erin’s PC');
 });
 
-// ---------- v0.13: waiting changes, from Settings > Account and security ----------
+// ---------- v0.13: waiting changes, from Settings > Account ----------
 const kindOn = (srv) => srv.peer.reg.signedCall('/v1/account/kind', 'account-kind', {});
 async function openAccount(page) {
   await page.click('.nav button[aria-label="Settings"]');
-  await page.click('.layer-nav button.row:has-text("Account and security")');
+  await page.click('.layer-nav button.row:has-text("Account")');
 }
 // The GitHub code screen in a modal; (mock) GitHub approves it for ghId.
 async function approveOnGithub(page, ghId) {

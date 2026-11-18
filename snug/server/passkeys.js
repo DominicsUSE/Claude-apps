@@ -207,7 +207,7 @@ export function createPasskeys({
     return false;
   }
 
-  // ---------- Signed in: Settings > Account and security > Passkeys ----------
+  // ---------- Signed in: Settings > Security > Passkeys ----------
   async function authed(req, res, path, user) {
     const post = req.method === 'POST';
     if (req.method === 'GET' && path === '/api/passkeys') {

@@ -260,7 +260,8 @@ let pushed = 0;
 function layers() {
   const u = S.ui;
   return (u.phone && u.depth > 0 ? 1 + (u.trail?.length || 0) : 0) + (u.pane ? 1 : 0) + (u.phone && u.drawer ? 1 : 0)
-    + (u.lightbox || u.menu || u.pop || u.quick || u.modal || u.layer ? 1 : 0);
+    + (u.lightbox || u.menu || u.pop || u.quick || u.modal || u.layer ? 1 : 0)
+    + (u.layer && u.layerBack ? 1 : 0); // a phone settings page sits one step above its list
 }
 function syncHistory() {
   const want = layers();
@@ -352,6 +353,7 @@ function closeTop() {
   if (u.pop) return closePop();
   if (u.quick) return closeQuick();
   if (u.modal) return closeModal();
+  if (u.layer && u.layerBack) { const f = u.layerBack; u.layerBack = null; f(); return true; }
   if (u.layer) return closeLayer();
   if (u.drawer) return closeDrawer();
   if (u.ctxPeek && !u.phone) return closePeek();

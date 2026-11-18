@@ -96,8 +96,8 @@ export const Tile = ({ house, lg, invite }) => html`<span class=${`tile${lg ? ' 
 export const KIND_ICON = { text: 'hash', voice: 'speaker', news: 'news', thread: 'thread', forum: 'forum', stage: 'stage' }; // forum, stage: js/views/places.js
 export const RoomIcon = ({ kind, size }) => html`<${Icon} name=${KIND_ICON[kind] || 'room'} size=${size} />`;
 
-export function Seg({ value, options, onChange, label }) {
-  return html`<div class="seg" role="group" aria-label=${label}>
+export function Seg({ value, options, onChange, label, cls }) {
+  return html`<div class=${cls ? `seg ${cls}` : 'seg'} role="group" aria-label=${label}>
     ${options.map(([v, text]) => html`<button key=${v} type="button" aria-pressed=${String(value === v)} onClick=${() => onChange(v)}>${text}</button>`)}
   </div>`;
 }

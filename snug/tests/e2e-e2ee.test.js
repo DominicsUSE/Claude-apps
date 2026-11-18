@@ -123,7 +123,8 @@ test('turning it on: the first-run sheet, the recovery key typed back, keys kept
   await page.locator('text=Saved. You confirmed you have it.').waitFor();
   assert.equal(await page.locator('.e2-dev').count(), 1);
   assert.match(await page.locator('.e2-limits').textContent(), /It still sees:/);
-  // The server's own list (GET /api/privacy) renders under it.
+  // 0.15: the details are a disclosure under the controls; opened, the server's own list (GET /api/privacy) renders inside.
+  await page.locator('.e2-limits summary').click();
   await page.locator('.e2-limits .e2-sees li:has-text("Who is in each DM and group")').waitFor();
   assert.match(await page.locator('.e2-limits').textContent(), /Snug’s code comes from this server/);
   assert.match(await page.locator('.e2-limits').textContent(), /aren’t sealed/); // 0.14: a browser's keys aren't sealed by a key store

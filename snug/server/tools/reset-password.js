@@ -69,7 +69,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     if (r.passkeys) console.log(`${r.passkeys} passkey${r.passkeys === 1 ? ' was' : 's were'} removed.`);
     if (r.twoFactor) console.log('Two-factor sign-in was turned off.');
     if (r.recovery) console.log('Their recovery key was deleted (in case someone else made it).');
-    console.log('Tell them to change it in Settings > Account and security, and to make a new recovery key there.');
+    console.log('Tell them to change it in Settings > Security, and to make a new recovery key there.');
     console.log('If they used end-to-end encrypted conversations, a reset can’t bring back what they could read before.');
   } catch (e) {
     console.error(e.message);

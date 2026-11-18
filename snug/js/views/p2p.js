@@ -177,7 +177,7 @@ export function P2pNotice() {
     call('id.rebind', { approve }).then(() => {
       S.p2p = { ...S.p2p, rebindPending: null };
       toast(approve ? 'Moving your account to your other PC now.'
-        : byKey ? 'Stopped. If that wasn’t you, make a new recovery key now: Settings, Account and security.'
+        : byKey ? 'Stopped. If that wasn’t you, make a new recovery key now: Settings, Account.'
           : 'Stopped. If that wasn’t you, check your GitHub account’s security.');
     }, (e) => toast(e.offline ? 'You’re offline. Try again once you’re back.' : e.message)).finally(() => setBusy(false));
   };
@@ -210,7 +210,7 @@ export function P2pNotice() {
     // v0.12 review, second pass: changes waiting on the account that the owner may not have asked for.
     if (p.recovery?.pendingAt || p.ghChange) {
       cls = ''; icon = 'alert';
-      text += ' Changes are waiting on your account. If you didn’t ask for them, cancel them in Settings, Account and security.';
+      text += ' Changes are waiting on your account. If you didn’t ask for them, cancel them in Settings, Account.';
       act = html`<div class="p2p-notice-acts"><button class="btn sm" id="p2p-moving-waiting" onClick=${() => openModal(WaitingModal)}>Review changes</button></div>`;
     }
   } else if (p.state === 'revoked') {
@@ -231,7 +231,7 @@ export function P2pNotice() {
   </div>`;
 }
 
-// ---------- Settings > Account and security ----------
+// ---------- Settings > Account ----------
 // The Snug username (rename through the registry), security code, key protection, hide-IP.
 export function UsernameRow({ Row }) {
   const p = S.p2p;
@@ -423,7 +423,7 @@ function RecoveryModal() {
   const [err, setErr] = useState('');
   useEffect(() => { call('id.recoveryShow', {}).then(setK, (e) => setErr(offlineText(e))); }, []);
   if (err) return html`<div><h2 id="rk-modal-t">Save your recovery key</h2><div class="err" role="alert"><${Icon} name="alert" size=${14} /><span>${err}</span></div>
-    <p class="modal-lead">If you can’t find it, make a new one: Settings, Account and security, Recovery key.</p>
+    <p class="modal-lead">If you can’t find it, make a new one: Settings, Account, Recovery key.</p>
     <div class="modal-foot"><button class="btn" onClick=${closeModal}>Close</button></div></div>`;
   if (!k) return html`<p class="modal-lead">Loading…</p>`;
   return html`<${RecoverySave} code=${k.code} username=${k.username} titleId="rk-modal-t"
@@ -545,7 +545,7 @@ function MoveModal() {
       <p class="modal-lead">This PC stops getting messages. Your saved chats are copied over and stay here too.</p>
       <div class="p2p-peer-code"><span class="p2p-local">The new PC’s security code</span>
         <div class="p2p-fp" id="mv-fingerprint">${groups(peek.fingerprint).map((g, i) => html`<span key=${i}>${g}</span>`)}</div>
-        <span class="p2p-local">It should match Settings, Account and security on the new PC, once it’s moved.</span></div>
+        <span class="p2p-local">It should match Settings, Account on the new PC, once it’s moved.</span></div>
       ${err && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} /><span>${err}</span></div>`}
       <div class="modal-foot">
         <button type="button" class="btn" onClick=${closeModal}>Cancel</button>

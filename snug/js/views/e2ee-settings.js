@@ -14,9 +14,19 @@ import { COPY, storageNoteFor } from '../lib/e2ee/copy.js';
 import { SetupSheet, RecoveryKeyScreen } from './e2ee-setup.js';
 import { LinkScreen, RecoverScreen } from './e2ee-link.js';
 
-const PAGE = { id: 'e2ee', label: 'Encryption', icon: 'lock', section: 'You', words: 'end-to-end encryption e2ee encrypted keys devices recovery key safety number verify history new device approve browser lock' };
+const PAGE = { id: 'e2ee', label: 'Encryption', icon: 'lock', section: 'Privacy and security', words: 'end-to-end encryption e2ee encrypted keys devices recovery key safety number verify history new device approve browser lock' };
 const when = (t) => (t ? new Date(t).toLocaleDateString(undefined, { dateStyle: 'medium' }) : '');
 const failText = (e) => (e?.offline ? 'You’re offline. Try again once you’re back.' : e?.message || 'That didn’t work. Try again.');
+
+// The page's opening line ends with what is true now, never a promise the
+// state below contradicts (on: stored encrypted; not on: readable by the host).
+function leadState() {
+  const st = E2.status;
+  if (st === 'off' || (st === 'none' && !E2.on)) return ' This server doesn’t offer it, so whoever runs it could read your direct messages.';
+  if (st === 'none') return ' It isn’t on yet: until it is, your direct messages are stored on this server where whoever runs it could read them.';
+  if (st === 'unsupported') return '';
+  return ' Once they are, this server stores them encrypted.';
+}
 
 function Status({ Row }) {
   const st = E2.status;
@@ -30,7 +40,7 @@ function Status({ Row }) {
   }
   if (st === 'unsupported') return html`<p class="e2-warn" role="status"><${Icon} name="alert" size=${16} /><span>${COPY.unsupported[E2.support?.reason] || COPY.unsupported.old}</span></p>`;
   if (st === 'none') {
-    return html`<${Row} label="End-to-end encryption" hint=${E2.on ? COPY.setupBody : 'This server hasn’t turned on end-to-end encryption.'}>
+    return html`<${Row} label="End-to-end encryption" hint=${E2.on ? 'Turn it on for this device to encrypt your direct messages and groups with people who have it on too.' : 'This server hasn’t turned on end-to-end encryption.'}>
       ${E2.on && html`<button class="btn primary" onClick=${() => openModal(SetupSheet, {})}>Turn on</button>`}
     <//>`;
   }
@@ -172,7 +182,7 @@ function EncryptionPage({ Row }) {
   });
   return html`<div class="e2-page">
     <h1>Encryption</h1>
-    <p class="lead">Direct messages and groups can be end-to-end encrypted: encrypted on your device and readable only on the devices of the people in them. This server stores them encrypted.</p>
+    <p class="lead">Direct messages and groups can be end-to-end encrypted: encrypted on your device and readable only on the devices of the people in them.${leadState()}</p>
     <${Status} Row=${Row} />
     ${deviceKind() === 'app' && E2.keyStore === 'none' && html`<p class="e2-warn e2-keystore" role="status"><${Icon} name="alert" size=${16} /><span>${COPY.keyStoreNone}</span></p>`}
     ${ready && html`<${MetaProblem} />`}
@@ -200,8 +210,8 @@ function EncryptionPage({ Row }) {
     ${(ready || E2.status === 'pending' || E2.status === 'new-device') && html`<${Row} label=${COPY.resetTitle} hint=${COPY.resetBody} top>
       <button class="btn danger" onClick=${() => openModal(ResetSheet, {})}>${COPY.resetAction}</button>
     <//>`}
-    <div class="detail e2-limits">
-      <h2 class="e2-h2">What it does and doesn’t do</h2>
+    <details class="e2-limits pv-adv">
+      <summary><${Icon} name="chev-r" size=${16} /><span>What it protects, and what the server can still see</span></summary>
       <ul>
         <li>${COPY.serverSees} <${ServerSees} /></li>
         <li>${COPY.roomsNot}</li>
@@ -210,7 +220,7 @@ function EncryptionPage({ Row }) {
         <li>${storageNoteFor({ kind: deviceKind(), keyStore: E2.keyStore, sealed: E2.device ? deviceKeySealed() : null })}</li>
         <li>Compare safety numbers with the people you talk to (in a conversation’s details) to know nobody put different keys between you.</li>
       </ul>
-    </div>
+    </details>
   </div>`;
 }
 
@@ -243,7 +253,7 @@ export function registerE2eePage({ PAGES, VIEWS, Row }) {
   const sync = () => {
     const want = E2.status !== 'off';
     const i = PAGES.findIndex((p) => p.id === 'e2ee');
-    if (want && i < 0) PAGES.splice(PAGES.findIndex((p) => p.id === 'privacy') + 1, 0, { ...PAGE });
+    if (want && i < 0) PAGES.splice((PAGES.findIndex((p) => p.id === 'security') + 1) || (PAGES.findIndex((p) => p.id === 'privacy') + 1), 0, { ...PAGE });
     else if (!want && i >= 0) PAGES.splice(i, 1);
   };
   subscribe(sync);

@@ -178,3 +178,12 @@
 .conn-fact dd { margin: 0; color: var(--text-1); font-size: var(--t-14); overflow-wrap: anywhere; }
 .conn-acts { display: flex; gap: var(--s-2); flex-wrap: wrap; margin: var(--s-4) 0 var(--s-2); }
 @media (max-width: 560px) { .conn-fact { grid-template-columns: 1fr; gap: var(--s-1); } }
+
+/* Settings > Accessibility: the keys worth knowing, and the read-aloud example under its hint. */
+.a11y-keys { margin: 0 0 var(--s-3); display: grid; gap: var(--s-1); width: 100%; max-width: 32rem; }
+.a11y-try { display: inline-block; margin-top: var(--s-1); min-height: var(--h-xs); }
+@media (pointer: coarse) { .a11y-try { min-height: var(--tap-min); } }
+
+/* Phone: Contrast's three short choices stay on one row (they fit at 288px)
+   instead of the shared grid leaving High alone on a second line. */
+@media (max-width: 759px) { .seg.seg-3 { grid-template-columns: repeat(3, 1fr); } }

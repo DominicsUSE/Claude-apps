@@ -2,7 +2,7 @@
 // house's settings in another. Every change applies at once; nothing to save.
 import { html, useState, useRef, useEffect, useLayoutEffect } from '../../vendor/preact-htm.js';
 import {
-  S, me, closeLayer, setPref, updateMe, setNotify, openModal, updateHouse,
+  S, me, emit, closeLayer, setPref, updateMe, setNotify, openModal, updateHouse,
   setMemberRole, leaveHouse, removeMember, signedOut, toast, openMenu,
 } from '../store.js';
 import { api, stopTransport } from '../server.js';
@@ -27,7 +27,7 @@ import { PLACES_PAGES, PLACES_VIEWS, WelcomePage } from './places-settings.js'; 
 import { VoiceSettings, HouseVoice } from './voiceopts-settings.js'; // Voice and video; House settings > Voice
 import { setVoiceSettingsOpener, setHouseVoiceOpener } from './voiceopts.js';
 import { openLayer as openVoiceLayer } from '../store.js';
-import { registerAccountPages } from './account.js';
+import { registerAccountPages, NOTIFY_PARTS } from './account.js';
 import { KeysEditor, setMessageComponent } from './appearance.js'; // Settings > Keyboard: change any shortcut; the Appearance preview // appearance, accessibility, streamer mode, security, your data, profile extras
 import { ChatSettings } from './chat.js'; // Settings > Text and messages
 import { CommunityOverview } from './community-settings.js'; // House settings > Overview: pictures, own link, newcomers, Danger zone
@@ -37,6 +37,7 @@ import { registerVaultPage } from './vault-settings.js'; // v0.10 C: Settings > 
 import { registerE2eePage } from './e2ee-settings.js'; // Settings > Encryption (end-to-end encryption), when the server offers it
 import { registerConnectionPage } from './connection.js'; // 0.12: Settings > Connection
 import { t } from '../lib/i18n.js'; // words in the chosen language (js/locales)
+import { SETTING_ROWS } from './settings-index.js'; // the names of the settings on each page, for the search
 
 
 function Row({ label, hint, children, top }) {
@@ -57,33 +58,58 @@ function groups(pages) {
   return out;
 }
 
-// A page matches when the words typed appear on it: the whole phrase, or every
-// word as the start of one of its words. Loose letter-by-letter matching is
-// only tried on the page's name, because every page lists dozens of words and
-// almost any query is spread somewhere through them.
-export function settingMatches(query, page) {
-  const q = fold(query).trim();
-  if (!q) return true;
-  const text = fold(`${page.label} ${page.words || ''}`);
+// The words typed match a phrase when it holds them whole, or every word
+// starts one of its words.
+function wordsMatch(q, text) {
   if (text.includes(q)) return true;
   const words = text.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-  if (q.split(/\s+/).every((t) => words.some((w) => w.startsWith(t)))) return true;
+  return q.split(/\s+/).every((w) => words.some((x) => x.startsWith(w)));
+}
+// A page matches when the words typed appear on it: its name, its keywords or
+// one of its settings, the whole phrase, or every word as the start of one of
+// its words. Loose letter-by-letter matching is only tried on the page's name,
+// because every page lists dozens of words and almost any query is spread
+// somewhere through them.
+export function settingMatches(query, page, rows = []) {
+  const q = fold(query).trim();
+  if (!q) return true;
+  if (wordsMatch(q, fold(`${page.label} ${page.words || ''}`))) return true;
+  if (rows.some((r) => wordsMatch(q, fold(r)))) return true;
   return fuzzy(q, page.label) >= 0;
+}
+// The settings on a page that match, by their names (at most three).
+export function rowHits(query, rows = []) {
+  const q = fold(query).trim();
+  if (!q) return [];
+  return [...new Set(rows)].filter((r) => wordsMatch(q, fold(r))).slice(0, 3);
 }
 
 const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const ROW_NAMES = '.layer-col .set-row .set-label > b, .layer-col .set-head';
+// A setting's name is its own words: a count or a picture beside them (a house's tile and name) is left out.
+const nameOf = (el) => [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').trim();
+// The control a person changed, for the quiet "Saved" beside its setting:
+// a switch, a choice not already picked, a colour, a slider, a field.
+const PICKS = '[role=switch], .seg > button, [role=radio], .swatch';
+const FIELDS = 'select, input[type=range], input[type=time], input.set-field, textarea.set-field';
 
 // On a phone the layer is list first: the sections, then a page with Back.
 // Opened at a named page (from a menu or a shortcut) it starts on that page.
-function Layer({ title, icon, pages, page, setPage, children, foot, startOpen }) {
+// `index`: the names of the settings on each page, so the search can find a
+// setting and go to it (pages add the ones they draw as they are opened).
+// `saves`: every change applies at once, so each one says "Saved" quietly.
+function Layer({ title, icon, pages, page, setPage, children, foot, startOpen, index, saves }) {
   const [q, setQ] = useState('');
   const [inPage, setInPage] = useState(!!startOpen || pages.length === 1);
-  const shown = q ? pages.filter((p) => settingMatches(q, p)) : pages;
+  const [said, setSaid] = useState('');
+  const rowsOf = (id) => (index ? [...(index.rows[id] || []), ...(index.seen[id] || [])] : []);
+  const shown = q ? pages.filter((p) => settingMatches(q, p, rowsOf(p.id))) : pages;
   const phone = S.ui.phone;
   const label = pages.find((p) => p.id === page)?.label || title;
   const ref = useRef();
+  const target = useRef(null); // a setting picked from the search, to bring into view
   const moved = useRef(false); // the person went between the list and a page
-  const pick = (id) => { moved.current = true; setPage(id); setInPage(true); };
+  const pick = (id, row) => { moved.current = true; target.current = row || null; setPage(id); setInPage(true); };
   const toList = () => { moved.current = true; setInPage(false); };
   const listed = pages.length > 1;
   // Focus comes into the layer when it opens and goes back to what opened it
@@ -96,18 +122,95 @@ function Layer({ title, icon, pages, page, setPage, children, foot, startOpen })
   // On a phone the list and the page take turns on screen, so focus follows:
   // to Back on a page, to the page's row back on the list.
   useLayoutEffect(() => {
-    if (!moved.current || !phone || !ref.current) return;
+    if (!moved.current || !phone || !ref.current || target.current) return;
     const el = ref.current;
     const t = inPage ? el.querySelector('.layer-back') : (el.querySelector('.layer-nav .row.sel') || el.querySelector('.layer-nav .row'));
     t?.focus();
   }, [inPage]);
-  // On a phone page the top bar already names the page, so a heading that only
-  // repeats it is kept for screen readers but not drawn twice (a house's
-  // Overview keeps its heading: that one is the house's name).
+  // On a phone a page is one step above the list, for the back button and
+  // the back gesture too: app.js counts S.ui.layerBack as a history entry and
+  // calls it on popstate.
+  const back = phone && inPage && listed;
   useLayoutEffect(() => {
-    const h = ref.current?.querySelector('.layer-col h1');
+    const f = back ? toList : null;
+    if (!!S.ui.layerBack === !!f) { if (f) S.ui.layerBack = f; return; }
+    S.ui.layerBack = f;
+    emit();
+  }, [back]);
+  useEffect(() => () => { if (S.ui.layerBack) { S.ui.layerBack = null; emit(); } }, []);
+  // After every draw: on a phone page the top bar already names the page, so a
+  // heading that only repeats it is kept for screen readers but not drawn twice
+  // (a house's Overview keeps its heading: that one is the house's name). Then
+  // the search's part: learn the page's setting names, mark the ones that
+  // match, and bring a setting picked from the results into view.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const h = el.querySelector('.layer-col h1');
     if (h) h.classList.toggle('dup-title', !!(phone && inPage && h.textContent.trim() === label));
+    const names = [...el.querySelectorAll(ROW_NAMES)];
+    if (index) index.seen[page] = [...new Set(names.map(nameOf).filter(Boolean))];
+    const fq = fold(q).trim();
+    for (const b of names) {
+      const row = b.closest('.set-row') || b;
+      if (fq && wordsMatch(fq, fold(nameOf(b)))) row.setAttribute('data-match', ''); else row.removeAttribute('data-match');
+    }
+    const want = target.current;
+    if (!want) return;
+    target.current = null;
+    const hit = names.find((b) => nameOf(b) === want);
+    if (!hit) return;
+    const row = hit.closest('.set-row') || hit;
+    row.scrollIntoView({ block: 'center' });
+    row.setAttribute('data-hit', '');
+    setTimeout(() => row.removeAttribute('data-hit'), 2000);
+    const ctl = [...row.querySelectorAll(FOCUSABLE)].find((x) => x.getClientRects().length);
+    (ctl || el.querySelector('.layer-body'))?.focus({ preventScroll: true });
   });
+  // "Saved", next to the setting that changed and for screen readers.
+  const saved = (ctl) => {
+    const row = ctl.closest('.set-row');
+    if (!row || ctl.closest('form, .modal')) return;
+    row.setAttribute('data-saved', '');
+    clearTimeout(row.savedTimer);
+    row.savedTimer = setTimeout(() => row.removeAttribute('data-saved'), 1800);
+    const name = row.querySelector('.set-label > b');
+    setSaid('');
+    setTimeout(() => setSaid(name ? t('settings.savedName', { name: nameOf(name) }) : t('settings.saved')), 50);
+  };
+  const onBodyClick = (e) => {
+    if (!saves) return;
+    const c = e.target.closest?.(PICKS);
+    if (!c || c.disabled) return;
+    // Picking what was already picked changes nothing (the page hasn't redrawn yet, so this is the old state).
+    if (c.getAttribute('role') !== 'switch' && (c.getAttribute('aria-pressed') === 'true' || c.getAttribute('aria-checked') === 'true')) return;
+    saved(c);
+  };
+  const onBodyChange = (e) => { if (saves && e.target.matches?.(FIELDS) && !e.target.disabled) saved(e.target); };
+  const results = () => [...ref.current.querySelectorAll('.layer-nav .row, .layer-nav .set-hit')].filter((x) => x.getClientRects().length);
+  const onFind = (e) => {
+    // The nav's own arrow keys would move on again from the first result.
+    if (e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); results()[0]?.focus(); }
+    // Enter opens a page named like the search, or else goes to the first
+    // setting found ("text size" lands on Text size, not Appearance's top).
+    if (e.key === 'Enter' && q) {
+      e.preventDefault();
+      const list = results();
+      const fq = fold(q).trim();
+      const page = list.find((x) => x.classList.contains('row') && fold(x.textContent).includes(fq));
+      (page || list.find((x) => x.classList.contains('set-hit')) || list[0])?.click();
+    }
+  };
+  // Up and down move through the sections and settings found.
+  const onNavKey = (e) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const list = results();
+    const i = list.indexOf(document.activeElement);
+    if (i < 0) return;
+    e.preventDefault();
+    if (e.key === 'ArrowUp' && i === 0) { ref.current.querySelector('.layer-nav input[type=search]')?.focus(); return; }
+    list[Math.max(0, Math.min(list.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))].focus();
+  };
   const onKey = (e) => {
     const u = S.ui;
     if (u.menu || u.pop || u.modal || u.quick || u.lightbox) return;
@@ -125,20 +228,25 @@ function Layer({ title, icon, pages, page, setPage, children, foot, startOpen })
     else if (!e.shiftKey && at === last) { e.preventDefault(); first.focus(); }
   };
   const mode = !phone ? '' : inPage ? ' phone-page' : ' phone-list';
-  return html`<div class=${`layer${mode}`} role="dialog" aria-modal="true" aria-label=${title} tabindex="-1" ref=${ref} onKeyDown=${onKey}>
+  return html`<div class=${`layer${mode}${listed ? ' listed' : ''}`} role="dialog" aria-modal="true" aria-label=${title} tabindex="-1" ref=${ref} onKeyDown=${onKey}>
     ${phone && inPage && html`<div class="layer-top">
       <button class="ib layer-back" aria-label=${title === t('settings.title') ? t('settings.all') : `${title} settings`} data-tip=${t('common.back')} onClick=${toList}><${Icon} name="back" /></button>
       <span class="layer-top-title trunc">${label}</span>
     </div>`}
-    <nav class="layer-nav" aria-label=${t('settings.sections', { title })}>
+    <nav class="layer-nav" aria-label=${t('settings.sections', { title })} onKeyDown=${onNavKey}>
       ${phone && html`<div class="layer-nav-title trunc">${title}</div>`}
       <h2>${icon}${title}</h2>
-      <input class="field" type="search" placeholder=${t('settings.find')} aria-label=${t('settings.find')} value=${q} onInput=${(e) => setQ(e.target.value)} />
+      <div class="layer-find">
+        <${Icon} name="search" size=${16} />
+        <input class="field" type="search" placeholder=${t('settings.find')} aria-label=${t('settings.find')}
+          value=${q} onInput=${(e) => setQ(e.target.value)} onKeyDown=${onFind} />
+      </div>
       ${groups(shown).map((g) => {
         const rows = g.pages.map((p) => html`<button key=${p.id} class=${`row${page === p.id ? ' sel' : ''}`} aria-current=${page === p.id ? 'page' : undefined} onClick=${() => pick(p.id)}>
           <span class="row-ic"><${Icon} name=${p.icon} size=${18} /></span><span class="grow trunc">${p.label}</span>
           ${phone && html`<span class="row-go" aria-hidden="true"><${Icon} name="chev-r" size=${16} /></span>`}
-        </button>`);
+        </button>
+        ${rowHits(q, rowsOf(p.id)).map((r) => html`<button key=${`${p.id}-${r}`} class="set-hit" aria-label=${`${r}, ${p.label}`} onClick=${() => pick(p.id, r)}><span class="trunc">${r}</span></button>`)}`);
         if (!g.section) return rows;
         // Screen readers hear each section's name with its pages (You, App, Moderation...).
         const hid = `layer-sec-${g.key}`;
@@ -147,10 +255,11 @@ function Layer({ title, icon, pages, page, setPage, children, foot, startOpen })
           ${rows}
         </div>`;
       })}
-      ${!shown.length && html`<p class="faint" style="padding:4px 8px">${t('settings.noMatch', { q })}</p>`}
+      ${!shown.length && html`<p class="faint layer-none" role="status">${t('settings.noMatch', { q })}</p>`}
       <div class="layer-foot">${foot}</div>
     </nav>
-    <div class="layer-body"><div class="layer-col">${children}</div></div>
+    <div class="layer-body" tabindex="0" role="region" aria-label=${label} onClick=${onBodyClick} onChange=${onBodyChange}><div class="layer-col">${children}</div></div>
+    <p class="sr" role="status">${said}</p>
     <button class="ib layer-close" aria-label=${t('settings.close')} data-tip=${t('common.close')} data-key="Esc" onClick=${closeLayer}><${Icon} name="x" /></button>
   </div>`;
 }
@@ -255,9 +364,11 @@ function LinksEditor({ list }) {
 
 function Notify() {
   const houses = S.houseOrder.map((id) => S.houses[id]);
+  const { NotifySounds, NotifyMentions, NotifyCalls, NotifyQuiet } = NOTIFY_PARTS;
   return html`
     <h1>${t('settings.page.notify')}</h1>
-    <p class="lead">One setting per place, three choices. Rooms follow their house unless you change one from its menu.</p>
+    <p class="lead">How Snug tells you something needs you, and when it stays quiet. Everything still collects in Catch up.</p>
+    <div class="set-head">How you’re told</div>
     <${Row} label="Pop-ups" hint="A small note at the top when something needs you and you’re looking elsewhere.">
       <${Switch} on=${S.prefs.toasts} label="Pop-ups" onChange=${(v) => setPref('toasts', v)} />
     <//>
@@ -265,10 +376,9 @@ function Notify() {
       <${Switch} on=${S.prefs.desktop && typeof Notification !== 'undefined' && Notification.permission === 'granted'} label="Notifications while Snug is open" onChange=${setDesktop} />
     <//>
     <${PushSetting} />
-    <${Row} label="While you’re Focused" hint=${`Nothing pops up. Everything collects in Catch up. ${me().presence === 'focus' ? 'You’re focused now.' : S.ui.phone ? 'Set it from the You tab, under your name.' : 'Set it from your name at the bottom of the sidebar.'}`}>
-      <span class="sub" style="display:flex;gap:8px;align-items:center"><i class="pres inline focus"></i>${PRESENCE.focus.label}</span>
-    <//>
-    <div class="set-head">Houses</div>
+    <${NotifySounds} />
+    <div class="set-head">Messages</div>
+    <p class="hint set-note">One setting per house, three choices. Rooms follow their house unless you change one from its menu.</p>
     ${houses.map((h) => {
       const overrides = roomIds(S, h.id).filter((r) => S.rooms[r].notify);
       return html`<div key=${h.id}>
@@ -282,10 +392,18 @@ function Notify() {
         </div>`)}
       </div>`;
     })}
-    <div class="set-head">Direct</div>
     <${Row} label="Direct messages and groups" hint="Always count as needing you. Mute a single conversation from its menu.">
       <span class="sub">Everything</span>
-    <//>`;
+    <//>
+    <div class="set-head">Mentions</div>
+    <${NotifyMentions} />
+    <div class="set-head">Calls and voice rooms</div>
+    <${NotifyCalls} />
+    <div class="set-head">Quiet times</div>
+    <${Row} label="While you’re Focused" hint=${`Nothing pops up. Everything collects in Catch up. ${me().presence === 'focus' ? 'You’re focused now.' : S.ui.phone ? 'Set it from the You tab, under your name.' : 'Set it from your name at the bottom of the sidebar.'}`}>
+      <span class="sub" style="display:flex;gap:8px;align-items:center"><i class="pres inline focus"></i>${PRESENCE.focus.label}</span>
+    <//>
+    <${NotifyQuiet} />`;
 }
 
 // The shortcut editor (js/views/appearance.js): record, conflicts, reset.
@@ -330,22 +448,24 @@ export function confirmSignOut() {
   });
 }
 
-// Appearance and Account and security are drawn by js/views/account.js (registerAccountPages below).
+// Appearance, Account and Security are drawn by js/views/account.js (registerAccountPages below).
 const VIEWS = { profile: Profile, notify: Notify, keys: Keys };
 // Privacy and safety (js/views/safety-settings.js), before Account.
-PAGES.splice(PAGES.findIndex((p) => p.id === 'account'), 0, { id: 'privacy', label: 'Privacy and safety', icon: 'shield', words: 'privacy block blocked unblock messages requests friend requests dm safety who can see encrypt encryption end to end data stored server ip address online presence last seen last active recently here typing link previews' },
+PAGES.splice(PAGES.findIndex((p) => p.id === 'account'), 0, { id: 'privacy', label: 'Privacy and safety', icon: 'eye', words: 'privacy block blocked unblock messages requests friend requests dm safety who can see encrypt encryption end to end data stored server ip address online presence last seen last active recently here typing link previews' },
   // The full privacy page (js/views/privacy.js), also at /privacy for anyone.
   { id: 'guide', label: 'Privacy guide', icon: 'info', words: 'privacy policy data stored kept retention how long logs ip address diagnostics analytics tracking anonymous law police court encrypt' });
-VIEWS.privacy = () => html`<${PrivacyPage} openGuide=${() => goPage?.('guide')} />`;
+VIEWS.privacy = () => html`<${PrivacyPage} openGuide=${() => goPage?.('guide')} go=${(id) => goPage?.(id)} />`;
 VIEWS.guide = () => html`<h1>${t('settings.page.guide')}</h1><${PrivacyGuide} level=${2} />`;
 // Voice and video (js/views/voiceopts-settings.js), after Notifications.
-PAGES.splice(PAGES.findIndex((p) => p.id === 'notify') + 1, 0, { id: 'voice', label: 'Voice and video', icon: 'voice', words: 'voice video microphone mic speaker headphones camera webcam push to talk ptt sensitivity noise suppression echo gain volume screen share quality sounds afk deafen calls ringtone ring volume ring on who can ring muted warning camera quality resolution frame rate mirror microphone volume output volume reconnect' });
+PAGES.splice(PAGES.findIndex((p) => p.id === 'notify') + 1, 0, { id: 'voice', label: 'Voice and video', icon: 'voice', words: 'audio and video sound voice video microphone mic speaker headphones camera webcam push to talk ptt sensitivity noise suppression echo gain volume screen share quality sounds afk deafen calls ringtone ring volume ring on who can ring muted warning camera quality resolution frame rate mirror microphone volume output volume reconnect' });
 VIEWS.voice = VoiceSettings;
-// Account (js/views/account.js): Appearance in full, Accessibility, Streamer mode, more Notifications and Profile, Account and security, Your data.
-registerAccountPages({ PAGES, VIEWS, Row, signOut, Settings });
+// Account (js/views/account.js): Appearance in full, Accessibility, Streamer mode, more Profile, Account, Security, Your data.
+registerAccountPages({ PAGES, VIEWS, Row, signOut, Settings, go: (id) => goPage?.(id) });
 // Text and messages (js/views/chat.js): skin tone, frequently used emoji, emoticons, message IDs.
 PAGES.push({ id: 'chat', label: 'Text and messages', icon: 'quote', words: 'emoji skin tone frequently used emoticons smiley message id copy link developer slash commands reply mention ping @ on off shortcodes' });
-VIEWS.chat = () => html`<${ChatSettings} Row=${Row} />`;
+VIEWS.chat = () => html`<h1>${t('settings.page.chat')}</h1>
+  <p class="lead">Emoji, how replies mention people, and a few extras for people who like them.</p>
+  <${ChatSettings} Row=${Row} />`;
 // Desktop app (js/views/desktop-settings.js): its page in the desktop app only, and the Username row on Profile.
 registerDesktopPage({ PAGES, VIEWS, Row });
 // v0.10 A: registerAdminPage
@@ -364,19 +484,28 @@ function arrange(pages, plan) {
   for (const p of pages) Object.assign(p, at.has(p.id) ? { section: at.get(p.id).section } : {});
   pages.sort((a, b) => (at.get(a.id)?.n ?? 1e4) - (at.get(b.id)?.n ?? 1e4));
 }
+// You: who you are and how you're signed in. Privacy and security: who sees
+// what, how you're protected, what Snug keeps. App: how Snug tells you things,
+// sounds, looks and reads. More: the rest, kept for the people who want them.
 arrange(PAGES, [
-  ['You', ['profile', 'account', 'privacy', 'e2ee', 'data']],
-  ['App', ['notify', 'voice', 'look', 'chat', 'a11y', 'streamer', 'keys', 'desktop', 'connection']],
+  ['You', ['profile', 'account']],
+  ['Privacy and security', ['privacy', 'security', 'e2ee', 'data']],
+  ['App', ['notify', 'voice', 'look', 'chat', 'a11y', 'keys']],
+  ['More', ['streamer', 'desktop', 'connection', 'guide']],
   ['Admin', ['admin']],
 ]);
 
-registerE2eePage({ PAGES, VIEWS, Row }); // after arrange: it comes and goes with the server's setting, placed after Privacy
+registerE2eePage({ PAGES, VIEWS, Row }); // after arrange: it comes and goes with the server's setting, placed after Security
 
 let goPage = null; // the open Settings layer's page switch, for links between pages
 // Page and section names in the chosen language (js/locales). Pages other
 // modules add keep their own label until they have a key. The English words
 // stay searchable, so "theme" still finds Appearance in any language.
-const SECTION_KEY = { You: 'settings.section.you', App: 'settings.section.app', Admin: 'settings.section.admin' };
+const SECTION_KEY = {
+  You: 'settings.section.you', 'Privacy and security': 'settings.section.privacy', App: 'settings.section.app', More: 'settings.section.more', Admin: 'settings.section.admin',
+};
+// The names of the settings on each page, for the search (js/views/settings-index.js), plus those learned as pages open.
+const INDEX = { rows: SETTING_ROWS, seen: {} };
 function translatedPages() {
   return PAGES.map((p) => {
     const key = `settings.page.${p.id}`;
@@ -393,9 +522,13 @@ export function Settings({ page: start }) {
     if (S.version) return;
     api('/api/me').then((r) => { S.version = r.version; setVer(r.version || ''); }, () => {});
   }, []);
-  const V = VIEWS[page];
+  // A page that isn't there (an old link, a page this server doesn't offer) opens Profile.
+  const pages = translatedPages();
+  const cur = VIEWS[page] && pages.some((p) => p.id === page) ? page : 'profile';
+  const V = VIEWS[cur];
   const shown = S.conn.version || ver;
-  return html`<${Layer} title=${t('settings.title')} icon=${html`<${Icon} name="sliders" />`} pages=${translatedPages()} page=${page} setPage=${setPage} startOpen=${!!start}
+  return html`<${Layer} title=${t('settings.title')} icon=${html`<${Icon} name="sliders" />`} pages=${pages} page=${cur} setPage=${setPage} startOpen=${!!start}
+    index=${INDEX} saves
     foot=${html`<${Nook} size=${16} /><span class="set-version">${shown ? `Snug ${shown}` : 'Snug'}</span>`}>
     <${V} />
   <//>`;

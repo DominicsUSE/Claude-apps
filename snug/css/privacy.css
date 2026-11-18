@@ -20,3 +20,30 @@
 .erase-choice label span { display: grid; gap: 2px; }
 .erase-choice label small { color: var(--text-2); font-size: var(--t-meta); line-height: var(--lh-body); }
 .erase-choice input { margin-top: 3px; }
+
+/* The privacy dashboard (Settings > Privacy and safety): four plain answers in
+   cards on the page's own surface step, each with one way to act. */
+.pv-dash { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: var(--s-3); margin: var(--s-2) 0 var(--s-4); max-width: 720px; }
+.pv-card { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-4); border-radius: var(--r-modal); background: var(--color-surface); border: 1px solid var(--color-border); min-width: 0; }
+.pv-card-title { display: flex; align-items: center; gap: var(--s-2); margin: 0; font-size: var(--t-body); font-weight: var(--w-semibold); color: var(--color-text); }
+.pv-card-ic { display: inline-grid; place-items: center; width: var(--h-xs); height: var(--h-xs); border-radius: var(--r-full); background: var(--color-hover); color: var(--color-text-secondary); flex: none; }
+.pv-card[data-tone="ok"] .pv-card-ic { background: var(--success-soft); color: var(--success-ink); }
+.pv-card[data-tone="warn"] .pv-card-ic { background: var(--warning-soft); color: var(--warning-ink); }
+.pv-card-text { margin: 0; color: var(--color-text-secondary); font-size: var(--t-ui); line-height: var(--lh-body); text-wrap: pretty; }
+.pv-card-acts { margin-top: auto; display: flex; flex-wrap: wrap; gap: var(--s-2); padding-top: var(--s-1); }
+/* A plain-http server: the one network fact shown above the fold. */
+.pv-warn { display: flex; gap: var(--s-2); align-items: flex-start; margin: var(--s-2) 0; padding: var(--s-2) var(--s-3); border-radius: var(--r-input); background: var(--warning-soft); color: var(--color-text); font-size: var(--t-ui); line-height: var(--lh-body); max-width: 720px; }
+.pv-warn > .ic { color: var(--warning-ink); flex: none; margin-top: 2px; }
+/* Disclosures: "Advanced security information" here, and the same shape on Encryption. */
+.pv-adv { margin-top: var(--s-6); max-width: 720px; border-top: 1px solid var(--color-border); }
+.pv-adv > summary { display: flex; align-items: center; gap: var(--s-2); min-height: var(--h-md); padding: var(--s-2) 0; cursor: pointer; list-style: none; font-size: var(--t-section); font-weight: var(--w-semibold); color: var(--color-text); border-radius: var(--r-row); }
+.pv-adv > summary::-webkit-details-marker { display: none; }
+.pv-adv > summary > .ic { color: var(--text-3); transition: transform var(--m-standard) var(--ease-in-out); flex: none; }
+.pv-adv[open] > summary > .ic { transform: rotate(90deg); }
+.pv-adv > summary:focus-visible { outline: var(--focus-w, 2px) solid var(--color-focus); outline-offset: 2px; }
+.pv-adv-body { padding-bottom: var(--s-2); }
+.pv-adv .pv-sect ul ul { margin-top: var(--s-1); }
+@media (max-width: 759px) {
+  .pv-dash { grid-template-columns: 1fr; }
+  .pv-adv > summary { min-height: var(--tap-min); font-size: var(--t-body); }
+}

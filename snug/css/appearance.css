@@ -199,11 +199,11 @@
 .ap-swatch i { display: block; height: 4px; border-radius: 2px; width: 70%; }
 .ap-swatch i + i { width: 45%; opacity: 0.6; }
 .ap-swatch b { display: block; width: var(--s-3); height: var(--s-3); border-radius: var(--r-row); margin: auto; }
-.ap-accents { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: flex-end; }
+.ap-accents { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: flex-start; }
 .ap-accent { display: inline-flex; align-items: center; gap: var(--s-2); height: var(--h-sm); padding: 0 var(--s-3); border-radius: var(--r-btn); background: var(--bg-3); color: var(--text-2); font-size: var(--t-13); }
 .ap-accent:hover { background: var(--bg-4); color: var(--text-1); }
 .ap-accent:active { background: var(--btn2-press); }
-.ap-accent[aria-checked="true"] { background: var(--bg-4); color: var(--text-1); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.ap-accent[aria-checked="true"] { background: var(--bg-4); color: var(--text-1); box-shadow: inset 0 0 0 2px var(--color-primary); font-weight: var(--w-medium); }
 .ap-accent i { width: var(--s-3); height: var(--s-3); border-radius: var(--r-row); background: var(--c); }
 .ap-custom { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); justify-content: flex-end; margin-top: var(--s-2); }
 .ap-hex { width: 7.5rem; font-family: var(--mono); text-transform: uppercase; }

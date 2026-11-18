@@ -1,5 +1,5 @@
 // Passkeys for password accounts on a Snug server (v0.12, server/passkeys.js): the sign-in
-// button and the username field's autofill, and Settings > Account and security > Passkeys.
+// button and the username field's autofill, and Settings > Security > Passkeys.
 // Where they can't work (plain http, an IP address, the desktop app), Settings says why and
 // the sign-in screen shows no button: passwords always keep working.
 import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';

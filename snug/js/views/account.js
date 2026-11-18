@@ -21,12 +21,12 @@ import { Icon } from '../ui/icons.js';
 import { Seg, Switch, Tile, Rich } from '../ui/kit.js';
 import { speak } from '../account.js';
 import { MessagingSettings } from './messaging.js';
-import { AppearancePage, ProfileStyle, SoundSettings, setSettingsLayer } from './appearance.js'; // customisation (js/views/appearance.js)
+import { AppearancePage, ProfileStyle, SoundSettings, setSettingsLayer, LookSlider } from './appearance.js'; // customisation (js/views/appearance.js)
 import { bindings, comboKeys, ACTIONS } from '../lib/keys.js'; // the person's shortcuts in the sheet
 import { setLook } from '../account.js';
 import { Confirm } from './modals.js';
 import { RevokeSheet, hasKeys } from './e2ee-revoke.js'; // signing out a device can remove its encryption keys too
-import { EraseChoice } from './privacy.js'; // deleting: keep or erase what I wrote
+import { EraseChoice, encryptionWords, encryptionDevices } from './privacy.js'; // deleting: keep or erase what I wrote; encryption in plain words
 import { lastActive } from '../lib/privacy.js'; // 0.14: a device's last use is kept to the day
 import { p2pOwner, AccountRows, ConnectRow, DeleteP2p } from './p2p.js'; // GitHub-secured accounts: no password; the Snug username
 import { PasskeyRows, PasskeyStepButton } from './passkeys.js'; // v0.12: passkey sign-in (server/passkeys.js); v0.13: passkey as step-up
@@ -37,6 +37,7 @@ const MOD = isMac ? '⌘' : 'Ctrl';
 let Row = ({ label, hint, children }) => html`<div class="set-row"><div class="set-label"><b>${label}</b>${hint && html`<span>${hint}</span>`}</div><div class="set-ctl">${children}</div></div>`;
 let baseSignOut = null;
 let SettingsC = null;
+let goTo = null; // the open Settings layer's page switch (js/views/settings.js)
 const Err = ({ id, text }) => html`<div class="err" id=${id} role="alert"><${Icon} name="alert" size=${16} /><span>${text}</span></div>`;
 const acc = () => S.account || { prefs: {}, notes: {}, totp: false, backupLeft: 0 };
 
@@ -137,38 +138,58 @@ export const AccountLook = AppearancePage;
 
 // ---------- Accessibility ----------
 
+// Moving around with the keyboard: the few keys worth knowing, on the page itself.
+const KEY_HELP = [
+  [['Tab'], 'Next control; Shift Tab goes back'],
+  [['↑', '↓'], 'Move through lists, menus and messages'],
+  [['Enter'], 'Open or press what’s selected'],
+  [['Esc'], 'Close the top layer, menu or dialog'],
+  [[MOD, 'K'], 'Jump to a house, room, conversation or person'],
+  [[MOD, '/'], 'Every keyboard shortcut'],
+];
+
 export function A11yPage() {
   const p = S.prefs;
   const tts = typeof speechSynthesis !== 'undefined';
   return html`
     <h1>${t('settings.page.a11y')}</h1>
     <p class="lead">Ways to make Snug easier to read and use. They follow you to every device.</p>
+    <div class="set-head">Reading</div>
+    <${Row} label="Text size" hint="Makes all of Snug’s text bigger or smaller, starting from your browser’s own size. Spacing stays put, so more fits when it’s smaller.">
+      <${LookSlider} id="a11y-font" k="fontScale" label="Text size" min=${12} max=${20} unit="px" />
+    <//>
+    <${Row} label="Contrast" hint="High makes secondary text, times and outlines darker and the focus ring thicker. Match device follows the system’s own setting.">
+      <${Seg} cls="seg-3" label="Contrast" value=${p.contrast || 'system'} options=${[['system', 'Match device'], ['standard', 'Standard'], ['high', 'High']]} onChange=${(v) => setPref('contrast', v)} />
+    <//>
     <${Row} label="Font" hint="Atkinson Hyperlegible was drawn for low vision: letters that are easy to tell apart (I, l and 1; O and 0). Fonts are on the Appearance page.">
-      <button class="btn" onClick=${() => SettingsC && openLayer({ C: SettingsC, props: { page: 'look' } })}>Choose a font</button>
+      <button class="btn" onClick=${() => (goTo ? goTo('look') : SettingsC && openLayer({ C: SettingsC, props: { page: 'look' } }))}>Choose a font</button>
     <//>
     <${Row} label="Underline links" hint="Every link and link-like button gets a clear underline.">
       <${Switch} on=${p.underlineLinks} label="Underline links" onChange=${(v) => setPref('underlineLinks', v)} />
     <//>
-    <${Row} label="Contrast" hint="High makes secondary text, times and outlines darker and the focus ring thicker. Match device follows the system’s own setting.">
-      <${Seg} label="Contrast" value=${p.contrast || 'system'} options=${[['system', 'Match device'], ['standard', 'Standard'], ['high', 'High']]} onChange=${(v) => setPref('contrast', v)} />
+    <div class="set-head">Motion</div>
+    <${Row} label="Motion" hint="Panels slide and fade briefly, never longer than a fifth of a second. Reduced turns that off everywhere; Match device follows the system’s own setting.">
+      <${Seg} label="Motion" value=${p.motion} options=${[['system', 'Match device'], ['reduced', 'Reduced']]} onChange=${(v) => setPref('motion', v)} />
     <//>
+    <div class="set-head">Keyboard and focus</div>
     <${Row} label="Always show the focus ring" hint="Show where you are even after a click, not only when moving with the keyboard.">
       <${Switch} on=${p.focusAlways} label="Always show the focus ring" onChange=${(v) => setPref('focusAlways', v)} />
     <//>
-    <${Row} label="Motion" hint="Panels slide and fade briefly. Reduced turns that off; Match device follows the system’s own setting.">
-      <${Seg} label="Motion" value=${p.motion} options=${[['system', 'Match device'], ['reduced', 'Reduced']]} onChange=${(v) => setPref('motion', v)} />
-    <//>
-    <${Row} label="Read new messages aloud" hint=${tts ? 'In the conversation you have open, using your device’s voice. Off unless you turn it on.' : 'This browser can’t speak.'}>
+    <${Row} label="Keyboard" hint="Everything in Snug works from the keyboard. These are the keys to start with." top>
+      <dl class="a11y-keys">
+        ${KEY_HELP.map(([keys, what]) => html`<div class="acc-key-row" key=${what}><dt>${keys.map((k) => html`<kbd class="kbd">${k}</kbd>`)}</dt><dd>${what}</dd></div>`)}
+      </dl>
       <div class="acc-inline">
-        <button class="btn" disabled=${!tts} onClick=${() => speak('This is how messages will sound.')}>Try it</button>
-        <${Switch} on=${p.tts && tts} label="Read new messages aloud" onChange=${(v) => setPref('tts', v)} />
+        <button class="btn" onClick=${openShortcuts}>All keyboard shortcuts</button>
+        <button class="btn quiet" onClick=${() => goTo?.('keys')}>Change shortcuts</button>
       </div>
     <//>
-    <${Row} label="Keyboard" hint=${`Everything in Snug works from the keyboard. ${MOD} / lists the shortcuts.`}>
-      <button class="btn" onClick=${openShortcuts}>Keyboard shortcuts</button>
+    <div class="set-head">Speech</div>
+    <${Row} label="Read new messages aloud" hint=${html`${tts ? 'In the conversation you have open, using your device’s voice. Off unless you turn it on.' : 'This browser can’t speak.'}
+      ${tts && html`<button class="linkish a11y-try" onClick=${() => speak('This is how messages will sound.')}>Hear an example</button>`}`}>
+      <${Switch} on=${p.tts && tts} label="Read new messages aloud" disabled=${!tts} onChange=${(v) => setPref('tts', v)} />
     <//>`;
 }
-
 // ---------- Notifications: the account's extra options ----------
 
 function minutesToTime(m) { return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; }
@@ -239,12 +260,24 @@ function QuietDays({ q, setQuiet }) {
   </div>`;
 }
 
-export function NotifyMore() {
-  const p = S.prefs;
-  const q = p.quiet || { on: false, from: 1320, to: 420, tz: 0 };
+// Settings > Notifications draws these under its own headings (js/views/settings.js):
+// how you're told (sounds, previews), mentions, calls, and quiet times.
+const quietOf = () => {
+  const q = S.prefs.quiet || { on: false, from: 1320, to: 420, tz: 0 };
   // The named zone follows daylight saving; the offset is kept for older Snugs.
   const zone = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return undefined; } })();
-  const setQuiet = (patch) => setPref('quiet', { ...q, ...patch, tz: new Date().getTimezoneOffset(), ...(zone ? { zone } : {}) });
+  return [q, (patch) => setPref('quiet', { ...q, ...patch, tz: new Date().getTimezoneOffset(), ...(zone ? { zone } : {}) })];
+};
+function NotifySounds() {
+  const p = S.prefs;
+  return html`
+    <${SoundSettings} Row=${Row} />
+    <${Row} label="Show message text" hint="In desktop notifications and pop-ups. Off says only who wrote and where.">
+      <${Switch} on=${p.preview !== false} label="Show message text in notifications" onChange=${(v) => setPref('preview', v)} />
+    <//>`;
+}
+function NotifyMentions() {
+  const p = S.prefs;
   const houses = S.houseOrder.map((id) => S.houses[id]).filter(Boolean);
   const toggleSet = (key, id, on) => {
     const next = { ...(p[key] || {}) };
@@ -252,12 +285,30 @@ export function NotifyMore() {
     setPref(key, next);
   };
   return html`
-    <div class="set-head">Sounds and previews</div>
-    <${SoundSettings} Row=${Row} />
-    <${Row} label="Show message text" hint="In desktop notifications and pop-ups. Off says only who wrote and where.">
-      <${Switch} on=${p.preview !== false} label="Show message text in notifications" onChange=${(v) => setPref('preview', v)} />
+    <${Row} label="Highlight words" hint="Messages with one of these (whole words, any case) count as mentions: a badge, Catch up and a notification." top>
+      <${KeywordsEditor} />
     <//>
-    <div class="set-head">Quiet hours</div>
+    ${houses.length > 0 && html`<div class="set-sub-head">@everyone, @here and sounds in each house</div>
+      ${houses.map((h) => html`<div key=${h.id} class="acc-house">
+        <span class="acc-house-name"><${Tile} house=${h} />${h.name}</span>
+        <label class="acc-check"><${Switch} on=${!p.everyoneOff?.[h.id]} label=${`@everyone and @here in ${h.name} count as mentions`} onChange=${(v) => toggleSet('everyoneOff', h.id, !v)} /><span>@everyone and @here</span></label>
+        <label class="acc-check"><${Switch} on=${!p.mutedSounds?.[h.id]} label=${`Sounds for ${h.name}`} onChange=${(v) => toggleSet('mutedSounds', h.id, !v)} /><span>Sounds</span></label>
+      </div>`)}`}`;
+}
+function NotifyCalls() {
+  const p = S.prefs;
+  return html`
+    <${Row} label="Calls from favourites" hint="While you’re Focused, calls from friends you starred still ring out loud.">
+      <${Switch} on=${p.favCalls} label="Let calls from favourites ring while Focused" onChange=${(v) => setPref('favCalls', v)} />
+    <//>
+    <${Row} label="Ring sound and who can ring you" hint="The ring, its volume, and whose calls ring at all are with your microphone and camera settings.">
+      <button class="btn" onClick=${() => goTo?.('voice')}>Voice and video settings</button>
+    <//>`;
+}
+function NotifyQuiet() {
+  const p = S.prefs;
+  const [q, setQuiet] = quietOf();
+  return html`
     <${Row} label="Quiet hours" hint="No sounds, pop-ups or phone notifications between these times. Everything still collects in Catch up.">
       <${Switch} on=${q.on} label="Quiet hours" onChange=${(v) => setQuiet({ on: v })} />
     <//>
@@ -271,24 +322,11 @@ export function NotifyMore() {
     <${Row} label="Different on some days" hint="A window that runs past midnight belongs to the day it starts. Days use your own time zone." top>
       <${QuietDays} q=${q} setQuiet=${setQuiet} />
     <//>
-    <${Row} label="Calls from favourites" hint="While you’re Focused, calls from friends you starred still ring out loud.">
-      <${Switch} on=${p.favCalls} label="Let calls from favourites ring while Focused" onChange=${(v) => setPref('favCalls', v)} />
-    <//>
-    <div class="set-head">Highlight words</div>
-    <${Row} label="Your words" hint="Messages with one of these (whole words, any case) count as mentions: a badge, Catch up and a notification." top>
-      <${KeywordsEditor} />
-    <//>
-    <div class="set-head">Away</div>
     <${Row} label="Go idle after" hint="With no keyboard or mouse for this long, people see you as Away until you’re back. Focused and Offline don’t change.">
       <${Seg} label="Go idle after" value=${p.autoIdle} options=${[[0, 'Never'], [5, '5 min'], [10, '10 min'], [30, '30 min'], [60, '1 hour']]} onChange=${(v) => setPref('autoIdle', v)} />
-    <//>
-    ${houses.length > 0 && html`<div class="set-head">Each house</div>
-      ${houses.map((h) => html`<div key=${h.id} class="acc-house">
-        <span class="acc-house-name"><${Tile} house=${h} />${h.name}</span>
-        <label class="acc-check"><${Switch} on=${!p.everyoneOff?.[h.id]} label=${`@everyone and @here in ${h.name} count as mentions`} onChange=${(v) => toggleSet('everyoneOff', h.id, !v)} /><span>@everyone and @here</span></label>
-        <label class="acc-check"><${Switch} on=${!p.mutedSounds?.[h.id]} label=${`Sounds for ${h.name}`} onChange=${(v) => toggleSet('mutedSounds', h.id, !v)} /><span>Sounds</span></label>
-      </div>`)}`}`;
+    <//>`;
 }
+export const NOTIFY_PARTS = { NotifySounds, NotifyMentions, NotifyCalls, NotifyQuiet };
 
 // ---------- Streamer mode ----------
 
@@ -315,6 +353,7 @@ function PasswordForm() {
   const [code, setCode] = useState('');
   const [msg, setMsg] = useState(null);
   const need = acc().totp;
+  const ready = !!cur && !!next && (!need || !!code);
   // v0.13: or a passkey checked now, instead of the current password (and the code)
   const submit = async (e, passkey) => {
     e?.preventDefault();
@@ -331,7 +370,8 @@ function PasswordForm() {
     <div><label class="label" for="pw-next">New password</label><input id="pw-next" class="field" type="password" autocomplete="new-password" value=${next} onInput=${(e) => setNext(e.target.value)} /><div class="hint">At least 8 characters. Every other device will need it.</div></div>
     ${need && html`<div><label class="label" for="pw-code">Code from your app</label><input id="pw-code" class="field" inputmode="numeric" autocomplete="one-time-code" value=${code} onInput=${(e) => setCode(e.target.value)} /></div>`}
     ${msg && html`<div class=${msg.bad ? 'err' : 'hint'} role=${msg.bad ? 'alert' : 'status'}>${msg.text}</div>`}
-    <div><button class="btn" type="submit" disabled=${!cur || !next || (need && !code)}>Change password</button></div>
+    <div class="acc-inline"><button class="btn" type="submit" aria-describedby=${ready ? undefined : 'pw-why'} disabled=${!ready}>Change password</button>
+      ${!ready && html`<span class="hint" id="pw-why">${!cur ? 'Type your current password first.' : !next ? 'Then a new one.' : 'And the code from your app.'}</span>`}</div>
     ${next.length >= 8 && html`<${PasskeyStepButton} id="pw-passkey" label="Change it with a passkey instead" onProof=${(proof) => submit(null, proof)} />`}
   </form>`;
 }
@@ -497,19 +537,19 @@ function RecentSignIns() {
     </ul>`;
 }
 
-export function SecurityPage() {
+// Settings > Account: who you're signed in as, the devices signed in as you, and signing out.
+export function AccountPage() {
   const u = me();
-  const a = acc();
   return html`
     <h1>${t('settings.page.account')}</h1>
-    <p class="lead">Signed in as <b style="font-weight:500">${u.name}</b> (<span class="secret">@${u.handle}</span>).</p>
+    <p class="lead">Signed in as <b style="font-weight:500">${u.name}</b> (<span class="secret">@${u.handle}</span>). Your name, picture and username are on Profile; passwords, passkeys and recovery are on Security.</p>
     <${Row} label="Connection" hint=${S.conn.socket === 'open' ? 'Connected. Changes reach everyone at once.' : 'Not connected. Changes wait until Snug is back.'}>
       <span class="sub" style="display:flex;gap:8px;align-items:center"><i class=${`pres inline ${S.conn.socket === 'open' ? 'open' : 'offline'}`}></i>${S.conn.socket === 'open' ? 'Online' : 'Offline'}</span>
     <//>
-    ${p2pOwner() ? html`<${AccountRows} Row=${Row} signOut=${baseSignOut} />` : html`<${PasswordSecurity} a=${a} />`}
-    <div class="set-head">Devices</div>
+    ${p2pOwner() && html`<${AccountRows} Row=${Row} signOut=${baseSignOut} />`}
+    <div class="set-head">Devices and sessions</div>
+    <p class="hint set-note">Every browser and app signed in as you. Sign out any you don’t recognise, then change your password on Security.</p>
     <${Sessions} />
-    <${RecentSignIns} />
     ${!p2pOwner() && html`<div class="set-head">Sign out</div>
     <${Row} label="Sign out on this device" hint="Your houses and messages stay on the server.">
       <button class="btn" onClick=${() => baseSignOut?.(false)}>Sign out</button>
@@ -519,9 +559,39 @@ export function SecurityPage() {
         title: 'Sign out everywhere?', text: p2pOwner() ? 'Every device signed in as you will need to sign in with GitHub again.' : 'Every device signed in as you will need your password again.', action: 'Sign out everywhere', danger: true,
         onConfirm: () => baseSignOut?.(true),
       })}>Sign out everywhere</button>
+    <//>
+    <div class="set-head">Your data</div>
+    <${Row} label="Download or delete your account" hint="Take everything that’s yours with you, deactivate for a while, or delete for good.">
+      <button class="btn" onClick=${() => goTo?.('data')}>Open Your data</button>
     <//>`;
 }
 
+// Settings > Security: how you sign in, how you get back in, encryption in a
+// sentence, and what happened recently. Plain words first; the details are a click away.
+export function SecurityPage() {
+  const enc = encryptionWords();
+  const devices = encryptionDevices();
+  return html`
+    <h1>${t('settings.page.security')}</h1>
+    <p class="lead">How you sign in, how you get back in if you lose your password or a device, and what changed recently.</p>
+    ${p2pOwner()
+      ? html`<${Row} label="How you sign in" hint="This account belongs to the desktop app on this PC. Its recovery key, GitHub link and moving to a new PC are on Account.">
+          <button class="btn" onClick=${() => goTo?.('account')}>Open Account</button>
+        <//>`
+      : html`<${PasswordSecurity} a=${acc()} />`}
+    <div class="set-head">Encryption</div>
+    <${Row} label="End-to-end encryption" hint=${enc.text}>
+      ${enc.page && html`<button class=${`btn${enc.act ? ' primary' : ''}`} onClick=${() => goTo?.('e2ee')}>${enc.act || 'Open Encryption'}</button>`}
+    <//>
+    ${devices > 0 && html`<${Row} label="Trusted devices" hint=${`${plural(devices, 'device')} can read your encrypted messages. Remove one you no longer use on the Encryption page.`}>
+      <button class="btn" onClick=${() => goTo?.('e2ee')}>Review</button>
+    <//>`}
+    <div class="set-head">Active sessions</div>
+    <${Row} label="Signed-in devices" hint="Where you’re signed in now, and when each was last used. Sign out any you don’t recognise.">
+      <button class="btn" onClick=${() => goTo?.('account')}>Review devices</button>
+    <//>
+    <${RecentSignIns} />`;
+}
 // Password accounts: the password, two-factor sign-in, and connecting GitHub on the PC's first account.
 function PasswordSecurity({ a }) {
   return html`
@@ -751,7 +821,7 @@ export const ACCOUNT_ACTIONS = [
   { label: 'Keyboard shortcuts', icon: 'keys', words: 'keyboard shortcuts keys hotkeys help', run: openShortcuts },
   { label: 'Appearance settings', icon: 'palette', words: 'appearance theme font size zoom compact density', run: () => SettingsC && openLayer({ C: SettingsC, props: { page: 'look' } }) },
   { label: 'Accessibility settings', icon: 'access', words: 'accessibility dyslexia font contrast focus speech read aloud', run: () => SettingsC && openLayer({ C: SettingsC, props: { page: 'a11y' } }) },
-  { label: 'Security settings', icon: 'shield', words: 'security password two factor 2fa devices sessions', run: () => SettingsC && openLayer({ C: SettingsC, props: { page: 'account' } }) },
+  { label: 'Security settings', icon: 'shield', words: 'security password two factor 2fa devices sessions', run: () => SettingsC && openLayer({ C: SettingsC, props: { page: 'security' } }) },
 ];
 
 // ---------- The sidebar's resize grip ----------
@@ -788,8 +858,9 @@ export function SidebarGrip() {
 
 // ---------- Registration (called once by js/views/settings.js) ----------
 
-export function registerAccountPages({ PAGES, VIEWS, Row: R, signOut, Settings }) {
+export function registerAccountPages({ PAGES, VIEWS, Row: R, signOut, Settings, go }) {
   if (R) Row = R;
+  goTo = go;
   baseSignOut = signOut;
   SettingsC = Settings;
   const at = (id) => PAGES.findIndex((p) => p.id === id);
@@ -803,20 +874,22 @@ export function registerAccountPages({ PAGES, VIEWS, Row: R, signOut, Settings }
     { id: 'streamer', label: 'Streamer mode', icon: 'spoiler', words: 'streamer stream hide handles invite codes privacy screen share' });
   VIEWS.a11y = A11yPage;
   VIEWS.streamer = StreamerPage;
-  // Notifications: the original page, then sounds, previews, quiet hours, words and each house.
-  const BaseNotify = VIEWS.notify;
-  VIEWS.notify = () => html`<${BaseNotify} /><${NotifyMore} />`;
+  // Notifications draws NOTIFY_PARTS (above) under its own headings.
   const notify = PAGES[at('notify')];
-  if (notify) notify.words = `${notify.words} sound sounds pack volume preview quiet hours schedule keywords highlight words everyone here idle away`;
+  if (notify) notify.words = `${notify.words} sound sounds pack volume preview quiet hours schedule keywords highlight words everyone here idle away calls voice rooms messages`;
   // Profile: the original page, then pronouns, accent, banner, status.
   const BaseProfile = VIEWS.profile;
   VIEWS.profile = () => html`<${BaseProfile} /><${ProfileMore} />`;
   const prof = PAGES[at('profile')];
   if (prof) prof.words = `${prof.words} pronouns banner accent status picture photo upload avatar decoration name style profile colours`;
-  // Account becomes Account and security; Your data after it.
-  VIEWS.account = SecurityPage;
+  // Account: who you are, devices and signing out. Security after it: how you
+  // sign in and get back in. Your data after that.
+  VIEWS.account = AccountPage;
   const account = PAGES[at('account')];
-  if (account) { account.label = 'Account and security'; account.words = `${account.words} two factor 2fa authenticator totp backup codes devices sessions`; }
-  PAGES.splice(at('account') + 1, 0, { id: 'data', label: 'Your data', icon: 'file', words: 'data export download delete deactivate close account gdpr' });
+  if (account) account.words = `${account.words} username handle github recovery move new pc`;
+  PAGES.splice(at('account') + 1, 0,
+    { id: 'security', label: 'Security', icon: 'shield', words: 'security password change two factor 2fa authenticator totp backup codes passkey passkeys recovery key forgot reset encryption trusted devices sessions sign-ins activity' },
+    { id: 'data', label: 'Your data', icon: 'file', words: 'data export download delete deactivate close account gdpr stored on this device copy offline' });
+  VIEWS.security = SecurityPage;
   VIEWS.data = DataPage;
 }

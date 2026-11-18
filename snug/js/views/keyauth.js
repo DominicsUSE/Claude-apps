@@ -155,7 +155,7 @@ export function KeyAuth({ cfg, onPassword, onGitHub, entered }) {
     body = html`
       <div class="auth-head">
         <h1 id="auth-title">Type this code on your other PC</h1>
-        <p class="auth-sub">On your other PC, open Snug, go to Settings, then Account and security, choose <b>Move to a new PC</b>, and type this code.</p>
+        <p class="auth-sub">On your other PC, open Snug, go to Settings, then Account, choose <b>Move to a new PC</b>, and type this code.</p>
       </div>
       <div class="auth-code-box">
         ${step.code

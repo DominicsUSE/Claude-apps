@@ -193,7 +193,7 @@ function patternUrl(kind, colour) {
 let applied = '';
 // Custom properties this function set on <html> (js/boot.js may have set some
 // from last time's look before this module ran; they count as ours too).
-let inline = new Set(typeof document === 'undefined' ? [] : [...document.documentElement.style].filter((k) => k.startsWith('--') && !k.startsWith('--chat-pattern') && k !== '--ctx-w'));
+let inline = new Set(typeof document === 'undefined' ? [] : [...document.documentElement.style].filter((k) => k.startsWith('--') && !k.startsWith('--chat-pattern') && k !== '--ctx-w' && k !== '--text-scale'));
 const looks = new Set();  // the data-* attributes this function owns
 export function applyAppearance() {
   const p = effectivePrefs();
@@ -227,7 +227,11 @@ export function applyAppearance() {
   attr('data-name-styles', p.showNameStyles === false ? 'off' : null);
   attr('data-gif', p.gifAutoplay && p.gifAutoplay !== 'auto' ? p.gifAutoplay : null);
   root.removeAttribute('data-text');
-  root.style.fontSize = p.fontScale && p.fontScale !== 16 ? `${p.fontScale}px` : '';
+  // Text size: the root's --text-scale (css/tokens.css), so every rem size follows
+  // and the browser's own default size is still the starting point.
+  root.style.fontSize = '';
+  if (p.fontScale && p.fontScale !== 16) root.style.setProperty('--text-scale', String(Math.round((p.fontScale / 16) * 1000) / 1000));
+  else root.style.removeProperty('--text-scale');
   root.style.zoom = p.zoom && p.zoom !== 100 ? `${p.zoom}%` : '';
   root.style.filter = p.saturation < 100 ? `saturate(${p.saturation}%)` : '';
   root.style.setProperty('--ctx-w', `${p.sidebarW || 240}px`);
@@ -255,7 +259,7 @@ export function applyAppearance() {
   try {
     const attrs = {};
     for (const name of looks) if (root.hasAttribute(name)) attrs[name] = root.getAttribute(name);
-    localStorage.setItem('snug.paint', JSON.stringify({ attrs, props, fontSize: root.style.fontSize, zoom: root.style.zoom }));
+    localStorage.setItem('snug.paint', JSON.stringify({ attrs, props, textScale: root.style.getPropertyValue('--text-scale'), zoom: root.style.zoom }));
   } catch { /* storage full or blocked: the first paint uses the raw setting */ }
   // The desktop app colours its title bar to match (optional bridge).
   try { window.snugApp?.setThemeColor?.(props['--bg-0'] || th.bg0 || getComputedStyle(root).getPropertyValue('--bg-0').trim()); } catch { /* no bridge */ }
