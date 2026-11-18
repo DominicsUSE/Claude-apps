@@ -87,7 +87,7 @@ goes back to an older version on its own (README, "Install, update, go back").
   hidden, and link to how Snug handles your data.
 - **Home shows your invitations** to houses, with who sent each one and a look before joining.
 - **The sidebar folds into the rail** with the arrow at the rail's foot, and stays as you left it on this
-  device. Below 1024px wide it starts folded, so a tablet gets the whole width for the conversation. Folded, a
+  device. Below 880px wide it starts folded, so an upright tablet gets the whole width for the conversation. Folded, a
   house picked in the rail shows its rooms over the content until you go somewhere (Esc or a click outside puts
   them away), and the rail's foot carries you, your settings and the call you are in.
 - **Where am I:** the house's header shows who is online and how many members ("● 2 online · 10", the full

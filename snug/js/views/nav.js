@@ -346,11 +346,11 @@ export function Rail({ sp = S.ui.space, pick = openSpace, foot = null } = {}) {
 
 // ---------- The sidebar, folded away (desktop) ----------
 // The context column can fold into the rail, and stays as you left it on this
-// device. Until you choose, it is folded below 1024px wide (a tablet), where
+// device. Until you choose, it is folded below 880px wide (a tablet held upright), where
 // the conversation needs the room. Folded, a place chosen in the rail opens
 // its column over the content for a moment ("peek"); going anywhere, Esc or a
 // click outside puts it away.
-const wideQuery = typeof matchMedia === 'function' ? matchMedia('(min-width: 1024px)') : null;
+const wideQuery = typeof matchMedia === 'function' ? matchMedia('(min-width: 880px)') : null;
 wideQuery?.addEventListener?.('change', () => emit());
 export const ctxShut = () => !S.ui.phone && (typeof S.prefs.ctxShut === 'boolean' ? S.prefs.ctxShut : !(wideQuery ? wideQuery.matches : true));
 export function toggleCtx() {
