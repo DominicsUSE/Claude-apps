@@ -2,7 +2,7 @@
 // subtext, quotes, lists, underline, spoilers, masked links, dynamic
 // timestamps and code blocks with a language label, highlighting and Copy.
 // Everything is built from tokens as elements; no message text ever becomes HTML.
-import { html, useState } from '../../vendor/preact-htm.js';
+import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { S, openModal, closeModal, persist, toast } from '../store.js';
 import { fmtStamp } from '../lib/format.js';
 import { highlight, langOf } from '../lib/highlight.js';
@@ -19,6 +19,22 @@ export function CodeBlock({ lang, v }) {
   const [copied, setCopied] = useState(false);
   const label = lang || 'Code';
   const onCopy = () => { copy(v); setCopied(true); setTimeout(() => setCopied(false), 1600); };
+  // A tab stop only while the block scrolls sideways (a keyboard has to reach
+  // it to scroll it); short snippets add no stop to the Tab order.
+  const pre = useRef();
+  useEffect(() => {
+    const el = pre.current;
+    if (!el) return undefined;
+    const fit = () => {
+      if (el.scrollWidth > el.clientWidth + 1) el.setAttribute('tabindex', '0');
+      else el.removeAttribute('tabindex');
+    };
+    fit();
+    if (typeof ResizeObserver !== 'function') return undefined;
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [v]);
   return html`<div class="codeblock" data-lang=${key || ''}>
     <div class="cb-head">
       <span class="cb-lang">${label}</span>
@@ -26,7 +42,7 @@ export function CodeBlock({ lang, v }) {
         <${Icon} name=${copied ? 'check' : 'copy'} size=${14} />${copied ? 'Copied' : 'Copy'}
       </button>
     </div>
-    <pre tabindex="0" role="group" aria-label=${`${label} code`}><code>${highlight(v, lang).map((t, i) => (t.t === 'text' ? t.v : html`<span key=${i} class=${`hl-${t.t}`}>${t.v}</span>`))}</code></pre>
+    <pre ref=${pre} role="group" aria-label=${`${label} code`}><code>${highlight(v, lang).map((t, i) => (t.t === 'text' ? t.v : html`<span key=${i} class=${`hl-${t.t}`}>${t.v}</span>`))}</code></pre>
   </div>`;
 }
 

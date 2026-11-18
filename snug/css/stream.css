@@ -108,6 +108,8 @@ mark.hit { background: none; color: inherit; font-weight: var(--w-bold); text-de
   .rx { position: relative; height: var(--h-36); padding: 0 var(--s-3); }
   .rx::after { content: ""; position: absolute; inset: -4px 0; }
   .rx.add { min-width: var(--tap-min); justify-content: center; }
+  /* The thread link stays 28px tall to look at; a finger gets 44px. */
+  .stub::after { content: ""; position: absolute; inset: -8px 0; }
 }
 
 /* Thread stub: the conversation visibly branches from its message. */
@@ -212,11 +214,25 @@ mark.hit { background: none; color: inherit; font-weight: var(--w-bold); text-de
 /* Editing a message above: this box steps back and says so. */
 .composer.waiting .composer-row .ib { opacity: 0.6; } /* the buttons step back; the placeholder keeps its contrast */
 .composer-banner.editing-note > .ic { color: var(--text-2); }
+.editing-note .edit-short { display: none; }
+@media (max-width: 479px) { /* phones: two words and the cancel button; the full sentence stays for screen readers */
+  .editing-note .edit-long { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .editing-note .edit-short { display: inline; }
+}
 /* The room's storage note: one quiet line above the box, outside it, so the
    box stays the same height and the messages above stay in view. */
 .composer > .e2-room-hint { margin: 0 0 var(--s-1); padding: 0 0 0 var(--s-1); min-height: var(--h-sm); font-size: var(--t-meta); line-height: var(--lh-ui); color: var(--text-2); }
 .composer > .e2-room-hint > .ic { flex: none; color: var(--text-3); }
 .composer > .e2-room-hint .btn { flex: none; color: var(--text-1); }
+.e2-hint-ok > .ic { display: none; }
+/* Narrow main column: the short note keeps one line; "Got it" becomes a close
+   button whose name is still "Got it". */
+@media (max-width: 899px) {
+  .composer > .e2-room-hint .e2-hint-ok { width: var(--h-sm); padding: 0; justify-content: center; }
+  .e2-hint-ok > .ic { display: block; }
+  .e2-hint-ok .e2-ok-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+@media (max-width: 899px) and (pointer: coarse) { .composer > .e2-room-hint .e2-hint-ok { width: var(--tap-min); height: var(--tap-min); } }
 .e2-hint-short { display: none; }
 /* Below desktop width, or beside a thread or people pane, the whole sentence
    would take two or three lines: the short form shows. */
@@ -234,9 +250,12 @@ mark.hit { background: none; color: inherit; font-weight: var(--w-bold); text-de
 /* Touch: each attachment gets its own row, so the name reads and both 44px
    buttons sit side by side instead of on top of each other. */
 @media (pointer: coarse) {
-  .pending-file { flex: 1 1 100%; max-width: none; padding-right: 0; }
+  .pending-file { flex: 1 1 100%; max-width: none; padding-right: 0; height: 48px; }
+  .pending-file img { height: 48px; width: 48px; }
   .pending-file .pending-name { flex: 1; }
   .pending-file .ib, .pending-file .pf-edit { position: static; flex: none; }
+  /* Two rows of files at most before they scroll: the messages keep the screen. */
+  .composer-files { max-height: 112px; overflow-y: auto; overscroll-behavior: contain; }
 }
 .pending-name { display: grid; min-width: 0; line-height: var(--lh-ui); font-size: var(--t-ui); }
 .pending-state { font-size: var(--t-meta); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -299,13 +318,14 @@ a.file:hover { border-color: var(--line-strong); }
   .jump-bar { left: var(--s-2); right: var(--s-2); height: var(--touch); }
   .jump { height: 36px; }
   .composer { padding: 0 var(--s-2); }
-  .composer textarea { font-size: var(--t-input-touch); }
+  .composer textarea { font-size: var(--t-input-touch); max-height: min(40dvh, 160px); } /* dvh: shrinks with the on-screen keyboard */
   .foot { padding: 0 var(--s-3); padding-bottom: env(safe-area-inset-bottom, 0px); height: calc(24px + env(safe-area-inset-bottom, 0px)); }
   .day, .newline { padding: 0 var(--s-3); }
   .ac { left: var(--s-2); right: var(--s-2); max-width: none; }
   .lightbox { padding: var(--s-2); }
-  .rx { height: 32px; padding: 0 var(--s-3); }
 }
+/* A narrow window with a mouse: a little more room per chip. Touch keeps the 36px chips set above. */
+@media (max-width: 759px) and (pointer: fine) { .rx { height: 32px; padding: 0 var(--s-3); } }
 
 /* While a popover (a profile card, a picker) is open, hover toolbars on other
    rows stay hidden, so nothing stale floats beside it. */

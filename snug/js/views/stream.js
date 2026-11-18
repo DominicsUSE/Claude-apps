@@ -112,8 +112,11 @@ function EditBox({ conv, m }) {
   const ref = useRef();
   useEffect(() => {
     const el = ref.current;
-    el.focus();
+    el.focus({ preventScroll: true });
     el.setSelectionRange(el.value.length, el.value.length);
+    // The whole message being edited comes into view (on a phone it is often
+    // half above the fold), not only the caret's line.
+    el.closest('.msg')?.scrollIntoView({ block: 'nearest' });
   }, []);
   useLayoutEffect(() => grow(ref.current), [text]);
   const onKey = (e) => {
@@ -633,7 +636,7 @@ export function Composer({ conv, placeholder, short }) {
     <div class="composer-box">
       ${editingHere && html`<div class="composer-banner editing-note" role="status">
         <${Icon} name="edit" size=${16} />
-        <span class="trunc grow">Editing a message above. Enter saves, Esc cancels.</span>
+        <span class="trunc grow"><span class="edit-long">Editing a message above. Enter saves, Esc cancels.</span><span class="edit-short" aria-hidden="true">Editing above</span></span>
         <button class="ib sm" aria-label="Cancel editing" data-tip="Cancel editing" data-key="Esc" onClick=${() => { setEditing(null); focusComposer(conv); }}><${Icon} name="x" size=${16} /></button>
       </div>`}
       ${replyTo && html`<div class="composer-banner">
@@ -690,7 +693,8 @@ function Foot({ conv }) {
 
 // Placeholder rows in the shape of messages (avatar, name, a line), so the
 // list doesn't jump when the real ones arrive.
-const Skeleton = ({ rows }) => html`<${LoadingState} kind="messages" rows=${rows.length} label="Loading earlier messages" cls="older" />`;
+// Skeleton rows shaped like messages. The first load and the older page say which they are.
+const Skeleton = ({ rows, label = 'Loading earlier messages' }) => html`<${LoadingState} kind="messages" rows=${rows.length} label=${label} cls="older" />`;
 
 // What can take focus inside a message. Out of the tab order (one stop per
 // stream); a message's Right and Left arrows walk them, the toolbar first.
@@ -906,7 +910,7 @@ export function Stream({ conv, intro, placeholder, short }) {
     <${UnreadBar} conv=${conv} scroller=${scroller} />
     <div class="scroller" ref=${scroller} onScroll=${onScroll} onKeyDown=${onKey}>
       ${!ready
-        ? html`<div class="msgs"><${Skeleton} rows=${[72, 48, 64, 40, 56]} /></div>`
+        ? html`<div class="msgs"><${Skeleton} rows=${[72, 48, 64, 40, 56]} label="Loading messages" /></div>`
         : html`<div class="msgs" ref=${inner} role="log" aria-label="Messages">
           ${start > 0 || S.more[conv]
             ? (older === 'error' || older === 'fail'

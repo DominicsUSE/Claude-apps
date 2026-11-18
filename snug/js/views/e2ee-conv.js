@@ -78,7 +78,7 @@ export function RoomComposerHint({ conv }) {
   return html`<p class="e2-room-hint hint" role="note"><${Icon} name="unlock" size=${14} /><span class="grow">
       <span class="e2-hint-full">${COPY.roomsNot}</span><span class="e2-hint-short" aria-hidden="true">${COPY.roomsNotShort}</span>
     </span>
-    <button type="button" class="btn sm ghost" onClick=${done}>Got it</button></p>`;
+    <button type="button" class="btn sm ghost e2-hint-ok" data-tip="Got it" onClick=${done}><${Icon} name="x" size=${16} /><span class="e2-ok-label">Got it</span></button></p>`;
 }
 
 /** On a line the server writes (calls, people added or leaving, renames) in an encrypted conversation: it isn't encrypted. */

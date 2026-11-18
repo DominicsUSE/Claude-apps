@@ -191,6 +191,7 @@ export default {
   'composer.messageTo': 'Message {name}',
   'composer.messageShort': 'Message',
   'composer.replyThread': 'Reply in thread',
+  'composer.replyShort': 'Reply',
   'composer.send': 'Send message',
   'composer.sendTip': 'Send',
   'composer.tooLong': 'Send message: too long to send',

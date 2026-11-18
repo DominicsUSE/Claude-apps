@@ -153,10 +153,19 @@ button.pfile-view:focus-visible { outline: 2px solid var(--focus, var(--accent))
 .viewer .ib[disabled] { color: rgb(244 241 237 / 0.35); background: none; }
 .viewer .ib:focus-visible, .vw-nav:focus-visible { outline: var(--focus-w) solid var(--on-media); outline-offset: 1px; }
 .vw-top { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-3); min-height: var(--h-lg); }
-.vw-who { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--s-2); font-size: var(--t-14); }
-.vw-who b { font-weight: var(--w-semibold); }
+/* Name over time, each on one line: a long date never runs under the tools. */
+.vw-who { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; font-size: var(--t-14); line-height: 1.3; }
+.vw-name { display: flex; align-items: baseline; gap: var(--s-2); min-width: 0; }
+.vw-who b { font-weight: var(--w-semibold); min-width: 0; }
+.vw-who b, .vw-who time { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vw-who time { color: rgb(244 241 237 / 0.7); font-size: var(--t-12); }
-.vw-count { margin-left: var(--s-2); font-size: var(--t-12); padding: 0 var(--s-2); border-radius: var(--r-row); background: rgb(255 255 255 / 0.12); }
+/* Phones: the tools keep the top row; who and when get a full row of their own below. */
+@media (max-width: 479px) {
+  .vw-top { flex-wrap: wrap; row-gap: 0; padding: var(--s-1) var(--s-1) var(--s-2); }
+  .vw-tools { margin-left: auto; }
+  .vw-who { order: 2; flex: 1 1 100%; padding: 0 var(--s-2); }
+}
+.vw-count { flex: none; font-size: var(--t-12); padding: 0 var(--s-2); border-radius: var(--r-row); background: rgb(255 255 255 / 0.12); }
 .vw-tools { display: flex; gap: 2px; }
 .vw-stage { position: relative; display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center; min-height: 0; overflow: hidden; padding: var(--s-2) var(--s-12); touch-action: none; }
 /* The whole picture fits the stage: never cropped, never stretched. */

@@ -473,7 +473,7 @@ export function ThreadPane({ tid }) {
         ${!S.ui.phone && html`<button class="ib" aria-label="Close thread" data-tip="Close" data-key="Esc" onClick=${closePane}><${Icon} name="x" /></button>`}
       </div>
     </header>
-    <${Stream} key=${tid} conv=${tid} intro=${intro} placeholder=${t('composer.replyThread')} />
+    <${Stream} key=${tid} conv=${tid} intro=${intro} placeholder=${t('composer.replyThread')} short=${t('composer.replyShort')} />
   </aside>`;
 }
 

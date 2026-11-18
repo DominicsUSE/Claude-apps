@@ -65,6 +65,20 @@ goes back to an older version on its own (README, "Install, update, go back").
   line of its own); the time of the latest reply gives way instead, without the stray "Last".
 - **Touch screens** no longer leave a grey tint on the message you last tapped.
 - **Polls on phones** put the vote count on its own line with the buttons together below it.
+- **The picture viewer on phones** puts its tools on the top row and the sender and date on a row of their own,
+  so a long date no longer runs under the zoom buttons.
+- **Touch targets.** Reactions keep their 36px chips with a 44px touch area on every phone width, and the "4
+  replies" thread link gets a 44px touch area too.
+- **The composer on phones** stops growing at 160px (and shrinks with the keyboard), attachments waiting to
+  send take two short rows at most and then scroll, so the messages keep most of the screen.
+- **Threads on narrow phones** say "Reply" in the composer instead of a cut-off "Reply in threa".
+- **Editing on phones** shows "Editing above" with its cancel button (screen readers hear the whole
+  instruction), and the message being edited scrolls fully into view.
+- **Code blocks** that fit their width are no longer a Tab stop; only ones that scroll sideways are.
+- **Loading** a conversation for the first time is announced as "Loading messages", not "Loading earlier
+  messages".
+- **The room storage note** turns "Got it" into a close button on narrower windows (still named "Got it"),
+  leaving the note more room.
 
 ## 0.14.0
 
