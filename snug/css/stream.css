@@ -22,6 +22,8 @@
 }
 .msg.grouped { margin-top: 0; padding-top: calc(var(--line-gap) + 3px); padding-bottom: calc(var(--line-gap) + 3px); }
 .msg:hover, .msg:focus-within { background: var(--surface-chat-hover); --bg: var(--surface-chat-hover); }
+/* A touch screen has no pointer resting on a row: the tint left by the last tap would stick to it. */
+@media (hover: none) { .msg:hover:not(:focus-within):not(.menu-open):not(.sel):not(.replying):not(.mention) { background: transparent; --bg: inherit; } }
 .msg:focus-visible { outline-offset: -2px; border-radius: 0; }
 .msg.mention { background: var(--mention-bg); --bg: var(--mention-bg); box-shadow: inset 2px 0 0 var(--mention-edge); }
 .msg.mention:hover, .msg.mention:focus-within { background: color-mix(in srgb, var(--mention-bg) 95%, var(--text-1)); --bg: color-mix(in srgb, var(--mention-bg) 95%, var(--text-1)); }
@@ -69,6 +71,8 @@ mark.hit { background: none; color: inherit; font-weight: var(--w-bold); text-de
 .reply-ref:hover { color: var(--text-1); }
 .reply-ref .avatar { --sz: var(--av-2xs); flex: none; }
 .reply-ref b { font-weight: var(--w-semibold); flex: none; color: var(--text-2); }
+.reply-ref .reply-text { min-width: 0; }
+.reply-ref:focus-visible { outline-offset: 1px; }
 .reply-ref:hover b { color: var(--text-1); }
 .msg.has-ref .msg-gutter { grid-row: 2 / span 4; }
 
@@ -77,6 +81,8 @@ mark.hit { background: none; color: inherit; font-weight: var(--w-bold); text-de
    Shift to see Save as well. */
 .msg-actions { position: absolute; right: var(--s-4); top: -18px; display: none; align-items: center; padding: 2px; gap: 0; z-index: 2; border-color: var(--line-subtle); box-shadow: var(--elev-1); }
 .msg:hover .msg-actions, .msg:focus-within .msg-actions, .msg.menu-open .msg-actions { display: flex; }
+/* Walking messages with the keyboard: the pointer's resting row doesn't show a second bar. */
+.msgs:has(.msg:focus-visible, .msg :focus-visible) .msg:hover:not(:focus-within):not(.menu-open) .msg-actions { display: none; }
 .msg-actions .ib { width: var(--h-sm); height: var(--h-sm); border-radius: var(--r-row); }
 .msg-actions .ib:hover { background: var(--surface-hover); }
 .msg-actions .ib.danger:hover { background: var(--error-soft); }
@@ -95,17 +101,35 @@ mark.hit { background: none; color: inherit; font-weight: var(--w-bold); text-de
 .rx.add:hover { color: var(--text-1); background: var(--rx-bg); border-color: var(--line); }
 .msg:not(:hover):not(:focus-within) .rx.add { opacity: 0; }
 @media (hover: none) { .msg .rx.add { opacity: 1 !important; } }
+.rx:focus-visible { outline-offset: 1px; }
+/* Touch: 36px chips that a finger can find; the pressable area reaches 44px. */
+@media (pointer: coarse) {
+  .reactions { gap: var(--s-2); }
+  .rx { position: relative; height: var(--h-36); padding: 0 var(--s-3); }
+  .rx::after { content: ""; position: absolute; inset: -4px 0; }
+  .rx.add { min-width: var(--tap-min); justify-content: center; }
+  /* The thread link stays 28px tall to look at; a finger gets 44px. */
+  .stub::after { content: ""; position: absolute; inset: -8px 0; }
+}
 
 /* Thread stub: the conversation visibly branches from its message. */
 .stub { margin-top: var(--s-1); height: 28px; padding: 0 var(--s-2) 0 var(--s-1); display: inline-flex; align-items: center; gap: var(--s-2); border-radius: var(--r-btn); font-size: var(--t-ui); color: var(--text-2); position: relative; max-width: 100%; transition: background var(--m-hover) var(--ease-in-out), color var(--m-hover) var(--ease-in-out); }
 .stub::before { content: ""; position: absolute; right: calc(100% + var(--s-2)); bottom: 50%; width: calc(var(--avatar) / 2 + var(--s-2) - 2px); height: 20px; border-left: 2px solid var(--line-strong); border-bottom: 2px solid var(--line-strong); border-bottom-left-radius: var(--r-btn); pointer-events: none; }
 .stub:hover { background: var(--surface-hover); color: var(--text-1); }
 .stub .avatar { --sz: var(--av-20); }
+.stub b { flex: none; white-space: nowrap; } /* the count and its unread dot never wrap; the time gives way */
+.stub .faint { min-width: 0; }
 .stub b { font-weight: var(--w-semibold); color: color-mix(in srgb, var(--link) 88%, var(--text-1)); } /* nudged toward the text colour: AA on a hovered or highlighted message too */
 .stub.unread b::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--unread); margin-left: var(--s-2); vertical-align: middle; }
 
 /* Attachments: media at radius 8 within a 420px box; files as one compact row. */
 .files { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-1); }
+/* Two to four pictures in one message: a grid of square tiles, 420px wide at most. */
+.files.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-1); max-width: min(100%, 420px); }
+.files.grid.n3 > :first-child { grid-row: span 2; }
+.files.grid .file-wrap { display: grid; max-width: none; }
+.files.grid .img { width: auto !important; aspect-ratio: 1 / 1 !important; max-width: none; max-height: none; border-radius: var(--r-btn); }
+.files.grid.n3 > :first-child .img, .files.grid.n3 > .img:first-child { aspect-ratio: auto !important; height: 100%; }
 .img { display: block; max-width: min(100%, 420px); max-height: 420px; border-radius: var(--r-media); overflow: hidden; background: var(--surface-hover); cursor: zoom-in; }
 .img img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .file { height: var(--h-lg); padding: 0 var(--s-3) 0 var(--s-2); display: inline-flex; align-items: center; gap: var(--s-2); background: var(--surface-2); border: 1px solid var(--line-subtle); border-radius: var(--r-modal); max-width: min(100%, 420px); text-align: left; transition: border-color var(--m-hover) var(--ease-in-out); }
@@ -113,33 +137,36 @@ mark.hit { background: none; color: inherit; font-weight: var(--w-bold); text-de
 .file-name { font-weight: var(--w-medium); font-size: var(--t-body); line-height: var(--lh-heading); }
 .file-size { font-size: var(--t-meta); color: var(--text-3); line-height: var(--lh-ui); }
 
-.msg-state { margin-top: 2px; font-size: var(--t-meta); color: var(--text-3); display: flex; align-items: center; gap: var(--s-2); }
-.msg-state.failed { color: var(--error); }
-.msg-state button { text-decoration: underline; text-underline-offset: 3px; color: var(--text-1); font-weight: var(--w-medium); border-radius: var(--r-row); }
+.msg-state { margin-top: 2px; font-size: var(--t-meta); color: var(--text-3); display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+.msg-state > .ic { flex: none; }
+.msg-state.failed { color: var(--error); margin-top: var(--s-1); }
+.msg-state-acts { display: inline-flex; gap: var(--s-1); }
+.msg-state-acts .btn { color: var(--text-1); }
+/* A message that didn't send: a red edge, the text dimmed, and the way out under it. */
+.msg.failed { box-shadow: inset 2px 0 0 var(--danger); }
+.msg.failed .msg-text { color: var(--text-2); }
 
 .msg-edit { margin: var(--s-1) 0; }
 .msg-edit textarea { font-size: var(--t-msg); background: var(--surface-2); }
 .msg-edit .hint { font-size: var(--t-meta); margin-top: var(--s-1); }
 
 /* Dividers: a thin line with the day in the middle. */
-.day { display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-4); margin-top: var(--s-4); height: 16px; font-size: var(--t-meta); font-weight: var(--w-semibold); color: var(--text-3); font-variant-numeric: tabular-nums; }
+.day { display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-4); margin-top: var(--s-4); height: 16px; font-size: var(--t-meta); font-weight: var(--w-medium); color: var(--text-3); font-variant-numeric: tabular-nums; }
 .day::before, .day::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .day + .msg { margin-top: var(--s-2); }
 .thread-count { padding: var(--s-3) var(--s-4) 0; padding-left: calc(var(--s-4) + var(--avatar) + var(--s-4)); font-size: var(--t-meta); font-weight: var(--w-semibold); color: var(--text-3); }
 .thread-count + .day { margin-top: var(--s-3); }
-/* Unread separator: a violet line (violet = unread, attention) with a small
-   "New" tag at its end. Brand fill + --on-brand text is 4.5:1+ in every
-   preset. */
-.newline { display: flex; align-items: center; gap: 0; padding: 0 var(--s-4); margin-top: var(--s-3); height: 16px; }
-.newline::before { content: ""; flex: 1; height: 1px; background: var(--brand); }
-.newline span { color: var(--on-brand); background: var(--brand); font-size: var(--t-micro); font-weight: var(--w-bold); letter-spacing: 0.04em; text-transform: uppercase; padding: 0 5px; border-radius: 0 var(--r-row) var(--r-row) 0; line-height: 16px; }
+/* Unread separator: "New" first, where the eye starts reading, then a 1px
+   violet line (violet = unread, attention). Brand fill + --on-brand text is
+   4.5:1+ in every preset. */
+.newline { display: flex; align-items: center; gap: var(--s-2); padding: 0 var(--s-4); margin-top: var(--s-3); height: 18px; }
+.newline::after { content: ""; flex: 1; height: 1px; background: var(--brand); }
+.newline span { flex: none; color: var(--on-brand); background: var(--brand); font-size: var(--t-meta); font-weight: var(--w-semibold); padding: 0 var(--s-2); border-radius: var(--r-row); line-height: 18px; }
 .newline + .msg { margin-top: var(--s-2); }
 .day + .newline { margin-top: var(--s-2); }
-.older { padding: var(--s-4); display: grid; gap: var(--s-4); }
-.older-row { display: grid; grid-template-columns: var(--avatar) 1fr; gap: var(--s-4); }
-.older-row .skel:first-child { height: var(--avatar); border-radius: 50%; }
-.older-row .skel:last-child { height: 14px; margin-top: 4px; max-width: 60%; }
-.older-row:nth-child(2n) .skel:last-child { max-width: 82%; }
+/* Earlier messages loading: rows in the messages' own shape (kit LoadingState). */
+.ui-loading.older .ui-skel-msg { gap: var(--s-4); }
+.ui-loading.older .ui-skel-msg > .skel.circle { width: var(--avatar) !important; height: var(--avatar) !important; flex: none; }
 .older-msg { padding: var(--s-3) var(--s-4); font-size: var(--t-meta); color: var(--text-3); text-align: center; }
 /* The start of a conversation: a 56px mark, a 20px heading, one line. */
 .start { padding: var(--s-6) var(--s-4) var(--s-2); display: grid; gap: var(--s-2); max-width: 46rem; justify-items: start; }
@@ -149,14 +176,15 @@ mark.hit { background: none; color: inherit; font-weight: var(--w-bold); text-de
 .start p { color: var(--text-2); font-size: var(--t-body); line-height: var(--lh-body); }
 .start .acts { display: flex; gap: var(--s-2); margin-top: var(--s-1); flex-wrap: wrap; }
 
-/* Reading older messages: a bar attached to the top of the composer. */
+/* Reading older messages: a pill floating just above the composer, with the
+   count of new messages and the way back to the latest. */
 .jump-wrap { position: relative; height: 0; padding: 0 var(--s-4); z-index: 3; }
-.jump-bar { position: absolute; left: var(--s-4); right: var(--s-4); bottom: 0; height: var(--h-sm); padding: 0 var(--s-1) 0 var(--s-3); display: flex; align-items: center; gap: var(--s-2); background: var(--surface-sel); color: var(--text-2); border-radius: var(--r-input) var(--r-input) 0 0; font-size: var(--t-ui); animation: rise-in var(--m-control) var(--ease-out); }
+.jump-bar { position: absolute; left: var(--s-4); right: var(--s-4); bottom: var(--s-2); height: var(--h-sm); padding: 0 var(--s-1) 0 var(--s-3); display: flex; align-items: center; gap: var(--s-2); background: var(--surface-float); color: var(--text-2); border: 1px solid var(--line); border-radius: var(--r-input); box-shadow: var(--elev-2); font-size: var(--t-ui); animation: rise-in var(--m-control) var(--ease-out); }
 .jump-bar .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jump-bar.has-new { background: var(--brand-soft); border-color: var(--mention-edge); }
 .jump-bar.has-new .grow { color: var(--text-1); font-weight: var(--w-semibold); }
 .jump { height: var(--h-xs); padding: 0 var(--s-2); display: inline-flex; align-items: center; gap: var(--s-1); flex: none; border-radius: var(--r-row); color: var(--text-1); font-size: var(--t-ui); font-weight: var(--w-semibold); transition: background var(--m-hover) var(--ease-in-out); }
 .jump:hover { background: var(--surface-hover); }
-.stream.reading-old .composer-box { border-top-left-radius: 0; border-top-right-radius: 0; }
 
 /* Composer: one bar (radius 8, the secondary surface). + on the left opens
    attach, poll, sticker, time and schedule; the text; then GIF, emoji, voice
@@ -175,16 +203,60 @@ mark.hit { background: none; color: inherit; font-weight: var(--w-bold); text-de
 .composer .send:hover { background: var(--brand-hover); color: var(--on-brand); }
 .composer .send:active { background: var(--brand-press); }
 .composer-row > .ib.send[disabled] { display: none; } /* Send shows once there is something to send; Enter sends either way */
+/* Phones: once Send is showing, the voice-message button steps aside so the text keeps its room. */
+@media (max-width: 759px) { .composer-row:has(> .ib.send:not([disabled])) > .ib.mic:not(.on) { display: none; } }
 /* The reply / edit / long-paste strip: attached above the text, quieter surface. */
 .composer-banner { display: flex; align-items: center; gap: var(--s-2); min-height: 32px; padding: 0 var(--s-1) 0 var(--s-3); background: var(--surface-hover); border-radius: calc(var(--r-input) - 1px) calc(var(--r-input) - 1px) 0 0; font-size: var(--t-ui); color: var(--text-2); min-width: 0; }
 .composer-banner + .composer-banner { border-radius: 0; border-top: 1px solid var(--line-subtle); }
 .composer-banner > .ic { color: var(--text-3); flex: none; }
 .composer-banner b { font-weight: var(--w-semibold); color: var(--text-1); }
+.composer-banner .reply-text { color: var(--text-3); }
+/* Editing a message above: this box steps back and says so. */
+.composer.waiting .composer-row .ib { opacity: 0.6; } /* the buttons step back; the placeholder keeps its contrast */
+.composer-banner.editing-note > .ic { color: var(--text-2); }
+.editing-note .edit-short { display: none; }
+@media (max-width: 479px) { /* phones: two words and the cancel button; the full sentence stays for screen readers */
+  .editing-note .edit-long { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .editing-note .edit-short { display: inline; }
+}
+/* The room's storage note: one quiet line above the box, outside it, so the
+   box stays the same height and the messages above stay in view. */
+.composer > .e2-room-hint { margin: 0 0 var(--s-1); padding: 0 0 0 var(--s-1); min-height: var(--h-sm); font-size: var(--t-meta); line-height: var(--lh-ui); color: var(--text-2); }
+.composer > .e2-room-hint > .ic { flex: none; color: var(--text-3); }
+.composer > .e2-room-hint .btn { flex: none; color: var(--text-1); }
+.e2-hint-ok > .ic { display: none; }
+/* Narrow main column: the short note keeps one line; "Got it" becomes a close
+   button whose name is still "Got it". */
+@media (max-width: 899px) {
+  .composer > .e2-room-hint .e2-hint-ok { width: var(--h-sm); padding: 0; justify-content: center; }
+  .e2-hint-ok > .ic { display: block; }
+  .e2-hint-ok .e2-ok-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+@media (max-width: 899px) and (pointer: coarse) { .composer > .e2-room-hint .e2-hint-ok { width: var(--tap-min); height: var(--tap-min); } }
+.e2-hint-short { display: none; }
+/* Below desktop width, or beside a thread or people pane, the whole sentence
+   would take two or three lines: the short form shows. */
+:root:has(.pane) .composer > .e2-room-hint .e2-hint-full { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+:root:has(.pane) .composer > .e2-room-hint .e2-hint-short { display: inline; }
+@media (max-width: 1179px) {
+  .composer > .e2-room-hint .e2-hint-full { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .e2-hint-short { display: inline; }
+}
 .composer-files { display: flex; gap: var(--s-2); padding: var(--s-2) var(--s-2) 0; flex-wrap: wrap; }
 .pending-file { position: relative; height: 56px; background: var(--surface-chat); border: 1px solid var(--line); border-radius: var(--r-modal); display: flex; align-items: center; gap: var(--s-2); padding-right: var(--s-6); overflow: hidden; max-width: 220px; }
 .pending-file img { height: 56px; width: 56px; object-fit: cover; }
 .pending-file .ic { margin-left: var(--s-2); color: var(--text-2); }
 .pending-file .ib { position: absolute; right: 2px; top: 2px; }
+/* Touch: each attachment gets its own row, so the name reads and both 44px
+   buttons sit side by side instead of on top of each other. */
+@media (pointer: coarse) {
+  .pending-file { flex: 1 1 100%; max-width: none; padding-right: 0; height: 48px; }
+  .pending-file img { height: 48px; width: 48px; }
+  .pending-file .pending-name { flex: 1; }
+  .pending-file .ib, .pending-file .pf-edit { position: static; flex: none; }
+  /* Two rows of files at most before they scroll: the messages keep the screen. */
+  .composer-files { max-height: 112px; overflow-y: auto; overscroll-behavior: contain; }
+}
 .pending-name { display: grid; min-width: 0; line-height: var(--lh-ui); font-size: var(--t-ui); }
 .pending-state { font-size: var(--t-meta); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pending-state.bad { color: var(--error); }
@@ -246,13 +318,14 @@ a.file:hover { border-color: var(--line-strong); }
   .jump-bar { left: var(--s-2); right: var(--s-2); height: var(--touch); }
   .jump { height: 36px; }
   .composer { padding: 0 var(--s-2); }
-  .composer textarea { font-size: var(--t-input-touch); }
+  .composer textarea { font-size: var(--t-input-touch); max-height: min(40dvh, 160px); } /* dvh: shrinks with the on-screen keyboard */
   .foot { padding: 0 var(--s-3); padding-bottom: env(safe-area-inset-bottom, 0px); height: calc(24px + env(safe-area-inset-bottom, 0px)); }
   .day, .newline { padding: 0 var(--s-3); }
   .ac { left: var(--s-2); right: var(--s-2); max-width: none; }
   .lightbox { padding: var(--s-2); }
-  .rx { height: 32px; padding: 0 var(--s-3); }
 }
+/* A narrow window with a mouse: a little more room per chip. Touch keeps the 36px chips set above. */
+@media (max-width: 759px) and (pointer: fine) { .rx { height: 32px; padding: 0 var(--s-3); } }
 
 /* While a popover (a profile card, a picker) is open, hover toolbars on other
    rows stay hidden, so nothing stale floats beside it. */

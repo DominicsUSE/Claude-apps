@@ -138,8 +138,11 @@ export function Viewer({ lb }) {
   return html`<div class=${`viewer${reduced() ? ' still' : ''}`} ref=${ref} role="dialog" aria-modal="true" aria-label=${label} onKeyDown=${onKey}>
     <div class="vw-top">
       <div class="vw-who">
-        ${author && html`<b>${author.name}</b><time datetime=${new Date(it.ts).toISOString()}>${fmtFull(it.ts)}</time>`}
-        ${many && html`<span class="vw-count" aria-live="polite">${i + 1} of ${list.length}</span>`}
+        <span class="vw-name">
+          ${author && html`<b>${author.name}</b>`}
+          ${many && html`<span class="vw-count" aria-live="polite">${i + 1} of ${list.length}</span>`}
+        </span>
+        ${author && html`<time datetime=${new Date(it.ts).toISOString()}>${fmtFull(it.ts)}</time>`}
       </div>
       <div class="vw-tools">
         ${it.kind === 'image' && html`

@@ -15,7 +15,7 @@ import { roomIds, isThread } from '../lib/attention.js';
 import { fmtWhen, fmtFull, fmtTime, plural, fuzzy } from '../lib/util.js';
 import { fmtStamp, STAMP_STYLES } from '../lib/format.js';
 import { Icon } from '../ui/icons.js';
-import { Avatar, Rich, Switch } from '../ui/kit.js';
+import { Avatar, Rich, Switch, LoadingState } from '../ui/kit.js';
 import { EmojiPicker } from './emoji.js';
 import { t } from '../lib/i18n.js'; // words in the chosen language (js/locales)
 
@@ -324,7 +324,7 @@ function EditHistory({ conv, m }) {
     <h2>Edit history</h2>
     <p class="modal-lead">The last ten versions of this message, newest first. Everyone who can read it can see these.</p>
     <div class="edits" aria-busy=${String(!state)}>
-      ${!state ? html`<div class="older"><div class="older-row"><div class="skel"></div><div class="skel" style="width:64%"></div></div></div>`
+      ${!state ? html`<${LoadingState} kind="lines" rows=${2} label="Loading edit history" />`
         : state.error ? html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${state.error}</div>`
           : html`
             <div class="edit-v now"><span class="edit-when">Now · ${fmtFull(state.current.ts)}</span><div class="msg-text"><${Rich} text=${state.current.text} /></div></div>

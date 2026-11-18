@@ -345,7 +345,7 @@ function Intro({ conv, meta }) {
       <div class="start">
         <span class="start-mark" aria-hidden="true"><${RoomIcon} kind=${meta.kind} size=${28} /></span>
         <h2>${meta.title}</h2>
-        <p>${meta.topic ? `${meta.topic}. ` : ''}${empty ? 'Nothing has been said here yet.' : `This is where ${meta.title} begins.`}</p>
+        <p>${meta.topic ? `${meta.topic}. ` : ''}${empty ? 'Nothing has been said here yet. Start the conversation below.' : `This is where ${meta.title} begins.`}</p>
         ${empty && (can(S, meta.house, 'invite') || can(S, meta.house, 'rooms')) && html`<div class="acts">
           ${can(S, meta.house, 'invite') && html`<button class="btn primary" onClick=${() => openModal(Invite, { house: meta.house })}><${Icon} name="user-plus" size=${16} />Invite people</button>`}
           ${can(S, meta.house, 'rooms') && html`<button class="btn" onClick=${() => openModal(RoomForm, { room: conv })}><${Icon} name="edit" size=${16} />Edit room</button>`}
@@ -358,7 +358,7 @@ function Intro({ conv, meta }) {
     <h2>${meta.title}</h2>
     <p>${meta.user
       ? `This is the start of your conversation with ${meta.user.name.split(' ')[0]}. Only the two of you are in it.`
-      : `A group of ${meta.dm.members.length}. Only the people in it can see it here.`}</p>
+      : `A group of ${meta.dm.members.length}. Only the people in it can see it here.`}${empty ? ' Say hello to start the conversation.' : ''}</p>
   </div>`;
 }
 
@@ -447,7 +447,7 @@ export function Conversation({ conv }) {
     ${meta.dm && html`<${RequestBanner} conv=${conv} />`}
     ${meta.dm && html`<${KeyBanner} conv=${conv} />`}
     ${meta.kind === 'forum' ? html`<${ForumView} key=${conv} conv=${conv} />` : html`<${Stream} key=${conv} conv=${conv} intro=${html`<${Intro} conv=${conv} meta=${meta} />`}
-      placeholder=${t('composer.messageTo', { name: meta.user ? first : `${meta.room && meta.kind === 'text' ? '#' : ''}${meta.title}` })} />`}
+      placeholder=${t('composer.messageTo', { name: meta.user ? first : `${meta.room && meta.kind === 'text' ? '#' : ''}${meta.title}` })} short=${t('composer.messageShort')} />`}
   </section>`;
 }
 
@@ -473,7 +473,7 @@ export function ThreadPane({ tid }) {
         ${!S.ui.phone && html`<button class="ib" aria-label="Close thread" data-tip="Close" data-key="Esc" onClick=${closePane}><${Icon} name="x" /></button>`}
       </div>
     </header>
-    <${Stream} key=${tid} conv=${tid} intro=${intro} placeholder=${t('composer.replyThread')} />
+    <${Stream} key=${tid} conv=${tid} intro=${intro} placeholder=${t('composer.replyThread')} short=${t('composer.replyShort')} />
   </aside>`;
 }
 

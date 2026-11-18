@@ -8,7 +8,7 @@ import { parseQuery, runSearch, setOp, isEmptyQuery } from '../lib/search.js';
 import { attention, isThread, roomIds } from '../lib/attention.js';
 import { fmtWhen, plural, fuzzy } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
-import { Avatar, Tile, RoomIcon, Rich, Empty } from '../ui/kit.js';
+import { Avatar, Tile, RoomIcon, Rich, Empty, LoadingState } from '../ui/kit.js';
 import { Settings } from './settings.js';
 import { searchMessages, api } from '../server.js';
 import { quickInvite } from '../lib/onboarding.js'; // a pasted invitation
@@ -159,7 +159,7 @@ export function Search() {
             ${examples().map(([ex, what]) => html`<button class="op" key=${ex} onClick=${() => { set(ex); input.current.focus(); }}><code>${ex}</code><span>${what}</span></button>`)}
           </div>`
         : loading && !hits.length
-          ? html`<div class="col" aria-busy="true"><div class="older">${[64, 48, 72].map((w) => html`<div class="older-row"><div class="skel"></div><div class="skel" style=${`width:${w}%`}></div></div>`)}</div></div>`
+          ? html`<div class="col"><${LoadingState} kind="messages" rows=${3} label="Searching" cls="older" /></div>`
         : res.error
           ? html`<${Empty} icon="alert" title="Search didn\u2019t work" text=${res.error} />`
         : !hits.length
@@ -175,16 +175,30 @@ export function Search() {
                 if (!meta || !who) return null;
                 return html`<div class="item" key=${m.id}>
                   <${Avatar} user=${who} />
-                  <button class="item-main" onClick=${() => jumpToMsg(conv, m.id)}>
+                  <div class="item-main hit-main" onClick=${(e) => openHit(e, conv, m)}>
+                    <${HitOpen} conv=${conv} m=${m} who=${who} meta=${meta} />
                     <span class="item-meta"><b>${who.name}</b><span class="where">${isThread(conv) ? `thread in ${meta.where}` : meta.title}</span><span class="num">${fmtWhen(m.ts)}</span></span>
                     <span class="item-text"><${Rich} m=${m} hl=${p.terms} /></span>
                     ${m.files?.length > 0 && html`<span class="item-meta"><${Icon} name="clip" size=${14} />${m.files.map((f) => f.name).join(', ')}</span>`}
-                  </button>
+                  </div>
                 </div>`;
               })}
             </div>`}
     </div>
   </section>`;
+}
+
+// A result opens its message. The button covers the whole result but holds no
+// text of its own, so links and mentions in the message aren't nested inside a
+// button (axe nested-interactive); its name says whose message and where. It is
+// for the keyboard: a click anywhere on the result (but a link in it) opens it too.
+function openHit(e, conv, m) {
+  if (e.target.closest('a, button:not(.hit-open), [role="button"]')) return;
+  jumpToMsg(conv, m.id);
+}
+function HitOpen({ conv, m, who, meta }) {
+  const where = isThread(conv) ? `a thread in ${meta.where}` : meta.title;
+  return html`<button class="hit-open" aria-label=${`Open ${who.name}’s message in ${where}, ${fmtWhen(m.ts)}`}></button>`; // its click reaches the result (openHit)
 }
 
 // End-to-end encrypted conversations: the server can't search them, so this device does,
@@ -201,10 +215,11 @@ function EncryptedHits({ p, q }) {
       if (!meta || !who) return null;
       return html`<div class="item" key=${`e-${m.id}`}>
         <${Avatar} user=${who} />
-        <button class="item-main" onClick=${() => jumpToMsg(conv, m.id)}>
+        <div class="item-main hit-main" onClick=${(e) => openHit(e, conv, m)}>
+          <${HitOpen} conv=${conv} m=${m} who=${who} meta=${meta} />
           <span class="item-meta"><b>${who.name}</b><span class="where">${isThread(conv) ? `thread in ${meta.where}` : meta.title}</span><span class="num">${fmtWhen(m.ts)}</span></span>
           <span class="item-text"><${Rich} m=${m} hl=${p.terms} /></span>
-        </button>
+        </div>
       </div>`;
     })}
     ${!hits.length && html`<p class="sub">Nothing here among the encrypted messages on this device.</p>`}

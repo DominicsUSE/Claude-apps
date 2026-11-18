@@ -73,8 +73,12 @@ export function RoomComposerHint({ conv }) {
   const [gone, setGone] = useState(hintGone);
   if (gone || !S.rooms[conv] || (E2.status === 'off' && !E2.on)) return null;
   const done = () => { try { localStorage.setItem(ROOM_HINT, '1'); } catch { /* storage off: gone for now */ } setGone(true); };
-  return html`<p class="e2-room-hint hint" role="note"><${Icon} name="unlock" size=${12} /><span class="grow">${COPY.roomsNot}</span>
-    <button type="button" class="btn sm ghost" onClick=${done}>Got it</button></p>`;
+  // One line above the composer. A narrow screen shows the short form; the whole
+  // sentence is still read out, and is in the room's Details.
+  return html`<p class="e2-room-hint hint" role="note"><${Icon} name="unlock" size=${14} /><span class="grow">
+      <span class="e2-hint-full">${COPY.roomsNot}</span><span class="e2-hint-short" aria-hidden="true">${COPY.roomsNotShort}</span>
+    </span>
+    <button type="button" class="btn sm ghost e2-hint-ok" data-tip="Got it" onClick=${done}><${Icon} name="x" size=${16} /><span class="e2-ok-label">Got it</span></button></p>`;
 }
 
 /** On a line the server writes (calls, people added or leaving, renames) in an encrypted conversation: it isn't encrypted. */
