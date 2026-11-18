@@ -3,7 +3,7 @@
 // and a few places you might like. Everything comes from real state; nothing
 // is filler. Rows, not cards: hierarchy comes from type and spacing.
 import { html, useEffect, useState } from '../../vendor/preact-htm.js';
-import { S, me, go, back, openConv, openModal, convMeta, isOnline, voiceRoomOf, discover, person } from '../store.js';
+import { S, me, go, back, openConv, openModal, openQuick, convMeta, isOnline, voiceRoomOf, discover, person } from '../store.js';
 import { attention, houseAttention } from '../lib/attention.js';
 import { friendsOnline, friendsList, friendRequests, activeConversations, liveVoice, upcomingEvents, eventState, greeting, wroteLately, summaryLine } from '../lib/social.js';
 import { gather } from './catchup.js';
@@ -282,6 +282,7 @@ export function Home() {
       ${S.ui.phone && S.ui.depth > 0 && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`}
       <h1 class="bar-title"><${Icon} name="house" />${t('nav.home')}</h1>
       <div class="bar-end">
+        ${S.ui.phone && html`<button class="ib" aria-label="Jump to or search" onClick=${() => openQuick()}><${Icon} name="search" /></button>`}
         <button class="btn quiet" onClick=${() => go({ type: 'friends', tab: 'add' })}><${Icon} name="user-plus" size=${16} />${t('home.addFriend')}</button>
       </div>
     </header>

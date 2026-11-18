@@ -20,7 +20,7 @@ import { friendRequests } from './lib/social.js';
 import { Icon } from './ui/icons.js';
 import { Avatar, Pres, Tile, Empty, presenceLabel } from './ui/kit.js';
 import { Menu, Pop, ModalFrame, Toasts, Lightbox, initTooltips } from './ui/overlays.js';
-import { Nav, NavDirect, HouseRooms, LiveDock, houseMenu, syncSpace, goBack, contextPlaces, dmAttention, homeNeeds, PhoneDrawer, closeDrawer, ctxShut, closePeek, ShellSkeleton } from './views/nav.js';
+import { Nav, NavDirect, HouseRooms, LiveDock, houseMenu, syncSpace, goBack, contextPlaces, dmAttention, homeNeeds, PhoneDrawer, closeDrawer, ctxShut, closePeek, ShellSkeleton, HouseMeta } from './views/nav.js';
 import { Conversation, ThreadPane, DetailsPane } from './views/conversation.js';
 import { PinsPane } from './views/media.js'; // pinned messages
 import { PeoplePane, MePop, peopleWanted } from './views/people.js';
@@ -72,10 +72,14 @@ function MessagesEmpty() {
 function PhoneHouse({ id }) {
   const h = S.houses[id];
   if (!h?.joined) return html`<${HousePage} id=${id} />`;
+  // Where am I: who is around and how many live here, under the name, as the desktop header has it.
   return html`<section class="main view phone-house" aria-label=${h.name}>
     <header class="bar">
       <button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>
-      <h1 class="bar-title"><${Tile} house=${h} /><span class="trunc">${h.name}</span></h1>
+      <h1 class="bar-title"><${Tile} house=${h} /><span class="ph-house-t">
+        <span class="trunc">${h.name}</span>
+        <${HouseMeta} h=${h} cls="ph-house-meta" />
+      </span></h1>
       <div class="bar-end">
         ${can(S, id, 'invite') && html`<button class="ib" aria-label=${t('nav.inviteTo', { house: h.name })} onClick=${() => openModal(Invite, { house: id })}><${Icon} name="user-plus" /></button>`}
         <button class="ib" aria-label=${`${h.name} menu`} onClick=${(e) => houseMenu(id, { anchor: rectOf(e) })}><${Icon} name="more" /></button>

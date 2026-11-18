@@ -108,13 +108,16 @@ export function Invite({ house, fresh }) {
   const field = useRef();
   useLayoutEffect(() => { if (link && field.current) field.current.scrollLeft = field.current.scrollWidth; }, [link]);
   const code = link ? link.split('/join/')[1] : '';
+  // On an address only this computer or network can open (127.x, a LAN address) the field
+  // shows just the invitation's part, not the address; Copy still copies the whole link.
+  const shown = link && localOnly(location.hostname) ? `/join/${code}` : link;
   return html`
     <h2>${fresh ? t('invite.ready', { house: h.name }) : t('invite.title', { house: h.name })}</h2>
     <p class="modal-lead">${fresh
       ? t('invite.leadFresh', { role: as })
       : t('invite.lead', { role: as, count: h.starter.length })}</p>
     <div class="copy-row invite-copy">
-      <input ref=${field} class="field" readonly value=${link || (linkError ? '' : t('invite.making'))} aria-label=${t('invite.link')} aria-describedby=${code ? 'invite-code' : undefined} onFocus=${(e) => e.target.select()} />
+      <input ref=${field} class="field" readonly value=${shown || (linkError ? '' : t('invite.making'))} data-link=${link || undefined} aria-label=${t('invite.link')} aria-describedby=${code ? 'invite-code' : undefined} onFocus=${(e) => e.target.select()} />
       <button class="btn primary" data-autofocus disabled=${!link} aria-busy=${!link && !linkError ? 'true' : undefined} onClick=${() => copyText(link)}><${Icon} name="copy" size=${16} />${t('invite.copy')}</button>
     </div>
     ${code && html`<p class="hint invite-code" id="invite-code">${t('invite.codeIs')} <b>${code}</b>. ${t('invite.codeHint')}</p>`}

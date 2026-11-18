@@ -11,10 +11,10 @@ import { Icon } from '../ui/icons.js';
 import { Avatar, Tile, RoomIcon, Rich, Empty } from '../ui/kit.js';
 import { Settings } from './settings.js';
 import { searchMessages, api } from '../server.js';
-import { quickInvite, inviteWhy } from '../lib/onboarding.js'; // a pasted invitation, and why one doesn't work
+import { quickInvite } from '../lib/onboarding.js'; // a pasted invitation
 import { t } from '../lib/i18n.js';
 import { openHouse } from './nav.js';
-import { AddHouse } from './modals.js'; // the switcher's "Start a house or join one"
+import { AddHouse, JoinByLink } from './modals.js'; // the switcher's "Start a house or join one"
 import { THEME_ACTIONS } from './appearance.js'; // themes by name
 import { ACCOUNT_ACTIONS } from './account.js'; // mute, mark read, themes, presence, status, streamer mode, shortcuts
 import { withRecent } from '../account.js'; // recent places come first
@@ -278,7 +278,8 @@ function candidates(q) {
 function joinFromQuick(code) {
   api(`/api/invite/${encodeURIComponent(code)}`).then(
     () => joinByCode(code).catch((e) => toast(e.offline ? t('common.offline') : e.message)),
-    (e) => toast(e.status === 404 ? inviteWhy(e.data?.reason) : e.offline ? t('common.offline') : e.message),
+    // A dead invitation gets the same dialog opening its link does: what went wrong, and Paste another link.
+    (e) => (e.status === 404 ? openModal(JoinByLink, { code }) : toast(e.offline ? t('common.offline') : e.message)),
   );
 }
 

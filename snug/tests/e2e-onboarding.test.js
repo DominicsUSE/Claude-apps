@@ -186,7 +186,11 @@ test('the plus: Start a house offers the invite link at once; Join with an invit
     // Straight to inviting, in plain words, with the link to copy.
     await robin.locator('.modal h2:text-is("Night bakers is ready")').waitFor();
     await robin.waitForFunction(() => /\/join\//.test(document.querySelector('.modal .copy-row input')?.value || ''));
-    const link = await robin.locator('.modal .copy-row input').first().inputValue();
+    // The field shows the invitation's part, not this computer's address; the whole link is what Copy copies.
+    const shown = await robin.locator('.modal .copy-row input').first().inputValue();
+    assert.ok(!/127\.0\.0\.1|localhost/.test(shown), `the field shows no local address: ${shown}`);
+    const link = await robin.locator('.modal .copy-row input').first().getAttribute('data-link');
+    assert.ok(link.endsWith(shown), 'Copy copies the whole link the field ends with');
     await robin.locator('.modal button:has-text("Copy link")').waitFor();
     // 127.0.0.1 only works on this computer: the dialog says so.
     await robin.locator('.modal .local-address:has-text("only works on this computer")').waitFor();
@@ -275,8 +279,12 @@ test('the quick switcher: paste an invitation link, press Enter, land in the hou
     assert.match(await row.textContent(), /Join with this invitation/);
     assert.equal(await row.getAttribute('aria-selected'), 'true', 'first, and picked');
     await bex.keyboard.press('Enter');
-    await bex.locator('.toast:has-text("turned it off")').waitFor();
+    // The same dialog opening the link gets: what went wrong, and the next step.
+    await bex.locator('.modal .join-bad:has-text("turned it off")').waitFor();
+    await bex.locator('.modal button:has-text("Paste another link")').waitFor();
     assert.equal(await bex.locator('.rail-house:has-text("Kiln & Co.")').count(), 0);
+    await bex.click('.modal button:has-text("Close")');
+    await bex.locator('.modal').waitFor({ state: 'detached' });
     // The working link.
     await bex.keyboard.press('Control+k');
     await bex.locator('.quick input').fill(`${url}/join/${code}`);

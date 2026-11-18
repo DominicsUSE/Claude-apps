@@ -295,7 +295,7 @@ test('a new account joins by link as a newcomer, and the house opens after a fir
   await robin.click('.rail-house:has-text("Kiln & Co.")', { button: 'right' });
   await robin.click('.menu-item:has-text("Invite people")');
   await robin.waitForFunction(() => /\/join\//.test(document.querySelector('.copy-row input')?.value || ''));
-  const link = await robin.locator('.copy-row input').first().inputValue();
+  const link = await robin.locator('.copy-row input').first().getAttribute('data-link'); // the field itself shows only /join/<code> on 127.0.0.1
   await robin.keyboard.press('Escape');
 
   const dana = await person(null, { path: new URL(link).pathname });

@@ -172,10 +172,11 @@
 }
 .home-main, .home-side { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap-major); align-content: start; }
 .home-sect { min-width: 0; }
-/* One column: who is around comes first, then the rest in reading order. */
+/* One column: who is online now comes first, then the rest in reading order
+   (Recently here stays after the conversations going, so they are not pushed below the fold). */
 @container (max-width: 819px) {
   .home-main, .home-side { display: contents; }
-  .home-sect[aria-labelledby="home-friends"], .home-sect[aria-labelledby="home-recent"] { order: -1; }
+  .home-sect[aria-labelledby="home-friends"] { order: -1; }
 }
 
 .home-h { display: flex; align-items: center; gap: var(--s-2); height: var(--h-xs); margin-bottom: var(--s-1); }
@@ -312,6 +313,9 @@ button.home-row:hover .home-row-ic:not(:has(> .avatar, > .tile)) { background: v
 .you-tab .dock { margin: 0; }
 .phone-house .bar-title .tile { --sz: 28px; }
 .phone-house .nav-scroll { padding-top: var(--s-2); }
+.ph-house-t { display: flex; flex-direction: column; min-width: 0; line-height: 22px; }
+.ph-house-meta { white-space: nowrap; overflow: hidden; min-width: 0; letter-spacing: 0; }
+.ph-house-meta > .num { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- Catch up and Search (views owned by the nav agent) ----------
    Rows separated by spacing and hover, not rules; violet marks what is for you. */
@@ -348,6 +352,8 @@ button.home-row:hover .home-row-ic:not(:has(> .avatar, > .tile)) { background: v
 .ctx-house-head .ctx-meta { white-space: nowrap; overflow: hidden; min-width: 0; }
 .ctx-house-head .ctx-meta > .ctx-online { flex: none; }
 .ctx-house-head .ctx-meta > .num { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ctx-meta.has-online { gap: var(--s-1); }
+.ctx-online .pres.inline { margin-right: 4px; }
 
 /* ---------- Room marks: private, muted, favourites ---------- */
 .row-mark { display: inline-grid; place-items: center; color: var(--text-3); }

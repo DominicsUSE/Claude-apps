@@ -246,10 +246,11 @@ function MemberPage({ id, events }) {
   const voice = roomIds(S, id).reduce((n, r) => n + (S.voice[r] || []).length, 0);
   const owner = can(S, id, 'roles');
   const settings = () => openLayer({ C: HouseSettings, props: { house: id } });
+  const more = html`<button class="ib" aria-label=${`${h.name} menu`} aria-haspopup="menu" data-tip="More" onClick=${(e) => houseMenu(id, { anchor: rectOf(e) })}><${Icon} name="more" /></button>`;
   const actions = html`
     ${can(S, id, 'invite') && html`<button class="ib" aria-label=${`Invite people to ${h.name}`} data-tip="Invite people" onClick=${() => openModal(Invite, { house: id })}><${Icon} name="user-plus" /></button>`}
     ${owner && html`<button class="ib" aria-label="House settings" data-tip="House settings" onClick=${settings}><${Icon} name="sliders" /></button>`}
-    <button class="ib" aria-label=${`${h.name} menu`} aria-haspopup="menu" data-tip="More" onClick=${(e) => houseMenu(id, { anchor: rectOf(e) })}><${Icon} name="more" /></button>`;
+    ${more}`;
 
   if (events) {
     return html`<section class="main view pl-page" aria-label=${`Events in ${h.name}`}>
@@ -263,7 +264,7 @@ function MemberPage({ id, events }) {
   }
 
   return html`<section class="main view pl-page" aria-label=${h.name}>
-    <${Bar} title=${html`<${Icon} name="house" />About`} house=${h}>${actions}<//>
+    <${Bar} title=${html`<${Icon} name="house" />About`} house=${h}>${more}<//>
     <div class="view-body">
       <${Band} house=${h} topic=${h.topic} isPublic=${h.public} here=${here} voice=${voice} members=${members.length} member>
         ${can(S, id, 'invite') && html`<button class="btn" onClick=${() => openModal(Invite, { house: id })}><${Icon} name="user-plus" size=${16} />Invite people</button>`}

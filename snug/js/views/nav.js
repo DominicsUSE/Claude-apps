@@ -367,14 +367,15 @@ function pickPeek(sp) {
 
 // The rail's foot: the fold button, and while folded what the column's
 // bottom panel holds (you, your settings, and the call you are in).
-function RailFoot({ shut }) {
+// While the sidebar peeks open, its own bottom panel shows you and Settings: the rail does not repeat them.
+function RailFoot({ shut, peek }) {
   const u = isOnline() ? me() : { ...me(), presence: 'offline' };
   const c = S.call;
   const muted = c ? !!c.muted : !!(pre.muted || pre.deaf);
   return html`<div class="rail-foot">
     ${shut && c && html`<button class="ib rail-call" aria-label=${t('nav.backToCall')} data-tip=${t('nav.backToCall')} data-tip-side="right" onClick=${() => openConv(c.room)}><${Icon} name="voice" /></button>
       <button class=${`ib${muted ? ' alert' : ''}`} aria-pressed=${String(muted)} aria-label=${t('nav.muteMic')} data-tip=${muted ? t('nav.unmute') : t('nav.mute')} data-tip-side="right" onClick=${panelMic}><${Icon} name=${muted ? 'mic-off' : 'mic'} /></button>`}
-    ${shut && html`<button class="rail-me" aria-label=${`${u.name}, ${presenceLabel(u)}. Change presence and status`} data-tip=${u.name} data-tip-side="right"
+    ${shut && !peek && html`<button class="rail-me" aria-label=${`${u.name}, ${presenceLabel(u)}. Change presence and status`} data-tip=${u.name} data-tip-side="right"
         onClick=${(e) => openPop({ anchor: rectOf(e), label: 'Presence and status', C: MePop, props: {} })}><${Avatar} user=${u} presence size=${32} /></button>
       <button class="ib" aria-label=${t('nav.settings')} data-tip=${t('nav.settings')} data-tip-side="right" onClick=${() => openLayer({ C: Settings, props: {} })}><${Icon} name="gear" /></button>`}
     <button class="ib rail-fold" aria-expanded=${String(!shut)} aria-label=${t('nav.sidebar')} data-tip=${shut ? t('nav.showSidebar') : t('nav.hideSidebar')} data-tip-side="right" onClick=${toggleCtx}>
@@ -657,17 +658,27 @@ export function HouseRooms({ id }) {
       line="Read them now. They join this list once you post." onClick=${() => openModal(RoomBrowser, { house: id })} /></div>`}`;
 }
 
-function HouseHead({ id }) {
-  const h = S.houses[id];
+// Under a house's name, on the desktop header and the phone's house screen.
+// Nobody else around: the member count alone ("Just you" crowded the buttons beside it).
+// Someone online: "● 2 online · 10", the full wording in the tooltip, so it fits beside Invite and Settings.
+export function HouseMeta({ h, cls = '' }) {
   const members = Object.keys(h.members || {}).length;
   const online = onlineIn(h);
-  // Nobody else around: the member count alone ("Just you" crowded the buttons beside it).
+  const membersText = t('house.members', { count: members });
+  if (!online) return html`<span class=${`ctx-meta ${cls}`}><span class="num">${membersText}</span></span>`;
+  return html`<span class=${`ctx-meta has-online ${cls}`} title=${`${online} ${t('nav.online', { count: online })}, ${membersText}`}>
+    <${OnlineCount} n=${online} cls="ctx-online" /><span class="num" aria-hidden="true">· ${members}</span><span class="sr">, ${membersText}</span>
+  </span>`;
+}
+
+function HouseHead({ id }) {
+  const h = S.houses[id];
   return html`<button class="house-row ctx-house" aria-label=${`${h.name}, house menu`} aria-haspopup="menu"
     onClick=${(e) => houseMenu(id, { anchor: rectOf(e) })}
     onContextMenu=${(e) => { e.preventDefault(); houseMenu(id, { x: e.clientX, y: e.clientY }); }}>
     <span class="grow" style="min-width:0">
       <span class="ctx-name trunc">${h.name}</span>
-      <span class="ctx-meta">${online > 0 && html`<${OnlineCount} n=${online} cls="ctx-online" />`}<span class="num">${t('house.members', { count: members })}</span></span>
+      <${HouseMeta} h=${h} />
     </span>
     <${Icon} name="chev-d" size=${16} />
   </button>`;
@@ -682,7 +693,7 @@ function HouseActs({ id }) {
   const name = S.houses[id].name;
   return html`<div class="ctx-house-acts">
     ${invite && html`<button class="ib compact" aria-label=${t('nav.inviteTo', { house: name })} data-tip=${t('nav.invitePeople')} onClick=${() => openModal(Invite, { house: id })}><${Icon} name="user-plus" size=${16} /></button>`}
-    ${settings && html`<button class="ib compact" aria-label=${t('nav.settingsOf', { house: name })} data-tip=${t('nav.houseSettings')} onClick=${() => openLayer({ C: HouseSettings, props: { house: id } })}><${Icon} name="gear" size=${16} /></button>`}
+    ${settings && html`<button class="ib compact" aria-label=${t('nav.settingsOf', { house: name })} data-tip=${t('nav.houseSettings')} onClick=${() => openLayer({ C: HouseSettings, props: { house: id } })}><${Icon} name="sliders" size=${16} /></button>`}
   </div>`;
 }
 
@@ -818,7 +829,7 @@ export function Nav() {
   const peek = shut && !!S.ui.ctxPeek && S.ui.ctxPeek.at === S.ui.view;
   if (S.ui.ctxPeek && !peek) S.ui.ctxPeek = null; // went somewhere: it goes away
   return html`<div class="nav">
-    <${Rail} pick=${shut ? pickPeek : openSpace} foot=${html`<${RailFoot} shut=${shut} />`} />
+    <${Rail} pick=${shut ? pickPeek : openSpace} foot=${html`<${RailFoot} shut=${shut} peek=${peek} />`} />
     ${(!shut || peek) && html`<nav class=${`ctx${peek ? ' ctx-peek' : ''}`} aria-label=${ctxLabel(sp)}>
       ${ctxFor(sp)}
       ${!isOnline() && S.ui.view.type !== 'conv' && html`<div class="conn" role="status"><${Icon} name="offline" size=${16} />${t('nav.cantReach')}</div>`}
