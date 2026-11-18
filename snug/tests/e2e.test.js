@@ -295,7 +295,7 @@ test('a new account joins by link as a newcomer, and the house opens after a fir
   await robin.click('.rail-house:has-text("Kiln & Co.")', { button: 'right' });
   await robin.click('.menu-item:has-text("Invite people")');
   await robin.waitForFunction(() => /\/join\//.test(document.querySelector('.copy-row input')?.value || ''));
-  const link = await robin.locator('.copy-row input').first().inputValue();
+  const link = await robin.locator('.copy-row input').first().getAttribute('data-link'); // the field itself shows only /join/<code> on 127.0.0.1
   await robin.keyboard.press('Escape');
 
   const dana = await person(null, { path: new URL(link).pathname });
@@ -428,7 +428,7 @@ test('the rail and the context column switch places, and Alt+Down walks the colu
   assert.equal(await robin.locator('.main .composer textarea').count(), 1, 'Messages opens the latest conversation');
 
   await robin.click('.rail-btn:has-text("Discover")');
-  await robin.locator('.nav .ctx[aria-label="Discover"] .row:has-text("Communities")').waitFor();
+  await robin.locator('.nav .ctx[aria-label="Discover"] .row:has-text("Houses")').waitFor();
   await robin.locator('.nav .ctx .row:has-text("Music")').waitFor();
 
   await robin.click('.rail-house:has-text("Ridgeline Riders")');
@@ -506,7 +506,7 @@ test('a friend request reaches the other person live, and accepting makes both f
 
 test('discover lists a public community; preview, join, and its page opens', async () => {
   await robin.click('.rail-btn:has-text("Discover")');
-  await robin.click('.nav .ctx .row:has-text("Communities")');
+  await robin.click('.nav .ctx .row:has-text("Houses")');
   const card = robin.locator('.d-house:has-text("The Listening Room")');
   await card.waitFor();
   assert.equal(await robin.locator('.d-house:has-text("Kiln & Co.")').count(), 0, 'communities you are in are not suggested');

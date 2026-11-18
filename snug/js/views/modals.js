@@ -1,5 +1,5 @@
 // Dialogs. Each one asks for a single decision and has one main button.
-import { html, useEffect, useState } from '../../vendor/preact-htm.js';
+import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import {
   S, closeModal, createRoom, updateRoom, createHouse, joinHouse, joinByCode, startDm, openConv, openModal, toast, go,
 } from '../store.js';
@@ -81,8 +81,8 @@ export function LocalAddressNote() {
   const where = localOnly(location.hostname);
   if (!where) return null;
   return html`<p class="hint local-address" role="note"><${Icon} name="alert" size=${14} />${where === 'computer'
-    ? `This link uses ${location.host}, an address that only works on this computer. Send people the address they use to reach this Snug instead.`
-    : `This link uses ${location.host}, an address that only works on your own network (the same Wi-Fi or office).`}</p>`;
+    ? 'This link only works on this computer. Send people the address they use to reach this Snug instead.'
+    : 'This link only works on your own network (the same Wi-Fi or office).'}</p>`;
 }
 
 // `fresh`: straight after starting the house, so inviting is the next step, not a menu away.
@@ -104,15 +104,23 @@ export function Invite({ house, fresh }) {
     return undefined;
   };
   const as = h.roles.find((r) => r.id === h.joinRole)?.name || t('invite.aMember');
+  // The code is the part that matters: the field shows the end of the link, and the code is spelled out under it.
+  const field = useRef();
+  useLayoutEffect(() => { if (link && field.current) field.current.scrollLeft = field.current.scrollWidth; }, [link]);
+  const code = link ? link.split('/join/')[1] : '';
+  // On an address only this computer or network can open (127.x, a LAN address) the field
+  // shows just the invitation's part, not the address; Copy still copies the whole link.
+  const shown = link && localOnly(location.hostname) ? `/join/${code}` : link;
   return html`
     <h2>${fresh ? t('invite.ready', { house: h.name }) : t('invite.title', { house: h.name })}</h2>
     <p class="modal-lead">${fresh
       ? t('invite.leadFresh', { role: as })
       : t('invite.lead', { role: as, count: h.starter.length })}</p>
-    <div class="copy-row">
-      <input class="field" readonly value=${link || (linkError ? '' : t('invite.making'))} aria-label=${t('invite.link')} onFocus=${(e) => e.target.select()} />
-      <button class="btn primary" data-autofocus disabled=${!link} onClick=${() => copyText(link)}><${Icon} name="copy" size=${16} />${t('invite.copy')}</button>
+    <div class="copy-row invite-copy">
+      <input ref=${field} class="field" readonly value=${shown || (linkError ? '' : t('invite.making'))} data-link=${link || undefined} aria-label=${t('invite.link')} aria-describedby=${code ? 'invite-code' : undefined} onFocus=${(e) => e.target.select()} />
+      <button class="btn primary" data-autofocus disabled=${!link} aria-busy=${!link && !linkError ? 'true' : undefined} onClick=${() => copyText(link)}><${Icon} name="copy" size=${16} />${t('invite.copy')}</button>
     </div>
+    ${code && html`<p class="hint invite-code" id="invite-code">${t('invite.codeIs')} <b>${code}</b>. ${t('invite.codeHint')}</p>`}
     ${linkError && html`<div class="err" role="alert"><${Icon} name="alert" size=${14} />${linkError}</div>`}
     ${link && html`<${LocalAddressNote} />`}
     ${link && html`<div class="invite-app"><button class="btn quiet" onClick=${() => copyText(`snug://join/${link.split('/join/')[1]}`)}><${Icon} name="link" size=${16} />${t('invite.copyApp')}</button><span class="hint">${t('invite.appHint')}</span></div>`}
@@ -145,10 +153,14 @@ export function JoinByLink({ code, onBack }) {
     joinByCode(code).catch((e) => { setBusy(false); setError(e.offline ? t('common.offline') : e.message); });
   };
   if (error && !info) {
-    return html`<div class="join-bad" role="alert"><h2>${t('invite.bad')}</h2><p class="modal-lead">${error}</p></div>
-      <div class="modal-foot"><button class="btn" data-autofocus onClick=${dismiss}>${onBack ? t('join.tryAnother') : t('common.close')}</button></div>`;
+    // What went wrong, then what to do about it: ask for a new link, or paste another.
+    return html`<div class="join-bad" role="alert"><span class="join-bad-ic" aria-hidden="true"><${Icon} name="link" size=${20} /></span><h2>${t('invite.bad')}</h2><p class="modal-lead">${error}</p></div>
+      <div class="modal-foot">
+        ${!onBack && html`<button class="btn" onClick=${() => { S.ui.joinCode = null; openModal(AddHouse, { mode: 'join' }); }}>${t('join.pasteAnother')}</button>`}
+        <button class="btn primary" data-autofocus onClick=${dismiss}>${onBack ? t('join.tryAnother') : t('common.close')}</button>
+      </div>`;
   }
-  if (!info) return html`<div class="join-card" aria-busy="true"><div class="join-head"><span class="skel join-skel-tile"></span><div class="join-id"><span class="skel join-skel-line"></span><span class="skel join-skel-line short"></span></div></div></div>`;
+  if (!info) return html`<h2 class="sr">${t('join.looking')}</h2><div class="join-card" aria-busy="true"><div class="join-head"><span class="skel join-skel-tile"></span><div class="join-id"><span class="skel join-skel-line"></span><span class="skel join-skel-line short"></span></div></div></div>`;
   const h = info.house;
   const already = S.houseOrder.some((id) => S.houses[id]?.name === h.name && S.houses[id]?.joined);
   // The house's invitation background and icon (server/community.js), shown to whoever holds the link.

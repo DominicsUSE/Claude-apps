@@ -106,6 +106,10 @@ button.op:hover { background: var(--surface-hover); }
 .quick-list .menu-item .tile { --sz: 20px; }
 .quick-foot { flex: none; padding: var(--s-2) var(--s-3); border-top: 1px solid var(--line-subtle); background: var(--surface-nav); display: flex; gap: var(--s-4); font-size: var(--t-12); color: var(--text-3); }
 .quick-foot span { display: flex; gap: var(--s-1); align-items: center; }
+.quick-foot { flex-wrap: wrap; row-gap: var(--s-1); }
+.quick-foot .quick-foot-tip { margin-left: auto; }
+.quick .menu-item .badge { flex: none; }
+@media (max-width: 759px) { .quick-foot > span:not(.quick-foot-tip) { display: none; } .quick-foot .quick-foot-tip { margin-left: 0; } }
 
 /* Settings: a full layer with its own sidebar, so it never crowds the chat.
    Two columns (brief 34): the category list on the navigation surface, its
@@ -175,6 +179,11 @@ button.op:hover { background: var(--surface-hover); }
 .member-row .avatar { --sz: var(--av-sm); }
 select.field { width: auto; padding-right: var(--s-6); }
 .copy-row { display: flex; gap: var(--s-2); }
+.copy-row .field { flex: 1; min-width: 0; }
+.invite-code { margin: var(--s-2) 0 0; overflow-wrap: anywhere; }
+.invite-code b { color: var(--text-1); font-weight: var(--w-semibold); font-family: var(--mono); }
+.join-bad-ic { width: var(--h-md); height: var(--h-md); display: grid; place-items: center; border-radius: 50%; background: var(--danger-soft); color: var(--danger); margin-bottom: var(--s-2); }
+@media (max-width: 479px) { .invite-copy { flex-wrap: wrap; } .invite-copy .btn { flex: 1 0 100%; justify-content: center; } }
 .copy-row .field { font-family: var(--mono); }
 .copy-row .btn { height: var(--h-md); }
 

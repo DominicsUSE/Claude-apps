@@ -246,10 +246,11 @@ function MemberPage({ id, events }) {
   const voice = roomIds(S, id).reduce((n, r) => n + (S.voice[r] || []).length, 0);
   const owner = can(S, id, 'roles');
   const settings = () => openLayer({ C: HouseSettings, props: { house: id } });
+  const more = html`<button class="ib" aria-label=${`${h.name} menu`} aria-haspopup="menu" data-tip="More" onClick=${(e) => houseMenu(id, { anchor: rectOf(e) })}><${Icon} name="more" /></button>`;
   const actions = html`
     ${can(S, id, 'invite') && html`<button class="ib" aria-label=${`Invite people to ${h.name}`} data-tip="Invite people" onClick=${() => openModal(Invite, { house: id })}><${Icon} name="user-plus" /></button>`}
     ${owner && html`<button class="ib" aria-label="House settings" data-tip="House settings" onClick=${settings}><${Icon} name="sliders" /></button>`}
-    <button class="ib" aria-label=${`${h.name} menu`} aria-haspopup="menu" data-tip="More" onClick=${(e) => houseMenu(id, { anchor: rectOf(e) })}><${Icon} name="more" /></button>`;
+    ${more}`;
 
   if (events) {
     return html`<section class="main view pl-page" aria-label=${`Events in ${h.name}`}>
@@ -257,13 +258,13 @@ function MemberPage({ id, events }) {
       <div class="view-body"><div class="pl-cols pl-events">
         <p class="pl-lead pl-span">${canPlan(id) ? `Plan something and everyone in ${h.name} can say they’re coming.` : `What’s planned in ${h.name}. Say you’re going and the people running it know who to expect.`}</p>
         <div class="pl-main"><${EventList} house=${id} title="Coming up" /></div>
-        <aside class="pl-aside" aria-label="Past events"><${PastEvents} house=${id} /></aside>
+        <section class="pl-aside" aria-label="Past events"><${PastEvents} house=${id} /></section>
       </div></div>
     </section>`;
   }
 
   return html`<section class="main view pl-page" aria-label=${h.name}>
-    <${Bar} title=${html`<${Icon} name="house" />About`} house=${h}>${actions}<//>
+    <${Bar} title=${html`<${Icon} name="house" />About`} house=${h}>${more}<//>
     <div class="view-body">
       <${Band} house=${h} topic=${h.topic} isPublic=${h.public} here=${here} voice=${voice} members=${members.length} member>
         ${can(S, id, 'invite') && html`<button class="btn" onClick=${() => openModal(Invite, { house: id })}><${Icon} name="user-plus" size=${16} />Invite people</button>`}
@@ -276,11 +277,11 @@ function MemberPage({ id, events }) {
           <${EventList} house=${id} limit=${3} skipLive />
           <${Rooms} id=${id} now=${now} />
         </div>
-        <aside class="pl-aside" aria-label="About this house">
+        <section class="pl-aside" aria-label="About this house">
           <${Rules} text=${h.rules} open=${h.newcomer} />
           <${Members} id=${id} />
           <${RoomEncNote} />
-        </aside>
+        </section>
       </div>
     </div>
   </section>`;
@@ -316,7 +317,7 @@ function InvitedPage({ id }) {
             <p class="pl-note">The other ${plural(Math.max(0, roomIds(S, id).length - h.starter.length), 'room')} open once you’ve said hello.</p>
           </section>
         </div>
-        <aside class="pl-aside"><${Rules} text=${h.rules} open /></aside>
+        <section class="pl-aside"><${Rules} text=${h.rules} open /></section>
       </div>
     </div>
   </section>`;
@@ -342,12 +343,12 @@ function PublicPage({ id }) {
   }, [id, tries]);
 
   if (st.status === 'loading') {
-    return html`<section class="main view pl-page" aria-label="Community"><${Bar} title="Community" />
+    return html`<section class="main view pl-page" aria-label="House"><${Bar} title="House" />
       <div class="view-body pl-state"><${Loading} label="Opening the door" /></div></section>`;
   }
   if (st.status === 'error') {
-    return html`<section class="main view pl-page" aria-label="Community"><${Bar} title="Community" />
-      <div class="view-body"><${Empty} icon="house" title="Couldn’t open this community" text="It may have become private, or you’re offline.">
+    return html`<section class="main view pl-page" aria-label="House"><${Bar} title="House" />
+      <div class="view-body"><${Empty} icon="house" title="Couldn’t open this house" text="It may have become private, or you’re offline.">
         <div style="display:flex;gap:8px"><button class="btn" onClick=${() => go({ type: 'discover' })}>Back to Discover</button><button class="btn primary" onClick=${() => setTries((t) => t + 1)}>Try again</button></div>
       <//></div></section>`;
   }
@@ -360,7 +361,7 @@ function PublicPage({ id }) {
     joinPublicHouse(id).then((r) => { if (!r) setBusy(false); else previews.delete(pkey); });
   };
   return html`<section class="main view pl-page" aria-label=${h.name}>
-    <${Bar} title=${html`<${Icon} name="compass" />Community`} />
+    <${Bar} title=${html`<${Icon} name="compass" />House`} />
     <div class="view-body">
       <${Band} house=${h} topic=${h.topic} isPublic here=${h.online} voice=${h.inVoice} members=${h.members}>
         <button class="btn primary" disabled=${busy} aria-busy=${String(busy)} onClick=${join}>${busy ? 'Joining…' : `Join ${h.name}`}</button>
@@ -383,7 +384,7 @@ function PublicPage({ id }) {
             <ul class="pl-room-names">${h.rooms.map((r, i) => html`<li key=${i}><${RoomIcon} kind=${r.kind} size=${16} /><span class="trunc">${r.name}</span></li>`)}</ul>
           </section>
         </div>
-        <aside class="pl-aside"><${Rules} text=${h.rules} open /></aside>
+        <section class="pl-aside"><${Rules} text=${h.rules} open /></section>
       </div>
     </div>
   </section>`;

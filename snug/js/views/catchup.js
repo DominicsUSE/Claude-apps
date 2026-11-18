@@ -10,7 +10,7 @@ import { mentions } from '../lib/format.js';
 import { fmtWhen, plural, nameList } from '../lib/util.js';
 import { Icon } from '../ui/icons.js';
 import { Avatar, Tile, RoomIcon, Rich, Empty } from '../ui/kit.js';
-import { JoinPreview } from './modals.js';
+import { JoinPreview, AddHouse } from './modals.js';
 import { Mentions } from './mentions.js'; // the Mentions tab (server/inbox.js mentions.list)
 
 const Back = () => S.ui.phone && S.ui.depth > 0 && html`<button class="ib" aria-label="Back" onClick=${back}><${Icon} name="back" /></button>`;
@@ -178,7 +178,9 @@ export function CatchUp() {
         <button class="btn quiet" style="margin-left:auto" onClick=${() => setPresence('around')}>I’m back</button></div>`}
       ${nothing
         ? html`<${Empty} icon="check" title="You’re all caught up" text="Mentions, replies and direct messages collect here, so the rest of the app can stay quiet.">
-            <button class="btn" onClick=${() => openQuick()}>Jump to a room</button>
+            ${S.houseOrder.length
+              ? html`<button class="btn" onClick=${() => openQuick()}>Jump to a room</button>`
+              : html`<button class="btn primary" onClick=${() => openModal(AddHouse, {})}>Start or join a house</button>`}
           <//>`
         : html`<div class="col">
           ${(needs.length > 0 || S.invites.length > 0) && html`<div class="view-sect for-you">For you <span class="badge" aria-label=${`${forYou} for you`}>${forYou}</span></div>`}

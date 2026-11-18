@@ -75,7 +75,10 @@
 .row.sel-parent .row-ic { color: var(--text-2); }
 .row.sel::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 0 2px 2px 0; background: var(--indicator); }
 .row.unread { color: var(--text-1); font-weight: var(--w-semibold); }
-.row.unread:not(.sel)::before { content: ""; position: absolute; left: -8px; top: calc(50% - 4px); width: 4px; height: 8px; border-radius: 0 2px 2px 0; background: var(--unread); }
+/* The pip sits on the row's own edge (inside its hover shape), not on the column's edge. */
+.row.unread:not(.sel)::before { content: ""; position: absolute; left: 0; top: calc(50% - 4px); width: 3px; height: 8px; border-radius: 0 2px 2px 0; background: var(--unread); }
+/* A row with a count already says it: no pip as well (one signal, not two). */
+.row.unread:not(.sel):has(.row-end .badge)::before { content: none; }
 /* Places (Catch up, Friends, Messages) say it once: a count, or bold text. The pip is for channels. */
 .row.row-place.unread:not(.sel)::before { content: none; }
 /* The pip and bold text already say "new": the trailing dot stays for screen
@@ -260,3 +263,14 @@
    the chevron beside it opens the drawer of rooms and communities. */
 .bar .title-switch { margin-left: calc(var(--s-2) * -1); color: var(--text-3); }
 .bar .title-switch:hover { color: var(--text-1); }
+
+/* ---------- Signed out (0.15) ----------
+   The sign-in screen and the privacy link below it share one scrolling
+   column, so the link never sits on top of the form. */
+.signedout { height: 100%; display: flex; flex-direction: column; overflow-y: auto; background: var(--surface-rail); }
+.signedout > .auth { flex: 1 0 auto; height: auto; }
+.signedout-foot { flex: none; display: flex; justify-content: center; padding-bottom: var(--s-3); }
+.signedout-foot .pv-signedout-link { position: static; transform: none; }
+.tabs-list { display: contents; }
+.auth-form .auth-forgot { margin-left: 0; } /* level with the field labels */
+@media (max-width: 720px) { .signedout { background: var(--surface-chat); } }

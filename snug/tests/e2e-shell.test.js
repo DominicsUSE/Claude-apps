@@ -415,3 +415,72 @@ test('phone: the drawer hops communities and rooms from a room, and the member l
   await page.locator('.screen.push .main .bar-title:has-text("Ride plans")').waitFor();
   await ctx.close();
 });
+
+test('the sidebar folds into the rail and stays folded; a house picked from the rail peeks its rooms; Esc puts it away', async () => {
+  const page = await person('robin');
+  await page.click('.rail-house:has-text("Kiln & Co.")');
+  // Where am I: the house's name, and (for those allowed) invite and settings beside it.
+  await page.locator('.ctx-house-head .ctx-name:text-is("Kiln & Co.")').waitFor();
+  await page.locator('.ctx-house-acts button[aria-label="Invite people to Kiln & Co."]').waitFor();
+  const fold = page.locator('.rail-fold');
+  assert.equal(await fold.getAttribute('aria-expanded'), 'true');
+  await fold.click();
+  await page.locator('.nav .ctx').waitFor({ state: 'detached' });
+  assert.equal(await fold.getAttribute('aria-expanded'), 'false');
+  // Folded, the rail's foot carries you and your settings.
+  await page.locator('.rail-foot button[aria-label="Settings"]').waitFor();
+  // A place picked in the rail opens its column over the content, until you go somewhere.
+  await page.click('.rail-house:has-text("Kiln & Co.")');
+  const peek = page.locator('.ctx.ctx-peek');
+  await peek.waitFor();
+  await page.keyboard.press('Escape');
+  await peek.waitFor({ state: 'detached' });
+  await page.click('.rail-house:has-text("Kiln & Co.")');
+  await peek.locator('.row:has-text("The floor")').click();
+  await peek.waitFor({ state: 'detached' });
+  await page.locator('.main .bar-title:has-text("The floor")').waitFor();
+  // Kept on this device.
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('snug.prefs')).ctxShut === true);
+  await page.reload();
+  await page.waitForFunction(() => window.snug.S.conn.socket === 'open');
+  await page.locator('.app.ctx-shut').waitFor();
+  assert.equal(await page.locator('.nav .ctx').count(), 0);
+  await page.click('.rail-fold');
+  await page.locator('.nav .ctx').waitFor();
+  await page.context().close();
+});
+
+test('phone: Back, the phone’s back and a swipe from the left edge return to the list you came from, never straight to the tabs', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  page.setDefaultTimeout(10000);
+  page.on('pageerror', (e) => errors.push(`phone: ${e.message}`));
+  await page.goto(url);
+  await page.fill('#auth-handle', 'robin');
+  await page.fill('#auth-pass', PASSWORD);
+  await page.click('.auth-form button[type=submit]');
+  await page.waitForSelector('.tabs');
+  await page.waitForFunction(() => window.snug.S.conn.socket === 'open');
+  const where = () => page.evaluate(() => { const u = window.snug.S.ui; return `${u.view.type}:${u.view.id || ''}@${u.depth}`; });
+  await page.click('.home-house:has-text("Kiln & Co.")');
+  await page.click('.screen.push .row:has-text("Glaze lab")');
+  await page.locator('.screen.push .main .bar-title:has-text("Glaze lab")').waitFor();
+  // A profile opened from the room keeps the room under it.
+  await page.evaluate(() => import('/js/store.js').then((st) => st.go({ type: 'person', id: 'ines' })));
+  assert.equal(await where(), 'person:ines@1');
+  await page.goBack();
+  await page.waitForFunction(() => window.snug.S.ui.view.type === 'conv');
+  assert.equal(await where(), 'conv:k_glaze@1');
+  // A swipe in from the left edge goes back one step: the house's rooms.
+  const cdp = await ctx.newCDPSession(page);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 6, y: 420 }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 130, y: 424 }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await page.waitForFunction(() => window.snug.S.ui.view.type === 'house');
+  assert.equal(await where(), 'house:kiln@1');
+  // Then Back once more: the tabs, on Home.
+  await page.goBack();
+  await page.waitForFunction(() => window.snug.S.ui.depth === 0);
+  await page.locator('.tabs .tab[aria-selected="true"]:has-text("Home")').waitFor();
+  await ctx.close();
+});

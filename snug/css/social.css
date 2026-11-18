@@ -124,9 +124,10 @@
 .f-tab-count { color: var(--text-3); font-weight: var(--w-regular); font-size: var(--t-meta); }
 .f-tab[aria-selected="true"] .f-tab-count { color: var(--text-2); }
 /* Add friend: the one accent action on this screen, a small primary button. */
-.f-tab.add { margin-left: var(--s-2); padding: 0 var(--s-3) 0 var(--s-2); background: var(--brand); color: var(--on-brand); }
-.f-tab.add:hover { background: var(--brand-hover); color: var(--on-brand); }
-.f-tab.add[aria-selected="true"] { background: transparent; color: var(--brand-ink); box-shadow: inset 0 0 0 1px var(--line); }
+/* Adding a friend is an action beside the tabs: a quiet outlined button, not a violet square. */
+.f-tab.add { margin-left: auto; padding: 0 var(--s-3) 0 var(--s-2); color: var(--text-1); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.f-tab.add:hover { background: var(--surface-hover); color: var(--text-1); }
+.f-tab.add[aria-selected="true"] { background: var(--surface-sel); color: var(--text-1); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .f-tab.add .ic { color: currentColor; }
 
 .f-wrap { width: 100%; max-width: 56rem; padding: var(--s-4) var(--s-6) var(--s-8); }
@@ -220,7 +221,8 @@
 
 /* The stage */
 .d-feature { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-5); align-items: center; padding: var(--s-4); border-radius: var(--r-modal); background: var(--surface-2); --bg: var(--surface-2); }
-.d-feature-art { position: relative; display: grid; place-items: center; align-self: stretch; padding: var(--s-4) var(--s-6); border-radius: var(--r-btn); background: color-mix(in oklch, oklch(var(--tile-l) var(--tile-c) var(--hue)) 35%, var(--surface-2)); }
+/* The house's own tile carries its colour; no flat block behind it. */
+.d-feature-art { position: relative; display: grid; place-items: center; align-self: start; padding: 0; border-radius: var(--r-btn); background: none; }
 .d-feature-art:hover .arch { transform: translateY(-2px); }
 .d-feature-art .arch { transition: transform var(--m-standard) var(--ease-out); }
 .d-feature-text { display: grid; gap: var(--s-2); align-content: center; min-width: 0; }
@@ -351,7 +353,10 @@
   .pp-grid { grid-template-columns: minmax(0, 1fr); gap: var(--s-6); padding: var(--s-6) var(--s-4) 0; }
 
   .f-tab { height: var(--touch); }
-  .f-tab.add { margin-left: 0; }
+  /* At 320px the tabs scroll sideways; Add friend stays pinned at the end, never clipped. */
+  .main.view > .f-tabs .f-tab.add { position: sticky; right: 0; flex: none; margin-left: auto; z-index: 1;
+    background: var(--bg); box-shadow: inset 0 0 0 1px var(--line-strong), calc(var(--s-2) * -1) 0 0 0 var(--bg); }
+  .main.view > .f-tabs .f-tab.add[aria-selected="true"] { background: var(--surface-sel); }
   .f-wrap { padding: var(--s-1) var(--s-2) var(--s-12); }
   .f-row { min-height: var(--av-xl); }
   .f-handle { display: none; }
@@ -370,7 +375,7 @@
   .d-tabs { display: flex; overflow-x: auto; scrollbar-width: none; }
   .d-tab { height: var(--touch); white-space: nowrap; }
   .d-feature { grid-template-columns: minmax(0, 1fr); gap: var(--s-4); padding: var(--s-4); margin: 0 calc(var(--s-2) * -1); }
-  .d-feature-art { padding: var(--s-4) 0 0; }
+  .d-feature-art { padding: 0; justify-self: start; }
   .arch-xl { width: calc(var(--av-2xl) * 1.17); height: calc(var(--av-2xl) * 1.42); font-size: var(--av-lg); }
   .d-feature-name { font-size: var(--t-section); }
   .d-feature-acts .btn { height: var(--touch); flex: 1; }

@@ -31,6 +31,56 @@ goes back to an older version on its own (README, "Install, update, go back").
 - **Text size** is one multiplier (`--text-scale`) on the page's font size, ready for more steps.
 - The local-address warning in the invite dialog reads in light themes (it failed contrast).
 
+### Shell, navigation, Home and getting started
+
+- **A new account's Home explains Snug.** "Welcome to Snug: create a house or join one with an invite", with
+  both buttons, a sentence each on houses, rooms and direct messages, and five steps that tick themselves off
+  as you do them: your account, your username, a house, inviting friends, a first message. The steps can be
+  hidden, and link to how Snug handles your data.
+- **Home shows your invitations** to houses, with who sent each one and a look before joining.
+- **The sidebar folds into the rail** with the arrow at the rail's foot, and stays as you left it on this
+  device. Below 1024px wide it starts folded, so a tablet gets the whole width for the conversation. Folded, a
+  house picked in the rail shows its rooms over the content until you go somewhere (Esc or a click outside puts
+  them away), and the rail's foot carries you, your settings and the call you are in.
+- **Where am I:** the house's header shows who is online and how many members ("● 2 online · 10", the full
+  wording on hover), with Invite people and House settings (a sliders icon, so it isn't mistaken for your own
+  Settings) beside the name for those allowed; when nobody else is around it just gives the member count. On a
+  phone the house's screen shows the same line under the name, and has Invite people too. Rooms can be added to
+  **Favourites** (room menu), which sit at the top of the house's list on this device (favourites are not
+  synced between your devices yet); private rooms show a lock and muted rooms a crossed bell. A room with a
+  count no longer also shows the unread pip.
+- The house's About page keeps Invite people and Settings as buttons on the page, not again as icons in its top
+  bar. With the sidebar folded and peeking open, the rail's foot no longer repeats you and Settings under the
+  panel's own.
+- **Back on a phone goes to the list you came from.** A swipe in from the left edge now goes back (as the
+  header's arrow and the phone's own back do) instead of opening the drawer, and a screen opened from another
+  (a profile from a room, a room from a house) returns there, never straight to the tabs.
+- **Quick switcher:** with nothing typed it lists your recent places and then your houses; rows show their
+  unread count; the footer says an invitation link can be pasted; "Start a house or join one" is an action.
+  The list is announced as you move through it, and closing it with Esc puts keyboard focus back where it was.
+  A dead invitation pasted there opens the same "That invitation doesn't work" dialog, with Paste another link,
+  as opening the link does. Phone Home has a search button that opens it.
+- **Invitations in plain words.** The invite dialog spells out the code and keeps the end of the link in view;
+  a link that doesn't work says why, then offers "Paste another link". On an address only this computer or
+  network can open, neither the warning nor the link field shows that address: the field shows `/join/<code>`
+  and Copy link still copies the whole link.
+- **One word for Snug's spaces: house.** Home, Discover and the switcher said "community" in places.
+- **Signed out:** "How Snug handles your data" sits below the form instead of over it, and Forgot your password
+  lines up with the labels.
+- **Loading:** while your places load after signing in, the frame's shape shows instead of a blank screen.
+- On a phone's Home, people online now come first; "Recently here" sits after the conversations going, so they
+  are no longer pushed below the fold.
+- **Empty places:** the phone's empty Messages tab has the same empty state and New message button as the
+  desktop; a new account's Catch up offers to start or join a house instead of "Jump to a room".
+- Friends' tabs hide zero counts and scroll sideways at 320px with Add a friend pinned at the end, and Add a friend is an outlined button rather than a violet square. Discover's
+  featured house drops the flat colour block behind its tile. Event rows in a narrow column put their buttons
+  under the title instead of squeezing it.
+- **Fix: a double tap on the last line of a message opened the emoji picker** on phones, when the message had reactions: the
+  reactions' finger-sized hit area reached up over the text. It now grows downwards only.
+- Accessibility: Search has a heading, Home, house and profile side columns are sections rather than nested
+  complementary landmarks, the phone has one main landmark per screen, and the skip link says "Skip to content"
+  where there is no composer.
+
 ## 0.14.0
 
 ### Calls: private by default
