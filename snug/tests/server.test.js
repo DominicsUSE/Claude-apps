@@ -3738,7 +3738,8 @@ test('account: two-factor sign-in: turning it on, required at sign-in, replay re
   assert.match(await tf.refused('totp.enable', { code: totpAt(key, Date.now()), password: 'not my password' }), /password/);
   assert.equal(srv.db.get('SELECT enabled FROM totp WHERE user = ?', tf.id).enabled, 0, 'still off');
   assert.match(await tf.refused('totp.enable', { password: 'a long password', code: '000000' === totpAt(key, Date.now()) ? '111111' : '000000' }), /isn’t right/);
-  const { codes } = await tf.ok('totp.enable', { password: 'a long password', code: totpAt(key, Date.now()) });
+  const used = totpAt(key, Date.now());
+  const { codes } = await tf.ok('totp.enable', { password: 'a long password', code: used });
   assert.equal(codes.length, 10);
   assert.ok(codes.every((c) => /^[a-z2-9]{4}-[a-z2-9]{4}$/.test(c)));
   srv.resetLimits(); // two-factor changes allow six tries in a burst
@@ -3752,7 +3753,7 @@ test('account: two-factor sign-in: turning it on, required at sign-in, replay re
   const step2 = (t, code) => post('/api/login/totp', { ticket: t, code });
   assert.equal((await step2(ticket, '12345')).status, 401);
   // The code just used to turn it on is spent: replaying it is refused.
-  assert.equal((await step2(ticket, totpAt(key, Date.now()))).status, 401);
+  assert.equal((await step2(ticket, used)).status, 401); // the very code (a slow runner can cross into the next 30 s step)
   // The next code (one step ahead, within the drift) works once.
   const next = hotp(key, stepAt(Date.now()) + 1);
   const ok = await step2(ticket, next);
