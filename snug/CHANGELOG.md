@@ -65,6 +65,8 @@ goes back to an older version on its own (README, "Install, update, go back").
 - Friends' tabs hide zero counts, and Add a friend is an outlined button rather than a violet square. Discover's
   featured house drops the flat colour block behind its tile. Event rows in a narrow column put their buttons
   under the title instead of squeezing it.
+- **Fix: a double tap on the last line of a message opened the emoji picker** on phones that has reactions: the
+  reactions' finger-sized hit area reached up over the text. It now grows downwards only.
 - Accessibility: Search has a heading, Home, house and profile side columns are sections rather than nested
   complementary landmarks, the phone has one main landmark per screen, and the skip link says "Skip to content"
   where there is no composer.

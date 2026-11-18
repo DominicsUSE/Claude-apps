@@ -443,6 +443,9 @@ button.ev-title:hover { text-decoration: underline; text-underline-offset: 3px; 
     content: ""; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
     width: max(100%, var(--touch)); height: max(100%, var(--touch));
   }
+  /* A reaction's hit area grows downwards only: grown upwards it covered the
+     last line of the message, and a double tap there opened the emoji picker. */
+  .rx::after { top: 0; transform: translateX(-50%); }
 }
 
 /* ---------- Camera and screen sharing (voice track) ----------
