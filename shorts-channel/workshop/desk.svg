@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1200" width="1920" height="1200">
+  <defs>
+    <style>@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&amp;display=swap');</style>
+    <filter id="wood" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.0032 0.085" numOctaves="4" seed="3"/>
+      <feColorMatrix type="matrix" values="0.50 0 0 0 0.25  0.32 0 0 0 0.15  0.18 0 0 0 0.08  0 0 0 0 1"/>
+    </filter>
+    <filter id="fibre" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.7" numOctaves="3" seed="21"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer><feFuncA type="table" tableValues="0 0.16"/></feComponentTransfer>
+    </filter>
+    <filter id="blotch" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.006" numOctaves="3" seed="8"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.62  0 0 0 0 0.48  0 0 0 0 0.30  0.9 0 0 0 -0.35"/>
+    </filter>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="12" dy="18" stdDeviation="14" flood-color="#140a04" flood-opacity="0.55"/>
+    </filter>
+    <filter id="propshadow" x="-20%" y="-50%" width="150%" height="250%">
+      <feDropShadow dx="10" dy="14" stdDeviation="6" flood-color="#140a04" flood-opacity="0.6"/>
+    </filter>
+    <filter id="stampink" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.09" numOctaves="2" seed="5" result="t"/>
+      <feColorMatrix in="t" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -5 3.2" result="m"/>
+      <feComposite in="SourceGraphic" in2="m" operator="in"/>
+    </filter>
+    <filter id="soft"><feGaussianBlur stdDeviation="1.2"/></filter>
+    <filter id="wc" filterUnits="userSpaceOnUse" x="0" y="0" width="1920" height="1200">
+      <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="17" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="10"/>
+      <feGaussianBlur stdDeviation="0.8"/>
+    </filter>
+    <radialGradient id="lamp" cx="0.16" cy="-0.05" r="0.95">
+      <stop offset="0" stop-color="#FFC877" stop-opacity="0.42"/>
+      <stop offset="0.55" stop-color="#FFB25C" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#FFB25C" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="vignette" cx="0.48" cy="0.45" r="0.75">
+      <stop offset="0.55" stop-color="#1a0c04" stop-opacity="0"/>
+      <stop offset="1" stop-color="#1a0c04" stop-opacity="0.78"/>
+    </radialGradient>
+    <linearGradient id="pencilFacet" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E7B95A"/><stop offset="0.5" stop-color="#D9A441"/><stop offset="1" stop-color="#A97A2A"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#DAD4C8"/><stop offset="0.5" stop-color="#A9A196"/><stop offset="1" stop-color="#7D766C"/>
+    </linearGradient>
+  </defs>
+
+  <!-- desk -->
+  <rect width="1920" height="1200" filter="url(#wood)"/>
+
+  <!-- under-sheet -->
+  <g transform="translate(150 120) rotate(2.4)">
+    <rect width="1680" height="960" fill="#E9DDC2" filter="url(#shadow)"/>
+    <rect width="1680" height="960" filter="url(#fibre)"/>
+  </g>
+
+  <!-- coffee ring -->
+  <g opacity="0.32" filter="url(#soft)">
+    <circle cx="210" cy="1035" r="78" fill="none" stroke="#5E3417" stroke-width="7"/>
+    <circle cx="210" cy="1035" r="74" fill="#7A4521" opacity="0.12"/>
+  </g>
+
+  <!-- main sheet -->
+  <g transform="translate(110 108) rotate(-1.1)">
+    <rect width="1700" height="980" fill="#F3E9D2" filter="url(#shadow)"/>
+    <rect width="1700" height="980" filter="url(#blotch)" opacity="0.35" style="mix-blend-mode:multiply"/>
+    <rect width="1700" height="980" filter="url(#fibre)"/>
+
+    <g transform="translate(40 150) scale(0.9)">
+      <!--SHEET-->
+    </g>
+
+    <!-- palette swatches -->
+    <g filter="url(#wc)" opacity="0.85" style="mix-blend-mode:multiply">
+      <ellipse cx="1180" cy="925" rx="34" ry="20" fill="#D98A4E"/>
+      <ellipse cx="1250" cy="928" rx="34" ry="20" fill="#7E9C7A"/>
+      <ellipse cx="1320" cy="924" rx="34" ry="20" fill="#D9A441"/>
+      <ellipse cx="1390" cy="928" rx="34" ry="20" fill="#8B5E3C"/>
+      <ellipse cx="1460" cy="925" rx="34" ry="20" fill="#7D96AE"/>
+      <ellipse cx="1530" cy="928" rx="34" ry="20" fill="#5A4F48"/>
+    </g>
+
+    <!-- council stamp -->
+    <g transform="translate(1500 95) rotate(9)" filter="url(#stampink)" opacity="0.8">
+      <rect x="-150" y="-50" width="300" height="100" rx="8" fill="none" stroke="#A8402A" stroke-width="7"/>
+      <rect x="-138" y="-38" width="276" height="76" rx="4" fill="none" stroke="#A8402A" stroke-width="2.5"/>
+      <text x="0" y="-2" text-anchor="middle" font-family="Arial Black, Arial" font-size="34" letter-spacing="4" fill="#A8402A">APPROVED</text>
+      <text x="0" y="28" text-anchor="middle" font-family="Arial Black, Arial" font-size="12" letter-spacing="2" fill="#A8402A">BY TOWN COUNCIL (PENDING)</text>
+    </g>
+
+    <!-- masking tape -->
+    <rect x="-30" y="-14" width="150" height="44" fill="#E6D9B6" opacity="0.85" transform="rotate(-32 45 8)"/>
+    <rect x="1590" y="930" width="150" height="44" fill="#E6D9B6" opacity="0.85" transform="rotate(-28 1665 952)"/>
+  </g>
+
+  <!-- paper clip -->
+  <g transform="translate(560 96) rotate(-6)" filter="url(#propshadow)">
+    <path d="M0 0 L0 110 A18 18 0 0 0 36 110 L36 -14 A26 26 0 0 0 -16 -14 L-16 96" fill="none" stroke="url(#metal)" stroke-width="6" stroke-linecap="round"/>
+  </g>
+
+  <!-- pencil -->
+  <g transform="translate(1290 1120) rotate(-14)" filter="url(#propshadow)">
+    <rect x="0" y="-14" width="470" height="28" fill="url(#pencilFacet)"/>
+    <line x1="0" y1="-4" x2="470" y2="-4" stroke="#B88A32" stroke-width="1.5"/>
+    <line x1="0" y1="5" x2="470" y2="5" stroke="#9E7228" stroke-width="1.5"/>
+    <rect x="470" y="-15" width="44" height="30" fill="url(#metal)"/>
+    <line x1="482" y1="-15" x2="482" y2="15" stroke="#6E675E" stroke-width="2"/>
+    <line x1="502" y1="-15" x2="502" y2="15" stroke="#6E675E" stroke-width="2"/>
+    <rect x="514" y="-14" width="36" height="28" rx="8" fill="#C97A63"/>
+    <path d="M0 -14 L-70 0 L0 14 Z" fill="#E6C595"/>
+    <path d="M-48 -4.5 L-70 0 L-48 4.5 Z" fill="#3B2F28"/>
+  </g>
+
+  <!-- wooden rubber stamp -->
+  <g transform="translate(1835 330)" filter="url(#propshadow)">
+    <rect x="-46" y="-46" width="92" height="92" rx="10" fill="#8B5E3C"/>
+    <rect x="-46" y="-46" width="92" height="92" rx="10" filter="url(#wood)" opacity="0.5"/>
+    <circle cx="0" cy="0" r="30" fill="#6E4428"/>
+    <circle cx="-8" cy="-8" r="12" fill="#9A6A44" opacity="0.7"/>
+  </g>
+
+  <!-- eraser -->
+  <g transform="translate(70 560) rotate(78)" filter="url(#propshadow)">
+    <rect x="-55" y="-22" width="110" height="44" rx="6" fill="#E9DED0"/>
+    <rect x="-55" y="-22" width="62" height="44" rx="6" fill="#7D96AE"/>
+  </g>
+
+  <!-- light -->
+  <rect width="1920" height="1200" fill="url(#lamp)" style="mix-blend-mode:screen"/>
+  <rect width="1920" height="1200" fill="url(#vignette)"/>
+</svg>
