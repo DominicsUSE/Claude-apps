@@ -1,0 +1,172 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&display=swap" rel="stylesheet">
+<style>html,body{margin:0;background:#000}svg{display:block}</style></head>
+<body>
+<svg id="stage" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
+<defs><!--DEFS--></defs>
+<rect width="1080" height="1920" filter="url(#wood)"/>
+<g opacity="0.3" filter="url(#soft)"><circle cx="170" cy="1720" r="92" fill="none" stroke="#5E3417" stroke-width="8"/></g>
+<g transform="translate(70 140) rotate(2.2)"><rect width="950" height="1420" fill="#E9DDC2" filter="url(#shadow)"/><rect width="950" height="1420" filter="url(#fibre)"/></g>
+<g id="cards"></g>
+<g id="stamp"></g>
+<g id="cap"></g>
+<g transform="translate(860 110) rotate(8)" filter="url(#propshadow)">
+  <path d="M0 0 L0 110 A18 18 0 0 0 36 110 L36 -14 A26 26 0 0 0 -16 -14 L-16 96" fill="none" stroke="url(#metal)" stroke-width="6" stroke-linecap="round"/>
+</g>
+<g transform="translate(420 1700) rotate(-9)" filter="url(#propshadow)">
+  <rect x="0" y="-14" width="470" height="28" fill="url(#pencilFacet)"/>
+  <line x1="0" y1="-4" x2="470" y2="-4" stroke="#B88A32" stroke-width="1.5"/><line x1="0" y1="5" x2="470" y2="5" stroke="#9E7228" stroke-width="1.5"/>
+  <rect x="470" y="-15" width="44" height="30" fill="url(#metal)"/><rect x="514" y="-14" width="36" height="28" rx="8" fill="#C97A63"/>
+  <path d="M0 -14 L-70 0 L0 14 Z" fill="#E6C595"/><path d="M-48 -4.5 L-70 0 L-48 4.5 Z" fill="#3B2F28"/>
+</g>
+<rect width="1080" height="1920" fill="url(#lamp)" style="mix-blend-mode:screen"/>
+<rect width="1080" height="1920" fill="url(#vignette)"/>
+</svg>
+<script>
+/*DATA*/
+const S = TL.shots, FPS = TL.fps;
+const L = Object.fromEntries(TL.lines.map(l => [l.id, l]));
+const INK = "#3B2F28";
+const COL = {DEB: "#C9733A", MARCUS: "#5F7A63", PRIYA: "#5A4F48", GORD: "#A97A2A", WENDY: "#8B5E3C", NOTE: "#5E7A99"};
+const ease = x => 1 - Math.pow(1 - x, 3);
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+
+function mouthState(who, t) {
+  const m = TL.mouths[who]; const f = Math.floor(t * FPS);
+  return m && f >= 0 && f < m.length ? m[f] : 0;
+}
+function ch(name, x, y, s, t, opt = {}) {
+  const c = CH[opt.variant || name];
+  const who = (opt.voice || name).toUpperCase();
+  const st = opt.state !== undefined ? opt.state : mouthState(who, t);
+  const mk = opt.mouth || (opt.variant || name);
+  const mouth = MOUTH[mk] ? `<g filter="url(#wob)">${MOUTH[mk][st]}</g>` : "";
+  return `<g transform="translate(${x} ${y}) rotate(${opt.rot || 0}) scale(${s})">${c.body}${c.face}${mouth}</g>`;
+}
+function card(content, rot, cam, dy = 0, drot = 0) {
+  return `<g transform="translate(60 ${150 + dy}) rotate(${rot + drot} 480 700)">
+    <rect width="960" height="1400" fill="#F3E9D2" filter="url(#shadow)"/>
+    <rect width="960" height="1400" filter="url(#blotch)" opacity="0.35" style="mix-blend-mode:multiply"/>
+    <rect width="960" height="1400" filter="url(#fibre)"/>
+    <g transform="translate(40 50)" clip-path="url(#sceneclip)"><g transform="${cam}">${content}</g></g>
+    <rect x="40" y="50" width="880" height="1100" fill="none" stroke="${INK}" stroke-width="2.5" opacity="0.65"/>
+  </g>`;
+}
+const push = (lt, z0 = 1, rate = 0.012, cx = 440, cy = 550) => `translate(${cx} ${cy}) scale(${z0 + rate * lt}) translate(${-cx} ${-cy})`;
+const crop = (lt, z, fx, fy, rate = 0.015) => `translate(440 550) scale(${z + rate * lt}) translate(${-fx} ${-fy})`;
+
+function barry(t) { return BG.towers + BG.barry + BG.flames + ch("lenny", 330, 300, 0.62, t, {state: 0}) + ch("deb", 150, 1060, 1.3, t, {variant: "deb_sad", voice: "DEB"}); }
+
+function postText(t) {
+  const c = L.L02.chunks; const said = i => t >= c[i].start + 0.1;
+  let lines = [];
+  if (said(0)) lines.push("Okay so.");
+  let l2 = "";
+  if (said(1)) l2 = "Road crew is coming THRUSDAY";
+  if (said(2)) l2 += ",";
+  if (said(3)) l2 += t >= c[4].start + 0.1 ? " TO FILL BARRY." : " to fill Barry.";
+  if (l2) lines.push(...wrap(l2, 26));
+  if (said(5)) lines.push("...just saying");
+  let y = 440, out = "";
+  for (const s of lines) { out += `<text x="230" y="${y}" font-family="Caveat, cursive" font-size="40" font-weight="700" fill="${INK}">${s}</text>`; y += 52; }
+  if (t > L.L02.end + 0.2) {
+    out += `<line x1="220" y1="${y + 10}" x2="660" y2="${y + 10}" stroke="#C8B08A" stroke-width="2"/>
+      <text x="230" y="${y + 60}" font-family="Caveat, cursive" font-size="30" font-weight="700" fill="#5F7A63">Ron Dellamy (Ward 3)</text>
+      <text x="230" y="${y + 96}" font-family="Caveat, cursive" font-size="30" fill="${INK}">is this about bins</text>`;
+  }
+  if (Math.floor(t * 2) % 2 === 0 && t < L.L02.end + 0.2) out += `<rect x="${236 + 0}" y="${y - 30}" width="4" height="36" fill="${INK}"/>`;
+  return out;
+}
+function wrap(s, n) { const w = s.split(" "); const out = []; let cur = ""; for (const x of w) { if ((cur + " " + x).trim().length > n) { out.push(cur.trim()); cur = x; } else cur += " " + x; } if (cur.trim()) out.push(cur.trim()); return out; }
+
+const SH = [
+  {k: "s1_close", rot: -1, draw: (t, lt) => card(barry(t), -1, crop(lt, 1.57, 270, 650))},
+  {k: "s2_wide", rot: -1, draw: (t, lt) => card(barry(t), -1, push(lt))},
+  {k: "s3_post", rot: 1.2, slide: true, draw: (t, lt) => card(BG.phone + postText(t), 1.2, push(lt, 1, 0.008))},
+  {k: "s4_marcus", rot: -0.8, slide: true, draw: (t, lt) => card(BG.street + ch("marcus", 300, 1010, 1.25, t) + BG.table, -0.8, push(lt))},
+  {k: "s5_wendy", rot: 0.9, slide: true, draw: (t, lt) => {
+      const snip = t >= L.L05.end + 0.05;
+      const ribbon = snip
+        ? `<path d="M330 880 Q420 960 560 990" fill="none" stroke="#D98A4E" stroke-width="12"/><path d="M860 870 Q760 950 640 985" fill="none" stroke="#D98A4E" stroke-width="12"/>`
+        : `<path d="M330 880 Q600 900 860 870" fill="none" stroke="#D98A4E" stroke-width="12"/>`;
+      const posts = `<rect x="322" y="860" width="16" height="140" fill="#8B5E3C" stroke="${INK}" stroke-width="2.5"/><rect x="852" y="850" width="16" height="140" fill="#8B5E3C" stroke="${INK}" stroke-width="2.5"/>`;
+      return card(BG.wendy + posts + ribbon + ch("wendy", 200, 1060, 1.3, t), 0.9, push(lt));
+    }},
+  {k: "s6_gord", rot: -1.3, slide: true, draw: (t, lt) => {
+      const go = t - (L.L06.end + 0.3);
+      const dx = go > 0 ? 520 * ease(clamp(go / 2.0, 0, 1)) : 0;
+      return card(BG.gord + ch("gord", 610, 990, 1.12, t, {rot: -90}) + `<g transform="translate(${650 + dx} 1000) scale(1.15) translate(0 -300)">${BG.truck}</g>`, -1.3, push(lt));
+    }},
+  {k: "s7_night", rot: 1, slide: true, draw: (t, lt) => {
+      const x = 900 - 1250 * clamp(lt / (S.s8_morning - S.s7_night), 0, 1);
+      return card(BG.night + `<g transform="translate(${x} 585) translate(0 -300)">${BG.btruck}</g>`, 1, push(lt, 1, 0.01));
+    }},
+  {k: "s8_morning", rot: -0.6, draw: (t, lt) => card(BG.morning + ch("deb", 160, 1060, 1.3, t), -0.6, push(lt, 1, 0.02))},
+  {k: "s9_priya", rot: 1.1, slide: true, draw: (t, lt) => card(BG.priya + ch("priya", 440, 1090, 2.0, t), 1.1, push(lt, 1, 0.025, 440, 520))},
+  {k: "s10_lenny", rot: -1, draw: (t, lt) => {
+      const dur = S.end - S.s10_lenny;
+      if (lt > dur - 0.25) return card(barry(0.2), -1, crop(0, 1.57, 270, 650));
+      const hammering = lt > 0.4 && lt < 1.7;
+      const j = hammering ? ((Math.floor(t * 24) % 2) ? 3 : -3) : 0;
+      const holeS = clamp((lt - 0.6) / 1.1, 0, 1);
+      let s = BG.lnight;
+      if (holeS > 0) s += `<g transform="translate(420 780) scale(${holeS}) translate(-420 -780)">${BG.hole}</g>`;
+      s += ch("lenny", 300, 800, 1.15, t, {state: 0});
+      s += `<g transform="translate(${470 + j} ${490 + j})">${BG.jack}</g>`;
+      if (lt > 2.4) s += `<rect x="413" y="745" width="14" height="28" fill="#FBF6EA" stroke="${INK}" stroke-width="2"/>
+        <circle cx="420" cy="733" r="22" fill="#FFC86B" filter="url(#glow)" opacity="0.7"/><ellipse cx="420" cy="733" rx="5" ry="9" fill="#F0A33C"/>`;
+      return card(s, -1, push(lt, 1, 0.01));
+    }},
+];
+SH.forEach(s => s.start = S[s.k]);
+SH.forEach((s, i) => s.end = i + 1 < SH.length ? SH[i + 1].start : S.end);
+
+function caption(t) {
+  if (t >= S.s7_night && t < S.s8_morning) return {who: "NOTE", label: "GREATER PEMBERTON", text: "\"a goodwill gesture\""};
+  let best = null;
+  for (const l of TL.lines) for (const c of l.chunks) {
+    if (t >= c.start - 0.05 && t <= c.end + 0.3) best = {who: l.char, label: l.char + (l.id === "L04" ? " (off)" : ""), text: c.text};
+  }
+  return best;
+}
+function capSVG(c) {
+  if (!c) return "";
+  const size = Math.min(60, 800 / (0.42 * c.text.length));
+  return `<g transform="translate(100 1330) rotate(-1.2)" filter="url(#propshadow)">
+    <path d="M0 6 L60 0 L120 7 L200 1 L300 6 L420 0 L540 5 L660 0 L760 6 L860 2 L870 128 L780 134 L660 128 L540 135 L420 129 L300 136 L180 129 L60 135 L4 130 Z" fill="#FBF6EA"/>
+    <text x="34" y="42" font-family="Caveat, cursive" font-weight="700" font-size="30" fill="${COL[c.who]}">${c.label}</text>
+    <text x="34" y="104" font-family="Caveat, cursive" font-weight="700" font-size="${size.toFixed(1)}" fill="${INK}">${c.text}</text>
+  </g><rect x="440" y="1312" width="120" height="38" fill="#E6D9B6" opacity="0.85" transform="rotate(4 500 1330)"/>`;
+}
+function stampSVG(t) {
+  const t0 = S.s2_wide + 0.15;
+  if (t < t0) return "";
+  const k = t - t0 < 0.09 ? 1.35 : 1;
+  return `<g transform="translate(300 215) rotate(-5) scale(${k})" filter="url(#stampF)" opacity="0.9">
+    <rect x="-210" y="-52" width="420" height="104" rx="8" fill="none" stroke="#A8402A" stroke-width="7"/>
+    <text x="0" y="-8" text-anchor="middle" font-family="Arial Black, Arial" font-size="40" letter-spacing="5" fill="#A8402A">TOWN PROBLEM</text>
+    <text x="0" y="38" text-anchor="middle" font-family="Arial Black, Arial" font-size="38" letter-spacing="4" fill="#A8402A">#212</text></g>`;
+}
+const boils = () => document.querySelectorAll("feTurbulence.boil");
+window.render = function (t) {
+  const f = Math.floor(t * FPS);
+  const seed = [4, 21, 37][f % 3];
+  boils().forEach(e => e.setAttribute("seed", seed));
+  const i = SH.findIndex(s => t >= s.start && t < s.end);
+  const sh = SH[i < 0 ? SH.length - 1 : i];
+  const lt = t - sh.start;
+  let html = "";
+  if (sh.slide && lt < 0.32 && i > 0) {
+    const prev = SH[i - 1];
+    html += prev.draw(t, t - prev.start);
+    const p = ease(lt / 0.32);
+    html += sh.draw(t, lt).replace(`translate(60 150) rotate(${sh.rot} 480 700)`, `translate(60 ${150 - 1750 * (1 - p)}) rotate(${sh.rot + 5 * (1 - p)} 480 700)`);
+  } else html = sh.draw(t, lt);
+  document.getElementById("cards").innerHTML = html;
+  document.getElementById("stamp").innerHTML = stampSVG(t);
+  document.getElementById("cap").innerHTML = capSVG(caption(t));
+};
+window.DURATION = S.end;
+</script>
+</body></html>
