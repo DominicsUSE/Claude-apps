@@ -1,0 +1,447 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1200" width="1920" height="1200">
+  <defs>
+    <style>@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&amp;display=swap');</style>
+    <filter id="wood" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.0032 0.085" numOctaves="4" seed="3"/>
+      <feColorMatrix type="matrix" values="0.50 0 0 0 0.25  0.32 0 0 0 0.15  0.18 0 0 0 0.08  0 0 0 0 1"/>
+    </filter>
+    <filter id="fibre" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.7" numOctaves="3" seed="21"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer><feFuncA type="table" tableValues="0 0.16"/></feComponentTransfer>
+    </filter>
+    <filter id="blotch" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.006" numOctaves="3" seed="8"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.62  0 0 0 0 0.48  0 0 0 0 0.30  0.9 0 0 0 -0.35"/>
+    </filter>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="12" dy="18" stdDeviation="14" flood-color="#140a04" flood-opacity="0.55"/>
+    </filter>
+    <filter id="propshadow" x="-20%" y="-50%" width="150%" height="250%">
+      <feDropShadow dx="10" dy="14" stdDeviation="6" flood-color="#140a04" flood-opacity="0.6"/>
+    </filter>
+    <filter id="stampink" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.09" numOctaves="2" seed="5" result="t"/>
+      <feColorMatrix in="t" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -5 3.2" result="m"/>
+      <feComposite in="SourceGraphic" in2="m" operator="in"/>
+    </filter>
+    <filter id="soft"><feGaussianBlur stdDeviation="1.2"/></filter>
+    <filter id="wc" filterUnits="userSpaceOnUse" x="0" y="0" width="1920" height="1200">
+      <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="17" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="10"/>
+      <feGaussianBlur stdDeviation="0.8"/>
+    </filter>
+    <radialGradient id="lamp" cx="0.16" cy="-0.05" r="0.95">
+      <stop offset="0" stop-color="#FFC877" stop-opacity="0.42"/>
+      <stop offset="0.55" stop-color="#FFB25C" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#FFB25C" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="vignette" cx="0.48" cy="0.45" r="0.75">
+      <stop offset="0.55" stop-color="#1a0c04" stop-opacity="0"/>
+      <stop offset="1" stop-color="#1a0c04" stop-opacity="0.78"/>
+    </radialGradient>
+    <linearGradient id="pencilFacet" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E7B95A"/><stop offset="0.5" stop-color="#D9A441"/><stop offset="1" stop-color="#A97A2A"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#DAD4C8"/><stop offset="0.5" stop-color="#A9A196"/><stop offset="1" stop-color="#7D766C"/>
+    </linearGradient>
+  </defs>
+
+  <!-- desk -->
+  <rect width="1920" height="1200" filter="url(#wood)"/>
+
+  <!-- under-sheet -->
+  <g transform="translate(150 120) rotate(2.4)">
+    <rect width="1680" height="960" fill="#E9DDC2" filter="url(#shadow)"/>
+    <rect width="1680" height="960" filter="url(#fibre)"/>
+  </g>
+
+  <!-- coffee ring -->
+  <g opacity="0.32" filter="url(#soft)">
+    <circle cx="210" cy="1035" r="78" fill="none" stroke="#5E3417" stroke-width="7"/>
+    <circle cx="210" cy="1035" r="74" fill="#7A4521" opacity="0.12"/>
+  </g>
+
+  <!-- main sheet -->
+  <g transform="translate(110 108) rotate(-1.1)">
+    <rect width="1700" height="980" fill="#F3E9D2" filter="url(#shadow)"/>
+    <rect width="1700" height="980" filter="url(#blotch)" opacity="0.35" style="mix-blend-mode:multiply"/>
+    <rect width="1700" height="980" filter="url(#fibre)"/>
+
+    <g transform="translate(40 150) scale(0.9)">
+      <svg x="0" y="0" width="1800" height="770" viewBox="0 230 1800 770" overflow="visible">
+  <defs>
+    <filter id="wob" filterUnits="userSpaceOnUse" x="-260" y="-660" width="520" height="720">
+      <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="7"/>
+      <feDisplacementMap in="SourceGraphic" scale="3.5"/>
+    </filter>
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer><feFuncA type="table" tableValues="0 0.22"/></feComponentTransfer>
+    </filter>
+
+    <!-- DEB -->
+    <g id="deb">
+      <rect x="-32" y="-75" width="16" height="70" fill="#F4C1A6"/>
+      <rect x="16" y="-75" width="16" height="70" fill="#F4C1A6"/>
+      <ellipse cx="-26" cy="-5" rx="17" ry="7" fill="#3B2F28"/>
+      <ellipse cx="26" cy="-5" rx="17" ry="7" fill="#3B2F28"/>
+      <path d="M-30 -235 L-84 -160 L-52 -128 L-42 -146 L-60 -164 L-20 -214 Z" fill="#D98A4E"/>
+      <path d="M-28 -255 L28 -255 L102 -70 L-102 -70 Z" fill="#D98A4E"/>
+      <path d="M-14 -255 L14 -255 L22 -70 L-22 -70 Z" fill="#FBF6EA"/>
+      <rect x="-10" y="-270" width="20" height="18" fill="#F4C1A6"/>
+      <path d="M-74 -280 C-104 -340 -62 -398 -10 -394 C32 -408 98 -372 80 -300 C92 -270 72 -254 56 -262 L-58 -262 C-76 -254 -92 -266 -74 -280 Z" fill="#D9A441"/>
+      <circle cx="0" cy="-305" r="42" fill="#F4C1A6"/>
+      <path d="M-44 -312 C-46 -352 46 -356 44 -312 C30 -334 -26 -336 -44 -312 Z" fill="#D9A441"/>
+      <path d="M24 -240 L130 -285 L138 -268 L34 -215 Z" fill="#D98A4E"/>
+      <circle cx="140" cy="-282" r="11" fill="#F4C1A6"/>
+      <rect x="128" y="-336" width="26" height="46" rx="5" fill="#7E9C7A" transform="rotate(12 141 -313)"/>
+    </g>
+
+    <!-- MARCUS -->
+    <g id="marcus">
+      <rect x="-34" y="-205" width="28" height="192" fill="#C8B08A"/>
+      <rect x="6" y="-205" width="28" height="192" fill="#C8B08A"/>
+      <rect x="-42" y="-16" width="40" height="16" rx="7" fill="#FBF6EA"/>
+      <rect x="2" y="-16" width="40" height="16" rx="7" fill="#FBF6EA"/>
+      <rect x="-50" y="-432" width="100" height="240" rx="10" fill="#FBF6EA"/>
+      <rect x="-74" y="-420" width="22" height="182" rx="10" fill="#FBF6EA"/>
+      <circle cx="-63" cy="-232" r="12" fill="#D9A27A"/>
+      <rect x="-78" y="-270" width="26" height="42" rx="5" fill="#3B2F28"/>
+      <rect x="-56" y="-428" width="112" height="208" rx="16" fill="#7E9C7A"/>
+      <rect x="-9" y="-428" width="18" height="208" fill="#FBF6EA"/>
+      <path d="M46 -420 L70 -412 L106 -332 L88 -322 Z" fill="#FBF6EA"/>
+      <path d="M88 -322 L106 -332 L126 -410 L108 -416 Z" fill="#FBF6EA"/>
+      <circle cx="118" cy="-420" r="12" fill="#D9A27A"/>
+      <rect x="104" y="-474" width="26" height="44" rx="5" fill="#3B2F28"/>
+      <rect x="-12" y="-452" width="24" height="26" fill="#D9A27A"/>
+      <rect x="-38" y="-542" width="76" height="100" rx="34" fill="#D9A27A"/>
+      <path d="M-40 -500 C-46 -562 12 -584 54 -546 C32 -550 46 -530 40 -506 C20 -532 -20 -532 -40 -500 Z" fill="#3A2A20"/>
+    </g>
+
+    <!-- PRIYA -->
+    <g id="priya">
+      <rect x="-26" y="-100" width="18" height="90" fill="#3A322D"/>
+      <rect x="8" y="-100" width="18" height="90" fill="#3A322D"/>
+      <rect x="-36" y="-20" width="34" height="20" rx="8" fill="#D98A4E"/>
+      <rect x="2" y="-20" width="34" height="20" rx="8" fill="#D98A4E"/>
+      <circle cx="0" cy="-178" r="92" fill="#5A4F48"/>
+      <circle cx="0" cy="-292" r="62" fill="#5A4F48"/>
+      <circle cx="0" cy="-284" r="42" fill="#B07A55"/>
+      <path d="M-42 -286 C-44 -332 6 -340 42 -310 C20 -318 -8 -316 -28 -298 L-36 -262 Z" fill="#3B2F28"/>
+      <rect x="-38" y="-218" width="76" height="120" rx="10" fill="#3B2F28"/>
+      <rect x="-30" y="-210" width="60" height="102" rx="5" fill="#7E9C7A"/>
+      <circle cx="-40" cy="-150" r="12" fill="#B07A55"/>
+      <circle cx="40" cy="-150" r="12" fill="#B07A55"/>
+    </g>
+
+    <!-- GORD -->
+    <g id="gord">
+      <rect x="-52" y="-160" width="28" height="40" fill="#F2C6A8"/>
+      <rect x="24" y="-160" width="28" height="40" fill="#F2C6A8"/>
+      <rect x="-52" y="-125" width="28" height="112" fill="#FBF6EA"/>
+      <rect x="24" y="-125" width="28" height="112" fill="#FBF6EA"/>
+      <rect x="-60" y="-17" width="42" height="17" rx="7" fill="#6B4A32"/>
+      <rect x="18" y="-17" width="42" height="17" rx="7" fill="#6B4A32"/>
+      <path d="M-70 -218 L70 -218 L80 -155 L-80 -155 Z" fill="#C8B08A"/>
+      <path d="M-52 -380 L52 -380 C90 -330 106 -250 88 -205 L-88 -205 C-106 -250 -90 -330 -52 -380 Z" fill="#FBF6EA"/>
+      <path d="M-52 -380 L-22 -380 L94 -236 L82 -206 Z" fill="#D9A441"/>
+      <path d="M-52 -378 L-90 -312 L-68 -300 L-40 -350 Z" fill="#FBF6EA"/>
+      <path d="M-90 -312 L-68 -300 L-80 -234 L-98 -240 Z" fill="#F2C6A8"/>
+      <circle cx="-90" cy="-230" r="12" fill="#F2C6A8"/>
+      <path d="M52 -378 L94 -322 L76 -306 L44 -348 Z" fill="#FBF6EA"/>
+      <path d="M94 -322 L76 -306 L112 -282 L124 -298 Z" fill="#F2C6A8"/>
+      <rect x="116" y="-334" width="18" height="34" rx="3" fill="#7E9C7A"/>
+      <rect x="116" y="-356" width="18" height="22" rx="3" fill="#7E9C7A"/>
+      <circle cx="124" cy="-290" r="12" fill="#F2C6A8"/>
+      <rect x="-16" y="-396" width="32" height="20" fill="#F2C6A8"/>
+      <circle cx="-48" cy="-428" r="10" fill="#F2C6A8"/>
+      <circle cx="48" cy="-428" r="10" fill="#F2C6A8"/>
+      <rect x="-46" y="-476" width="92" height="92" rx="32" fill="#F2C6A8"/>
+      <path d="M-46 -452 C-66 -456 -68 -420 -46 -412 Z" fill="#FBF6EA"/>
+      <path d="M46 -452 C66 -456 68 -420 46 -412 Z" fill="#FBF6EA"/>
+      <path d="M-32 -414 C-22 -432 -4 -426 0 -418 C4 -426 22 -432 32 -414 C22 -403 8 -407 0 -411 C-8 -407 -22 -403 -32 -414 Z" fill="#FBF6EA"/>
+    </g>
+
+    <!-- WENDY -->
+    <g id="wendy">
+      <rect x="-28" y="-112" width="18" height="102" fill="#8A5A3C"/>
+      <rect x="10" y="-112" width="18" height="102" fill="#8A5A3C"/>
+      <rect x="-36" y="-13" width="28" height="13" rx="4" fill="#D98A4E"/>
+      <rect x="8" y="-13" width="28" height="13" rx="4" fill="#D98A4E"/>
+      <rect x="-56" y="-208" width="112" height="100" fill="#4A403A"/>
+      <path d="M-95 -396 L-112 -232 L-90 -228 L-75 -380 Z" fill="#4A403A"/>
+      <circle cx="-101" cy="-222" r="12" fill="#8A5A3C"/>
+      <path d="M-100 -402 L100 -402 L94 -360 L78 -196 L-78 -196 L-94 -360 Z" fill="#4A403A"/>
+      <path d="M-104 -400 C-104 -422 -60 -424 -46 -402 Z" fill="#4A403A"/>
+      <path d="M104 -400 C104 -422 60 -424 46 -402 Z" fill="#4A403A"/>
+      <path d="M-22 -402 L22 -402 L0 -330 Z" fill="#D98A4E"/>
+      <path d="M86 -396 L122 -300 L104 -290 L74 -372 Z" fill="#4A403A"/>
+      <g transform="translate(116 -292) rotate(8)">
+        <ellipse cx="-13" cy="6" rx="11" ry="17" fill="#D9A441"/>
+        <ellipse cx="13" cy="6" rx="11" ry="17" fill="#D9A441"/>
+        <circle cx="0" cy="2" r="12" fill="#8A5A3C"/>
+        <path d="M-7 -28 L-30 -178 L-14 -182 L7 -30 Z" fill="#FBF6EA"/>
+        <path d="M7 -28 L30 -178 L14 -182 L-7 -30 Z" fill="#FBF6EA"/>
+        <circle cx="0" cy="-30" r="5" fill="#3B2F28"/>
+      </g>
+      <rect x="-12" y="-420" width="24" height="22" fill="#8A5A3C"/>
+      <circle cx="0" cy="-472" r="62" fill="#2A1D17"/>
+      <circle cx="0" cy="-450" r="42" fill="#8A5A3C"/>
+    </g>
+
+    <!-- LENNY -->
+    <g id="lenny">
+      <path d="M-98 0 L-62 0 L-72 -58 L-88 -58 Z" fill="#D98A4E"/>
+      <rect x="-104" y="-6" width="48" height="8" fill="#D98A4E"/>
+      <path d="M20 -30 C62 -30 92 -62 86 -122 C82 -138 64 -138 62 -122 C66 -76 46 -56 18 -56 Z" fill="#8C8178"/>
+      <ellipse cx="-18" cy="-5" rx="14" ry="7" fill="#3A322D"/>
+      <ellipse cx="18" cy="-5" rx="14" ry="7" fill="#3A322D"/>
+      <ellipse cx="0" cy="-62" rx="42" ry="58" fill="#8C8178"/>
+      <ellipse cx="0" cy="-52" rx="26" ry="36" fill="#DCD2C2"/>
+      <path d="M-38 -98 L38 -98 L45 -30 L-45 -30 Z" fill="#D9A441"/>
+      <path d="M-10 -98 L10 -98 L6 -30 L-6 -30 Z" fill="#DCD2C2"/>
+      <ellipse cx="-42" cy="-70" rx="10" ry="24" fill="#8C8178" transform="rotate(18 -42 -70)"/>
+      <ellipse cx="42" cy="-70" rx="10" ry="24" fill="#8C8178" transform="rotate(-18 42 -70)"/>
+      <path d="M-34 -156 L-26 -188 L-10 -164 Z" fill="#8C8178"/>
+      <path d="M34 -156 L26 -188 L10 -164 Z" fill="#8C8178"/>
+      <ellipse cx="0" cy="-140" rx="40" ry="32" fill="#8C8178"/>
+      <ellipse cx="0" cy="-124" rx="20" ry="14" fill="#FBF6EA"/>
+      <path d="M-40 -148 C-30 -166 -10 -156 0 -146 C10 -156 30 -166 40 -148 C30 -130 12 -135 0 -140 C-12 -135 -30 -130 -40 -148 Z" fill="#3A322D"/>
+    </g>
+  
+<filter id="paint" filterUnits="userSpaceOnUse" x="-300" y="-700" width="600" height="760">
+  <feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="3" seed="4" result="n"/>
+  <feDisplacementMap in="SourceGraphic" in2="n" scale="2.5" result="d"/>
+  <feTurbulence type="fractalNoise" baseFrequency="0.018" numOctaves="4" seed="9" result="m"/>
+  <feColorMatrix in="m" type="matrix" values="0.35 0 0 0 0.72  0.35 0 0 0 0.72  0.35 0 0 0 0.72  0 0 0 0 1" result="mg"/>
+  <feBlend in="d" in2="mg" mode="multiply" result="b"/>
+  <feComposite in="b" in2="d" operator="in"/>
+</filter>
+<filter id="bleed" filterUnits="userSpaceOnUse" x="-300" y="-700" width="600" height="760">
+  <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="13" result="n"/>
+  <feDisplacementMap in="SourceGraphic" in2="n" scale="12" result="d"/>
+  <feGaussianBlur in="d" stdDeviation="1.6"/>
+</filter>
+</defs>
+
+  <!-- paper + ground -->
+  
+  
+  <g fill="#3B2F28" opacity="0.07">
+    <ellipse cx="150" cy="860" rx="95" ry="12"/>
+    <ellipse cx="450" cy="860" rx="70" ry="12"/>
+    <ellipse cx="750" cy="860" rx="80" ry="12"/>
+    <ellipse cx="1050" cy="860" rx="100" ry="12"/>
+    <ellipse cx="1350" cy="860" rx="90" ry="12"/>
+    <ellipse cx="1650" cy="860" rx="90" ry="12"/>
+  </g>
+
+  <!-- stamp -->
+  
+
+  <!-- DEB -->
+  <g transform="translate(150 860)">
+    <use href="#deb" transform="translate(7 5)" opacity="0.45" filter="url(#bleed)" style="mix-blend-mode:multiply"/>
+    <use href="#deb" stroke="#3B2F28" stroke-width="3" stroke-linejoin="round" filter="url(#paint)"/>
+    <g filter="url(#wob)" stroke="#3B2F28" stroke-width="3" stroke-linecap="round">
+      <circle cx="-15" cy="-305" r="4.5" fill="#3B2F28"/>
+      <circle cx="15" cy="-305" r="4.5" fill="#3B2F28"/>
+      <line x1="-27" y1="-323" x2="-8" y2="-315"/>
+      <line x1="27" y1="-323" x2="8" y2="-315"/>
+      <ellipse cx="0" cy="-282" rx="11" ry="8" fill="#3B2F28"/>
+      <ellipse cx="0" cy="-278" rx="6" ry="3" fill="#D98A4E" stroke="none"/>
+      <circle cx="-43" cy="-290" r="5" fill="#D9A441" stroke-width="3"/>
+      <circle cx="43" cy="-290" r="5" fill="#D9A441" stroke-width="3"/>
+      <circle cx="-32" cy="-210" r="4" fill="#FBF6EA" stroke-width="2.5"/>
+      <circle cx="-38" cy="-170" r="4" fill="#FBF6EA" stroke-width="2.5"/>
+      <circle cx="-44" cy="-130" r="4" fill="#FBF6EA" stroke-width="2.5"/>
+      <path d="M150 -350 L162 -362 M156 -340 L172 -346 M146 -356 L148 -372" fill="none" stroke-width="3"/>
+    </g>
+  </g>
+
+  <!-- MARCUS -->
+  <g transform="translate(450 860)">
+    <use href="#marcus" transform="translate(7 5)" opacity="0.45" filter="url(#bleed)" style="mix-blend-mode:multiply"/>
+    <use href="#marcus" stroke="#3B2F28" stroke-width="3" stroke-linejoin="round" filter="url(#paint)"/>
+    <g filter="url(#wob)" stroke="#3B2F28" stroke-width="3" stroke-linecap="round" fill="none">
+      <line x1="-56" y1="-380" x2="-9" y2="-380"/><line x1="9" y1="-380" x2="56" y2="-380"/>
+      <line x1="-56" y1="-335" x2="-9" y2="-335"/><line x1="9" y1="-335" x2="56" y2="-335"/>
+      <line x1="-56" y1="-290" x2="-9" y2="-290"/><line x1="9" y1="-290" x2="56" y2="-290"/>
+      <line x1="-56" y1="-250" x2="-9" y2="-250"/><line x1="9" y1="-250" x2="56" y2="-250"/>
+      <circle cx="-14" cy="-494" r="4.5" fill="#3B2F28"/>
+      <circle cx="14" cy="-494" r="4.5" fill="#3B2F28"/>
+      <line x1="-25" y1="-510" x2="-6" y2="-508"/>
+      <line x1="6" y1="-520" x2="25" y2="-514"/>
+      <path d="M-14 -470 Q2 -460 20 -476"/>
+      <circle cx="40" cy="-488" r="5" fill="#FBF6EA" stroke-width="2.5"/>
+      <rect x="-74" y="-264" width="18" height="30" rx="2" fill="#7E9C7A" stroke="none"/>
+      <rect x="108" y="-468" width="18" height="32" rx="2" fill="#7E9C7A" stroke="none"/>
+    </g>
+  </g>
+
+  <!-- PRIYA -->
+  <g transform="translate(750 860)">
+    <use href="#priya" transform="translate(7 5)" opacity="0.45" filter="url(#bleed)" style="mix-blend-mode:multiply"/>
+    <use href="#priya" stroke="#3B2F28" stroke-width="3" stroke-linejoin="round" filter="url(#paint)"/>
+    <g filter="url(#wob)" stroke="#3B2F28" stroke-width="3" stroke-linecap="round" fill="none">
+      <circle cx="-14" cy="-281" r="4" fill="#3B2F28"/>
+      <circle cx="14" cy="-281" r="4" fill="#3B2F28"/>
+      <line x1="-23" y1="-286" x2="-6" y2="-286"/>
+      <line x1="6" y1="-286" x2="23" y2="-286"/>
+      <path d="M-20 -272 Q-14 -268 -8 -272" stroke-width="2.5"/>
+      <path d="M8 -272 Q14 -268 20 -272" stroke-width="2.5"/>
+      <line x1="-8" y1="-260" x2="8" y2="-260"/>
+      <line x1="-16" y1="-238" x2="-20" y2="-200"/>
+      <line x1="16" y1="-238" x2="20" y2="-200"/>
+      <path d="M-50 -110 Q0 -96 50 -110" />
+      <polyline points="18,-210 -6,-170 8,-150 -22,-108" stroke="#FBF6EA" stroke-width="3"/>
+      <polyline points="-6,-170 -26,-160" stroke="#FBF6EA" stroke-width="2.5"/>
+    </g>
+  </g>
+
+  <!-- GORD -->
+  <g transform="translate(1050 860)">
+    <use href="#gord" transform="translate(7 5)" opacity="0.45" filter="url(#bleed)" style="mix-blend-mode:multiply"/>
+    <use href="#gord" stroke="#3B2F28" stroke-width="3" stroke-linejoin="round" filter="url(#paint)"/>
+    <g filter="url(#wob)" stroke="#3B2F28" stroke-width="3" stroke-linecap="round" fill="none">
+      <rect x="-52" y="-119" width="28" height="7" fill="#D98A4E" stroke="none"/>
+      <rect x="-52" y="-106" width="28" height="7" fill="#7E9C7A" stroke="none"/>
+      <rect x="24" y="-119" width="28" height="7" fill="#D98A4E" stroke="none"/>
+      <rect x="24" y="-106" width="28" height="7" fill="#7E9C7A" stroke="none"/>
+      <line x1="-37" y1="-378" x2="86" y2="-222" stroke="#FBF6EA" stroke-width="6"/>
+      <circle cx="-17" cy="-442" r="12"/>
+      <circle cx="17" cy="-442" r="12"/>
+      <line x1="-5" y1="-443" x2="5" y2="-443"/>
+      <circle cx="-17" cy="-441" r="3.5" fill="#3B2F28"/>
+      <circle cx="17" cy="-441" r="3.5" fill="#3B2F28"/>
+      <path d="M-30 -462 L-8 -458" stroke-width="7"/>
+      <path d="M30 -462 L8 -458" stroke-width="7"/>
+      <path d="M-8 -398 Q0 -394 8 -398"/>
+      <path d="M-20 -466 Q-8 -472 4 -468" stroke="#FBF6EA" stroke-width="3"/>
+      <rect x="-60" y="-350" width="22" height="26" rx="2" stroke-width="3"/>
+      <line x1="-54" y1="-350" x2="-54" y2="-362" stroke="#D98A4E" stroke-width="4"/>
+      <line x1="-46" y1="-350" x2="-46" y2="-360" stroke="#7E9C7A" stroke-width="4"/>
+    </g>
+  </g>
+
+  <!-- WENDY -->
+  <g transform="translate(1350 860)">
+    <use href="#wendy" transform="translate(7 5)" opacity="0.45" filter="url(#bleed)" style="mix-blend-mode:multiply"/>
+    <use href="#wendy" stroke="#3B2F28" stroke-width="3" stroke-linejoin="round" filter="url(#paint)"/>
+    <g filter="url(#wob)" stroke="#3B2F28" stroke-width="3" stroke-linecap="round" fill="none">
+      <path d="M-22 -458 Q-14 -466 -6 -458"/>
+      <path d="M6 -458 Q14 -466 22 -458"/>
+      <path d="M-19 -436 Q0 -410 19 -436 Z" fill="#3B2F28"/>
+      <path d="M-14 -434 L14 -434" stroke="#FBF6EA" stroke-width="3"/>
+      <circle cx="-43" cy="-436" r="7" stroke="#D9A441" stroke-width="3"/>
+      <circle cx="43" cy="-436" r="7" stroke="#D9A441" stroke-width="3"/>
+      <path d="M-22 -402 L-40 -300 M22 -402 L40 -300"/>
+      <g fill="#D9A441" stroke-width="2.5">
+        <circle cx="-56" cy="-392" r="6"/><circle cx="-48" cy="-372" r="6"/><circle cx="-38" cy="-353" r="6"/>
+        <circle cx="-26" cy="-336" r="6"/><circle cx="-13" cy="-322" r="6"/>
+        <circle cx="56" cy="-392" r="6"/><circle cx="48" cy="-372" r="6"/><circle cx="38" cy="-353" r="6"/>
+        <circle cx="26" cy="-336" r="6"/><circle cx="13" cy="-322" r="6"/>
+        <circle cx="0" cy="-300" r="15"/>
+      </g>
+      <circle cx="0" cy="-300" r="6" fill="#D98A4E" stroke="none"/>
+    </g>
+  </g>
+
+  <!-- LENNY -->
+  <g transform="translate(1650 860) scale(1.4)">
+    <use href="#lenny" transform="translate(5 4)" opacity="0.45" filter="url(#bleed)" style="mix-blend-mode:multiply"/>
+    <use href="#lenny" stroke="#3B2F28" stroke-width="3" stroke-linejoin="round" filter="url(#paint)"/>
+    <g filter="url(#wob)" stroke="#3B2F28" stroke-width="3" stroke-linecap="round">
+      <rect x="-91" y="-40" width="22" height="9" fill="#FBF6EA" stroke="none"/>
+      <path d="M44 -42 C56 -48 64 -58 68 -70 L80 -66 C76 -50 66 -38 52 -32 Z" fill="#3A322D" stroke="none"/>
+      <path d="M62 -92 L86 -96 L86 -82 L64 -78 Z" fill="#3A322D" stroke="none"/>
+      <path d="M62 -122 C64 -134 84 -136 86 -122 Z" fill="#3A322D" stroke="none"/>
+      <line x1="-42" y1="-58" x2="-10" y2="-58" stroke="#FBF6EA" stroke-width="5"/>
+      <line x1="10" y1="-58" x2="43" y2="-58" stroke="#FBF6EA" stroke-width="5"/>
+      <circle cx="-17" cy="-148" r="5.5" fill="#FBF6EA" stroke="none"/>
+      <circle cx="17" cy="-148" r="5.5" fill="#FBF6EA" stroke="none"/>
+      <circle cx="-16" cy="-148" r="2.6" fill="#3B2F28" stroke="none"/>
+      <circle cx="18" cy="-148" r="2.6" fill="#3B2F28" stroke="none"/>
+      <ellipse cx="0" cy="-130" rx="6" ry="4" fill="#3B2F28"/>
+      <path d="M-6 -120 Q0 -116 6 -120" fill="none"/>
+    </g>
+  </g>
+
+  <!-- names -->
+  <g font-family="Caveat, cursive" font-weight="700" font-size="46" text-anchor="middle" fill="#3B2F28" letter-spacing="1">
+    <text x="150" y="935">DEB</text>
+    <text x="450" y="935">MARCUS</text>
+    <text x="750" y="935">PRIYA</text>
+    <text x="1050" y="935">GORD</text>
+    <text x="1350" y="935">WENDY</text>
+    <text x="1650" y="935">LENNY</text>
+  </g>
+
+  <!-- riso grain -->
+  
+</svg>
+<g transform="translate(0 -230)"><text x="40" y="300" font-family="Caveat, cursive" font-weight="700" font-size="62" fill="#3B2F28">Main cast</text><path d="M40 314 Q190 306 340 316" fill="none" stroke="#3B2F28" stroke-width="2.5" opacity="0.7"/><text x="150" y="982" text-anchor="middle" transform="rotate(-3 150 982)" font-family="Caveat, cursive" font-size="34" fill="#9A4E2C">posts in CAPS</text><text x="450" y="982" text-anchor="middle" transform="rotate(2 450 982)" font-family="Caveat, cursive" font-size="34" fill="#9A4E2C">two phones. always.</text><text x="750" y="982" text-anchor="middle" transform="rotate(-2 750 982)" font-family="Caveat, cursive" font-size="34" fill="#9A4E2C">screen time: 11h 42m</text><text x="1050" y="982" text-anchor="middle" transform="rotate(3 1050 982)" font-family="Caveat, cursive" font-size="34" fill="#9A4E2C">stuck in 1987</text><text x="1350" y="982" text-anchor="middle" transform="rotate(-2 1350 982)" font-family="Caveat, cursive" font-size="34" fill="#9A4E2C">ribbon not included</text><text x="1650" y="982" text-anchor="middle" transform="rotate(2 1650 982)" font-family="Caveat, cursive" font-size="34" fill="#9A4E2C">only competent resident</text></g>
+    </g>
+
+    <!-- palette swatches -->
+    <g filter="url(#wc)" opacity="0.85" style="mix-blend-mode:multiply">
+      <ellipse cx="1180" cy="925" rx="34" ry="20" fill="#D98A4E"/>
+      <ellipse cx="1250" cy="928" rx="34" ry="20" fill="#7E9C7A"/>
+      <ellipse cx="1320" cy="924" rx="34" ry="20" fill="#D9A441"/>
+      <ellipse cx="1390" cy="928" rx="34" ry="20" fill="#8B5E3C"/>
+      <ellipse cx="1460" cy="925" rx="34" ry="20" fill="#7D96AE"/>
+      <ellipse cx="1530" cy="928" rx="34" ry="20" fill="#5A4F48"/>
+    </g>
+
+    <!-- council stamp -->
+    <g transform="translate(1500 95) rotate(9)" filter="url(#stampink)" opacity="0.8">
+      <rect x="-150" y="-50" width="300" height="100" rx="8" fill="none" stroke="#A8402A" stroke-width="7"/>
+      <rect x="-138" y="-38" width="276" height="76" rx="4" fill="none" stroke="#A8402A" stroke-width="2.5"/>
+      <text x="0" y="-2" text-anchor="middle" font-family="Arial Black, Arial" font-size="34" letter-spacing="4" fill="#A8402A">APPROVED</text>
+      <text x="0" y="28" text-anchor="middle" font-family="Arial Black, Arial" font-size="12" letter-spacing="2" fill="#A8402A">BY TOWN COUNCIL (PENDING)</text>
+    </g>
+
+    <!-- masking tape -->
+    <rect x="-30" y="-14" width="150" height="44" fill="#E6D9B6" opacity="0.85" transform="rotate(-32 45 8)"/>
+    <rect x="1590" y="930" width="150" height="44" fill="#E6D9B6" opacity="0.85" transform="rotate(-28 1665 952)"/>
+  </g>
+
+  <!-- paper clip -->
+  <g transform="translate(560 96) rotate(-6)" filter="url(#propshadow)">
+    <path d="M0 0 L0 110 A18 18 0 0 0 36 110 L36 -14 A26 26 0 0 0 -16 -14 L-16 96" fill="none" stroke="url(#metal)" stroke-width="6" stroke-linecap="round"/>
+  </g>
+
+  <!-- pencil -->
+  <g transform="translate(1290 1120) rotate(-14)" filter="url(#propshadow)">
+    <rect x="0" y="-14" width="470" height="28" fill="url(#pencilFacet)"/>
+    <line x1="0" y1="-4" x2="470" y2="-4" stroke="#B88A32" stroke-width="1.5"/>
+    <line x1="0" y1="5" x2="470" y2="5" stroke="#9E7228" stroke-width="1.5"/>
+    <rect x="470" y="-15" width="44" height="30" fill="url(#metal)"/>
+    <line x1="482" y1="-15" x2="482" y2="15" stroke="#6E675E" stroke-width="2"/>
+    <line x1="502" y1="-15" x2="502" y2="15" stroke="#6E675E" stroke-width="2"/>
+    <rect x="514" y="-14" width="36" height="28" rx="8" fill="#C97A63"/>
+    <path d="M0 -14 L-70 0 L0 14 Z" fill="#E6C595"/>
+    <path d="M-48 -4.5 L-70 0 L-48 4.5 Z" fill="#3B2F28"/>
+  </g>
+
+  <!-- wooden rubber stamp -->
+  <g transform="translate(1835 330)" filter="url(#propshadow)">
+    <rect x="-46" y="-46" width="92" height="92" rx="10" fill="#8B5E3C"/>
+    <rect x="-46" y="-46" width="92" height="92" rx="10" filter="url(#wood)" opacity="0.5"/>
+    <circle cx="0" cy="0" r="30" fill="#6E4428"/>
+    <circle cx="-8" cy="-8" r="12" fill="#9A6A44" opacity="0.7"/>
+  </g>
+
+  <!-- eraser -->
+  <g transform="translate(70 560) rotate(78)" filter="url(#propshadow)">
+    <rect x="-55" y="-22" width="110" height="44" rx="6" fill="#E9DED0"/>
+    <rect x="-55" y="-22" width="62" height="44" rx="6" fill="#7D96AE"/>
+  </g>
+
+  <!-- light -->
+  <rect width="1920" height="1200" fill="url(#lamp)" style="mix-blend-mode:screen"/>
+  <rect width="1920" height="1200" fill="url(#vignette)"/>
+</svg>
